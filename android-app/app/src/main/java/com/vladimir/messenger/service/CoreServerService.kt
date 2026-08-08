@@ -329,18 +329,11 @@ class CoreServerService : Service() {
                     // P2P RELAY ФИЛЬТРАЦИЯ:
                     // Сохраняем ТОЛЬКО если контакт уже добавлен (это наш собеседник)
                     // Иначе — это широковещательное сообщение не для нас (ретранслируем, но не сохраняем)
-                    // P2P ФИЛЬТРАЦИЯ: ищем чат по chatId из события
-                    // chatId — это UUID переписки между конкретными людьми
-                    // Если у нас нет такого чата — это чужая переписка, пропускаем
-                    val chat = chatRepository.getChatById(chatId)
+                    // P2P ФИЛЬТРАЦИЯ: ищем существующий чат с этим контактом
+                    // Если чата нет — не создаём (пользователь сам решает с кем общаться)
+                    val chat = chatRepository.getChatByContactId(senderId)
                     if (chat == null) {
-                        Log.d(TAG, "No chat with id=$chatId — skipping (relay only, not our conversation)")
-                        return
-                    }
-                    
-                    // Дополнительная проверка: senderId должен быть контактом в этом чате
-                    if (chat.contactId != senderId) {
-                        Log.d(TAG, "Sender $senderId != chat.contactId ${chat.contactId} — skipping")
+                        Log.d(TAG, "No existing chat with $senderId — skipping (no active conversation)")
                         return
                     }
                     
