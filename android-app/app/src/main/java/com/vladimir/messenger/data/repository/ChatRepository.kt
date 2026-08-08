@@ -224,6 +224,7 @@ class ChatRepository @Inject constructor(
         content: String,
         timestamp: Long,
         channel: MessageChannel = MessageChannel.UNKNOWN,
+        recipientId: String = "",
     ) {
         val entity = MessageEntity(
             id = messageId,
@@ -233,9 +234,18 @@ class ChatRepository @Inject constructor(
             timestamp = timestamp,
             isFromMe = false,
             status = MessageStatus.DELIVERED.name,
+            recipientId = recipientId,
         )
         messageDao.insertMessage(entity)
         chatDao.updateLastMessage(chatId, content, timestamp)
+    }
+
+    suspend fun getChatById(chatId: String): Chat? {
+        return chatDao.getChatById(chatId)?.toDomain()
+    }
+
+    suspend fun getChatByContactId(contactId: String): Chat? {
+        return chatDao.getChatByContactId(contactId)?.toDomain()
     }
 
     suspend fun createChat(contactId: String, contactName: String): Chat {
