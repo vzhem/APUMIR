@@ -93,7 +93,7 @@ class UpdateChecker @Inject constructor(
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Check for update failed", e)
+            Log.d(TAG, "Check for update skipped (no network)")  // тихая обработка
             null
         }
     }
@@ -164,7 +164,7 @@ class UpdateChecker @Inject constructor(
             }
             BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
         } catch (e: Exception) {
-            Log.e(TAG, "HTTP GET failed: ${e.message}")
+            Log.d(TAG, "Network unavailable: ${e.message}")  // тихая обработка, не ошибка
             null
         } finally {
             conn.disconnect()
