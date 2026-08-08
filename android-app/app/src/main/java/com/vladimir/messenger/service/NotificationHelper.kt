@@ -41,7 +41,11 @@ class NotificationHelper @Inject constructor(
         messageText: String,
         isIncoming: Boolean,
     ) {
-        if (!isIncoming) return  // Не показываем уведомления для исходящих
+        Log.d(TAG, "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
+        if (!isIncoming) {
+            Log.d(TAG, "Skipping notification (outgoing message)")
+            return
+        }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         

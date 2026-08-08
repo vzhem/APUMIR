@@ -272,8 +272,10 @@ class CoreServerService : Service() {
         
         // Observer for incoming messages → show notifications
         serviceScope.launch {
+            Log.i(TAG, "Starting message observer for notifications")
             chatRepository.observeAllMessages()
                 .collect { messages ->
+                    Log.d(TAG, "Message observer received ${messages.size} messages")
                     // Фильтруем только новые входящие (lastSeen = 0 или не прочитаны)
                     // Простая логика: если сообщение появилось в последние 2 секунды и входящее
                     val now = System.currentTimeMillis()
