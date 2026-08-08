@@ -29,6 +29,16 @@ jobs:
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
       
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        
+      - name: Подмена versionName в build.gradle.kts на имя тега
+        run: |
+          sed -i "s/versionName = \"v[0-9.]*\"/versionName = \"${{ steps.get_version.outputs.VERSION }}\"/" android-app/app/build.gradle.kts
+          echo "versionName заменён на ${{ steps.get_version.outputs.VERSION }}"
+          grep versionName android-app/app/build.gradle.kts
+
       - name: Grant execute permission for gradlew
         run: chmod +x ./android-app/gradlew
       
