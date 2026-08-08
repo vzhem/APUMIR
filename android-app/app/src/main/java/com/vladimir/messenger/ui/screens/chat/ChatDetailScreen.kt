@@ -1,13 +1,5 @@
 package com.vladimir.messenger.ui.screens.chat
 
-// =============================================================================
-// CHATDETAILSCREEN.KT — Экран переписки
-// =============================================================================
-// Показывает историю сообщений в выбранном чате.
-// Поле ввода сообщения внизу.
-// Автоскролл к последнему сообщению.
-// =============================================================================
-
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +15,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.MessageBubble
+import com.vladimir.messenger.domain.model.Message
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +32,8 @@ fun ChatDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    var selectedMessage by remember { mutableStateOf<Message?>(null) }
+    val context = LocalContext.current
 
     // Прокрутка к последнему сообщению
     LaunchedEffect(uiState.scrollToBottom, uiState.messages.size) {
@@ -78,8 +78,7 @@ fun ChatDetailScreen(
                     }
                 },
                 actions = {
-                    // Будущие действия: звонок, информация о контакте (Фаза 2)
-                    IconButton(onClick = { /* TODO Фаза 2: звонок */ }) {
+                    IconButton(onClick = { /* TODO: звонок */ }) {
                         Icon(
                             Icons.Default.Call,
                             contentDescription = "Звонок",
@@ -90,7 +89,6 @@ fun ChatDetailScreen(
             )
         },
         bottomBar = {
-            // Панель ввода сообщения
             MessageInputBar(
                 text         = uiState.inputText,
                 onTextChange = viewModel::onInputTextChanged,
@@ -112,7 +110,6 @@ fun ChatDetailScreen(
                 }
 
                 uiState.messages.isEmpty() -> {
-                    // Пустой чат
                     Column(
                         modifier            = Modifier.align(Alignment.Center),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -138,7 +135,6 @@ fun ChatDetailScreen(
                 }
 
                 else -> {
-                    // Список сообщений
                     LazyColumn(
                         state          = listState,
                         modifier       = Modifier.fillMaxSize(),
@@ -149,16 +145,43 @@ fun ChatDetailScreen(
                             items = uiState.messages,
                             key   = { it.id },
                         ) { message ->
-                            MessageBubble(message = message)
+                            MessageBubble(
+                                message = message,
+                                onLongClick = { msg -> selectedMessage = msg }
+                            )
                         }
                     }
                 }
             }
         }
     }
+
+    // AlertDialog для копирования сообщения
+    selectedMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { selectedMessage = null },
+            title = { Text("Копировать сообщение?") },
+            text = { Text(message.content.take(100) + if (message.content.length > 100) "..." else "") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("Сообщение", message.content)
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                    selectedMessage = null
+                }) {
+                    Text("Копировать")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedMessage = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 }
 
-// Панель ввода сообщения
 @Composable
 private fun MessageInputBar(
     text: String,
@@ -178,7 +201,6 @@ private fun MessageInputBar(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            // Поле ввода
             TextField(
                 value         = text,
                 onValueChange = onTextChange,
@@ -196,7 +218,6 @@ private fun MessageInputBar(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Кнопка отправки
             FilledIconButton(
                 onClick  = onSend,
                 enabled  = text.isNotBlank() && !isSending,
