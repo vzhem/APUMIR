@@ -19,7 +19,7 @@ import com.vladimir.messenger.data.local.entity.MessageEntity
         MessageEntity::class,
         ContactEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

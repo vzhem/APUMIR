@@ -10,4 +10,5 @@ data class Message(
     val isFromMe: Boolean = false,
     val replyToId: String? = null,
     val channel: MessageChannel = MessageChannel.UNKNOWN,
+    val recipientId: String = "",
 )

@@ -14,4 +14,5 @@ data class MessageEntity(
     val isFromMe: Boolean = false,
     val replyToId: String? = null,
     val channel: String = "UNKNOWN",
+    val recipientId: String = "",
 )

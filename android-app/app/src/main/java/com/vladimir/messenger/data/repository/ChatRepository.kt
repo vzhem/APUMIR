@@ -44,19 +44,7 @@ class ChatRepository @Inject constructor(
             val messageId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
 
-            val entity = MessageEntity(
-                id = messageId,
-                chatId = chatId,
-                senderId = "self",
-                content = content,
-                timestamp = timestamp,
-                isFromMe = true,
-                status = MessageStatus.PENDING.name,
-                channel = MessageChannel.UNKNOWN.name,
-            )
-            messageDao.insertMessage(entity)
-            chatDao.updateLastMessage(chatId, content, timestamp)
-
+            // ШАГ 1: Определить recipientId
             val chat = chatDao.getChatById(chatId)
             val rawId = if (recipientId.isBlank()) chat?.contactId ?: "" else recipientId
             
@@ -75,10 +63,24 @@ class ChatRepository @Inject constructor(
             
             Log.i(TAG, "  actualRecipientId='$actualRecipientId'")
 
-            // Попытка 1: через Rust (MQTT/P2P)
-            // Отслеживаем через какой канал отправляем
+            // ШАГ 2: Создать entity с recipientId
+            val entity = MessageEntity(
+                id = messageId,
+                chatId = chatId,
+                senderId = "self",
+                content = content,
+                timestamp = timestamp,
+                isFromMe = true,
+                status = MessageStatus.PENDING.name,
+                channel = MessageChannel.UNKNOWN.name,
+                recipientId = actualRecipientId,
+            )
+            messageDao.insertMessage(entity)
+            chatDao.updateLastMessage(chatId, content, timestamp)
+
+            // ШАГ 3: Отправить через Rust (MQTT/P2P)
             var usedChannel = MessageChannel.UNKNOWN
-            
+
             var sent = if (actualRecipientId.isNotBlank()) {
                 Log.i(TAG, "🚀 SENDING via Rust: messageId=$messageId recipient=$actualRecipientId")
                 val ok = RustBridge.sendMessage(messageId, chatId, actualRecipientId, content)
@@ -90,13 +92,12 @@ class ChatRepository @Inject constructor(
                 false
             }
 
-            // Попытка 2: fallback через Cloudflare relay если Rust не отправил
+            // ШАГ 4: Fallback через Cloudflare relay
             if (!sent && actualRecipientId.isNotBlank()) {
                 Log.w(TAG, "MQTT failed, trying Cloudflare relay fallback")
                 val cfRelay = CloudflareRelay.getInstance()
                 if (cfRelay != null) {
                     try {
-                        // Отправить JSON с метаданными для принимающей стороны
                         val payload = JSONObject().apply {
                             put("type", "message")
                             put("messageId", messageId)
@@ -122,19 +123,16 @@ class ChatRepository @Inject constructor(
 
             if (sent) {
                 messageDao.updateMessageStatus(messageId, MessageStatus.SENT.name)
-                // Обновить channel (если отправились через CF/MQTT)
                 if (usedChannel != MessageChannel.UNKNOWN) {
                     messageDao.updateMessageChannel(messageId, usedChannel.name)
                 }
-                
-                // Принудительный CF fallback через 3 секунды если MQTT не подтвердил доставку
+
+                // Принудительный CF fallback через 5 секунд
                 if (usedChannel == MessageChannel.MQTT) {
                     GlobalScope.launch(Dispatchers.IO) {
                         delay(5000)
-                        // Проверить текущий статус
                         val currentStatus = messageDao.getMessageById(messageId)?.status
                         if (currentStatus == MessageStatus.SENT.name || currentStatus == MessageStatus.PENDING.name) {
-                            // MQTT не подтвердил доставку — дублировать через CF
                             val cfRelay = CloudflareRelay.getInstance()
                             if (cfRelay != null) {
                                 try {
@@ -297,7 +295,18 @@ class ChatRepository @Inject constructor(
      */
     fun observeAllMessages(): Flow<List<Message>> {
         return messageDao.observeAll().map { entities ->
-            entities.map { it.toDomain() }
+            val myNodeId = RustBridge.nodeId() ?: "unknown"
+            entities.filter { entity ->
+                // P2P архитектура: показать только свои + адресованные мне
+                // Широковещательные сообщения шифруются E2E — другие узлы их не видят
+                val isForMe = entity.isFromMe || 
+                              entity.recipientId == myNodeId ||
+                              entity.recipientId.isBlank()  // legacy messages
+                
+                Log.d(TAG, "MESSAGE FILTER: id=${entity.id.take(8)} isFromMe=${entity.isFromMe} recipient=${entity.recipientId.take(16)} myNode=${myNodeId.take(16)} isForMe=$isForMe")
+                
+                isForMe
+            }.map { it.toDomain() }
         }
     }
 
