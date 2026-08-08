@@ -27,6 +27,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
 import com.vladimir.messenger.ui.theme.MessageBubbleOwn
@@ -86,23 +88,38 @@ fun MessageBubble(
                         )
                     }
                 } else {
-                    // Обычный режим — кликабельные URL
-                    ClickableText(
-                        text = annotatedText,
-                        style = MaterialTheme.typography.bodyMedium.copy(color = textColor),
-                        onClick = { offset ->
-                            val annotations = annotatedText.getStringAnnotations("URL", offset, offset)
-                            if (annotations.isNotEmpty()) {
-                                val url = annotations.first().item
-                                try {
-                                    val uri = if (url.startsWith("http")) Uri.parse(url) else Uri.parse("https://$url")
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                                } catch (e: Exception) {
-                                    android.util.Log.e("MessageBubble", "Failed to open URL: $url", e)
+                    // Обычный режим — Text + pointerInput для различения tap/long press
+                    Box(
+                        modifier = Modifier.pointerInput(message.id) {
+                            detectTapGestures(
+                                onLongPress = {
+                                    // Long press → включить выделение (НЕ открывать URL)
+                                    onLongClick?.invoke()
+                                },
+                                onTap = { offset ->
+                                    // Обычный клик → проверить URL
+                                    val annotations = annotatedText.getStringAnnotations("URL", offset.x.toInt(), offset.x.toInt())
+                                    if (annotations.isNotEmpty()) {
+                                        val url = annotations.first().item
+                                        try {
+                                            val uri = if (url.startsWith("http")) Uri.parse(url) else Uri.parse("https://$url")
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("MessageBubble", "Failed to open URL: $url", e)
+                                        }
+                                    } else {
+                                        // Клик не на URL → вызвать onTap
+                                        onTap()
+                                    }
                                 }
-                            }
+                            )
                         }
-                    )
+                    ) {
+                        Text(
+                            text = annotatedText,
+                            style = MaterialTheme.typography.bodyMedium.copy(color = textColor),
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
