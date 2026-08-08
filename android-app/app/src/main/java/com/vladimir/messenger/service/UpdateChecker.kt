@@ -103,11 +103,18 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     fun downloadApk(releaseInfo: ReleaseInfo): Long {
+        // Скачиваем в cache директорию приложения (надёжнее для FileProvider)
+        val cacheDir = context.cacheDir
+        val apkFile = File(cacheDir, "p2p-update-${releaseInfo.version}.apk")
+        // Удаляем старый файл если есть
+        if (apkFile.exists()) apkFile.delete()
+        
         val request = DownloadManager.Request(Uri.parse(releaseInfo.downloadUrl)).apply {
             setTitle("P2P Messenger Update")
             setDescription("Скачивание версии ${releaseInfo.version}")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "p2p-messenger-${releaseInfo.version}.apk")
+            // Скачиваем в cache dir приложения (не external)
+            setDestinationInExternalFilesDir(context, null, "p2p-update-${releaseInfo.version}.apk")
         }
         
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -124,7 +131,7 @@ class UpdateChecker @Inject constructor(
         try {
             val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             
-            // Пытаемся получить локальный путь к файлу
+            // Получаем путь к файлу из DownloadManager
             val query = DownloadManager.Query().setFilterById(downloadId)
             val cursor = downloadManager.query(query)
             
@@ -135,32 +142,53 @@ class UpdateChecker @Inject constructor(
                 cursor.close()
                 
                 if (localUri != null) {
-                    apkFile = try { File(java.net.URI(localUri)) } catch (_: Exception) { File(localUri.removePrefix("file://")) }
+                    apkFile = try { 
+                        File(java.net.URI(localUri)) 
+                    } catch (_: Exception) { 
+                        File(localUri.removePrefix("file://")) 
+                    }
                 }
             }
             
             if (apkFile == null || !apkFile.exists()) {
-                Log.e(TAG, "Cannot find downloaded APK file")
+                Log.e(TAG, "Cannot find downloaded APK file (id=$downloadId)")
                 return
             }
             
-            Log.i(TAG, "Installing APK from: ${apkFile.absolutePath}")
+            Log.i(TAG, "Installing APK: ${apkFile.absolutePath} (${apkFile.length() / 1024 / 1024}MB)")
             
-            // Используем FileProvider для безопасного URI
+            // FileProvider с authority <package>.fileprovider
             val authority = "${context.packageName}.fileprovider"
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                context, authority, apkFile
-            )
-            
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+            val uri = try {
+                androidx.core.content.FileProvider.getUriForFile(context, authority, apkFile)
+            } catch (e: IllegalArgumentException) {
+                Log.e(TAG, "FileProvider cannot handle file: ${apkFile.absolutePath}", e)
+                // Fallback: открываем через обычный file URI (может не работать на Android 14+)
+                Uri.fromFile(apkFile)
             }
             
-            context.startActivity(intent)
-            Log.i(TAG, "Install intent started with FileProvider URI")
+            Log.i(TAG, "FileProvider URI: $uri")
+            
+            // Используем ACTION_INSTALL_PACKAGE (работает на всех версиях Android)
+            val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            
+            try {
+                context.startActivity(intent)
+                Log.i(TAG, "Install intent started successfully")
+            } catch (e: android.content.ActivityNotFoundException) {
+                Log.w(TAG, "ACTION_INSTALL_PACKAGE not available, trying ACTION_VIEW")
+                // Fallback на ACTION_VIEW
+                val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(fallbackIntent)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "installApk failed", e)
         }
