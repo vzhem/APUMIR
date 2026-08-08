@@ -11,45 +11,42 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Set up JDK 17
+
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-      
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-      
+
       - name: Accept Android licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-      
+
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-        
-      - name: Подмена versionName в build.gradle.kts на имя тега
+
+      - name: Sync versionName with tag
         run: |
-          sed -i "s/versionName = \"v[0-9.]*\"/versionName = \"${{ steps.get_version.outputs.VERSION }}\"/" android-app/app/build.gradle.kts
-          echo "versionName заменён на ${{ steps.get_version.outputs.VERSION }}"
-          grep versionName android-app/app/build.gradle.kts
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Setting versionName to $VERSION"
+          sed -i "s/versionName = .*/versionName = \"$VERSION\"/" android-app/app/build.gradle.kts
+          grep -n "versionName" android-app/app/build.gradle.kts
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./android-app/gradlew
-      
-      - name: Build Debug APK (auto-signed)
+
+      - name: Build Release APK
         working-directory: ./android-app
         run: ./gradlew :app:assembleRelease --no-daemon
-      
-      - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -57,11 +54,11 @@ jobs:
           name: Release ${{ steps.get_version.outputs.VERSION }}
           body: |
             ## P2P Messenger ${{ steps.get_version.outputs.VERSION }}
-            
+
             Автоматическая сборка из тега.
-            
+
             ### Установка
-            1. Скачайте app-debug.apk
+            1. Скачайте app-release.apk
             2. Разрешите установку из неизвестных источников
             3. Установите
           draft: false
