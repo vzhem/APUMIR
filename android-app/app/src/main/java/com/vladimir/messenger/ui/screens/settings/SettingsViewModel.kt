@@ -6,6 +6,8 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.repository.NetworkStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -24,7 +26,9 @@ data class SettingsUiState(
 )
 
 @HiltViewModel
-class SettingsViewModel @Inject constructor() : ViewModel() {
+class SettingsViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState = _uiState.asStateFlow()
@@ -49,6 +53,13 @@ class SettingsViewModel @Inject constructor() : ViewModel() {
                 else           -> NetworkStatus.Disconnected
             }
 
+            // Получить актуальную версию приложения
+            val appVersion = try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+            } catch (e: Exception) {
+                "unknown"
+            }
+
             _uiState.update {
                 it.copy(
                     displayName      = "Anonymous",
@@ -57,6 +68,7 @@ class SettingsViewModel @Inject constructor() : ViewModel() {
                     connectionStatus = networkStatus,
                     connectedPeers   = RustBridge.connectedPeers().toInt(),
                     connectionMode   = "P2P / QUIC",
+                    appVersion       = appVersion,
                     rustCoreVersion  = "Rust Core",
                 )
             }
