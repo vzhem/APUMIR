@@ -50,3 +50,6 @@ cloudflare-worker/node_modules/
 # OS files
 Thumbs.db
 .DS_Store
+
+# Machine-specific JVM settings
+android-app/gradle/gradle-daemon-jvm.properties
