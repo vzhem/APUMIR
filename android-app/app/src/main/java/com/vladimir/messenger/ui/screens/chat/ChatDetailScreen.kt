@@ -12,6 +12,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.MessageBubble
@@ -32,7 +35,15 @@ fun ChatDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    var selectedMessage by remember { mutableStateOf<Message?>(null) }
+    var activeMessage by remember { mutableStateOf<Message?>(null) }
+    var showCopyDialog by remember { mutableStateOf<Message?>(null) }
+
+    // Сброс выделения и диалога копирования
+    fun resetSelection() {
+        activeMessage = null
+        showCopyDialog = null
+    }
+
     val context = LocalContext.current
 
     // Прокрутка к последнему сообщению
@@ -100,7 +111,12 @@ fun ChatDetailScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(paddingValues)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { resetSelection() }
+                    )
+                },
         ) {
             when {
                 uiState.isLoading -> {
@@ -147,7 +163,26 @@ fun ChatDetailScreen(
                         ) { message ->
                             MessageBubble(
                                 message = message,
-                                onLongClick = { msg -> selectedMessage = msg }
+                                isSelected = activeMessage?.id == message.id,
+                                linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                onTap = {
+                                    if (activeMessage?.id == message.id) {
+                                        // Клик на уже выделенное → показать AlertDialog
+                                        showCopyDialog = message
+                                    } else {
+                                        // Клик на другое сообщение → сбросить и выделить
+                                        activeMessage = message
+                                    }
+                                },
+                                onLongClick = {
+                                    if (activeMessage?.id == message.id) {
+                                        // Long press на выделенное → показать AlertDialog
+                                        showCopyDialog = message
+                                    } else {
+                                        // Long press → включить выделение
+                                        activeMessage = message
+                                    }
+                                }
                             )
                         }
                     }
@@ -157,9 +192,9 @@ fun ChatDetailScreen(
     }
 
     // AlertDialog для копирования сообщения
-    selectedMessage?.let { message ->
+    showCopyDialog?.let { message ->
         AlertDialog(
-            onDismissRequest = { selectedMessage = null },
+            onDismissRequest = { showCopyDialog = null },
             title = { Text("Копировать сообщение?") },
             text = { Text(message.content.take(100) + if (message.content.length > 100) "..." else "") },
             confirmButton = {
@@ -168,13 +203,14 @@ fun ChatDetailScreen(
                     val clip = ClipData.newPlainText("Сообщение", message.content)
                     clipboard.setPrimaryClip(clip)
                     Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                    selectedMessage = null
+                    showCopyDialog = null
+                    resetSelection()
                 }) {
                     Text("Копировать")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { selectedMessage = null }) {
+                TextButton(onClick = { showCopyDialog = null }) {
                     Text("Отмена")
                 }
             }
