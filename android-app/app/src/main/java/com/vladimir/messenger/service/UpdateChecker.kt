@@ -118,24 +118,52 @@ class UpdateChecker @Inject constructor(
     }
 
     /**
-     * Установить скачанный APK.
+     * Установить скачанный APK через FileProvider.
      */
     fun installApk(downloadId: Long) {
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val uri = downloadManager.getUriForDownloadedFile(downloadId)
-        
-        if (uri == null) {
-            Log.e(TAG, "Cannot get URI for downloaded file")
-            return
+        try {
+            val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            
+            // Пытаемся получить локальный путь к файлу
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val cursor = downloadManager.query(query)
+            
+            var apkFile: File? = null
+            if (cursor != null && cursor.moveToFirst()) {
+                val localUriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                val localUri = cursor.getString(localUriIdx)
+                cursor.close()
+                
+                if (localUri != null) {
+                    apkFile = try { File(java.net.URI(localUri)) } catch (_: Exception) { File(localUri.removePrefix("file://")) }
+                }
+            }
+            
+            if (apkFile == null || !apkFile.exists()) {
+                Log.e(TAG, "Cannot find downloaded APK file")
+                return
+            }
+            
+            Log.i(TAG, "Installing APK from: ${apkFile.absolutePath}")
+            
+            // Используем FileProvider для безопасного URI
+            val authority = "${context.packageName}.fileprovider"
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context, authority, apkFile
+            )
+            
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            
+            context.startActivity(intent)
+            Log.i(TAG, "Install intent started with FileProvider URI")
+        } catch (e: Exception) {
+            Log.e(TAG, "installApk failed", e)
         }
-        
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-        }
-        
-        context.startActivity(intent)
-        Log.i(TAG, "Install intent started")
     }
 
     private fun isVersionNewer(current: String, latest: String): Boolean {

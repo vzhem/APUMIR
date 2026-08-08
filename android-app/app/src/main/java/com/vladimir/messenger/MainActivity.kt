@@ -16,6 +16,9 @@ package com.vladimir.messenger
 import android.Manifest
 import android.content.Intent
 import android.content.Context
+import android.os.PowerManager
+import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -34,7 +37,6 @@ import com.vladimir.messenger.service.BotApi
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
-import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -165,6 +167,9 @@ class MainActivity : ComponentActivity() {
 
         // Запрашиваем разрешение на уведомления (Android 13+)
         requestNotificationPermission()
+        requestIgnoreBatteryOptimizations()
+        // Запрос на отключение battery optimization (для push в Doze mode)
+
 
         // Запускаем Foreground Service с Rust ядром
         startCoreService()
@@ -290,6 +295,25 @@ class MainActivity : ComponentActivity() {
     }
 
     // Запрос разрешения на уведомления
+    
+    private fun requestIgnoreBatteryOptimizations() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                // Показываем системный диалог запроса
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+                Log.i("MainActivity", "Requested ignore battery optimizations")
+            } else {
+                Log.d("MainActivity", "Already ignoring battery optimizations")
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to request battery optimization exemption", e)
+        }
+    }
+
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
