@@ -47,7 +47,7 @@ class MessengerApplication : Application() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "P2P Messenger Service",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Keeps P2P connection alive"
                 setShowBadge(false)
