@@ -255,6 +255,19 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                // Диалог обновления
+                val updateState by updateViewModel.uiState.collectAsStateWithLifecycle()
+                Log.d("MainActivity", "UpdateDialog check: isChecking=${updateState.isChecking}, updateAvailable=${updateState.updateAvailable != null}")
+                updateState.updateAvailable?.let { release ->
+                    Log.i("MainActivity", "Rendering UpdateDialog for ${release.version}")
+                    UpdateDialog(
+                        releaseInfo = release,
+                        isDownloading = updateState.isDownloading,
+                        onDownloadClick = { updateViewModel.downloadUpdate() },
+                        onDismissClick = { updateViewModel.dismissUpdate() }
+                    )
+                }
+
                 MessengerNavGraph(
                         startDestination = if (uiState.hasIdentity)
                             Screen.ChatList.route
