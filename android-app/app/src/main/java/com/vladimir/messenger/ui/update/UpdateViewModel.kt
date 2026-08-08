@@ -79,6 +79,7 @@ class UpdateViewModel @Inject constructor(
             override fun onReceive(context: Context, intent: Intent) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id == downloadId) {
+                    android.util.Log.i("UpdateViewModel", "Download complete, opening installer")
                     _uiState.update { it.copy(isDownloading = false) }
                     updateChecker.installApk(downloadId)
                 }

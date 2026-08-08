@@ -41,9 +41,9 @@ class NotificationHelper @Inject constructor(
         messageText: String,
         isIncoming: Boolean,
     ) {
-        Log.d(TAG, "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
+        android.util.Log.d("NotificationHelper", "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
         if (!isIncoming) {
-            Log.d(TAG, "Skipping notification (outgoing message)")
+            android.util.Log.d("NotificationHelper", "Skipping notification (outgoing message)")
             return
         }
 
