@@ -194,7 +194,7 @@ class MainActivity : ComponentActivity() {
         val now = System.currentTimeMillis()
         val oneDayMs = 24 * 60 * 60 * 1000L
         
-        if (now - lastCheck > oneDayMs) {
+        if (true) {  // проверять при каждом запуске
             try {
                 val currentVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "v0.0.0"
                 updateViewModel.checkForUpdate(currentVersion)

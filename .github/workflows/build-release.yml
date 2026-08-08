@@ -34,7 +34,7 @@ jobs:
       
       - name: Build Debug APK (auto-signed)
         working-directory: ./android-app
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:assembleRelease --no-daemon
       
       - name: Get version from tag
         id: get_version
@@ -43,7 +43,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: android-app/app/build/outputs/apk/debug/app-debug.apk
+          files: android-app/app/build/outputs/apk/release/app-release.apk
           name: Release ${{ steps.get_version.outputs.VERSION }}
           body: |
             ## P2P Messenger ${{ steps.get_version.outputs.VERSION }}

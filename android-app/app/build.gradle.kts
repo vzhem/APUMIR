@@ -25,8 +25,18 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("p2p-release.jks")
+            storePassword = "p2p2026release"
+            keyAlias = "p2p"
+            keyPassword = "p2p2026release"
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
         }
         debug {
