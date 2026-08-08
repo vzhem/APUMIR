@@ -1,0 +1,107 @@
+
+namespace p2p_core {
+
+    [Throws=CoreError]
+    string initialize_core();
+
+    string get_version();
+    u8 get_protocol_version();
+
+    P2PCoreHandle create_engine(string display_name);
+    P2PCoreHandle create_engine_with_keys(string display_name, string public_key, string private_key);
+};
+
+[Error]
+interface CoreError {
+    InitError(string detail);
+    NetworkError(string detail);
+    CryptoError(string detail);
+    DatabaseError(string detail);
+    Unknown(string detail);
+};
+
+enum MessageStatusFfi {
+    "Pending",
+    "Sent",
+    "Delivered",
+    "Read",
+    "Failed"
+};
+
+dictionary MessageFfi {
+    string id;
+    string chat_id;
+    string sender_id;
+    string text;
+    string status;
+    i64 created_at;
+    boolean is_deleted;
+};
+
+dictionary ChatFfi {
+    string id;
+    string kind;
+    string? title;
+    i64 last_message_at;
+    i64 unread_count;
+};
+
+dictionary CoreEventFfi {
+    string event_type;
+    string? node_id;
+    string? peer_id;
+    string? display_name;
+    string? message_id;
+    string? chat_id;
+    string? sender_id;
+    string? text;
+    string? status;
+    i64? timestamp;
+    boolean? is_local;
+};
+
+interface P2PCoreHandle {
+
+    boolean start();
+    void stop();
+    boolean is_running();
+
+    string? node_id();
+    string? public_key();
+
+    string network_status();
+    u64 connected_peers();
+    void on_network_available();
+    void on_network_lost();
+
+    boolean send_message(
+        string message_id,
+        string chat_id,
+        string recipient_id,
+        string text
+    );
+
+    void receive_message(
+        string message_id,
+        string chat_id,
+        string sender_id,
+        string encrypted_text,
+        i64 timestamp
+    );
+
+    boolean mark_message_read(string message_id);
+
+    boolean create_chat(string chat_id);
+    boolean add_contact(string user_id, string display_name);
+    sequence<ChatFfi> get_chats();
+    sequence<MessageFfi> get_messages(string chat_id, u64 limit);
+
+    string generate_invite();
+    boolean connect_via_invite(string link);
+
+    boolean send_message_mqtt(string to_node_id, string payload);
+
+    CoreEventFfi? poll_event();
+    sequence<CoreEventFfi> drain_events();
+    u64 pending_events();
+};

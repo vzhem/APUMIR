@@ -1,0 +1,52 @@
+# Rust build artifacts
+rust-core/target/
+**/*.rs.bk
+Cargo.lock
+
+# Android build outputs
+android-app/.gradle/
+android-app/app/build/
+android-app/build/
+android-app/captures/
+android-app/local.properties
+android-app/.idea/
+android-app/*.iml
+
+# Android Studio
+.gradle/
+build/
+captures/
+.externalNativeBuild
+.cxx
+local.properties
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compiled native libraries (x86 and x86_64 for emulators only)
+# arm64-v8a and armeabi-v7a kept for real devices
+android-app/app/src/main/jniLibs/x86/
+android-app/app/src/main/jniLibs/x86_64/
+
+# Python virtual env
+venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+*.jks
+release-key.jks
+
+# Cloudflare worker node_modules
+cloudflare-worker/node_modules/
+
+# OS files
+Thumbs.db
+.DS_Store

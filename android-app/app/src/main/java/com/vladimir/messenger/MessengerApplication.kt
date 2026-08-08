@@ -1,0 +1,65 @@
+﻿package com.vladimir.messenger
+
+import android.app.Application
+import android.util.Log
+import java.util.concurrent.TimeUnit
+import com.vladimir.messenger.worker.ProxyCollectorWorker
+import androidx.work.WorkManager
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.NetworkType
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.Constraints
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
+import dagger.hilt.android.HiltAndroidApp
+
+@HiltAndroidApp
+class MessengerApplication : Application() {
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannels()
+
+        // Schedule proxy collector (every 6 hours)
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            val collectRequest = PeriodicWorkRequestBuilder<ProxyCollectorWorker>(6, TimeUnit.HOURS)
+                .setConstraints(constraints)
+                .build()
+
+            WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                ProxyCollectorWorker.WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                collectRequest
+            )
+            Log.i("MessengerApp", "Proxy collector scheduled (every 6 hours)")
+        } catch (e: Exception) {
+            Log.e("MessengerApp", "Failed to schedule proxy collector", e)
+        }
+    }
+
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "P2P Messenger Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps P2P connection alive"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    companion object {
+        const val CHANNEL_ID = "p2p_messenger_service"
+    }
+
+
+}
