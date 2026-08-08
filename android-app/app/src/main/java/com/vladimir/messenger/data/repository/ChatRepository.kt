@@ -59,22 +59,34 @@ class ChatRepository @Inject constructor(
 
             val chat = chatDao.getChatById(chatId)
             val rawId = if (recipientId.isBlank()) chat?.contactId ?: "" else recipientId
+            
+            Log.i(TAG, "📨 ROUTING DEBUG:")
+            Log.i(TAG, "  chatId=$chatId")
+            Log.i(TAG, "  input recipientId='$recipientId'")
+            Log.i(TAG, "  chat.contactId='${chat?.contactId}'")
+            Log.i(TAG, "  chat.contactName='${chat?.contactName}'")
+            Log.i(TAG, "  rawId='$rawId'")
+            
             val actualRecipientId = when {
                 rawId.startsWith("pk_") -> rawId
                 rawId.contains("node=pk_") -> "pk_" + rawId.substringAfter("node=pk_").substringBefore("&")
                 else -> rawId
             }
+            
+            Log.i(TAG, "  actualRecipientId='$actualRecipientId'")
 
             // Попытка 1: через Rust (MQTT/P2P)
             // Отслеживаем через какой канал отправляем
             var usedChannel = MessageChannel.UNKNOWN
             
             var sent = if (actualRecipientId.isNotBlank()) {
+                Log.i(TAG, "🚀 SENDING via Rust: messageId=$messageId recipient=$actualRecipientId")
                 val ok = RustBridge.sendMessage(messageId, chatId, actualRecipientId, content)
+                Log.i(TAG, "  Rust result: $ok")
                 if (ok) usedChannel = MessageChannel.MQTT
                 ok
             } else {
-                Log.w(TAG, "sendMessage: recipient id is blank for chatId=$chatId")
+                Log.w(TAG, "❌ sendMessage: recipient id is blank for chatId=$chatId")
                 false
             }
 
