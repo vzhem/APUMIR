@@ -100,7 +100,8 @@ object RustBridge {
             // MQTT fallback: only pk_ recipients (avoid duplicate chats)
             if (recipientId.startsWith("pk_")) {
                 val myId = nodeId() ?: "unknown"
-                val payload = "$myId|$messageId|$chatId|$text"
+                // Формат: senderId|messageId|chatId|recipientId|text
+                val payload = "$myId|$messageId|$chatId|$recipientId|$text"
                 val mqttOk = sendMessageMqtt(recipientId, payload)
                 Log.i(TAG, "MQTT fallback to $recipientId: $mqttOk")
             }

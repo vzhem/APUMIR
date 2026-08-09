@@ -648,18 +648,32 @@ self.runtime = Some(runtime);
                         });
                     }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
-                    let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
-                    if parts.len() == 4 && parts[0] != node_id {  // Skip own messages
-                        tracing::info!("MQTT: message from {}", parts[0]);
+                    // Формат: senderId|messageId|chatId|recipientId|text
+                    let parts: Vec<&str> = evt.payload.splitn(5, '|').collect();
+                    if parts.len() == 5 && parts[0] != node_id {  // Skip own messages
+                        let sender_id = parts[0];
+                        let message_id = parts[1];
+                        let chat_id = parts[2];
+                        let recipient_id = parts[3];
+                        let text = parts[4];
+                        
+                        // ФИЛЬТРАЦИЯ: проверяем что сообщение адресовано нам
+                        if recipient_id != node_id {
+                            tracing::debug!("MQTT: message for {} (not me {}) — relay only", recipient_id, node_id);
+                            // Не emit событие, просто пропускаем (relay only)
+                            continue;
+                        }
+                        
+                        tracing::info!("MQTT: message from {} to {}", sender_id, recipient_id);
                         let ts = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_millis() as i64;
                         events.emit(CoreEvent::MessageReceived {
-                            message_id: parts[1].to_string(),
-                            chat_id: parts[2].to_string(),
-                            sender_id: parts[0].to_string(),
-                            text: parts[3].to_string(),
+                            message_id: message_id.to_string(),
+                            chat_id: chat_id.to_string(),
+                            sender_id: sender_id.to_string(),
+                            text: text.to_string(),
                             timestamp: ts,
                         });
                         tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
