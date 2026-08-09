@@ -999,8 +999,10 @@ self.runtime = Some(runtime);
             status: "sent".into(),  // Всегда sent - retry продолжится через queue
         });
 
-        // Store-and-forward: queue on ANY send failure
-        if !send_ok {
+        // Store-and-forward: ВСЕГДА queue для оффлайн получателей
+        // Даже если MQTT принял сообщение, брокер не сохраняет для offline
+        // Получатель получит повторно через dequeue_for при peer_discovered
+        if recipient_id != self.node_id_str.clone().unwrap_or_default() {
             if let Some(ref queue) = self.message_queue {
                 use sha2::{Sha256, Digest};
                 let mut rh = Sha256::new();

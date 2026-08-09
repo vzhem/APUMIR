@@ -52,7 +52,7 @@ class CoreServerService : Service() {
     private var eventPollingJob: Job? = null
     private var lastNotificationText: String = ""
     private val knownPeers = mutableMapOf<String, Long>()  // peerId -> lastSeenMs
-    private val PEER_DEDUP_MS = 60_000L  // 60 сек дедупликация
+    private val PEER_DEDUP_MS = 5000_000L  // 60 сек дедупликация
 
     override fun onCreate() {
         super.onCreate()
@@ -316,8 +316,10 @@ class CoreServerService : Service() {
 
     private suspend fun handleEvent(event: CoreEventFfi) {
         Log.d(TAG, "Event: ${event.eventType}")
+        Log.d(TAG, "📥 Event: ${event.eventType}")
         when (event.eventType) {
             "message_received" -> {
+                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} chat=${event.chatId} msgId=${event.messageId} text=${event.text?.take(30)}")
                 val senderId = event.senderId ?: return
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
@@ -419,7 +421,7 @@ class CoreServerService : Service() {
             "keys_generated" -> Log.i(TAG, "Keys generated")
             "engine_started" -> Log.i(TAG, "Engine started OK")
             "error" -> Log.e(TAG, "Engine error: ${event.text}")
-            else -> Log.d(TAG, "Unknown event: ${event.eventType}")
+            else -> Log.d(TAG, "🔍 Event: type=${event.eventType} sender=${event.senderId} peer=${event.peerId} msg=${event.messageId} text=${event.text?.take(30)}")
         }
     }
 
