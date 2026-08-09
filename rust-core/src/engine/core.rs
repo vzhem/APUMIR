@@ -273,13 +273,14 @@ impl P2PCore {
                 let node_id_mqtt = node_id.clone();
                 let display_mqtt = display_name.clone();
                 let public_addr_mqtt = Arc::clone(&public_addr_arc);
+                let queue_mqtt = queue2.clone();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .unwrap();
                     rt.block_on(async move {
-                        Self::run_mqtt_transport(events_mqtt, node_id_mqtt, display_mqtt, public_addr_mqtt).await;
+                        Self::run_mqtt_transport(events_mqtt, node_id_mqtt, display_mqtt, public_addr_mqtt, queue_mqtt).await;
                     });
                 });
 
@@ -589,6 +590,7 @@ self.runtime = Some(runtime);
         node_id: String,
         display_name: String,
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
+        queue: Option<Arc<MessageQueue>>,
     ) {
         use crate::network::mqtt_transport::MqttTransport;
 
@@ -640,10 +642,39 @@ self.runtime = Some(runtime);
                     if evt.payload.is_empty() { continue; }  // Skip empty (retained clear)
                     let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
                     if parts.len() >= 4 && parts[0] != node_id {
-                        tracing::info!("MQTT: peer online: {} ({})", parts[1], parts[0]);
+                        let peer_id = parts[0];
+                        let display_name = parts[1];
+                        tracing::info!("MQTT: peer online: {} ({})", display_name, peer_id);
+                        
+                        // PEER ONLINE: доставить накопленные сообщения
+                        if let Some(ref q) = queue {
+                            use sha2::{Sha256, Digest};
+                            
+                            let mut rh = Sha256::new();
+                            rh.update(peer_id.as_bytes());
+                            let rh_result = rh.finalize();
+                            let mut rid = [0u8; 32];
+                            rid.copy_from_slice(&rh_result);
+                            
+                            let messages = q.dequeue_for(&rid).await;
+                            if !messages.is_empty() {
+                                tracing::info!("✓ Peer {} online, delivering {} msgs", 
+                                    peer_id, messages.len());
+                                
+                                for msg in messages {
+                                    if let Ok(payload) = String::from_utf8(msg.payload) {
+                                        match transport.send_message(peer_id, &payload).await {
+                                            Ok(_) => tracing::info!("  ✓ Delivered to {}", peer_id),
+                                            Err(e) => tracing::warn!("  ✗ Failed: {}", e),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         events.emit(CoreEvent::PeerDiscovered {
-                            peer_id: parts[0].to_string(),
-                            display_name: parts[1].to_string(),
+                            peer_id: peer_id.to_string(),
+                            display_name: display_name.to_string(),
                             is_local: false,
                         });
                     }
@@ -659,8 +690,36 @@ self.runtime = Some(runtime);
                         
                         // ФИЛЬТРАЦИЯ: проверяем что сообщение адресовано нам
                         if recipient_id != node_id {
-                            tracing::debug!("MQTT: message for {} (not me {}) — relay only", recipient_id, node_id);
-                            // Не emit событие, просто пропускаем (relay only)
+                            tracing::debug!("MQTT: message for {} (not me {}) — relay mode", recipient_id, node_id);
+                            
+                            // RELAY: сохранить в очередь для оффлайн доставки
+                            if let Some(ref queue) = queue {
+                                use sha2::{Sha256, Digest};
+                                
+                                let mut rh = Sha256::new();
+                                rh.update(recipient_id.as_bytes());
+                                let rh_result = rh.finalize();
+                                let mut rid = [0u8; 32];
+                                rid.copy_from_slice(&rh_result);
+                                
+                                let mut mh = Sha256::new();
+                                mh.update(message_id.as_bytes());
+                                let mh_result = mh.finalize();
+                                let mut mid = [0u8; 16];
+                                mid.copy_from_slice(&mh_result[..16]);
+                                
+                                let payload = evt.payload.clone();
+                                let qmsg = crate::network::message_queue::QueuedMessage::new(
+                                    mid, rid, payload.as_bytes().to_vec()
+                                );
+                                
+                                if let Err(e) = queue.enqueue(qmsg).await {
+                                    tracing::warn!("Failed to enqueue: {}", e);
+                                } else {
+                                    tracing::info!("✓ Queued msg {} for relay to {}", message_id, recipient_id);
+                                }
+                            }
+                            
                             continue;
                         }
                         
