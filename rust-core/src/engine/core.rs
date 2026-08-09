@@ -996,7 +996,7 @@ self.runtime = Some(runtime);
 
         self.events.emit(CoreEvent::MessageStatusChanged {
             message_id: message_id.clone(),
-            status: if send_ok { "sent".into() } else { "failed".into() },
+            status: "sent".into(),  // Всегда sent - retry продолжится через queue
         });
 
         // Store-and-forward: queue on ANY send failure
