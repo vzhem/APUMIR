@@ -659,8 +659,41 @@ self.runtime = Some(runtime);
                         
                         // ФИЛЬТРАЦИЯ: проверяем что сообщение адресовано нам
                         if recipient_id != node_id {
-                            tracing::debug!("MQTT: message for {} (not me {}) — relay only", recipient_id, node_id);
-                            // Не emit событие, просто пропускаем (relay only)
+                            tracing::debug!("MQTT: message for {} (not me {}) — relay mode", recipient_id, node_id);
+                            
+                            // RELAY MODE: сохранить в очередь для оффлайн доставки
+                            if let Some(ref queue) = queue_arc {
+                                use sha2::{Sha256, Digest};
+                                
+                                // Hash recipient_id -> [u8; 32]
+                                let mut rh = Sha256::new();
+                                rh.update(recipient_id.as_bytes());
+                                let rh_result = rh.finalize();
+                                let mut rid = [0u8; 32];
+                                rid.copy_from_slice(&rh_result);
+                                
+                                // Hash message_id -> [u8; 16]
+                                let mut mh = Sha256::new();
+                                mh.update(message_id.as_bytes());
+                                let mh_result = mh.finalize();
+                                let mut mid = [0u8; 16];
+                                mid.copy_from_slice(&mh_result[..16]);
+                                
+                                // Сохранить весь payload для ретрансляции
+                                let payload = evt.payload.clone();
+                                let qmsg = crate::network::message_queue::QueuedMessage::new(
+                                    mid, rid, payload.as_bytes().to_vec()
+                                );
+                                
+                                let queue2 = Arc::clone(queue);
+                                if let Err(e) = queue2.enqueue(qmsg).await {
+                                    tracing::warn!("Failed to enqueue for relay: {}", e);
+                                } else {
+                                    tracing::info!("✓ Queued message {} for relay to {}", message_id, recipient_id);
+                                }
+                            }
+                            
+                            // Не emit событие, не сохраняем в БД (relay only)
                             continue;
                         }
                         
@@ -1054,12 +1087,32 @@ self.runtime = Some(runtime);
         );
 
         self.events.emit(CoreEvent::MessageReceived {
-            message_id,
+            message_id: message_id.clone(),
             chat_id,
             sender_id,
             text,
             timestamp,
         });
+        
+        // SEND ACK: сообщить ретрансляторам что сообщение доставлено
+        if let Some(ref transport) = self.network.transport {
+            if let Some(rt) = &self.runtime {
+                let transport_clone = Arc::clone(transport);
+                let msg_id_clone = message_id.clone();
+                let my_node_id = self.node_id_str.clone().unwrap_or_default();
+                
+                rt.spawn(async move {
+                    use rumqttc::QoS;
+                    let ack_topic = format!("p2pm2/ack/{}", my_node_id);
+                    let ack_payload = format!("ack|{}", msg_id_clone);
+                    if let Err(e) = transport_clone.client.publish(&ack_topic, QoS::AtLeastOnce, false, ack_payload.as_bytes()).await {
+                        tracing::warn!("Failed to send ACK: {}", e);
+                    } else {
+                        tracing::info!("✓ Sent ACK for message {}", msg_id_clone);
+                    }
+                });
+            }
+        }
     }
 
     pub fn mark_message_read(&self, message_id: &str) -> bool {
