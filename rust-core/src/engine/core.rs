@@ -1031,10 +1031,20 @@ self.runtime = Some(runtime);
         encrypted_text: String,
         timestamp: i64,
     ) {
+        // E2E: если расшифровка не удалась — skip (не наше сообщение или нет сессии)
         let text = match self.crypto.decrypt(&encrypted_text, &sender_id) {
-            Some(bytes) => String::from_utf8(bytes).unwrap_or(encrypted_text.clone()),
-            None => encrypted_text,
+            Some(bytes) => String::from_utf8(bytes).unwrap_or_default(),
+            None => {
+                tracing::debug!("receive_message: decrypt failed for {} — skip (no session or wrong recipient)", sender_id);
+                return;  // ⚠️ НЕ emit событие, не сохраняем в БД
+            }
         };
+
+        // Если decrypt вернул пустую строку — тоже skip
+        if text.is_empty() {
+            tracing::debug!("receive_message: decrypted text is empty for {} — skip", sender_id);
+            return;
+        }
 
         let _ = self.storage.save_message(
             message_id.clone(),
