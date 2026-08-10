@@ -11,6 +11,12 @@ interface MessageDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessageIgnore(message: MessageEntity): Long
+
+    @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE id = :messageId)")
+    suspend fun messageExists(messageId: String): Boolean
+
 
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
@@ -26,6 +32,10 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentOutgoingMessagesForChat(chatId: String, limit: Int): List<MessageEntity>
+
+
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 AND status IN ('PENDING', 'SENT') ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getUnconfirmedOutgoingMessages(chatId: String, limit: Int): List<MessageEntity>
 
     @Query("UPDATE messages SET channel = :channel WHERE id = :messageId")
     suspend fun updateMessageChannel(messageId: String, channel: String)

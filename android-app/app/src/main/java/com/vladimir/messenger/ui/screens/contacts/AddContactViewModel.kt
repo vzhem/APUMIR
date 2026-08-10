@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.ContactRepository
+import com.vladimir.messenger.data.RustBridge
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +15,7 @@ import kotlinx.coroutines.launch
 
 data class AddContactUiState(
     val inviteLink: String = "",
+    val displayName: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
     val contactAdded: Boolean = false,
@@ -40,6 +42,10 @@ class AddContactViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    fun onDisplayNameChanged(value: String) {
+        _uiState.update { it.copy(displayName = value) }
+    }
+
     fun onAddContactClicked() {
         val raw = _uiState.value.inviteLink.trim()
         if (raw.isBlank()) {
@@ -63,7 +69,8 @@ class AddContactViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            val displayName = "Contact ${fingerprint.takeLast(8)}"
+            val displayName = _uiState.value.displayName.trim().takeIf { it.isNotBlank() } 
+                ?: "Contact ${fingerprint.takeLast(8)}"
 
             // 1. обавляем контакт
             val contactResult = contactRepository.addContact(displayName, fingerprint)
@@ -74,18 +81,20 @@ class AddContactViewModel @Inject constructor(
                     // 2. Сразу создаём чат для этого контакта
                     val chat = chatRepository.createChat(fingerprint, contact.displayName)
                     Log.i(TAG, "Chat created: ${chat.id} for ${chat.contactName}")
-                    _uiState.update { it.copy(isLoading = false, contactAdded = true) }
+                    _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                 }
                 .onFailure { error ->
                     // сли контакт уже есть — ищем существующий чат
                     if (error.message == "Contact already exists") {
                         Log.i(TAG, "Contact already exists, finding existing chat")
+                        // Всё равно регистрируем peer в Rust
+                        try { RustBridge.connectViaInvite(raw) } catch (_: Exception) {}
                         val existing = contactRepository.getContactByFingerprint(fingerprint)
                         if (existing != null) {
                             // роверяем есть ли уже чат, если нет — создаём
                             chatRepository.getOrCreateChat(fingerprint, existing.displayName)
                         }
-                        _uiState.update { it.copy(isLoading = false, contactAdded = true) }
+                        _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                     } else {
                         Log.e(TAG, "Failed to add contact", error)
                         _uiState.update {

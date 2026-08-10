@@ -52,7 +52,7 @@ class CoreServerService : Service() {
     private var eventPollingJob: Job? = null
     private var lastNotificationText: String = ""
     private val knownPeers = mutableMapOf<String, Long>()  // peerId -> lastSeenMs
-    private val PEER_DEDUP_MS = 5000L  // 60 сек дедупликация
+    private val PEER_DEDUP_MS = 30000L  // 60 сек дедупликация
 
     override fun onCreate() {
         super.onCreate()
@@ -320,12 +320,14 @@ class CoreServerService : Service() {
         Log.d(TAG, "📥 Event: ${event.eventType}")
         when (event.eventType) {
             "message_received" -> {
-                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} chat=${event.chatId} msgId=${event.messageId} text=${event.text?.take(30)}")
+                val originalTs = event.timestamp
+                val ts = originalTs ?: System.currentTimeMillis()
+                Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} msgId=${event.messageId} originalTs=$originalTs ts=$ts text=${event.text?.take(30)}")
                 val senderId = event.senderId ?: return
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
                 val text = event.text ?: return
-                val timestamp = event.timestamp ?: System.currentTimeMillis()
+                val timestamp = ts
 
                 Log.i(TAG, "Message from $senderId in chat $chatId: $text")
                 try {
@@ -334,12 +336,24 @@ class CoreServerService : Service() {
                     // Иначе — это широковещательное сообщение не для нас (ретранслируем, но не сохраняем)
                     // P2P ФИЛЬТРАЦИЯ: ищем существующий чат с этим контактом
                     // Если чата нет — не создаём (пользователь сам решает с кем общаться)
-                    val chat = chatRepository.getChatByContactId(senderId)
+                    var chat = chatRepository.getChatByContactId(senderId)
                     if (chat == null) {
-                        Log.d(TAG, "No existing chat with $senderId — skipping (no active conversation)")
-                        return
+                        Log.i(TAG, "No chat with $senderId - auto-creating contact and chat")
+                        try {
+                            val autoName = "Contact " + senderId.takeLast(8)
+                            val contactResult = contactRepository.addContact(autoName, senderId)
+                            if (contactResult.isFailure && contactResult.exceptionOrNull()?.message != "Contact already exists") {
+                                Log.e(TAG, "Auto-add contact failed: " + contactResult.exceptionOrNull()?.message)
+                                return
+                            }
+                            chat = chatRepository.getOrCreateChat(senderId, autoName)
+                            Log.i(TAG, "Auto-created chat " + chat.id + " for " + senderId)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Auto-create failed", e)
+                            return
+                        }
                     }
-                    
+
                     chatRepository.saveIncomingMessage(
                         chatId = chat.id,
                         senderId = senderId,
@@ -349,6 +363,14 @@ class CoreServerService : Service() {
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                     Log.i(TAG, "Saved incoming message to chat ${chat.id}")
+                    
+                    // Отправить ACK отправителю
+                    try {
+                        RustBridge.sendDeliveryAck(messageId, senderId)
+                        Log.i(TAG, "📤 Delivery ACK sent for msgId=$messageId")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠ ACK send failed: ${e.message}")
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error saving incoming message", e)
                 }
@@ -357,49 +379,41 @@ class CoreServerService : Service() {
             "peer_discovered" -> {
                 val peerId = event.peerId ?: return
                 if (!peerId.startsWith("pk_")) return  // Skip mDNS duplicates
-                val peerName = event.displayName ?: "Unknown"
+                val peerName = event.displayName?.takeIf { it.isNotBlank() } ?: "Anonymous"
                 val now = System.currentTimeMillis()
                 val lastSeen = knownPeers[peerId] ?: 0L
                 if (now - lastSeen < PEER_DEDUP_MS) return  // дедупликация
                 knownPeers[peerId] = now
                 Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
 
-                // Автосоздание контакта и чата
+                // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
                 try {
-                    contactRepository.updateOnlineStatus(peerId, true)
-                    // Обновляем имя если изменилось (например после перезапуска)
                     val existing = contactRepository.getContactByFingerprint(peerId)
-                    if (existing == null) {
-                        Log.i(TAG, "🆕 Новый контакт: $peerName ($peerId) — создаём чат автоматически")
-                        contactRepository.addContact(peerName, peerId)
-                        // АВТОСОЗДАНИЕ ЧАТА для нового контакта
-                        try {
-                            chatRepository.getOrCreateChat(peerId, peerName)
-                            Log.i(TAG, "✅ Чат с $peerName создан автоматически")
-                        } catch (e2: Exception) {
-                            Log.w(TAG, "⚠ Не удалось создать чат: ${e2.message}")
-                        }
-                    } else {
-                        if (existing.displayName != peerName && peerName != "Unknown") {
+                    if (existing != null) {
+                        // Контакт существует — обновляем online status
+                        contactRepository.updateOnlineStatus(peerId, true)
+                        if (existing.displayName != peerName && peerName.isNotBlank() && peerName != "Unknown" && peerName != "Anonymous" && (existing.displayName.startsWith("Contact ") || existing.displayName == "Anonymous")) {
                             contactRepository.updateDisplayName(existing.id, peerName)
-                        }
-                        // Всегда обновляем имя в чате (на случай если контакт создан с Anonymous)
-                        if (peerName != "Unknown" && peerName != "Anonymous") {
                             chatRepository.updateContactName(peerId, peerName)
                         }
+                        Log.i(TAG, "✅ Обновлён существующий контакт: $peerName")
+                        
+                        // FULL SYNC только для существующих контактов
+                        serviceScope.launch {
+                            try {
+                                chatRepository.retryPendingMessagesForPeer(peerId)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Retry failed", e)
+                            }
+                        }
+                    } else {
+                        // Контакт НЕ существует — игнорируем
+                        Log.i(TAG, "ℹ Peer не в контактах: $peerName ($peerId) — нужен invite link")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Update contact failed", e)
                 }
 
-                try {
-                    val retried = chatRepository.retryPendingMessagesForPeer(peerId)
-                    if (retried > 0) {
-                        Log.i(TAG, "Retried $retried pending messages for peer=$peerId")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Retry pending failed", e)
-                }
             }
 
             "peer_lost" -> {
@@ -432,6 +446,18 @@ class CoreServerService : Service() {
             "keys_generated" -> Log.i(TAG, "Keys generated")
             "engine_started" -> Log.i(TAG, "Engine started OK")
             "error" -> Log.e(TAG, "Engine error: ${event.text}")
+            "delivery_ack" -> {
+                val messageId = event.messageId ?: return
+                Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
+                serviceScope.launch {
+                    try {
+                        chatRepository.updateMessageStatus(messageId, com.vladimir.messenger.domain.model.MessageStatus.DELIVERED)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to mark DELIVERED", e)
+                    }
+                }
+            }
+            
             else -> Log.d(TAG, "🔍 Event: type=${event.eventType} sender=${event.senderId} peer=${event.peerId} msg=${event.messageId} text=${event.text?.take(30)}")
         }
     }

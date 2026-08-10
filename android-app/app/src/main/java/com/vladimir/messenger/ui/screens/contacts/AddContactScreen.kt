@@ -85,6 +85,7 @@ fun AddContactScreen(
             paddingValues = paddingValues,
             uiState = uiState,
             onInviteLinkChanged = viewModel::onInviteLinkChanged,
+            onDisplayNameChanged = viewModel::onDisplayNameChanged,
             onAddContactClicked = viewModel::onAddContactClicked,
         )
     }
@@ -95,6 +96,7 @@ private fun Content(
     paddingValues: PaddingValues,
     uiState: AddContactUiState,
     onInviteLinkChanged: (String) -> Unit,
+    onDisplayNameChanged: (String) -> Unit,
     onAddContactClicked: () -> Unit,
 ) {
     Column(
@@ -120,6 +122,16 @@ private fun Content(
             supportingText = {
                 uiState.error?.let { Text(it) }
             },
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = uiState.displayName,
+            onValueChange = onDisplayNameChanged,
+            label = { Text("Имя контакта (опционально)") },
+            placeholder = { Text("Анна, Стас, ...") },
+            modifier = Modifier.fillMaxWidth(),
         )
 
         Spacer(modifier = Modifier.height(16.dp))

@@ -161,6 +161,9 @@ fun MessengerNavGraph(
                 },
                 onScanQrClick = {
                     navController.navigate(Screen.QrScanner.route)
+                },
+                onShowMyQrClick = {
+                    navController.navigate(Screen.ShareProfile.route)
                 }
             )
         }

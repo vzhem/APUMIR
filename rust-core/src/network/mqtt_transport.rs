@@ -12,7 +12,7 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
     ("mqtt.eclipseprojects.io", 1883),
 ];
 
-const PRESENCE_INTERVAL: Duration = Duration::from_secs(30);
+const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone)]
 pub struct PeerInfo {

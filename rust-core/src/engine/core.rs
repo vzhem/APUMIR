@@ -857,7 +857,7 @@ self.runtime = Some(runtime);
         tracing::info!("Invite: added peer {} at {}", node_id, addr);
         self.events.emit(CoreEvent::PeerDiscovered {
             peer_id: node_id.clone(),
-            display_name: String::new(),
+            display_name: "Anonymous".to_string(),
             is_local: false,
         });
         true

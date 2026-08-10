@@ -31,7 +31,7 @@ class ChatRepository @Inject constructor(
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
     private val lastFullSyncTime = mutableMapOf<String, Long>()
-    private val FULL_SYNC_COOLDOWN_MS = 30_000L  // 30 секунд
+    private val FULL_SYNC_COOLDOWN_MS = 300_000L  // 30 секунд
     companion object {
         private const val TAG = "ChatRepository"
     }
@@ -207,8 +207,8 @@ class ChatRepository @Inject constructor(
             val chat = chatDao.getChatByContactId(peerId)
             if (chat != null) {
                 Log.i(TAG, "✅ Найден чат: id=${chat.id}")
-                val recentMessages = messageDao.getRecentOutgoingMessagesForChat(chat.id, 50)
-                Log.i(TAG, "🔄 FULL SYNC: found ${recentMessages.size} recent outgoing messages")
+                val recentMessages = messageDao.getUnconfirmedOutgoingMessages(chat.id, 50)
+                Log.i(TAG, "🔄 FULL SYNC: found ${recentMessages.size} unconfirmed (PENDING/SENT) messages")
                 
                 for (msg in recentMessages) {
                     try {
@@ -269,6 +269,14 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
     ) {
+        // Защита от дубликатов (FULL SYNC может прислать то же сообщение повторно)
+        val exists = messageDao.messageExists(messageId)
+        if (exists) {
+            Log.i(TAG, "⏩ SKIP duplicate msg $messageId (already in DB)")
+            return
+        }
+        
+        Log.i(TAG, "💾 saveIncomingMessage: chatId=$chatId msgId=$messageId ts=$timestamp")
         val entity = MessageEntity(
             id = messageId,
             chatId = chatId,
@@ -279,7 +287,7 @@ class ChatRepository @Inject constructor(
             status = MessageStatus.DELIVERED.name,
             recipientId = recipientId,
         )
-        messageDao.insertMessage(entity)
+        messageDao.insertMessageIgnore(entity)
         chatDao.updateLastMessage(chatId, content, timestamp)
     }
 

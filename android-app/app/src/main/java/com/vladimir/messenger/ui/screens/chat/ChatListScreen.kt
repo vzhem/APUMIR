@@ -30,6 +30,7 @@ import com.vladimir.messenger.data.RustBridge
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +43,7 @@ fun ChatListScreen(
     onAddContactClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onScanQrClick: () -> Unit = {},
+    onShowMyQrClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

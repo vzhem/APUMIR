@@ -237,4 +237,16 @@ object RustBridge {
         }
     }
 
+
+    fun sendDeliveryAck(messageId: String, recipientId: String): Boolean {
+        return try {
+            // Отправляем ACK через MQTT в формате: ack|messageId
+            val ackPayload = "ack|$messageId"
+            engine?.sendMessageMqtt(recipientId, ackPayload) ?: false
+        } catch (e: Exception) {
+            android.util.Log.w("RustBridge", "sendDeliveryAck failed: ${e.message}")
+            false
+        }
+    }
+
 }
