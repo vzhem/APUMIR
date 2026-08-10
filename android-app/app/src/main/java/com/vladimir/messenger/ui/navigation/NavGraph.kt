@@ -34,6 +34,7 @@ import com.vladimir.messenger.ui.screens.onboarding.OnboardingScreen
 import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
+import com.vladimir.messenger.ui.screens.contacts.RenameContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
@@ -257,6 +258,19 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         // QR-СКАНЕР
         // ------------------------------------------------------------------
+        composable(
+            route = Screen.RenameContact.route,
+            arguments = listOf(
+                androidx.navigation.navArgument("contactId") { type = androidx.navigation.NavType.StringType },
+                androidx.navigation.navArgument("currentName") { type = androidx.navigation.NavType.StringType },
+            ),
+        ) {
+            RenameContactScreen(
+                onRenamed = { navController.popBackStack() },
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
         composable(route = Screen.QrScanner.route) {
             QrScannerScreen(
                 onBackClick = { navController.popBackStack() },

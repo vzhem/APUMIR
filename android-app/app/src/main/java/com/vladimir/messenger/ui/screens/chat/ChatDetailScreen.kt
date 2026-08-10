@@ -30,7 +30,9 @@ import androidx.compose.ui.platform.LocalContext
 fun ChatDetailScreen(
     chatId: String,
     contactName: String,
+    contactId: String = "",
     onBackClick: () -> Unit,
+    onRenameClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

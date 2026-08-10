@@ -69,4 +69,19 @@ class ContactRepository @Inject constructor(
         isOnline = isOnline,
         lastSeen = lastSeen,
     )
+
+    suspend fun renameContact(contactId: String, newName: String): Result<Unit> {
+        return try {
+            val existing = contactDao.getContactByFingerprint(contactId)
+            if (existing == null) {
+                return Result.failure(Exception("Contact not found"))
+            }
+            contactDao.updateDisplayName(existing.id, newName)
+            chatRepository.updateContactName(contactId, newName)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
 }
