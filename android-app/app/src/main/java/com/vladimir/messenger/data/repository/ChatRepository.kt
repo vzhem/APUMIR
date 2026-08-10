@@ -29,6 +29,9 @@ class ChatRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
 ) {
+    // Защита от повторного FULL SYNC в течение 30 секунд
+    private val lastFullSyncTime = mutableMapOf<String, Long>()
+    private val FULL_SYNC_COOLDOWN_MS = 30_000L  // 30 секунд
     companion object {
         private const val TAG = "ChatRepository"
     }
@@ -165,26 +168,66 @@ class ChatRepository @Inject constructor(
     }
 
     suspend fun retryPendingMessagesForPeer(peerId: String): Int {
-        val pending = messageDao.getPendingOutgoingMessages()
         var retried = 0
 
-        for (msg in pending) {
-            val chat = chatDao.getChatById(msg.chatId) ?: continue
-            if (chat.contactId != peerId) continue
+        // ШАГ 1: Классический retry PENDING (если такие есть)
+        try {
+            val pending = messageDao.getPendingOutgoingMessages()
+            Log.i(TAG, "🔍 retryPending: found ${pending.size} PENDING messages total")
+            for (msg in pending) {
+                val chat = chatDao.getChatById(msg.chatId) ?: continue
+                if (chat.contactId != peerId) continue
 
-            val sent = RustBridge.sendMessage(msg.id, msg.chatId, peerId, msg.content)
-            Log.i(TAG, "retryPendingMessagesForPeer peer=$peerId msg=${msg.id} sent=$sent")
+                Log.i(TAG, "  📤 retry PENDING msg=${msg.id.take(8)} content=${msg.content.take(20)}")
+                val sent = RustBridge.sendMessage(msg.id, msg.chatId, peerId, msg.content)
+                Log.i(TAG, "  📤 retry result: sent=$sent")
 
-            if (sent) {
-                messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
-                retried++
+                if (sent) {
+                    messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
+                    retried++
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ retryPending step 1 failed: ${e.message}", e)
         }
 
-        if (retried > 0) {
-            Log.i(TAG, "Retried $retried pending messages for peer=$peerId")
+        // ШАГ 2: FULL SYNC - отправить последние 50 сообщений этому peer
+        try {
+            // Проверка cooldown: не делать FULL SYNC чаще чем раз в 30 секунд для одного peer
+            val now = System.currentTimeMillis()
+            val lastSync = lastFullSyncTime[peerId] ?: 0L
+            val timeSinceLastSync = now - lastSync
+            if (timeSinceLastSync < FULL_SYNC_COOLDOWN_MS) {
+                Log.i(TAG, "⏱ FULL SYNC: cooldown активен для peer=$peerId (прошло ${timeSinceLastSync}ms из ${FULL_SYNC_COOLDOWN_MS}ms)")
+                return retried
+            }
+            lastFullSyncTime[peerId] = now
+            
+            Log.i(TAG, "🔍 FULL SYNC: ищем чат для peer=$peerId")
+            val chat = chatDao.getChatByContactId(peerId)
+            if (chat != null) {
+                Log.i(TAG, "✅ Найден чат: id=${chat.id}")
+                val recentMessages = messageDao.getRecentOutgoingMessagesForChat(chat.id, 50)
+                Log.i(TAG, "🔄 FULL SYNC: found ${recentMessages.size} recent outgoing messages")
+                
+                for (msg in recentMessages) {
+                    try {
+                        Log.i(TAG, "  🚀 sync msg=${msg.id.take(8)} content=${msg.content.take(20)}")
+                        val sent = RustBridge.sendMessage(msg.id, msg.chatId, peerId, msg.content)
+                        Log.i(TAG, "  📤 sync sent=$sent")
+                        if (sent) retried++
+                    } catch (e: Exception) {
+                        Log.e(TAG, "  ❌ sync failed: ${e.message}", e)
+                    }
+                }
+            } else {
+                Log.w(TAG, "⚠ No chat found for peer=$peerId")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ FULL SYNC step 2 failed: ${e.message}", e)
         }
 
+        Log.i(TAG, "✅ Synced $retried messages with peer=$peerId")
         return retried
     }
 

@@ -52,7 +52,7 @@ class CoreServerService : Service() {
     private var eventPollingJob: Job? = null
     private var lastNotificationText: String = ""
     private val knownPeers = mutableMapOf<String, Long>()  // peerId -> lastSeenMs
-    private val PEER_DEDUP_MS = 5000_000L  // 60 сек дедупликация
+    private val PEER_DEDUP_MS = 5000L  // 60 сек дедупликация
 
     override fun onCreate() {
         super.onCreate()
@@ -317,6 +317,7 @@ class CoreServerService : Service() {
     private suspend fun handleEvent(event: CoreEventFfi) {
         Log.d(TAG, "Event: ${event.eventType}")
         Log.d(TAG, "📥 Event: ${event.eventType}")
+        Log.d(TAG, "📥 Event: ${event.eventType}")
         when (event.eventType) {
             "message_received" -> {
                 Log.i(TAG, "📨 MESSAGE_RECEIVED: sender=${event.senderId} chat=${event.chatId} msgId=${event.messageId} text=${event.text?.take(30)}")
@@ -361,7 +362,7 @@ class CoreServerService : Service() {
                 val lastSeen = knownPeers[peerId] ?: 0L
                 if (now - lastSeen < PEER_DEDUP_MS) return  // дедупликация
                 knownPeers[peerId] = now
-                Log.i(TAG, "Peer discovered: $peerId ($peerName)")
+                Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
 
                 // Автосоздание контакта и чата
                 try {
@@ -369,13 +370,23 @@ class CoreServerService : Service() {
                     // Обновляем имя если изменилось (например после перезапуска)
                     val existing = contactRepository.getContactByFingerprint(peerId)
                     if (existing == null) {
+                        Log.i(TAG, "🆕 Новый контакт: $peerName ($peerId) — создаём чат автоматически")
                         contactRepository.addContact(peerName, peerId)
-                    } else if (existing.displayName != peerName && peerName != "Unknown") {
-                        contactRepository.updateDisplayName(existing.id, peerName)
-                    }
-                    // Всегда обновляем имя в чате (на случай если контакт создан с Anonymous)
-                    if (peerName != "Unknown" && peerName != "Anonymous") {
-                        chatRepository.updateContactName(peerId, peerName)
+                        // АВТОСОЗДАНИЕ ЧАТА для нового контакта
+                        try {
+                            chatRepository.getOrCreateChat(peerId, peerName)
+                            Log.i(TAG, "✅ Чат с $peerName создан автоматически")
+                        } catch (e2: Exception) {
+                            Log.w(TAG, "⚠ Не удалось создать чат: ${e2.message}")
+                        }
+                    } else {
+                        if (existing.displayName != peerName && peerName != "Unknown") {
+                            contactRepository.updateDisplayName(existing.id, peerName)
+                        }
+                        // Всегда обновляем имя в чате (на случай если контакт создан с Anonymous)
+                        if (peerName != "Unknown" && peerName != "Anonymous") {
+                            chatRepository.updateContactName(peerId, peerName)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Update contact failed", e)

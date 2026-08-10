@@ -37,6 +37,7 @@ import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
+import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
 
 // =============================================================================
 // РњРђР РЁР РЈРўР«
@@ -75,6 +76,9 @@ sealed class Screen(val route: String) {
 
     // Поделиться профилем
     data object ShareProfile : Screen("share_profile")
+
+    // QR-сканер для добавления контакта
+    data object QrScanner : Screen("qr_scanner")
 }
 
 // =============================================================================
@@ -154,6 +158,9 @@ fun MessengerNavGraph(
                 },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
+                },
+                onScanQrClick = {
+                    navController.navigate(Screen.QrScanner.route)
                 }
             )
         }
@@ -241,6 +248,22 @@ fun MessengerNavGraph(
         composable(route = Screen.ShareProfile.route) {
             ShareProfileScreen(
                 onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        // ------------------------------------------------------------------
+        // QR-СКАНЕР
+        // ------------------------------------------------------------------
+        composable(route = Screen.QrScanner.route) {
+            QrScannerScreen(
+                onBackClick = { navController.popBackStack() },
+                onQrScanned = { qrContent ->
+                    // Извлечь invite link из QR и перейти к AddContact
+                    val inviteLink = qrContent.removePrefix("p2p://invite/")
+                    navController.navigate(Screen.AddContact.createRoute(inviteLink)) {
+                        popUpTo(Screen.QrScanner.route) { inclusive = true }
+                    }
+                }
             )
         }
     }

@@ -45,9 +45,15 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     private fun loadMessages() {
+        android.util.Log.i("ChatDetailVM", "🔍 loadMessages for chatId=$chatId")
         viewModelScope.launch {
             getMessagesUseCase(chatId)
                 .collect { messages ->
+                    android.util.Log.i("ChatDetailVM", "📥 Received ${messages.size} messages for chatId=$chatId")
+                    // Показать последние 5 сообщений
+                    messages.takeLast(5).forEach { msg ->
+                        android.util.Log.i("ChatDetailVM", "  🔹 msg: id=${msg.id.take(8)} isFromMe=${msg.isFromMe} status=${msg.status} content=${msg.content.take(20)}")
+                    }
                     val wasEmpty = _uiState.value.messages.isEmpty()
                     _uiState.update { state ->
                         state.copy(
