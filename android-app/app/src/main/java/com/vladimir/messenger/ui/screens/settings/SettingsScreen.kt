@@ -34,6 +34,13 @@ import com.vladimir.messenger.ui.theme.StatusConnecting
 import com.vladimir.messenger.ui.theme.StatusDegraded
 import com.vladimir.messenger.ui.theme.StatusOffline
 import com.vladimir.messenger.ui.theme.StatusOnline
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.painterResource
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -331,6 +338,60 @@ private fun SettingsItem(
             )
         }
     }
+
+        // Диалог показа моего QR-кода
+        if (showMyQrDialog) {
+            val qrBitmap = remember(uiState.inviteLink) {
+                try {
+                    val writer = QRCodeWriter()
+                    val hints = mapOf(EncodeHintType.CHARACTER_SET to "UTF-8")
+                    val bitMatrix = writer.encode(uiState.inviteLink, BarcodeFormat.QR_CODE, 512, 512, hints)
+                    val width = bitMatrix.width
+                    val height = bitMatrix.height
+                    val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+                    for (x in 0 until width) {
+                        for (y in 0 until height) {
+                            bmp.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                        }
+                    }
+                    bmp
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            AlertDialog(
+                onDismissRequest = { showMyQrDialog = false },
+                title = { Text("My QR Code") },
+                text = {
+                    androidx.compose.foundation.layout.Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (qrBitmap != null) {
+                            Image(
+                                bitmap = qrBitmap.asImageBitmap(),
+                                contentDescription = "QR Code",
+                                modifier = Modifier.size(280.dp),
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                        Text(
+                            text = uiState.inviteLink,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showMyQrDialog = false }) {
+                        Text("Close")
+                    }
+                },
+            )
+        }
+
 }
 
 @Composable
