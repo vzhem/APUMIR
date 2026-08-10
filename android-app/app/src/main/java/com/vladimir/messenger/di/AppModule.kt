@@ -46,6 +46,6 @@ object AppModule {
         ChatRepository(chatDao, messageDao)
 
     @Provides @Singleton
-    fun provideContactRepository(contactDao: ContactDao): ContactRepository =
-        ContactRepository(contactDao)
+    fun provideContactRepository(contactDao: ContactDao, chatRepository: ChatRepository): ContactRepository =
+        ContactRepository(contactDao, chatRepository)
 }

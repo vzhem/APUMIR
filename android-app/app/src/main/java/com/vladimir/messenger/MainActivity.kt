@@ -207,7 +207,10 @@ class MainActivity : ComponentActivity() {
                     MainActivityEntryPoint::class.java
                 )
                 val updateChecker = entryPoint.updateChecker()
-                val release = updateChecker.checkForUpdate()
+                val appVersion = try {
+                        packageManager.getPackageInfo(packageName, 0).versionName ?: "v0.0.0"
+                    } catch (_: Exception) { "v0.0.0" }
+                    val release = updateChecker.checkForUpdate(appVersion)
                 if (release != null) {
                     Log.i("MainActivity", "New version available: ${release.version}")
                     // TODO: Show update dialog
