@@ -39,7 +39,7 @@ import android.content.Intent
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListScreen(
-    onChatClick: (chatId: String, contactName: String) -> Unit,
+    onChatClick: (chatId: String, contactName: String, contactId: String) -> Unit,
     onAddContactClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onScanQrClick: () -> Unit = {},
@@ -157,7 +157,7 @@ fun ChatListScreen(
                         ) { chat ->
                             ContactCard(
                                 chat    = chat,
-                                onClick = { onChatClick(chat.id, chat.contactName) },
+                                onClick = { onChatClick(chat.id, chat.contactName, chat.contactId) },
                             )
                             // Разделитель между чатами
                             HorizontalDivider(

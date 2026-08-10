@@ -56,9 +56,9 @@ sealed class Screen(val route: String) {
 
     // Р”РµС‚Р°Р»СЊРЅС‹Р№ СЌРєСЂР°РЅ С‡Р°С‚Р°
     // {chatId} Рё {contactName} вЂ” РїР°СЂР°РјРµС‚СЂС‹ РјР°СЂС€СЂСѓС‚Р°
-    data object ChatDetail : Screen("chat/{chatId}?contactName={contactName}") {
-        fun createRoute(chatId: String, contactName: String) =
-            "chat/$chatId?contactName=${contactName}"
+    data object ChatDetail : Screen("chat/{chatId}?contactName={contactName}&contactId={contactId}") {
+        fun createRoute(chatId: String, contactName: String, contactId: String) =
+            "chat/$chatId?contactName=${java.net.URLEncoder.encode(contactName, "UTF-8")}&contactId=$contactId"
     }
 
     // Р”РѕР±Р°РІР»РµРЅРёРµ РєРѕРЅС‚Р°РєС‚Р°
@@ -158,9 +158,9 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         composable(route = Screen.ChatList.route) {
             ChatListScreen(
-                onChatClick = { chatId, contactName ->
+                onChatClick = { chatId, contactName, contactId ->
                     navController.navigate(
-                        Screen.ChatDetail.createRoute(chatId, contactName)
+                        Screen.ChatDetail.createRoute(chatId, contactName, contactId)
                     )
                 },
                 onAddContactClick = {
@@ -191,15 +191,23 @@ fun MessengerNavGraph(
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null
+                },
+                navArgument("contactId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = ""
                 }
             )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getString("chatId") ?: return@composable
-            val contactName = backStackEntry.arguments?.getString("contactName") ?: "Unknown"
+            val contactName = backStackEntry.arguments?.getString("contactName")?.let {
+                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (_: Exception) { it }
+            } ?: "Unknown"
+            val contactId = backStackEntry.arguments?.getString("contactId") ?: ""
 
             ChatDetailScreen(
                 chatId      = chatId,
-                contactId   = chatId,
+                contactId   = contactId,
                 contactName = contactName,
                 onBackClick = { navController.popBackStack() },
                 onRenameClick = { cId, cName ->
