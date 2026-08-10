@@ -199,8 +199,12 @@ fun MessengerNavGraph(
 
             ChatDetailScreen(
                 chatId      = chatId,
+                contactId   = chatId,
                 contactName = contactName,
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.popBackStack() },
+                onRenameClick = { cId, cName ->
+                    navController.navigate(Screen.RenameContact.createRoute(cId, cName))
+                }
             )
         }
 

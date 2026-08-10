@@ -91,6 +91,15 @@ fun ChatDetailScreen(
                     }
                 },
                 actions = {
+                    if (contactId.isNotBlank()) {
+                        IconButton(onClick = { onRenameClick(contactId, contactName) }) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Rename",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     IconButton(onClick = { /* TODO: звонок */ }) {
                         Icon(
                             Icons.Default.Call,
