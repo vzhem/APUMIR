@@ -78,6 +78,15 @@ sealed class Screen(val route: String) {
     // Поделиться профилем
     data object ShareProfile : Screen("share_profile")
 
+    // Переименование контакта
+    data object RenameContact : Screen("rename_contact/{contactId}/{currentName}") {
+        fun createRoute(contactId: String, currentName: String): String {
+            val encodedId = java.net.URLEncoder.encode(contactId, "UTF-8")
+            val encodedName = java.net.URLEncoder.encode(currentName, "UTF-8")
+            return "rename_contact/$encodedId/$encodedName"
+        }
+    }
+
     // QR-сканер для добавления контакта
     data object QrScanner : Screen("qr_scanner")
 }

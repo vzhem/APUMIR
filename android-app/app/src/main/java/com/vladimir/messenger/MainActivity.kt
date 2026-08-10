@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.service.CoreServerService
+import com.vladimir.messenger.service.UpdateChecker
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
 import com.vladimir.messenger.ui.navigation.MessengerNavGraph
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 interface MainActivityEntryPoint {
     fun botApi(): BotApi
     fun contactRepository(): ContactRepository
+    fun updateChecker(): UpdateChecker
 }
 
 @AndroidEntryPoint
@@ -103,6 +105,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermission()
         requestIgnoreBatteryOptimizations()
         startCoreService()
+        checkForUpdates()
 
         setContent {
             P2PMessengerTheme {
@@ -192,6 +195,28 @@ class MainActivity : ComponentActivity() {
             }
         } catch (e: Exception) {
             Log.w("MainActivity", "Failed to request battery optimization exemption", e)
+        }
+    }
+
+
+    private fun checkForUpdates() {
+        lifecycleScope.launch {
+            try {
+                val entryPoint = EntryPointAccessors.fromApplication(
+                    applicationContext,
+                    MainActivityEntryPoint::class.java
+                )
+                val updateChecker = entryPoint.updateChecker()
+                val release = updateChecker.checkForUpdate()
+                if (release != null) {
+                    Log.i("MainActivity", "New version available: ${release.version}")
+                    // TODO: Show update dialog
+                } else {
+                    Log.d("MainActivity", "App is up to date")
+                }
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Update check failed: ${e.message}")
+            }
         }
     }
 

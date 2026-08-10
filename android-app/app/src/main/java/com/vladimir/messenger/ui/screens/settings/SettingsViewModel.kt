@@ -60,9 +60,14 @@ class SettingsViewModel @Inject constructor(
                 "unknown"
             }
 
+            // Load display name from SharedPreferences
+            val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            val savedName = prefs.getString("display_name", null)
+            val displayName = savedName?.takeIf { it.isNotBlank() } ?: "Anonymous"
+
             _uiState.update {
                 it.copy(
-                    displayName      = "Anonymous",
+                    displayName      = displayName,
                     fingerprint      = shortFingerprint,
                     inviteLink       = "p2p://invite/$pubKey",
                     connectionStatus = networkStatus,

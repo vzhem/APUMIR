@@ -89,6 +89,12 @@ fun ChatListScreen(
                                 Icon(Icons.Default.Settings, "Настройки")
                             }
                         }
+                            IconButton(onClick = onShowMyQrClick) {
+                                Icon(Icons.Default.QrCode2, "My QR")
+                            }
+                            IconButton(onClick = onScanQrClick) {
+                                Icon(Icons.Default.QrCodeScanner, "Scan QR")
+                            }
                             IconButton(onClick = {
                                 inviteLink = RustBridge.generateInvite()
                                 showInviteDialog = true

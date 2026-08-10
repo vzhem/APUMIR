@@ -12,6 +12,7 @@ import javax.inject.Singleton
 @Singleton
 class ContactRepository @Inject constructor(
     private val contactDao: ContactDao,
+    private val chatRepository: ChatRepository,
 ) {
     fun observeContacts(): Flow<List<Contact>> =
         contactDao.observeAllContacts().map { it.map { e -> e.toDomain() } }
