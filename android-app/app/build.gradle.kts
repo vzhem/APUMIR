@@ -15,8 +15,8 @@ android {
         applicationId = "com.vladimir.messenger"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 1115
-        versionName = "v11.15"
+        versionCode = 1116
+        versionName = "v11.16"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

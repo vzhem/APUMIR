@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
+import com.vladimir.messenger.ui.update.UpdateDialog
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
 import com.vladimir.messenger.ui.navigation.MessengerNavGraph
@@ -55,6 +56,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var pendingContactInfo by mutableStateOf<Triple<String, String, String>?>(null)
+    private var updateRelease by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
     private val viewModel: MainViewModel by viewModels()
 
     override fun onResume() {
@@ -152,6 +154,32 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                // иалог обновления
+                val currentUpdate = updateRelease
+                if (currentUpdate != null) {
+                    UpdateDialog(
+                        releaseInfo = currentUpdate,
+                        isDownloading = false,
+                        onDownloadClick = {
+                            val entryPoint = EntryPointAccessors.fromApplication(
+                                applicationContext,
+                                MainActivityEntryPoint::class.java
+                            )
+                            val checker = entryPoint.updateChecker()
+                            checker.downloadApk(currentUpdate)
+                            updateRelease = null
+                            
+                            // оказать подсказку "откройте Downloads"
+                            android.widget.Toast.makeText(
+                                applicationContext,
+                                "Скачивание началось. осле завершения откройте Downloads для установки.",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        onDismissClick = { updateRelease = null }
+                    )
+                }
+
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
                 if (uiState.isLoading) {
                     androidx.compose.foundation.layout.Box(
@@ -213,7 +241,7 @@ class MainActivity : ComponentActivity() {
                     val release = updateChecker.checkForUpdate(appVersion)
                 if (release != null) {
                     Log.i("MainActivity", "New version available: ${release.version}")
-                    // TODO: Show update dialog
+                    updateRelease = release
                 } else {
                     Log.d("MainActivity", "App is up to date")
                 }
