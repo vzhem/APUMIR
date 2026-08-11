@@ -110,7 +110,7 @@ impl MqttTransport {
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
         match tokio::time::timeout(Duration::from_secs(1), self.eventloop.poll()).await {
             Ok(Ok(Event::Incoming(Packet::Publish(p)))) => {
-                tracing::info!("MQTT IN: topic={} payload_len={} payload={:?}", p.topic, p.payload.len(), String::from_utf8_lossy(&p.payload).chars().take(200).collect::<String>());
+                tracing::info!("MQTT IN: topic={}", p.topic);
                 Some(MqttEvent {
                     topic: p.topic.clone(),
                     payload: String::from_utf8_lossy(&p.payload).to_string(),
