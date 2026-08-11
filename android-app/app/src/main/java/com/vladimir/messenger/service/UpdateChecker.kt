@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
-import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -61,24 +60,34 @@ class UpdateChecker @Inject constructor(
             
             Log.i(TAG, "Latest version: $latestVersion")
             
-            // Сравниваем версии (простое сравнение строк)
+            // Сравниваем числовые компоненты версии (11.16 > 11.9).
             if (isVersionNewer(currentVersion, latestVersion)) {
                 Log.i(TAG, "New version available: $latestVersion")
                 
-                // Найти APK asset
+                // Берём только APK с ожидаемым именем. GitHub не гарантирует порядок
+                // assets, поэтому "первый .apk" может оказаться ручной/устаревшей сборкой.
                 val assets = json.getJSONArray("assets")
-                var downloadUrl: String? = null
+                val canonicalName = "P2P-Messenger-$latestVersion.apk"
+                var canonicalUrl: String? = null
+                var legacyUrl: String? = null
                 for (i in 0 until assets.length()) {
                     val asset = assets.getJSONObject(i)
                     val name = asset.getString("name")
-                    if (name.endsWith(".apk")) {
-                        downloadUrl = asset.getString("browser_download_url")
-                        break
+                    when {
+                        name.equals(canonicalName, ignoreCase = true) -> {
+                            canonicalUrl = asset.getString("browser_download_url")
+                        }
+                        name.equals("app-release.apk", ignoreCase = true) -> {
+                            legacyUrl = asset.getString("browser_download_url")
+                        }
                     }
                 }
+                // Older workflows use app-release.apk for the Actions-built artifact.
+                // Prefer it when a release also contains a manual canonical upload.
+                val downloadUrl = legacyUrl ?: canonicalUrl
                 
                 if (downloadUrl == null) {
-                    Log.w(TAG, "No APK found in release")
+                    Log.w(TAG, "No supported APK asset found in release")
                     return@withContext null
                 }
                 
@@ -103,18 +112,13 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     fun downloadApk(releaseInfo: ReleaseInfo): Long {
-        // Скачиваем в cache директорию приложения (надёжнее для FileProvider)
-        val cacheDir = context.cacheDir
-        val apkFile = File(cacheDir, "p2p-update-${releaseInfo.version}.apk")
-        // Удаляем старый файл если есть
-        if (apkFile.exists()) apkFile.delete()
-        
+        val fileName = "P2P-Messenger-${releaseInfo.version}.apk"
         val request = DownloadManager.Request(Uri.parse(releaseInfo.downloadUrl)).apply {
-            setTitle("P2P Messenger Update")
+            setTitle(fileName)
             setDescription("Скачивание версии ${releaseInfo.version}")
+            setMimeType("application/vnd.android.package-archive")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            // Скачиваем в cache dir приложения (не external)
-            setDestinationInExternalFilesDir(context, null, "p2p-update-${releaseInfo.version}.apk")
+            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
         }
         
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -172,15 +176,6 @@ class UpdateChecker @Inject constructor(
         }
     }
 
-private fun isVersionNewer(current: String, latest: String): Boolean {
-        // Убираем 'v' если есть
-        val c = current.removePrefix("v")
-        val l = latest.removePrefix("v")
-        
-        // Простое сравнение: если строки разные и latest > current
-        return l != c && l > c
-    }
-
     private fun httpGet(url: String): String? {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -204,4 +199,31 @@ private fun isVersionNewer(current: String, latest: String): Boolean {
             conn.disconnect()
         }
     }
+}
+
+internal fun isVersionNewer(current: String, latest: String): Boolean {
+    fun parse(value: String): List<Int>? {
+        val normalized = value
+            .trim()
+            .removePrefix("v")
+            .removePrefix("V")
+            .substringBefore('-')
+            .substringBefore('+')
+
+        if (normalized.isBlank()) return null
+        return normalized.split('.').map { part ->
+            part.toIntOrNull() ?: return null
+        }
+    }
+
+    val currentParts = parse(current) ?: return false
+    val latestParts = parse(latest) ?: return false
+    val componentCount = maxOf(currentParts.size, latestParts.size)
+
+    for (index in 0 until componentCount) {
+        val currentPart = currentParts.getOrElse(index) { 0 }
+        val latestPart = latestParts.getOrElse(index) { 0 }
+        if (latestPart != currentPart) return latestPart > currentPart
+    }
+    return false
 }

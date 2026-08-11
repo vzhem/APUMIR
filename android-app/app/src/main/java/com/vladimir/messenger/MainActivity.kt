@@ -169,10 +169,10 @@ class MainActivity : ComponentActivity() {
                             checker.downloadApk(currentUpdate)
                             updateRelease = null
                             
-                            // оказать подсказку "откройте Downloads"
+                            // Показать подсказку "откройте Downloads"
                             android.widget.Toast.makeText(
                                 applicationContext,
-                                "Скачивание началось. осле завершения откройте Downloads для установки.",
+                                "Скачивание началось. После завершения откройте Downloads для установки.",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         },
