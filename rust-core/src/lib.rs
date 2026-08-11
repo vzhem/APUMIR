@@ -116,6 +116,10 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().connected_peers() as u64
     }
 
+    pub fn trigger_gossip_discovery(&self) -> bool {
+        self.inner.lock().unwrap().trigger_gossip_discovery()
+    }
+
     pub fn on_network_available(&self) {
         self.inner.lock().unwrap().on_network_available()
     }

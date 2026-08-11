@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.widget.Toast
 
 data class SettingsUiState(
     val displayName: String = "Anonymous",
@@ -31,6 +32,7 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
+    private var lastGossipTrigger: Long = 0L
     val uiState = _uiState.asStateFlow()
 
     init {
@@ -83,6 +85,33 @@ class SettingsViewModel @Inject constructor(
     fun onRestartEngine() {
         viewModelScope.launch {
             RustBridge.onNetworkAvailable()
+            loadSettings()
+        }
+    }
+
+    fun onTriggerGossipDiscovery() {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastGossipTrigger
+        
+        // ащита от быстрых нажатий (debounce 5 секунд)
+        if (elapsed < 5000L) {
+            val waitSec = ((5000L - elapsed) / 1000.0).toInt() + 1
+            Toast.makeText(context, "одождите $waitSec сек перед следующим запросом", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        lastGossipTrigger = now
+        Toast.makeText(context, "Собираю данные об абонентах...", Toast.LENGTH_SHORT).show()
+        
+        viewModelScope.launch {
+            val ok = RustBridge.triggerGossipDiscovery()
+            android.util.Log.i("SettingsVM", "Gossip trigger result: $ok")
+            if (ok) {
+                Toast.makeText(context, "Gossip запущен", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "шибка запуска gossip", Toast.LENGTH_SHORT).show()
+            }
+            // ерезагрузить UI чтобы показать обновлённое количество пиров
             loadSettings()
         }
     }

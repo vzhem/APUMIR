@@ -214,6 +214,13 @@ fun SettingsScreen(
                         subtitle = "Пересоединиться со всеми пирами",
                         onClick = viewModel::onRestartEngine,
                     )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon  = Icons.Default.Refresh,
+                        title = "Собрать данные об абонентах",
+                        subtitle = "апустить Gossip для поиска пиров",
+                        onClick = viewModel::onTriggerGossipDiscovery,
+                    )
                 }
             }
 

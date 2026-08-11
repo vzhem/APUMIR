@@ -809,6 +809,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_is_running(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_trigger_gossip_discovery(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_mark_message_read(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_network_status(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -1486,6 +1488,8 @@ public interface P2pCoreHandleInterface {
     fun `getMessages`(`chatId`: kotlin.String, `limit`: kotlin.ULong): List<MessageFfi>
     
     fun `isRunning`(): kotlin.Boolean
+
+      fun `triggerGossipDiscovery`(): kotlin.Boolean
     
     fun `markMessageRead`(`messageId`: kotlin.String): kotlin.Boolean
     
@@ -1704,6 +1708,19 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     )
     }
     
+
+
+
+      override fun `triggerGossipDiscovery`(): kotlin.Boolean {
+              return FfiConverterBoolean.lift(
+      callWithPointer {
+      uniffiRustCall() { _status ->
+      UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_trigger_gossip_discovery(
+          it, _status)
+  }
+      }
+      )
+      }
 
     override fun `markMessageRead`(`messageId`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(

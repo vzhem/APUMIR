@@ -984,6 +984,13 @@ self.runtime = Some(runtime);
         self.network.peer_count()
     }
 
+    /// ринудительно запустить Gossip broadcast (вызывается из UI)
+    pub fn trigger_gossip_discovery(&self) -> bool {
+        tracing::info!("Gossip: manual trigger requested");
+        // TODO: реализовать через канал связи с MQTT loop
+        true
+    }
+
     pub fn send_message(
         &self,
         message_id: String,

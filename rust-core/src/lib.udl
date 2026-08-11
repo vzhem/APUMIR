@@ -71,6 +71,7 @@ interface P2PCoreHandle {
 
     string network_status();
     u64 connected_peers();
+    boolean trigger_gossip_discovery();
     void on_network_available();
     void on_network_lost();
 

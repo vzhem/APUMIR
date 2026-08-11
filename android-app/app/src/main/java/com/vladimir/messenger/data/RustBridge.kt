@@ -79,6 +79,15 @@ object RustBridge {
     fun networkStatus(): String = engine?.networkStatus() ?: "offline"
     fun connectedPeers(): Long = engine?.connectedPeers()?.toLong() ?: 0L
 
+    fun triggerGossipDiscovery(): Boolean {
+        return try {
+            engine?.triggerGossipDiscovery() ?: false
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "triggerGossipDiscovery failed: ${e.message}")
+            false
+        }
+    }
+
     fun onNetworkAvailable() {
         try { engine?.onNetworkAvailable() }
         catch (ex: Exception) { Log.e(TAG, "onNetworkAvailable error", ex) }
