@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -268,7 +268,7 @@ impl P2PCore {
                     Self::run_tcp_listener(events_tcp, network_tcp, 7778).await;
                 });
 
-                // MQTT transport (internet fallback) — separate thread (EventLoop not Send)
+                // MQTT transport (internet fallback) вЂ” separate thread (EventLoop not Send)
                 let events_mqtt = Arc::clone(&events_arc);
                 let node_id_mqtt = node_id.clone();
                 let display_mqtt = display_name.clone();
@@ -630,10 +630,14 @@ self.runtime = Some(runtime);
 
         // Event loop (poll every 1s, presence every 30s)
         let mut tick: u32 = 0;
+        // === GOSSIP PROTOCOL: peer exchange state ===
+        let mut known_peers: std::collections::HashMap<String, (String, std::time::Instant)> = std::collections::HashMap::new();
+        let mut seen_gossip: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+        const MAX_GOSSIP_CACHE: usize = 500;
         loop {
             if let Some(evt) = transport.poll_event().await {
                 if evt.topic.starts_with("p2pm2/ping/") {
-                    // Heartbeat ping от peer
+                    // Heartbeat ping РѕС‚ peer
                     let peer_id = evt.topic.trim_start_matches("p2pm2/ping/");
                     if peer_id != node_id {
                         tracing::trace!("Ping from {}", peer_id);
@@ -646,7 +650,7 @@ self.runtime = Some(runtime);
                         let display_name = parts[1];
                         tracing::info!("MQTT: peer online: {} ({})", display_name, peer_id);
                         
-                        // PEER ONLINE: доставить накопленные сообщения
+                        // PEER ONLINE: РґРѕСЃС‚Р°РІРёС‚СЊ РЅР°РєРѕРїР»РµРЅРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
                         if let Some(ref q) = queue {
                             use sha2::{Sha256, Digest};
                             
@@ -658,14 +662,14 @@ self.runtime = Some(runtime);
                             
                             let messages = q.dequeue_for(&rid).await;
                             if !messages.is_empty() {
-                                tracing::info!("✓ Peer {} online, delivering {} msgs", 
+                                tracing::info!("вњ“ Peer {} online, delivering {} msgs", 
                                     peer_id, messages.len());
                                 
                                 for msg in messages {
                                     if let Ok(payload) = String::from_utf8(msg.payload) {
                                         match transport.send_message(peer_id, &payload).await {
-                                            Ok(_) => tracing::info!("  ✓ Delivered to {}", peer_id),
-                                            Err(e) => tracing::warn!("  ✗ Failed: {}", e),
+                                            Ok(_) => tracing::info!("  вњ“ Delivered to {}", peer_id),
+                                            Err(e) => tracing::warn!("  вњ— Failed: {}", e),
                                         }
                                     }
                                 }
@@ -677,9 +681,46 @@ self.runtime = Some(runtime);
                             display_name: display_name.to_string(),
                             is_local: false,
                         });
+                        // === GOSSIP: record in known_peers ===
+                        known_peers.insert(peer_id.to_string(), (display_name.to_string(), std::time::Instant::now()));
+                    }
+                } else if evt.topic.starts_with("p2pm2/gossip/broadcast") {
+                    // === GOSSIP: receive peer list from other nodes ===
+                    if evt.payload.is_empty() { continue; }
+                    let parts: Vec<&str> = evt.payload.split('|').collect();
+                    if parts.len() < 3 || parts[0] != "gossip" { continue; }
+                    let sender = parts[1];
+                    let msg_uuid = parts[2];
+                    if sender == node_id { continue; }
+                    if seen_gossip.contains(&msg_uuid.to_string()) { continue; }
+                    
+                    seen_gossip.push_back(msg_uuid.to_string());
+                    while seen_gossip.len() > MAX_GOSSIP_CACHE {
+                        seen_gossip.pop_front();
+                    }
+                    
+                    let mut i = 3;
+                    while i + 1 < parts.len() {
+                        let peer_id = parts[i];
+                        let peer_name = parts[i + 1];
+                        i += 2;
+                        if peer_id == node_id { continue; }
+                        if !known_peers.contains_key(peer_id) {
+                            known_peers.insert(peer_id.to_string(), (peer_name.to_string(), std::time::Instant::now()));
+                            tracing::info!("Gossip: learned about peer {} ({})", peer_name, peer_id);
+                            events.emit(CoreEvent::PeerDiscovered {
+                                peer_id: peer_id.to_string(),
+                                display_name: peer_name.to_string(),
+                                is_local: false,
+                            });
+                        } else {
+                            if let Some(entry) = known_peers.get_mut(peer_id) {
+                                entry.1 = std::time::Instant::now();
+                            }
+                        }
                     }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
-                    // Формат: senderId|messageId|chatId|recipientId|text
+                    // Р¤РѕСЂРјР°С‚: senderId|messageId|chatId|recipientId|text
                     let parts: Vec<&str> = evt.payload.splitn(5, '|').collect();
                     if parts.len() == 5 && parts[0] != node_id {  // Skip own messages
                         let sender_id = parts[0];
@@ -688,11 +729,11 @@ self.runtime = Some(runtime);
                         let recipient_id = parts[3];
                         let text = parts[4];
                         
-                        // ФИЛЬТРАЦИЯ: проверяем что сообщение адресовано нам
+                        // Р¤РР›Р¬РўР РђР¦РРЇ: РїСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ Р°РґСЂРµСЃРѕРІР°РЅРѕ РЅР°Рј
                         if recipient_id != node_id {
-                            tracing::debug!("MQTT: message for {} (not me {}) — relay mode", recipient_id, node_id);
+                            tracing::debug!("MQTT: message for {} (not me {}) вЂ” relay mode", recipient_id, node_id);
                             
-                            // RELAY: сохранить в очередь для оффлайн доставки
+                            // RELAY: СЃРѕС…СЂР°РЅРёС‚СЊ РІ РѕС‡РµСЂРµРґСЊ РґР»СЏ РѕС„С„Р»Р°Р№РЅ РґРѕСЃС‚Р°РІРєРё
                             if let Some(ref queue) = queue {
                                 use sha2::{Sha256, Digest};
                                 
@@ -716,11 +757,11 @@ self.runtime = Some(runtime);
                                 if let Err(e) = queue.enqueue(qmsg).await {
                                     tracing::warn!("Failed to enqueue: {}", e);
                                 } else {
-                                    tracing::info!("✓ Queued msg {} for relay to {}", message_id, recipient_id);
+                                    tracing::info!("вњ“ Queued msg {} for relay to {}", message_id, recipient_id);
                                 }
                             }
                             
-                            continue;
+                            // no continue — allow tick += 1 to execute
                         }
                         
                         tracing::info!("MQTT: message from {} to {}", sender_id, recipient_id);
@@ -743,6 +784,31 @@ self.runtime = Some(runtime);
             if tick >= 30 {
                 tick = 0;
                 let _ = transport.publish_presence(&display_name, addr_str.as_deref(), is_relay).await;
+                // === GOSSIP: broadcast known peers to the network ===
+                if !known_peers.is_empty() {
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis();
+                    let prefix = &node_id[..std::cmp::min(8, node_id.len())];
+                    let msg_uuid = format!("{}-{}", ts, prefix);
+                    let mut gossip_parts: Vec<String> = vec![
+                        "gossip".to_string(),
+                        node_id.clone(),
+                        msg_uuid,
+                    ];
+                    let count = std::cmp::min(known_peers.len(), 30);
+                    for (i, (pid, (pname, _))) in known_peers.iter().enumerate() {
+                        if i >= count { break; }
+                        gossip_parts.push(pid.clone());
+                        gossip_parts.push(pname.clone());
+                    }
+                    let gossip_payload = gossip_parts.join("|");
+                    match transport.publish_gossip(&gossip_payload).await {
+                        Ok(_) => tracing::info!("Gossip: broadcasted {} known peers", count),
+                        Err(e) => tracing::info!("Gossip: broadcast failed: {}", e),
+                    }
+                }
             }
         }
     }
@@ -996,12 +1062,12 @@ self.runtime = Some(runtime);
 
         self.events.emit(CoreEvent::MessageStatusChanged {
             message_id: message_id.clone(),
-            status: "sent".into(),  // Всегда sent - retry продолжится через queue
+            status: "sent".into(),  // Р’СЃРµРіРґР° sent - retry РїСЂРѕРґРѕР»Р¶РёС‚СЃСЏ С‡РµСЂРµР· queue
         });
 
-        // Store-and-forward: ВСЕГДА queue для оффлайн получателей
-        // Даже если MQTT принял сообщение, брокер не сохраняет для offline
-        // Получатель получит повторно через dequeue_for при peer_discovered
+        // Store-and-forward: Р’РЎР•Р“Р”Рђ queue РґР»СЏ РѕС„С„Р»Р°Р№РЅ РїРѕР»СѓС‡Р°С‚РµР»РµР№
+        // Р”Р°Р¶Рµ РµСЃР»Рё MQTT РїСЂРёРЅСЏР» СЃРѕРѕР±С‰РµРЅРёРµ, Р±СЂРѕРєРµСЂ РЅРµ СЃРѕС…СЂР°РЅСЏРµС‚ РґР»СЏ offline
+        // РџРѕР»СѓС‡Р°С‚РµР»СЊ РїРѕР»СѓС‡РёС‚ РїРѕРІС‚РѕСЂРЅРѕ С‡РµСЂРµР· dequeue_for РїСЂРё peer_discovered
         if recipient_id != self.node_id_str.clone().unwrap_or_default() {
             if let Some(ref queue) = self.message_queue {
                 use sha2::{Sha256, Digest};
@@ -1215,3 +1281,5 @@ mod tests {
         assert_eq!(engine.public_key(), Some("pk_test".into()));
     }
 }
+
+

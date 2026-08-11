@@ -1,4 +1,4 @@
-//! # MQTT Transport — децентрализованный bootstrap + presence + relay
+﻿//! # MQTT Transport вЂ” РґРµС†РµРЅС‚СЂР°Р»РёР·РѕРІР°РЅРЅС‹Р№ bootstrap + presence + relay
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -74,7 +74,7 @@ impl MqttTransport {
             if is_relay { "relay" } else { "client" }
         );
         let topic = format!("p2pm2/presence/{}", self.node_id);
-        self.client.publish(&topic, QoS::AtLeastOnce, false, payload.as_bytes())
+        self.client.publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
             .await.map_err(|e| e.to_string())
     }
 
@@ -91,10 +91,16 @@ impl MqttTransport {
 
     pub async fn send_message(&self, to_node_id: &str, payload: &str) -> Result<(), String> {
         let topic = format!("p2pm2/msg/{}", to_node_id);
-        self.client.publish(&topic, QoS::AtLeastOnce, false, payload.as_bytes())
+        self.client.publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
             .await.map_err(|e| e.to_string())
     }
 
+
+    /// GOSSIP: Broadcast known peers to all subscribers via p2pm2/gossip/broadcast
+    pub async fn publish_gossip(&self, payload: &str) -> Result<(), String> {
+        self.client.publish("p2pm2/gossip/broadcast", QoS::AtLeastOnce, false, payload.as_bytes())
+            .await.map_err(|e| e.to_string())
+    }
     pub async fn register_as_relay(&self, public_addr: &str) -> Result<(), String> {
         let payload = format!("{}|{}", self.node_id, public_addr);
         self.client.publish("p2pm2/relay/register", QoS::AtLeastOnce, true, payload.as_bytes())
@@ -104,7 +110,7 @@ impl MqttTransport {
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
         match tokio::time::timeout(Duration::from_secs(1), self.eventloop.poll()).await {
             Ok(Ok(Event::Incoming(Packet::Publish(p)))) => {
-                tracing::info!("MQTT IN: topic={}", p.topic);
+                tracing::info!("MQTT IN: topic={} payload_len={} payload={:?}", p.topic, p.payload.len(), String::from_utf8_lossy(&p.payload).chars().take(200).collect::<String>());
                 Some(MqttEvent {
                     topic: p.topic.clone(),
                     payload: String::from_utf8_lossy(&p.payload).to_string(),
@@ -125,3 +131,4 @@ pub struct MqttEvent {
     pub topic: String,
     pub payload: String,
 }
+
