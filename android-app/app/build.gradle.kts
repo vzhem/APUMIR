@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
@@ -6,6 +6,29 @@
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt.android)
 }
+
+fun versionCodeFromName(versionName: String): Int? {
+    val match = Regex("^v([0-9]+)\\.([0-9]+)(?:\\.([0-9]+))?$").matchEntire(versionName)
+        ?: return null
+    val major = match.groupValues[1].toLongOrNull() ?: return null
+    val minor = match.groupValues[2].toLongOrNull() ?: return null
+    val patch = match.groupValues[3].ifEmpty { "0" }.toLongOrNull() ?: return null
+    if (minor > 999 || patch > 999) return null
+
+    val versionCode = major * 1_000_000 + minor * 1_000 + patch
+    return versionCode.takeIf { it in 1L..2_100_000_000L }?.toInt()
+}
+
+val releaseVersionName = providers.gradleProperty("releaseVersionName")
+    .orElse(providers.environmentVariable("GITHUB_REF_NAME"))
+    .orNull
+    ?.takeIf { versionCodeFromName(it) != null }
+    ?: "v11.16"
+val releaseVersionCode = providers.gradleProperty("releaseVersionCode")
+    .orNull
+    ?.toIntOrNull()
+    ?: versionCodeFromName(releaseVersionName)
+    ?: 11_016_000
 
 android {
     namespace = "com.vladimir.messenger"
@@ -15,8 +38,8 @@ android {
         applicationId = "com.vladimir.messenger"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 1116
-        versionName = "v11.16"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
