@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.net.URLEncoder
 import javax.inject.Inject
 
 data class ShareProfileUiState(
@@ -18,6 +19,7 @@ data class ShareProfileUiState(
     val nodeId: String = "",
     val shareLink: String = "",
     val alternativeLink: String = "",
+    val installLink: String = "https://github.com/vzhem/APUMIR/releases/latest",
     val isLoading: Boolean = true,
 )
 
@@ -38,7 +40,9 @@ class ShareProfileViewModel @Inject constructor(
         val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
         val nodeId = prefs.getString("node_id", "") ?: ""
         val displayName = prefs.getString("display_name", "Me") ?: "Me"
-        val shareLink = "p2pmessenger://add?node_id=$nodeId"
+        val encodedNodeId = nodeId.urlEncode()
+        val encodedName = displayName.urlEncode()
+        val shareLink = "p2pmessenger://add?node_id=$encodedNodeId&name=$encodedName"
         val alternativeLink = botApi.generateShareLink(nodeId)
 
         _uiState.update {
@@ -51,4 +55,6 @@ class ShareProfileViewModel @Inject constructor(
             )
         }
     }
+
+    private fun String.urlEncode(): String = URLEncoder.encode(this, "UTF-8")
 }
