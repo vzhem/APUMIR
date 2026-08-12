@@ -790,13 +790,17 @@ InviteFriendScreen
 - [ ] Fan-out delivery каждому участнику.
 - [ ] Group messages на 3 телефонах.
 
-## v11.18.0 — Delivery diagnostics and channel transparency
+## v11.18.0 — Delivery diagnostics, channel transparency and data cleanup
 
 - [ ] Показывать канал доставки в debug mode.
 - [ ] Network diagnostics screen.
 - [ ] Unified message envelope.
 - [ ] Deduplication hardening.
 - [ ] ACK hardening.
+- [ ] Исправить дублирующие чаты, оставшиеся после старых версий.
+- [ ] Добавить миграцию/утилиту слияния дублей чатов по реальному `contactId` / fingerprint.
+- [ ] При слиянии сохранять историю сообщений и не терять статусы доставки.
+- [ ] Добавить безопасный dry-run режим диагностики дублей перед изменением БД.
 
 ## v11.19.0 — Group topics MVP
 
