@@ -1,4 +1,4 @@
-﻿package com.vladimir.messenger.ui.screens.share
+package com.vladimir.messenger.ui.screens.share
 
 import android.content.Intent
 import androidx.compose.foundation.layout.*
@@ -71,7 +71,7 @@ fun ShareProfileScreen(
             )
 
             Text(
-                text = "Поделитесь ссылкой чтобы добавить вас в контакты",
+                text = "Отправьте другу ссылку. Если APUMIR уже установлен — откроется добавление контакта. Если нет — отправьте также ссылку на APK.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -111,6 +111,19 @@ fun ShareProfileScreen(
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace
                     )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        "Если APUMIR не установлен:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        uiState.installLink,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace
+                    )
                 }
             }
 
@@ -132,9 +145,21 @@ fun ShareProfileScreen(
 
                 Button(
                     onClick = {
+                        val shareText = """
+                            Добавь меня в APUMIR / P2P Messenger.
+
+                            Если приложение уже установлено, открой ссылку:
+                            ${uiState.shareLink}
+
+                            Альтернативная ссылка через Telegram:
+                            ${uiState.alternativeLink}
+
+                            Если APUMIR не установлен, скачай APK здесь:
+                            ${uiState.installLink}
+                        """.trimIndent()
                         val sendIntent = Intent().apply {
                             action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, "Добавь меня в P2P Messenger: ${uiState.shareLink}")
+                            putExtra(Intent.EXTRA_TEXT, shareText)
                             type = "text/plain"
                         }
                         val shareIntent = Intent.createChooser(sendIntent, null)
@@ -148,10 +173,20 @@ fun ShareProfileScreen(
                 }
             }
 
+            OutlinedButton(
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(uiState.alternativeLink))
+                    copied = true
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Скопировать Telegram-ссылку")
+            }
+
             Spacer(Modifier.height(16.dp))
 
             Text(
-                "Когда друг откроет ссылку, он автоматически добавит вас в контакты.",
+                "Когда друг откроет ссылку, APUMIR покажет ваш профиль и предложит добавить контакт. Если приложение не установлено, отправьте другу также ссылку на APK или сам APK-файл.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

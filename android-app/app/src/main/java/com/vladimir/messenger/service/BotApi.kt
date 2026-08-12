@@ -10,6 +10,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -98,7 +99,8 @@ class BotApi @Inject constructor(
      * Сгенерировать share link для текущего пользователя.
      */
     fun generateShareLink(nodeId: String): String {
-        return "https://t.me/$BOT_USERNAME?start=$nodeId"
+        val encodedNodeId = URLEncoder.encode(nodeId, "UTF-8")
+        return "https://t.me/$BOT_USERNAME?start=$encodedNodeId"
     }
 
     /**

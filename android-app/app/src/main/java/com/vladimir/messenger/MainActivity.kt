@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.Alignment
+import com.vladimir.messenger.util.InviteLinkParser
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -57,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     private var pendingContactInfo by mutableStateOf<Triple<String, String, String>?>(null)
     private var updateRelease by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
+    private var lastHandledInviteUri: String? = null
     private val viewModel: MainViewModel by viewModels()
 
     override fun onResume() {
@@ -71,31 +73,47 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleDeepLinkIntent(intent: Intent?) {
-        val uri: Uri? = intent?.data
-        if (uri == null) return
+        val uri: Uri = intent?.data ?: return
+        val rawUri = uri.toString()
+        if (rawUri == lastHandledInviteUri) return
 
-        val scheme = uri.scheme ?: return
-        val host = uri.host ?: ""
+        Log.i("MainActivity", "Deep link received: $rawUri")
 
-        Log.i("MainActivity", "Deep link received: $uri")
+        val invite = InviteLinkParser.parse(rawUri)
+        if (invite == null) {
+            Log.w("MainActivity", "Unsupported invite link: $rawUri")
+            return
+        }
 
-        when {
-            scheme == "p2pmessenger" && host == "add" -> {
-                val nodeId = uri.getQueryParameter("node_id") ?: uri.getQueryParameter("nodeId") ?: return
-                val publicKey = uri.getQueryParameter("public_key") ?: uri.getQueryParameter("publicKey") ?: nodeId
-                val displayName = uri.getQueryParameter("name") ?: "Contact ${nodeId.takeLast(6)}"
-                pendingContactInfo = Triple(nodeId, publicKey, displayName)
-            }
-            scheme == "https" && host == "t.me" -> {
-                // t.me бот ссылки
-                val path = uri.path?.removePrefix("/") ?: ""
-                if (path.startsWith("P2PMessengerBot")) {
-                    val startParam = uri.getQueryParameter("start") ?: return
-                    if (startParam.startsWith("add_")) {
-                        val nodeId = startParam.removePrefix("add_")
-                        pendingContactInfo = Triple(nodeId, nodeId, "Contact ${nodeId.takeLast(6)}")
-                    }
+        lastHandledInviteUri = rawUri
+        val fallbackName = invite.displayName ?: "Contact ${invite.nodeId.takeLast(6)}"
+        pendingContactInfo = Triple(
+            invite.nodeId,
+            invite.publicKey ?: invite.nodeId,
+            fallbackName
+        )
+
+        // Best effort enrichment: if the sender has registered in the Cloudflare
+        // registry, replace the generic fallback name with the advertised profile name.
+        lifecycleScope.launch {
+            try {
+                val entryPoint = EntryPointAccessors.fromApplication(
+                    applicationContext,
+                    MainActivityEntryPoint::class.java
+                )
+                val nodeInfo = entryPoint.botApi().lookupNode(invite.nodeId)
+                if (nodeInfo != null) {
+                    Log.i("MainActivity", "Invite registry lookup OK: ${nodeInfo.displayName}")
+                    pendingContactInfo = Triple(
+                        nodeInfo.nodeId,
+                        nodeInfo.publicKey.ifBlank { invite.publicKey ?: nodeInfo.nodeId },
+                        nodeInfo.displayName.ifBlank { fallbackName }
+                    )
+                } else {
+                    Log.i("MainActivity", "Invite registry lookup returned no data for ${invite.nodeId.take(16)}")
                 }
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Invite registry lookup failed: ${e.message}")
             }
         }
     }
