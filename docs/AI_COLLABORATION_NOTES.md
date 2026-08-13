@@ -181,3 +181,11 @@ APK появится: `app\build\outputs\apk\release\app-release.apk`
   через env-var; Defender вызывает временные падения (zip.dll / kapt / lint / corrupt cache)
   → повторный запуск или исключения Defender; `lintVitalAnalyzeRelease` падает → тестовый
   APK собираем без lint; поверх v11.16.4 ставим только release-APK с версией выше.
+- **2026-08-13 (доп.4) — КРИТИЧНО:** тестируемый relay `https://p2p-relay.1985vzhem.workers.dev`
+  ОТВЕЧАЕТ (`/health` → ok), но **`/poll` и `/send` возвращают 404** — релейный inbox
+  (store-and-forward) НЕ развёрнут. Это блокирует офлайн-доставку и ACK/DELIVERED (G1).
+  Онлайн-сообщения ходят через MQTT/P2P напрямую (relay не нужен). Приложение ждёт от Worker:
+  `GET /health`; `POST /register {node_id,public_key,display_name}`; `GET /lookup?node_id=`;
+  `GET /version`; `POST /send {to,from,payload}`; `GET /poll?node=` → `{ok,messages:[{from,payload}]}`.
+  Фикс = W1/W2: написать полный Worker (KV + TTL ≥30 дней) и задеплоить. Исходника Worker'а
+  в репо НЕТ.
