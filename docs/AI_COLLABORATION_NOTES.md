@@ -165,6 +165,14 @@ receipt-cleanup → интеграция в отправку → переисп�
 - **Исходник Cloudflare Worker'а НЕ в репо** (развёрнут на Cloudflare) — его поведение
   (endpoints `/send`, `/poll`, TTL/retention inbox) известно лишь по клиентскому коду
   (`service/CloudflareRelay.kt`). Это открытый вопрос для офлайн-доставки «через неделю».
+- **Sandbox может пере-клонироваться между ходами**: локальная ветка `arena/019ff7c3-apumir`
+  сбрасывается к базе (`991da05`), рабочие файлы сохраняются, а **remote остаётся целым**
+  (все коммиты на месте). Симптом: `git log` показывает мало коммитов, а `git status` — кучу
+  «modified/untracked» для уже закоммиченных файлов; `origin/arena/...` ref может отсутствовать.
+  **Лечение**: `git fetch origin arena/019ff7c3-apumir`; узнать tip через `git ls-remote origin
+  arena/019ff7c3-apumir`; `git reset --mixed <tip-hash>` (сохраняет рабочее дерево); проверить
+  `git status` (остаться должны только новые изменения); закоммитить + `git push origin
+  arena/019ff7c3-apumir` (fast-forward). **НИКОГДА не делать `--force` push** — затрёт remote.
 
 ---
 
