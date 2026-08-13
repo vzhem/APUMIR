@@ -308,3 +308,69 @@ APK появится: `app\build\outputs\apk\release\app-release.apk`
   переиспользовать постоянное MQTT-соединение (умеренный рефакторинг; в очереди). Следующий
   функциональный шаг = **D3 офлайн-доставка** (телефон хранит сообщение и доставляет, когда
   получатель доступен) — основная цель пользователя.
+- **2026-08-13 (доп.7) — РЕЛИЗ v11.16.5 ОПУБЛИКОВАН:** tag `v11.16.5` → `b83d9b3`; APK
+  `P2P-Messenger-v11.16.5.apk` SHA-256 `993ae5eb…`; отмечен Latest. Включает: ✓✓ DELIVERED,
+  recipient-aware routing (нет утечки на 3+ тел), фикс шторма, базовую офлайн-доставку.
+  Workflow отключали на релиз → потом **запушили фикс с guard** (`add4b7d`, пушл пользователь,
+  бот не может) + включили обратно.
+- **2026-08-13 (доп.8) — mesh M0–M2 готовы:** `docs/MESH_DELIVERY.md` (дизайн), M1 `RelayQueue`
+  (`network/relay_queue.rs`), M2 `network/wire.rs` (конверты relay/receipt/gsumm + base64 dep).
+  Оба компилируются (`build-rust.ps1`). В `run_mqtt_transport` старый relay ОТКЛЮЧЁН (фикс
+  `b83d9b3`) — чужие сообщения дропаются. M3 вернёт их правильно (через RelayQueue + дедуп).
+
+---
+
+## 9. M3 — подробное руководство по реализации (для следующей сессии)
+
+**Цель M3:** реальная пересылка через третий телефон — A шлёт офлайн-B, C (online) хранит и
+доставляет B, когда тот появится; receipt расходится → cleanup; A получает ✓✓. Без шторма.
+
+### 9.1. ГЛАВНОЕ ПРАВИЛО (шторм-урок) ⚠️
+**Перед любым enqueue в RelayQueue — проверить `relay_queue.contains(msg_id)`.** Если уже есть —
+ПРОПУСТИТЬ (не re-enqueue, не re-relay). Это единственная защита от петли (старый relay петлил
+из-за отсутствия дедупа: узел получал свою же публикацию и ставил снова). Плюс `hop_count`
+(`MAX_HOPS=8`) и TTL.
+
+### 9.2. Точки интеграции (код)
+- **`rust-core/src/engine/core.rs` → `run_mqtt_transport`** — MQTT event loop. В ветке `p2pm2/msg/`:
+  `ack|…`→MessageDelivered; 5-полей сообщение → `if recipient==node_id` MessageReceived, иначе drop.
+- **`network/relay_queue.rs`** — `RelayQueue`: `enqueue/contains/for_recipient/digest/remove/cleanup_expired`.
+- **`network/wire.rs`** — `build_relay/build_receipt/build_gossip_summary/parse` (→ `MeshEnvelope`).
+- Старый `MessageQueue` (параметр `queue` в `run_mqtt_transport`) — sender-side (свои сообщения при
+  peer-discovered). НЕ трогать; `RelayQueue` — отдельная сущность для ЧУЖИХ.
+
+### 9.3. Подшаги M3 (каждый — отдельный коммит + телефонный тест)
+1. **Проброс `RelayQueue`**: поле `relay_queue: Option<Arc<RelayQueue>>` в `P2PCore`, init в
+   `start()`, передать параметром в `run_mqtt_transport` (как `queue`).
+2. **(a) handle `relay|…`**: `wire::parse` → `Relay`: `recipient==node_id` → доставить (decode
+   `e2e_payload` → текст → `MessageReceived`) + послать `receipt` origin; иначе →
+   `if !contains(msg_id) && !hops_exceeded { enqueue(msg с hop+1) }`.
+3. **(b) handle `receipt|…`**: `relay_queue.remove(msg_id)`; если `origin==node_id` → `MessageDelivered` (✓✓).
+4. **(c) gossip**: на peer-discovered → отправить `gsumm` (`relay_queue.digest()`) peer; при
+   получении `gsumm` — переслать peer те свои `relay`-конверты, которых у него нет.
+5. **(d) send-path**: в `send_message`, если recipient офлайн (нет addr) — собрать `relay`-конверт
+   (`wire::build_relay`, `e2e_payload`=байты текста, hop=0, ttl) и опубликовать в mesh-топик →
+   онлайн-узлы примут в RelayQueue.
+
+### 9.4. Mesh-топик
+`p2pm2/msg/` (переиспользовать; роутить по префиксу тега). Все подписаны на `p2pm2/#`, каждый
+применяет дедуп + проверку получателя.
+
+### 9.5. Тест M3 (3 телефона: Стас/Женя/Анна)
+1. B — режим полёта. A и C онлайн.  2. A→B: A публикует `relay` → C хранит в RelayQueue.
+3. A уходит офлайн.  4. B возвращается → C доставляет (B: MessageReceived + receipt).
+5. receipt → C.remove(msg_id); A (вернулся) → DELIVERED ✓✓.
+6. Проверить: **шторма нет** (logcat тихий), **C не показывает** чужое, B получил, у A ✓✓.
+
+### 9.6. Цикл сборка/тест
+Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, версия через
+`$env:GITHUB_REF_NAME`) → `adb -s <serial> install -r …app-release.apk` (3 тел.) →
+`adb logcat -d -s CoreServerService:I RustBridge:I`. Перед `git pull` — `git stash` (`.so` мешает).
+Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC).
+
+### 9.7. Старт новой сессии
+1. Прочитать **весь** `docs/AI_COLLABORATION_NOTES.md` (⚙️ принцип, 🌐 mesh, раздел 9).
+2. Прочитать `docs/MESH_DELIVERY.md`.
+3. Подшаг 1 (проброс RelayQueue) → компиляция → (a) → тест 2 тел → (b) → (c) → (d) → тест 3 тел.
+   Маленькими шагами, с подтверждением.
+
