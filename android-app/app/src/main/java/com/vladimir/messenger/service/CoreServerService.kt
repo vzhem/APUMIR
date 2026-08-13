@@ -11,7 +11,8 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import com.vladimir.messenger.domain.model.MessageChannel
-import org.json.JSONObject
+import com.vladimir.messenger.data.relay.RelayEnvelope
+import com.vladimir.messenger.domain.model.MessageStatus
 import androidx.core.app.NotificationCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
@@ -153,51 +154,73 @@ class CoreServerService : Service() {
             val cfUrl = prefs.getString("cloudflare_relay_url", "https://p2p-relay.1985vzhem.workers.dev") ?: "https://p2p-relay.1985vzhem.workers.dev"
             cloudflareRelay = CloudflareRelay(cfUrl, nodeId ?: "", serviceScope)
             cloudflareRelay?.onMessageReceived = { senderId: String, payload: String ->
-                Log.i(TAG, "CF relay message from $senderId: ${payload.take(50)}")
+                Log.i(TAG, "CF relay payload from $senderId: ${payload.take(50)}")
                 serviceScope.launch {
                     try {
-                        // Парсить JSON payload от ChatRepository (если это наше сообщение)
-                        val (messageId, content, timestamp) = try {
-                            val json = JSONObject(payload)
-                            if (json.optString("type") == "message") {
-                                Triple(
-                                    json.optString("messageId", java.util.UUID.randomUUID().toString()),
-                                    json.optString("content", payload),
-                                    json.optLong("timestamp", System.currentTimeMillis())
+                        when (val parsed = RelayEnvelope.parse(payload)) {
+                            is RelayEnvelope.Parsed.Ack -> {
+                                // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
+                                val messageId = parsed.messageId
+                                val existing = chatRepository.getMessageById(messageId)
+                                if (existing != null && existing.isFromMe &&
+                                    existing.status != MessageStatus.DELIVERED &&
+                                    existing.status != MessageStatus.READ
+                                ) {
+                                    chatRepository.updateMessageStatus(messageId, MessageStatus.DELIVERED)
+                                    Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
+                                } else {
+                                    Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
+                                }
+                            }
+
+                            is RelayEnvelope.Parsed.Message -> {
+                                val messageId = parsed.messageId
+                                // Дедупликация: сообщение уже в БД
+                                val existingMsg = chatRepository.getMessageById(messageId)
+                                if (existingMsg != null) {
+                                    Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
+                                } else {
+                                    val contact = contactRepository.getContactById(senderId)
+                                    val contactName = contact?.displayName ?: senderId.take(16)
+                                    val chat = chatRepository.getOrCreateChat(senderId, contactName)
+                                    chatRepository.saveIncomingMessage(
+                                        chatId = chat.id,
+                                        senderId = senderId,
+                                        messageId = messageId,
+                                        content = parsed.content,
+                                        timestamp = parsed.timestamp,
+                                        channel = MessageChannel.CF,
+                                    )
+                                    Log.i(TAG, "CF message saved to chat ${chat.id}: ${parsed.content.take(30)}")
+                                }
+                                // G1 fix: отправить ACK обратно отправителю через relay
+                                // (отправитель узнаёт о доставке, даже если был офлайн в момент приёма).
+                                try {
+                                    val ack = RelayEnvelope.buildAck(messageId, RustBridge.nodeId() ?: "")
+                                    cloudflareRelay?.sendMessage(senderId, ack)
+                                    Log.i(TAG, "📤 CF ACK sent to $senderId for msgId=$messageId")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "CF ACK send failed: ${e.message}")
+                                }
+                            }
+
+                            is RelayEnvelope.Parsed.Other -> {
+                                // Legacy plain-text payload (не envelope) — сохраняем как раньше.
+                                val messageId = java.util.UUID.randomUUID().toString()
+                                val contact = contactRepository.getContactById(senderId)
+                                val contactName = contact?.displayName ?: senderId.take(16)
+                                val chat = chatRepository.getOrCreateChat(senderId, contactName)
+                                chatRepository.saveIncomingMessage(
+                                    chatId = chat.id,
+                                    senderId = senderId,
+                                    messageId = messageId,
+                                    content = parsed.raw,
+                                    timestamp = System.currentTimeMillis(),
+                                    channel = MessageChannel.CF,
                                 )
-                            } else {
-                                Triple(java.util.UUID.randomUUID().toString(), payload, System.currentTimeMillis())
+                                Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
                             }
-                        } catch (e: Exception) {
-                            // Не JSON — обычный plain-text
-                            Triple(java.util.UUID.randomUUID().toString(), payload, System.currentTimeMillis())
                         }
-
-                        // Дедупликация: проверить есть ли messageId в БД
-                        val existingMsg = chatRepository.getMessageById(messageId)
-                        if (existingMsg != null) {
-                            Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
-                            // Можно обновить channel, если CF подтвердил доставку
-                            if (existingMsg.channel == MessageChannel.UNKNOWN || existingMsg.channel == MessageChannel.MQTT) {
-                                // CF подтвердил доставку — оставляем channel как есть
-                                Log.d(TAG, "Message already exists via another channel")
-                            }
-                            return@launch
-                        }
-
-                        // Получить/создать чат (используя senderId напрямую как contactId)
-                        val contact = contactRepository.getContactById(senderId)
-                        val contactName = contact?.displayName ?: senderId.take(16)
-                        val chat = chatRepository.getOrCreateChat(senderId, contactName)
-                        chatRepository.saveIncomingMessage(
-                            chatId = chat.id,
-                            senderId = senderId,
-                            messageId = messageId,
-                            content = content,
-                            timestamp = timestamp,
-                            channel = MessageChannel.CF,
-                        )
-                        Log.i(TAG, "CF message saved to chat ${chat.id}: ${content.take(30)}")
                     } catch (e: Exception) {
                         Log.e(TAG, "CF message handling failed", e)
                     }

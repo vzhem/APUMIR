@@ -155,10 +155,12 @@ private fun buildAnnotatedMessageText(text: String, linkColor: Color): Annotated
 @Composable
 private fun MessageStatusIcon(status: MessageStatus) {
     val (icon, tint) = when (status) {
-        MessageStatus.PENDING   -> Pair(Icons.Default.Schedule, Color.White.copy(alpha = 0.7f))
-        MessageStatus.SENT      -> Pair(Icons.Default.Done, Color.White.copy(alpha = 0.7f))
-        MessageStatus.DELIVERED -> Pair(Icons.Default.DoneAll, Color.White)
-        MessageStatus.FAILED    -> Pair(Icons.Default.Error, Color.Red.copy(alpha = 0.8f))
+        MessageStatus.PENDING        -> Pair(Icons.Default.Schedule, Color.White.copy(alpha = 0.7f))
+        MessageStatus.QUEUED_OFFLINE -> Pair(Icons.Default.Schedule, Color.White.copy(alpha = 0.5f))
+        MessageStatus.SENT           -> Pair(Icons.Default.Done, Color.White.copy(alpha = 0.7f))
+        MessageStatus.DELIVERED      -> Pair(Icons.Default.DoneAll, Color.White)
+        MessageStatus.READ           -> Pair(Icons.Default.DoneAll, Color(0xFF66D9EF))
+        MessageStatus.FAILED         -> Pair(Icons.Default.Error, Color.Red.copy(alpha = 0.8f))
     }
     Icon(
         imageVector = icon,

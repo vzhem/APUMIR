@@ -7,7 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 import com.vladimir.messenger.service.CloudflareRelay
-import org.json.JSONObject
+import com.vladimir.messenger.data.relay.RelayEnvelope
 
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
@@ -101,13 +101,9 @@ class ChatRepository @Inject constructor(
                 val cfRelay = CloudflareRelay.getInstance()
                 if (cfRelay != null) {
                     try {
-                        val payload = JSONObject().apply {
-                            put("type", "message")
-                            put("messageId", messageId)
-                            put("chatId", chatId)
-                            put("content", content)
-                            put("timestamp", timestamp)
-                        }.toString()
+                        val payload = RelayEnvelope.buildMessage(
+                            messageId, chatId, content, timestamp, RustBridge.nodeId() ?: ""
+                        )
                         val cfSent = kotlinx.coroutines.runBlocking {
                             cfRelay.sendMessage(actualRecipientId, payload)
                         }
@@ -139,13 +135,9 @@ class ChatRepository @Inject constructor(
                             val cfRelay = CloudflareRelay.getInstance()
                             if (cfRelay != null) {
                                 try {
-                                    val payload = JSONObject().apply {
-                                        put("type", "message")
-                                        put("messageId", messageId)
-                                        put("chatId", chatId)
-                                        put("content", content)
-                                        put("timestamp", timestamp)
-                                    }.toString()
+                                    val payload = RelayEnvelope.buildMessage(
+                                        messageId, chatId, content, timestamp, RustBridge.nodeId() ?: ""
+                                    )
                                     val cfSent = cfRelay.sendMessage(actualRecipientId, payload)
                                     if (cfSent) {
                                         Log.i(TAG, "Message duplicated via CF relay (MQTT unconfirmed)")
