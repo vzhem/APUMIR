@@ -176,20 +176,34 @@ receipt-cleanup → интеграция в отправку → переисп�
 
 ---
 
-## 6. Текущий фокус работы
+## 6. Текущий фокус работы (resume here — следующая сессия)
 
-- После v11.16.4 идёт **v11.16.5**. Основной трек — **офлайн-доставка сообщений/файлов**
-  (store-and-forward + ACK через relay). Дизайн и план: `docs/OFFLINE_DELIVERY.md`.
-- План шагами: **D1** (статусы QUEUED_OFFLINE/READ) — код написан; **D2** (ACK через relay)
-  — код написан, **ожидается сборка/unit-тест на Windows**; далее **D3** (OutboxProcessor —
-  гарантированный постинг в relay с retry), **D4** (дедуп CF poll по messageId),
-  **D5** (запуск OutboxProcessor), **D6** (smoke-тест на 3 телефонах), затем **W1/W2**
-  (вынести CF Worker в репо + TTL inbox ≥ 30 дней).
-- Также сделано в этой сессии: раздел `MASTER_PLAN_v2.md` «ПРИОРИТЕТ 7+» (обход ограничений
-  и самовосстановление связи); фикс `.github/workflows/build-release.yml` (guard: не
-  трогать существующий Release после ручной публикации).
-- Изменения закоммичены в `arena/019ff7c3-apumir` (2 коммита: docs+workflow; код D1/D2+тест)
-  и запушены — пользователь тянет ветку в `C:\APUMIR-arena-test` для сборки/теста.
+Ветка: `arena/019ff7c3-apumir` (все коммиты на remote). Канонический клон для сборки/теста:
+`C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
+(см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
+
+**Сделано и проверено на телефонах (v11.16.5-in-progress):**
+- D1 (статусы QUEUED_OFFLINE/READ) + D2 (ACK round-trip) — **✓✓ DELIVERED работает**
+  (фикс Rust `0c992b9`: ACK `ack|...` больше не выбрасывается ядром).
+- Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — **работает**
+  (тест Анна→Стас: доставка + ✓✓).
+- Архитектурный принцип (телефоны = серверы; mesh) + дизайн `docs/MESH_DELIVERY.md`.
+- **M1 `RelayQueue`** (`rust-core/src/network/relay_queue.rs`) — **компилируется**.
+
+**Следующий шаг = M2** — wire-форматы `relay`/`receipt`/`gossip_summary` (модуль Rust,
+компилируем через `build-rust.ps1`). Дальше: M3 gossip → M4 доставка → M5 receipt-cleanup →
+M6 интеграция в отправку → M7 E2E → M8 персистентность → M9 группы. Полный план:
+`docs/MESH_DELIVERY.md`.
+
+**Pending (НЕ в ветке / в очереди):**
+- Фикс `.github/workflows/build-release.yml` (guard от порчи Release) — **НЕ закоммичен**:
+  бот Arena не может пушить GitHub Actions файлы (`workflows` permission). Лежит готовым в
+  sandbox; пользователь коммитит+пушит сам, либо ИИ даёт содержимое файла.
+- Шаг **B (скорость)**: переиспользовать постоянное MQTT-соединение вместо нового на каждую
+  отправку/ACK (`send_message_mqtt` создаёт новое соединение каждый раз) — умеренный рефакторинг.
+- D4: дедуп CF poll по `messageId` (мелочь).
+- CF Worker `/send`,`/poll` = 404 — НЕ критично (доставка идёт через телефоны/MQTT, не через
+  Worker-ящик; Worker = только registry/discovery по архитектуре).
 
 ---
 
