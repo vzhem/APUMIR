@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -721,6 +721,17 @@ self.runtime = Some(runtime);
                     }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
                     // Р¤РѕСЂРјР°С‚: senderId|messageId|chatId|recipientId|text
+                    // ACK: "ack|messageId" — подтверждение доставки (получатель → отправитель).
+                    // Не является сообщением чата — обновляем статус и не парсим как 5-полей.
+                    if let Some(rest) = evt.payload.strip_prefix("ack|") {
+                        let mid = rest.trim();
+                        if !mid.is_empty() {
+                            tracing::info!("MQTT: delivery ACK received for {}", mid);
+                            events.emit(CoreEvent::MessageDelivered {
+                                message_id: mid.to_string(),
+                            });
+                        }
+                    }
                     let parts: Vec<&str> = evt.payload.splitn(5, '|').collect();
                     if parts.len() == 5 && parts[0] != node_id {  // Skip own messages
                         let sender_id = parts[0];

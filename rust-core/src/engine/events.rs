@@ -63,7 +63,8 @@ impl CoreEvent {
             CoreEvent::PeerLost { .. } => "peer_lost",
             CoreEvent::MessageReceived { .. } => "message_received",
             CoreEvent::MessageStatusChanged { .. } => "message_status_changed",
-            CoreEvent::MessageDelivered { .. } => "message_delivered",
+            // "delivery_ack" — Kotlin (CoreServerService) ждёт именно это имя → ставит DELIVERED
+            CoreEvent::MessageDelivered { .. } => "delivery_ack",
             CoreEvent::Error { .. } => "error",
             CoreEvent::KeysGenerated { .. } => "keys_generated",
         }
