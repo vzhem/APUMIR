@@ -186,18 +186,25 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано и проверено на телефонах (v11.16.5-in-progress):**
-- D1 (статусы QUEUED_OFFLINE/READ) + D2 (ACK round-trip) — **✓✓ DELIVERED работает**
-  (фикс Rust `0c992b9`: ACK `ack|...` больше не выбрасывается ядром).
-- Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — **работает**
-  (тест Анна→Стас: доставка + ✓✓).
-- Архитектурный принцип (телефоны = серверы; mesh) + дизайн `docs/MESH_DELIVERY.md`.
-- **M1 `RelayQueue`** (`rust-core/src/network/relay_queue.rs`) — **компилируется**.
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; mesh M0–M2 в ветке):**
+- D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
+- Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
+- Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
+- Архитектурный принцип (телефоны = серверы; mesh) + `docs/MESH_DELIVERY.md`.
+- **M1 `RelayQueue`** + **M2 `network/wire.rs`** (mesh-конверты relay/receipt/gsumm) — компилируются.
 
-**Следующий шаг = M2** — wire-форматы `relay`/`receipt`/`gossip_summary` (модуль Rust,
-компилируем через `build-rust.ps1`). Дальше: M3 gossip → M4 доставка → M5 receipt-cleanup →
-M6 интеграция в отправку → M7 E2E → M8 персистентность → M9 группы. Полный план:
-`docs/MESH_DELIVERY.md`.
+**Следующий шаг = M3 — интеграция mesh в транспорт (САМОЕ ДЕЛИКАТНОЕ; урок шторма!).**
+Трогает `p2pm2/msg/` хендлер в `core.rs` + передаёт `RelayQueue` в `run_mqtt_transport`.
+**Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
+(как со старым relay). Подшаги M3 (каждый — телефонный тест):
+- (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
+- (b) handle `receipt` → cleanup `RelayQueue` + DELIVERED у origin;
+- (c) gossip: на peer-discovered — обмен сводками `gsumm` + пересылка недоставленных;
+- (d) send-path: recipient офлайн → flood `relay`-конверта онлайн-узлам.
+Дальше: M4 доставка → M5 receipt-cleanup → M6 интеграция → M7 E2E → M8 персистентность →
+M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
+⚠️ M3 — большой и рискованный (как старый relay, что устроил шторм). Лучше делать свежей,
+сфокусированной сессией.
 
 **Pending (НЕ в ветке / в очереди):**
 - Фикс `.github/workflows/build-release.yml` (guard от порчи Release) — **НЕ закоммичен**:
