@@ -741,42 +741,12 @@ self.runtime = Some(runtime);
                         let text = parts[4];
                         
                         // Р¤РР›Р¬РўР РђР¦РРЇ: РїСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ Р°РґСЂРµСЃРѕРІР°РЅРѕ РЅР°Рј
-                        if recipient_id != node_id {
-                            tracing::debug!("MQTT: message for {} (not me {}) вЂ” relay mode", recipient_id, node_id);
-                            
-                            // RELAY: СЃРѕС…СЂР°РЅРёС‚СЊ РІ РѕС‡РµСЂРµРґСЊ РґР»СЏ РѕС„С„Р»Р°Р№РЅ РґРѕСЃС‚Р°РІРєРё
-                            if let Some(ref queue) = queue {
-                                use sha2::{Sha256, Digest};
-                                
-                                let mut rh = Sha256::new();
-                                rh.update(recipient_id.as_bytes());
-                                let rh_result = rh.finalize();
-                                let mut rid = [0u8; 32];
-                                rid.copy_from_slice(&rh_result);
-                                
-                                let mut mh = Sha256::new();
-                                mh.update(message_id.as_bytes());
-                                let mh_result = mh.finalize();
-                                let mut mid = [0u8; 16];
-                                mid.copy_from_slice(&mh_result[..16]);
-                                
-                                let payload = evt.payload.clone();
-                                let qmsg = crate::network::message_queue::QueuedMessage::new(
-                                    mid, rid, payload.as_bytes().to_vec()
-                                );
-                                
-                                if let Err(e) = queue.enqueue(qmsg).await {
-                                    tracing::warn!("Failed to enqueue: {}", e);
-                                } else {
-                                    tracing::info!("вњ“ Queued msg {} for relay to {}", message_id, recipient_id);
-                                }
-                            }
-                            
-                            // no continue — allow tick += 1 to execute
-                        } else {
+                        if recipient_id == node_id {
                             // Сообщение адресовано НАМ → MessageReceived (Kotlin сохранит + ACK-нет).
-                            // Чужие (recipient != я) сюда НЕ попадают — они только релеятся в очереди выше,
-                            // без показа и без ложного ✓✓ (фикс утечки/преждевременного ACK для 3+ телефонов).
+                            // Чужие (recipient != я) ИГНОРИРУЕМ: старый relay (enqueue-for-others)
+                            // создавал бесконечный шторм (self-receive → re-enqueue → повтор). Relay
+                            // отключён до настоящего mesh (M2-M6, RelayQueue с защитой от петель).
+                            // Базовая доставка (прямой MQTT/QUIC + sender-side retry) работает без relay.
                             tracing::info!("MQTT: message from {} to me", sender_id);
                             let ts = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
