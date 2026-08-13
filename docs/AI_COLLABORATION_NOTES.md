@@ -112,7 +112,7 @@ receipt-cleanup → интеграция в отправку → переисп�
   ```powershell
   Set-Location C:\APUMIR-arena-test
   git fetch origin
-  git checkout arena/019ff7c3-apumir
+  git checkout arena/019ffc32-apumir
   ```
 - Если путь к клону вдруг неизвестен — найди `gradlew.bat`:
   ```powershell
@@ -169,32 +169,42 @@ receipt-cleanup → интеграция в отправку → переисп�
 - **Исходник Cloudflare Worker'а НЕ в репо** (развёрнут на Cloudflare) — его поведение
   (endpoints `/send`, `/poll`, TTL/retention inbox) известно лишь по клиентскому коду
   (`service/CloudflareRelay.kt`). Это открытый вопрос для офлайн-доставки «через неделю».
-- **Sandbox может пере-клонироваться между ходами**: локальная ветка `arena/019ff7c3-apumir`
+- **Sandbox может пере-клонироваться между ходами**: локальная ветка `arena/019ffc32-apumir`
   сбрасывается к базе (`991da05`), рабочие файлы сохраняются, а **remote остаётся целым**
   (все коммиты на месте). Симптом: `git log` показывает мало коммитов, а `git status` — кучу
   «modified/untracked» для уже закоммиченных файлов; `origin/arena/...` ref может отсутствовать.
-  **Лечение**: `git fetch origin arena/019ff7c3-apumir`; узнать tip через `git ls-remote origin
-  arena/019ff7c3-apumir`; `git reset --mixed <tip-hash>` (сохраняет рабочее дерево); проверить
+  **Лечение**: `git fetch origin arena/019ffc32-apumir`; узнать tip через `git ls-remote origin
+  arena/019ffc32-apumir`; `git reset --mixed <tip-hash>` (сохраняет рабочее дерево); проверить
   `git status` (остаться должны только новые изменения); закоммитить + `git push origin
-  arena/019ff7c3-apumir` (fast-forward). **НИКОГДА не делать `--force` push** — затрёт remote.
+  arena/019ffc32-apumir` (fast-forward). **НИКОГДА не делать `--force` push** — затрёт remote.
+- **Перенос в новую сессионную ветку выполнен 2026-08-13:** `arena/019ff7c3-apumir`
+  fast-forward-слита в `arena/019ffc32-apumir` (`991da05` → `e5b171c`) и новая ветка запушена.
+  Команды переноса были: `git fetch origin`; `git merge origin/arena/019ff7c3-apumir`;
+  проверка `git log --oneline -15` и наличия `network/relay_queue.rs` + `network/wire.rs`;
+  `git push origin arena/019ffc32-apumir`. **Для продолжения источник истины — только новая
+  ветка `arena/019ffc32-apumir`; старую не checkout и не пушить.** Новый ИИ сразу проверяет
+  текущую ветку и подтягивает её только fast-forward, без `force-push`.
 
 ---
 
 ## 6. Текущий фокус работы (resume here — следующая сессия)
 
-Ветка: `arena/019ff7c3-apumir` (все коммиты на remote). Канонический клон для сборки/теста:
+Ветка: `arena/019ffc32-apumir` (все коммиты на remote). Канонический клон для сборки/теста:
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; mesh M0–M2 в ветке):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; mesh M0–M2 + M3.1 в ветке):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
 - Архитектурный принцип (телефоны = серверы; mesh) + `docs/MESH_DELIVERY.md`.
 - **M1 `RelayQueue`** + **M2 `network/wire.rs`** (mesh-конверты relay/receipt/gsumm) — компилируются.
+- **M3.1:** `RelayQueue` добавлена в `P2PCore`, создаётся в `start()` и передаётся параметром
+  в `run_mqtt_transport`; обработка relay/receipt/gossip ещё НЕ добавлена. Ожидает проверки
+  `build-rust.ps1` на Windows перед следующим подшагом.
 
-**Следующий шаг = M3 — интеграция mesh в транспорт (САМОЕ ДЕЛИКАТНОЕ; урок шторма!).**
-Трогает `p2pm2/msg/` хендлер в `core.rs` + передаёт `RelayQueue` в `run_mqtt_transport`.
+**Следующий шаг = проверить M3.1 сборкой, затем M3(a) только после подтверждения пользователя.**
+M3(a) трогает `p2pm2/msg/` хендлер в `core.rs` и впервые начинает использовать `RelayQueue`.
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -228,6 +238,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   не существует. Договорились: arena-ветки тестировать в одном каноническом клоне
   `C:\APUMIR-arena-test`, снапшоты не мутировать. Код ИИ доходит до машины только через
   commit + push в arena-ветку + `git fetch`/`checkout` пользователем.
+- **2026-08-13 (доп.9)** — состояние fast-forward перенесено из `arena/019ff7c3-apumir` в
+  `arena/019ffc32-apumir`. Выполнен M3.1: `RelayQueue` проброшена в `run_mqtt_transport` без
+  обработки mesh-конвертов; следующий шаг только после Windows-сборки `build-rust.ps1`.
 
 ---
 
@@ -371,6 +384,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 ### 9.7. Старт новой сессии
 1. Прочитать **весь** `docs/AI_COLLABORATION_NOTES.md` (⚙️ принцип, 🌐 mesh, раздел 9).
 2. Прочитать `docs/MESH_DELIVERY.md`.
-3. Подшаг 1 (проброс RelayQueue) → компиляция → (a) → тест 2 тел → (b) → (c) → (d) → тест 3 тел.
-   Маленькими шагами, с подтверждением.
+3. Проверить, что текущая ветка — `arena/019ffc32-apumir`, и что M3.1 уже на месте:
+   поле `relay_queue` в `P2PCore`, init в `start()`, параметр `run_mqtt_transport`.
+4. Сначала дождаться результата `build-rust.ps1` от пользователя. Только после успешной
+   сборки и отдельного «да»: (a) → тест → (b) → тест → (c) → тест → (d) → тест 3 тел.
+   Маленькими шагами, с подтверждением; перед каждым `enqueue` обязателен `contains(msg_id)`.
 

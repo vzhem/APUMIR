@@ -15,6 +15,7 @@ use crate::network::relay::RelayManager;
 use crate::network::mqtt_transport::MqttTransport;
 use crate::network::presence::PresenceManager;
 use crate::network::message_queue::MessageQueue;
+use crate::network::relay_queue::RelayQueue;
 use crate::network::adaptive_polling::AdaptivePolling;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +108,7 @@ pub struct P2PCore {
     relay: Option<Arc<RelayManager>>,
     presence: Option<Arc<PresenceManager>>,
     message_queue: Option<Arc<MessageQueue>>,
+    relay_queue: Option<Arc<RelayQueue>>,
     adaptive_polling: Arc<Mutex<AdaptivePolling>>,
     node_id_str: Option<String>,
 }
@@ -129,6 +131,7 @@ impl P2PCore {
             relay: None,
             presence: None,
             message_queue: None,
+            relay_queue: None,
             adaptive_polling: Arc::new(Mutex::new(AdaptivePolling::with_defaults())),
             node_id_str: None,
         }
@@ -200,9 +203,10 @@ impl P2PCore {
             self.relay = Some(Arc::new(RelayManager::new(nid)));
             self.presence = Some(Arc::new(PresenceManager::new(nid)));
             self.message_queue = Some(Arc::new(MessageQueue::new()));
+            self.relay_queue = Some(Arc::new(RelayQueue::new()));
             let _ = 0; // modules initialized
         }
-        tracing::info!("Network stack initialized: Router+DHT+Relay+Presence+Queue");
+        tracing::info!("Network stack initialized: Router+DHT+Relay+Presence+Queue+RelayQueue");
 
         let _ = self
             .storage
@@ -234,6 +238,7 @@ impl P2PCore {
         let public_addr_arc = Arc::clone(&self.public_addr);
         let dht2 = self.dht.clone();
         let queue2 = self.message_queue.clone();
+        let relay_queue2 = self.relay_queue.clone();
         let display_name = self.config.display_name.clone();
         let quic_port = self.config.quic_port;
 
@@ -274,13 +279,21 @@ impl P2PCore {
                 let display_mqtt = display_name.clone();
                 let public_addr_mqtt = Arc::clone(&public_addr_arc);
                 let queue_mqtt = queue2.clone();
+                let relay_queue_mqtt = relay_queue2.clone();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .unwrap();
                     rt.block_on(async move {
-                        Self::run_mqtt_transport(events_mqtt, node_id_mqtt, display_mqtt, public_addr_mqtt, queue_mqtt).await;
+                        Self::run_mqtt_transport(
+                            events_mqtt,
+                            node_id_mqtt,
+                            display_mqtt,
+                            public_addr_mqtt,
+                            queue_mqtt,
+                            relay_queue_mqtt,
+                        ).await;
                     });
                 });
 
@@ -591,6 +604,7 @@ self.runtime = Some(runtime);
         display_name: String,
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         queue: Option<Arc<MessageQueue>>,
+        _relay_queue: Option<Arc<RelayQueue>>,
     ) {
         use crate::network::mqtt_transport::MqttTransport;
 
