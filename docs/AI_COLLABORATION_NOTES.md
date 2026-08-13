@@ -136,3 +136,48 @@
   не существует. Договорились: arena-ветки тестировать в одном каноническом клоне
   `C:\APUMIR-arena-test`, снапшоты не мутировать. Код ИИ доходит до машины только через
   commit + push в arena-ветку + `git fetch`/`checkout` пользователем.
+
+---
+
+## 8. Сборка и тест APK на Windows (гэтчи)
+
+- **PowerShell ломает аргументы вида `-Pname=value` для `gradlew.bat`** → ошибка
+  `Task '.16.5' not found`. **Лечится**: задавать версию через env-переменную
+  `$env:GITHUB_REF_NAME = "v11.16.X"` (build.gradle.kts её читает), БЕЗ `-P`.
+- **Windows Defender (антивирус) вызывает ВРЕМЕННЫЕ падения сборки**: краш JVM
+  (`zip.dll`, `EXCEPTION_IN_PAGE_ERROR`), падение `kapt`, падение `lint`
+  (`unsafe memory access` / `Could not initialize class org.jetbrains.uast.UastFacade`),
+  «corrupt cache». **Обычно проходит повторным запуском**; для надёжности — добавить папку
+  проекта и `C:\Users\<user>\.gradle` в исключения Windows Defender.
+- **`lintVitalAnalyzeRelease` падает на release-сборке** → для ТЕСТА собираем без lint
+  (`-x lintVitalAnalyzeRelease -x lintVitalReportRelease`), предварительно `.\gradlew --stop`
+  (сбросить зависший lint-сервис). Lint не нужен для тестового APK.
+- **Ставить тестовый APK поверх релиза v11.16.4 БЕЗ потери данных**: только **release-APK
+  тем же ключом** (`p2p-release.jks` есть в репо) и с версией **выше** (v11.16.5 →
+  versionCode 11_016_005 > 11_016_004). Debug-APK потребовал бы удаления → потеря данных.
+- **Команды adb для теста** (телефоны по USB, отладка включена):
+  - список подключённых: `adb devices`
+  - установка на конкретный: `adb -s <serial> install -r <apk>`
+  - установка (если один телефон): `adb install -r <apk>`
+- **Тест-сценарии пишем по именам телефонов** (см. раздел 4): «Анна пишет Стасу, Стас
+  выключает телефон» и т.п. Если появился новый телефон — спросить имя и привязать к serial.
+- ⚠️ Это НЕ баг PowerShell как таковой: после `-P` (починено env-var) остальные падения —
+  это Gradle/JVM + антивирус. Менять оболочку на cmd не лечит lint/краши кэша.
+
+### 8.1. Эталонная команда сборки тестового release-APK
+
+```powershell
+Set-Location C:\APUMIR-arena-test\android-app
+.\gradlew --stop
+$env:GITHUB_REF_NAME = "v11.16.5"
+.\gradlew :app:assembleRelease -x lintVitalAnalyzeRelease -x lintVitalReportRelease
+```
+
+APK появится: `app\build\outputs\apk\release\app-release.apk`
+
+### 8.2. Журнал (продолжение)
+
+- **2026-08-13 (доп.3)** — сборка release-APK на Windows: PowerShell ломает `-P` → версия
+  через env-var; Defender вызывает временные падения (zip.dll / kapt / lint / corrupt cache)
+  → повторный запуск или исключения Defender; `lintVitalAnalyzeRelease` падает → тестовый
+  APK собираем без lint; поверх v11.16.4 ставим только release-APK с версией выше.
