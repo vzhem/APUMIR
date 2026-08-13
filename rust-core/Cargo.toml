@@ -60,6 +60,7 @@ rand = "0.8"
 bincode = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 
 # ── База данных ─────────────────────────────────────────────────────
 rusqlite = { version = "0.31", features = ["bundled"] }
