@@ -1,4 +1,4 @@
-name: Build Release APK
+﻿name: Build Release APK
 
 on:
   push:
@@ -9,7 +9,29 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    name: Skip auto-build if Release already exists
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check_release.outputs.exists }}
+    steps:
+      - name: Check if Release already exists for the tag
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" --json name >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release '$TAG' already exists — skipping auto-build to preserve the manually published release."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No existing release for '$TAG' — will auto-build."
+          fi
+
   build:
+    needs: check
+    if: needs.check.outputs.exists != 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -55,12 +77,12 @@ jobs:
           body: |
             ## P2P Messenger ${{ steps.get_version.outputs.VERSION }}
 
-            Автоматическая сборка из тега.
+            втоматическая сборка из тега.
 
-            ### Установка
+            ### становка
             1. Скачайте app-release.apk
-            2. Разрешите установку из неизвестных источников
-            3. Установите
+            2. азрешите установку из неизвестных источников
+            3. становите
           draft: false
           prerelease: false
         env:
