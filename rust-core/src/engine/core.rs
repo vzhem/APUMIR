@@ -773,21 +773,24 @@ self.runtime = Some(runtime);
                             }
                             
                             // no continue — allow tick += 1 to execute
+                        } else {
+                            // Сообщение адресовано НАМ → MessageReceived (Kotlin сохранит + ACK-нет).
+                            // Чужие (recipient != я) сюда НЕ попадают — они только релеятся в очереди выше,
+                            // без показа и без ложного ✓✓ (фикс утечки/преждевременного ACK для 3+ телефонов).
+                            tracing::info!("MQTT: message from {} to me", sender_id);
+                            let ts = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as i64;
+                            events.emit(CoreEvent::MessageReceived {
+                                message_id: message_id.to_string(),
+                                chat_id: chat_id.to_string(),
+                                sender_id: sender_id.to_string(),
+                                text: text.to_string(),
+                                timestamp: ts,
+                            });
+                            tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
                         }
-                        
-                        tracing::info!("MQTT: message from {} to {}", sender_id, recipient_id);
-                        let ts = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64;
-                        events.emit(CoreEvent::MessageReceived {
-                            message_id: message_id.to_string(),
-                            chat_id: chat_id.to_string(),
-                            sender_id: sender_id.to_string(),
-                            text: text.to_string(),
-                            timestamp: ts,
-                        });
-                        tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
                     }
                 }
             }
