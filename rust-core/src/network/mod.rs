@@ -26,6 +26,7 @@ pub mod nat_types;
 pub mod presence;
 pub mod quic_client;
 pub mod relay;
+pub mod relay_queue;
 pub mod router;
 
 // Реэкспорты для удобства
