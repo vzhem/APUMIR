@@ -210,8 +210,8 @@ RelayMessage {
   будущий шаг: WorkManager → receive-only mode → own-topic/signed bounded pull → короткое окно
   → stop; никакого enqueue/forward чужого. Exact wake Android не гарантирует; real-time только
   через отдельный opt-in foreground service. Нужны sender/recipient quotas против offline-load.
-- **Надёжность receipt:** тест 2026-08-14 выявил два blocker: MQTT обязан reconnect +
-  re-subscribe после смены сети (r1), а retained receipt нужен отдельный topic по `msg_id`
-  с cleanup, иначе общий `p2pm2/msg/<origin>` перезаписывается ACK/summary (r2). До r2
-  потерянный receipt оставляет сообщение до TTL.
+- **Надёжность receipt:** r1 reconnect + re-subscribe после смены сети проверен на Android
+  2026-08-14. Остался r2: retained receipt нужен отдельный topic по `msg_id` с cleanup, иначе
+  общий `p2pm2/msg/<origin>` перезаписывается ACK/summary. До r2 потерянный receipt оставляет
+  сообщение до TTL.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).

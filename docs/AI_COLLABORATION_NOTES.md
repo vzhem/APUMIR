@@ -256,12 +256,13 @@ receipt-cleanup → интеграция в отправку → переисп�
   Финальный origin-delivery не прошёл: после возврата сети MQTT Анны не reconnect-нулся,
   хотя Android Wi-Fi был VALIDATED и TCP broker:1883 доступен. Также retained receipt может
   быть перезаписан ACK/summary на общем topic — это отдельный M3(c.2-r2).
-- **M3(c.2-r1), код готов:** `EventLoop::poll()` вынесен в непрерывную background task;
+- **M3(c.2-r1) ВЕРИФИЦИРОВАН:** `EventLoop::poll()` работает в непрерывной background task;
   основной цикл читает bounded channel (256), reconnect имеет backoff 1→30 с, а после
-  повторного `ConnAck` заново подписывается на `p2pm2/#`. Старый timeout(1s) больше не отменяет
-  reconnect. Windows Android Rust build успешен за 1m01s.
+  повторного `ConnAck` заново подписывается на `p2pm2/#`. Windows Rust 1m01s, APK `v11.16.8`
+  установлен на 3 телефона. На Анне Wi-Fi+data off/on: PID остался `23407`, offline errors=4
+  с backoff 8/16/30/30 с, reconnect+re-subscribe=1, live probe=1.
 
-**Следующий шаг = собрать APK `v11.16.8` для M3(c.2-r1); M3(c.2-r2)/M3(d) не начинать.**
+**Следующий шаг = отдельно согласовать M3(c.2-r2) unique retained receipt topic; M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -322,9 +323,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   summary переслал 1 relay/166 B, Стас доставил один раз + auto-receipt, Женя cleanup один раз.
   Обнаружены два blocker финального origin: MQTT не reconnect после Wi-Fi off/on при доступном
   TCP 1883; retained receipt перезаписывается более поздним ACK/summary на общем topic.
-- **2026-08-14 (доп.6)** — код M3(c.2-r1) заменяет отменяемый `timeout(1s, eventloop.poll())`
-  на непрерывную background task + bounded event channel 256, reconnect backoff 1→30 с и
-  re-subscribe. Windows Android Rust build успешен за 1m01s; дальше APK + Wi-Fi probe.
+- **2026-08-14 (доп.6)** — M3(c.2-r1) проверен на APK `v11.16.8`: при Wi-Fi+data off
+  процесс Анны не перезапустился, MQTT дал 4 bounded errors (8/16/30/30 с); после сети —
+  ровно 1 reconnect+re-subscribe и 1/1 live probe при том же PID `23407`.
 - **2026-08-14 (доп.7)** — пользователь требует отдельный background receive-only режим:
   периодически просыпаться и получать только свои сообщения, не хранить/не пересылать чужие.
   План: WorkManager + network constraint + own topics/signed pull + короткое bounded окно;
@@ -480,7 +481,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
 4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
    one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
-5. Код r1 (непрерывный MQTT poll + re-subscribe) собран через `build-rust.ps1` за 1m01s.
-   Дальше APK `v11.16.8`, затем Wi-Fi off/on + live probe. r2 receipt topic, M3(d), UI relay
-   и background receive-only пока не трогать.
+5. r1 проверен на `v11.16.8`: Wi-Fi off/on без restart процесса, bounded backoff,
+   reconnect+re-subscribe=1 и live probe=1. Следующим может быть только отдельно согласованный
+   r2 receipt topic; M3(d), UI relay и background receive-only пока не трогать.
 
