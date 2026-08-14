@@ -446,8 +446,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.21)** — independent verify: 21 hashes, known APK/native hashes, bundle,
   offline clone/reset на docs commit и Git connectivity прошли. Raw source-ZIP blob check дал
   ложный fail из-за CRLF; fresh archive SHA-256 совпал с USB и filter-aware `hash-object --path`
-  совпал с commit для 4/4 файлов. `dangling commit` при fsck — stash refs и exit=0. Осталось
-  записать final report/status, пересчитать manifest и выполнить его последний recheck.
+  совпал с commit для 4/4 файлов. `dangling commit` при fsck — stash refs и exit=0.
+- **2026-08-14 (доп.22)** — milestone-backup `v11.16.10` на незашифрованном FAT32 `F:`
+  ПОЛНОСТЬЮ ПРОВЕРЕН: `F:\APU-backups\APU-v11.16.10-2026-08-14-e055471`, 24 files,
+  50,958,011 bytes, 23 manifest entries; final manifest SHA-256
+  `8FD9428BDF6B938FFA4DF25752F64ED67FD21FB092299F9B6C31983F38C6AF49`. Bundle/offline
+  restore/source ZIP/artifacts/hashes passed. Носитель содержит signing material без шифрования:
+  хранить физически безопасно, не публиковать; после записи — безопасно извлечь.
 
 ---
 
@@ -622,8 +627,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 5. R3 `v11.16.10` полностью проверен: local delivery=1, duplicate suppressed=1, receipts=2,
    обе очереди cleanup=1, origin-delivery=1, seen tombstones, retained relay=0; после reconnect
    Анны re-subscribe/probe=1, все повторные mesh/UI counts=0 при тех же PID.
-6. Milestone-backup на незашифрованном `F:`: 21 hashes, bundle, offline clone/reset и source
-   ZIP CRLF-aware проверки прошли. Осталось записать final verification report/status, пересчитать
-   manifest и выполнить последний recheck; только затем копия готова.
+6. Milestone-backup на незашифрованном `F:` полностью проверен: 24 files, 23 manifest entries,
+   bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 записан в доп.22. Носитель
+   можно безопасно извлечь и хранить физически защищённо.
 7. Затем отдельно согласовать продолжение; M3(d)/UI/background пока не трогать.
 

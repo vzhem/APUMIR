@@ -396,6 +396,33 @@ adb -s $Serial shell dumpsys package com.vladimir.messenger |
 копию не считать полной. После каждого изменения этой инструкции следующая milestone-копия
 должна включать обновлённую версию файла.
 
+### 5.1. Безопасное извлечение внешнего носителя
+
+После final hash verify закрыть окна/файлы носителя и перейти на внутренний диск. Arena-agent не
+может сам нажать кнопку на Windows пользователя; он обязан честно дать готовую команду. Для `F:`:
+
+```powershell
+Set-Location C:\APUMIR-arena-test
+
+$DriveLetter = "F:"
+$Shell = New-Object -ComObject Shell.Application
+$DriveItem = $Shell.Namespace(17).ParseName($DriveLetter)
+if ($null -eq $DriveItem) { throw "Drive item not found: $DriveLetter" }
+
+$DriveItem.InvokeVerb("Eject")
+Start-Sleep -Seconds 10
+
+if (Test-Path "$DriveLetter\") {
+    throw "Drive is still mounted; use the Windows Safely Remove Hardware icon"
+}
+
+Write-Host "EXTERNAL DRIVE SAFELY EJECTED"
+```
+
+Физически вынимать флешку только если путь исчез и Windows не сообщает о занятом устройстве.
+Если команда не извлекла диск, не использовать `mountvol /p` как слепой обход: закрыть Explorer,
+редактор, антивирусное сканирование и применить значок «Безопасное извлечение устройства».
+
 ## 6. Известные ошибки PowerShell и безопасное продолжение
 
 ### `else` не распознан как команда
