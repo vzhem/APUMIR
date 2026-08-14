@@ -833,6 +833,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   сейчас нужен для data-preserving signer continuity; не удалять без отдельного migration plan.
   Во время аудита Arena снова локально вернула HEAD на `991da05`; безопасно исправлено exact fetch
   `arena/01a000bc-apumir` + mixed reset до `44f1aa3`, без branch switch/hard reset/потери файлов.
+- **2026-08-14 (доп.82)** — current ADB transport serials отличаются от stale harness serials,
+  но read-only package identity mapping PASS 3/3 по независимым app UID, version и сохранённым
+  firstInstallTime: Anna `AUYF6R5923006121` / MTN-NX1 / UID 10425 / PID 24022 /
+  firstInstallTime `2026-08-08 11:40:39`; Zhenya `3B665800EES00000` / PLR110 / UID 10395 /
+  PID 7439 / `2026-08-08 17:31:18`; Stas `11567254BK001192` / TECNO LI6 / UID 10387 /
+  PID 20786 / `2026-08-10 12:41:10`. Все versionCode 11016012, processRunning=true.
+  Это те же три data-preserved APU installations. Native-recovery capture должен использовать
+  только эти current serials и повторно guard'ить exact UID/version/firstInstallTime перед dump.
 
 ---
 
