@@ -764,21 +764,40 @@ self.runtime = Some(runtime);
                                     // содержит байты текста, и читать их имеет право только получатель.
                                     match String::from_utf8(e2e_payload) {
                                         Ok(text) => {
-                                            let ts = std::time::SystemTime::now()
+                                            let now = std::time::SystemTime::now()
                                                 .duration_since(std::time::UNIX_EPOCH)
-                                                .unwrap_or_default()
-                                                .as_millis() as i64;
+                                                .unwrap_or_default();
                                             events.emit(CoreEvent::MessageReceived {
                                                 message_id: msg_id.clone(),
                                                 chat_id: chat_scope,
-                                                sender_id: origin,
+                                                sender_id: origin.clone(),
                                                 text,
-                                                timestamp: ts,
+                                                timestamp: now.as_millis() as i64,
                                             });
                                             tracing::info!(
                                                 "MESH relay: {} delivered to local recipient",
                                                 msg_id
                                             );
+
+                                            // M3(b.1): получатель автоматически рассылает
+                                            // mesh receipt. Все узлы на p2pm2/# увидят его,
+                                            // relay-узлы очистят очередь, origin получит ✓✓.
+                                            let receipt = crate::network::wire::build_receipt(
+                                                &msg_id,
+                                                &node_id,
+                                                now.as_secs(),
+                                            );
+                                            match transport.send_message(&origin, &receipt).await {
+                                                Ok(_) => tracing::info!(
+                                                    "MESH receipt: {} sent automatically to origin",
+                                                    msg_id
+                                                ),
+                                                Err(e) => tracing::warn!(
+                                                    "MESH receipt: failed to send {}: {}",
+                                                    msg_id,
+                                                    e
+                                                ),
+                                            }
                                         }
                                         Err(_) => tracing::warn!(
                                             "MESH relay: payload for {} is not valid UTF-8, dropped",
