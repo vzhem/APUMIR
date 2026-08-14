@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **v11.16.11 cold-start PASS 3/3; controlled reconnect pending**
+Статус: **v11.16.11 cold-start PASS 3/3; controlled reconnect Анны PASS; delivery check pending**
 
 Дата: 2026-08-14
 
@@ -12,7 +12,10 @@ r4.1 добавил изолированный bounded duplicate helper; Android
 r4.2 Android Rust release build прошёл за 1m01s; APK build — за 32s. APK artifact проверен:
 22,550,028 B, SHA-256 `DDC836A…3A12`, embedded native совпал с source, apksigner exit=0. Harness
 не распарсил certificate label; corrected compare доказал один V2 signer SHA-256 у нового APK и
-у установленной v11.16.10. Второй broker и duplicate filter ещё не подключены.
+у установленной v11.16.10. Controlled reconnect Анны сохранил PID `30085`, восстановил исходные
+Wi-Fi/data=`1/1`, дал ровно один reconnect subscription request и последующий live peer traffic;
+ошибок MQTT, ложных/старых markers и crash/ANR не было. Test message не публиковался, поэтому
+отдельный low-volume delivery check ещё pending. Второй broker и duplicate filter ещё не подключены.
 
 ## 1. Зачем это нужно
 

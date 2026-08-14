@@ -630,6 +630,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   (Стас), effective readiness 3/3 через code-valid live-peer-after-error equivalent у Анны/Жени;
   expected PID membership=true, false-success gate=true, crash=0. Phones не restart, logs не
   очищены, test message не публиковался. Дальше controlled reconnect Анны на PID `30085`.
+- **2026-08-14 (доп.60)** — controlled reconnect Анны PASS на сохранённом PID `30085`: Wi-Fi и
+  mobile data восстановлены `1/1`, MQTT errors=0, новый truthful reconnect subscription marker
+  ровно 1, live peer lines=4 и peer-after-reconnect=true. Initial/false/old markers=`0/0/0/0`,
+  crash/ANR=0. Evidence сохранён в `%TEMP%\apu-r4.2-v11.16.11-reconnect-Anna.json` и
+  `%TEMP%\apu-r4.2-reconnect-Anna.log`; network interruption, restart и log clear не повторять.
+  Test message не публиковался. Следующий отдельный шаг — спроектировать один безопасный
+  low-volume delivery check этой APK без перехода к r4.3, UI/background или M3(d).
 
 ---
 
