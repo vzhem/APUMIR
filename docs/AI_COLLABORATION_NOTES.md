@@ -344,11 +344,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   не появился, но exact второй ConnAck/re-subscribe и live probe напрямую доказывают reconnect;
   старый guard `errors>=1` был излишне строгим, это не ошибка продукта.
 
-**M3(c.2-r3), milestone-backup и первый security smoke завершены. До M3(d) нужен отдельный выбор
-следующего этапа. Простой ConnAck→next-broker fallback отклонён review до сборки: независимые
-публичные brokers не bridge topics, поэтому телефоны на HiveMQ и EMQX образуют две изолированные
-сети. Надёжный вариант требует bounded multi-broker overlay/координации с дедупом. M3(d) пока
-не начинать без отдельного решения пользователя.**
+**M3(c.2-r3), milestone-backup и первый security smoke завершены. Пользователь выбрал следующим
+этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
+`docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
+cross-broker dedup, global traffic budgets и сначала два локальных brokers. Следующий малый шаг —
+r4.1 pure duplicate policy; M3(d), UI/background пока не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -572,6 +572,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Код возвращён к проверенному r3; commit `8544b6e` superseded следующим revert-коммитом. Нужен
   design: parallel/overlapping broker subscriptions + bounded publish/dedup либо coordinated
   primary migration; затем local tests. Sandbox не имеет `cargo`/`rustfmt`.
+- **2026-08-14 (доп.48)** — пользователь выбрал multi-broker reliability перед M3(d). Принят
+  staged design `docs/MQTT_MULTI_BROKER_DESIGN.md`: две concurrent sessions, ConnAck-ready gate,
+  subscriptions/reconnect state per broker, publish fanout max 2, exact SHA-256 topic+payload
+  duplicate window 30 s/cap 4096, global (не per-broker) mesh budgets, retained cleanup на всех
+  published sessions и deterministic failure tests сначала на двух local Mosquitto brokers.
+  Первый code step r4.1 должен быть pure bounded duplicate helper, без изменения network path.
 
 ---
 

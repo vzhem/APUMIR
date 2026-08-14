@@ -1009,6 +1009,7 @@ InviteFriendScreen
   ConnAck gate обязателен, но нельзя просто увести один телефон на другой независимый public
   broker — без bridge это разделит mesh. Нужны overlapping multi-broker subscriptions/publish с
   дедупом либо coordinated primary migration, затем circuit breaker/re-subscribe без flood.
+  Принятый staged design и local failure matrix: `docs/MQTT_MULTI_BROKER_DESIGN.md`.
 - [ ] Identity/Sybil: forged invite/PK/username binding, enumeration, registry poisoning и ложная
   friend-of-friend цепочка; неизвестные peers не вытесняют friend traffic.
 - [ ] Android surface: malformed deep links/QR/clipboard, exported components/FileProvider,
