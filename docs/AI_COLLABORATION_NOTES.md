@@ -483,6 +483,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Remote `84e5104` не пострадал. После fetch filter-aware hash всех remote-tracked файлов доказал:
   отличаются только 2 новых docs-правки, missing=0. Они сохранены, branch возвращён на remote,
   правки повторно закоммичены как fast-forward `1b15270`; remote sync и clean tree проверены.
+- **2026-08-14 (доп.29)** — corrected normal relay действительно опубликован ровно один раз:
+  ID `sec-origin-1786707178388`, QoS1, retain=false, 160 bytes; все PID до publish стабильны.
+  Через 15 с Анна/Женя сохранили snapshots и имели по 3 references. Snapshot Стаса не создался,
+  потому что filtered `adb logcat` дал пустой stdout и pipeline `Set-Content` не был вызван;
+  publish уже confirmed, повтор запрещён. Нужен full-log local diagnostic без новой сети/clear.
 
 ---
 
@@ -502,6 +507,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   вслепую после pre-publish marker: сначала доказать `publishConfirmed=false` и ноль test ID в
   phone logs, записать failed-before-network recovery, затем исправить вызов на
   `py -3 $PythonPath $SecurityStatePath`.
+- **Пустой native stdout через pipeline может не создать snapshot-файл:** конструкция
+  `adb ... | Set-Content $Path` на Стасе вернула no output, поэтому `Set-Content` не вызвался и
+  последующий `Get-Content` упал, хотя `$LASTEXITCODE=0`. Сначала получать `Out-String`, затем
+  явно писать через `[IO.File]::WriteAllText(...)`; отдельно проверять `Test-Path`. Failed
+  snapshot не означает failed publish: доверять persisted `setupPublishConfirmed` и не повторять.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -670,8 +680,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke baseline/identity прошли: ID `sec-origin-1786707178388`, PID
-   `12571/22100/2529`. Failed-before-MQTT setup recovery полностью доказан (`0/0/0` test ID),
-   controlled retry разрешён. Следующий шаг — исправленный один normal relay, затем отдельный
-   анализ. Conflict, M3(d), UI и background пока не трогать.
+7. Low-volume security smoke ID `sec-origin-1786707178388`: corrected normal relay опубликован
+   ровно один раз (QoS1/non-retained/160 B), повтор запрещён. Анна/Женя snapshots имеют по 3
+   references; Stas snapshot отсутствует из-за empty-stdout pipeline. Следующий шаг — только
+   full-log diagnostic/metrics без publish и clear. Conflict, M3(d), UI/background не трогать.
 

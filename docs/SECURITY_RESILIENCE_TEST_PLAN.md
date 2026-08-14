@@ -280,4 +280,9 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
 - Первая normal-setup попытка завершилась до сети: helper ожидал `sys.argv[1]`, но PowerShell не
   передал state-path; traceback возник до MQTT client/connect/publish. Atomic recovery затем
   подтвердил `publishConfirmed=false`, test-ID counts `0/0/0`, прежние три PID и записал
-  failed-before-network marker; logs очищены. Разрешён один controlled retry с исправленным argv.
+  failed-before-network marker; logs очищены.
+- Controlled retry опубликовал ровно один normal relay `sec-origin-1786707178388`: QoS1,
+  retain=false, 160 bytes. До/через 15 с PID стабильны; snapshots Анны/Жени имеют по 3 ID
+  references. Snapshot Стаса не создался из-за empty stdout в `adb | Set-Content`; это harness
+  failure после confirmed publish, не основание для повтора. Перед attack нужен full-log local
+  diagnostic всех трёх без новой публикации и без очистки logs.
