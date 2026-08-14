@@ -347,9 +347,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 **M3(c.2-r3), milestone-backup и первый security smoke завершены. Пользователь выбрал следующим
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
-cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1 Android Rust
-build PASS. r4.2 code оставляет один HiveMQ session, ждёт реальный ConnAck до subscription/
-presence и ждёт Windows build; второго broker/fanout пока нет. M3(d), UI/background не начинать.**
+cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1 и r4.2 Android
+Rust build PASS. r4.2 оставляет один HiveMQ session и ждёт реальный ConnAck до subscription/
+presence; следующий шаг — собрать, но не ставить APK `v11.16.11`. Второго broker/fanout пока нет.
+M3(d), UI/background не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -587,8 +588,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   только primary HiveMQ session, запускает непрерывный EventLoop и ждёт первый настоящий ConnAck
   через oneshot. Только после него queue-ятся wildcard subscription, retained-presence clear и
   current presence; reconnect по-прежнему делает subscription request при clean session. Логи
-  различают initialized/ConnAck/subscription-request, не называют enqueue SubAck. Ждёт Windows
-  build; EMQX, fanout и r4.1 filter production path пока не подключены.
+  различают initialized/ConnAck/subscription-request, не называют enqueue SubAck. Windows Android
+  Rust release build PASS за 1m01s, 9 warnings без errors; EMQX, fanout и r4.1 filter production
+  path пока не подключены. Следующий шаг — APK `v11.16.11` без установки.
 
 ---
 
