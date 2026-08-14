@@ -1069,6 +1069,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   overflow/backpressure/invariant/stall/restart/request/crash=0. State в finally, automatic retry
   false. Python py_compile, one-call, parser-trap, action/acceptance, ordering/state scans PASS.
   Следующий gate — sync both scripts, Windows ParseFile + `py -3 ... --check`, затем one shot.
+- **2026-08-14 (доп.101)** — v11.16.13 one-shot functional delivery smoke PASS; не повторять.
+  Scripts Windows parser PASS; PS SHA `F114F0B0D85F0FEAD1714A69673B4E1802E04649D07C82750B9E345C048DDAF7`,
+  Python SHA `53942722673005DCCB77593A352C89A51277DDC4AD641EF7568A1B7EBE211F3A`.
+  State `%TEMP%\apu-r4.2-r1b4-v11.16.13-delivery-smoke.json`, SHA-256
+  `BA04C060B1CCEE5272A4113332032225A3029BAD8CF10F27DAD215BD4790F08F`; test ID
+  `v111613-smoke-1786737622095-3deda0ae`. Exactly one public HiveMQ publish: QoS1,
+  retain=false, publishCalled/confirmed=true, automaticRetry=false. Exact matrix: Anna
+  relay/store/local/receipt/remove/origin/UI=`1/1/0/1/1/1/0`; Zhenya=`1/1/0/1/1/0/0`;
+  Stas=`1/0/1/1/0/0/1`. PASS также означает PID stable 3/3 и unexpected relay/MQTT error/
+  overflow/backpressure/invariant/stall/restart/request/crash=0. Functional smoke budget consumed.
+  Transport/relay/receipt foundation доказан; главная user-facing offline goal теперь блокируется
+  конкретно M3(d) automatic send-path + M8 persistence + final 3-phone offline acceptance. Старый
+  agreed order ставит bounded multi-broker r4 перед M3(d), но пользователь спросил, когда будет
+  главная цель; не менять порядок молча — запросить explicit reprioritization choice.
 
 ---
 
