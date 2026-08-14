@@ -1310,6 +1310,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   остаются отдельными долгами/r4.5, не скрывать. Static feature/fanout/dedup/ownership/cap/mixed-
   version scans PASS; host cargo/test не запускался. Следующий gate — Windows Android Rust compile
   feature `mqtt-dual-broker`, до PASS никакой APK/phone/public runtime.
+- **2026-08-15 (доп.122)** — добавлен versioned `scripts/r44_dual_integration_build.ps1` для exact
+  integration source `0181b34`; baseline — policy recovery SHA 5559…AF03 и generated `.so`
+  7,180,888 B / C866…E4FCC. Preflight требует C-drive, generated-only Git, feature gate, exact
+  two persistent constructors, secondary status/subscription, fanout/dedup/retained markers,
+  semaphore reservation/two-producer test и shared core state. Ровно один child
+  `build-rust.ps1 -Features mqtt-dual-broker`, exact bounded wait900s, separate streams; feature
+  uniqueness считается только по stdout (CLIXML stderr count лишь записывается). PASS требует
+  exit0/Finished1/errors0, changed nonempty `.so`, generated-only final status. State фиксирует
+  exact pair/max sessions/fanout=2, dedup30s/4096, critical cap256, retained cap4096, wireChanged=false,
+  runtimeIntegration=true; APK/ADB/phones/public traffic/retry=false. Parser-trap, one-build,
+  bounded-wait, auto-variable, C-drive, ordering/state и forbidden-action scans PASS. Следующий gate
+  — sync exact harness commit и один Windows build; incomplete не повторять автоматически.
 
 ---
 

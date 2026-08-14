@@ -371,9 +371,10 @@ event перемещает permit в core queue, остальные packet types
 консервативно queue'ится в exact configured pair (bounded safe superset, включая временно inactive
 client) и obligation удаляется только после обоих enqueue. Wire payload не изменён, exact broker
 pair оставляет HiveMQ common path для N-1. Startup при primary down и legacy transient sender
-остаются r4.5/debt. Static integration checks PASS;
-следующий gate только Windows `build-rust.ps1 -Features mqtt-dual-broker`, без APK/phones/public
-runtime.
+остаются r4.5/debt. Static integration checks PASS. Versioned
+`r44_dual_integration_build.ps1` готов для source `0181b34`: exact policy recovery/native guards,
+one bounded feature build, authoritative stdout marker, artifact/generated-only gates и no
+APK/ADB/phones/public traffic. Windows compile pending.
 
 ### Mixed-version acceptance для MQTT overlay
 
