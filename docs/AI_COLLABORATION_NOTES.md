@@ -348,9 +348,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
 cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1/r4.2 Rust и APK
-`v11.16.11` install PASS 3/3. Controlled cold start уже запущен на 3 телефонах, но analyzer
-остановился до snapshot/state на reserved PowerShell `$PID`; не restart/clear. Следующий шаг —
-read-only recovery с `$ProcessId`. Второго broker/fanout нет. M3(d), UI/background не начинать.**
+`v11.16.11` install PASS 3/3. Cold snapshot: PIDs stable, crash/false-success=0; Стас direct gate
+PASS, Анна/Женя имеют live peer-after-error evidence, но ранние markers вытеснены. Следующий шаг —
+read-only semantic-equivalent finalizer без restart. Второго broker/fanout нет; M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -621,8 +621,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.57)** — controlled force-stop/log-clear/launch выполнился на 3/3 и прошёл
   35 s wait, но analyzer упал ДО первого log read/snapshot/state: PowerShell variables
   case-insensitive, поэтому `$Pid` попытался перезаписать read-only automatic `$PID`. Продукт не
-  падал, message не публиковался. Не restart/clear: read-only recovery должен использовать
-  `$ProcessId`, снять current PID-filtered logs и сохранить cold-state.
+  падал, message не публиковался; read-only recovery затем сохранил snapshots/state.
+- **2026-08-14 (доп.58)** — delayed recovery: PIDs Анна/Женя/Стас=`30085/15597/26923`, single
+  process 3/3, crash=0, old false connected/subscribed=0. Стас сохранил direct r4.2 markers
+  init/session/loop=`1/1/1`, subscription/ready/ack=`1/1/1`, MQTT errors=1 и live peers=24.
+  У Анны/Жени early markers уже вытеснены (`0`), но current-process live peers=`7/7`, errors=0:
+  в r4.2 core это возможно только после ConnAck oneshot + subscription. Нужен local finalizer:
+  direct gate для Стаса, live-peer-after-last-error semantic equivalent для Анны/Жени, expected
+  PID membership и snapshot hashes; не restart/clear/publish.
 
 ---
 

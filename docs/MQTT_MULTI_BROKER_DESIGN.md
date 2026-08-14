@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **v11.16.11 running 3/3; cold-start logs need read-only recovery after harness trap**
+Статус: **cold evidence saved; semantic-equivalent finalizer pending without restart**
 
 Дата: 2026-08-14
 
