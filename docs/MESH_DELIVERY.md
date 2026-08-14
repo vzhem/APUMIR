@@ -205,6 +205,11 @@ RelayMessage {
   «Средний», «Без ограничений». Текущий M3(c.2) backend = средний (16/256 KiB round,
   32/512 KiB за 30 с); UI/config позже. «Без ограничений» снимает только soft traffic budget,
   но не hard safety (dedup/TTL/hops/queue/storage/thermal/OS).
+- **Background receive-only — решение 2026-08-14:** Android должен периодически просыпаться
+  при наличии сети для получения только собственных сообщений, не становясь relay. Отдельный
+  будущий шаг: WorkManager → receive-only mode → own-topic/signed bounded pull → короткое окно
+  → stop; никакого enqueue/forward чужого. Exact wake Android не гарантирует; real-time только
+  через отдельный opt-in foreground service. Нужны sender/recipient quotas против offline-load.
 - **Надёжность receipt:** тест 2026-08-14 выявил два blocker: MQTT обязан reconnect +
   re-subscribe после смены сети (r1), а retained receipt нужен отдельный topic по `msg_id`
   с cleanup, иначе общий `p2pm2/msg/<origin>` перезаписывается ACK/summary (r2). До r2

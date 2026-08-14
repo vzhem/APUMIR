@@ -201,6 +201,13 @@ receipt-cleanup → интеграция в отправку → переисп�
   (16/256 KiB round, 32/512 KiB за 30 с). UI/config plumbing — отдельный шаг. Даже в режиме
   «Без ограничений» НИКОГДА не отключать hard safety: dedup, TTL, max hops, queue/storage,
   thermal/OS safety; это означает без мягкого лимита трафика, а не буквально без защиты.
+- **Background receive-only — решение пользователя (2026-08-14):** приложение должно
+  периодически просыпаться в фоне хотя бы для получения СВОИХ сообщений, не становясь relay-
+  сервером. Это отдельный Android-шаг после текущих r1/r2: bounded WorkManager wake при наличии
+  сети → receive-only Rust mode → подписка только own topics / signed bounded pull → короткое
+  окно приёма → stop. В этом режиме запрещены enqueue/хранение/forward чужих relay. Android
+  не гарантирует точный момент wake; для real-time нужен отдельный opt-in foreground service.
+  Телефон без сети/выключенный не разбудить — сообщение ждёт у relay до следующего окна.
 
 ---
 
@@ -252,9 +259,9 @@ receipt-cleanup → интеграция в отправку → переисп�
 - **M3(c.2-r1), код готов:** `EventLoop::poll()` вынесен в непрерывную background task;
   основной цикл читает bounded channel (256), reconnect имеет backoff 1→30 с, а после
   повторного `ConnAck` заново подписывается на `p2pm2/#`. Старый timeout(1s) больше не отменяет
-  reconnect. Ещё не собрано на Windows.
+  reconnect. Windows Android Rust build успешен за 1m01s.
 
-**Следующий шаг = Windows `build-rust.ps1` для M3(c.2-r1); M3(c.2-r2)/M3(d) не начинать.**
+**Следующий шаг = собрать APK `v11.16.8` для M3(c.2-r1); M3(c.2-r2)/M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -317,7 +324,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   TCP 1883; retained receipt перезаписывается более поздним ACK/summary на общем topic.
 - **2026-08-14 (доп.6)** — код M3(c.2-r1) заменяет отменяемый `timeout(1s, eventloop.poll())`
   на непрерывную background task + bounded event channel 256, reconnect backoff 1→30 с и
-  re-subscribe. Следующий шаг — Windows build и phone probe; receipt-topic r2 только потом.
+  re-subscribe. Windows Android Rust build успешен за 1m01s; дальше APK + Wi-Fi probe.
+- **2026-08-14 (доп.7)** — пользователь требует отдельный background receive-only режим:
+  периодически просыпаться и получать только свои сообщения, не хранить/не пересылать чужие.
+  План: WorkManager + network constraint + own topics/signed pull + короткое bounded окно;
+  real-time foreground — отдельный opt-in. Реализация только после M3(c.2-r1/r2).
 
 ---
 
@@ -469,6 +480,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
 4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
    one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
-5. Код r1 (непрерывный MQTT poll + re-subscribe) готов: сначала `build-rust.ps1`, затем
-   Wi-Fi off/on + live probe. r2 receipt topic, M3(d) и UI relay пока не трогать.
+5. Код r1 (непрерывный MQTT poll + re-subscribe) собран через `build-rust.ps1` за 1m01s.
+   Дальше APK `v11.16.8`, затем Wi-Fi off/on + live probe. r2 receipt topic, M3(d), UI relay
+   и background receive-only пока не трогать.
 
