@@ -265,3 +265,14 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
 Каждый найденный дефект превращать в минимальный regression test до или вместе с исправлением.
 Сначала доказать проблему малым безопасным сценарием, затем исправить, повторить тот же тест и
 только после этого повышать нагрузку.
+
+## 7. Журнал коротких security smoke
+
+- **2026-08-14, `v11.16.10`, conflicting-origin preparation:** первая попытка baseline invalid:
+  процесс Жени был остановлен, а следующие интерактивные PowerShell-блоки продолжили работу после
+  `throw` и напечатали ложный READY. Attack не выполнялся. Harness исправлен на единый atomic
+  `& { ... }` + explicit `baselineComplete`.
+- Повторный baseline прошёл: security ID `sec-origin-1786707178388`; PID Анна/Женя/Стас =
+  `12571/22100/2529`; temperature = `30/28.8/30°C`; PSS = `118986/88012/53898 KiB`;
+  battery = `100/100/57%`. Женя cold-start, MQTT subscription подтверждена; все три logcat
+  очищены. Следом нужен один normal setup relay и отдельный анализ до attack.

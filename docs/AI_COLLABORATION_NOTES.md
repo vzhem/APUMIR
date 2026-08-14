@@ -460,6 +460,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   только текущий интерактивный foreach, а последующие отдельно выполненные команды ошибочно
   записали partial state, очистили logcat и напечатали READY. Не использовать этот state/PASS.
   Перезапустить Женю и создать новый security msg_id в одном atomic `& { ... }` scriptblock.
+- **2026-08-14 (доп.25)** — atomic baseline security smoke прошёл; Женя cold-start и MQTT
+  subscription confirmed. Новый ID `sec-origin-1786707178388`. PID Анна/Женя/Стас =
+  `12571/22100/2529`; battery = `100/100/57%`; temperature = `30/28.8/30°C`; PSS =
+  `118986/88012/53898 KiB`. State имеет `baselineComplete=true` и все 3 телефона; logcat очищен.
+  Следующий малый шаг: один normal non-retained setup relay, анализ, только затем conflict.
 
 ---
 
@@ -642,7 +647,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Выбран low-volume security smoke. Старый-cache baseline invalid из-за остановленного процесса
-   Жени и интерактивного продолжения после throw; следующий шаг — atomic restart/baseline и новый
-   security msg_id. M3(d)/UI/background пока не трогать.
+7. Low-volume security smoke baseline прошёл atomic-сценарием: ID
+   `sec-origin-1786707178388`, PID `12571/22100/2529`, три безопасные resource baseline сохранены.
+   Следующий шаг — ровно один normal non-retained setup relay и анализ; conflict только после него.
+   M3(d)/UI/background пока не трогать.
 
