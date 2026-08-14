@@ -717,6 +717,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `%TEMP%\apu-r4.2-r1b2-rust-build.log`. PowerShell `NativeCommandError` — только stderr progress
   при exit=0. APK/phones ещё не менялись. Следующий artifact gate — test APK v11.16.12 из exact
   application source `f6130f6` с embedded native hash 7C95…; install только после artifact verify.
+- **2026-08-14 (доп.69)** — первая v11.16.12 APK-build попытка остановилась **до**
+  `assembleRelease`: уже `gradlew --stop` запустил JBR 21.0.8 и JVM упала в `jimage.dll` с
+  `EXCEPTION_IN_PAGE_ERROR (0xc0000006)`, создав `android-app/hs_err_pid8788.log`. Harness сохранил
+  `gradleStopExitCode=1`, `gradleBuildExitCode=-1`, без `BUILD SUCCESSFUL`; stable TEMP APK не
+  создавалась, install/phones не затрагивались. Это известный Windows Defender/JVM transient, не
+  compile defect APU. Старый one-shot state/log не удалять и блок не повторять. Перед одним
+  controlled retry сохранить `hs_err` в TEMP с hash, вернуть worktree к одной generated `.so`,
+  использовать новый build2 state/log и не вызывать аварийный `gradlew --stop` повторно.
 
 ---
 
