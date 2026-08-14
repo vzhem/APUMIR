@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.4 bounded fanout/retained-target policy source complete; Windows compile pending**
+Статус: **r4.4 policy child build completed; saved-artifact recovery pending**
 
 Дата: 2026-08-15
 
@@ -349,9 +349,22 @@ remove/re-record без stale order. Пять deterministic tests без сет�
 AsyncClient/EventLoop/publish/subscribe и не меняет default/r4.3 runtime. Следующий gate — Windows
 `build-rust.ps1 -Features mqtt-dual-broker`; только после PASS одновременно подключать secondary
 subscribe/publish и существующий `MqttDuplicateFilter` к production path. Versioned
-`r44_fanout_policy_build.ps1` готов: exact source `e3b806f`, previous D7A2…FE95 native guard,
-bounded exact child wait, separate evidence/state и no APK/ADB/phones/public traffic; Windows run
-pending.
+`r44_fanout_policy_build.ps1` выполнил child build: exit0, Finished release=1, compiler errors=0,
+67.85s. Parent дал false incomplete только потому, что feature marker посчитан вместе в stdout и
+CLIXML/host stderr (combined=2) до artifact inspection. State SHA-256 `311C29BF…57495`; build не
+повторять. Saved-only `r44_fanout_policy_build_recover.ps1` готов: exact parent/source/log shape,
+stdout marker=1, stderr duplicate=1, generated `.so` nonempty/changed и generated-only worktree;
+Windows recovery run pending, no build/ADB/phones.
+
+### Mixed-version acceptance для MQTT overlay
+
+Dual-broker rollout обязан сохранять одну сеть при поддерживаемых разных версиях APU. Пока N-1
+умеет только HiveMQ, N обязан продолжать publish/subscribe через общий HiveMQ и не считать EMQX-
+only path доставкой; множество active brokers должно пересекаться. Новый duplicate/status envelope
+не может требоваться старому узлу без capability/version negotiation. Перед release обязательна
+matrix N↔N-1 в обоих направлениях и третий relay другой версии: ровно одно core/UI event,
+receipt/retained cleanup, no storm/split и честный degraded/upgrade-required для неподдерживаемой
+версии. Общий compatibility backlog — MASTER_PLAN v2 фаза 0.5.
 
 ### r4.5 — failure/recovery matrix
 

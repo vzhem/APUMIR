@@ -512,6 +512,11 @@ Set-Location C:\APUMIR-arena-test
 Для Cargo/Gradle дополнительно требовать `Finished release`/`BUILD SUCCESSFUL`; для APK — exact
 version, signer и embedded native hash. Exit 0 без positive marker/artifact недостаточен. Stderr
 при exit 0 не скрывать: сохранять в evidence log и отличать warning/progress от `error:`.
+PowerShell child/host serialization может продублировать `Write-Host` marker в stderr/CLIXML:
+uniqueness feature/config marker считать по authoritative stdout, а не по объединённым streams.
+Stderr duplicate не удалять; записать counts/hashes обоих streams. `Finished release`, exit0,
+compiler errors=0 и generated artifact/hash проверяются независимо. Combined marker count=2 при
+stdout=1 не является compile failure и исправляется saved-evidence recovery без rebuild.
 
 Для команд с нормальным nonzero outcome parser обязан явно разрешать только точную комбинацию,
 например `pidof exit=1 + empty`; любой другой exit/output — failure. Нельзя глобально считать

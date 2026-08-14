@@ -1249,6 +1249,34 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   automatic retry=false. Parser-trap, automatic-variable, one-build, bounded-wait, C-drive,
   state/order и forbidden-action static scans PASS. Следующий gate — sync exact harness commit,
   Windows ParseFile/automatic-variable scan и один build run; при ambiguous/incomplete не retry.
+- **2026-08-15 (доп.117) — обязательное решение пользователя:** APU должен работать в одной mesh-
+  сети при разных поддерживаемых версиях приложения; нельзя рассчитывать на одновременное
+  обновление всех телефонов. Для protocol changes обязательны explicit wire/schema version,
+  capabilities или backward-compatible encoding, безопасный reject неизвестного обязательного
+  формата и mixed-version matrix минимум N↔N-1 в обоих направлениях плюс relay третьим телефоном
+  другой версии. Проверять message/receipt/cleanup/dedup/reconnect и отсутствие split/storm. Старые
+  небезопасные версии не поддерживать бесконечно: minimum supported version и `upgrade required`
+  должны быть явными, без ложного SENT/DELIVERED/тихой потери. Android upgrade только с сохранением
+  identity/data/keys; destructive migration/uninstall запрещены. План: MASTER_PLAN v2 фаза 0.5;
+  тематические MQTT/mesh acceptance criteria также должны учитывать rolling update.
+- **2026-08-15 (доп.118)** — первый r4.4 fanout-policy Android Rust build фактически compile PASS,
+  но parent harness сохранил `FAIL_DO_NOT_RETRY_AUTOMATICALLY` после build из-за combined-stream
+  feature-marker count=2. State `%TEMP%\apu-r4.4-fanout-policy-rust-build.json`, SHA-256
+  `311C29BFE2402EBEEBA853087C133EF23D05D67590B0AE6A38BF940A1BE57495`; child PID8048 exit0,
+  Finished release=1, compiler errors=0, duration67.85s, policy source SHA F411…F7E. Generated `.so`
+  fields пусты только потому, что marker assertion сработал до artifact inspection; APK/ADB/phones/
+  public traffic=false. Build не повторять. Это повтор известного CLIXML/host-stream эффекта:
+  feature marker считать exact по stdout, stderr duplicate хранить как evidence, combined count не
+  использовать как uniqueness gate. Нужен distinct saved-build recovery: exact parent/log hashes,
+  stdout marker=1, completed child evidence, generated `.so` nonempty/changed и generated-only Git.
+- **2026-08-15 (доп.119)** — добавлен saved-only
+  `scripts/r44_fanout_policy_build_recover.ps1`: exact parent SHA 311C…7495/source e3b806f/policy
+  hash F411…F7E; требует parent child exit0/Finished1/errors0 и null generated fields после
+  marker-only stop. Authoritative stdout feature marker должен быть 1, stderr duplicate=1,
+  combined=2; raw streams/log остаются immutable и хэшируются. Recovery без Start-Process/build/
+  ADB проверяет generated `.so` nonempty, changed от D7A2…FE95 и generated-only Git, затем пишет
+  distinct PASS state. Static saved-only, ordering/state, parser-trap, automatic-variable и
+  no-phone scans PASS. Следующий gate — sync/parser и один recovery run; build не повторять.
 
 ---
 
