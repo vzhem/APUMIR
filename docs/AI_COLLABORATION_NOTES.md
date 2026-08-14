@@ -540,8 +540,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   что поздний `pidof` Жени вернул `8350 24000`, хотя expected `24000` жив.
 - **2026-08-14 (доп.42)** — process diagnostic позже дал только PID `24000`; `ps`/cmdline/UID
   подтверждают единственный основной `com.vladimir.messenger`, 52 threads, sleeping, MQTT live,
-  errors=0. PID `8350` был transient/already exited и не содержал attack snapshot. Functional
-  attack PASS можно финализировать membership-aware по сохранённым snapshots; attack не повторять.
+  errors=0. PID `8350` был transient/already exited и не содержал attack snapshot.
+- **2026-08-14 (доп.43)** — membership-aware finalizer сохранил conflicting-origin PASS:
+  expected PID present на 3/3; Анна/Женя forged-input+previously-seen=`1+1`; Стас forged-input+
+  conflict-drop=`1+1`; все receipt/store/local/UI/cleanup/origin/errors/crash=`0`. Post-attack:
+  max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery delta `0/0/+1`. Logs очищены,
+  `controlLogBaselineReady=true`. Attack завершён, не повторять; дальше один normal control ID.
 
 ---
 
@@ -756,8 +760,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2: attack semantics PASS; extra PID Жени был transient,
-   единственный текущий процесс снова expected `24000`. Следующий шаг — membership-aware local
-   finalizer по сохранённым snapshots, затем одна normal control delivery. Attack не повторять;
-   M3(d), UI/background пока не трогать.
+7. Low-volume security smoke generation 2: conflicting-origin attack полностью PASSED и
+   persisted; no UI/receipt/re-enqueue/crash, resources safe, control logs baseline ready.
+   Следующий шаг — ровно одна normal control delivery с новым ID и отдельный анализ. Attack,
+   M3(d), UI/background больше не трогать.
 
