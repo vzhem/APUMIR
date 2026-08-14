@@ -304,6 +304,7 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   (QoS1/non-retained/179 B) дала exact semantics PASS: Анна/Женя previously-seen=1/1, Стас
   conflict-drop=1; store/delivery/receipt/UI/errors/crash=0. Membership-aware finalizer сохранил
   PASS; post-attack max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery `0/0/+1`. Первый normal
-  control helper прошёл live gate, но PC HiveMQ connect timeout случился до publish. Recovery:
-  confirmed=false, control ID refs=`0/0/0`, HiveMQ:1883 TCP reachable=true, no publish persisted;
-  разрешён ровно один retry того же ID. Не создавать новый ID и не повторять после send attempt.
+  control helper прошёл live gate, но PC HiveMQ connect timeout случился до publish. Recovery
+  доказал no-publish refs=`0/0/0` и HiveMQ TCP recovery. Единственный retry того же ID
+  `sec-control-1786712273127` подтверждён QoS1/non-retained, 176 B; PID membership 3/3, snapshots
+  через 15 s refs=`10/7/10`. Повторять/очищать logs нельзя; остался local exact analysis+resources.

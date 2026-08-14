@@ -549,6 +549,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   подключился к HiveMQ за 10 s и упал ДО `client.publish`; control не отправлен. Recovery доказал
   control ID refs=`0/0/0`, confirmed=false и TCP HiveMQ:1883 reachable=true. State сохранил
   no-network-publish и разрешил ровно один retry того же ID; attack остаётся завершённым.
+- **2026-08-14 (доп.45)** — единственный authorized retry того же ранее unpublished control ID
+  `sec-control-1786712273127` подтверждён QoS1/non-retained, 176 B. Pre-gate PID membership 3/3,
+  peer lines `3/12/29`, ID refs=0; через 15 s snapshots готовы с refs `10/7/10`. Не повторять и
+  не очищать logs; следующий шаг только локальный exact analyzer normal delivery + resources.
 
 ---
 
