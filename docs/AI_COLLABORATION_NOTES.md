@@ -801,6 +801,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   stopped, Stas PID 26923. Stopped process допустим до install. Следующий gate — один atomic
   `adb install -r` на 3 телефона с appId + independent UID + firstInstallTime preservation;
   при partial fail не rollback/uninstall/retry, после install приложение пока не launch.
+- **2026-08-14 (доп.79)** — v11.16.12 data-preserving `adb install -r` PASS 3/3. Version
+  v11.16.11/11016011→v11.16.12/11016012; appId/independent UID preserved: Anna 10425,
+  Zhenya 10395, Stas 10387; firstInstallTime и dataDir preserved 3/3. Uninstall/data clear/
+  force-stop/launch не выполнялись; после install processRunning=false 3/3. State:
+  `%TEMP%\apu-r4.2-r1b2-v11.16.12-install.json`. Следующий gate — controlled launch без
+  force-stop: precheck stopped/version, log clear, launch 3/3, 150 с wait для real ConnAck,
+  peer traffic и первого 120-секундного `MQTT LIVENESS HEARTBEAT`; no user test publish.
 
 ---
 

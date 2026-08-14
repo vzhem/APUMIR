@@ -245,7 +245,8 @@ PASS за 61.65 с: exit=0, compiler warnings=9, errors=0; arm64 `.so` 7,167,112
 build3 затем PASS: v11.16.12/11016012, 22,582,796 B, SHA-256
 `6765FC7A0ACF10CD9909BC265E729EC1E0BAE47D1314376585CC2123649A3F55`; embedded native exact.
 Signer preflight PASS: V2 new/installed=true, certificate SHA-256 `F843CBE7…A4A5F7` exact.
-Data-preserving install/phone liveness ещё pending. EMQX, dual publish и cross-broker dedup не
+Data-preserving v11.16.12 install PASS 3/3 с appId/UID/firstInstallTime/dataDir preservation;
+controlled launch/liveness pending. EMQX, dual publish и cross-broker dedup не
 подключены; transient sender остаётся отдельным долгом.
 
 ### r4.3 — вторая session за feature gate
