@@ -193,7 +193,7 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; mesh M0–M2, M3.1 + код M3(a) в ветке):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; mesh M0–M2, M3.1, M3(a) + код M3(b)):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -208,7 +208,11 @@ receipt-cleanup → интеграция в отправку → переисп�
   в UI, Стас получил ровно одно сообщение, счётчики логов 5→5 / 5→5 / 7→7 — шторма нет.
   Receipt/gossip/send-path ещё НЕ добавлены.
 
-**Следующий шаг = M3(b) receipt-cleanup, только после отдельного подтверждения пользователя.**
+- **M3(b), код готов:** `receipt|…` проверяет совпадение `msg_id` + `recipient`, удаляет
+  сообщение из `RelayQueue`, а на origin эмитит `MessageDelivered`. Повторный/чужой receipt
+  безопасно игнорируется. Генерация receipt, gossip и send-path ещё НЕ добавлены.
+
+**Следующий шаг = проверить M3(b) через `build-rust.ps1`; дальше не идти без результата.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -253,6 +257,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   конверт в очереди и не показали его, Стас получил одно сообщение, счётчики не росли —
   шторма нет. Наблюдение: из-за общей подписки `p2pm2/#` старый `ack|…` видят все узлы и
   эмитят локальный `DELIVERY_ACK`, но чужого сообщения/статуса в UI нет; это не шторм.
+- **2026-08-14 (доп.)** — добавлен код M3(b): приём mesh `receipt`, проверка пары
+  `msg_id`/`recipient`, cleanup `RelayQueue` и `MessageDelivered` только на origin. Дубликат
+  receipt безопасен. Ожидается Windows `build-rust.ps1`; gossip/send-path не тронуты.
 
 ---
 
@@ -398,7 +405,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 2. Прочитать `docs/MESH_DELIVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1 и M3(a) уже успешно
    собраны и проверены ручным relay-конвертом на Анне/Жене/Стасе; шторма и утечки UI нет.
-4. Следующий шаг — M3(b), обработка `receipt` с cleanup `RelayQueue` и `DELIVERED` у origin.
-   Начинать только после отдельного «да»; gossip/send-path пока не трогать. Перед каждым
-   будущим `enqueue` обязателен `contains(msg_id)`.
+4. Код M3(b) уже добавлен: receipt-cleanup + `MessageDelivered` на origin. Сначала дождаться
+   Windows `build-rust.ps1`, затем отдельного ручного relay→receipt теста. Gossip/send-path
+   пока не трогать. Перед каждым будущим `enqueue` обязателен `contains(msg_id)`.
 

@@ -745,8 +745,8 @@ self.runtime = Some(runtime);
                             });
                         }
                     } else if evt.payload.starts_with("relay|") {
-                        // M3(a): принимаем только relay-конверт. Receipt и gossip будут
-                        // добавлены отдельными маленькими шагами после телефонных тестов.
+                        // M3(a): relay-конверт. Gossip будет добавлен отдельным шагом
+                        // после сборки и телефонного теста receipt-cleanup.
                         match crate::network::wire::parse(&evt.payload) {
                             Some(MeshEnvelope::Relay {
                                 msg_id,
@@ -839,6 +839,60 @@ self.runtime = Some(runtime);
                                 }
                             }
                             _ => tracing::warn!("MESH relay: malformed envelope dropped"),
+                        }
+                    } else if evt.payload.starts_with("receipt|") {
+                        // M3(b): receipt удаляет доставленное сообщение только если msg_id
+                        // и recipient совпадают с записью в RelayQueue. Подпись добавит M7.
+                        match crate::network::wire::parse(&evt.payload) {
+                            Some(MeshEnvelope::Receipt {
+                                msg_id,
+                                recipient,
+                                ts,
+                            }) => {
+                                if msg_id.is_empty() || recipient.is_empty() {
+                                    tracing::warn!("MESH receipt: missing metadata, dropped");
+                                } else if let Some(ref q) = relay_queue {
+                                    let stored_message = q
+                                        .for_recipient(&recipient)
+                                        .into_iter()
+                                        .find(|message| message.msg_id == msg_id);
+
+                                    if let Some(message) = stored_message {
+                                        let is_origin = message.origin_sender == node_id;
+                                        if q.remove(&msg_id) {
+                                            tracing::info!(
+                                                "MESH receipt: removed {} for {} at {}",
+                                                msg_id,
+                                                recipient,
+                                                ts
+                                            );
+
+                                            if is_origin {
+                                                events.emit(CoreEvent::MessageDelivered {
+                                                    message_id: msg_id.clone(),
+                                                });
+                                                tracing::info!(
+                                                    "MESH receipt: {} delivered at origin",
+                                                    msg_id
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        // Повторный/чужой receipt безопасно игнорируется.
+                                        tracing::trace!(
+                                            "MESH receipt: unknown {} for {}, ignored",
+                                            msg_id,
+                                            recipient
+                                        );
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        "MESH receipt: queue unavailable, dropped {}",
+                                        msg_id
+                                    );
+                                }
+                            }
+                            _ => tracing::warn!("MESH receipt: malformed envelope dropped"),
                         }
                     } else {
                         // Обычный формат: senderId|messageId|chatId|recipientId|text.
