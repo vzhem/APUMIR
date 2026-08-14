@@ -287,8 +287,8 @@ UID/firstInstall/dataDir preserved, processes post-install absent. User approved
 launch выполнен once: 2/3 direct startup PASS, Anna missing only READY/ConnAck/subscription lines;
 state/evidence immutable, relaunch forbidden. Saved-evidence recovery proved runtime PASS 3/3;
 Anna startup lines evicted, direct markers remain 2/3. One-publish QoS1/non-retained functional
-smoke PASS with exact relay/receipt/cleanup/UI matrix; budget consumed. Next order (bounded r4 vs
-immediate M3(d)) awaits explicit reprioritization. EMQX, dual publish
+smoke PASS with exact relay/receipt/cleanup/UI matrix; budget consumed. User explicitly kept
+reliability-first order: bounded r4.3–r4.5 before M3(d). EMQX, dual publish
 и cross-broker dedup не подключены;
 transient sender остаётся отдельным долгом.
 

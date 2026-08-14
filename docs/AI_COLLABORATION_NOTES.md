@@ -1083,6 +1083,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   конкретно M3(d) automatic send-path + M8 persistence + final 3-phone offline acceptance. Старый
   agreed order ставит bounded multi-broker r4 перед M3(d), но пользователь спросил, когда будет
   главная цель; не менять порядок молча — запросить explicit reprioritization choice.
+- **2026-08-14 (доп.102)** — пользователь явно выбрал сохранить старый reliability-first порядок:
+  `r4.3 status-only feature-gated second session → r4.4 bounded dual publish+production dedup →
+  r4.5 local two-broker failure matrix → M3(d) automatic offline relay send-path → persistence →
+  final three-phone offline acceptance`. Не переставлять M3(d) раньше r4 молча. Functional public
+  smoke уже consumed; r4.3 не публикует user envelopes во вторую session, дальнейшие public tests
+  только если отдельно необходимы/разрешены. Следующий шаг source-only: audit current
+  `multi_broker.rs`, `mqtt_dedup.rs`, session ownership/config и минимальный compile-tested r4.3.
 
 ---
 
