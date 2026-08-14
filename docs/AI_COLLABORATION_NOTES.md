@@ -208,11 +208,12 @@ receipt-cleanup → интеграция в отправку → переисп�
   в UI, Стас получил ровно одно сообщение, счётчики логов 5→5 / 5→5 / 7→7 — шторма нет.
   Receipt/gossip/send-path ещё НЕ добавлены.
 
-- **M3(b), код готов:** `receipt|…` проверяет совпадение `msg_id` + `recipient`, удаляет
+- **M3(b), код собран:** `receipt|…` проверяет совпадение `msg_id` + `recipient`, удаляет
   сообщение из `RelayQueue`, а на origin эмитит `MessageDelivered`. Повторный/чужой receipt
-  безопасно игнорируется. Генерация receipt, gossip и send-path ещё НЕ добавлены.
+  безопасно игнорируется. Windows `build-rust.ps1` успешно завершён 2026-08-14. Генерация
+  receipt, gossip и send-path ещё НЕ добавлены.
 
-**Следующий шаг = проверить M3(b) через `build-rust.ps1`; дальше не идти без результата.**
+**Следующий шаг = собрать APK и провести ручной relay→receipt тест; M3(c) пока не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -259,7 +260,8 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   эмитят локальный `DELIVERY_ACK`, но чужого сообщения/статуса в UI нет; это не шторм.
 - **2026-08-14 (доп.)** — добавлен код M3(b): приём mesh `receipt`, проверка пары
   `msg_id`/`recipient`, cleanup `RelayQueue` и `MessageDelivered` только на origin. Дубликат
-  receipt безопасен. Ожидается Windows `build-rust.ps1`; gossip/send-path не тронуты.
+  receipt безопасен. Windows `build-rust.ps1` прошёл; следующий шаг — APK + ручной
+  relay→receipt тест. Gossip/send-path не тронуты.
 
 ---
 
@@ -405,7 +407,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 2. Прочитать `docs/MESH_DELIVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1 и M3(a) уже успешно
    собраны и проверены ручным relay-конвертом на Анне/Жене/Стасе; шторма и утечки UI нет.
-4. Код M3(b) уже добавлен: receipt-cleanup + `MessageDelivered` на origin. Сначала дождаться
-   Windows `build-rust.ps1`, затем отдельного ручного relay→receipt теста. Gossip/send-path
-   пока не трогать. Перед каждым будущим `enqueue` обязателен `contains(msg_id)`.
+4. Код M3(b) уже добавлен и собран через Windows `build-rust.ps1`. Следующий шаг — APK и
+   отдельный ручной relay→receipt тест. M3(c), gossip и send-path пока не трогать. Перед
+   каждым будущим `enqueue` обязателен `contains(msg_id)`.
 
