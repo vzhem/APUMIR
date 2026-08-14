@@ -297,8 +297,8 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
 - Generation-2 baseline прошёл без relay: ID `sec-origin2-1786710017189`, TTL 3600, PID
   `14734/24000/13746`; live traffic gate=true у всех; battery `100/100/58%`, temperature
   `31/28.7/30°C`, PSS `117764/98527/142225 KiB`. Затем один normal relay опубликован QoS1,
-  non-retained, 183 B; PID стабильны, immediate snapshot refs=`10/7/10`. PowerShell parser fail
-  не запустил первый analysis. Python retry доказал exact expected metrics: Анна
-  relay/store/cleanup/origin=`1/1/1/1`, Женя=`1/1/1/0`, Стас relay/local/receipt/UI=`1/1/1/1`,
-  errors/crash=0; затем raw Unicode stdout упал на cp1251 до save/clear. Нужен ASCII-only
-  finalizer; publish/attack запрещены до persisted PASS и fresh attack-log baseline.
+  non-retained, 183 B; PID стабильны, immediate snapshot refs=`10/7/10`. После двух harness
+  failures ASCII-only finalizer сохранил exact PASS: Анна relay/store/cleanup/origin=`1/1/1/1`,
+  Женя=`1/1/1/0`, Стас relay/local/receipt/UI=`1/1/1/1`; duplicate=0, errors/crash=0. Recipient
+  origin binding установлен, attack log baseline очищен. Разрешена одна conflicting-origin
+  injection; ожидаются conflict drop у Стаса, no receipt/UI/re-enqueue.

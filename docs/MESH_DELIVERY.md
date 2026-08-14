@@ -224,4 +224,7 @@ RelayMessage {
   Причина broker-fallback в коде: `AsyncClient.publish().await` до polling подтверждает enqueue,
   не TCP/ConnAck, поэтому доступный второй broker не выбирается. Нужен bounded ConnAck gate +
   broker rotation/circuit breaker; одна строка `subscribed` не connectivity evidence.
+  После fresh connection generation-2 normal control всё же прошёл exact: relay/store/cleanup/
+  origin у Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без
+  duplicate/error/crash. Это устанавливает чистую origin binding baseline для security conflict.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).

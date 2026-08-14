@@ -525,11 +525,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.37)** — первый exact-analysis блок вообще не выполнился: PowerShell parser
   отверг не заключённые в скобки вызовы `Count-Literal ... +`. Остаток интерактивного paste дал
   пустые метрики, отдельный `else` и ложный текст INCOMPLETE. MQTT/state/snapshots не изменены.
-- **2026-08-14 (доп.38)** — compile-first Python helper точно посчитал setup до вывода строк
-  Стаса: Анна relay/store/cleanup/origin=`1/1/1/1`, Женя=`1/1/1/0`, Стас relay/local/receipt/UI=
-  `1/1/1/1`; PID стабильны, errors/crash=0. Затем raw Unicode log line не кодировалась в cp1251,
-  helper упал до save/clear. Attack не выполнялся, setup не повторять. Нужен ASCII-only finalizer,
-  который повторно считает snapshots, сохраняет PASS и только затем очищает attack logs.
+- **2026-08-14 (доп.38)** — compile-first Python helper точно посчитал setup, но raw Unicode
+  log line не кодировалась в cp1251 и helper упал до save/clear. Attack не выполнялся.
+- **2026-08-14 (доп.39)** — ASCII-only finalizer повторно доказал и сохранил generation-2
+  normal setup PASS: Анна relay/store/cleanup/origin=`1/1/1/1`, Женя=`1/1/1/0`, Стас
+  relay/local/receipt/UI=`1/1/1/1`; duplicate=0, PID stable, errors/crash=0. Recipient origin
+  binding установлен, attack logs очищены и `attackLogBaselineReady=true`. Следом разрешена
+  ровно одна conflicting-origin non-retained публикация; анализ отдельным шагом.
 
 ---
 
@@ -739,8 +741,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2: snapshots уже доказали exact normal setup PASS
-   (`Anna 1/1/1/1`, `Zhenya 1/1/1/0`, `Stas 1/1/1/1`, UI только Стас=1, errors/crash=0), но
-   Python Unicode stdout упал до state save/log clear. Следующий шаг — ASCII-only local finalizer;
-   publish/conflict до marker запрещены. M3(d), UI/background пока не трогать.
+7. Low-volume security smoke generation 2 normal setup полностью PASSED и persisted для ID
+   `sec-origin2-1786710017189`; recipient origin binding установлен, attack logs baseline ready.
+   Следующий шаг — ровно один non-retained relay того же ID с attacker origin, затем отдельный
+   local analysis. M3(d), UI/background пока не трогать.
 
