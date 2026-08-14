@@ -232,14 +232,16 @@ QoS/retain/topics/caps/backoff не менялись. Windows `build-rust.ps1` s
 `A1FE612E339D35CD834234832490B252CFC8AB0C120C843AE876EB6D9CBFD73D`. EventLoop→core stall и
 automatic session recovery остаются r1b2; transient `send_message_mqtt` пока вне wrapper.
 
-**r4.2-r1b2 source pending Windows build:** pure restart decision различает closed notification
-channel, finished EventLoop task, stalled phase и stopped probe; deterministic tests фиксируют
-reason labels и backoff `1→2→4→8→16→30→30`. Core initial ready gate ждёт настоящий ConnAck и
-subscription request максимум 45 с, затем повторяет fresh single-HiveMQ session с backoff. При
-terminal/stalled reason старая session полностью Drop до создания новой; generation увеличивается
-только после recovery. Уже полученный event сначала обрабатывается. RelayQueue, seen/delivery
-tombstones, known peers и traffic budgets объявлены вне restart и сохраняются. После нового
-ConnAck повторяются subscription, presence и relay-registration requests. EMQX, dual publish и
+**r4.2-r1b2 Windows compile PASS:** pure restart decision различает closed notification channel,
+finished EventLoop task, stalled phase и stopped probe; deterministic tests фиксируют reason labels
+и backoff `1→2→4→8→16→30→30`. Core initial ready gate ждёт настоящий ConnAck и subscription
+request максимум 45 с, затем повторяет fresh single-HiveMQ session с backoff. При terminal/stalled
+reason старая session полностью Drop до создания новой; generation увеличивается только после
+recovery. Уже полученный event сначала обрабатывается. RelayQueue, seen/delivery tombstones, known
+peers и traffic budgets объявлены вне restart и сохраняются. После нового ConnAck повторяются
+subscription, presence и relay-registration requests. Windows `build-rust.ps1` source `f6130f6`
+PASS за 61.65 с: exit=0, compiler warnings=9, errors=0; arm64 `.so` 7,167,112 B, SHA-256
+`7C9537E6FA5F93B4F6AC28B2705F97A35E738C36309922A029D06E0886517194`. EMQX, dual publish и
 cross-broker dedup не подключены; transient sender остаётся отдельным долгом.
 
 ### r4.3 — вторая session за feature gate

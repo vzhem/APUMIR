@@ -243,11 +243,12 @@ RelayMessage {
   7,148,552 B, SHA-256 `BC35DE5C…AA53995`. r1b1 добавил единый 5-секундный bounded
   AsyncClient enqueue wrapper для 8 persistent publish и 2 subscribe policies, 4 tests и heartbeat
   counters без изменения QoS/retain/topics. Windows build source `a360833` PASS за 61.53 с,
-  exit=0/errors=0; arm64 `.so` 7,155,352 B, SHA-256 `A1FE612E…CBFD73D`. r1b2 source добавил
-  deterministic restart reasons/backoff, 45-секундный real-ConnAck ready gate и bounded full
-  single-session recreation. Old transport Drop до new; уже полученный event не теряется;
-  RelayQueue/tombstones/known peers/budgets сохраняются. Windows build pending. EMQX/fanout не
-  подключены; public delivery probe до полного fix не повторять.
+  exit=0/errors=0; arm64 `.so` 7,155,352 B, SHA-256 `A1FE612E…CBFD73D`. r1b2 добавил deterministic
+  restart reasons/backoff, 45-секундный real-ConnAck ready gate и bounded full single-session
+  recreation. Old transport Drop до new; уже полученный event не теряется; RelayQueue/tombstones/
+  known peers/budgets сохраняются. Windows build source `f6130f6` PASS за 61.65 с, exit=0/errors=0;
+  arm64 `.so` 7,167,112 B, SHA-256 `7C9537E6…86517194`. EMQX/fanout не подключены; public delivery
+  probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:

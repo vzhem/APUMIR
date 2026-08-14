@@ -708,7 +708,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   только после success. Полученный event не выбрасывается: restart проверяется только при None.
   RelayQueue, seen/local-delivery tombstones, known peers и global budgets живут вне replacement.
   После recovery повторяются subscription/presence/relay-registration requests. EMQX/dual publish/
-  production cross-broker dedup и transient sender не подключены. Windows build pending.
+  production cross-broker dedup и transient sender не подключены.
+- **2026-08-14 (доп.68)** — r4.2-r1b2 Windows Android Rust compile PASS source `f6130f6`:
+  61.65 с, exit=0, Cargo `Finished release`, compiler warnings=9, errors=0. Новая arm64 `.so`
+  7,167,112 B, SHA-256 `7C9537E6FA5F93B4F6AC28B2705F97A35E738C36309922A029D06E0886517194`;
+  Git modified только generated `.so`, не commit. r1b1 `.so` A1FE… сохранена новым stash;
+  старые stashes не pop. State/log: `%TEMP%\apu-r4.2-r1b2-rust-build.json` и
+  `%TEMP%\apu-r4.2-r1b2-rust-build.log`. PowerShell `NativeCommandError` — только stderr progress
+  при exit=0. APK/phones ещё не менялись. Следующий artifact gate — test APK v11.16.12 из exact
+  application source `f6130f6` с embedded native hash 7C95…; install только после artifact verify.
 
 ---
 
