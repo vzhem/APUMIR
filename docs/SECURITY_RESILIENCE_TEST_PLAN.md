@@ -288,8 +288,8 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   ID abandoned: повтор publish и attack запрещены. Это availability/reconnect finding; следующий
   шаг — fresh controlled restart baseline. Нужен будущий watchdog/liveness regression: после
   timeout при VALIDATED network клиент обязан reconnect либо явно перейти в recoverable state.
-- Controlled cold start затем дал Анна/Женя subscription+ConnAck=`1+1`, errors=0, но Стас дал
-  queued subscription и ConnAck=0; block остановился до нового state/ID. Code review нашёл
-  transport flaw: `AsyncClient.publish().await` до event-loop polling подтверждает только queue,
-  поэтому первый broker ложно считается connected и fallback brokers не пробуются. Baseline gate
-  обязан требовать ConnAck. До fix/обхода — только bounded reachability diagnostic, без attack.
+- Controlled cold start дал Анна/Женя subscription+ConnAck=`1+1`, errors=0; Стас не уложился
+  в 20 s gate, но после 5 initial errors поздно получил ConnAck и live presence. Bounded TCP:
+  HiveMQ:1883 failed, EMQX:1883 passed. Code review: `AsyncClient.publish().await` до event-loop
+  polling подтверждает только queue, поэтому доступный fallback не выбирается. Baseline обязан
+  требовать ConnAck + live incoming после Ack; новый ID только после fresh-state adoption.

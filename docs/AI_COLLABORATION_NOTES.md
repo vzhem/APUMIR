@@ -505,11 +505,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Первый security ID окончательно непригоден/abandoned. Это availability/reconnect наблюдение,
   не crash и не доказанный dedup defect; старый relay не переиздавать.
 - **2026-08-14 (доп.32)** — controlled force-stop/cold-start всех трёх очистил RAM state. Анна
-  PID `14734`, Женя `24000`: subscription=1, ConnAck=1, MQTT errors=0. На Стасе cold start прошёл
-  и subscription была queued, но ConnAck=0; atomic block остановился до state/new ID/log clear.
-  Старый state остаётся источником истории, но его PID теперь stale. Code review подтвердил:
-  broker fallback ошибочно принимает queued publish за соединение. Дальше только local
-  startup-log + bounded TCP reachability diagnostic, без relay/restart.
+  PID `14734`, Женя `24000`: subscription=1, ConnAck=1, MQTT errors=0. На Стасе cold start прошёл,
+  но 20-секундный gate не дождался ConnAck; block остановился до state/new ID/log clear.
+- **2026-08-14 (доп.33)** — Стас PID `13746` поздно получил initial ConnAck после 5 MQTT errors
+  и затем стабильно видел presence Анны/Жени; это late initial connection, не re-subscribe.
+  Bounded TCP probe: `broker.hivemq.com:1883` exit=1, `broker.emqx.io:1883` exit=0. Значит,
+  fallback-дефект практически значим: доступный второй broker не выбирается, пока first retry
+  когда-нибудь не сработает. Старый state PID stale; дальше adopt fresh PIDs/new ID без restart
+  и без relay, при gate ConnAck + live incoming после Ack.
 
 ---
 
@@ -702,8 +705,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke: old ID abandoned, publish/conflict запрещены. После cold start
-   Анна/Женя имеют fresh PID `14734/24000`, ConnAck=1/1; Стас subscription queued, но ConnAck=0,
-   поэтому state/new ID не созданы и старые PID в state stale. Следующий шаг — startup-log и
-   bounded TCP reachability diagnostic Стаса, без relay/restart. M3(d), UI/background не трогать.
+7. Low-volume security smoke: old ID abandoned. Fresh PID Анна/Женя/Стас =
+   `14734/24000/13746`; Стас после 5 errors поздно получил initial ConnAck и live presence.
+   HiveMQ TCP probe failed, EMQX passed; fallback bug documented. Следующий шаг — atomic adopt
+   fresh baseline/new ID без restart/relay. M3(d), UI/background не трогать.
 
