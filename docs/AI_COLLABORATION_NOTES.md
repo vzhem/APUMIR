@@ -732,6 +732,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `C:\APUMIR-arena-test`, но .NET `[IO.File]::ReadAllText` разрешил его от process cwd
   `C:\Users\User`. Ничего не менялось, diagnostic JSON не создан. Workaround: каждый path для
   .NET IO сначала превращать в absolute через `(Resolve-Path -LiteralPath ...).Path`.
+- **2026-08-14 (доп.71)** — corrected jimage diagnostic подтвердил build2 exit=1/no APK и
+  exact loaded DLL `D:\Android Studio\jbr\bin\jimage.dll` (JBR 21.0.8). Файл 33,432 B,
+  SHA-256 `92910BA8868890D814107FDFBB2605C99E86C7CB7F7B3EFEE1B8F6262A043C20`, три чтения
+  стабильны, Authenticode Valid. `JAVA_HOME=D:\Android Studio\jbr`; одновременно на `C:` есть
+  signed Adoptium JDK 17.0.17. Defender available, но real-time=false; project/.gradle/.cargo
+  exclusions=true, JBR exclusion=false. PhysicalDisk API показывает оба диска Healthy/OK, но
+  System log за 2 часа содержит одно disk event — нужно отдельно вывести ID/provider и mapping
+  C:/D: до нового Java process. Дальше предпочтителен process-local JDK17 override на `C:`, без
+  изменения system JAVA_HOME и без build, затем только один guarded `gradlew --version` preflight.
 
 ---
 
