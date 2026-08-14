@@ -348,7 +348,10 @@ broker; он хранит SHA-256 logical ID и 2-bit mask, bounded oldest evict
 remove/re-record без stale order. Пять deterministic tests без сети. Модуль пока не содержит
 AsyncClient/EventLoop/publish/subscribe и не меняет default/r4.3 runtime. Следующий gate — Windows
 `build-rust.ps1 -Features mqtt-dual-broker`; только после PASS одновременно подключать secondary
-subscribe/publish и существующий `MqttDuplicateFilter` к production path.
+subscribe/publish и существующий `MqttDuplicateFilter` к production path. Versioned
+`r44_fanout_policy_build.ps1` готов: exact source `e3b806f`, previous D7A2…FE95 native guard,
+bounded exact child wait, separate evidence/state и no APK/ADB/phones/public traffic; Windows run
+pending.
 
 ### r4.5 — failure/recovery matrix
 

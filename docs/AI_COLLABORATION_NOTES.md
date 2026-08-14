@@ -1239,6 +1239,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   default и r4.3 network behavior не изменены. Host cargo test запрещён/недоступен; следующий gate
   — exact Windows `build-rust.ps1 -Features mqtt-dual-broker`, generated `.so` only. Только после
   compile PASS atomic integration включает secondary subscribe/publish и shared production dedup.
+- **2026-08-15 (доп.116)** — добавлен versioned `scripts/r44_fanout_policy_build.ps1` для exact
+  source commit `e3b806f`: требует прежний проверенный r4.3 feature `.so` 7,193,912 B /
+  D7A2…FE95, C-drive repo/environment, generated-only worktree и hard-gated feature/policy
+  constants. Child PowerShell запускает ровно один `build-rust.ps1 -Features mqtt-dual-broker`,
+  ждёт exact process максимум 900 с через structured `{Exited,ExitCode,ProcessId}`, затем требует
+  exit0, one feature marker, one Finished release, compiler errors=0, changed nonempty `.so` и
+  generated-only final status. Separate stdout/stderr/log/state; APK/ADB/phones/public traffic и
+  automatic retry=false. Parser-trap, automatic-variable, one-build, bounded-wait, C-drive,
+  state/order и forbidden-action static scans PASS. Следующий gate — sync exact harness commit,
+  Windows ParseFile/automatic-variable scan и один build run; при ambiguous/incomplete не retry.
 
 ---
 
