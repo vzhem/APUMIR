@@ -53,6 +53,7 @@ pub struct MqttLivenessSnapshot {
     pub incoming_publishes: u64,
     pub connacks: u64,
     pub notifications_forwarded: u64,
+    pub best_effort_drops: u64,
     pub poll_errors: u64,
     pub request_timeouts: u64,
     pub request_errors: u64,
@@ -164,6 +165,7 @@ pub struct MqttLivenessProbe {
     incoming_publishes: AtomicU64,
     connacks: AtomicU64,
     notifications_forwarded: AtomicU64,
+    best_effort_drops: AtomicU64,
     poll_errors: AtomicU64,
     request_timeouts: AtomicU64,
     request_errors: AtomicU64,
@@ -187,6 +189,7 @@ impl MqttLivenessProbe {
             incoming_publishes: AtomicU64::new(0),
             connacks: AtomicU64::new(0),
             notifications_forwarded: AtomicU64::new(0),
+            best_effort_drops: AtomicU64::new(0),
             poll_errors: AtomicU64::new(0),
             request_timeouts: AtomicU64::new(0),
             request_errors: AtomicU64::new(0),
@@ -225,6 +228,18 @@ impl MqttLivenessProbe {
         self.set_phase(MqttLoopPhase::Idle);
     }
 
+    pub fn mark_best_effort_drop(&self) -> u64 {
+        let previous = self
+            .best_effort_drops
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                Some(current.saturating_add(1))
+            })
+            .unwrap_or_else(|current| current);
+        self.mark_progress();
+        self.set_phase(MqttLoopPhase::Idle);
+        previous.saturating_add(1)
+    }
+
     pub fn mark_poll_error(&self) {
         self.poll_errors.fetch_add(1, Ordering::Relaxed);
         self.mark_progress();
@@ -259,6 +274,7 @@ impl MqttLivenessProbe {
             incoming_publishes: self.incoming_publishes.load(Ordering::Relaxed),
             connacks: self.connacks.load(Ordering::Relaxed),
             notifications_forwarded: self.notifications_forwarded.load(Ordering::Relaxed),
+            best_effort_drops: self.best_effort_drops.load(Ordering::Relaxed),
             poll_errors: self.poll_errors.load(Ordering::Relaxed),
             request_timeouts: self.request_timeouts.load(Ordering::Relaxed),
             request_errors: self.request_errors.load(Ordering::Relaxed),
@@ -300,6 +316,7 @@ mod tests {
             incoming_publishes: 0,
             connacks: 0,
             notifications_forwarded: 0,
+            best_effort_drops: 0,
             poll_errors: 0,
             request_timeouts: 0,
             request_errors: 0,
@@ -423,6 +440,8 @@ mod tests {
         probe.mark_incoming_publish();
         probe.mark_forwarding();
         probe.mark_notification_forwarded();
+        assert_eq!(probe.mark_best_effort_drop(), 1);
+        assert_eq!(probe.mark_best_effort_drop(), 2);
         probe.mark_connack();
         probe.mark_poll_error();
         probe.mark_request_timeout();
@@ -435,6 +454,7 @@ mod tests {
         assert_eq!(state.polls_completed, 1);
         assert_eq!(state.incoming_publishes, 1);
         assert_eq!(state.notifications_forwarded, 1);
+        assert_eq!(state.best_effort_drops, 2);
         assert_eq!(state.connacks, 1);
         assert_eq!(state.poll_errors, 1);
         assert_eq!(state.request_timeouts, 1);

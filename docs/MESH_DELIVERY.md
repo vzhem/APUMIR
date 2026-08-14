@@ -253,8 +253,11 @@ RelayMessage {
   v11.16.12 install PASS 3/3; appId/UID/firstInstallTime/dataDir preserved. Controlled launch 3/3;
   runtime readiness/liveness recovered PASS 3/3 from `p2p_core` snapshots: same launch PID, active
   subscribed traffic through capture end, no stall/restart/request failures. Exact cold-start READY
-  lines were evicted; launch is not repeated. EMQX/fanout не подключены; public delivery probe до
-  новой APK и её liveness gate не повторять.
+  lines were evicted; launch is not repeated. r1b3 source добавил topic-aware overflow: последние
+  32/256 slots защищены от refreshable presence/gossip/ping/summary; relay/receipt/message/ACK/
+  unknown fail-closed loss-intolerant и не drop. Best-effort drop observable/rate-limited; Windows
+  build pending. Durable critical handoff при полном reserve/recovery остаётся r1b4. EMQX/fanout не
+  подключены; public delivery probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:

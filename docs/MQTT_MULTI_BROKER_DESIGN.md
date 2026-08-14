@@ -249,8 +249,18 @@ Data-preserving v11.16.12 install PASS 3/3 с appId/UID/firstInstallTime/dataDir
 Controlled launch 3/3 выполнен; первый analyzer пропустил native tag `p2p_core`. Read-only recovery
 доказал runtime readiness/liveness PASS 3/3 по unchanged cold-launch PID, active wildcard traffic
 до capture end и отсутствию stall/restart/request failures; exact cold-start READY lines вытеснены
-и launch не повторяется. EMQX, dual publish и cross-broker dedup не
-подключены; transient sender остаётся отдельным долгом.
+и launch не повторяется.
+
+**r4.2-r1b3 source complete, Windows compile pending:** pure `mqtt_overflow.rs` классифицирует
+inbound traffic по topic+envelope: presence/gossip/ping/relay-registration/`gsumm`/empty retained
+clear — refreshable best-effort; message/relay/receipt/ACK и unknown — loss-intolerant fail-closed.
+Из общего cap 256 best-effort события не занимают последние 32 slots; у boundary используется
+non-blocking `try_send`, допустимый drop всегда увеличивает `best_effort_drops`, а payload-free log
+ограничен первым случаем и powers-of-two. Counter добавлен в heartbeat/stall/exit markers. Четыре
+pure tests покрывают taxonomy, unknown safety, exact reserve boundary и bounded logging; static
+integration checks PASS, host cargo не запускался. Loss-intolerant path по-прежнему ждёт `send` и
+никогда не drop; durable pending handoff перед session replacement остаётся отдельным r1b4.
+EMQX, dual publish и cross-broker dedup не подключены; transient sender остаётся отдельным долгом.
 
 ### r4.3 — вторая session за feature gate
 

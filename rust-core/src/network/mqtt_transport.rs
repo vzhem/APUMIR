@@ -12,6 +12,10 @@ use crate::network::mqtt_liveness::{
     assess_mqtt_liveness, mqtt_restart_reason, MqttLivenessAssessment, MqttLivenessProbe,
     MqttRestartReason,
 };
+use crate::network::mqtt_overflow::{
+    classify_mqtt_ingress, mqtt_ingress_disposition, should_log_best_effort_drop,
+    MqttIngressDisposition, MQTT_LOSS_INTOLERANT_RESERVE,
+};
 
 pub const MQTT_BROKERS: &[(&str, u16)] = &[
     ("broker.hivemq.com", 1883),
@@ -230,19 +234,62 @@ impl MqttTransport {
                                 .take(200)
                                 .collect::<String>()
                         );
+                        let ingress_kind = classify_mqtt_ingress(&p.topic, &p.payload);
+                        let remaining_capacity = event_tx.capacity();
+                        if mqtt_ingress_disposition(
+                            ingress_kind,
+                            remaining_capacity,
+                            MQTT_LOSS_INTOLERANT_RESERVE,
+                        ) == MqttIngressDisposition::DropBestEffort
+                        {
+                            let total_drops = eventloop_liveness.mark_best_effort_drop();
+                            if should_log_best_effort_drop(total_drops) {
+                                tracing::warn!(
+                                    "MQTT OVERFLOW DROP: kind={} total={} remaining_capacity={} reserve={}",
+                                    ingress_kind.as_str(),
+                                    total_drops,
+                                    remaining_capacity,
+                                    MQTT_LOSS_INTOLERANT_RESERVE
+                                );
+                            }
+                            continue;
+                        }
+
                         let event = MqttEvent {
                             topic: p.topic.clone(),
                             payload: String::from_utf8_lossy(&p.payload).to_string(),
                         };
                         eventloop_liveness.mark_forwarding();
-                        if event_tx
-                            .send(MqttNotification::Message(event))
-                            .await
-                            .is_err()
-                        {
-                            break "core notification channel closed while forwarding publish";
+                        if ingress_kind.is_best_effort() {
+                            match event_tx.try_send(MqttNotification::Message(event)) {
+                                Ok(()) => eventloop_liveness.mark_notification_forwarded(),
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                    let remaining_capacity = event_tx.capacity();
+                                    let total_drops = eventloop_liveness.mark_best_effort_drop();
+                                    if should_log_best_effort_drop(total_drops) {
+                                        tracing::warn!(
+                                            "MQTT OVERFLOW DROP: kind={} total={} remaining_capacity={} reserve={}",
+                                            ingress_kind.as_str(),
+                                            total_drops,
+                                            remaining_capacity,
+                                            MQTT_LOSS_INTOLERANT_RESERVE
+                                        );
+                                    }
+                                }
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                    break "core notification channel closed while forwarding publish";
+                                }
+                            }
+                        } else {
+                            if event_tx
+                                .send(MqttNotification::Message(event))
+                                .await
+                                .is_err()
+                            {
+                                break "core notification channel closed while forwarding publish";
+                            }
+                            eventloop_liveness.mark_notification_forwarded();
                         }
-                        eventloop_liveness.mark_notification_forwarded();
                     }
                     Ok(Event::Incoming(Packet::ConnAck(_))) => {
                         reconnect_backoff_secs = 1;
@@ -298,7 +345,7 @@ impl MqttTransport {
                         let snapshot = watchdog_liveness.snapshot();
                         match exit_result {
                             Ok(reason) => tracing::error!(
-                                "MQTT LIVENESS: EventLoop task exited: reason={} phase={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
+                                "MQTT LIVENESS: EventLoop task exited: reason={} phase={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
                                 reason,
                                 snapshot.phase.as_str(),
                                 snapshot.polls_completed,
@@ -306,6 +353,7 @@ impl MqttTransport {
                                 snapshot.incoming_publishes,
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
+                                snapshot.best_effort_drops,
                                 snapshot.poll_errors,
                                 snapshot.request_timeouts,
                                 snapshot.request_errors
@@ -314,7 +362,7 @@ impl MqttTransport {
                                 tracing::info!("MQTT LIVENESS: EventLoop task closed during requested shutdown")
                             }
                             Err(_) => tracing::error!(
-                                "MQTT LIVENESS: EventLoop task ended without completion signal; possible panic/abort; phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
+                                "MQTT LIVENESS: EventLoop task ended without completion signal; possible panic/abort; phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
                                 snapshot.phase.as_str(),
                                 snapshot.phase_age_ms(),
                                 snapshot.progress_age_ms(),
@@ -323,6 +371,7 @@ impl MqttTransport {
                                 snapshot.incoming_publishes,
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
+                                snapshot.best_effort_drops,
                                 snapshot.poll_errors,
                                 snapshot.request_timeouts,
                                 snapshot.request_errors
@@ -342,7 +391,7 @@ impl MqttTransport {
                                     .unwrap_or(true);
                                 if should_warn {
                                     tracing::warn!(
-                                        "MQTT LIVENESS STALLED: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
+                                        "MQTT LIVENESS STALLED: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
                                         phase.as_str(),
                                         stalled_for_ms,
                                         snapshot.progress_age_ms(),
@@ -351,6 +400,7 @@ impl MqttTransport {
                                         snapshot.incoming_publishes,
                                         snapshot.connacks,
                                         snapshot.notifications_forwarded,
+                                        snapshot.best_effort_drops,
                                         snapshot.poll_errors,
                                         snapshot.request_timeouts,
                                         snapshot.request_errors
@@ -367,7 +417,7 @@ impl MqttTransport {
 
                         if last_heartbeat.elapsed() >= MQTT_LIVENESS_HEARTBEAT_INTERVAL {
                             tracing::info!(
-                                "MQTT LIVENESS HEARTBEAT: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
+                                "MQTT LIVENESS HEARTBEAT: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
                                 snapshot.phase.as_str(),
                                 snapshot.phase_age_ms(),
                                 snapshot.progress_age_ms(),
@@ -376,6 +426,7 @@ impl MqttTransport {
                                 snapshot.incoming_publishes,
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
+                                snapshot.best_effort_drops,
                                 snapshot.poll_errors,
                                 snapshot.request_timeouts,
                                 snapshot.request_errors

@@ -860,6 +860,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   literals: `MQTT SESSION READY`, `MQTT: connection acknowledged by broker`,
   `MQTT: subscription requested after ConnAck`, `MQTT IN`, `MQTT LIVENESS HEARTBEAT`.
   User payload не публиковался; увиденные public-broker 5-byte message/receipt events чужие/служебные.
+- **2026-08-14 (доп.84)** — r4.2-r1b3 topic-aware overflow source complete, Windows compile
+  pending. Новый pure `network/mqtt_overflow.rs` классифицирует по topic+payload envelope:
+  presence/gossip/ping/relay-registration/`gsumm`/empty retained clear — refreshable best-effort;
+  обычное message, `relay|`, `receipt|`, ACK и unknown — loss-intolerant fail-closed. Общий
+  EventLoop→core cap остаётся 256; best-effort не может занять последние 32 slots и идёт через
+  non-blocking `try_send`. Допустимый overflow drop увеличивает fixed-memory
+  `best_effort_drops`; marker `MQTT OVERFLOW DROP` не содержит topic/payload и пишется только на
+  total 1/powers-of-two, exact counter входит в heartbeat/stall/task-exit. Четыре pure tests:
+  taxonomy, delivery+unknown safety, reserve boundary (loss-intolerant enqueue даже capacity=0),
+  bounded log schedule. Static field/marker/integration checks PASS; первый вспомогательный
+  Python exact-count check имел слишком широкий substring assertion, исправленный line-regex PASS;
+  это не Rust defect. Host cargo/test не запускались. Broker/QoS/retain/topics/caps не изменены.
+  Loss-intolerant всё ещё ждёт `.send().await` и никогда не drop; durable pending handoff перед
+  r1b2 session abort/replacement — следующий отдельный r1b4, без него overflow/recovery gate не
+  закрыт. Телефоны/APK/public traffic не менялись.
 
 ---
 
