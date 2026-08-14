@@ -1043,6 +1043,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   обнаружил три собственных risky line continuations (member `.` и два `-f` at EOL); переписаны
   atomic expressions в соответствии с доп.89/92 до Windows execution. Следующий gate — sync,
   Windows ParseFile zero errors и один read-only analyzer run; relaunch/logcat/ADB запрещены.
+- **2026-08-14 (доп.99)** — saved-evidence analyzer Windows ParseFile PASS, worktree SHA-256
+  `ECAFECEF82B301A351CB776DEE05BABC8F4412A8D97C661E1581AEC4A71E9EA2`; no ADB/logcat/relaunch.
+  Runtime recovery PASS 3/3. State `%TEMP%\apu-r4.2-r1b4-v11.16.13-launch-analysis-recovery.json`,
+  SHA-256 `7FDAF9BD2634A322186AECB704A393F132D9B66D9A891C568A9DB3E041C3A89F`; parent launch hash
+  3AA9…7E47 exact. Direct startup markers 2/3, runtime 3/3. Anna PID 10945 stable, earliest
+  preserved offset 20.501 с (startup definitively evicted), incoming 58; heartbeat incoming56/
+  connacks1/forwarded57, loss buffered/pending/backpressure=0/0/0. Zhenya PID20562 stable,
+  incoming73; heartbeat 58/1/59, loss buffered/pending/backpressure=2/0/0. Stas PID23149 stable,
+  incoming70; heartbeat 57/1/58, loss=2/0/0. Best-effort drops/poll errors/request timeout/error=0
+  на всех; all original stall/channel/session restart/recovery/crash gates zero. r1b4 handoff runtime
+  доказан: accepted critical events drain to pending=0. Relaunch/ADB/logcat/user payload=false.
+  Readiness/liveness gate закрыт; следующий разрешённый network action — только один explicit-user-
+  approved synthetic QoS1 non-retained relay smoke, без retry/high load.
 
 ---
 
