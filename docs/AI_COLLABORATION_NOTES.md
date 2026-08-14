@@ -348,9 +348,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
 cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1/r4.2 Rust и APK
-`v11.16.11` artifact/signature/signer compatibility PASS; установка `-r` на 3 телефона разрешена.
-r4.2 оставляет один HiveMQ session и ждёт реальный ConnAck до subscription/presence; второго
-broker/fanout пока нет. M3(d), UI/background не начинать.**
+`v11.16.11` artifact/signature/signer compatibility PASS. Первый install helper остановился до
+`adb install` на package-state parser; все телефоны остались v11.16.10. Нужен read-only schema
+check и corrected `-r`. Второго broker/fanout пока нет. M3(d), UI/background не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -610,6 +610,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   установленный на Анне v11.16.10 имеют один V2 certificate SHA-256
   `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7`. Pulled base.apk удалён,
   APK ещё не установлен, user data не менялись; evidence разрешил только `adb install -r`.
+- **2026-08-14 (доп.55)** — первый install helper остановился на Анне во время read-only
+  pre-state, ДО создания install state и ДО любого `adb install`: strict dumpsys parser не нашёл
+  один из `userId`/`firstInstallTime` (Android может печатать `appId` или поле в иной секции).
+  Телефоны/data не менялись. Не повторять install block: сначала вывести только safe package keys
+  (`version*`, `userId/appId`, install/update time, `cmd package ... -U`), затем адаптировать parser.
 
 ---
 
@@ -629,6 +634,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   вслепую после pre-publish marker: сначала доказать `publishConfirmed=false` и ноль test ID в
   phone logs, записать failed-before-network recovery, затем исправить вызов на
   `py -3 $PythonPath $SecurityStatePath`.
+- **`dumpsys package` identity key зависит от Android:** install preflight ожидал только exact
+  `userId=...` + `firstInstallTime` и остановился до install; некоторые версии печатают `appId`
+  либо time в другой секции. Сначала read-only вывести только safe matching keys и
+  `cmd package list packages -U`; parser должен принимать `userId|appId`, проверять ambiguity и
+  всё равно сравнивать UID + firstInstallTime до/после. Не ослаблять data-preservation gate.
 - **Пустой native stdout через pipeline может не создать snapshot-файл:** конструкция
   `adb ... | Set-Content $Path` на Стасе вернула no output, поэтому `Set-Content` не вызвался и
   последующий `Get-Content` упал, хотя `$LASTEXITCODE=0`. Сначала получать `Out-String`, затем

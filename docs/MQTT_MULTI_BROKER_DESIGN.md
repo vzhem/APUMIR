@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **v11.16.11 APK и signer compatibility PASS; install -r на 3 телефона разрешён**
+Статус: **APK/signer PASS; install paused before adb install for package-schema diagnostic**
 
 Дата: 2026-08-14
 
