@@ -1162,6 +1162,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `.ExitCode`; calls parameterless WaitForExit after bounded wait for redirected-stream flush.
   Separate build2 paths; same exact artifact/signature/native gates. Следующий gate parser/static
   checks then one corrected artifact build2, no phones.
+- **2026-08-14 (доп.110)** — corrected r4.3 v11.16.14 APK build2 PASS. State
+  `%TEMP%\apu-r4.3-observe-v11.16.14-apk-build2.json`, SHA-256
+  `01A649477F975B312D1CAB4797B217ACA5E6C68071E0AAC8736426FD9B492FBF`; exact child Gradle PID
+  11116/exit0, BUILD SUCCESSFUL=1, duration49.48s. APK v11.16.14/11016014:
+  22,615,564 B, SHA-256 `6C4D29DA78EB914C172376955B4A802473C26EB7595E25BEB51373D0CCE13F5C`;
+  V2 signer cert F843…A4A5F7 exact; embedded feature `.so` 7,193,912 B / D7A2…FE95 exact.
+  Phones/ADB/install/launch/public traffic=false. Artifact gate closed. Minimal r4.3 runtime plan:
+  data-preserving install+one launch только Anna, while Zhenya/Stas remain v11.16.13 primary peers;
+  this does not switch Anna away from HiveMQ because EMQX observer has subscriptions/publishes=0.
+  Require explicit phone-change approval before versioned harness.
+
+---
 
 ---
 

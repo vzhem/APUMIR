@@ -307,8 +307,9 @@ Windows feature child build фактически завершён (`Finished rel
 `Start-Process -Wait` wrapper завис после child exit и был прерван; parent FAIL state immutable.
 Corrected recovery PASS: feature marker/Finished release/errors=1/1/0; `.so` 7,193,912 B /
 `D7A2216E…D95FE95`, observe-only binary markers exact. Feature compile gate closed; APK v11.16.14
-First artifact harness stopped before Gradle on scalar-zero Wait helper defect; state proves no
-build/phones. Corrected build2 uses object-shaped wait result and distinct paths; pending.
+First artifact harness stopped before Gradle on scalar-zero Wait helper defect. Corrected build2
+PASS: v11.16.14 APK 22,615,564 B / `6C4D29DA…E13F5C`, signer/native exact. Minimal Anna-only
+observe runtime install/launch awaits approval; primary HiveMQ remains active.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 
