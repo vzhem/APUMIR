@@ -1,8 +1,8 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.3 v11.16.14 Anna runtime captured; immutable-evidence recovery analyzer pending**
+Статус: **r4.3 v11.16.14 Anna observe-only runtime PASS; r4.4 next**
 
-Дата: 2026-08-14
+Дата: 2026-08-15
 
 Этап: M3(c.2-r4, до M3(d)
 
@@ -320,8 +320,11 @@ r4.3 acceptance-событие. Primary остался HiveMQ: один initial 
 1.432 с в том же generation=1/attempt=1, затем READY, heartbeat и 64 incoming; pending,
 backpressure, request failures, stall и restart=0. Поэтому strict `primaryErrors==0` дал ложный
 incomplete: одиночная bounded ошибка допустима только при доказанном последующем same-session
-ready/progress. Добавлен saved-only `r43_anna_runtime2_analyze.ps1`; до его Windows ParseFile/PASS
-r4.3 формально pending. Analyzer не использует ADB/logcat и не повторяет install/launch.
+ready/progress. Saved-only `r43_anna_runtime2_analyze.ps1` Windows ParseFile/safety и execution
+PASS без ADB/logcat/install/launch. Recovery state SHA-256 `9F10B5D1…58E55` связал exact parent
+E4AA…8425 и manifest 2A3C…3FA0; outcome `PASS_FROM_IMMUTABLE_RUNTIME2_EVIDENCE`. **r4.3 gate
+закрыт PASS**. Parent incomplete и отсутствующие early lifecycle markers остаются immutable;
+runtime2/analyzer не повторять. Следующий этап — r4.4 bounded dual publish + production dedup.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 

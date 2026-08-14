@@ -281,8 +281,10 @@ RelayMessage {
   stable, peers unchanged. EMQX connected ConnAck=1/poll_errors=0 и contract
   subscriptions/publishes=0/0; primary HiveMQ после одного bounded initial timeout восстановился
   в том же generation/attempt, дал READY+heartbeat+64 incoming без stall/restart/request failure.
-  Parent incomplete вызван strict marker/error harness gate; saved-evidence-only analyzer pending,
-  runtime2/relaunch не повторять. EMQX fanout не подключён; public delivery probe не повторять.
+  Parent incomplete вызван strict marker/error harness gate; saved-evidence-only analyzer затем
+  PASS без ADB/logcat/install/launch (recovery SHA-256 `9F10B5D1…58E55`). r4.3 gate закрыт;
+  runtime2/analyzer/relaunch не повторять. EMQX fanout ещё не подключён; следующий этап r4.4,
+  public delivery probe/high-load не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:

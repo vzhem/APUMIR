@@ -1212,6 +1212,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   r4.3 формально не закрывать. Общее правило: не требовать `MQTT error=0` как самоцель — норма
   только bounded error с последующим same-session ready/progress; отсутствие последующего ready,
   repeated/tight errors, stall/restart, pending growth или PID change остаются failure.
+- **2026-08-15 (доп.114)** — saved-evidence-only r4.3 runtime2 analyzer Windows ParseFile/safety
+  PASS; worktree script SHA-256 `F53742D765F86FCB705ED3C79548E4862E4FEF67392DF022223FB36A714E9D51`.
+  Recovery state `%TEMP%\apu-r4.3-observe-v11.16.14-anna-runtime2-analysis-recovery.json`,
+  SHA-256 `9F10B5D13BC00033991AB27CF3EABAADC4D0BE34E242FBF47AA180B766258E55`, outcome
+  `PASS_FROM_IMMUTABLE_RUNTIME2_EVIDENCE`; parent E4AA…8425 и evidence manifest 2A3C…3FA0 exact.
+  Anna v11.16.14 PID `21678` stable; EMQX connected ConnAck=1, subscriptions/publishes=0/0,
+  errors=0. Primary HiveMQ READY+heartbeat+64 incoming после единственного initial timeout,
+  recovered за 1.432 с в generation=1/attempt=1. Zhenya/Stas v11.16.13 PID `20562/23149`
+  unchanged. Analyzer ADB/logcat/install/launch=false. **r4.3 runtime gate закрыт PASS**; parent
+  incomplete и missing early lifecycle markers остаются immutable facts, ничего не повторять.
+  Следующий выбранный этап — r4.4 bounded dual publish max2 + production cross-broker dedup;
+  сначала source/local compile gates, public high-load запрещён.
 
 ---
 
