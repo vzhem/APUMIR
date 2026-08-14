@@ -533,8 +533,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   binding установлен, attack logs очищены и `attackLogBaselineReady=true`.
 - **2026-08-14 (доп.40)** — после live gate peer lines `2/9/16` опубликован ровно один
   conflicting-origin relay того же ID: attacker origin, QoS1, retain=false, 179 B. PID остались
-  `14734/24000/13746`; attack snapshots готовы, test-ID refs=`2/2/2`. Не повторять и не очищать;
-  следующий шаг — ASCII-only exact conflict/no-side-effect analysis + resource metrics.
+  `14734/24000/13746`; attack snapshots готовы, test-ID refs=`2/2/2`. Не повторять.
+- **2026-08-14 (доп.41)** — attack semantics полностью ожидаемые: Анна/Женя forged input=1 и
+  previously-seen=1, Стас forged input=1/conflict-drop=1; на всех store/local/receipt/cleanup/
+  origin/UI/errors/crash=0. Resources safe (max 35°C). Analyzer поставил incomplete только потому,
+  что поздний `pidof` Жени вернул `8350 24000`, хотя expected `24000` жив. State имеет analysis
+  complete/pass=false, logs не очищены. Нужен local process-identity diagnostic; attack не повторять.
 
 ---
 
@@ -576,6 +580,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   log clear; `py_compile` такое не ловит. Automation должна выводить только ASCII metrics/
   `json.dumps(..., ensure_ascii=True)`, либо использовать `backslashreplace`; raw logs уже лежат
   в snapshot и не должны печататься в консоль.
+- **`pidof <package>` может вернуть несколько PID через пробел:** exact string equality дала
+  ложный restart на Жене (`8350 24000`), хотя ожидаемый cache-owning PID `24000` оставался в
+  списке и attack snapshot был снят именно с него. Сначала разбирать PID как tokens и требовать
+  membership expected PID; при новом PID отдельно смотреть `/proc/<pid>/cmdline/status` и `ps`,
+  потому что auxiliary/duplicate process может влиять на MQTT. Не повторять уже sent attack.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -744,8 +753,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2: normal setup PASS; ровно один conflicting-origin
-   relay (QoS1/non-retained/179 B) уже published, snapshots refs=`2/2/2`, PID стабильны. Повтор и
-   log clear запрещены до ASCII-only conflict/no-side-effect analysis. Затем control delivery и
-   post-resource сравнение. M3(d), UI/background пока не трогать.
+7. Low-volume security smoke generation 2: attack semantics PASS, но final marker false только
+   из-за multi-PID Жени `8350 24000`; expected PID `24000` жив, logs сохранены. Следующий шаг —
+   local `/proc`/`ps` identity diagnostic без publish/clear; затем membership-aware finalizer.
+   Control, M3(d), UI/background пока не трогать.
 

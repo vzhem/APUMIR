@@ -300,6 +300,8 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   non-retained, 183 B; PID стабильны, immediate snapshot refs=`10/7/10`. После двух harness
   failures ASCII-only finalizer сохранил exact PASS: Анна relay/store/cleanup/origin=`1/1/1/1`,
   Женя=`1/1/1/0`, Стас relay/local/receipt/UI=`1/1/1/1`; duplicate=0, errors/crash=0. Recipient
-  origin binding установлен, attack log baseline очищен. Затем после live gate опубликована одна
-  conflicting-origin injection: QoS1, non-retained, 179 B; PID стабильны, snapshot refs=`2/2/2`.
-  Повтор запрещён; до control нужен exact conflict drop/no receipt/UI/re-enqueue analysis.
+  origin binding установлен, attack log baseline очищен. Затем одна conflicting-origin injection
+  (QoS1/non-retained/179 B) дала exact semantics PASS: Анна/Женя previously-seen=1/1, Стас
+  conflict-drop=1; store/delivery/receipt/UI/errors/crash=0, max 35°C. Final gate false только из-за
+  `pidof` Жени=`8350 24000` при живом expected PID `24000`. До control нужен process identity
+  diagnostic и membership-aware finalizer; attack не повторять, logs не очищать.
