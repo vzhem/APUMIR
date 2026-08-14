@@ -255,8 +255,9 @@ RelayMessage {
   subscribed traffic through capture end, no stall/restart/request failures. Exact cold-start READY
   lines were evicted; launch is not repeated. r1b3 source добавил topic-aware overflow: последние
   32/256 slots защищены от refreshable presence/gossip/ping/summary; relay/receipt/message/ACK/
-  unknown fail-closed loss-intolerant и не drop. Best-effort drop observable/rate-limited; Windows
-  build pending. Durable critical handoff при полном reserve/recovery остаётся r1b4. EMQX/fanout не
+  unknown fail-closed loss-intolerant и не drop. Best-effort drop observable/rate-limited. Windows
+  Rust build `a69c1a0` PASS; `.so` 7,169,720 B / `E36F32E8…6B9B066`. Durable critical handoff при
+  полном reserve/recovery остаётся r1b4. EMQX/fanout не
   подключены; public delivery probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/

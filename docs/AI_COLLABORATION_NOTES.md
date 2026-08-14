@@ -875,6 +875,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Loss-intolerant всё ещё ждёт `.send().await` и никогда не drop; durable pending handoff перед
   r1b2 session abort/replacement — следующий отдельный r1b4, без него overflow/recovery gate не
   закрыт. Телефоны/APK/public traffic не менялись.
+- **2026-08-14 (доп.85)** — r4.2-r1b3 Windows Android Rust build PASS exact source
+  `a69c1a0bc44e653758523965ca6c46e48deb0bd8`: `build-rust.ps1` exit=0,
+  `Finished release`=1, compiler errors=0, duration 65.99 с. Harness warning count=10 включает
+  прежние 9 warning lines + Cargo summary `generated 9 warnings`, не новый десятый defect.
+  arm64 `libp2p_core.so`: 7,169,720 B, SHA-256
+  `E36F32E8CB1E6FA641D380550A496523840D174CC70B4888C04D5E2DD6B9B066`; hash отличается от
+  r1b2. Windows HEAD/remote exact, Git modified только generated arm64 `.so`, не commit.
+  State/log: `%TEMP%\apu-r4.2-r1b3-rust-build.json` и `.log`; APK/phones/public traffic не
+  менялись. Следующий source-only r1b4 — durable/owned pending handoff loss-intolerant event при
+  full critical reserve и session replacement, без silent relay/receipt loss.
 
 ---
 

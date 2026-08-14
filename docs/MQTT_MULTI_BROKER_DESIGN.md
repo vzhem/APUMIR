@@ -258,9 +258,12 @@ clear — refreshable best-effort; message/relay/receipt/ACK и unknown — loss
 non-blocking `try_send`, допустимый drop всегда увеличивает `best_effort_drops`, а payload-free log
 ограничен первым случаем и powers-of-two. Counter добавлен в heartbeat/stall/exit markers. Четыре
 pure tests покрывают taxonomy, unknown safety, exact reserve boundary и bounded logging; static
-integration checks PASS, host cargo не запускался. Loss-intolerant path по-прежнему ждёт `send` и
-никогда не drop; durable pending handoff перед session replacement остаётся отдельным r1b4.
-EMQX, dual publish и cross-broker dedup не подключены; transient sender остаётся отдельным долгом.
+integration checks PASS, host cargo не запускался. Windows Android Rust build source `a69c1a0`
+PASS за 65.99 с, exit=0/errors=0; arm64 `.so` 7,169,720 B, SHA-256
+`E36F32E8CB1E6FA641D380550A496523840D174CC70B4888C04D5E2DD6B9B066`. Loss-intolerant path
+по-прежнему ждёт `send` и никогда не drop; durable pending handoff перед session replacement
+остаётся отдельным r1b4. EMQX, dual publish и cross-broker dedup не подключены; transient sender
+остаётся отдельным долгом.
 
 ### r4.3 — вторая session за feature gate
 
