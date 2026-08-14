@@ -279,7 +279,9 @@ Rust build source `1a43342` PASS за 66.01 с, exit=0/errors=0; arm64 `.so` 7,1
 block остановился до Gradle из-за PowerShell `java -version` stderr handling; build не attempted,
 APK/phones не менялись. Corrected build2 затем собрал v11.16.13 APK (22,599,180 B,
 `5A26728B…D7C03BA`), version/V2/build exits PASS, но exact certificate-line parser остановил state
-до cert/native extraction. Build не повторять; read-only artifact recovery pending. EMQX, dual publish
+до cert/native extraction. Read-only recovery PASS без rebuild: signer cert exact, embedded r1b4
+native exact; authoritative APK v11.16.13 22,599,180 B / `5A26728B…D7C03BA`. Preinstall snapshot
+pending. EMQX, dual publish
 и cross-broker dedup не подключены;
 transient sender остаётся отдельным долгом.
 

@@ -945,6 +945,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   открыть existing APK ZIP и проверить embedded `.so` size/hash. Общее parser rule: raw output
   сохранять до parsing; tool version/localization/separators не считать build failure. Если
   exit+positive marker+artifact уже PASS, parser failure исправлять read-only analyzer, не rebuild.
+- **2026-08-14 (доп.91)** — v11.16.13 APK read-only validation recovery PASS без rebuild.
+  Recovery state `%TEMP%\apu-r4.2-r1b4-v11.16.13-apk-validation-recovery.json`; parent build2
+  state SHA-256 `73D33593BCFB5FF82718716A1929AE7CD89028A215E2E7389A1AE41DE3A570AD`.
+  Authoritative APK `%TEMP%\apu-r4.2-r1b4-v11.16.13-build2.apk`: v11.16.13/11016013,
+  22,599,180 B, SHA-256 `5A26728BE78941C7D0CA6FE8FBE24AD81679A57F60FE87B35999014F3D7C03BA`.
+  Signer exit=0, V2=true, exactly one signer; certificate SHA-256
+  `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7` exact installed signer.
+  Embedded arm64 `.so` 7,180,888 B / `E706A9009F28E842F6A030D0CCC7BABB28D56E20DEFB5FB34117FD87F032E7E5`
+  exact r1b4. Причина old parser stop: actual label `V2 Signer: certificate SHA-256 digest`, не
+  ожидавшийся `Signer #1 ...`; normalized semantic parser PASS. BuildRepeated/phones/ADB/install/
+  launch/public traffic=false. APK не перезаписывать. Следующий шаг — distinct read-only
+  v11.16.13 preinstall snapshot; install требует отдельного guarded data-preserving блока.
 
 ---
 
