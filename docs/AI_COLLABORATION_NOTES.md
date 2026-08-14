@@ -741,6 +741,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   System log за 2 часа содержит одно disk event — нужно отдельно вывести ID/provider и mapping
   C:/D: до нового Java process. Дальше предпочтителен process-local JDK17 override на `C:`, без
   изменения system JAVA_HOME и без build, затем только один guarded `gradlew --version` preflight.
+- **2026-08-14 (доп.72)** — disk mapping доказал environment root cause: `C:` = Netac SSD
+  Healthy/Online, volume Healthy; `D:` = HDD ST1000DM010, physical API Healthy/Online, но volume
+  Health=`Warning`. System журнал содержит NTFS Error Event ID 55 в 15:57:45Z: повреждена
+  структура файловой системы тома D, нужна online check. Оба JBR crash читали
+  `D:\Android Studio\jbr\bin\jimage.dll`. Пользователь выбрал APU работать только с C.
+  Не запускать Java/Gradle/JBR с D и не делать chkdsk repair до отдельного согласования/backup
+  важных данных. Для сборки использовать только process-local
+  `C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot`, `--no-daemon`, с восстановлением
+  env после команды; system JAVA_HOME не менять. Сначала guarded `java -version` +
+  `gradlew --version`, без assemble, и проверка отсутствия нового hs_err.
 
 ---
 
