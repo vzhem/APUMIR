@@ -1,9 +1,15 @@
 //! # MQTT Transport — децентрализованный bootstrap + presence + relay
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS};
 use tokio::sync::{mpsc, oneshot, Mutex};
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, Packet};
+
+use crate::network::mqtt_liveness::{
+    assess_mqtt_liveness, MqttLivenessAssessment, MqttLivenessProbe,
+};
 
 pub const MQTT_BROKERS: &[(&str, u16)] = &[
     ("broker.hivemq.com", 1883),
@@ -15,6 +21,10 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 const MQTT_EVENT_BUFFER: usize = 256;
 const MQTT_RECONNECT_BACKOFF_MAX_SECS: u64 = 30;
+const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
+const MQTT_LIVENESS_STALL_AFTER: Duration = Duration::from_secs(90);
+const MQTT_LIVENESS_WARNING_REPEAT: Duration = Duration::from_secs(60);
+const MQTT_LIVENESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(120);
 const MAX_MESH_TOPIC_SEGMENT_BYTES: usize = 128;
 const MAX_MESH_MESSAGE_ID_BYTES: usize = 256;
 
@@ -66,6 +76,9 @@ pub struct MqttTransport {
     event_tx: Option<mpsc::Sender<MqttNotification>>,
     event_rx: mpsc::Receiver<MqttNotification>,
     eventloop_task: Option<tokio::task::JoinHandle<()>>,
+    eventloop_watchdog_task: Option<tokio::task::JoinHandle<()>>,
+    liveness: Arc<MqttLivenessProbe>,
+    shutdown_requested: Arc<AtomicBool>,
     has_connected_once: bool,
     node_id: String,
     peers: Arc<Mutex<Vec<PeerInfo>>>,
@@ -97,6 +110,9 @@ impl MqttTransport {
             event_tx: Some(event_tx),
             event_rx,
             eventloop_task: None,
+            eventloop_watchdog_task: None,
+            liveness: Arc::new(MqttLivenessProbe::new()),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
             has_connected_once: false,
             node_id: node_id.to_string(),
             peers: Arc::new(Mutex::new(Vec::new())),
@@ -131,14 +147,23 @@ impl MqttTransport {
             .take()
             .ok_or_else(|| "MQTT event channel unavailable".to_string())?;
         let (initial_connack_tx, initial_connack_rx) = oneshot::channel::<()>();
+        let (eventloop_exit_tx, mut eventloop_exit_rx) = oneshot::channel::<&'static str>();
+        let eventloop_liveness = Arc::clone(&self.liveness);
+        let watchdog_liveness = Arc::clone(&self.liveness);
+        let watchdog_shutdown_requested = Arc::clone(&self.shutdown_requested);
 
         self.eventloop_task = Some(tokio::spawn(async move {
             let mut reconnect_backoff_secs = 1u64;
             let mut initial_connack_tx = Some(initial_connack_tx);
-            loop {
-                match eventloop.poll().await {
+            let exit_reason = loop {
+                eventloop_liveness.mark_poll_started();
+                let poll_result = eventloop.poll().await;
+                eventloop_liveness.mark_poll_completed();
+
+                match poll_result {
                     Ok(Event::Incoming(Packet::Publish(p))) => {
                         reconnect_backoff_secs = 1;
+                        eventloop_liveness.mark_incoming_publish();
                         tracing::info!(
                             "MQTT IN: topic={} payload_len={} payload={:?}",
                             p.topic,
@@ -152,23 +177,28 @@ impl MqttTransport {
                             topic: p.topic.clone(),
                             payload: String::from_utf8_lossy(&p.payload).to_string(),
                         };
+                        eventloop_liveness.mark_forwarding();
                         if event_tx
                             .send(MqttNotification::Message(event))
                             .await
                             .is_err()
                         {
-                            break;
+                            break "core notification channel closed while forwarding publish";
                         }
+                        eventloop_liveness.mark_notification_forwarded();
                     }
                     Ok(Event::Incoming(Packet::ConnAck(_))) => {
                         reconnect_backoff_secs = 1;
+                        eventloop_liveness.mark_connack();
+                        eventloop_liveness.mark_forwarding();
                         if event_tx
                             .send(MqttNotification::ConnectionAcknowledged)
                             .await
                             .is_err()
                         {
-                            break;
+                            break "core notification channel closed while forwarding ConnAck";
                         }
+                        eventloop_liveness.mark_notification_forwarded();
                         if let Some(sender) = initial_connack_tx.take() {
                             let _ = sender.send(());
                         }
@@ -177,6 +207,8 @@ impl MqttTransport {
                         reconnect_backoff_secs = 1;
                     }
                     Err(e) => {
+                        eventloop_liveness.mark_poll_error();
+                        eventloop_liveness.mark_backoff();
                         tracing::warn!(
                             "MQTT error: {}; retrying in {}s",
                             e,
@@ -186,6 +218,105 @@ impl MqttTransport {
                         reconnect_backoff_secs = reconnect_backoff_secs
                             .saturating_mul(2)
                             .min(MQTT_RECONNECT_BACKOFF_MAX_SECS);
+                    }
+                }
+            };
+
+            eventloop_liveness.mark_stopped();
+            tracing::error!("MQTT: event loop stopped: {}", exit_reason);
+            let _ = eventloop_exit_tx.send(exit_reason);
+        }));
+
+        self.eventloop_watchdog_task = Some(tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(MQTT_LIVENESS_WATCHDOG_INTERVAL);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            ticker.tick().await;
+
+            let mut last_heartbeat = Instant::now();
+            let mut last_stall_warning: Option<Instant> = None;
+
+            loop {
+                tokio::select! {
+                    exit_result = &mut eventloop_exit_rx => {
+                        let snapshot = watchdog_liveness.snapshot();
+                        match exit_result {
+                            Ok(reason) => tracing::error!(
+                                "MQTT LIVENESS: EventLoop task exited: reason={} phase={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                reason,
+                                snapshot.phase.as_str(),
+                                snapshot.polls_completed,
+                                snapshot.polls_started,
+                                snapshot.incoming_publishes,
+                                snapshot.connacks,
+                                snapshot.notifications_forwarded,
+                                snapshot.poll_errors
+                            ),
+                            Err(_) if watchdog_shutdown_requested.load(Ordering::Acquire) => {
+                                tracing::info!("MQTT LIVENESS: EventLoop task closed during requested shutdown")
+                            }
+                            Err(_) => tracing::error!(
+                                "MQTT LIVENESS: EventLoop task ended without completion signal; possible panic/abort; phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                snapshot.phase.as_str(),
+                                snapshot.phase_age_ms(),
+                                snapshot.progress_age_ms(),
+                                snapshot.polls_completed,
+                                snapshot.polls_started,
+                                snapshot.incoming_publishes,
+                                snapshot.connacks,
+                                snapshot.notifications_forwarded,
+                                snapshot.poll_errors
+                            ),
+                        }
+                        break;
+                    }
+                    _ = ticker.tick() => {
+                        let snapshot = watchdog_liveness.snapshot();
+                        match assess_mqtt_liveness(snapshot, MQTT_LIVENESS_STALL_AFTER) {
+                            MqttLivenessAssessment::Healthy => {
+                                last_stall_warning = None;
+                            }
+                            MqttLivenessAssessment::Stalled { phase, stalled_for_ms } => {
+                                let should_warn = last_stall_warning
+                                    .map(|last| last.elapsed() >= MQTT_LIVENESS_WARNING_REPEAT)
+                                    .unwrap_or(true);
+                                if should_warn {
+                                    tracing::warn!(
+                                        "MQTT LIVENESS STALLED: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                        phase.as_str(),
+                                        stalled_for_ms,
+                                        snapshot.progress_age_ms(),
+                                        snapshot.polls_completed,
+                                        snapshot.polls_started,
+                                        snapshot.incoming_publishes,
+                                        snapshot.connacks,
+                                        snapshot.notifications_forwarded,
+                                        snapshot.poll_errors
+                                    );
+                                    last_stall_warning = Some(Instant::now());
+                                }
+                            }
+                            MqttLivenessAssessment::Stopped => {
+                                tracing::error!(
+                                    "MQTT LIVENESS: probe reports stopped before task completion signal"
+                                );
+                            }
+                        }
+
+                        if last_heartbeat.elapsed() >= MQTT_LIVENESS_HEARTBEAT_INTERVAL {
+                            tracing::info!(
+                                "MQTT LIVENESS HEARTBEAT: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                snapshot.phase.as_str(),
+                                snapshot.phase_age_ms(),
+                                snapshot.progress_age_ms(),
+                                snapshot.polls_completed,
+                                snapshot.polls_started,
+                                snapshot.incoming_publishes,
+                                snapshot.connacks,
+                                snapshot.notifications_forwarded,
+                                snapshot.poll_errors
+                            );
+                            last_heartbeat = Instant::now();
+                        }
                     }
                 }
             }
@@ -210,10 +341,13 @@ impl MqttTransport {
         // Clear any old retained presence before run_mqtt_transport publishes the
         // current presence. Both requests preserve their order in the client queue.
         let topic = format!("p2pm2/presence/{}", self.node_id);
-        let _ = self
+        if let Err(error) = self
             .client
             .publish(&topic, QoS::AtLeastOnce, true, b"")
-            .await;
+            .await
+        {
+            tracing::warn!("MQTT: retained presence clear request failed: {}", error);
+        }
 
         Ok(())
     }
@@ -310,6 +444,11 @@ impl MqttTransport {
 
 impl Drop for MqttTransport {
     fn drop(&mut self) {
+        // Stop diagnostics first so a normal transport shutdown is not reported as a panic/abort.
+        self.shutdown_requested.store(true, Ordering::Release);
+        if let Some(task) = self.eventloop_watchdog_task.take() {
+            task.abort();
+        }
         if let Some(task) = self.eventloop_task.take() {
             task.abort();
         }

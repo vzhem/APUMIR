@@ -672,12 +672,27 @@ self.runtime = Some(runtime);
             pa.map(|a| a.to_string())
         };
         let is_relay = addr_str.is_some();
-        let _ = transport.publish_presence(&display_name, addr_str.as_deref(), is_relay).await;
+        match transport
+            .publish_presence(&display_name, addr_str.as_deref(), is_relay)
+            .await
+        {
+            Ok(_) => tracing::info!("MQTT: initial presence request queued after ConnAck"),
+            Err(e) => tracing::warn!("MQTT: initial presence request failed: {}", e),
+        }
 
         if is_relay {
             if let Some(ref addr) = addr_str {
-                let _ = transport.register_as_relay(addr).await;
-                tracing::info!("MQTT: registered as relay at {}", addr);
+                match transport.register_as_relay(addr).await {
+                    Ok(_) => tracing::info!(
+                        "MQTT: relay registration request queued for {}",
+                        addr
+                    ),
+                    Err(e) => tracing::warn!(
+                        "MQTT: relay registration request failed for {}: {}",
+                        addr,
+                        e
+                    ),
+                }
             }
         }
 
@@ -1339,7 +1354,12 @@ self.runtime = Some(runtime);
             tick += 1;
             if tick >= 30 {
                 tick = 0;
-                let _ = transport.publish_presence(&display_name, addr_str.as_deref(), is_relay).await;
+                if let Err(e) = transport
+                    .publish_presence(&display_name, addr_str.as_deref(), is_relay)
+                    .await
+                {
+                    tracing::warn!("MQTT: periodic presence request failed: {}", e);
+                }
                 // === GOSSIP: broadcast known peers to the network ===
                 if !known_peers.is_empty() {
                     let ts = std::time::SystemTime::now()

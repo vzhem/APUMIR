@@ -662,6 +662,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `event_tx.send().await`, core может ждать bounded `AsyncClient.publish().await`; task completion
   не проверяется, periodic presence errors игнорируются. Причина ещё не доказана runtime stack,
   но перед r4.3 обязателен r4.2-r1 observable-liveness/backpressure fix и local stall tests.
+- **2026-08-14 (доп.63)** — r4.2-r1a source добавил чистый payload-free
+  `network/mqtt_liveness.rs`: фазы EventLoop, monotonic phase/progress age и fixed-memory atomic
+  counters; 5 deterministic tests для healthy/stalled boundary/stopped/counters/saturation.
+  `MqttTransport` запускает независимый watchdog (15 с), stall threshold 90 с, warning repeat
+  60 с, heartbeat 120 с; completion oneshot сообщает normal task exit или missing signal, а
+  `shutdown_requested` исключает ложный panic-marker при штатном Drop. EventLoop помечает poll,
+  publish input, ConnAck, forwarding и backoff. Initial/periodic presence, retained clear и relay
+  registration больше не скрывают enqueue errors и не называют queued request broker success.
+  Brokers/QoS/retain/channel caps/backoff/reconnect не изменены; timeout/drop/recovery — r1b.
+  Sandbox без cargo/rustfmt, поэтому host tests не запускались; следующий gate — только Windows
+  `build-rust.ps1`, затем отдельный idle/stall log test новой APK без public user publish.
 
 ---
 
