@@ -601,6 +601,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   source/embedded native оба `B0905083B734886B46BA2EB1B7AE9CBC76E77FAABC6C3359CD091352EE105C65`;
   apksigner exit=0. Regex не распарсил certificate (`NOT_PARSED`), поэтому до install нужно
   read-only сравнить signer SHA-256 нового APK и установленной v11.16.10, не полагаться лишь на exit.
+- **2026-08-14 (доп.53)** — signer preflight подтвердил все 3 телефона online на v11.16.10,
+  затем остановился ДО pull/install: PowerShell `-f` применился только к второй части строки после
+  `+`, и `cmd` получил literal `"{0}"`. Это harness-only fail, APK/phones/data не изменены.
+  Workaround: не сочетать `+` и `-f` без скобок; для apksigner вызвать `.bat` напрямую, временно
+  `ErrorActionPreference=Continue`, сохранить exit/output и парсить SHA-256 из полного текста.
 
 ---
 
@@ -631,12 +636,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   snapshot/state marker. Если строка уже потеряна, live `MQTT: peer online` после последнего
   `MQTT error` логически доказывает действующее subscribed connection; не требовать недоступную
   старую строку и не перезапускать лишь ради лога.
-- **PowerShell parser: function calls вокруг `+` надо заключать в скобки:** внутри hashtable
-  `Count-Literal ... +` на переносе дал parser error, после чего остаток paste снова выполнялся
-  отдельными командами и породил ложный INCOMPLETE/`else` errors. Правильно:
-  `(Count-Literal ...) + (Count-Literal ...)`. Для длинной read-only диагностики безопаснее
-  записать Python/`.ps1` как here-string, сначала compile/parse, затем выполнить; PASS/state/clear
-  остаются только внутри валидного файла.
+- **PowerShell parser/precedence вокруг `+` требует скобок:** function calls у `+` без скобок
+  дали parser error; позже `'<template-a>' + '<template-b>' -f args` применил `-f` только ко второй
+  строке и оставил literal `{0}` для `cmd`. Использовать `(Call ...) + (Call ...)`, а format сначала
+  собирать целиком: `$Template = 'a{0}' + 'b{1}'; $Command = $Template -f $x,$y`. Для длинной
+  диагностики безопаснее записать Python/`.ps1`, сначала compile/parse, затем выполнить;
+  PASS/state/clear остаются только внутри валидного файла.
 - **Python stdout в Windows PowerShell cp1251 не печатает любой Unicode из logcat:** raw line с
   box-drawing glyph дала runtime `UnicodeEncodeError` после верного подсчёта, но до state save и
   log clear; `py_compile` такое не ловит. Automation должна выводить только ASCII metrics/

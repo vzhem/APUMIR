@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.1/r4.2 APK artifact/signature PASS; перед install сравнить signer с v11.16.10**
+Статус: **APK PASS; signer compare preflight подтвердил телефоны, harness retry нужен до install**
 
 Дата: 2026-08-14
 
