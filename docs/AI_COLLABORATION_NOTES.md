@@ -243,6 +243,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   явный opt-in auto-crash; redaction plaintext/keys/tokens/PII, preview, encryption, size/rate
   limits, dedup/backoff/retention и локальный export. Не отправлять напрямую «ИИ»: ИИ получает
   только явно приложенный export или доступный project issue/report. План — фаза 2.4.
+- **Проверки атак — решение пользователя (2026-08-14):** периодически на разных важных APK
+  проверять spam, duplicate/replay, DoS/resource exhaustion, malformed/fuzz inputs, Sybil/
+  spoofing, Android/deep-link/background, media/storage, diagnostics/privacy и update/signing.
+  Короткие low-volume пробы можно делать на 3 своих телефонах; flood/load/soak — только на
+  локальном broker/mock, никогда не на публичном HiveMQ/чужих сервисах. После атаки обязательно
+  проверить recovery обычным сообщением. Полный план: `docs/SECURITY_RESILIENCE_TEST_PLAN.md`.
 
 ---
 
@@ -310,10 +316,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   затем Стас получил ровно 1 `MessageReceived`, второй live relay подавлен, receipts=2.
   Анна/Женя cleanup=1, только Анна origin-delivery=1; оба relay-узла поздний второй relay
   проигнорировали через seen tombstone. Итоговый `Anna stored=0` в позднем агрегате — только
-  вытеснение старой строки из logcat: предыдущая store-фаза уже доказала `1`.
+  вытеснение старой строки из logcat: предыдущая store-фаза уже доказала `1`. Fresh subscriber
+  exact base-topic Стаса получил только retained `gsumm`; retained relay count=0, PID всех трёх
+  не изменились — `send_mesh_relay(retain=false)` доказан.
 
-**Следующий шаг = доказать fresh subscription, что c2 relay не retained, затем reconnect Анны
-без повторной store/delivery/origin-delivery. M3(d) не начинать.**
+**Следующий шаг = reconnect Анны без повторной store/delivery/origin-delivery. M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -410,7 +417,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.16)** — r3 Rust/APK `v11.16.10` собраны; 3-phone delivery для
   `m3c2r3-1786702254585`: store Анна/Женя=1, Стас delivery=1 + duplicate suppressed=1 +
   receipts=2, cleanup Анна/Женя=1, origin-delivery только Анна=1, seen tombstone сработал.
-  Осталось доказать отсутствие retained relay fresh subscription и reconnect без повтора.
+- **2026-08-14 (доп.17)** — independent fresh subscription exact base-topic Стаса получила
+  retained `gsumm`, но `retainedRelayCount=0`; PIDs 12571/27336/2529 не изменились. Остался
+  финальный reconnect Анны без повторной store/delivery/origin-delivery.
+- **2026-08-14 (доп.18)** — добавлен периодический defensive security plan: spam/DoS/replay,
+  malformed/fuzz, Sybil/identity, Android/background, media/storage, diagnostics/privacy и
+  supply-chain. High load только локально; важная APK получает short 3-phone smoke + recovery
+  control message. См. `docs/SECURITY_RESILIENCE_TEST_PLAN.md` и MASTER_PLAN фазы 0.4/8.4.
 
 ---
 
@@ -557,14 +570,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 
 ### 9.7. Старт новой сессии
 1. Прочитать **весь** `docs/AI_COLLABORATION_NOTES.md` (⚙️ принцип, 🌐 mesh, раздел 9).
-2. Прочитать `docs/MESH_DELIVERY.md` и правило milestone-backup в
-   `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`.
+2. Прочитать `docs/MESH_DELIVERY.md`, `docs/SECURITY_RESILIENCE_TEST_PLAN.md` и правило
+   milestone-backup в `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1, M3(a), M3(b) и авто-receipt
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
 4. M3(c.1), c.2 relay-path, r1 reconnect и r2 unique receipt проверены. R2 выявил stale
    retained relay blocker.
 5. R3 `v11.16.10`: build/install и delivery-фаза прошли — local delivery=1, duplicate
    suppressed=1, receipts=2, обе очереди cleanup=1, origin-delivery=1, seen tombstones сработали.
-   Следующий шаг: fresh MQTT subscription доказывает отсутствие retained relay, затем reconnect
-   Анны без повторов. M3(d)/UI/background пока не трогать.
+   Fresh subscription доказала retained relay=0 (retained `gsumm` допустим). Следующий шаг:
+   reconnect Анны без повторов. M3(d)/UI/background пока не трогать.
 

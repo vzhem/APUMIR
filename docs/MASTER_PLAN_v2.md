@@ -17,6 +17,8 @@
 - После каждой существенно важной проверенной сборки ИИ сам предлагает milestone-backup APU
   на внешний носитель с Git history, APK, hashes и clean-PC recovery guide; процедура:
   [`BACKUP_AND_CLEAN_PC_RECOVERY.md`](BACKUP_AND_CLEAN_PC_RECOVERY.md).
+- Spam/DoS/replay и другие defensive tests повторять по важным сборкам; high load только на
+  собственной локальной инфраструктуре: [`SECURITY_RESILIENCE_TEST_PLAN.md`](SECURITY_RESILIENCE_TEST_PLAN.md).
 
 ---
 
@@ -139,10 +141,17 @@ v2.0 добавляет практический путь развития пр�
 - [ ] Создать `docs/RELEASE_PROCESS.md`.
 - [ ] Создать checklist ручной проверки перед релизом.
 - [ ] Создать rollback plan.
+- [ ] Ввести security/resilience gate по
+  [`SECURITY_RESILIENCE_TEST_PLAN.md`](SECURITY_RESILIENCE_TEST_PLAN.md): короткий abuse smoke
+  для каждой важной APK, полный controlled regression/local load для release candidate.
+- [ ] Архивировать результаты: version/commit/devices, counters, resource baseline, найденные
+  дефекты и успешный retest; после нагрузки обязательно доставить обычное control message.
 
 Критерий:
 
 - Следующий релиз публикуется без cleanup и без риска подмены проверенного APK.
+- Нет известных непроверенных blocker по spam/DoS/replay; нагрузочные тесты не проводятся на
+  публичных/чужих сервисах, а только в своей локальной лаборатории.
 
 ## Фаза 0.2 — Документация текущей архитектуры
 
@@ -186,6 +195,21 @@ v2.0 добавляет практический путь развития пр�
 Критерий: пользователь везде видит только APU; приложение имеет единый оригинальный adaptive
 logo и согласованный современный интерфейс в light/dark themes, а старые технические имена
 остаются только внутри совместимых путей/кода и не требуют опасного переименования репозитория.
+
+## Фаза 0.4 — Периодические defensive abuse-тесты
+
+- [ ] Поддерживать матрицу spam/DoS/replay/parser/Sybil/Android/media/privacy/update tests.
+- [ ] Делить тесты на: unit/fuzz без сети; короткий 3-phone smoke; высокий load/soak только с
+  локальным broker/mock и stop conditions; независимый review перед production security claim.
+- [ ] Не атаковать публичный HiveMQ, GitHub, Cloudflare или чужие endpoints: там допустимы только
+  малые функциональные пробы своими test IDs.
+- [ ] Измерять crash/ANR/PID, duplicate UI, queues/caches, CPU/RAM/network/disk/battery/temperature,
+  reconnect/backoff и обязательное восстановление обычной доставки после теста.
+- [ ] Каждый найденный дефект закреплять regression test, исправлять и повторно проверять на той
+  же APK-матрице. Полная процедура — `docs/SECURITY_RESILIENCE_TEST_PLAN.md`.
+
+Критерий: важная сборка не только выполняет новый сценарий, но и сохраняет hard limits,
+приватность и нормальную доставку после согласованной безопасной нагрузки.
 
 ---
 
@@ -413,6 +437,8 @@ InviteFriendScreen
 - [ ] Глобальный поиск выполнять по точному `@username`, а не по display name.
 - [ ] Display name оставить свободным и неуникальным.
 - [ ] Добавить rate limits, opt-in discoverability и защиту от массового перебора.
+- [ ] Периодически тестировать enumeration, case variants, rename churn, squatting, forged
+  PK binding и Sybil-регистрации в собственной test registry; не сканировать чужие сервисы.
 - [ ] Продумать rename/recovery/cooldown и защиту от захвата известных имён.
 - [ ] Registry использовать как первый discovery-слой; долгосрочно проверить DHT/распределённый
   механизм уникальности. При недоступности lookup сохранять добавление по signed invite/PK.
@@ -480,6 +506,12 @@ InviteFriendScreen
 - [ ] Relay nodes хранят только E2E encrypted payload.
 - [ ] Пользователь может разрешить устройству быть relay.
 - [ ] Ограничения по батарее, Wi-Fi, зарядке, трафику.
+- [ ] Per-origin/per-recipient/global quotas, fair friend-priority queues, bounded replay cache,
+  token buckets для relay/receipt/presence/gossip и ранний drop oversized/malformed payload.
+- [ ] Regression matrix: duplicate/conflicting origin, replay after cleanup/reconnect, queue caps,
+  TTL/hop boundaries, receipt/presence/summary flood и network-flap storm.
+- [ ] Высокий load и Sybil simulation выполнять только через локальный broker/mock; после теста
+  контрольное обычное сообщение обязано доставиться без restart/очистки данных.
 
 ## Фаза 2.4 — Network diagnostics
 
@@ -497,7 +529,11 @@ InviteFriendScreen
 - NAT type;
 - relay candidates;
 - последние network events;
-- export logs.
+- export logs;
+- безопасные counters `accepted/dropped/rate-limited` по типу envelope и причине drop;
+- текущие/максимальные размеры bounded queues/caches, reconnect/backoff и circuit-breaker state;
+- локальный resource baseline CPU/RAM/network/storage/battery/temperature для abuse test без
+  plaintext сообщений, точных контактов и private identifiers.
 
 ### Удалённая отправка диагностических отчётов
 
@@ -700,6 +736,9 @@ InviteFriendScreen
 - [ ] Offline store-and-forward media manifest/chunks с TTL, квотами, лимитом места и приоритетом.
 - [ ] Настройки: auto-download по Wi-Fi/mobile/roaming, максимальный размер и экономия трафика.
 - [ ] Cache/storage manager: просмотр занятого места, выборочная и автоматическая очистка.
+- [ ] Defensive media tests: неверный MIME/имя/path traversal, oversized dimensions, corrupted
+  manifest/chunks, duplicate/out-of-order chunks, checksum mismatch, zip/decompression bomb,
+  disk quota exhaustion и interrupted cleanup — только на собственных тестовых файлах.
 - [ ] Не помещать большие файлы в текстовый MQTT relay-envelope: отдельно передавать bounded
   manifest и chunks через P2P/QUIC/доступные relay transports.
 
@@ -954,6 +993,26 @@ InviteFriendScreen
 - [ ] Dummy traffic.
 - [ ] Delayed delivery.
 - [ ] Контактное обнаружение без раскрытия адресной книги.
+
+## Фаза 8.4 — Abuse resistance: spam, DoS, replay и hostile inputs
+
+- [ ] Parser fuzz/property tests: malformed fields/base64/UTF-8, integer boundaries, unknown tag,
+  payload size limit до дорогого decode/allocation и legacy/new format confusion.
+- [ ] Spam regression: одинаковый `msg_id`, conflicting origin/payload, notification coalescing,
+  duplicate receipt/ACK и replay после cleanup/reconnect/process restart.
+- [ ] Resource DoS: bounded event channels/caches/queues, slow consumer, queue/storage saturation,
+  reconnect storm, backoff+jitter/circuit breaker и recovery после окончания входа.
+- [ ] Identity/Sybil: forged invite/PK/username binding, enumeration, registry poisoning и ложная
+  friend-of-friend цепочка; неизвестные peers не вытесняют friend traffic.
+- [ ] Android surface: malformed deep links/QR/clipboard, exported components/FileProvider,
+  repeated service start/network changes, notification/background wake abuse.
+- [ ] Diagnostics/privacy/update: redaction test с test secrets, collector-key failure,
+  APK signature/checksum/version/provenance и clean-PC milestone restore.
+- [ ] Unit/3-phone/local-load/release-candidate cadence и критерии из
+  `docs/SECURITY_RESILIENCE_TEST_PLAN.md`; high load только на собственной инфраструктуре.
+
+Критерий: нет crash/ANR/restart и второго UI event; hard caps соблюдены, секреты не попали в
+логи, а после каждого теста обычное control message доставляется и приложение само восстановилось.
 
 ---
 
