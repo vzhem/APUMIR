@@ -305,7 +305,8 @@ counters + bounded 1→30s backoff + Drop abort. Legacy switching `MultiBroker` 
 `build-rust.ps1 -Features mqtt-secondary-observe` добавлен для exact gated compile. Versioned
 Windows feature child build фактически завершён (`Finished release`, generated `.so`), но
 `Start-Process -Wait` wrapper завис после child exit и был прерван; parent FAIL state immutable.
-Read-only binary/log recovery pending, rebuild запрещён.
+First recovery stopped on self-referential docs-HEAD guard before analysis; corrected application-
+diff-only recovery pending, rebuild запрещён.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 

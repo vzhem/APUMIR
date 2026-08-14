@@ -1124,6 +1124,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   APK/phones untouched. Build не повторять. Added `r43_observe_build_recover.ps1` проверяет exact
   parent/log/source/binary markers read-only и пишет distinct recovery state. Future nested builds:
   no unbounded `Start-Process -Wait`; exact child `.WaitForExit(timeout)` + timeout evidence.
+- **2026-08-14 (доп.106)** — первый read-only r4.3 build recovery safely stopped before analysis:
+  Windows parser PASS, но script hardcoded previous documentation HEAD `c6164ba`, тогда как script
+  сам добавлен в `a056369`; build/ADB/phones не запускались, recovery state не создан. Это
+  self-referential harness precondition defect. Исправление: launcher отвечает за exact current
+  branch commit; versioned recovery внутри сохраняет фактический docs HEAD и строго требует
+  `git diff --quiet 2689dbb <HEAD> -- rust-core android-app build-rust.ps1`. Не hardcode commit,
+  который ещё изменится при добавлении самого script/docs. Parent build evidence неизменно, build
+  не повторять; distinct corrected script commit, затем read-only recovery.
 
 ---
 

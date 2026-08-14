@@ -4,7 +4,6 @@ Set-StrictMode -Version 2.0
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
-$ExpectedHead = "c6164ba482b7f0e5073161e6d4ef5c84f444913a"
 $ExpectedApplicationCommit = "2689dbb933523bb410d4a0ce22f5122863f0ba63"
 $ExpectedParentStateHash = "1A81D7F0ABE883146C06E9641A2C43AD49F94C80CD35C94A633143964BD42D03"
 $ExpectedPreviousSoHash = "E706A9009F28E842F6A030D0CCC7BABB28D56E20DEFB5FB34117FD87F032E7E5"
@@ -27,8 +26,8 @@ foreach ($RequiredPath in @($ParentStatePath, $StdoutPath, $StderrPath, $SoPath)
 }
 
 $CurrentHead = ((& git rev-parse HEAD) -join "").Trim()
-if ($LASTEXITCODE -ne 0 -or $CurrentHead -ne $ExpectedHead) {
-    throw "Unexpected Windows HEAD: $CurrentHead"
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($CurrentHead)) {
+    throw "Cannot resolve Windows HEAD"
 }
 & git diff --quiet $ExpectedApplicationCommit $CurrentHead -- rust-core android-app build-rust.ps1
 if ($LASTEXITCODE -ne 0) {
