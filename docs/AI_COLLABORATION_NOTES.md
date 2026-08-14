@@ -184,6 +184,13 @@ receipt-cleanup → интеграция в отправку → переисп�
   `git push origin arena/019ffc32-apumir`. **Для продолжения источник истины — только новая
   ветка `arena/019ffc32-apumir`; старую не checkout и не пушить.** Новый ИИ сразу проверяет
   текущую ветку и подтягивает её только fast-forward, без `force-push`.
+- **Масштабирование mesh:** текущие MQTT `p2pm2/#` и all-to-all presence — функциональный
+  прототип, НЕ готовая схема для тысяч телефонов. Уже есть: dedup `msg_id`, TTL 7 дней,
+  `hop_count` до 8, queue 200/recipient и 10 000 total; M3(c.1) добавляет 256 items/64 KiB,
+  cooldown 60 с/peer и 8 summaries/30 с global. До M3(c.2) обязательны batch/byte budgets
+  на relay-пересылку (начать с ≤16 relay за round) и честный fair fanout. Для production на
+  тысячи узлов нужны bounded neighbours (несколько peers за round), DHT/sharding и подписка
+  на own/neighbour topics вместо глобального wildcard. Не обещать масштаб до нагрузочного теста.
 
 ---
 
@@ -193,7 +200,7 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b) + код M3(b.1)):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1) + код M3(c.1)):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -220,7 +227,11 @@ receipt-cleanup → интеграция в отправку → переисп�
   `1/0/0/1/0`, Стас `0/1/1/0/0`; тихий замер 9→9 / 7→7 / 9→9, чужого UI и шторма нет.
   Старый ACK оставлен для совместимости; gossip/send-path не тронуты.
 
-**Следующий шаг = M3(c) gossip summaries + пересылка недостающих relay, только после «да».**
+- **M3(c.1), код готов:** при presence peer получает адресный `gsumm`; принимать его может
+  только target topic. Relay пока НЕ пересылаются. Встроены первые scale-лимиты: максимум
+  256 items / 64 KiB на summary, cooldown 60 с на peer, глобально 8 summary за 30 с.
+
+**Следующий шаг = Windows `build-rust.ps1`; M3(c.2) пока не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -270,7 +281,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   повторного cleanup, Стас получил одно сообщение. Тихий замер подтвердил отсутствие шторма.
 - **2026-08-14 (доп.2)** — M3(b.1) собран и проверен на 3 телефонах: при публикации только
   relay Стас сам отправил mesh receipt, Анна/Женя автоматически очистили очереди, origin
-  получил delivery. Счётчики стабильны, утечки UI/шторма нет. Следующий шаг — M3(c) gossip.
+  получил delivery. Счётчики стабильны, утечки UI/шторма нет.
+- **2026-08-14 (доп.3)** — добавлен код M3(c.1): адресная отправка/приём `gsumm` без relay,
+  с лимитами summary/cooldown/global budget. Зафиксировано честно: глобальный MQTT wildcard
+  не масштабируется на тысячи; до M3(c.2) нужны relay batch/byte budget и bounded fanout.
 
 ---
 
@@ -389,8 +403,11 @@ APK появится: `app\build\outputs\apk\release\app-release.apk`
    `e2e_payload` → текст → `MessageReceived`) + послать `receipt` origin; иначе →
    `if !contains(msg_id) && !hops_exceeded { enqueue(msg с hop+1) }`.
 3. **(b) handle `receipt|…`**: `relay_queue.remove(msg_id)`; если `origin==node_id` → `MessageDelivered` (✓✓).
-4. **(c) gossip**: на peer-discovered → отправить `gsumm` (`relay_queue.digest()`) peer; при
-   получении `gsumm` — переслать peer те свои `relay`-конверты, которых у него нет.
+4. **(c) gossip**, разделён безопасно:
+   - **(c.1)** на presence → адресно отправить `gsumm`; target принимает/парсит, без relay.
+     Лимиты: 256 items, 64 KiB, 60 с/peer, 8 summaries/30 с global.
+   - **(c.2)** сравнить summary и переслать отсутствующие relay; до кода обязательны лимиты
+     ≤16 relay/round + byte budget + fair bounded fanout. Никакого all-to-all без бюджета.
 5. **(d) send-path**: в `send_message`, если recipient офлайн (нет addr) — собрать `relay`-конверт
    (`wire::build_relay`, `e2e_payload`=байты текста, hop=0, ttl) и опубликовать в mesh-топик →
    онлайн-узлы примут в RelayQueue.
@@ -416,7 +433,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 2. Прочитать `docs/MESH_DELIVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1, M3(a), M3(b) и авто-receipt
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
-4. Следующий шаг — M3(c): gossip summary при peer presence и пересылка relay, которого нет
-   в сводке peer. Начинать только после «да», малыми коммитами; M3(d) send-path не трогать.
-   Перед любым `enqueue` по-прежнему обязателен `contains(msg_id)`.
+4. Код M3(c.1) адресных `gsumm` уже добавлен с item/byte/cooldown/global limits, но без relay.
+   Сначала Windows `build-rust.ps1` и телефонный тест логов. M3(c.2) не начинать до «да»;
+   перед ним зафиксировать relay batch/byte budget и bounded fanout. M3(d) не трогать.
 

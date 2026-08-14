@@ -649,6 +649,19 @@ self.runtime = Some(runtime);
         let mut known_peers: std::collections::HashMap<String, (String, std::time::Instant)> = std::collections::HashMap::new();
         let mut seen_gossip: std::collections::VecDeque<String> = std::collections::VecDeque::new();
         const MAX_GOSSIP_CACHE: usize = 500;
+
+        // Mesh gossip budgets: прототип не должен превращать тысячи presence-событий
+        // в безлимитную рассылку. Полная пагинация/Bloom summaries будет в hardening.
+        const MAX_MESH_SUMMARY_ITEMS: usize = 256;
+        const MAX_MESH_SUMMARY_BYTES: usize = 64 * 1024;
+        const MESH_SUMMARY_COOLDOWN_SECS: u64 = 60;
+        const MESH_SUMMARY_WINDOW_SECS: u64 = 30;
+        const MAX_MESH_SUMMARIES_PER_WINDOW: usize = 8;
+        let mut last_mesh_summary_sent: std::collections::HashMap<String, std::time::Instant> =
+            std::collections::HashMap::new();
+        let mut mesh_summary_window_started = std::time::Instant::now();
+        let mut mesh_summaries_sent_in_window: usize = 0;
+
         loop {
             if let Some(evt) = transport.poll_event().await {
                 if evt.topic.starts_with("p2pm2/ping/") {
@@ -685,6 +698,77 @@ self.runtime = Some(runtime);
                                         match transport.send_message(peer_id, &payload).await {
                                             Ok(_) => tracing::info!("  вњ“ Delivered to {}", peer_id),
                                             Err(e) => tracing::warn!("  вњ— Failed: {}", e),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // M3(c.1): отправляем peer только сводку RelayQueue. Никакие relay
+                        // на этом подшаге ещё не пересылаются. Cooldown и глобальный budget
+                        // защищают телефон, если одновременно видны тысячи peers.
+                        if let Some(ref q) = relay_queue {
+                            let now = std::time::Instant::now();
+                            if mesh_summary_window_started.elapsed().as_secs()
+                                >= MESH_SUMMARY_WINDOW_SECS
+                            {
+                                mesh_summary_window_started = now;
+                                mesh_summaries_sent_in_window = 0;
+                                last_mesh_summary_sent.retain(|_, sent_at| {
+                                    sent_at.elapsed().as_secs()
+                                        < MESH_SUMMARY_COOLDOWN_SECS * 10
+                                });
+                            }
+
+                            let cooldown_ready = last_mesh_summary_sent
+                                .get(peer_id)
+                                .map(|sent_at| {
+                                    sent_at.elapsed().as_secs()
+                                        >= MESH_SUMMARY_COOLDOWN_SECS
+                                })
+                                .unwrap_or(true);
+
+                            if cooldown_ready
+                                && mesh_summaries_sent_in_window
+                                    < MAX_MESH_SUMMARIES_PER_WINDOW
+                            {
+                                let digest = q.digest();
+                                if digest.len() > MAX_MESH_SUMMARY_ITEMS {
+                                    tracing::warn!(
+                                        "MESH gossip: summary for {} has {} items (limit {}), skipped",
+                                        peer_id,
+                                        digest.len(),
+                                        MAX_MESH_SUMMARY_ITEMS
+                                    );
+                                    last_mesh_summary_sent.insert(peer_id.to_string(), now);
+                                } else {
+                                    let summary =
+                                        crate::network::wire::build_gossip_summary(&digest);
+                                    if summary.len() > MAX_MESH_SUMMARY_BYTES {
+                                        tracing::warn!(
+                                            "MESH gossip: summary for {} is {} bytes (limit {}), skipped",
+                                            peer_id,
+                                            summary.len(),
+                                            MAX_MESH_SUMMARY_BYTES
+                                        );
+                                        last_mesh_summary_sent.insert(peer_id.to_string(), now);
+                                    } else {
+                                        match transport.send_message(peer_id, &summary).await {
+                                            Ok(_) => {
+                                                mesh_summaries_sent_in_window += 1;
+                                                last_mesh_summary_sent
+                                                    .insert(peer_id.to_string(), now);
+                                                tracing::info!(
+                                                    "MESH gossip: sent summary with {} items to {}",
+                                                    digest.len(),
+                                                    peer_id
+                                                );
+                                            }
+                                            Err(e) => tracing::warn!(
+                                                "MESH gossip: failed to send summary to {}: {}",
+                                                peer_id,
+                                                e
+                                            ),
                                         }
                                     }
                                 }
@@ -912,6 +996,44 @@ self.runtime = Some(runtime);
                                 }
                             }
                             _ => tracing::warn!("MESH receipt: malformed envelope dropped"),
+                        }
+                    } else if evt.payload == "gsumm" || evt.payload.starts_with("gsumm|") {
+                        // M3(c.1): все MQTT-узлы видят topic из-за p2pm2/#, но summary
+                        // принимает только peer, которому адресован p2pm2/msg/<node_id>.
+                        let topic_target = evt
+                            .topic
+                            .strip_prefix("p2pm2/msg/")
+                            .unwrap_or("");
+                        if topic_target == node_id {
+                            if evt.payload.len() > MAX_MESH_SUMMARY_BYTES {
+                                tracing::warn!(
+                                    "MESH gossip: incoming summary is {} bytes (limit {}), dropped",
+                                    evt.payload.len(),
+                                    MAX_MESH_SUMMARY_BYTES
+                                );
+                            } else {
+                                match crate::network::wire::parse(&evt.payload) {
+                                    Some(MeshEnvelope::GossipSummary { items }) => {
+                                        if items.len() > MAX_MESH_SUMMARY_ITEMS {
+                                            tracing::warn!(
+                                                "MESH gossip: incoming summary has {} items (limit {}), dropped",
+                                                items.len(),
+                                                MAX_MESH_SUMMARY_ITEMS
+                                            );
+                                        } else {
+                                            tracing::info!(
+                                                "MESH gossip: received summary with {} items",
+                                                items.len()
+                                            );
+                                            // M3(c.2) сравнит items с RelayQueue и перешлёт
+                                            // только отсутствующие relay ограниченной пачкой.
+                                        }
+                                    }
+                                    _ => tracing::warn!(
+                                        "MESH gossip: malformed summary dropped"
+                                    ),
+                                }
+                            }
                         }
                     } else {
                         // Обычный формат: senderId|messageId|chatId|recipientId|text.
