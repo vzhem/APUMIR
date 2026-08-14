@@ -214,11 +214,12 @@ receipt-cleanup → интеграция в отправку → переисп�
   `localDelivery=1 removed=0`; повторный receipt ничего повторно не удалил, чужого UI нет.
   Тихий замер стабилен (Анна 0→0, Женя 0→0, Стас 9→9); шторма нет.
 
-- **M3(b.1), код готов:** после принятия relay получатель строит `wire::build_receipt` и
+- **M3(b.1), код собран:** после принятия relay получатель строит `wire::build_receipt` и
   автоматически публикует его в topic origin; все подписанные relay-узлы смогут выполнить
-  проверенный M3(b) cleanup. Старый ACK оставлен для совместимости; gossip/send-path не тронуты.
+  проверенный M3(b) cleanup. Windows `build-rust.ps1` успешно завершён 2026-08-14. Старый ACK
+  оставлен для совместимости; gossip/send-path не тронуты.
 
-**Следующий шаг = проверить M3(b.1) через `build-rust.ps1`; M3(c) пока не начинать.**
+**Следующий шаг = APK + тест только relay; receipt/cleanup должны пройти автоматически.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -267,8 +268,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   очистил очереди Анны/Жени, только Анна получила origin-delivery, дубликат receipt не вызвал
   повторного cleanup, Стас получил одно сообщение. Тихий замер подтвердил отсутствие шторма.
 - **2026-08-14 (доп.2)** — добавлен M3(b.1): получатель relay автоматически строит mesh
-  receipt и публикует его origin через существующий MQTT transport. Старый ACK сохранён;
-  gossip/send-path не тронуты. Ожидается Windows `build-rust.ps1`.
+  receipt и публикует его origin через существующий MQTT transport. Windows `build-rust.ps1`
+  прошёл; следующий шаг — APK и тест публикацией только relay. Старый ACK сохранён;
+  gossip/send-path не тронуты.
 
 ---
 
@@ -414,7 +416,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 2. Прочитать `docs/MESH_DELIVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1, M3(a) и M3(b) уже
    собраны и проверены на Анне/Жене/Стасе; дедуп, cleanup, origin-delivery работают без шторма.
-4. Код M3(b.1) автоматической отправки receipt уже добавлен. Сначала Windows `build-rust.ps1`,
-   затем тест публикацией только relay: receipt/cleanup должны пройти без Python receipt.
-   M3(c), gossip/send-path пока не трогать; перед `enqueue` обязателен `contains(msg_id)`.
+4. M3(b.1) автоматической отправки receipt уже собран через Windows `build-rust.ps1`.
+   Следующий шаг — APK и тест публикацией только relay: receipt/cleanup должны пройти без
+   Python receipt. M3(c), gossip/send-path пока не трогать; перед `enqueue` — `contains(msg_id)`.
 
