@@ -348,9 +348,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
 cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1/r4.2 Rust и APK
-`v11.16.11` artifact/signature PASS; перед установкой осталось сравнить signer с установленной
-`v11.16.10`. r4.2 оставляет один HiveMQ session и ждёт реальный ConnAck до subscription/presence;
-второго broker/fanout пока нет. M3(d), UI/background не начинать.**
+`v11.16.11` artifact/signature/signer compatibility PASS; установка `-r` на 3 телефона разрешена.
+r4.2 оставляет один HiveMQ session и ждёт реальный ConnAck до subscription/presence; второго
+broker/fanout пока нет. M3(d), UI/background не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -606,6 +606,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `+`, и `cmd` получил literal `"{0}"`. Это harness-only fail, APK/phones/data не изменены.
   Workaround: не сочетать `+` и `-f` без скобок; для apksigner вызвать `.bat` напрямую, временно
   `ErrorActionPreference=Continue`, сохранить exit/output и парсить SHA-256 из полного текста.
+- **2026-08-14 (доп.54)** — corrected direct apksigner compare PASS: новый v11.16.11 и
+  установленный на Анне v11.16.10 имеют один V2 certificate SHA-256
+  `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7`. Pulled base.apk удалён,
+  APK ещё не установлен, user data не менялись; evidence разрешил только `adb install -r`.
 
 ---
 

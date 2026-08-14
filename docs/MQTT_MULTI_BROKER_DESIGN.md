@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **APK PASS; signer compare preflight подтвердил телефоны, harness retry нужен до install**
+Статус: **v11.16.11 APK и signer compatibility PASS; install -r на 3 телефона разрешён**
 
 Дата: 2026-08-14
 
@@ -11,8 +11,8 @@ r4.1 добавил изолированный bounded duplicate helper; Android
 сначала должен получить настоящий ConnAck, и только потом ставятся subscription/presence requests.
 r4.2 Android Rust release build прошёл за 1m01s; APK build — за 32s. APK artifact проверен:
 22,550,028 B, SHA-256 `DDC836A…3A12`, embedded native совпал с source, apksigner exit=0. Harness
-не распарсил certificate label, поэтому перед install нужен signer-identity compare с установленной
-v11.16.10. Второй broker и duplicate filter ещё не подключены.
+не распарсил certificate label; corrected compare доказал один V2 signer SHA-256 у нового APK и
+у установленной v11.16.10. Второй broker и duplicate filter ещё не подключены.
 
 ## 1. Зачем это нужно
 
