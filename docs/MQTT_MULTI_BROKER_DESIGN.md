@@ -1,8 +1,13 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **design approved, код ещё не начат**  
-Дата: 2026-08-14  
+Статус: **design approved; r4.1 helper написан, ждёт Windows Android build**
+
+Дата: 2026-08-14
+
 Этап: M3(c.2-r4, до M3(d)
+
+Текущий код r4.1 добавляет только изолированный bounded duplicate helper и unit-test cases.
+Production MQTT path ещё не вызывает его, поэтому сетевое поведение проверенного r3 не изменено.
 
 ## 1. Зачем это нужно
 

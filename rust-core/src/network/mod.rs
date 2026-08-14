@@ -84,5 +84,6 @@ pub enum NetworkError {
     ConnectionNotFound(String),
 }
 
+pub mod mqtt_dedup;
 pub mod mqtt_transport;
 pub mod multi_broker;

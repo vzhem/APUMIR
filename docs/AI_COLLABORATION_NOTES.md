@@ -347,8 +347,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 **M3(c.2-r3), milestone-backup и первый security smoke завершены. Пользователь выбрал следующим
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
-cross-broker dedup, global traffic budgets и сначала два локальных brokers. Следующий малый шаг —
-r4.1 pure duplicate policy; M3(d), UI/background пока не начинать.**
+cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1 pure duplicate
+helper написан изолированно и ждёт Windows `build-rust.ps1`; production path не изменён. M3(d),
+UI/background пока не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -577,7 +578,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   subscriptions/reconnect state per broker, publish fanout max 2, exact SHA-256 topic+payload
   duplicate window 30 s/cap 4096, global (не per-broker) mesh budgets, retained cleanup на всех
   published sessions и deterministic failure tests сначала на двух local Mosquitto brokers.
-  Первый code step r4.1 должен быть pure bounded duplicate helper, без изменения network path.
+- **2026-08-14 (доп.49)** — r4.1 code добавил изолированный `network/mqtt_dedup.rs`: хранит
+  только SHA-256(topic+separator+payload), window 30 s, cap 4096, expiry и deterministic oldest
+  eviction. Четыре unit cases покрывают duplicate/different/expiry/cap. Модуль объявлен, но не
+  подключён к MQTT receive path: до r4.2/r4.4 поведение сети не меняется. Sandbox compile/test
+  невозможен; следующий шаг только Windows `build-rust.ps1`, host `cargo test` не запускать.
 
 ---
 
