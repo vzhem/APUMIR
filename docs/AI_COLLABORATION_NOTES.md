@@ -910,8 +910,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `E706A9009F28E842F6A030D0CCC7BABB28D56E20DEFB5FB34117FD87F032E7E5`. Git modified только
   generated arm64 `.so`, не commit. State/log: `%TEMP%\apu-r4.2-r1b4-rust-build.json` и `.log`.
   APK/phones/public traffic не менялись. r1b3 topic-aware admission + r1b4 owned cross-session
-  handoff source/build gates закрыты; следующий safe artifact gate — C-drive APK v11.16.13 с
-  embedded native exact/signature check, пока без install/launch.
+  handoff source/build gates закрыты.
+- **2026-08-14 (доп.88)** — первый v11.16.13 APK artifact block остановился до Gradle: штатный
+  `java -version` JDK 17.0.17 написал version в stderr, а Windows PowerShell при
+  `$ErrorActionPreference=Stop` превратил её в `NativeCommandError`. Outcome
+  `FAIL_DO_NOT_RETRY_AUTOMATICALLY`, build exit/BUILD SUCCESSFUL/APK/version/signature/native
+  fields empty, phones=false. State `%TEMP%\apu-r4.2-r1b4-v11.16.13-apk-build.json` и logs не
+  удалять, старый блок не повторять. Это harness-only preflight defect, не Java/APU compile FAIL.
+  Сначала read-only подтвердить `BuildAttempted=false`, stable APK absent, exact r1b4 `.so` и
+  generated-only Git status. Затем один corrected build2 с distinct state/log/APK; Java version
+  получать через child `Start-Process`/redirect, чтобы штатный stderr не был terminating error.
 
 ---
 
