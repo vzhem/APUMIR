@@ -690,7 +690,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   hidden retry нет. QoS/retain/topics, AsyncClient cap 100, event cap 256 и backoff 30 с прежние.
   Это должно разорвать вероятный mutual deadlock: core через 5 с перестаёт ждать outgoing channel
   и снова освобождает EventLoop→core queue. Но forwarding `.send().await`, другие core stalls,
-  task restart и transient `send_message_mqtt` пока не исправлены — r1b2. Windows build pending.
+  task restart и transient `send_message_mqtt` пока не исправлены — r1b2.
+- **2026-08-14 (доп.66)** — r4.2-r1b1 Windows Android Rust compile PASS для source `a360833`:
+  61.53 с, exit=0, Cargo `Finished release`, compiler warnings=9, errors=0. Новая arm64
+  `libp2p_core.so`: 7,155,352 B, SHA-256
+  `A1FE612E339D35CD834234832490B252CFC8AB0C120C843AE876EB6D9CBFD73D`; Git modified только
+  generated `.so`, не commit. r1a `.so` BC35… сохранена новым stash, старые stashes не pop.
+  State/log: `%TEMP%\apu-r4.2-r1b1-rust-build.json` и `%TEMP%\apu-r4.2-r1b1-rust-build.log`.
+  PowerShell `NativeCommandError` снова был только stderr progress при exit=0. APK/phones не
+  менялись. Следующий код r1b2: closed channel outcome + bounded whole-session restart.
 
 ---
 

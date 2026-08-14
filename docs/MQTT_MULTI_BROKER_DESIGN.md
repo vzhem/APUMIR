@@ -222,14 +222,15 @@ QoS/retain/brokers/channels/backoff/reconnect не менялись; recovery и
 errors=0. Новая arm64 `.so`: 7,148,552 B, SHA-256
 `BC35DE5C760111B20312E189BFF4C7AC99010B4F1CB512E88652EDDD0AA53995`.
 
-**r4.2-r1b1 source pending Windows build:** новый transport-agnostic `mqtt_backpressure.rs`
-ограничивает ожидание постановки AsyncClient request пятью секундами и различает timeout/client
-error без topic/payload. 4 async/pure tests покрывают success, client error, pending future timeout
-и безопасный error text. Все 8 persistent publish policies и initial/reconnect subscribe используют
+**r4.2-r1b1 Windows compile PASS:** transport-agnostic `mqtt_backpressure.rs` ограничивает
+ожидание постановки AsyncClient request пятью секундами и различает timeout/client error без
+topic/payload. 4 async/pure tests покрывают success, client error, pending future timeout и
+безопасный error text. Все 8 persistent publish policies и initial/reconnect subscribe используют
 единый wrapper; скрытого retry нет. Liveness heartbeat получил `request_timeouts/request_errors`.
-QoS/retain/topics/caps/backoff не менялись. Это разрывает предполагаемый mutual channel deadlock,
-но EventLoop→core stall и automatic session recovery остаются следующим r1b2; transient
-`send_message_mqtt` пока вне этого wrapper.
+QoS/retain/topics/caps/backoff не менялись. Windows `build-rust.ps1` source `a360833` завершён
+за 61.53 с: exit=0, compiler warnings=9, errors=0; arm64 `.so` 7,155,352 B, SHA-256
+`A1FE612E339D35CD834234832490B252CFC8AB0C120C843AE876EB6D9CBFD73D`. EventLoop→core stall и
+automatic session recovery остаются r1b2; transient `send_message_mqtt` пока вне wrapper.
 
 ### r4.3 — вторая session за feature gate
 
