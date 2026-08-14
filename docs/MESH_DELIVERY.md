@@ -249,7 +249,8 @@ RelayMessage {
   known peers/budgets сохраняются. Windows build source `f6130f6` PASS за 61.65 с, exit=0/errors=0;
   arm64 `.so` 7,167,112 B, SHA-256 `7C9537E6…86517194`. C-drive JDK17 APK build3 PASS:
   v11.16.12/11016012, 22,582,796 B, SHA-256 `6765FC7A…649A3F55`, embedded native exact.
-  Signer/install/phone liveness pending. EMQX/fanout не подключены; public delivery probe до
+  Signer preflight PASS: V2 new/installed=true, cert SHA-256 `F843CBE7…A4A5F7`. Data-preserving
+  install/phone liveness pending. EMQX/fanout не подключены; public delivery probe до
   новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/

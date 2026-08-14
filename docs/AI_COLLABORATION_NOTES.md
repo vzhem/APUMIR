@@ -793,6 +793,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `processRunning=false/processIds=[]`; exit=0 требует PID tokens, другие exit/output = STOP.
   После install нужен отдельный controlled launch и новые dynamic PID/liveness gates; старые PID
   не использовать как обязательные.
+- **2026-08-14 (доп.78)** — v11.16.12 signer/device preflight2 PASS: APK 22,582,796 B/hash
+  `6765FC7A…649A3F55`; new и установленная v11.16.11 имеют V2=true и один certificate SHA-256
+  `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7`. Anna base.apk была
+  read-only pulled, hashed и удалена; Java env restored, hs_err set unchanged, install/data не
+  менялись. Все 3 adb devices/version v11.16.11; preinstall process: Anna PID 30085, Zhenya
+  stopped, Stas PID 26923. Stopped process допустим до install. Следующий gate — один atomic
+  `adb install -r` на 3 телефона с appId + independent UID + firstInstallTime preservation;
+  при partial fail не rollback/uninstall/retry, после install приложение пока не launch.
 
 ---
 
