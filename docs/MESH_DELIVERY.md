@@ -266,7 +266,8 @@ RelayMessage {
   но certificate output regex остановил first state. Read-only recovery затем PASS без rebuild:
   signer/embedded r1b4 exact; authoritative APK 22,599,180 B / `5A26728B…D7C03BA`. Первый inline
   preinstall не парсился/не выполнялся; versioned parser-validated preinstall2 затем PASS 3/3 без
-  phone changes. v11.16.13 guarded install awaits explicit approval. EMQX/fanout не
+  phone changes. User approved v11.16.13 guarded install; versioned parser-validated script pending
+  one execution. EMQX/fanout не
   подключены; public delivery probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/

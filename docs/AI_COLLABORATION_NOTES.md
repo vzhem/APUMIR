@@ -982,6 +982,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   calls captured separate stdout/stderr; install/force-stop/launch/logcat/network/public traffic
   false. Следующий phone-changing gate требует explicit approval: versioned guarded `adb install -r`
   v11.16.13; package replacement штатно остановит process, но block не делает force-stop/launch.
+- **2026-08-14 (доп.94)** — пользователь явно разрешил data-preserving install v11.16.13 на
+  Anna/Zhenya/Stas. Добавлен versioned `scripts/v111613_install.ps1`: exact preinstall state/APK/
+  signer guards; все 3 real-time prechecks завершаются до первого phone-changing command; затем
+  ровно один sequential `adb install -r` call site, separate stdout/stderr, exact `Success`, post
+  version/UID/firstInstallTime/dataDir/process-absent. State пишется в `finally` даже при partial
+  install, automatic retry запрещён. Script не содержит actionable uninstall/data clear/force-stop/
+  launch/logcat/network; final PASS только после state write+hash и verified 3/3. Known parser-trap,
+  ordering/state и forbidden-command scans PASS. Первый sandbox checker дал false assertion на
+  слово `uninstall` внутри safety output label `Data clear/uninstall: False`; corrected scan
+  отличает declarations от actionable commands и PASS. Phones пока не менялись; следующий gate —
+  sync exact script, Windows `ParseFile` zero errors, затем approved install once.
 
 ---
 
