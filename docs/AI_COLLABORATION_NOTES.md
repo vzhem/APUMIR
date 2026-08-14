@@ -767,6 +767,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   sorted baseline `full path|size|SHA`, запускает только `java -version` и
   `gradlew --no-daemon --version` с process-local C-drive JDK17, затем требует exact same set/hash.
   Любой new/changed hs_err = STOP; system JAVA_HOME после блока обязательно восстановить.
+- **2026-08-14 (доп.75)** — C-drive JDK17 preflight2 PASS: signed Adoptium
+  `C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot`, jimage SHA-256
+  `F01C057DA0222BC70A7F904C3104DEDFC6F268446EE797C6DD70F9651A52265F`; `java -version` и
+  `gradlew --no-daemon -Dorg.gradle.java.home=<C JDK17> --version` exit=0 и Gradle подтвердил
+  JVM 17.0.17. Baseline/final hs_err=`9/9`, set/hash unchanged, new crash=0; Git только generated
+  `.so`; JAVA_HOME/GRADLE_JAVA_HOME/PATH восстановлены. State/log:
+  `%TEMP%\apu-v11.16.12-jdk17-preflight2.json/.log`. Следующий единственный build3 использует
+  process-local C JDK17 + `--no-daemon`, без `gradlew --stop`; до task обязан проверить, что
+  Android SDK/NDK path тоже не на D. Любой new hs_err или D JBR reference = STOP.
 
 ---
 
