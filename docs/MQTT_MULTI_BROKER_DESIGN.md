@@ -273,8 +273,11 @@ General channel cap 256/reserve 32 теперь держит место для C
 backpressure — fixed-memory counters в heartbeat/stall/exit; invariant violation сохраняет event и
 пишет payload-free error. 7 sync + 1 async tests покрывают FIFO, core/session Arc ownership,
 capacity wait+notify, zero-cap normalization и r1b3 taxonomy. Это session-level in-memory safety,
-не process restart persistence (она остаётся M8). Targeted static checks PASS; Windows build pending.
-EMQX, dual publish и cross-broker dedup не подключены; transient sender остаётся отдельным долгом.
+не process restart persistence (она остаётся M8). Targeted static checks PASS. Windows Android
+Rust build source `1a43342` PASS за 66.01 с, exit=0/errors=0; arm64 `.so` 7,180,888 B, SHA-256
+`E706A9009F28E842F6A030D0CCC7BABB28D56E20DEFB5FB34117FD87F032E7E5`. Следующий gate — APK
+v11.16.13 artifact/signature без install. EMQX, dual publish и cross-broker dedup не подключены;
+transient sender остаётся отдельным долгом.
 
 ### r4.3 — вторая session за feature gate
 

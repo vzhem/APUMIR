@@ -259,8 +259,9 @@ RelayMessage {
   Rust build `a69c1a0` PASS; `.so` 7,169,720 B / `E36F32E8…6B9B066`. r1b4 source вынес
   message/relay/receipt/ACK/unknown в отдельный core-owned FIFO cap 256, shared всеми replacement
   sessions и drained раньше best-effort; full inbox останавливает дальнейший broker poll после
-  initial ConnAck, не удаляя accepted event. Это in-memory session safety, не M8 persistence;
-  Windows build pending. EMQX/fanout не
+  initial ConnAck, не удаляя accepted event. Это in-memory session safety, не M8 persistence.
+  Windows Rust build `1a43342` PASS; `.so` 7,180,888 B / `E706A900…032E7E5`. Следующий gate —
+  v11.16.13 APK artifact/signature без install. EMQX/fanout не
   подключены; public delivery probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/

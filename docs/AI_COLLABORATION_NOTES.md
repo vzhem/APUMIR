@@ -902,6 +902,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   отброшен; это не Rust defect. Host cargo/test не запускались. Broker/QoS/retain/topics не
   изменены. Safety только между sessions внутри живого process; process persistence остаётся M8.
   APK/phones/public traffic не менялись.
+- **2026-08-14 (доп.87)** — r4.2-r1b4 Windows Android Rust build PASS exact source
+  `1a433424d9b340b392b00aef2c093cdd54edb128`: `build-rust.ps1` exit=0,
+  `Finished release`=1, compiler errors=0, duration 66.01 с. Warning count=10 снова равен 9
+  existing warning lines + Cargo summary. Previous r1b3 `.so` hash E36F…B066 exact before build.
+  Новая arm64 `libp2p_core.so`: 7,180,888 B, SHA-256
+  `E706A9009F28E842F6A030D0CCC7BABB28D56E20DEFB5FB34117FD87F032E7E5`. Git modified только
+  generated arm64 `.so`, не commit. State/log: `%TEMP%\apu-r4.2-r1b4-rust-build.json` и `.log`.
+  APK/phones/public traffic не менялись. r1b3 topic-aware admission + r1b4 owned cross-session
+  handoff source/build gates закрыты; следующий safe artifact gate — C-drive APK v11.16.13 с
+  embedded native exact/signature check, пока без install/launch.
 
 ---
 
