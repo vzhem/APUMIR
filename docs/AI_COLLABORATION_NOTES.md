@@ -544,8 +544,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.43)** — membership-aware finalizer сохранил conflicting-origin PASS:
   expected PID present на 3/3; Анна/Женя forged-input+previously-seen=`1+1`; Стас forged-input+
   conflict-drop=`1+1`; все receipt/store/local/UI/cleanup/origin/errors/crash=`0`. Post-attack:
-  max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery delta `0/0/+1`. Logs очищены,
-  `controlLogBaselineReady=true`. Attack завершён, не повторять; дальше один normal control ID.
+  max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery delta `0/0/+1`. Logs очищены.
+- **2026-08-14 (доп.44)** — control ID создан и pre-live gate `6/15/15` прошёл, но PC Paho не
+  подключился к HiveMQ за 10 s и упал ДО `client.publish`; control не отправлен. State:
+  attempted=true, confirmed=false, snapshots absent. Нужна no-publish recovery (0 ID в logs +
+  TCP probe), затем не более одного retry того же ID; attack остаётся завершённым.
 
 ---
 
@@ -592,6 +595,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   списке и attack snapshot был снят именно с него. Сначала разбирать PID как tokens и требовать
   membership expected PID; при новом PID отдельно смотреть `/proc/<pid>/cmdline/status` и `ps`,
   потому что auxiliary/duplicate process может влиять на MQTT. Не повторять уже sent attack.
+- **Paho connect timeout до строки `client.publish` означает ноль publish, но marker уже true:**
+  control helper сохранил attempt, затем 10 s не получил connection к HiveMQ и упал до publish.
+  Не retry вслепую: проверить `confirmed=false`, ноль control ID в 3 phone logs и bounded TCP
+  reachability; записать pre-publish failure. Только после этого разрешён один controlled retry
+  того же ещё не опубликованного ID. Fallback broker бесполезен, если телефоны сидят на HiveMQ.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -760,8 +768,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2: conflicting-origin attack полностью PASSED и
-   persisted; no UI/receipt/re-enqueue/crash, resources safe, control logs baseline ready.
-   Следующий шаг — ровно одна normal control delivery с новым ID и отдельный анализ. Attack,
-   M3(d), UI/background больше не трогать.
+7. Low-volume security smoke generation 2: attack полностью PASSED. Первый control attempt
+   остановился до publish на PC HiveMQ connect timeout; marker attempted=true/confirmed=false.
+   Следующий шаг — local 0-ID/TCP recovery, потом максимум один authorized retry того же ID.
+   Attack, M3(d), UI/background больше не трогать.
 

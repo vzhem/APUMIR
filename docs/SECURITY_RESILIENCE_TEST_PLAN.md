@@ -302,7 +302,7 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   Женя=`1/1/1/0`, Стас relay/local/receipt/UI=`1/1/1/1`; duplicate=0, errors/crash=0. Recipient
   origin binding установлен, attack log baseline очищен. Затем одна conflicting-origin injection
   (QoS1/non-retained/179 B) дала exact semantics PASS: Анна/Женя previously-seen=1/1, Стас
-  conflict-drop=1; store/delivery/receipt/UI/errors/crash=0. Transient второй PID Жени исчез;
-  membership-aware finalizer подтвердил expected PID на 3/3 и сохранил PASS. Post-attack max
-  35°C, PSS delta `-3043/-15721/+9613 KiB`, battery `0/0/+1`; безопасно. Logs очищены; осталась
-  одна normal control delivery с новым ID. Attack не повторять.
+  conflict-drop=1; store/delivery/receipt/UI/errors/crash=0. Membership-aware finalizer сохранил
+  PASS; post-attack max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery `0/0/+1`. Первый normal
+  control helper прошёл live gate, но PC HiveMQ connect timeout случился до publish; attempted=true,
+  confirmed=false. Перед единственным retry обязательны 0 control ID в logs и TCP reachability.
