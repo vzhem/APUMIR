@@ -512,11 +512,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Bounded TCP probe: `broker.hivemq.com:1883` exit=1, `broker.emqx.io:1883` exit=0. Значит,
   fallback-дефект практически значим: доступный второй broker не выбирается, пока first retry
   когда-нибудь не сработает.
-- **2026-08-14 (доп.34)** — fresh-state adoption прошёл Анну/Женю (live peers=14/14), но снова
-  остановился на Стасе: доказанная ранее поздняя ConnAck-строка уже вытеснена из ring, а startup
-  snapshot был снят до неё. State/new ID/log clear опять не выполнялись. Safe gate теперь:
-  текущий PID + startup subscription/identity + live peer traffic ПОСЛЕ последнего MQTT error;
-  это прямое доказательство connected subscriber без повторного restart/relay.
+- **2026-08-14 (доп.34)** — fresh-state adoption прошёл Анну/Женю, но сначала остановился на
+  вытесненной ConnAck-строке Стаса. Safe equivalent gate: текущий PID + startup identity/
+  subscription + live peer traffic ПОСЛЕ последнего MQTT error.
+- **2026-08-14 (доп.35)** — generation-2 baseline READY без relay: старый ID abandoned;
+  новый `sec-origin2-1786710017189`, TTL 3600, logs cleared. PID Анна/Женя/Стас =
+  `14734/24000/13746`; live-peer-after-error=true у всех; battery `100/100/58%`, temperature
+  `31/28.7/30°C`, PSS `117764/98527/142225 KiB`. Следом ровно один normal setup publish,
+  отдельное сохранение logs и только потом анализ/conflict.
 
 ---
 
@@ -715,8 +718,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke: old ID abandoned. Fresh PID `14734/24000/13746`; Стас connected,
-   но ConnAck line вытеснена после её доказательства. State всё ещё старый. Следующий шаг — adopt
-   fresh baseline/new ID по live-peer-after-last-error evidence, без restart/relay; затем setup.
-   M3(d), UI/background не трогать.
+7. Low-volume security smoke generation 2 READY: ID `sec-origin2-1786710017189`, TTL 3600,
+   PID `14734/24000/13746`, fresh live connection gate и resource baseline прошли, logs очищены.
+   Следующий шаг — один normal non-retained setup relay и snapshot, затем анализ. Conflict,
+   M3(d), UI/background пока не трогать.
 

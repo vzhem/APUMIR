@@ -294,3 +294,6 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   connection, поэтому доступный fallback не выбирается. Поздний ConnAck затем вытеснился из
   logcat до state adoption; robust equivalent gate = live subscribed peer traffic после последнего
   MQTT error + stable PID/identity. Важные late events сразу сохранять snapshot/state marker.
+- Generation-2 baseline прошёл без relay: ID `sec-origin2-1786710017189`, TTL 3600, PID
+  `14734/24000/13746`; live traffic gate=true у всех; battery `100/100/58%`, temperature
+  `31/28.7/30°C`, PSS `117764/98527/142225 KiB`. Logs очищены; далее один normal setup.
