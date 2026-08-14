@@ -808,6 +808,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `%TEMP%\apu-r4.2-r1b2-v11.16.12-install.json`. Следующий gate — controlled launch без
   force-stop: precheck stopped/version, log clear, launch 3/3, 150 с wait для real ConnAck,
   peer traffic и первого 120-секундного `MQTT LIVENESS HEARTBEAT`; no user test publish.
+- **2026-08-14 (доп.80)** — v11.16.12 controlled launch реально выполнился 3/3 и ждал 150 с,
+  processes/crash gate не упал, но analyzer дал ложные native counts=0: snapshots фильтровали
+  `RustBridge:V`, тогда как `rust-core/src/logging/logger.rs` создаёт tracing-android layer с
+  exact tag **`p2p_core`**. `RustBridge` — только Kotlin bridge tag. Это harness-only false
+  incomplete, не MQTT FAIL; no user publish/network toggle. State и старые snapshots не удалять,
+  launch/log clear не повторять. Recovery только read-only current logcat с `p2p_core:V`, exact
+  original PID membership и отдельными diagnostic snapshots/state. Все будущие native harnesses
+  обязаны включать `p2p_core:V`; Kotlin/UI дополнительно `RustBridge`/`CoreServerService`.
 
 ---
 
