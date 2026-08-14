@@ -932,6 +932,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `pidof exit=1+empty` = process absent, `git diff --quiet exit=1` = differences, `git grep exit=1`
   = no match; никакого global allowance. После harness-only stop — immutable old evidence,
   read-only no-effect proof и distinct build2/recovery2 paths, без удаления/повтора old block.
+- **2026-08-14 (доп.90)** — corrected v11.16.13 APK build2 реально собрал artifact, но state
+  `FAIL_DO_NOT_RETRY_AUTOMATICALLY` из-за слишком узкого certificate-output parser после signer
+  success. Java/Gradle/AAPT/apksigner exit=`0/0/0/0`, `BUILD SUCCESSFUL`=1, version
+  v11.16.13/11016013, V2=true. APK `%TEMP%\apu-r4.2-r1b4-v11.16.13-build2.apk`:
+  22,599,180 B, SHA-256 `5A26728BE78941C7D0CA6FE8FBE24AD81679A57F60FE87B35999014F3D7C03BA`.
+  Cert field и embedded-native fields пусты только потому, что exact-English regex остановил block
+  до ZIP inspection; phones/ADB/install/launch/public traffic=false. State и separate signer
+  stdout/stderr immutable; build2 не повторять и artifact не перезаписывать. Recovery только
+  read-only: показать safe signer certificate lines, извлечь substring после digest label,
+  удалить `[^0-9A-Fa-f]`, потребовать ровно один 64-hex digest и exact expected cert; отдельно
+  открыть existing APK ZIP и проверить embedded `.so` size/hash. Общее parser rule: raw output
+  сохранять до parsing; tool version/localization/separators не считать build failure. Если
+  exit+positive marker+artifact уже PASS, parser failure исправлять read-only analyzer, не rebuild.
 
 ---
 

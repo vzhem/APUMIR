@@ -496,6 +496,15 @@ exit 1 успешным и нельзя ослаблять весь outer guard 
 artifact/network effect и сохранность входных hashes; затем использовать distinct `build2`/
 `recovery2` state paths с исправленным native wrapper.
 
+**Связанное правило parser compatibility:** raw stdout/stderr должны быть записаны до parsing.
+Нельзя считать build неуспешным только потому, что новая версия native tool изменила английский
+label, пробелы, регистр или separators digest. Для certificate/hash искать однозначную semantic
+строку, брать значение после label, удалять separators (`[^0-9A-Fa-f]`) и требовать ровно 64 hex.
+Exit 0 и общий marker всё равно недостаточны без exact identity hash. Если build, artifact и signer
+verify уже завершились, parser failure исправлять read-only анализом сохранённого output/artifact;
+не удалять evidence, не rebuild и не перезаписывать готовый APK. Тот же принцип применять к
+`aapt`, `apksigner`, `dumpsys`, Cargo/Gradle markers и любым version-dependent CLI outputs.
+
 ### Backup остановился после создания части файлов
 
 **Симптом:** папка milestone уже существует, некоторые большие файлы готовы, но остался
