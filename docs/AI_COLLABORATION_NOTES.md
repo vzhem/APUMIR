@@ -993,6 +993,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   слово `uninstall` внутри safety output label `Data clear/uninstall: False`; corrected scan
   отличает declarations от actionable commands и PASS. Phones пока не менялись; следующий gate —
   sync exact script, Windows `ParseFile` zero errors, затем approved install once.
+- **2026-08-14 (доп.95)** — approved versioned `scripts/v111613_install.ps1` Windows ParseFile
+  PASS; worktree script SHA-256 `B13E9127856B01FB2898AC46B4599CA6C72C404BC8A36F4BBD0605DE9C001374`.
+  Guarded data-preserving `adb install -r` v11.16.13 PASS 3/3. State
+  `%TEMP%\apu-r4.2-r1b4-v11.16.13-install.json`, SHA-256
+  `2B7C9B74AEA366AA5530351223E956F0087DE70FC71461E282192DBA8D2CC4B7`; verified count=3.
+  Anna UID 10425, Zhenya 10395, Stas 10387 preserved; version v11.16.13/11016013,
+  firstInstallTime и dataDir exact preserved 3/3. Uninstall/data clear/force-stop/launch/logcat/
+  network/public traffic=false. Post-install processRunning=false 3/3. Install/state/evidence не
+  повторять/не удалять. Следующий gate требует separate approval: one controlled launch новой
+  версии без force-stop и без `logcat -c`; early 45s + late additional 120s snapshots с exact new
+  PID и native `p2p_core`, чтобы одновременно сохранить startup READY и heartbeat evidence.
 
 ---
 
