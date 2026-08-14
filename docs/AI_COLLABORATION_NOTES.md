@@ -210,7 +210,7 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + код M3(c.2)):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1)):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -242,12 +242,19 @@ receipt-cleanup → интеграция в отправку → переисп�
   60–66 секунд, то есть cooldown 60 с соблюдён. Логи 8/8/10 включали старый буфер logcat,
   но timestamps доказали интервалы; item/byte/global limits активны.
 
-- **M3(c.2), код готов:** target сравнивает `gsumm` со своей RelayQueue и пересылает только
-  отсутствующие relay. Medium budgets: 16/256 KiB за round, 32/512 KiB за 30 с, envelope
-  ≤64 KiB, максимум 64 кандидата/round; остаток остаётся в очереди, cursor даёт fairness.
-  `gossip_candidates()` клонирует не больше 64 payload-ов и ничего не удаляет. UI-режимов ещё нет.
+- **M3(c.2), relay-path ВЕРИФИЦИРОВАН на 3 телефонах:** Windows Rust + APK `v11.16.7`
+  собраны. Для `m3c2-1786692960596` Анна/Женя сохранили hop 1; Анна ушла offline;
+  Женя получил пустой `gsumm`, переслал ровно 1 relay/166 bytes; Стас получил 1 раз,
+  отправил 1 receipt, Женя сделал 1 cleanup. Budgets 16/256 KiB round, 32/512 KiB/30 с.
+  Финальный origin-delivery не прошёл: после возврата сети MQTT Анны не reconnect-нулся,
+  хотя Android Wi-Fi был VALIDATED и TCP broker:1883 доступен. Также retained receipt может
+  быть перезаписан ACK/summary на общем topic — это отдельный M3(c.2-r2).
+- **M3(c.2-r1), код готов:** `EventLoop::poll()` вынесен в непрерывную background task;
+  основной цикл читает bounded channel (256), reconnect имеет backoff 1→30 с, а после
+  повторного `ConnAck` заново подписывается на `p2pm2/#`. Старый timeout(1s) больше не отменяет
+  reconnect. Ещё не собрано на Windows.
 
-**Следующий шаг = Windows `build-rust.ps1`; M3(d) пока не начинать.**
+**Следующий шаг = Windows `build-rust.ps1` для M3(c.2-r1); M3(c.2-r2)/M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -304,6 +311,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.4)** — добавлен M3(c.2): bounded resend отсутствующих relay с budgets
   16/256 KiB round и 32/512 KiB window, max envelope 64 KiB, fair cursor. Пользователь хочет
   три UI-режима relay: лёгкий/средний/без ограничений; сейчас backend = средний, UI позже.
+- **2026-08-14 (доп.5)** — M3(c.2) relay-path проверен на `v11.16.7`: Женя по пустому
+  summary переслал 1 relay/166 B, Стас доставил один раз + auto-receipt, Женя cleanup один раз.
+  Обнаружены два blocker финального origin: MQTT не reconnect после Wi-Fi off/on при доступном
+  TCP 1883; retained receipt перезаписывается более поздним ACK/summary на общем topic.
+- **2026-08-14 (доп.6)** — код M3(c.2-r1) заменяет отменяемый `timeout(1s, eventloop.poll())`
+  на непрерывную background task + bounded event channel 256, reconnect backoff 1→30 с и
+  re-subscribe. Следующий шаг — Windows build и phone probe; receipt-topic r2 только потом.
 
 ---
 
@@ -426,7 +440,8 @@ APK появится: `app\build\outputs\apk\release\app-release.apk`
    - **(c.1)** на presence → адресно отправить `gsumm`; target принимает/парсит, без relay.
      Лимиты: 256 items, 64 KiB, 60 с/peer, 8 summaries/30 с global.
    - **(c.2)** сравнить summary и переслать отсутствующие relay: 16/256 KiB за round,
-     32/512 KiB за 30 с, envelope ≤64 KiB, ≤64 кандидата, fair cursor. Код готов, ждёт сборки.
+     32/512 KiB за 30 с, envelope ≤64 KiB, ≤64 кандидата, fair cursor. Relay-path проверен.
+     r1 reconnect-код ждёт сборки; r2 unique retained receipt topic — только после r1.
 5. **(d) send-path**: в `send_message`, если recipient офлайн (нет addr) — собрать `relay`-конверт
    (`wire::build_relay`, `e2e_payload`=байты текста, hop=0, ttl) и опубликовать в mesh-топик →
    онлайн-узлы примут в RelayQueue.
@@ -452,7 +467,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 2. Прочитать `docs/MESH_DELIVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1, M3(a), M3(b) и авто-receipt
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
-4. M3(c.1) проверен. Код M3(c.2) bounded resend уже добавлен со средними budgets
-   16/256 KiB и 32/512 KiB, hard envelope 64 KiB + fair cursor. Сначала `build-rust.ps1`,
-   потом 3-phone test; M3(d) и UI режимов relay пока не трогать.
+4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
+   one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
+5. Код r1 (непрерывный MQTT poll + re-subscribe) готов: сначала `build-rust.ps1`, затем
+   Wi-Fi off/on + live probe. r2 receipt topic, M3(d) и UI relay пока не трогать.
 

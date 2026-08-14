@@ -1,8 +1,8 @@
-﻿//! # MQTT Transport вЂ” РґРµС†РµРЅС‚СЂР°Р»РёР·РѕРІР°РЅРЅС‹Р№ bootstrap + presence + relay
+//! # MQTT Transport — децентрализованный bootstrap + presence + relay
 
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, Packet};
 
 pub const MQTT_BROKERS: &[(&str, u16)] = &[
@@ -13,6 +13,13 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
 ];
 
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
+const MQTT_EVENT_BUFFER: usize = 256;
+const MQTT_RECONNECT_BACKOFF_MAX_SECS: u64 = 30;
+
+enum MqttNotification {
+    Message(MqttEvent),
+    ConnectionAcknowledged,
+}
 
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
@@ -26,7 +33,11 @@ pub struct PeerInfo {
 
 pub struct MqttTransport {
     client: AsyncClient,
-    eventloop: EventLoop,
+    eventloop: Option<EventLoop>,
+    event_tx: Option<mpsc::Sender<MqttNotification>>,
+    event_rx: mpsc::Receiver<MqttNotification>,
+    eventloop_task: Option<tokio::task::JoinHandle<()>>,
+    has_connected_once: bool,
     node_id: String,
     peers: Arc<Mutex<Vec<PeerInfo>>>,
     relay_nodes: Arc<Mutex<Vec<PeerInfo>>>,
@@ -50,8 +61,14 @@ impl MqttTransport {
             ).await {
                 Ok(_) => {
                     tracing::info!("MQTT: connected to {}:{}", host, port);
+                    let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
                     return Ok(Self {
-                        client, eventloop,
+                        client,
+                        eventloop: Some(eventloop),
+                        event_tx: Some(event_tx),
+                        event_rx,
+                        eventloop_task: None,
+                        has_connected_once: false,
                         node_id: node_id.to_string(),
                         peers: Arc::new(Mutex::new(Vec::new())),
                         relay_nodes: Arc::new(Mutex::new(Vec::new())),
@@ -78,14 +95,84 @@ impl MqttTransport {
             .await.map_err(|e| e.to_string())
     }
 
-    pub async fn subscribe(&self) -> Result<(), String> {
-        // One wildcard subscription for ALL p2pm topics
+    pub async fn subscribe(&mut self) -> Result<(), String> {
+        // One wildcard subscription for ALL p2pm topics.
         self.client.subscribe("p2pm2/#", QoS::AtLeastOnce)
             .await.map_err(|e| e.to_string())?;
         tracing::info!("MQTT: subscribed to p2pm2/# (node={})", self.node_id);
-        // Clear any old retained presence for this node
+
+        // Clear any old retained presence for this node.
         let topic = format!("p2pm2/presence/{}", self.node_id);
         let _ = self.client.publish(&topic, QoS::AtLeastOnce, true, b"").await;
+
+        // EventLoop должен поллиться непрерывно. Старый timeout(1s) отменял
+        // eventloop.poll() именно в момент reconnect-backoff, поэтому после возврата
+        // сети клиент больше не подключался. Отдельная задача не отменяет poll;
+        // основной цикл получает уже готовые события через bounded channel.
+        let mut eventloop = self
+            .eventloop
+            .take()
+            .ok_or_else(|| "MQTT event loop already started".to_string())?;
+        let event_tx = self
+            .event_tx
+            .take()
+            .ok_or_else(|| "MQTT event channel unavailable".to_string())?;
+
+        self.eventloop_task = Some(tokio::spawn(async move {
+            let mut reconnect_backoff_secs = 1u64;
+            loop {
+                match eventloop.poll().await {
+                    Ok(Event::Incoming(Packet::Publish(p))) => {
+                        reconnect_backoff_secs = 1;
+                        tracing::info!(
+                            "MQTT IN: topic={} payload_len={} payload={:?}",
+                            p.topic,
+                            p.payload.len(),
+                            String::from_utf8_lossy(&p.payload)
+                                .chars()
+                                .take(200)
+                                .collect::<String>()
+                        );
+                        let event = MqttEvent {
+                            topic: p.topic.clone(),
+                            payload: String::from_utf8_lossy(&p.payload).to_string(),
+                        };
+                        if event_tx
+                            .send(MqttNotification::Message(event))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(Event::Incoming(Packet::ConnAck(_))) => {
+                        reconnect_backoff_secs = 1;
+                        if event_tx
+                            .send(MqttNotification::ConnectionAcknowledged)
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(_) => {
+                        reconnect_backoff_secs = 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "MQTT error: {}; retrying in {}s",
+                            e,
+                            reconnect_backoff_secs
+                        );
+                        tokio::time::sleep(Duration::from_secs(reconnect_backoff_secs)).await;
+                        reconnect_backoff_secs = reconnect_backoff_secs
+                            .saturating_mul(2)
+                            .min(MQTT_RECONNECT_BACKOFF_MAX_SECS);
+                    }
+                }
+            }
+        }));
+
         Ok(())
     }
 
@@ -108,22 +195,43 @@ impl MqttTransport {
     }
 
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
-        match tokio::time::timeout(Duration::from_secs(1), self.eventloop.poll()).await {
-            Ok(Ok(Event::Incoming(Packet::Publish(p)))) => {
-                tracing::info!("MQTT IN: topic={} payload_len={} payload={:?}", p.topic, p.payload.len(), String::from_utf8_lossy(&p.payload).chars().take(200).collect::<String>());
-                Some(MqttEvent {
-                    topic: p.topic.clone(),
-                    payload: String::from_utf8_lossy(&p.payload).to_string(),
-                })
+        match tokio::time::timeout(Duration::from_secs(1), self.event_rx.recv()).await {
+            Ok(Some(MqttNotification::Message(event))) => Some(event),
+            Ok(Some(MqttNotification::ConnectionAcknowledged)) => {
+                if self.has_connected_once {
+                    // clean_session=true удаляет подписки на broker при разрыве,
+                    // поэтому после каждого reconnect подписываемся заново.
+                    match self.client.subscribe("p2pm2/#", QoS::AtLeastOnce).await {
+                        Ok(_) => tracing::info!(
+                            "MQTT: connection restored; re-subscribed to p2pm2/# (node={})",
+                            self.node_id
+                        ),
+                        Err(e) => tracing::warn!(
+                            "MQTT: connection restored but re-subscribe failed: {}",
+                            e
+                        ),
+                    }
+                } else {
+                    self.has_connected_once = true;
+                    tracing::info!("MQTT: connection acknowledged by broker");
+                }
+                None
             }
-            Ok(Ok(_)) => None,
-            Ok(Err(e)) => { tracing::warn!("MQTT error: {}", e); None }
+            Ok(None) => None,
             Err(_) => None,
         }
     }
 
     pub fn peers(&self) -> Arc<Mutex<Vec<PeerInfo>>> { Arc::clone(&self.peers) }
     pub fn relay_nodes(&self) -> Arc<Mutex<Vec<PeerInfo>>> { Arc::clone(&self.relay_nodes) }
+}
+
+impl Drop for MqttTransport {
+    fn drop(&mut self) {
+        if let Some(task) = self.eventloop_task.take() {
+            task.abort();
+        }
+    }
 }
 
 #[derive(Debug)]

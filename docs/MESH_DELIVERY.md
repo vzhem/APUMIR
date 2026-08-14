@@ -205,5 +205,8 @@ RelayMessage {
   «Средний», «Без ограничений». Текущий M3(c.2) backend = средний (16/256 KiB round,
   32/512 KiB за 30 с); UI/config позже. «Без ограничений» снимает только soft traffic budget,
   но не hard safety (dedup/TTL/hops/queue/storage/thermal/OS).
-- **Надёжность receipt:** потерянный receipt → сообщение живёт до TTL (приемлемо).
+- **Надёжность receipt:** тест 2026-08-14 выявил два blocker: MQTT обязан reconnect +
+  re-subscribe после смены сети (r1), а retained receipt нужен отдельный topic по `msg_id`
+  с cleanup, иначе общий `p2pm2/msg/<origin>` перезаписывается ACK/summary (r2). До r2
+  потерянный receipt оставляет сообщение до TTL.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).
