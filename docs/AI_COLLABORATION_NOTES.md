@@ -1090,6 +1090,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   smoke уже consumed; r4.3 не публикует user envelopes во вторую session, дальнейшие public tests
   только если отдельно необходимы/разрешены. Следующий шаг source-only: audit current
   `multi_broker.rs`, `mqtt_dedup.rs`, session ownership/config и минимальный compile-tested r4.3.
+- **2026-08-14 (доп.103)** — r4.3 status-only secondary source complete, Windows feature build
+  pending. Legacy `multi_broker.rs` (5-broker switching fallback, может split mesh) не подключён.
+  Cargo feature `mqtt-secondary-observe`, `default=[]`; module declaration и core spawn hard-gated.
+  Новый `mqtt_secondary_observer.rs`: ровно EMQX `broker.emqx.io:1883`, one EventLoop task,
+  AsyncClient channel cap1 retained only for session lifetime, clean_session=true/keepalive60;
+  **нет `.subscribe()`/`.publish()`**. Payload-free `MQTT SECONDARY STATUS/SUPERVISOR` markers
+  фиксируют starting/connecting/connected/backoff/stopped, polls/ConnAck/errors и неизменно
+  `subscriptions=0 publishes=0`; backoff 1→2→4→8→16→30, Drop abort. 4 pure tests: initial
+  counters, ConnAck/error transitions, stable labels, capped backoff. Primary HiveMQ transport,
+  topics/QoS/retain/channels/relay/dedup untouched. `build-rust.ps1` получил safe optional
+  `-Features mqtt-secondary-observe`, default behavior unchanged. Observe-only/feature integration/
+  Windows feature-build/static policy scans PASS; host cargo/test не запускались. APK/phones/
+  public traffic не менялись. Следующий gate — exact Windows `build-rust.ps1 -Features
+  mqtt-secondary-observe`, generated `.so` only.
 
 ---
 

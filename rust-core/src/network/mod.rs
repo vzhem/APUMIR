@@ -88,5 +88,7 @@ pub mod mqtt_backpressure;
 pub mod mqtt_dedup;
 pub mod mqtt_liveness;
 pub mod mqtt_overflow;
+#[cfg(feature = "mqtt-secondary-observe")]
+pub mod mqtt_secondary_observer;
 pub mod mqtt_transport;
 pub mod multi_broker;

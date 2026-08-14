@@ -717,6 +717,18 @@ self.runtime = Some(runtime);
 
         const MQTT_SESSION_RESTART_BACKOFF_MAX_SECS: u64 = 30;
 
+        #[cfg(feature = "mqtt-secondary-observe")]
+        let _secondary_observer = {
+            let observer =
+                crate::network::mqtt_secondary_observer::SecondaryBrokerObserver::spawn(&node_id);
+            let snapshot = observer.snapshot();
+            tracing::info!(
+                "MQTT SECONDARY SUPERVISOR: feature=enabled mode=observe_only state={} subscriptions=0 publishes=0",
+                snapshot.state.as_str()
+            );
+            observer
+        };
+
         // Core owns this bounded FIFO across every single-session replacement. MQTT transports
         // only borrow it through Arc, so dropping a stalled session cannot drop relay/receipt.
         let loss_intolerant_inbox = Arc::new(MqttLossIntolerantInbox::new(

@@ -3,6 +3,10 @@ name = "p2p-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+mqtt-secondary-observe = []
+
 # Собираем как динамическую библиотеку для Android (.so файл)
 [lib]
 name = "p2p_core"
