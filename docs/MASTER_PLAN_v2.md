@@ -19,6 +19,9 @@
   [`BACKUP_AND_CLEAN_PC_RECOVERY.md`](BACKUP_AND_CLEAN_PC_RECOVERY.md).
 - Spam/DoS/replay и другие defensive tests повторять по важным сборкам; high load только на
   собственной локальной инфраструктуре: [`SECURITY_RESILIENCE_TEST_PLAN.md`](SECURITY_RESILIENCE_TEST_PLAN.md).
+- Каждую ошибку инструмента и безопасный workaround сразу записывать в collaboration notes и
+  тематическую инструкцию: симптом, причина, точный обход, проверка и запреты; не оставлять
+  полезное решение только в чате.
 
 ---
 

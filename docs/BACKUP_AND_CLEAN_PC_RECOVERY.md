@@ -136,23 +136,25 @@ $Milestone = @(
 )
 $Milestone | Set-Content (Join-Path $BackupDir "MILESTONE.txt") -Encoding UTF8
 
+function Get-NativeVersionReport {
+    param([string]$Label, [string]$CommandLine)
+    $Output = cmd.exe /d /c "$CommandLine 2>&1" | Out-String
+    $ExitCode = $LASTEXITCODE
+    return @(("--- {0} (exit code {1}) ---" -f $Label, $ExitCode), $Output.Trim(), "")
+}
+
 $EnvironmentReport = @()
 $EnvironmentReport += "Created: $([DateTimeOffset]::Now.ToString('o'))"
 $EnvironmentReport += "ANDROID_HOME=$env:ANDROID_HOME"
 $EnvironmentReport += "ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT"
 $EnvironmentReport += "ANDROID_NDK_HOME=$env:ANDROID_NDK_HOME"
-$EnvironmentReport += "--- git ---"
-$EnvironmentReport += (git --version 2>&1 | Out-String).Trim()
-$EnvironmentReport += "--- java ---"
-$EnvironmentReport += (java -version 2>&1 | Out-String).Trim()
-$EnvironmentReport += "--- rustc ---"
-$EnvironmentReport += (rustc --version 2>&1 | Out-String).Trim()
-$EnvironmentReport += "--- cargo ---"
-$EnvironmentReport += (cargo --version 2>&1 | Out-String).Trim()
-$EnvironmentReport += "--- cargo ndk ---"
-$EnvironmentReport += (cargo ndk --version 2>&1 | Out-String).Trim()
-$EnvironmentReport += "--- adb ---"
-$EnvironmentReport += (adb version 2>&1 | Out-String).Trim()
+$EnvironmentReport += Get-NativeVersionReport "Git" "git --version"
+$EnvironmentReport += Get-NativeVersionReport "Java" "java -version"
+$EnvironmentReport += Get-NativeVersionReport "Rust compiler" "rustc --version"
+$EnvironmentReport += Get-NativeVersionReport "Cargo" "cargo --version"
+$EnvironmentReport += Get-NativeVersionReport "cargo-ndk" "cargo ndk --version"
+$EnvironmentReport += Get-NativeVersionReport "ADB" "adb version"
+$EnvironmentReport += Get-NativeVersionReport "Gradle wrapper" "android-app\gradlew.bat --version"
 if ($env:ANDROID_HOME -and (Test-Path (Join-Path $env:ANDROID_HOME "ndk"))) {
     $EnvironmentReport += "--- installed NDK folders ---"
     $EnvironmentReport += (Get-ChildItem (Join-Path $env:ANDROID_HOME "ndk") -Directory |
@@ -393,3 +395,63 @@ adb -s $Serial shell dumpsys package com.vladimir.messenger |
 Если отсутствует хотя бы `APU-source.bundle`, `MILESTONE.txt`, проверенный APK или hashes,
 копию не считать полной. После каждого изменения этой инструкции следующая milestone-копия
 должна включать обновлённую версию файла.
+
+## 6. Известные ошибки PowerShell и безопасное продолжение
+
+### `else` не распознан как команда
+
+**Симптом:** `else : Имя "else" не распознано...` после того, как пользователь отдельно вставил
+и выполнил `if { ... }`, а затем отдельной вставкой — `else { ... }`.
+
+**Причина:** интерактивный Windows PowerShell уже завершил синтаксическую конструкцию `if`.
+`else` должен попасть в тот же parse/paste-блок.
+
+**Обход:** давать и вставлять `if { ... } else { ... }` одним блоком или не использовать
+отдельный `else`. Если сам `if` уже успешно показал нужный результат, отдельная ошибка `else`
+не отменяет этот результат. Не повторять опасные/изменяющие команды только ради удаления текста
+ошибки из консоли.
+
+### `NativeCommandError` на успешном `java -version`
+
+**Симптом:** при `$ErrorActionPreference = "Stop"` backup прекращается на `java -version`, хотя
+Java исправна и выводит нормальную версию.
+
+**Причина:** Java штатно пишет version text в stderr; Windows PowerShell 5 может превратить
+stderr native-программы в terminating `NativeCommandError`.
+
+**Безопасный обход:** не отключать строгую проверку всего backup. Для environment capture
+направлять stderr в stdout внутри `cmd.exe`, отдельно записывать exit code:
+
+```powershell
+Set-Location C:\APUMIR-arena-test
+
+$Output = cmd.exe /d /c "java -version 2>&1" | Out-String
+$ExitCode = $LASTEXITCODE
+Write-Host $Output.Trim()
+Write-Host ("Exit code: {0}" -f $ExitCode)
+```
+
+Тот же шаблон применять к `git`, `rustc`, `cargo`, `cargo ndk`, `adb` и `gradlew` при сборе
+`ENVIRONMENT.txt`. Не считать команду успешной только по тексту: сохранять и exit code.
+
+### Backup остановился после создания части файлов
+
+**Симптом:** папка milestone уже существует, некоторые большие файлы готовы, но остался
+`INCOMPLETE.tmp`, отсутствуют `SHA256SUMS.txt` или final verify.
+
+**Обход:** не удалять папку и не начинать всё заново. Сначала проверить обязательные файлы,
+повторно выполнить `git bundle verify`, проверить точные APK/native hashes, продолжить с точки
+остановки, затем полностью пересоздать `SHA256SUMS.txt`. `INCOMPLETE.tmp` удалять только после
+записи всех файлов. После resume всё равно выполнить независимую hash-проверку и пробный clone в
+новую временную папку.
+
+Если marker отсутствует, но verify ещё не записан, не угадывать состояние: проверить
+`BACKUP_STATUS.txt`, manifests и hashes, не перезаписывая артефакты без причины.
+
+### Tested code commit и более новый documentation commit
+
+APK может быть собран из tested code commit, а инструкции — дополнены отдельными docs-only
+commit. Перед backup доказать `git diff --quiet <code> <docs> -- rust-core android-app`. В
+`MILESTONE.txt` записать оба SHA. Bundle обязан содержать оба; restore делает checkout нужной
+ветки и `reset --hard` на documentation commit. Если application code между ними отличается,
+такой docs commit нельзя приписывать уже протестированному APK без новой сборки/теста.

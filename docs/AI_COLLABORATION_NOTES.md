@@ -90,6 +90,15 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 переписку/private identity keys. Каноническая процедура:
 `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`. Обычную неудачную промежуточную сборку milestone не считать.
 
+### 0.2. Обязательный журнал ошибок и обходов
+
+Каждую обнаруженную ошибку, ловушку инструмента и безопасный workaround ИИ обязан сразу
+записывать в `AI_COLLABORATION_NOTES.md` и в тематическую инструкцию/план. Не оставлять решение
+только в чате. Фиксировать: симптом, причину, точный безопасный обход, как проверить результат
+и что нельзя делать. Если обход снижает безопасность или является временным — явно отметить
+риск и будущий правильный fix. Перед похожим шагом новая ИИ-сессия сначала ищет существующий
+гэтч и не заставляет пользователя повторно проходить уже известную ошибку.
+
 ### 🐣 Пользователь — новичок. Это важно.
 
 - Объясняй **простым языком, без жаргона**. Если нужен технический термин — сразу
@@ -429,13 +438,29 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.19)** — r3 reconnect финально пройден: Wi-Fi+data Анны off/on, PID
   12571/27336/2529 сохранились, re-subscribe=1, live probe=1; повторные store/remove/origin,
   recipient delivery/receipt/UI и relay payload все 0. Отсутствие строки `MQTT error` не делает
-  тест неполным: второй ConnAck/re-subscribe и probe доказаны. `v11.16.10` — важная точка,
-  пользователю нужно предложить milestone-backup перед следующим этапом.
+  тест неполным: второй ConnAck/re-subscribe и probe доказаны. `v11.16.10` — важная точка.
+- **2026-08-14 (доп.20)** — пользователь требует записывать все ошибки/обходы для новой ИИ-
+  сессии. Milestone backup на незашифрованный FAT32 `F:` создан (22 files, 50,920,869 bytes,
+  21 hash entries), но ещё ждёт independent hash/restore verify. Гэтчи: отдельный `else` в
+  интерактивном PowerShell 5; `java -version` stderr + ErrorAction Stop; безопасное resume по
+  `INCOMPLETE.tmp`. Перед финальной verify обновить backup новым docs commit с этими обходами.
 
 ---
 
 ## 8. Сборка и тест APK на Windows (гэтчи)
 
+- **Windows PowerShell 5: отдельный `else` после уже выполненного блока `if` не парсится** →
+  `else is not recognized`. Давать `if { ... } else { ... }` одним цельным paste-блоком либо
+  вообще не использовать отдельный `else`. Если ветка `if` уже успешно выполнилась, эта ошибка
+  сама по себе не отменяет её результат.
+- **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
+  `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
+  Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
+  code и output; не отключать проверки всего backup-скрипта ради одной команды.
+- **Прерванный milestone-backup не удалять вслепую:** пока есть `INCOMPLETE.tmp`, проверить
+  уже созданные bundle/source/artifacts и их hashes, продолжить с точки остановки, заново создать
+  `SHA256SUMS.txt`, и удалять marker только после завершения. Отдельная независимая verify-фаза
+  всё равно обязательна. Полный recovery — `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`.
 - **PowerShell ломает аргументы вида `-Pname=value` для `gradlew.bat`** → ошибка
   `Task '.16.5' not found`. **Лечится**: задавать версию через env-переменную
   `$env:GITHUB_REF_NAME = "v11.16.X"` (build.gradle.kts её читает), БЕЗ `-P`.
@@ -586,6 +611,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 5. R3 `v11.16.10` полностью проверен: local delivery=1, duplicate suppressed=1, receipts=2,
    обе очереди cleanup=1, origin-delivery=1, seen tombstones, retained relay=0; после reconnect
    Анны re-subscribe/probe=1, все повторные mesh/UI counts=0 при тех же PID.
-6. Следующий предлагаемый шаг — milestone-backup на внешний носитель по backup guide. После него
-   отдельно согласовать продолжение; M3(d)/UI/background пока не трогать.
+6. Milestone-backup создаётся на незашифрованном `F:` по backup guide: базовый набор создан,
+   но нужно включить последний docs commit с PowerShell-workarounds, пересчитать hashes и сделать
+   independent bundle/hash/temporary restore verify. Только после этого копия готова.
+7. Затем отдельно согласовать продолжение; M3(d)/UI/background пока не трогать.
 
