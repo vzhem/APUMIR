@@ -195,7 +195,12 @@ receipt-cleanup → интеграция в отправку → переисп�
   2) друзья друзей (только по проверяемой/signed цепочке знакомства); 3) любые узлы — лишь
   как opt-in, когда телефон не занят, не перегрет, с достаточной батареей/сетью/местом.
   Реализовывать weighted fair queues с квотами, чтобы strangers не вытесняли друзей и при
-  этом не голодали навсегда. Конкретные веса/порог idle согласовать перед кодом M3(c.2)/Tier relay.
+  этом не голодали навсегда.
+- **Настройка relay — решение пользователя (2026-08-14):** три режима в UI: «Лёгкий»,
+  «Средний», «Без ограничений». Текущий M3(c.2) реализует backend-бюджеты «Среднего» режима
+  (16/256 KiB round, 32/512 KiB за 30 с). UI/config plumbing — отдельный шаг. Даже в режиме
+  «Без ограничений» НИКОГДА не отключать hard safety: dedup, TTL, max hops, queue/storage,
+  thermal/OS safety; это означает без мягкого лимита трафика, а не буквально без защиты.
 
 ---
 
@@ -205,7 +210,7 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1) + код M3(c.1)):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + код M3(c.2)):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -237,7 +242,12 @@ receipt-cleanup → интеграция в отправку → переисп�
   60–66 секунд, то есть cooldown 60 с соблюдён. Логи 8/8/10 включали старый буфер logcat,
   но timestamps доказали интервалы; item/byte/global limits активны.
 
-**Следующий шаг = согласовать budgets/приоритеты M3(c.2), затем отдельное «да» на код.**
+- **M3(c.2), код готов:** target сравнивает `gsumm` со своей RelayQueue и пересылает только
+  отсутствующие relay. Medium budgets: 16/256 KiB за round, 32/512 KiB за 30 с, envelope
+  ≤64 KiB, максимум 64 кандидата/round; остаток остаётся в очереди, cursor даёт fairness.
+  `gossip_candidates()` клонирует не больше 64 payload-ов и ничего не удаляет. UI-режимов ещё нет.
+
+**Следующий шаг = Windows `build-rust.ps1`; M3(d) пока не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -290,8 +300,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   получил delivery. Счётчики стабильны, утечки UI/шторма нет.
 - **2026-08-14 (доп.3)** — M3(c.1) собран и проверен на 3 телефонах: адресные `gsumm`
   отправляются/принимаются, cooldown 60 с подтверждён timestamps (интервалы 60–66 с), relay
-  actions=0. До M3(c.2) нужны relay batch/byte budget и bounded fanout. Приоритет пользователя:
-  друзья → друзья друзей → любые узлы только при свободных ресурсах телефона.
+  actions=0.
+- **2026-08-14 (доп.4)** — добавлен M3(c.2): bounded resend отсутствующих relay с budgets
+  16/256 KiB round и 32/512 KiB window, max envelope 64 KiB, fair cursor. Пользователь хочет
+  три UI-режима relay: лёгкий/средний/без ограничений; сейчас backend = средний, UI позже.
 
 ---
 
@@ -413,8 +425,8 @@ APK появится: `app\build\outputs\apk\release\app-release.apk`
 4. **(c) gossip**, разделён безопасно:
    - **(c.1)** на presence → адресно отправить `gsumm`; target принимает/парсит, без relay.
      Лимиты: 256 items, 64 KiB, 60 с/peer, 8 summaries/30 с global.
-   - **(c.2)** сравнить summary и переслать отсутствующие relay; до кода обязательны лимиты
-     ≤16 relay/round + byte budget + fair bounded fanout. Никакого all-to-all без бюджета.
+   - **(c.2)** сравнить summary и переслать отсутствующие relay: 16/256 KiB за round,
+     32/512 KiB за 30 с, envelope ≤64 KiB, ≤64 кандидата, fair cursor. Код готов, ждёт сборки.
 5. **(d) send-path**: в `send_message`, если recipient офлайн (нет addr) — собрать `relay`-конверт
    (`wire::build_relay`, `e2e_payload`=байты текста, hop=0, ttl) и опубликовать в mesh-топик →
    онлайн-узлы примут в RelayQueue.
@@ -440,7 +452,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 2. Прочитать `docs/MESH_DELIVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1, M3(a), M3(b) и авто-receipt
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
-4. M3(c.1) адресных `gsumm` собран и проверен на 3 телефонах; cooldown 60 с работает,
-   relay actions=0. Следующий шаг — согласовать M3(c.2): batch/byte/global budgets, bounded
-   fanout и веса friend/FoF/idle-public; код только после «да». M3(d) не трогать.
+4. M3(c.1) проверен. Код M3(c.2) bounded resend уже добавлен со средними budgets
+   16/256 KiB и 32/512 KiB, hard envelope 64 KiB + fair cursor. Сначала `build-rust.ps1`,
+   потом 3-phone test; M3(d) и UI режимов relay пока не трогать.
 

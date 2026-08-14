@@ -662,6 +662,20 @@ self.runtime = Some(runtime);
         let mut mesh_summary_window_started = std::time::Instant::now();
         let mut mesh_summaries_sent_in_window: usize = 0;
 
+        // M3(c.2) medium-mode relay budgets. Остаток остаётся в RelayQueue до
+        // следующего раунда; hard safety (dedup/TTL/hops/queue caps) не отключается.
+        const MAX_MESH_RELAYS_PER_ROUND: usize = 16;
+        const MAX_MESH_RELAY_CANDIDATES_PER_ROUND: usize = 64;
+        const MAX_MESH_RELAY_BYTES_PER_ROUND: usize = 256 * 1024;
+        const MAX_MESH_RELAY_ENVELOPE_BYTES: usize = 64 * 1024;
+        const MESH_RELAY_WINDOW_SECS: u64 = 30;
+        const MAX_MESH_RELAYS_PER_WINDOW: usize = 32;
+        const MAX_MESH_RELAY_BYTES_PER_WINDOW: usize = 512 * 1024;
+        let mut mesh_relay_window_started = std::time::Instant::now();
+        let mut mesh_relays_sent_in_window: usize = 0;
+        let mut mesh_relay_bytes_sent_in_window: usize = 0;
+        let mut mesh_relay_cursor: usize = 0;
+
         loop {
             if let Some(evt) = transport.poll_event().await {
                 if evt.topic.starts_with("p2pm2/ping/") {
@@ -1025,8 +1039,141 @@ self.runtime = Some(runtime);
                                                 "MESH gossip: received summary with {} items",
                                                 items.len()
                                             );
-                                            // M3(c.2) сравнит items с RelayQueue и перешлёт
-                                            // только отсутствующие relay ограниченной пачкой.
+
+                                            // M3(c.2): peer прислал свою сводку. Отправляем
+                                            // только то, чего в ней нет, с medium-mode budgets.
+                                            if let Some(ref q) = relay_queue {
+                                                let expired = q.cleanup_expired();
+                                                if expired > 0 {
+                                                    tracing::info!(
+                                                        "MESH gossip: removed {} expired relay(s)",
+                                                        expired
+                                                    );
+                                                }
+
+                                                let (candidates, total_missing) = q
+                                                    .gossip_candidates(
+                                                        &items,
+                                                        mesh_relay_cursor,
+                                                        MAX_MESH_RELAY_CANDIDATES_PER_ROUND,
+                                                    );
+
+                                                if total_missing > 0 {
+                                                    if mesh_relay_window_started
+                                                        .elapsed()
+                                                        .as_secs()
+                                                        >= MESH_RELAY_WINDOW_SECS
+                                                    {
+                                                        mesh_relay_window_started =
+                                                            std::time::Instant::now();
+                                                        mesh_relays_sent_in_window = 0;
+                                                        mesh_relay_bytes_sent_in_window = 0;
+                                                    }
+
+                                                    let mut examined = 0usize;
+                                                    let mut sent = 0usize;
+                                                    let mut sent_bytes = 0usize;
+
+                                                    for message in &candidates {
+                                                        if sent >= MAX_MESH_RELAYS_PER_ROUND
+                                                            || mesh_relays_sent_in_window
+                                                                >= MAX_MESH_RELAYS_PER_WINDOW
+                                                        {
+                                                            break;
+                                                        }
+
+                                                        examined += 1;
+
+                                                        let ttl_secs = message
+                                                            .expires_at
+                                                            .saturating_duration_since(
+                                                                std::time::Instant::now(),
+                                                            )
+                                                            .as_secs();
+                                                        if ttl_secs == 0
+                                                            || message.hops_exceeded()
+                                                        {
+                                                            continue;
+                                                        }
+
+                                                        let relay =
+                                                            crate::network::wire::build_relay(
+                                                                &message.msg_id,
+                                                                &message.recipient,
+                                                                &message.origin_sender,
+                                                                &message.chat_scope,
+                                                                ttl_secs,
+                                                                message.hop_count,
+                                                                &message.e2e_payload,
+                                                            );
+                                                        let relay_bytes = relay.len();
+                                                        if relay_bytes
+                                                            > MAX_MESH_RELAY_ENVELOPE_BYTES
+                                                        {
+                                                            tracing::warn!(
+                                                                "MESH gossip: relay {} is {} bytes (limit {}), skipped",
+                                                                message.msg_id,
+                                                                relay_bytes,
+                                                                MAX_MESH_RELAY_ENVELOPE_BYTES
+                                                            );
+                                                            continue;
+                                                        }
+                                                        if sent_bytes.saturating_add(relay_bytes)
+                                                            > MAX_MESH_RELAY_BYTES_PER_ROUND
+                                                            || mesh_relay_bytes_sent_in_window
+                                                                .saturating_add(relay_bytes)
+                                                                > MAX_MESH_RELAY_BYTES_PER_WINDOW
+                                                        {
+                                                            break;
+                                                        }
+
+                                                        match transport
+                                                            .send_message(
+                                                                &message.recipient,
+                                                                &relay,
+                                                            )
+                                                            .await
+                                                        {
+                                                            Ok(_) => {
+                                                                sent += 1;
+                                                                sent_bytes += relay_bytes;
+                                                                mesh_relays_sent_in_window += 1;
+                                                                mesh_relay_bytes_sent_in_window +=
+                                                                    relay_bytes;
+                                                                tracing::trace!(
+                                                                    "MESH gossip: resent {} for {}",
+                                                                    message.msg_id,
+                                                                    message.recipient
+                                                                );
+                                                            }
+                                                            Err(e) => tracing::warn!(
+                                                                "MESH gossip: failed to resend {}: {}",
+                                                                message.msg_id,
+                                                                e
+                                                            ),
+                                                        }
+                                                    }
+
+                                                    if examined > 0 {
+                                                        mesh_relay_cursor = mesh_relay_cursor
+                                                            .wrapping_add(examined)
+                                                            % total_missing;
+                                                    }
+                                                    if sent > 0 {
+                                                        tracing::info!(
+                                                            "MESH gossip: resent {} relay(s), {} bytes ({} missing)",
+                                                            sent,
+                                                            sent_bytes,
+                                                            total_missing
+                                                        );
+                                                    } else {
+                                                        tracing::trace!(
+                                                            "MESH gossip: no relay sent ({} missing, budget/limits)",
+                                                            total_missing
+                                                        );
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                     _ => tracing::warn!(

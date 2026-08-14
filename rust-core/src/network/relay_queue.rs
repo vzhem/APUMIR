@@ -9,7 +9,7 @@
 //!
 //! См. `docs/MESH_DELIVERY.md`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -231,6 +231,46 @@ impl RelayQueue {
             .collect()
     }
 
+    /// Ограниченный набор relay, отсутствующих в сводке peer.
+    ///
+    /// Сортирует только ссылки и клонирует не больше `limit` payload-ов, поэтому даже
+    /// полная очередь не создаёт вторую полную копию в памяти. `cursor` обеспечивает
+    /// продолжение со следующей части очереди в новом gossip-раунде.
+    pub fn gossip_candidates(
+        &self,
+        peer_digest: &[(String, String)],
+        cursor: usize,
+        limit: usize,
+    ) -> (Vec<RelayMessage>, usize) {
+        let peer_items: HashSet<(&str, &str)> = peer_digest
+            .iter()
+            .map(|(msg_id, recipient)| (msg_id.as_str(), recipient.as_str()))
+            .collect();
+        let entries = self.entries.lock().unwrap();
+        let mut missing: Vec<&RelayMessage> = entries
+            .values()
+            .filter(|message| {
+                !peer_items.contains(&(message.msg_id.as_str(), message.recipient.as_str()))
+            })
+            .collect();
+        missing.sort_by(|a, b| {
+            a.recipient
+                .cmp(&b.recipient)
+                .then_with(|| a.msg_id.cmp(&b.msg_id))
+        });
+
+        let total_missing = missing.len();
+        if total_missing == 0 || limit == 0 {
+            return (Vec::new(), total_missing);
+        }
+
+        let start = cursor % total_missing;
+        let candidates = (0..total_missing.min(limit))
+            .map(|offset| (*missing[(start + offset) % total_missing]).clone())
+            .collect();
+        (candidates, total_missing)
+    }
+
     /// Сводка очереди: `(msg_id, recipient)` для gossip-обмена.
     pub fn digest(&self) -> Vec<(String, String)> {
         self.entries
@@ -354,6 +394,26 @@ mod tests {
         assert_eq!(for_c.len(), 1);
 
         // for_recipient не удаляет
+        assert_eq!(q.total_count(), 3);
+    }
+
+    #[test]
+    fn test_gossip_candidates_are_bounded_rotating_clones() {
+        let q = RelayQueue::new();
+        q.enqueue(msg("m1", "pk_b")).unwrap();
+        q.enqueue(msg("m2", "pk_b")).unwrap();
+        q.enqueue(msg("m3", "pk_b")).unwrap();
+
+        let peer_digest = vec![("m2".to_string(), "pk_b".to_string())];
+        let (first, total) = q.gossip_candidates(&peer_digest, 0, 1);
+        assert_eq!(total, 2);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].msg_id, "m1");
+
+        let (second, total) = q.gossip_candidates(&peer_digest, 1, 1);
+        assert_eq!(total, 2);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].msg_id, "m3");
         assert_eq!(q.total_count(), 3);
     }
 
