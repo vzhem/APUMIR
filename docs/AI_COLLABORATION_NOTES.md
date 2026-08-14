@@ -537,8 +537,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.41)** — attack semantics полностью ожидаемые: Анна/Женя forged input=1 и
   previously-seen=1, Стас forged input=1/conflict-drop=1; на всех store/local/receipt/cleanup/
   origin/UI/errors/crash=0. Resources safe (max 35°C). Analyzer поставил incomplete только потому,
-  что поздний `pidof` Жени вернул `8350 24000`, хотя expected `24000` жив. State имеет analysis
-  complete/pass=false, logs не очищены. Нужен local process-identity diagnostic; attack не повторять.
+  что поздний `pidof` Жени вернул `8350 24000`, хотя expected `24000` жив.
+- **2026-08-14 (доп.42)** — process diagnostic позже дал только PID `24000`; `ps`/cmdline/UID
+  подтверждают единственный основной `com.vladimir.messenger`, 52 threads, sleeping, MQTT live,
+  errors=0. PID `8350` был transient/already exited и не содержал attack snapshot. Functional
+  attack PASS можно финализировать membership-aware по сохранённым snapshots; attack не повторять.
 
 ---
 
@@ -753,8 +756,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2: attack semantics PASS, но final marker false только
-   из-за multi-PID Жени `8350 24000`; expected PID `24000` жив, logs сохранены. Следующий шаг —
-   local `/proc`/`ps` identity diagnostic без publish/clear; затем membership-aware finalizer.
-   Control, M3(d), UI/background пока не трогать.
+7. Low-volume security smoke generation 2: attack semantics PASS; extra PID Жени был transient,
+   единственный текущий процесс снова expected `24000`. Следующий шаг — membership-aware local
+   finalizer по сохранённым snapshots, затем одна normal control delivery. Attack не повторять;
+   M3(d), UI/background пока не трогать.
 

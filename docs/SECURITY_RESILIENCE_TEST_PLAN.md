@@ -303,5 +303,6 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   origin binding установлен, attack log baseline очищен. Затем одна conflicting-origin injection
   (QoS1/non-retained/179 B) дала exact semantics PASS: Анна/Женя previously-seen=1/1, Стас
   conflict-drop=1; store/delivery/receipt/UI/errors/crash=0, max 35°C. Final gate false только из-за
-  `pidof` Жени=`8350 24000` при живом expected PID `24000`. До control нужен process identity
-  diagnostic и membership-aware finalizer; attack не повторять, logs не очищать.
+  transient `pidof` Жени=`8350 24000` при живом expected PID `24000`; поздний `ps` подтвердил
+  единственный основной PID `24000`, MQTT live/errors=0. Финализировать membership-aware по
+  snapshots, затем control; attack не повторять.
