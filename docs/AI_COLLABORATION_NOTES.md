@@ -551,8 +551,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   no-network-publish и разрешил ровно один retry того же ID; attack остаётся завершённым.
 - **2026-08-14 (доп.45)** — единственный authorized retry того же ранее unpublished control ID
   `sec-control-1786712273127` подтверждён QoS1/non-retained, 176 B. Pre-gate PID membership 3/3,
-  peer lines `3/12/29`, ID refs=0; через 15 s snapshots готовы с refs `10/7/10`. Не повторять и
-  не очищать logs; следующий шаг только локальный exact analyzer normal delivery + resources.
+  peer lines `3/12/29`, ID refs=0; через 15 s snapshots готовы с refs `10/7/10`. Не повторять.
+- **2026-08-14 (доп.46)** — local analyzer сохранил окончательный normal-control PASS. Анна:
+  input/store/receipt-input/remove/origin=`1/1/1/1/1`; Женя input/store/receipt-input/remove=
+  `1/1/1/1`; Стас input/local/receipt-input/receipt-sent/UI=`1/1/1/1/1`. Все unexpected store/
+  local/origin/UI, duplicate, previously-seen, conflict, MQTT error, crash/ANR=`0`; snapshots
+  `10/7/10`, expected PID membership 3/3. Post-control battery `100/100/60%`, temperature
+  `38/29.6/31°C`, PSS `117511/90608/126208 KiB`, CPU `0.7/0.5/0.7%`, threads `59/52/66`.
+  Control recovery и весь первый low-volume security smoke завершены; logs оставлены, state PASS.
 
 ---
 
@@ -772,8 +778,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2: attack полностью PASSED. Первый control attempt
-   остановился до publish на PC HiveMQ connect timeout; marker attempted=true/confirmed=false.
-   Следующий шаг — local 0-ID/TCP recovery, потом максимум один authorized retry того же ID.
-   Attack, M3(d), UI/background больше не трогать.
+7. Первый low-volume security smoke generation 2 полностью PASSED: normal setup, один
+   conflicting-origin drop и normal control после attack дали exact expected semantics, PID 3/3,
+   errors/crash=0; post-control resources записаны в доп.46. Ничего не повторять. Следующий этап
+   не начинать без согласования; M3(d), UI/background пока не трогать.
 

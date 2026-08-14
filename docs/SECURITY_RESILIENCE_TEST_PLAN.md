@@ -306,5 +306,9 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   PASS; post-attack max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery `0/0/+1`. Первый normal
   control helper прошёл live gate, но PC HiveMQ connect timeout случился до publish. Recovery
   доказал no-publish refs=`0/0/0` и HiveMQ TCP recovery. Единственный retry того же ID
-  `sec-control-1786712273127` подтверждён QoS1/non-retained, 176 B; PID membership 3/3, snapshots
-  через 15 s refs=`10/7/10`. Повторять/очищать logs нельзя; остался local exact analysis+resources.
+  `sec-control-1786712273127` подтверждён QoS1/non-retained, 176 B. Local finalizer дал exact
+  normal-control PASS: Анна input/store/receipt/remove/origin=`1/1/1/1/1`, Женя input/store/
+  receipt/remove=`1/1/1/1`, Стас input/local/receipt-in/receipt-out/UI=`1/1/1/1/1`; все duplicate/
+  conflict/errors/crash=0, PID membership 3/3, snapshots refs=`10/7/10`. Post-control battery
+  `100/100/60%`, temperature `38/29.6/31°C`, PSS `117511/90608/126208 KiB`, CPU
+  `0.7/0.5/0.7%`, threads `59/52/66`. Первый bounded security smoke полностью PASSED; не повторять.

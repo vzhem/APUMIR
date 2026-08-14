@@ -224,7 +224,10 @@ RelayMessage {
   Причина broker-fallback в коде: `AsyncClient.publish().await` до polling подтверждает enqueue,
   не TCP/ConnAck, поэтому доступный второй broker не выбирается. Нужен bounded ConnAck gate +
   broker rotation/circuit breaker; одна строка `subscribed` не connectivity evidence.
-  После fresh connection generation-2 normal control всё же прошёл exact: relay/store/cleanup/
-  origin у Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без
-  duplicate/error/crash. Это устанавливает чистую origin binding baseline для security conflict.
+  После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
+  Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
+  error/crash. После successful conflict rejection отдельный normal control также прошёл exact:
+  intermediates store+cleanup, recipient одна local/UI delivery+receipt, origin delivery, все
+  duplicate/conflict/error/crash=0 и PID stable 3/3. Первый PC publish attempt остановился до
+  publish на HiveMQ ConnAck timeout; 0 refs и TCP recovery доказали безопасный единственный retry.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).
