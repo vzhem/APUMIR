@@ -759,6 +759,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   или повторять блок. Workaround: сначала read-only inventory exact path/size/SHA/time всех repo и
   TEMP hs_err, отделить известные 8788/7760 от historical, затем архивировать каждый отдельно.
   Новый Java preflight сравнивает baseline set с post-run set, а не требует абсолютный zero.
+- **2026-08-14 (доп.74)** — hs_err inventory нашёл 9 historical reports в `android-app/` от
+  2026-08-12 (до r1b2), каждый с отдельным SHA-256; Git их игнорирует, status содержит только
+  generated arm64 `.so`. Новые 8788/7760 уже отдельно сохранены в TEMP с hashes
+  `FD9EE6A3…F6DEE5F` / `8BD399F5…17F4BEC`; repo originals удалены после verified copies.
+  Historical reports не удалять и не архивировать повторно. Correct JDK17 preflight записывает
+  sorted baseline `full path|size|SHA`, запускает только `java -version` и
+  `gradlew --no-daemon --version` с process-local C-drive JDK17, затем требует exact same set/hash.
+  Любой new/changed hs_err = STOP; system JAVA_HOME после блока обязательно восстановить.
 
 ---
 
