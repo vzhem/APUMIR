@@ -132,7 +132,7 @@ v2.0 добавляет практический путь развития пр�
 - [ ] Переделать `.github/workflows/build-release.yml`, чтобы он не перезаписывал уже созданный Release.
 - [ ] Добавить manual release mode.
 - [ ] Добавить публикацию checksum и provenance.
-- [ ] Привести имя APK к формату `P2P-Messenger-vX.Y.Z.apk`.
+- [ ] Привести пользовательское имя APK к формату `APU-vX.Y.Z.apk`.
 - [ ] Создать `docs/RELEASE_PROCESS.md`.
 - [ ] Создать checklist ручной проверки перед релизом.
 - [ ] Создать rollback plan.
@@ -150,6 +150,36 @@ v2.0 добавляет практический путь развития пр�
 - [ ] `docs/TELEGRAM_AND_REGISTRY.md`
 - [ ] `docs/THREAT_MODEL.md`
 - [ ] `docs/NETWORK_CASCADE.md`
+
+## Фаза 0.3 — Единый бренд APU, логотип и современное оформление
+
+**Решение пользователя:** во всём пользовательском интерфейсе продукт называется только
+**APU**. `APUMIR`, `P2P Messenger` и похожие имена — исторические/технические названия папок,
+репозитория, package/classes и legacy links; они не должны показываться пользователю. Не
+переименовывать технические пути одним большим опасным изменением.
+
+- [ ] Провести аудит всех видимых строк: launcher label, onboarding, профиль/share, settings,
+  notifications, dialogs, APK/update texts, invite pages и accessibility descriptions.
+- [ ] Ввести единый строковый ресурс имени `APU`, исключить hardcoded старые названия из UI.
+- [ ] Новые APK/releases называть `APU-vX.Y.Z`; GitHub repo/локальные папки могут быть APUMIR.
+- [ ] Для новых links/сайта использовать бренд APU, сохранив чтение старых `p2pmessenger://`,
+  `.apumir` и legacy invite links ради обратной совместимости.
+- [ ] Разработать оригинальный современный логотип APU, отражающий P2P, приватность и связь,
+  но не копирующий Telegram или другие продукты.
+- [ ] Подготовить vector source (SVG), Android adaptive icon foreground/background, monochrome
+  themed icon, launcher icon, notification icon, splash и безопасные поля для малых размеров.
+- [ ] Проверить узнаваемость на 16/24/48 px, светлом/тёмном фоне и в grayscale; закрепить права
+  и исходники, чтобы логотип можно было законно использовать в релизах.
+- [ ] Создать UI design system: цветовые tokens, typography, spacing, shapes, icons, motion,
+  light/dark/high-contrast themes и требования accessibility.
+- [ ] Последовательно оформить onboarding, список чатов, чат, contacts/search, profile,
+  settings, media/stories и системные состояния loading/empty/error/offline.
+- [ ] Сделать кликабельный макет и проверить основные сценарии на телефонах до массового
+  переписывания Compose UI.
+
+Критерий: пользователь везде видит только APU; приложение имеет единый оригинальный adaptive
+logo и согласованный современный интерфейс в light/dark themes, а старые технические имена
+остаются только внутри совместимых путей/кода и не требуют опасного переименования репозитория.
 
 ---
 

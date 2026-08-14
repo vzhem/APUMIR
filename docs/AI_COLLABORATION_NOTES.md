@@ -219,6 +219,11 @@ receipt-cleanup → интеграция в отправку → переисп�
   личные Stories: фото/видео/текст, audience privacy, signed manifest, E2E chunks, TTL 24 ч,
   views/reactions/replies и friend-only bounded relay без flood. Большие media не помещать в
   MQTT text envelope. Backlog — `MASTER_PLAN_v2.md`, фазы 5.3–5.4.
+- **Бренд — решение пользователя (2026-08-14):** пользовательское название везде только
+  **APU**. APUMIR/P2P Messenger остаются лишь техническими/историческими именами repo, папок,
+  package/classes и legacy links; не делать рискованный массовый rename. Нужны аудит всех UI
+  strings, новый оригинальный modern logo (adaptive/monochrome/notification/splash/vector),
+  design system и последовательное light/dark/accessibility оформление. План — фаза 0.3.
 
 ---
 
@@ -273,13 +278,14 @@ receipt-cleanup → интеграция в отправку → переисп�
   установлен на 3 телефона. На Анне Wi-Fi+data off/on: PID остался `23407`, offline errors=4
   с backoff 8/16/30/30 с, reconnect+re-subscribe=1, live probe=1.
 
-- **M3(c.2-r2), код готов:** auto-receipt публикуется retained в
-  `p2pm2/msg/<origin>/receipt/<sha256(msg_id)>`, поэтому ACK/summary его не перезаписывают.
-  Origin проверяет exact own topic и удаляет retained receipt пустой публикацией после обработки.
-  Origin segment ограничен safe ASCII/128 B, msg_id — 256 B; старые base-topic receipts читаются.
-  Windows Android Rust build успешен за 1m01s.
+- **M3(c.2-r2), unique receipt ВЕРИФИЦИРОВАН на `v11.16.9`:** Стас отправил receipt в
+  exact SHA-256 topic; Женя cleanup=1; при offline Анне независимый subscriber получил retained
+  payload с `retain=true`; после reconnect Анна сделала cleanup+origin-delivery и topic очищен
+  (`RETAINED RECEIPT CLEARED`). Но тест выявил следующий blocker: c2 relay resend всё ещё
+  retained на base recipient topic. После reconnect Анна получила старый relay, снова сохранила
+  его и вызвала вторую доставку/receipt (`originDelivery=2`). Это не норма.
 
-**Следующий шаг = собрать APK `v11.16.9` для M3(c.2-r2); M3(d) не начинать.**
+**Следующий шаг = согласовать M3(c.2-r3): c2 relay non-retained + recipient dedup; M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -357,6 +363,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.10)** — расширены media-фазы: 5.3 включает любые files и видеокружочки;
   новая 5.4 — Stories (photo/video/text, privacy audience, signed/E2E, TTL 24 ч, reactions,
   bounded friend relay). Большие media не идут внутри MQTT text envelope.
+- **2026-08-14 (доп.11)** — зафиксирован единый пользовательский бренд **APU**; APUMIR и
+  P2P Messenger — только внутренние/legacy имена. В MASTER_PLAN добавлена фаза 0.3: аудит
+  strings, оригинальный adaptive logo, design system и современное light/dark оформление.
+- **2026-08-14 (доп.12)** — r2 unique retained receipt доказан и корректно очищен, но stale
+  retained relay после reconnect породил вторые store/delivery/receipt/origin-delivery.
+  Нужен отдельный r3: c2 resend non-retained + bounded recipient delivery dedup.
 
 ---
 
@@ -508,7 +520,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
 4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
    one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
-5. r1 проверен на `v11.16.8`: Wi-Fi off/on без restart процесса, bounded backoff,
-   reconnect+re-subscribe=1 и live probe=1. Код r2 собран через `build-rust.ps1` за 1m01s;
-   дальше APK `v11.16.9` и отдельный 3-phone test. M3(d)/UI/background пока не трогать.
+5. r1 проверен. r2 unique receipt/cleanup проверен на `v11.16.9`, но stale retained relay
+   вызвал вторую доставку и origin-delivery. Следующий только после согласия: r3 non-retained
+   c2 resend + recipient dedup. M3(d)/UI/background пока не трогать.
 

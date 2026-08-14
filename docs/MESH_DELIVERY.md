@@ -210,8 +210,8 @@ RelayMessage {
   будущий шаг: WorkManager → receive-only mode → own-topic/signed bounded pull → короткое окно
   → stop; никакого enqueue/forward чужого. Exact wake Android не гарантирует; real-time только
   через отдельный opt-in foreground service. Нужны sender/recipient quotas против offline-load.
-- **Надёжность receipt:** r1 reconnect + re-subscribe после смены сети проверен на Android
-  2026-08-14. Код r2 готов: retained receipt идёт в отдельный
-  `p2pm2/msg/<origin>/receipt/<sha256(msg_id)>`, а origin удаляет retained topic после обработки;
-  ACK/summary больше его не перезаписывают. Windows build успешен; нужен 3-phone test.
+- **Надёжность receipt:** r1 reconnect и r2 unique retained receipt+cleanup проверены на
+  Android 2026-08-14. Выявлен r3 blocker: c2 relay resend на retained base topic переживает
+  доставку и после reconnect может снова попасть в очередь/доставиться. Исправить resend на
+  non-retained и добавить bounded recipient dedup до продолжения M3.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).
