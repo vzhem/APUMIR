@@ -521,8 +521,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `31/28.7/30°C`, PSS `117764/98527/142225 KiB`.
 - **2026-08-14 (доп.36)** — после immediate live gate `8/16/28` peer lines generation-2 normal
   relay опубликован ровно один раз: QoS1, retain=false, 183 bytes, TTL 3600. PID неизменны;
-  immediate snapshots сохранены, test-ID refs Анна/Женя/Стас=`10/7/10`. Не повторять и не
-  атаковать до exact local analysis delivery/UI/receipt/cleanup; logs пока не очищены.
+  immediate snapshots сохранены, test-ID refs Анна/Женя/Стас=`10/7/10`. Не повторять.
+- **2026-08-14 (доп.37)** — первый exact-analysis блок вообще не выполнился: PowerShell parser
+  отверг не заключённые в скобки вызовы `Count-Literal ... +`. Остаток интерактивного paste дал
+  пустые метрики, отдельный `else` и ложный текст INCOMPLETE. MQTT/state/snapshots не изменены,
+  logs не очищены, attack не выполнялся. Повторить только analysis через compile-first Python
+  helper; setup relay не переиздавать.
 
 ---
 
@@ -553,6 +557,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   snapshot/state marker. Если строка уже потеряна, live `MQTT: peer online` после последнего
   `MQTT error` логически доказывает действующее subscribed connection; не требовать недоступную
   старую строку и не перезапускать лишь ради лога.
+- **PowerShell parser: function calls вокруг `+` надо заключать в скобки:** внутри hashtable
+  `Count-Literal ... +` на переносе дал parser error, после чего остаток paste снова выполнялся
+  отдельными командами и породил ложный INCOMPLETE/`else` errors. Правильно:
+  `(Count-Literal ...) + (Count-Literal ...)`. Для длинной read-only диагностики безопаснее
+  записать Python/`.ps1` как here-string, сначала compile/parse, затем выполнить; PASS/state/clear
+  остаются только внутри валидного файла.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -722,7 +732,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
 7. Low-volume security smoke generation 2: ID `sec-origin2-1786710017189`, normal relay
-   опубликован один раз (QoS1/non-retained/183 B), snapshots refs `10/7/10`, PID стабильны.
-   Следующий шаг — local exact setup analysis; publish/conflict до результата запрещены.
-   M3(d), UI/background пока не трогать.
+   опубликован один раз, snapshots refs `10/7/10`. PowerShell analysis parser fail не затронул
+   state/logs/network. Следующий шаг — compile-first Python exact analysis; publish/conflict до
+   результата запрещены. M3(d), UI/background пока не трогать.
 
