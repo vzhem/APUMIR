@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **v11.16.11 cold-start PASS 3/3; controlled reconnect Анны PASS; delivery check pending**
+Статус: **v11.16.11 cold-start/reconnect PASS; delivery blocked by silent MQTT liveness loss; no test publish**
 
 Дата: 2026-08-14
 
@@ -14,8 +14,18 @@ r4.2 Android Rust release build прошёл за 1m01s; APK build — за 32s.
 не распарсил certificate label; corrected compare доказал один V2 signer SHA-256 у нового APK и
 у установленной v11.16.10. Controlled reconnect Анны сохранил PID `30085`, восстановил исходные
 Wi-Fi/data=`1/1`, дал ровно один reconnect subscription request и последующий live peer traffic;
-ошибок MQTT, ложных/старых markers и crash/ANR не было. Test message не публиковался, поэтому
-отдельный low-volume delivery check ещё pending. Второй broker и duplicate filter ещё не подключены.
+ошибок MQTT, ложных/старых markers и crash/ANR не было. Test message не публиковался. Две
+последующие guarded delivery-preflight попытки также остановились **до publish**. Вторая сохранила
+динамические PID, но за readiness window и позднюю read-only диагностику все 3 телефона при
+`airplane=0`, Wi-Fi=1 и VALIDATED network дали `MQTT IN/presence/peer/error/ConnAck/subscription=0`;
+PID membership 3/3, crash/ANR=0. Значит, delivery остаётся pending, а перед r4.3 нужен отдельный
+r4.2-r1 observable-liveness/backpressure fix. Второй broker и duplicate filter ещё не подключены.
+
+Source review показал правдоподобный, но ещё не доказанный stack trace риск взаимной блокировки:
+EventLoop бесконечно ждёт `event_tx.send(...).await`, а core может одновременно бесконечно ждать
+`AsyncClient.publish(...).await` в другом bounded channel. Завершение EventLoop task не
+наблюдается, периодические presence publish errors игнорируются. Нельзя называть это точной
+причиной без runtime proof, но само тихое состояние уже является release blocker.
 
 ## 1. Зачем это нужно
 
@@ -187,6 +197,18 @@ broker не должен ошибочно менять state другой sessio
 - Убрать ложный `connected` до ConnAck.
 - Сохранить один HiveMQ broker и текущую функциональность.
 - Проверить cold start и reconnect на трёх телефонах без новой доставки/дублей.
+
+### r4.2-r1 — observable liveness и bounded backpressure
+
+- Не позволять EventLoop→core и core→AsyncClient бесконечно ждать друг друга на заполненных
+  bounded channels; timeout/overflow должны быть явными и измеримыми, не тихими.
+- Наблюдать завершение/panic EventLoop task и переводить session в `Stopped/Degraded`, а не
+  оставлять живой PID с ложной готовностью.
+- Не игнорировать periodic presence publish errors; добавить bounded counters/last-progress time.
+- Сначала определить topic-aware overflow policy: presence/gossip можно bounded-drop с metric,
+  но relay/receipt нельзя молча терять после broker QoS ACK.
+- Проверить на локальном broker: idle > keepalive, заполнение channels, consumer stall и recovery.
+- До прохождения r4.2-r1 не публиковать новый public delivery probe и не начинать r4.3.
 
 ### r4.3 — вторая session за feature gate
 

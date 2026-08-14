@@ -649,6 +649,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `delivery2` state/snapshots и динамически фиксирует текущий single PID каждого телефона перед
   readiness gate (не вшивает уже устаревший PID). Сначала он проверяет старое no-publish evidence,
   а при любом неполном исходе не повторяет публикацию автоматически.
+- **2026-08-14 (доп.62)** — delivery2 также безопасно остановлен ДО envelope/publisher: за 45 с
+  Анна не дала fresh peer marker. State SHA-256
+  `39ED438B7EF19910D41700C01965466B1BEFAA8B63C06DBB9DB45DE0936099EC` сохранил пустые
+  topic/envelope и `publishCalled/publishConfirmed=false`. Первый read-only analyzer упал на
+  PowerShell/.NET typed-list binding после записи только Anna diagnostic; телефоны не менял.
+  Отдельный Python diagnostic2 завершён: PID membership Анна/Женя/Стас=`30085/20292/26923`,
+  airplane=`0/0/0`, Wi-Fi=`1/1/1`, mobile data=`1/0/1`, VALIDATED lines=`21/20/21`, crash=0.
+  При этом после baseline на всех 3: MQTT input/presence/peer/error/ConnAck/subscription=`0`.
+  Это не delivery FAIL (ни одного test publish не было), а silent MQTT liveness blocker.
+  Source review нашёл правдоподобный mutual-backpressure риск: EventLoop ждёт bounded
+  `event_tx.send().await`, core может ждать bounded `AsyncClient.publish().await`; task completion
+  не проверяется, periodic presence errors игнорируются. Причина ещё не доказана runtime stack,
+  но перед r4.3 обязателен r4.2-r1 observable-liveness/backpressure fix и local stall tests.
 
 ---
 

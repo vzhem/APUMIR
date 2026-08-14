@@ -233,7 +233,11 @@ RelayMessage {
   effective cold-start readiness 3/3 без false success/crash. Controlled reconnect Анны также
   PASS на том же PID: один subscription request после reconnect, затем live peer traffic, без
   MQTT error/ложных markers/crash. Test message не публиковался; отдельный safe low-volume
-  delivery check pending. EMQX/fanout не подключены.
+  delivery check остановлен до publish: при живых PID, VALIDATED network и crash=0 все три
+  телефона позднее дали ноль MQTT input/presence/peer/error/ConnAck/subscription markers. Это
+  silent-liveness release blocker, а не delivery FAIL. Перед r4.3 обязателен r4.2-r1: наблюдаемое
+  завершение EventLoop, bounded channel waits, явные periodic publish errors и local stall/recovery
+  tests. EMQX/fanout не подключены; public delivery probe до fix не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:
