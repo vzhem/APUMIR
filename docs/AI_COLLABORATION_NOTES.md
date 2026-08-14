@@ -524,9 +524,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   immediate snapshots сохранены, test-ID refs Анна/Женя/Стас=`10/7/10`. Не повторять.
 - **2026-08-14 (доп.37)** — первый exact-analysis блок вообще не выполнился: PowerShell parser
   отверг не заключённые в скобки вызовы `Count-Literal ... +`. Остаток интерактивного paste дал
-  пустые метрики, отдельный `else` и ложный текст INCOMPLETE. MQTT/state/snapshots не изменены,
-  logs не очищены, attack не выполнялся. Повторить только analysis через compile-first Python
-  helper; setup relay не переиздавать.
+  пустые метрики, отдельный `else` и ложный текст INCOMPLETE. MQTT/state/snapshots не изменены.
+- **2026-08-14 (доп.38)** — compile-first Python helper точно посчитал setup до вывода строк
+  Стаса: Анна relay/store/cleanup/origin=`1/1/1/1`, Женя=`1/1/1/0`, Стас relay/local/receipt/UI=
+  `1/1/1/1`; PID стабильны, errors/crash=0. Затем raw Unicode log line не кодировалась в cp1251,
+  helper упал до save/clear. Attack не выполнялся, setup не повторять. Нужен ASCII-only finalizer,
+  который повторно считает snapshots, сохраняет PASS и только затем очищает attack logs.
 
 ---
 
@@ -563,6 +566,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `(Count-Literal ...) + (Count-Literal ...)`. Для длинной read-only диагностики безопаснее
   записать Python/`.ps1` как here-string, сначала compile/parse, затем выполнить; PASS/state/clear
   остаются только внутри валидного файла.
+- **Python stdout в Windows PowerShell cp1251 не печатает любой Unicode из logcat:** raw line с
+  box-drawing glyph дала runtime `UnicodeEncodeError` после верного подсчёта, но до state save и
+  log clear; `py_compile` такое не ловит. Automation должна выводить только ASCII metrics/
+  `json.dumps(..., ensure_ascii=True)`, либо использовать `backslashreplace`; raw logs уже лежат
+  в snapshot и не должны печататься в консоль.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -731,8 +739,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2: ID `sec-origin2-1786710017189`, normal relay
-   опубликован один раз, snapshots refs `10/7/10`. PowerShell analysis parser fail не затронул
-   state/logs/network. Следующий шаг — compile-first Python exact analysis; publish/conflict до
-   результата запрещены. M3(d), UI/background пока не трогать.
+7. Low-volume security smoke generation 2: snapshots уже доказали exact normal setup PASS
+   (`Anna 1/1/1/1`, `Zhenya 1/1/1/0`, `Stas 1/1/1/1`, UI только Стас=1, errors/crash=0), но
+   Python Unicode stdout упал до state save/log clear. Следующий шаг — ASCII-only local finalizer;
+   publish/conflict до marker запрещены. M3(d), UI/background пока не трогать.
 
