@@ -816,6 +816,23 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   launch/log clear не повторять. Recovery только read-only current logcat с `p2p_core:V`, exact
   original PID membership и отдельными diagnostic snapshots/state. Все будущие native harnesses
   обязаны включать `p2p_core:V`; Kotlin/UI дополнительно `RustBridge`/`CoreServerService`.
+- **2026-08-14 (доп.81)** — первый native-recovery block остановился на non-destructive ADB
+  preflight: Anna `RFCWC16RDYL` отсутствовала в `adb devices` как exact `device`. Остановка была
+  до loop capture/state writes: `%TEMP%\apu-r4.2-r1b2-v11.16.12-native-recovery.json` и три
+  `...-native-recovery-<Name>.log` не созданы, logcat/app/network не менялись, capture budget не
+  израсходован. Сначала только read-only `adb devices -l`; capture разрешён лишь после exact 3/3.
+  Repo hygiene audit: correct branch clean, 222 tracked files, no untracked/ignored files и no
+  merge markers. Historical tracked baggage есть: phone logs (~13 MB), 9 JVM crash logs + replay,
+  Kotlin daemon/build logs, unused UTF-16 `temp_core.txt`, duplicated legacy native libraries.
+  Сейчас не удалять: cleanup отложен. Важный release blocker: tracked Android arm64 `.so`
+  SHA-256 `3C5E0D645B5FE80367AAFDB8590DDC21B9E56B081DCC639E99A1A59A412B2832`
+  не содержит r1a/r1b markers, а tag workflow Rust не пересобирает и может упаковать stale native
+  code. Установленный build3 не затронут: он собран свежим `build-rust.ps1`, его `.so` hash
+  `7C9537E6FA5F93B4F6AC28B2705F97A35E738C36309922A029D06E0886517194`. До любого tag/release
+  добавить reproducible Rust build/hash gate. Tracked signing keystore/config — security debt, но
+  сейчас нужен для data-preserving signer continuity; не удалять без отдельного migration plan.
+  Во время аудита Arena снова локально вернула HEAD на `991da05`; безопасно исправлено exact fetch
+  `arena/01a000bc-apumir` + mixed reset до `44f1aa3`, без branch switch/hard reset/потери файлов.
 
 ---
 
