@@ -9,7 +9,8 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::network::mqtt_backpressure::{await_mqtt_request, MqttRequestError};
 use crate::network::mqtt_liveness::{
-    assess_mqtt_liveness, MqttLivenessAssessment, MqttLivenessProbe,
+    assess_mqtt_liveness, mqtt_restart_reason, MqttLivenessAssessment, MqttLivenessProbe,
+    MqttRestartReason,
 };
 
 pub const MQTT_BROKERS: &[(&str, u16)] = &[
@@ -81,6 +82,7 @@ pub struct MqttTransport {
     eventloop_watchdog_task: Option<tokio::task::JoinHandle<()>>,
     liveness: Arc<MqttLivenessProbe>,
     shutdown_requested: Arc<AtomicBool>,
+    notification_channel_closed: bool,
     has_connected_once: bool,
     node_id: String,
     peers: Arc<Mutex<Vec<PeerInfo>>>,
@@ -115,6 +117,7 @@ impl MqttTransport {
             eventloop_watchdog_task: None,
             liveness: Arc::new(MqttLivenessProbe::new()),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
+            notification_channel_closed: false,
             has_connected_once: false,
             node_id: node_id.to_string(),
             peers: Arc::new(Mutex::new(Vec::new())),
@@ -509,6 +512,24 @@ impl MqttTransport {
         .await
     }
 
+    pub fn restart_reason(&self) -> Option<MqttRestartReason> {
+        if self.shutdown_requested.load(Ordering::Acquire) {
+            return None;
+        }
+
+        let eventloop_task_finished = self
+            .eventloop_task
+            .as_ref()
+            .map(|task| task.is_finished())
+            .unwrap_or(true);
+        mqtt_restart_reason(
+            self.notification_channel_closed,
+            eventloop_task_finished,
+            self.liveness.snapshot(),
+            MQTT_LIVENESS_STALL_AFTER,
+        )
+    }
+
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
         match tokio::time::timeout(Duration::from_secs(1), self.event_rx.recv()).await {
             Ok(Some(MqttNotification::Message(event))) => Some(event),
@@ -539,7 +560,13 @@ impl MqttTransport {
                 }
                 None
             }
-            Ok(None) => None,
+            Ok(None) => {
+                if !self.notification_channel_closed {
+                    tracing::error!("MQTT LIVENESS: core notification channel closed");
+                    self.notification_channel_closed = true;
+                }
+                None
+            }
             Err(_) => None,
         }
     }

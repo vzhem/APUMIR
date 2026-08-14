@@ -636,6 +636,67 @@ self.runtime = Some(runtime);
             }
         }
     }
+    async fn connect_ready_mqtt_session(
+        node_id: &str,
+        display_name: &str,
+    ) -> Result<crate::network::mqtt_transport::MqttTransport, String> {
+        use crate::network::mqtt_transport::MqttTransport;
+
+        const MQTT_SESSION_READY_TIMEOUT: std::time::Duration =
+            std::time::Duration::from_secs(45);
+
+        let mut transport = MqttTransport::connect(node_id, display_name).await?;
+        match tokio::time::timeout(MQTT_SESSION_READY_TIMEOUT, transport.subscribe()).await {
+            Ok(Ok(())) => Ok(transport),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(format!(
+                "MQTT session did not reach ConnAck/subscription request within {}s",
+                MQTT_SESSION_READY_TIMEOUT.as_secs()
+            )),
+        }
+    }
+
+    async fn announce_mqtt_session(
+        transport: &crate::network::mqtt_transport::MqttTransport,
+        display_name: &str,
+        addr_str: Option<&str>,
+        is_relay: bool,
+        generation: u64,
+    ) {
+        match transport
+            .publish_presence(display_name, addr_str, is_relay)
+            .await
+        {
+            Ok(_) => tracing::info!(
+                "MQTT SESSION: presence request queued after ConnAck generation={}",
+                generation
+            ),
+            Err(error) => tracing::warn!(
+                "MQTT SESSION: presence request failed generation={}: {}",
+                generation,
+                error
+            ),
+        }
+
+        if is_relay {
+            if let Some(addr) = addr_str {
+                match transport.register_as_relay(addr).await {
+                    Ok(_) => tracing::info!(
+                        "MQTT SESSION: relay registration request queued generation={} addr={}",
+                        generation,
+                        addr
+                    ),
+                    Err(error) => tracing::warn!(
+                        "MQTT SESSION: relay registration request failed generation={} addr={}: {}",
+                        generation,
+                        addr,
+                        error
+                    ),
+                }
+            }
+        }
+    }
+
     async fn run_mqtt_transport(
         events: Arc<EventBus>,
         node_id: String,
@@ -644,57 +705,62 @@ self.runtime = Some(runtime);
         queue: Option<Arc<MessageQueue>>,
         relay_queue: Option<Arc<RelayQueue>>,
     ) {
-        use crate::network::mqtt_transport::MqttTransport;
+        use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
+
+        const MQTT_SESSION_RESTART_BACKOFF_MAX_SECS: u64 = 30;
 
         // Wait for STUN to complete
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-        let mut transport = match MqttTransport::connect(&node_id, &display_name).await {
-            Ok(t) => {
-                tracing::info!("MQTT: transport initialized; awaiting broker ConnAck");
-                t
-            }
-            Err(e) => {
-                tracing::error!("MQTT: initialization failed: {}", e);
-                return;
-            }
-        };
-
-        if let Err(e) = transport.subscribe().await {
-            tracing::error!("MQTT: initial ConnAck/subscription failed: {}", e);
-            return;
-        }
-        tracing::info!("MQTT: initial ConnAck received; subscription request queued");
-
-        // Publish presence
         let addr_str = {
             let pa = public_addr.lock().unwrap();
             pa.map(|a| a.to_string())
         };
         let is_relay = addr_str.is_some();
-        match transport
-            .publish_presence(&display_name, addr_str.as_deref(), is_relay)
-            .await
-        {
-            Ok(_) => tracing::info!("MQTT: initial presence request queued after ConnAck"),
-            Err(e) => tracing::warn!("MQTT: initial presence request failed: {}", e),
-        }
+        let mut session_generation = 1u64;
+        let mut session_restart_backoff_secs = 1u64;
+        let mut session_start_attempt = 1u64;
 
-        if is_relay {
-            if let Some(ref addr) = addr_str {
-                match transport.register_as_relay(addr).await {
-                    Ok(_) => tracing::info!(
-                        "MQTT: relay registration request queued for {}",
-                        addr
-                    ),
-                    Err(e) => tracing::warn!(
-                        "MQTT: relay registration request failed for {}: {}",
-                        addr,
-                        e
-                    ),
+        let mut transport = loop {
+            match Self::connect_ready_mqtt_session(&node_id, &display_name).await {
+                Ok(transport) => {
+                    tracing::info!(
+                        "MQTT SESSION READY: generation={} attempt={} ConnAck=true subscription_request=true",
+                        session_generation,
+                        session_start_attempt
+                    );
+                    break transport;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "MQTT SESSION START FAILED: generation={} attempt={} error={}; retrying_in={}s",
+                        session_generation,
+                        session_start_attempt,
+                        error,
+                        session_restart_backoff_secs
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(
+                        session_restart_backoff_secs,
+                    ))
+                    .await;
+                    session_restart_backoff_secs = next_mqtt_restart_backoff_secs(
+                        session_restart_backoff_secs,
+                        MQTT_SESSION_RESTART_BACKOFF_MAX_SECS,
+                    );
+                    session_start_attempt = session_start_attempt.saturating_add(1);
                 }
             }
-        }
+        };
+
+        session_restart_backoff_secs = 1;
+        Self::announce_mqtt_session(
+            &transport,
+            &display_name,
+            addr_str.as_deref(),
+            is_relay,
+            session_generation,
+        )
+        .await;
 
         // Event loop (poll every 1s, presence every 30s)
         let mut tick: u32 = 0;
@@ -739,7 +805,73 @@ self.runtime = Some(runtime);
         let mut delivered_mesh_relay_order: VecDeque<String> = VecDeque::new();
 
         loop {
-            if let Some(evt) = transport.poll_event().await {
+            let polled_event = transport.poll_event().await;
+
+            // Never discard an event already handed to core. If a terminal/stalled condition is
+            // observed together with one final event, process it now and restart next iteration.
+            if polled_event.is_none() {
+                if let Some(reason) = transport.restart_reason() {
+                    let previous_generation = session_generation;
+                    let next_generation = session_generation.saturating_add(1);
+                    tracing::error!(
+                        "MQTT SESSION RESTART REQUIRED: generation={} reason={} detail={:?}",
+                        previous_generation,
+                        reason.as_str(),
+                        reason
+                    );
+
+                    drop(transport);
+                    let mut recovery_attempt = 1u64;
+                    transport = loop {
+                        let retry_delay_secs = session_restart_backoff_secs;
+                        tracing::warn!(
+                            "MQTT SESSION RESTART SCHEDULED: from_generation={} to_generation={} attempt={} delay={}s",
+                            previous_generation,
+                            next_generation,
+                            recovery_attempt,
+                            retry_delay_secs
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(retry_delay_secs)).await;
+
+                        match Self::connect_ready_mqtt_session(&node_id, &display_name).await {
+                            Ok(recovered_transport) => break recovered_transport,
+                            Err(error) => {
+                                session_restart_backoff_secs = next_mqtt_restart_backoff_secs(
+                                    session_restart_backoff_secs,
+                                    MQTT_SESSION_RESTART_BACKOFF_MAX_SECS,
+                                );
+                                tracing::warn!(
+                                    "MQTT SESSION RESTART FAILED: target_generation={} attempt={} error={}; next_retry_in={}s",
+                                    next_generation,
+                                    recovery_attempt,
+                                    error,
+                                    session_restart_backoff_secs
+                                );
+                                recovery_attempt = recovery_attempt.saturating_add(1);
+                            }
+                        }
+                    };
+
+                    session_generation = next_generation;
+                    session_restart_backoff_secs = 1;
+                    tick = 0;
+                    Self::announce_mqtt_session(
+                        &transport,
+                        &display_name,
+                        addr_str.as_deref(),
+                        is_relay,
+                        session_generation,
+                    )
+                    .await;
+                    tracing::info!(
+                        "MQTT SESSION RECOVERED: generation={} ConnAck=true subscription_request=true",
+                        session_generation
+                    );
+                    continue;
+                }
+            }
+
+            if let Some(evt) = polled_event {
                 if evt.topic.starts_with("p2pm2/ping/") {
                     // Heartbeat ping РѕС‚ peer
                     let peer_id = evt.topic.trim_start_matches("p2pm2/ping/");

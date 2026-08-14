@@ -78,6 +78,61 @@ pub enum MqttLivenessAssessment {
     Stopped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MqttRestartReason {
+    NotificationChannelClosed,
+    EventLoopTaskFinished,
+    Stalled {
+        phase: MqttLoopPhase,
+        stalled_for_ms: u64,
+    },
+    ProbeStopped,
+}
+
+impl MqttRestartReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotificationChannelClosed => "notification_channel_closed",
+            Self::EventLoopTaskFinished => "eventloop_task_finished",
+            Self::Stalled { .. } => "eventloop_stalled",
+            Self::ProbeStopped => "liveness_probe_stopped",
+        }
+    }
+}
+
+pub fn mqtt_restart_reason(
+    notification_channel_closed: bool,
+    eventloop_task_finished: bool,
+    snapshot: MqttLivenessSnapshot,
+    stall_after: Duration,
+) -> Option<MqttRestartReason> {
+    if notification_channel_closed {
+        return Some(MqttRestartReason::NotificationChannelClosed);
+    }
+    if eventloop_task_finished {
+        return Some(MqttRestartReason::EventLoopTaskFinished);
+    }
+
+    match assess_mqtt_liveness(snapshot, stall_after) {
+        MqttLivenessAssessment::Healthy => None,
+        MqttLivenessAssessment::Stalled {
+            phase,
+            stalled_for_ms,
+        } => Some(MqttRestartReason::Stalled {
+            phase,
+            stalled_for_ms,
+        }),
+        MqttLivenessAssessment::Stopped => Some(MqttRestartReason::ProbeStopped),
+    }
+}
+
+pub fn next_mqtt_restart_backoff_secs(current_secs: u64, maximum_secs: u64) -> u64 {
+    current_secs
+        .saturating_mul(2)
+        .max(1)
+        .min(maximum_secs.max(1))
+}
+
 pub fn assess_mqtt_liveness(
     snapshot: MqttLivenessSnapshot,
     stall_after: Duration,
@@ -279,6 +334,85 @@ mod tests {
             assess_mqtt_liveness(state, Duration::from_secs(90)),
             MqttLivenessAssessment::Stopped
         );
+    }
+
+    #[test]
+    fn closed_notification_channel_requires_restart() {
+        let state = snapshot(MqttLoopPhase::Polling, 1_000, 900);
+        assert_eq!(
+            mqtt_restart_reason(false, false, state, Duration::from_secs(90)),
+            None
+        );
+        assert_eq!(
+            mqtt_restart_reason(true, false, state, Duration::from_secs(90)),
+            Some(MqttRestartReason::NotificationChannelClosed)
+        );
+    }
+
+    #[test]
+    fn finished_eventloop_task_requires_restart() {
+        let state = snapshot(MqttLoopPhase::Idle, 1_000, 900);
+        assert_eq!(
+            mqtt_restart_reason(false, true, state, Duration::from_secs(90)),
+            Some(MqttRestartReason::EventLoopTaskFinished)
+        );
+    }
+
+    #[test]
+    fn stalled_phase_preserves_diagnostic_reason() {
+        let state = snapshot(MqttLoopPhase::Forwarding, 100_000, 5_000);
+        assert_eq!(
+            mqtt_restart_reason(false, false, state, Duration::from_secs(90)),
+            Some(MqttRestartReason::Stalled {
+                phase: MqttLoopPhase::Forwarding,
+                stalled_for_ms: 95_000,
+            })
+        );
+    }
+
+    #[test]
+    fn stopped_probe_requires_restart_even_before_task_handle_finishes() {
+        let state = snapshot(MqttLoopPhase::Stopped, 1_000, 999);
+        let reason = mqtt_restart_reason(false, false, state, Duration::from_secs(90));
+        assert_eq!(reason, Some(MqttRestartReason::ProbeStopped));
+        assert_eq!(reason.unwrap().as_str(), "liveness_probe_stopped");
+    }
+
+    #[test]
+    fn restart_reason_labels_are_stable_for_harnesses() {
+        assert_eq!(
+            MqttRestartReason::NotificationChannelClosed.as_str(),
+            "notification_channel_closed"
+        );
+        assert_eq!(
+            MqttRestartReason::EventLoopTaskFinished.as_str(),
+            "eventloop_task_finished"
+        );
+        assert_eq!(
+            MqttRestartReason::Stalled {
+                phase: MqttLoopPhase::Polling,
+                stalled_for_ms: 90_000,
+            }
+            .as_str(),
+            "eventloop_stalled"
+        );
+        assert_eq!(
+            MqttRestartReason::ProbeStopped.as_str(),
+            "liveness_probe_stopped"
+        );
+    }
+
+    #[test]
+    fn restart_backoff_is_exponential_and_capped() {
+        let mut current = 1u64;
+        let mut observed = Vec::new();
+        for _ in 0..6 {
+            current = next_mqtt_restart_backoff_secs(current, 30);
+            observed.push(current);
+        }
+        assert_eq!(observed, vec![2, 4, 8, 16, 30, 30]);
+        assert_eq!(next_mqtt_restart_backoff_secs(0, 30), 1);
+        assert_eq!(next_mqtt_restart_backoff_secs(u64::MAX, 30), 30);
     }
 
     #[test]

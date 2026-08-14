@@ -699,6 +699,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   State/log: `%TEMP%\apu-r4.2-r1b1-rust-build.json` и `%TEMP%\apu-r4.2-r1b1-rust-build.log`.
   PowerShell `NativeCommandError` снова был только stderr progress при exit=0. APK/phones не
   менялись. Следующий код r1b2: closed channel outcome + bounded whole-session restart.
+- **2026-08-14 (доп.67)** — r4.2-r1b2 source добавил pure restart decision для closed core
+  notification channel, finished EventLoop task, stalled phase и stopped probe; liveness tests
+  теперь 11, включая стабильные reason labels и backoff `1→2→4→8→16→30→30`. Transport ставит
+  one-time channel-closed marker и проверяет task handle/probe. Core ready helper ждёт настоящий
+  ConnAck+subscription request максимум 45 с. Initial failure и terminal/stalled session создают
+  fresh single-HiveMQ transport с bounded backoff; old transport Drop раньше new, generation растёт
+  только после success. Полученный event не выбрасывается: restart проверяется только при None.
+  RelayQueue, seen/local-delivery tombstones, known peers и global budgets живут вне replacement.
+  После recovery повторяются subscription/presence/relay-registration requests. EMQX/dual publish/
+  production cross-broker dedup и transient sender не подключены. Windows build pending.
 
 ---
 
