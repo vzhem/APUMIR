@@ -258,7 +258,7 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1/r2) + r3 delivery):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1/r2/r3)):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -310,17 +310,19 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   retained на base recipient topic. После reconnect Анна получила старый relay, снова сохранила
   его и вызвала вторую доставку/receipt (`originDelivery=2`). Это не норма.
 
-- **M3(c.2-r3), build + основная доставка ПРОШЛИ на `v11.16.10`:** commit `e055471`,
+- **M3(c.2-r3) ПОЛНОСТЬЮ ВЕРИФИЦИРОВАН на `v11.16.10`:** code commit `e055471`,
   APK SHA-256 `E68F6EC976428AF5A2910A652653C41DFA9E4A84F4D1A149C8A0E3CF5F16D9DB` установлен
   на 3 телефона. Для `m3c2r3-1786702254585` Анна/Женя отдельно подтвердили store=1;
-  затем Стас получил ровно 1 `MessageReceived`, второй live relay подавлен, receipts=2.
-  Анна/Женя cleanup=1, только Анна origin-delivery=1; оба relay-узла поздний второй relay
-  проигнорировали через seen tombstone. Итоговый `Anna stored=0` в позднем агрегате — только
-  вытеснение старой строки из logcat: предыдущая store-фаза уже доказала `1`. Fresh subscriber
-  exact base-topic Стаса получил только retained `gsumm`; retained relay count=0, PID всех трёх
-  не изменились — `send_mesh_relay(retain=false)` доказан.
+  Стас получил ровно 1 `MessageReceived`, второй live relay подавлен, receipts=2; обе очереди
+  cleanup=1, origin-delivery только Анна=1, seen tombstones исключили re-enqueue. Fresh
+  subscription exact base-topic Стаса получила только retained `gsumm`, retained relay=0.
+  После Wi-Fi+data off/on Анны: PID всех трёх неизменны, reconnect+re-subscribe=1, live probe=1,
+  повторные store/remove/origin/delivery/receipt/UI и relay payload = 0. `MQTT error` в logcat
+  не появился, но exact второй ConnAck/re-subscribe и live probe напрямую доказывают reconnect;
+  старый guard `errors>=1` был излишне строгим, это не ошибка продукта.
 
-**Следующий шаг = reconnect Анны без повторной store/delivery/origin-delivery. M3(d) не начинать.**
+**M3(c.2-r3) завершён. Следующий предлагаемый шаг — milestone-backup `v11.16.10` на внешний
+носитель; M3(d) не начинать без отдельного согласования.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -424,6 +426,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   malformed/fuzz, Sybil/identity, Android/background, media/storage, diagnostics/privacy и
   supply-chain. High load только локально; важная APK получает short 3-phone smoke + recovery
   control message. См. `docs/SECURITY_RESILIENCE_TEST_PLAN.md` и MASTER_PLAN фазы 0.4/8.4.
+- **2026-08-14 (доп.19)** — r3 reconnect финально пройден: Wi-Fi+data Анны off/on, PID
+  12571/27336/2529 сохранились, re-subscribe=1, live probe=1; повторные store/remove/origin,
+  recipient delivery/receipt/UI и relay payload все 0. Отсутствие строки `MQTT error` не делает
+  тест неполным: второй ConnAck/re-subscribe и probe доказаны. `v11.16.10` — важная точка,
+  пользователю нужно предложить milestone-backup перед следующим этапом.
 
 ---
 
@@ -576,8 +583,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
 4. M3(c.1), c.2 relay-path, r1 reconnect и r2 unique receipt проверены. R2 выявил stale
    retained relay blocker.
-5. R3 `v11.16.10`: build/install и delivery-фаза прошли — local delivery=1, duplicate
-   suppressed=1, receipts=2, обе очереди cleanup=1, origin-delivery=1, seen tombstones сработали.
-   Fresh subscription доказала retained relay=0 (retained `gsumm` допустим). Следующий шаг:
-   reconnect Анны без повторов. M3(d)/UI/background пока не трогать.
+5. R3 `v11.16.10` полностью проверен: local delivery=1, duplicate suppressed=1, receipts=2,
+   обе очереди cleanup=1, origin-delivery=1, seen tombstones, retained relay=0; после reconnect
+   Анны re-subscribe/probe=1, все повторные mesh/UI counts=0 при тех же PID.
+6. Следующий предлагаемый шаг — milestone-backup на внешний носитель по backup guide. После него
+   отдельно согласовать продолжение; M3(d)/UI/background пока не трогать.
 
