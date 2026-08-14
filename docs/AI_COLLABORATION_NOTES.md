@@ -348,9 +348,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
 cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1/r4.2 Rust и APK
-`v11.16.11` artifact/signature/signer compatibility PASS. Package schema диагностирована, все
-телефоны ещё v11.16.10; corrected `adb install -r` с appId/UID+firstInstall preservation готов.
-Второго broker/fanout пока нет. M3(d), UI/background не начинать.**
+`v11.16.11` artifact/signature/signer compatibility PASS; `adb install -r` PASS на 3/3 с
+сохранением appId/UID/firstInstallTime. Следующий шаг — controlled cold start и truthful ConnAck
+markers. Второго broker/fanout пока нет. M3(d), UI/background не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -614,8 +614,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   pre-state, ДО создания install state и ДО любого `adb install`: strict parser ожидал `userId`,
   а все телефоны дают `appId`. Diagnostic подтвердил v11.16.10 на 3/3, install state absent,
   appId и independent `cmd package -U` UID совпали: Анна `10425`, Женя `10395`, Стас `10387`;
-  firstInstallTime уникально присутствует `1/1/1`. Corrected install parser должен требовать
-  appId=UID command и сохранять appId+firstInstallTime до/после; data gate не ослаблять.
+  firstInstallTime уникально присутствует `1/1/1`.
+- **2026-08-14 (доп.56)** — corrected `adb install -r` v11.16.11 PASS на Анне/Жене/Стасе.
+  На 3/3 version=`v11.16.11/11016011`; appId, independent UID и firstInstallTime совпали до/после,
+  значит uninstall/data reset не было. Install state/evidence complete PASS; ручной start ещё не
+  выполнялся. Следующий шаг — force-stop/clear-log/controlled launch и ConnAck marker analysis.
 
 ---
 

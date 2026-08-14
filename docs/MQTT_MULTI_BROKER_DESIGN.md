@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **APK/signer PASS; package schema resolved, corrected install -r ready**
+Статус: **v11.16.11 installed 3/3 with data preserved; cold-start test pending**
 
 Дата: 2026-08-14
 
