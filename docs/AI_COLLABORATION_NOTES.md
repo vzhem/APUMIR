@@ -776,6 +776,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `%TEMP%\apu-v11.16.12-jdk17-preflight2.json/.log`. Следующий единственный build3 использует
   process-local C JDK17 + `--no-daemon`, без `gradlew --stop`; до task обязан проверить, что
   Android SDK/NDK path тоже не на D. Любой new hs_err или D JBR reference = STOP.
+- **2026-08-14 (доп.76)** — C-drive APK build3 PASS: process-local signed Adoptium JDK17 и
+  Android SDK `C:\Users\User\AppData\Local\Android\Sdk`, `--no-daemon`, без `gradlew --stop` и
+  без D JBR. Gradle 52 tasks, `BUILD SUCCESSFUL` за 41.74 с; historical hs_err set 9/9 unchanged,
+  new crash=0, env restored. Test APK v11.16.12/11016012 из exact application source `f6130f6`:
+  22,582,796 B, SHA-256 `6765FC7A0ACF10CD9909BC265E729EC1E0BAE47D1314376585CC2123649A3F55`.
+  Embedded arm64 `.so` 7,167,112 B, SHA-256 `7C9537E6FA5F93B4F6AC28B2705F97A35E738C36309922A029D06E0886517194`,
+  exact source match. Saved APK/state/log: `%TEMP%\apu-r4.2-r1b2-v11.16.12-build3.apk`,
+  `...apk-build3.json/.log`. APK ещё не установлена. Следующий gate: apksigner V2/cert SHA-256
+  compare с установленной v11.16.11 + devices/version/current PID preflight; install только PASS.
 
 ---
 

@@ -241,8 +241,11 @@ recovery. Уже полученный event сначала обрабатыва�
 peers и traffic budgets объявлены вне restart и сохраняются. После нового ConnAck повторяются
 subscription, presence и relay-registration requests. Windows `build-rust.ps1` source `f6130f6`
 PASS за 61.65 с: exit=0, compiler warnings=9, errors=0; arm64 `.so` 7,167,112 B, SHA-256
-`7C9537E6FA5F93B4F6AC28B2705F97A35E738C36309922A029D06E0886517194`. EMQX, dual publish и
-cross-broker dedup не подключены; transient sender остаётся отдельным долгом.
+`7C9537E6FA5F93B4F6AC28B2705F97A35E738C36309922A029D06E0886517194`. C-drive JDK17 APK
+build3 затем PASS: v11.16.12/11016012, 22,582,796 B, SHA-256
+`6765FC7A0ACF10CD9909BC265E729EC1E0BAE47D1314376585CC2123649A3F55`; embedded native exact.
+APK signer/install/phone liveness ещё pending. EMQX, dual publish и cross-broker dedup не
+подключены; transient sender остаётся отдельным долгом.
 
 ### r4.3 — вторая session за feature gate
 
