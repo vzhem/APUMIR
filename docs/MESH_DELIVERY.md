@@ -274,8 +274,8 @@ RelayMessage {
   consumed. User explicitly kept bounded multi-broker r4.3–r4.5 before automatic offline send-path
   M3(d); then persistence + final acceptance. r4.3 status-only EMQX observer source complete behind
   default-off feature; no subscribe/publish. Windows child feature build completed, wrapper wait
-  was interrupted after child exit; first recovery self-HEAD guard stopped before analysis,
-  corrected read-only recovery pending, no rebuild. EMQX fanout не
+  was interrupted after child exit; corrected recovery PASS, feature `.so` D7A2…FE95 and
+  observe-only markers exact. APK v11.16.14 artifact build harness ready, no install. EMQX fanout не
   подключены; public delivery probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/

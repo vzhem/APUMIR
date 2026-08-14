@@ -1132,6 +1132,25 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `git diff --quiet 2689dbb <HEAD> -- rust-core android-app build-rust.ps1`. Не hardcode commit,
   который ещё изменится при добавлении самого script/docs. Parent build evidence неизменно, build
   не повторять; distinct corrected script commit, затем read-only recovery.
+- **2026-08-14 (доп.107)** — corrected r4.3 saved-artifact recovery Windows ParseFile PASS;
+  state `%TEMP%\apu-r4.3-observe-rust-build-recovery.json`, SHA-256
+  `99599AA6072DDF15DE8F4AAB76D427D17B21C8E8CD7EBA9D7D41313ED4ACD085`, outcome
+  `PASS_FROM_COMPLETED_CHILD_EVIDENCE`. Parent state 1A81…2D03 exact; feature marker=1,
+  Finished release=1, compiler errors=0. Generated feature `.so` 7,193,912 B, SHA-256
+  `D7A2216EF0210CBCD59685A6E76CF4D8284B87A8052C799280CBEEC4DD95FE95`; binary ASCII exact
+  `MQTT SECONDARY STATUS`, `MQTT SECONDARY SUPERVISOR`, `subscriptions=0 publishes=0` all present.
+  BuildRepeated/phones=false. r4.3 feature compile gate закрыт; parent wrapper FAIL остаётся
+  immutable harness evidence. Следующий gate — C-drive JDK17 APK v11.16.14 artifact с embedded
+  D7A2…FE95, signer/version checks, no install. Child process ожидать bounded exact PID через
+  `.WaitForExit(timeout)`, не unbounded `Start-Process -Wait`.
+- **2026-08-14 (доп.108)** — добавлен versioned `scripts/r43_v111614_apk_build.ps1`: application
+  diff guard 2689dbb, exact feature `.so` D7A2…FE95/7,193,912 B, JDK17 C-drive, version через
+  GITHUB_REF_NAME v11.16.14/11016014. Java/Gradle/AAPT/apksigner используют exact child Process и
+  bounded `.WaitForExit(30s/900s/30s/60s)`, no unbounded `Start-Process -Wait`; separate logs.
+  Gates: BUILD SUCCESSFUL, AAPT version, semantic normalized V2 signer cert, embedded native exact,
+  generated-only Git. State в finally; APK/phones/ADB/install/launch/public traffic false. Parser-
+  trap, bounded-wait/identity и no-phone scans PASS. Следующий gate — sync parser-validated harness
+  и artifact-only Windows run.
 
 ---
 

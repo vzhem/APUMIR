@@ -305,8 +305,9 @@ counters + bounded 1→30s backoff + Drop abort. Legacy switching `MultiBroker` 
 `build-rust.ps1 -Features mqtt-secondary-observe` добавлен для exact gated compile. Versioned
 Windows feature child build фактически завершён (`Finished release`, generated `.so`), но
 `Start-Process -Wait` wrapper завис после child exit и был прерван; parent FAIL state immutable.
-First recovery stopped on self-referential docs-HEAD guard before analysis; corrected application-
-diff-only recovery pending, rebuild запрещён.
+Corrected recovery PASS: feature marker/Finished release/errors=1/1/0; `.so` 7,193,912 B /
+`D7A2216E…D95FE95`, observe-only binary markers exact. Feature compile gate closed; APK v11.16.14
+artifact build harness ready with bounded exact-child waits; execution pending, no install.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 
