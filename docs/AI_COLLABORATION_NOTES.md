@@ -213,6 +213,11 @@ receipt-cleanup → интеграция в отправку → переисп�
   с конкретным `pk_…`/public key. Display name остаётся неуникальным. Binding должен быть
   подписан и проверен клиентом; нужны case normalization, uniqueness, rate limits/privacy,
   rename/recovery и защита от squatting. Подробный backlog — `MASTER_PLAN_v2.md`, фаза 1.7.
+- **Медиа/файлы — подтверждено пользователем (2026-08-14):** план обязан включать фото,
+  видео, аудио, voice notes, документы и произвольные файлы, GIF/stickers, previews, progress,
+  pause/resume/retry, encrypted chunks/checksums, offline relay с квотами и storage cleanup.
+  Большие media не помещать в MQTT text envelope; manifest/chunks идут отдельным bounded P2P/
+  QUIC/relay transport. Расширенный backlog — `MASTER_PLAN_v2.md`, фаза 5.3.
 
 ---
 
@@ -348,6 +353,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.9)** — записана продуктовая идея пользователя: глобальный поиск только
   по уникальному латинскому `@username`, привязанному подписанной записью к одному `pk_…`;
   display names могут совпадать. Добавлена фаза 1.7 в `MASTER_PLAN_v2.md`.
+- **2026-08-14 (доп.10)** — расширена фаза 5.3: фото/видео/аудио/voice/files/GIF/stickers,
+  previews, progress/resume, E2E chunks/checksums, offline quotas и storage/cache cleanup.
+  Большие media не идут внутри MQTT text envelope.
 
 ---
 

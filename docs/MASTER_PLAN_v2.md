@@ -618,18 +618,32 @@ InviteFriendScreen
 - [ ] Mute chat.
 - [ ] Archive chat.
 
-## Фаза 5.3 — Медиа
+## Фаза 5.3 — Медиа и любые файлы
 
-- [ ] Фото.
-- [ ] Видео.
-- [ ] Документы.
-- [ ] Voice messages.
-- [ ] Audio player.
-- [ ] Image preview.
-- [ ] File transfer progress.
-- [ ] Resume interrupted transfer.
-- [ ] Chunk encryption.
-- [ ] Chunk checksums.
+Поддержать отправку из личных чатов, групп и (где разрешено) каналов:
+
+- [ ] Фото: камера/галерея, оригинал или сжатие, несколько фото/альбом, подпись.
+- [ ] Видео: запись/галерея, preview, длительность, streaming после первых chunks.
+- [ ] Аудиофайлы: музыка/записи, название/исполнитель/обложка, audio player.
+- [ ] Voice messages: запись, waveform, pause/resume, скорость воспроизведения.
+- [ ] Документы и произвольные файлы любых расширений с безопасным MIME/именем/размером.
+- [ ] GIF/анимации, stickers и animated stickers как отдельные media types.
+- [ ] Контакт-карточка (vCard) и геолокация — отдельные типы вложений.
+- [ ] Preview/thumbnail для изображений, видео, PDF и поддерживаемых документов.
+- [ ] Несколько вложений в одном сообщении; reply/forward/copy metadata без потери media.
+- [ ] Upload/download progress, pause/cancel/retry и resume interrupted transfer.
+- [ ] Передача большими encrypted chunks, checksums каждого chunk и content hash всего файла.
+- [ ] Дедуп chunks/content, параллельная загрузка и восстановление только недостающих chunks.
+- [ ] E2E encryption ключей/manifest/chunks; relay/MQTT никогда не видит plaintext.
+- [ ] Offline store-and-forward media manifest/chunks с TTL, квотами, лимитом места и приоритетом.
+- [ ] Настройки: auto-download по Wi-Fi/mobile/roaming, максимальный размер и экономия трафика.
+- [ ] Cache/storage manager: просмотр занятого места, выборочная и автоматическая очистка.
+- [ ] Не помещать большие файлы в текстовый MQTT relay-envelope: отдельно передавать bounded
+  manifest и chunks через P2P/QUIC/доступные relay transports.
+
+Критерий: пользователь может надёжно отправить любой файл, фото, видео, аудио или voice note;
+передача переживает разрыв сети, проверяет целостность, не раскрывает relay содержимое и не
+переполняет память/диск телефона.
 
 ---
 
