@@ -219,4 +219,8 @@ RelayMessage {
   reconnect/re-subscribe даже при airplane=0 и VALIDATED network; non-retained setup relay
   сохранили Анна/Женя, но recipient его не получил. ID abandoned, повтор запрещён. Нужен bounded
   liveness/watchdog regression и recoverable reconnect state; это не опровергает r3 dedup.
+  Cold start подтвердил ConnAck у Анны/Жени, но не у Стаса. Причина broker-fallback в коде:
+  `AsyncClient.publish().await` до polling подтверждает enqueue в request channel, не TCP/ConnAck,
+  поэтому первый broker всегда принимается за рабочий. Нужен bounded ConnAck gate + broker
+  rotation/circuit breaker; одна строка `subscribed` не является connectivity evidence.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).

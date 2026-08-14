@@ -1005,6 +1005,8 @@ InviteFriendScreen
   duplicate receipt/ACK и replay после cleanup/reconnect/process restart.
 - [ ] Resource DoS: bounded event channels/caches/queues, slow consumer, queue/storage saturation,
   reconnect storm, backoff+jitter/circuit breaker и recovery после окончания входа.
+- [ ] Broker failover regression: queued `AsyncClient` request не считать соединением; bounded
+  ConnAck timeout, rotation/circuit breaker между brokers, re-subscribe и recovery без flood.
 - [ ] Identity/Sybil: forged invite/PK/username binding, enumeration, registry poisoning и ложная
   friend-of-friend цепочка; неизвестные peers не вытесняют friend traffic.
 - [ ] Android surface: malformed deep links/QR/clipboard, exported components/FileProvider,

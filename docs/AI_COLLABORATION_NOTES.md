@@ -210,6 +210,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   `git push origin arena/019ffc32-apumir`. **Для продолжения источник истины — только новая
   ветка `arena/019ffc32-apumir`; старую не checkout и не пушить.** Новый ИИ сразу проверяет
   текущую ветку и подтягивает её только fast-forward, без `force-push`.
+- **MQTT broker fallback сейчас фактически не проверяет соединение:** `MqttTransport::connect`
+  считает `AsyncClient.publish(...).await` успехом, но это лишь постановка request в bounded
+  channel до polling `EventLoop`, а не TCP/ConnAck. Поэтому цикл всегда выбирает первый broker;
+  строка `subscribed` тоже означает queued subscribe, а не доказанное соединение. Реальный gate —
+  `ConnAck`. Будущий fix: bounded await ConnAck/timeout и rotation broker (либо state machine после
+  bounded poll errors), затем subscribe; не создавать flood reconnect. Security smoke: после
+  timeout Стас не дал ConnAck даже после cold start, тогда как Анна/Женя дали 1/1.
 - **Масштабирование mesh:** текущие MQTT `p2pm2/#` и all-to-all presence — функциональный
   прототип, НЕ готовая схема для тысяч телефонов. Уже есть: dedup `msg_id`, TTL 7 дней,
   `hop_count` до 8, queue 200/recipient и 10 000 total; M3(c.1) добавляет 256 items/64 KiB,
@@ -496,8 +503,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.31)** — saved evidence подтвердил store Анна/Женя=1/1; late diagnostic при
   airplane=0 и VALIDATED network у всех не нашёл у Стаса ни reconnect/re-subscribe, ни relay/UI.
   Первый security ID окончательно непригоден/abandoned. Это availability/reconnect наблюдение,
-  не crash и не доказанный dedup defect. Следующий безопасный шаг: force-stop всех трёх, fresh
-  start/PID/subscription/ConnAck baseline, новый ID и TTL 3600; старые relay не переиздавать.
+  не crash и не доказанный dedup defect; старый relay не переиздавать.
+- **2026-08-14 (доп.32)** — controlled force-stop/cold-start всех трёх очистил RAM state. Анна
+  PID `14734`, Женя `24000`: subscription=1, ConnAck=1, MQTT errors=0. На Стасе cold start прошёл
+  и subscription была queued, но ConnAck=0; atomic block остановился до state/new ID/log clear.
+  Старый state остаётся источником истории, но его PID теперь stale. Code review подтвердил:
+  broker fallback ошибочно принимает queued publish за соединение. Дальше только local
+  startup-log + bounded TCP reachability diagnostic, без relay/restart.
 
 ---
 
@@ -690,8 +702,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke ID `sec-origin-1786707178388` abandoned: Анна/Женя stored=1/1,
-   Стас при VALIDATED network после MQTT timeout не reconnect-нулся и delivery=0. Publish/conflict
-   старого ID запрещены. Следующий шаг — controlled restart всех трёх и fresh baseline с новым ID,
-   без relay publish. M3(d), UI/background не трогать.
+7. Low-volume security smoke: old ID abandoned, publish/conflict запрещены. После cold start
+   Анна/Женя имеют fresh PID `14734/24000`, ConnAck=1/1; Стас subscription queued, но ConnAck=0,
+   поэтому state/new ID не созданы и старые PID в state stale. Следующий шаг — startup-log и
+   bounded TCP reachability diagnostic Стаса, без relay/restart. M3(d), UI/background не трогать.
 
