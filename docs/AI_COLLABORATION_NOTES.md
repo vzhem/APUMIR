@@ -530,8 +530,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.39)** — ASCII-only finalizer повторно доказал и сохранил generation-2
   normal setup PASS: Анна relay/store/cleanup/origin=`1/1/1/1`, Женя=`1/1/1/0`, Стас
   relay/local/receipt/UI=`1/1/1/1`; duplicate=0, PID stable, errors/crash=0. Recipient origin
-  binding установлен, attack logs очищены и `attackLogBaselineReady=true`. Следом разрешена
-  ровно одна conflicting-origin non-retained публикация; анализ отдельным шагом.
+  binding установлен, attack logs очищены и `attackLogBaselineReady=true`.
+- **2026-08-14 (доп.40)** — после live gate peer lines `2/9/16` опубликован ровно один
+  conflicting-origin relay того же ID: attacker origin, QoS1, retain=false, 179 B. PID остались
+  `14734/24000/13746`; attack snapshots готовы, test-ID refs=`2/2/2`. Не повторять и не очищать;
+  следующий шаг — ASCII-only exact conflict/no-side-effect analysis + resource metrics.
 
 ---
 
@@ -741,8 +744,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2 normal setup полностью PASSED и persisted для ID
-   `sec-origin2-1786710017189`; recipient origin binding установлен, attack logs baseline ready.
-   Следующий шаг — ровно один non-retained relay того же ID с attacker origin, затем отдельный
-   local analysis. M3(d), UI/background пока не трогать.
+7. Low-volume security smoke generation 2: normal setup PASS; ровно один conflicting-origin
+   relay (QoS1/non-retained/179 B) уже published, snapshots refs=`2/2/2`, PID стабильны. Повтор и
+   log clear запрещены до ASCII-only conflict/no-side-effect analysis. Затем control delivery и
+   post-resource сравнение. M3(d), UI/background пока не трогать.
 
