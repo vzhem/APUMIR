@@ -275,4 +275,6 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
 - Повторный baseline прошёл: security ID `sec-origin-1786707178388`; PID Анна/Женя/Стас =
   `12571/22100/2529`; temperature = `30/28.8/30°C`; PSS = `118986/88012/53898 KiB`;
   battery = `100/100/57%`. Женя cold-start, MQTT subscription подтверждена; все три logcat
-  очищены. Следом нужен один normal setup relay и отдельный анализ до attack.
+  очищены. Identity preflight затем подтвердил origin/recipient из original r3 state и поставил
+  `identityValidated=true`; повтор local-only preflight безопасен и не отправляет сеть. Следом
+  нужен один normal setup relay и отдельный анализ до attack.

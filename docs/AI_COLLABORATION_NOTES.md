@@ -464,7 +464,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   subscription confirmed. Новый ID `sec-origin-1786707178388`. PID Анна/Женя/Стас =
   `12571/22100/2529`; battery = `100/100/57%`; temperature = `30/28.8/30°C`; PSS =
   `118986/88012/53898 KiB`. State имеет `baselineComplete=true` и все 3 телефона; logcat очищен.
-  Следующий малый шаг: один normal non-retained setup relay, анализ, только затем conflict.
+- **2026-08-14 (доп.26)** — identity preflight взял origin/recipient из проверенного original r3
+  state, а не доверился ручному вводу: `pk_591a…4ecc` / `pk_7dc6…bd0c`, оба совпали. State имеет
+  `identityValidated=true`. Один и тот же local-only validation block случайно выполнен дважды;
+  он идемпотентен, сеть/logcat не затрагивал. Следующий шаг: один normal non-retained setup relay.
 
 ---
 
