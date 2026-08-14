@@ -637,6 +637,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `%TEMP%\apu-r4.2-reconnect-Anna.log`; network interruption, restart и log clear не повторять.
   Test message не публиковался. Следующий отдельный шаг — спроектировать один безопасный
   low-volume delivery check этой APK без перехода к r4.3, UI/background или M3(d).
+- **2026-08-14 (доп.61)** — первая delivery-preflight попытка остановилась до readiness window,
+  envelope и Python publisher: ожидаемый cold-start PID Жени `15597` уже сменился на `2513`.
+  One-shot state `%TEMP%\apu-r4.2-v11.16.11-delivery.json` сохранён и не удаляется; read-only
+  проверка (SHA-256 `8E528E76BEC261BE79BDFD0DBFA020ACF6DEE824C5CF52D5644B7758698465F9`)
+  доказала `topic/envelope` пустые, `publisherStarted` пустой, `publishCalled=false` и
+  `publishConfirmed=false`. PID Анна/Женя/Стас=`30085/2513/26923` затем были стабильны 15 с,
+  версия 3/3=`v11.16.11/11016011`. Это не delivery FAIL и не разрешает повтор старого блока.
+  При paste также потерялись первые кириллические буквы в двух внутренних labels; corrected
+  one-shot harness `scripts/r42_delivery2_check.ps1` использует только ASCII labels, отдельные
+  `delivery2` state/snapshots, сначала проверяет старое no-publish evidence и при любом неполном
+  исходе не повторяет публикацию автоматически.
 
 ---
 
