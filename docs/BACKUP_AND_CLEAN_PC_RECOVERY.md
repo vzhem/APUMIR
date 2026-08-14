@@ -518,6 +518,15 @@ outer `& {}` не начинался, но оставшиеся строки cli
 non-empty state path, проверки `Test-Path` и state SHA-256. Для нового исправленного запуска
 использовать distinct state/evidence names; старый parser output не выдавать за test attempt.
 
+**Nested PowerShell build и `Start-Process -Wait`:** не использовать неограниченный `-Wait` для
+child PowerShell, который сам запускает Cargo/Gradle process tree. На Windows child может уже
+завершиться и записать `Finished release`/artifact, но parent wrapper продолжит ждать до `Ctrl+C`,
+не записав exit/state. Запускать child с `-PassThru` без `-Wait`, затем ждать exact child PID через
+`.WaitForExit(boundedMilliseconds)`; timeout сохраняет state и process tree diagnostics, но не
+перезапускает build автоматически. Если build logs уже имеют positive marker и artifact exact,
+сначала доказать отсутствие cargo/rustc/child descendants, безопасно освободить только wrapper,
+затем оформить read-only recovery state. Не удалять logs и не rebuild готовый artifact.
+
 ### Backup остановился после создания части файлов
 
 **Симптом:** папка milestone уже существует, некоторые большие файлы готовы, но остался

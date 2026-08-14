@@ -1112,6 +1112,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   feature invocation/marker, ordering и no-phone scans PASS. Первый ordering checker ошибочно взял
   initialization `$GeneratedSoHash=$null` вместо post-build assignment; corrected targeted search
   PASS, harness defect отсутствует. Следующий gate — sync exact versioned harness и Windows run.
+- **2026-08-14 (доп.105)** — r4.3 feature child Cargo build фактически завершён, но parent
+  `Start-Process -Wait` не вернулся после child PID 9160 exit и был безопасно прерван через 689.25с
+  после process-tree proof. Parent state `%TEMP%\apu-r4.3-observe-rust-build.json`, SHA-256
+  `1A81D7F0ABE883146C06E9641A2C43AD49F94C80CD35C94A633143964BD42D03`, outcome FAIL only because
+  wrapper не получил exit/не прочитал logs. Evidence: stdout exact feature marker и completion/
+  native-copy lines; stderr `Finished release ... in 1m 12s`, `generated 9 warnings`, no compile
+  error shown. cargo/rustc/clang/lld/child PowerShell отсутствовали; only original console+conhost.
+  Generated `.so` 7,193,912 B, SHA-256
+  `D7A2216EF0210CBCD59685A6E76CF4D8284B87A8052C799280CBEEC4DD95FE95`; Git generated-only;
+  APK/phones untouched. Build не повторять. Added `r43_observe_build_recover.ps1` проверяет exact
+  parent/log/source/binary markers read-only и пишет distinct recovery state. Future nested builds:
+  no unbounded `Start-Process -Wait`; exact child `.WaitForExit(timeout)` + timeout evidence.
 
 ---
 

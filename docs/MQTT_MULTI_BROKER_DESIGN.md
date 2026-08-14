@@ -303,7 +303,9 @@ observer hard-gated в module/core, использует только EMQX, од
 Subscribe/publish отсутствуют; markers всегда сообщают `subscriptions=0 publishes=0`; status
 counters + bounded 1→30s backoff + Drop abort. Legacy switching `MultiBroker` не активирован.
 `build-rust.ps1 -Features mqtt-secondary-observe` добавлен для exact gated compile. Versioned
-Windows build harness готов; execution pending.
+Windows feature child build фактически завершён (`Finished release`, generated `.so`), но
+`Start-Process -Wait` wrapper завис после child exit и был прерван; parent FAIL state immutable.
+Read-only binary/log recovery pending, rebuild запрещён.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 
