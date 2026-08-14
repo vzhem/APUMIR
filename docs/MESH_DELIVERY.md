@@ -237,10 +237,11 @@ RelayMessage {
   телефона позднее дали ноль MQTT input/presence/peer/error/ConnAck/subscription markers. Это
   silent-liveness release blocker, а не delivery FAIL. Перед r4.3 обязателен r4.2-r1: наблюдаемое
   завершение EventLoop, bounded channel waits, явные periodic publish errors и local stall/recovery
-  tests. r4.2-r1a source уже добавляет payload-free phase/counter probe, independent watchdog,
-  completion/shutdown markers и rate-limited stall/heartbeat logs без изменения network policy;
-  Windows build ещё pending, recovery/backpressure fix остаётся r1b. EMQX/fanout не подключены;
-  public delivery probe до полного fix не повторять.
+  tests. r4.2-r1a добавляет payload-free phase/counter probe, independent watchdog,
+  completion/shutdown markers и rate-limited stall/heartbeat logs без изменения network policy.
+  Windows Android Rust build source `a357520` PASS за 68.45 с, exit=0/errors=0; arm64 `.so`
+  7,148,552 B, SHA-256 `BC35DE5C…AA53995`. Recovery/backpressure fix остаётся r1b.
+  EMQX/fanout не подключены; public delivery probe до полного fix не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:

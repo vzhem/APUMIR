@@ -673,6 +673,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Brokers/QoS/retain/channel caps/backoff/reconnect не изменены; timeout/drop/recovery — r1b.
   Sandbox без cargo/rustfmt, поэтому host tests не запускались; следующий gate — только Windows
   `build-rust.ps1`, затем отдельный idle/stall log test новой APK без public user publish.
+- **2026-08-14 (доп.64)** — r4.2-r1a Windows Android Rust compile PASS для source `a357520`:
+  `build-rust.ps1` arm64-v8a завершён за 68.45 с, exit=0, Cargo `Finished release`, compiler
+  warnings=9, errors=0. Harness count=10 включает отдельную итоговую строку `generated 9 warnings`.
+  Новая `libp2p_core.so`: 7,148,552 B, SHA-256
+  `BC35DE5C760111B20312E189BFF4C7AC99010B4F1CB512E88652EDDD0AA53995`; Git modified только
+  arm64 `.so`, её не commit. Предыдущая проверенная v11.16.11 `.so` B090… сохранена отдельным
+  новым stash; старые stashes не pop. Строка PowerShell `NativeCommandError` была только stderr
+  progress Cargo при фактическом exit=0. Build state/log: `%TEMP%\apu-r4.2-r1a-rust-build.json`
+  и `%TEMP%\apu-r4.2-r1a-rust-build.log`. APK/phones не менялись; следующий код — r1b.
 
 ---
 

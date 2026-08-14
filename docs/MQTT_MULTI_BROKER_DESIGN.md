@@ -210,14 +210,17 @@ broker не должен ошибочно менять state другой sessio
 - Проверить на локальном broker: idle > keepalive, заполнение channels, consumer stall и recovery.
 - До прохождения r4.2-r1 не публиковать новый public delivery probe и не начинать r4.3.
 
-**r4.2-r1a code pending Windows build:** добавлен payload-free `MqttLivenessProbe` с фазами
+**r4.2-r1a Windows compile PASS:** payload-free `MqttLivenessProbe` использует фазы
 `starting/polling/forwarding/backoff/idle/stopped`, monotonic phase/progress age и fixed-memory
 atomic counters. Независимый watchdog проверяет состояние каждые 15 с, считает stall после 90 с,
 повторяет warning не чаще раза в 60 с и пишет heartbeat раз в 120 с. Completion oneshot отличает
 заявленное завершение EventLoop от исчезновения task без сигнала; requested shutdown помечен
-отдельно. Initial/periodic presence и relay-registration теперь различают queued request и error.
+отдельно. Initial/periodic presence и relay-registration различают queued request и error.
 QoS/retain/brokers/channels/backoff/reconnect не менялись; recovery и overflow policy остаются r1b.
-Пять deterministic unit tests добавлены, но host `cargo test` запрещён; нужен `build-rust.ps1`.
+Пять deterministic unit tests добавлены; host `cargo test` запрещён. Windows `build-rust.ps1`
+для source `a357520` завершён за 68.45 с: exit=0, `Finished release`, compiler warnings=9,
+errors=0. Новая arm64 `.so`: 7,148,552 B, SHA-256
+`BC35DE5C760111B20312E189BFF4C7AC99010B4F1CB512E88652EDDD0AA53995`.
 
 ### r4.3 — вторая session за feature gate
 
