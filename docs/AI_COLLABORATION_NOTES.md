@@ -487,7 +487,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   ID `sec-origin-1786707178388`, QoS1, retain=false, 160 bytes; все PID до publish стабильны.
   Через 15 с Анна/Женя сохранили snapshots и имели по 3 references. Snapshot Стаса не создался,
   потому что filtered `adb logcat` дал пустой stdout и pipeline `Set-Content` не был вызван;
-  publish уже confirmed, повтор запрещён. Нужен full-log local diagnostic без новой сети/clear.
+  publish уже confirmed, повтор запрещён.
+- **2026-08-14 (доп.30)** — full-log diagnostic: PID всех трёх стабильны, Женя принял original
+  relay один раз и stored=1; Стас test ID/input/delivery/receipt/UI=`0/0/0/0/0`, а log показал
+  `MQTT error: Network timeout; retrying in 16s`. Поэтому setup incomplete, conflicting-origin
+  запрещён. Текущий full log Анны уже вытеснил ранние relay строки (остались queue summaries),
+  поэтому её immediate saved snapshot нужно читать отдельно. Следом только late-reconnect/
+  saved-snapshot diagnostic; original relay больше не публиковать.
 
 ---
 
@@ -680,8 +686,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke ID `sec-origin-1786707178388`: corrected normal relay опубликован
-   ровно один раз (QoS1/non-retained/160 B), повтор запрещён. Анна/Женя snapshots имеют по 3
-   references; Stas snapshot отсутствует из-за empty-stdout pipeline. Следующий шаг — только
-   full-log diagnostic/metrics без publish и clear. Conflict, M3(d), UI/background не трогать.
+7. Low-volume security smoke ID `sec-origin-1786707178388`: normal relay опубликован один раз,
+   Женя stored=1, но Стас не получил его из-за MQTT network timeout; setup incomplete, повтор и
+   conflict запрещены. Следующий шаг — local late-reconnect + immediate-snapshot diagnostic без
+   publish/clear; затем решить controlled restart/new ID. M3(d), UI/background не трогать.
 

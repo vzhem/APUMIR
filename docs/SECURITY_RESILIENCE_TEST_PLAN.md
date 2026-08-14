@@ -282,7 +282,7 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   подтвердил `publishConfirmed=false`, test-ID counts `0/0/0`, прежние три PID и записал
   failed-before-network marker; logs очищены.
 - Controlled retry опубликовал ровно один normal relay `sec-origin-1786707178388`: QoS1,
-  retain=false, 160 bytes. До/через 15 с PID стабильны; snapshots Анны/Жени имеют по 3 ID
-  references. Snapshot Стаса не создался из-за empty stdout в `adb | Set-Content`; это harness
-  failure после confirmed publish, не основание для повтора. Перед attack нужен full-log local
-  diagnostic всех трёх без новой публикации и без очистки logs.
+  retain=false, 160 bytes. До/через 15 с PID стабильны. Full diagnostic доказал: Женя input=1,
+  stored=1; Стас input/delivery/receipt/UI=0 и имел `MQTT Network timeout`, retry 16 s. Setup
+  incomplete, publish того же ID и attack запрещены. Ранние строки Анны вытеснены из live log,
+  но immediate snapshot сохранён; сначала проверить его и поздний reconnect без новой сети.
