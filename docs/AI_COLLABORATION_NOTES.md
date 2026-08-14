@@ -1017,6 +1017,32 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Separate early/late/crash evidence, state в finally, no automatic retry. Known parser/action,
   ordering/evidence/state и forbidden-command scans PASS. Phones остаются stopped после install;
   следующий gate — sync exact script, Windows ParseFile zero errors, затем approved launch once.
+- **2026-08-14 (доп.97)** — approved one-shot v11.16.13 launch выполнен; не повторять. Versioned
+  script Windows ParseFile PASS, worktree SHA-256
+  `6C7869F73FA8505F8CF7B279F9648B9AA6F8B58419DC51CC6D997F76D07D8DB1`. Early 45 с + late
+  additional 120 с завершены; force-stop/logcat-clear/network/user payload=false. State
+  `%TEMP%\apu-r4.2-r1b4-v11.16.13-launch.json`, SHA-256
+  `3AA96B1AE79C9EEB5CBEF99DCC4FAC13E7A14A23DD95F530989C138140737E47`, outcome
+  `INCOMPLETE_DO_NOT_REPEAT`, passedDeviceCount=2. Единственные reported failures: Anna direct
+  `MQTT SESSION READY`, connection-ack и subscription-request lines missing. Значит её process/
+  heartbeat connacks/pending/request counters и все error/stall/restart/crash gates прошли; иначе
+  они были бы в aggregated failure list. Вероятная причина — high public traffic вытеснил startup
+  lines даже до 45s early snapshot. Никаких новых ADB capture/relaunch/log clear. Recovery только
+  read-only из immutable state + early/late evidence: exact PID/epoch-filtered span, heartbeat
+  counters и incoming traffic. Direct cold-start markers могут остаться incomplete; runtime
+  readiness допускается только при connacks>=1 + heartbeat + incoming subscribed traffic + stable
+  PID + zero errors.
+- **2026-08-14 (доп.98)** — добавлен saved-evidence-only versioned analyzer
+  `scripts/v111613_launch_analyze.ps1`: exact parent hash, no `$Adb`/Start-Process, читает только
+  existing early/late logs, filters PID+launch epoch, verifies process stability and parses latest
+  heartbeat polls/incoming/connacks/forwarded/r1b3-r1b4/request counters. Runtime PASS требует
+  incoming>=1, connacks>=1, pending=0, requests=0 и zero original error metrics; direct READY
+  остаётся отдельным 2/3 fact. Anna разрешена как единственный inferred runtime-ready phone;
+  earliest offset>10 с помечает likely eviction. Manifest хэширует весь evidence; новый recovery
+  state не меняет parent. Static saved-only/ordering/state scans PASS. До commit source review
+  обнаружил три собственных risky line continuations (member `.` и два `-f` at EOL); переписаны
+  atomic expressions в соответствии с доп.89/92 до Windows execution. Следующий gate — sync,
+  Windows ParseFile zero errors и один read-only analyzer run; relaunch/logcat/ADB запрещены.
 
 ---
 

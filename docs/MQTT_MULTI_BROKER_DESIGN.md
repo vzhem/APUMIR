@@ -284,7 +284,9 @@ native exact; authoritative APK v11.16.13 22,599,180 B / `5A26728B…D7C03BA`. �
 preinstall не парсился и ничего не выполнил; versioned parser-validated preinstall2 затем PASS 3/3:
 installed identity/data/PID exact. Guarded data-preserving v11.16.13 install затем PASS 3/3;
 UID/firstInstall/dataDir preserved, processes post-install absent. User approved one controlled
-launch; versioned parser-validated early/late harness pending execution. EMQX, dual publish
+launch выполнен once: 2/3 direct startup PASS, Anna missing only READY/ConnAck/subscription lines;
+state/evidence immutable, relaunch forbidden. Versioned saved-evidence-only Anna runtime analyzer
+pending (no ADB/logcat). EMQX, dual publish
 и cross-broker dedup не подключены;
 transient sender остаётся отдельным долгом.
 

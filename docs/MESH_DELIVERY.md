@@ -267,8 +267,9 @@ RelayMessage {
   signer/embedded r1b4 exact; authoritative APK 22,599,180 B / `5A26728B…D7C03BA`. Первый inline
   preinstall не парсился/не выполнялся; versioned parser-validated preinstall2 затем PASS 3/3 без
   phone changes. Guarded data-preserving v11.16.13 install затем PASS 3/3; identity/data preserved,
-  processes stopped. User approved one controlled launch; versioned early/late harness pending.
-  EMQX/fanout не
+  processes stopped. Controlled launch executed once: direct startup markers PASS 2/3; Anna missing
+  only READY/ConnAck/subscription lines. Relaunch forbidden; versioned saved-evidence-only runtime
+  analyzer pending, без ADB/logcat. EMQX/fanout не
   подключены; public delivery probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
