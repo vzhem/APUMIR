@@ -211,7 +211,7 @@ RelayMessage {
   → stop; никакого enqueue/forward чужого. Exact wake Android не гарантирует; real-time только
   через отдельный opt-in foreground service. Нужны sender/recipient quotas против offline-load.
 - **Надёжность receipt:** r1 reconnect + re-subscribe после смены сети проверен на Android
-  2026-08-14. Остался r2: retained receipt нужен отдельный topic по `msg_id` с cleanup, иначе
-  общий `p2pm2/msg/<origin>` перезаписывается ACK/summary. До r2 потерянный receipt оставляет
-  сообщение до TTL.
+  2026-08-14. Код r2 готов: retained receipt идёт в отдельный
+  `p2pm2/msg/<origin>/receipt/<sha256(msg_id)>`, а origin удаляет retained topic после обработки;
+  ACK/summary больше его не перезаписывают. Нужны Windows build + 3-phone test.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).

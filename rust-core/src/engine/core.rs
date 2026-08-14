@@ -885,9 +885,12 @@ self.runtime = Some(runtime);
                                                 &node_id,
                                                 now.as_secs(),
                                             );
-                                            match transport.send_message(&origin, &receipt).await {
+                                            match transport
+                                                .send_mesh_receipt(&origin, &msg_id, &receipt)
+                                                .await
+                                            {
                                                 Ok(_) => tracing::info!(
-                                                    "MESH receipt: {} sent automatically to origin",
+                                                    "MESH receipt: {} sent automatically to unique origin topic",
                                                     msg_id
                                                 ),
                                                 Err(e) => tracing::warn!(
@@ -966,6 +969,10 @@ self.runtime = Some(runtime);
                                 recipient,
                                 ts,
                             }) => {
+                                let is_own_retained_receipt = !msg_id.is_empty()
+                                    && !recipient.is_empty()
+                                    && transport.is_own_mesh_receipt_topic(&evt.topic, &msg_id);
+
                                 if msg_id.is_empty() || recipient.is_empty() {
                                     tracing::warn!("MESH receipt: missing metadata, dropped");
                                 } else if let Some(ref q) = relay_queue {
@@ -1007,6 +1014,22 @@ self.runtime = Some(runtime);
                                         "MESH receipt: queue unavailable, dropped {}",
                                         msg_id
                                     );
+                                }
+
+                                // Удаляет retained receipt только его локальный origin и
+                                // только с topic, чей SHA-256 key совпал с msg_id.
+                                if is_own_retained_receipt {
+                                    match transport.clear_own_mesh_receipt(&msg_id).await {
+                                        Ok(_) => tracing::info!(
+                                            "MESH receipt: cleared retained topic for {}",
+                                            msg_id
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            "MESH receipt: failed to clear retained topic for {}: {}",
+                                            msg_id,
+                                            e
+                                        ),
+                                    }
                                 }
                             }
                             _ => tracing::warn!("MESH receipt: malformed envelope dropped"),

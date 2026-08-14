@@ -15,6 +15,8 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 const MQTT_EVENT_BUFFER: usize = 256;
 const MQTT_RECONNECT_BACKOFF_MAX_SECS: u64 = 30;
+const MAX_MESH_TOPIC_SEGMENT_BYTES: usize = 128;
+const MAX_MESH_MESSAGE_ID_BYTES: usize = 256;
 
 enum MqttNotification {
     Message(MqttEvent),
@@ -29,6 +31,33 @@ pub struct PeerInfo {
     pub is_relay: bool,
     pub rating: f32,
     pub last_seen: i64,
+}
+
+fn mesh_receipt_topic(origin_node_id: &str, msg_id: &str) -> Result<String, String> {
+    let safe_origin = !origin_node_id.is_empty()
+        && origin_node_id.len() <= MAX_MESH_TOPIC_SEGMENT_BYTES
+        && origin_node_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
+    if !safe_origin {
+        return Err("invalid receipt origin topic segment".to_string());
+    }
+    if msg_id.is_empty() || msg_id.len() > MAX_MESH_MESSAGE_ID_BYTES {
+        return Err("invalid receipt message id length".to_string());
+    }
+
+    // Фиксированный SHA-256 suffix не позволяет msg_id с '/', '+' или '#'
+    // создавать произвольные MQTT topics.
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(msg_id.as_bytes());
+    let receipt_key = digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!(
+        "p2pm2/msg/{}/receipt/{}",
+        origin_node_id, receipt_key
+    ))
 }
 
 pub struct MqttTransport {
@@ -176,6 +205,36 @@ impl MqttTransport {
         Ok(())
     }
 
+    /// M3(c.2-r2): receipt получает отдельный retained topic, поэтому обычный ACK
+    /// или gossip-summary больше не может перезаписать его до возвращения origin.
+    pub async fn send_mesh_receipt(
+        &self,
+        origin_node_id: &str,
+        msg_id: &str,
+        payload: &str,
+    ) -> Result<(), String> {
+        let topic = mesh_receipt_topic(origin_node_id, msg_id)?;
+        self.client
+            .publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Только локальный origin имеет право очистить свой retained receipt.
+    pub fn is_own_mesh_receipt_topic(&self, topic: &str, msg_id: &str) -> bool {
+        mesh_receipt_topic(&self.node_id, msg_id)
+            .map(|expected| expected == topic)
+            .unwrap_or(false)
+    }
+
+    pub async fn clear_own_mesh_receipt(&self, msg_id: &str) -> Result<(), String> {
+        let topic = mesh_receipt_topic(&self.node_id, msg_id)?;
+        self.client
+            .publish(&topic, QoS::AtLeastOnce, true, Vec::<u8>::new())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     pub async fn send_message(&self, to_node_id: &str, payload: &str) -> Result<(), String> {
         let topic = format!("p2pm2/msg/{}", to_node_id);
         self.client.publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
@@ -238,5 +297,31 @@ impl Drop for MqttTransport {
 pub struct MqttEvent {
     pub topic: String,
     pub payload: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn receipt_topic_is_unique_and_does_not_embed_message_id() {
+        let first = mesh_receipt_topic("pk_origin", "message/with+#wildcards").unwrap();
+        let same = mesh_receipt_topic("pk_origin", "message/with+#wildcards").unwrap();
+        let second = mesh_receipt_topic("pk_origin", "another-message").unwrap();
+
+        assert_eq!(first, same);
+        assert_ne!(first, second);
+        assert!(first.starts_with("p2pm2/msg/pk_origin/receipt/"));
+        assert!(!first.contains("message/with+#wildcards"));
+        assert_eq!(first.rsplit('/').next().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn receipt_topic_rejects_unsafe_origin_and_unbounded_message_id() {
+        assert!(mesh_receipt_topic("pk_origin/other", "m1").is_err());
+        assert!(mesh_receipt_topic("pk_origin+", "m1").is_err());
+        assert!(mesh_receipt_topic("pk_origin", "").is_err());
+        assert!(mesh_receipt_topic("pk_origin", &"m".repeat(257)).is_err());
+    }
 }
 

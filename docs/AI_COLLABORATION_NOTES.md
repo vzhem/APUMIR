@@ -217,7 +217,7 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1)):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1) + код r2):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -262,7 +262,12 @@ receipt-cleanup → интеграция в отправку → переисп�
   установлен на 3 телефона. На Анне Wi-Fi+data off/on: PID остался `23407`, offline errors=4
   с backoff 8/16/30/30 с, reconnect+re-subscribe=1, live probe=1.
 
-**Следующий шаг = отдельно согласовать M3(c.2-r2) unique retained receipt topic; M3(d) не начинать.**
+- **M3(c.2-r2), код готов:** auto-receipt публикуется retained в
+  `p2pm2/msg/<origin>/receipt/<sha256(msg_id)>`, поэтому ACK/summary его не перезаписывают.
+  Origin проверяет exact own topic и удаляет retained receipt пустой публикацией после обработки.
+  Origin segment ограничен safe ASCII/128 B, msg_id — 256 B; старые base-topic receipts читаются.
+
+**Следующий шаг = Windows `build-rust.ps1` для M3(c.2-r2); M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -330,6 +335,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   периодически просыпаться и получать только свои сообщения, не хранить/не пересылать чужие.
   План: WorkManager + network constraint + own topics/signed pull + короткое bounded окно;
   real-time foreground — отдельный opt-in. Реализация только после M3(c.2-r1/r2).
+- **2026-08-14 (доп.8)** — код M3(c.2-r2): unique retained receipt topic использует
+  SHA-256 msg_id, safe origin segment и limits; ACK/summary остаются на base topic и не могут
+  перезаписать receipt. Только локальный origin очищает exact retained topic после обработки.
+  Старый receipt совместим. Следующий шаг — Windows build; M3(d) не трогать.
 
 ---
 
@@ -452,8 +461,8 @@ APK появится: `app\build\outputs\apk\release\app-release.apk`
    - **(c.1)** на presence → адресно отправить `gsumm`; target принимает/парсит, без relay.
      Лимиты: 256 items, 64 KiB, 60 с/peer, 8 summaries/30 с global.
    - **(c.2)** сравнить summary и переслать отсутствующие relay: 16/256 KiB за round,
-     32/512 KiB за 30 с, envelope ≤64 KiB, ≤64 кандидата, fair cursor. Relay-path проверен.
-     r1 reconnect-код ждёт сборки; r2 unique retained receipt topic — только после r1.
+     32/512 KiB за 30 с, envelope ≤64 KiB, ≤64 кандидата, fair cursor. Relay-path и r1
+     reconnect проверены; код r2 unique retained receipt topic ждёт Windows build/test.
 5. **(d) send-path**: в `send_message`, если recipient офлайн (нет addr) — собрать `relay`-конверт
    (`wire::build_relay`, `e2e_payload`=байты текста, hop=0, ttl) и опубликовать в mesh-топик →
    онлайн-узлы примут в RelayQueue.
@@ -482,6 +491,6 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
    one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
 5. r1 проверен на `v11.16.8`: Wi-Fi off/on без restart процесса, bounded backoff,
-   reconnect+re-subscribe=1 и live probe=1. Следующим может быть только отдельно согласованный
-   r2 receipt topic; M3(d), UI relay и background receive-only пока не трогать.
+   reconnect+re-subscribe=1 и live probe=1. Код r2 unique retained receipt готов: сначала
+   `build-rust.ps1`, потом отдельный 3-phone test. M3(d)/UI/background пока не трогать.
 
