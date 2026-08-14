@@ -11,9 +11,9 @@ Set-Location C:\APUMIR-arena-test
     $PublisherPath = Join-Path $env:TEMP "apu-r4.2-v11.16.11-delivery2-publish.py"
 
     $Phones = @(
-        [ordered]@{ Name = "Anna"; Serial = "AUYF6R5923006121"; ExpectedProcessId = 30085 },
-        [ordered]@{ Name = "Zhenya"; Serial = "3B665800EES00000"; ExpectedProcessId = 2513 },
-        [ordered]@{ Name = "Stas"; Serial = "11567254BK001192"; ExpectedProcessId = 26923 }
+        [ordered]@{ Name = "Anna"; Serial = "AUYF6R5923006121" },
+        [ordered]@{ Name = "Zhenya"; Serial = "3B665800EES00000" },
+        [ordered]@{ Name = "Stas"; Serial = "11567254BK001192" }
     )
 
     $EvidencePaths = @($StatePath)
@@ -272,13 +272,14 @@ Set-Location C:\APUMIR-arena-test
             }
 
             $ProcessIds = @(Get-ProcessIds -Serial $Phone.Serial)
-            if ($ProcessIds -notcontains [int]$Phone.ExpectedProcessId) {
-                throw "Expected current PID $($Phone.ExpectedProcessId) is absent on $($Phone.Name); current=$($ProcessIds -join ',')"
+            if ($ProcessIds.Count -ne 1) {
+                throw "Expected one current APU PID on $($Phone.Name); current=$($ProcessIds -join ',')"
             }
+            $CurrentProcessId = [int]$ProcessIds[0]
 
             $State.phones[$Phone.Name] = [ordered]@{
                 serial = $Phone.Serial
-                expectedProcessId = [int]$Phone.ExpectedProcessId
+                expectedProcessId = $CurrentProcessId
                 initialProcessIds = @($ProcessIds)
                 prePublishProcessIds = @()
                 finalProcessIds = @()
@@ -358,9 +359,10 @@ Set-Location C:\APUMIR-arena-test
 
         foreach ($Phone in $Phones) {
             $ProcessIds = @(Get-ProcessIds -Serial $Phone.Serial)
+            $ExpectedProcessId = [int]$State.phones[$Phone.Name].expectedProcessId
             $State.phones[$Phone.Name].prePublishProcessIds = @($ProcessIds)
-            if ($ProcessIds -notcontains [int]$Phone.ExpectedProcessId) {
-                throw "PID changed before publish on $($Phone.Name)"
+            if ($ProcessIds -notcontains $ExpectedProcessId) {
+                throw "PID changed before publish on $($Phone.Name): expected=$ExpectedProcessId current=$($ProcessIds -join ',')"
             }
             $State.identities[$Phone.Name] = $NodeIds[$Phone.Name]
         }
@@ -570,7 +572,7 @@ finally:
                 mqttErrors = Count-Lines -Lines $Lines -Needles @("MQTT error:")
                 androidErrors = $AndroidErrors
                 crashAnr = $CrashAnr
-                expectedPidPresent = ($FinalProcessIds -contains [int]$Phone.ExpectedProcessId)
+                expectedPidPresent = ($FinalProcessIds -contains [int]$PhoneState.expectedProcessId)
                 finalProcessIds = @($FinalProcessIds)
             }
         }

@@ -646,8 +646,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   версия 3/3=`v11.16.11/11016011`. Это не delivery FAIL и не разрешает повтор старого блока.
   При paste также потерялись первые кириллические буквы в двух внутренних labels; corrected
   one-shot harness `scripts/r42_delivery2_check.ps1` использует только ASCII labels, отдельные
-  `delivery2` state/snapshots, сначала проверяет старое no-publish evidence и при любом неполном
-  исходе не повторяет публикацию автоматически.
+  `delivery2` state/snapshots и динамически фиксирует текущий single PID каждого телефона перед
+  readiness gate (не вшивает уже устаревший PID). Сначала он проверяет старое no-publish evidence,
+  а при любом неполном исходе не повторяет публикацию автоматически.
 
 ---
 
