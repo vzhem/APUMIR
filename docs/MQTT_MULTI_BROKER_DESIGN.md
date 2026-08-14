@@ -1,13 +1,15 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **design approved; r4.1 helper написан, ждёт Windows Android build**
+Статус: **r4.1 Android Rust build PASS; r4.2 код ждёт Windows build**
 
 Дата: 2026-08-14
 
 Этап: M3(c.2-r4, до M3(d)
 
-Текущий код r4.1 добавляет только изолированный bounded duplicate helper и unit-test cases.
-Production MQTT path ещё не вызывает его, поэтому сетевое поведение проверенного r3 не изменено.
+r4.1 добавил изолированный bounded duplicate helper; Android Rust release build прошёл за
+1m02s. r4.2 оставляет один primary HiveMQ session, но убирает ложный network success: EventLoop
+сначала должен получить настоящий ConnAck, и только потом ставятся subscription/presence requests.
+Второй broker и duplicate filter ещё не подключены.
 
 ## 1. Зачем это нужно
 

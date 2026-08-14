@@ -12,7 +12,6 @@ use crate::network::connection_pool::ConnectionPool;
 use crate::network::router::Router;
 use crate::network::dht::{RoutingTable, DhtNodeInfo};
 use crate::network::relay::RelayManager;
-use crate::network::mqtt_transport::MqttTransport;
 use crate::network::presence::PresenceManager;
 use crate::network::message_queue::MessageQueue;
 use crate::network::relay_queue::{RelayMessage, RelayQueue, DEFAULT_RELAY_TTL};
@@ -652,19 +651,20 @@ self.runtime = Some(runtime);
 
         let mut transport = match MqttTransport::connect(&node_id, &display_name).await {
             Ok(t) => {
-                tracing::info!("MQTT: transport connected");
+                tracing::info!("MQTT: transport initialized; awaiting broker ConnAck");
                 t
             }
             Err(e) => {
-                tracing::error!("MQTT: connect failed: {}", e);
+                tracing::error!("MQTT: initialization failed: {}", e);
                 return;
             }
         };
 
         if let Err(e) = transport.subscribe().await {
-            tracing::error!("MQTT: subscribe failed: {}", e);
+            tracing::error!("MQTT: initial ConnAck/subscription failed: {}", e);
             return;
         }
+        tracing::info!("MQTT: initial ConnAck received; subscription request queued");
 
         // Publish presence
         let addr_str = {

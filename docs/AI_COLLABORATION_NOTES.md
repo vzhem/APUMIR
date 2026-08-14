@@ -347,9 +347,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 **M3(c.2-r3), milestone-backup и первый security smoke завершены. Пользователь выбрал следующим
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
-cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1 pure duplicate
-helper написан изолированно и ждёт Windows `build-rust.ps1`; production path не изменён. M3(d),
-UI/background пока не начинать.**
+cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1 Android Rust
+build PASS. r4.2 code оставляет один HiveMQ session, ждёт реальный ConnAck до subscription/
+presence и ждёт Windows build; второго broker/fanout пока нет. M3(d), UI/background не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -581,8 +581,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.49)** — r4.1 code добавил изолированный `network/mqtt_dedup.rs`: хранит
   только SHA-256(topic+separator+payload), window 30 s, cap 4096, expiry и deterministic oldest
   eviction. Четыре unit cases покрывают duplicate/different/expiry/cap. Модуль объявлен, но не
-  подключён к MQTT receive path: до r4.2/r4.4 поведение сети не меняется. Sandbox compile/test
-  невозможен; следующий шаг только Windows `build-rust.ps1`, host `cargo test` не запускать.
+  подключён к MQTT receive path. Windows Android Rust release build PASS за 1m02s; ожидаемые
+  dead-code warnings подтверждают изоляцию helper, host `cargo test` не запускался.
+- **2026-08-14 (доп.50)** — r4.2 code убирает ложные startup markers без смены broker: создаёт
+  только primary HiveMQ session, запускает непрерывный EventLoop и ждёт первый настоящий ConnAck
+  через oneshot. Только после него queue-ятся wildcard subscription, retained-presence clear и
+  current presence; reconnect по-прежнему делает subscription request при clean session. Логи
+  различают initialized/ConnAck/subscription-request, не называют enqueue SubAck. Ждёт Windows
+  build; EMQX, fanout и r4.1 filter production path пока не подключены.
 
 ---
 

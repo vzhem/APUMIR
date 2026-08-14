@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, QoS, Packet};
 
 pub const MQTT_BROKERS: &[(&str, u16)] = &[
@@ -75,40 +75,33 @@ pub struct MqttTransport {
 impl MqttTransport {
     pub async fn connect(node_id: &str, _display_name: &str) -> Result<Self, String> {
         let client_id = format!("p2pm_{}", &node_id[..16.min(node_id.len())]);
+        let (host, port) = MQTT_BROKERS
+            .first()
+            .copied()
+            .ok_or_else(|| "No MQTT brokers configured".to_string())?;
 
-        for (host, port) in MQTT_BROKERS {
-            tracing::info!("MQTT: trying {}:{}", host, port);
-            let mut opts = MqttOptions::new(&client_id, *host, *port);
-            opts.set_keep_alive(Duration::from_secs(60));
-            opts.set_clean_session(true);
+        // r4.2 keeps the verified single-broker behavior. Creating AsyncClient only
+        // creates a bounded local request channel; it is not network success.
+        tracing::info!("MQTT: initializing primary session {}:{}", host, port);
+        let mut opts = MqttOptions::new(&client_id, host, port);
+        opts.set_keep_alive(Duration::from_secs(60));
+        opts.set_clean_session(true);
 
-            let (client, eventloop) = AsyncClient::new(opts, 100);
+        let (client, eventloop) = AsyncClient::new(opts, 100);
+        let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
 
-            match client.publish(
-                format!("p2pm2/ping/{}", node_id),
-                QoS::AtMostOnce, false, b"ping",
-            ).await {
-                Ok(_) => {
-                    tracing::info!("MQTT: connected to {}:{}", host, port);
-                    let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
-                    return Ok(Self {
-                        client,
-                        eventloop: Some(eventloop),
-                        event_tx: Some(event_tx),
-                        event_rx,
-                        eventloop_task: None,
-                        has_connected_once: false,
-                        node_id: node_id.to_string(),
-                        peers: Arc::new(Mutex::new(Vec::new())),
-                        relay_nodes: Arc::new(Mutex::new(Vec::new())),
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!("MQTT: {}:{} failed: {}", host, port, e);
-                }
-            }
-        }
-        Err("All MQTT brokers failed".to_string())
+        tracing::info!("MQTT: primary session created; awaiting broker ConnAck");
+        Ok(Self {
+            client,
+            eventloop: Some(eventloop),
+            event_tx: Some(event_tx),
+            event_rx,
+            eventloop_task: None,
+            has_connected_once: false,
+            node_id: node_id.to_string(),
+            peers: Arc::new(Mutex::new(Vec::new())),
+            relay_nodes: Arc::new(Mutex::new(Vec::new())),
+        })
     }
 
     pub async fn publish_presence(
@@ -125,15 +118,6 @@ impl MqttTransport {
     }
 
     pub async fn subscribe(&mut self) -> Result<(), String> {
-        // One wildcard subscription for ALL p2pm topics.
-        self.client.subscribe("p2pm2/#", QoS::AtLeastOnce)
-            .await.map_err(|e| e.to_string())?;
-        tracing::info!("MQTT: subscribed to p2pm2/# (node={})", self.node_id);
-
-        // Clear any old retained presence for this node.
-        let topic = format!("p2pm2/presence/{}", self.node_id);
-        let _ = self.client.publish(&topic, QoS::AtLeastOnce, true, b"").await;
-
         // EventLoop должен поллиться непрерывно. Старый timeout(1s) отменял
         // eventloop.poll() именно в момент reconnect-backoff, поэтому после возврата
         // сети клиент больше не подключался. Отдельная задача не отменяет poll;
@@ -146,9 +130,11 @@ impl MqttTransport {
             .event_tx
             .take()
             .ok_or_else(|| "MQTT event channel unavailable".to_string())?;
+        let (initial_connack_tx, initial_connack_rx) = oneshot::channel::<()>();
 
         self.eventloop_task = Some(tokio::spawn(async move {
             let mut reconnect_backoff_secs = 1u64;
+            let mut initial_connack_tx = Some(initial_connack_tx);
             loop {
                 match eventloop.poll().await {
                     Ok(Event::Incoming(Packet::Publish(p))) => {
@@ -183,6 +169,9 @@ impl MqttTransport {
                         {
                             break;
                         }
+                        if let Some(sender) = initial_connack_tx.take() {
+                            let _ = sender.send(());
+                        }
                     }
                     Ok(_) => {
                         reconnect_backoff_secs = 1;
@@ -201,6 +190,30 @@ impl MqttTransport {
                 }
             }
         }));
+
+        tracing::info!("MQTT: event loop started; awaiting initial broker ConnAck");
+        initial_connack_rx
+            .await
+            .map_err(|_| "MQTT event loop stopped before initial ConnAck".to_string())?;
+
+        // Queue the wildcard subscription only after the broker has acknowledged
+        // the connection. The EventLoop task continues polling and sends it.
+        self.client
+            .subscribe("p2pm2/#", QoS::AtLeastOnce)
+            .await
+            .map_err(|error| error.to_string())?;
+        tracing::info!(
+            "MQTT: subscription requested after ConnAck for p2pm2/# (node={})",
+            self.node_id
+        );
+
+        // Clear any old retained presence before run_mqtt_transport publishes the
+        // current presence. Both requests preserve their order in the client queue.
+        let topic = format!("p2pm2/presence/{}", self.node_id);
+        let _ = self
+            .client
+            .publish(&topic, QoS::AtLeastOnce, true, b"")
+            .await;
 
         Ok(())
     }
@@ -272,11 +285,11 @@ impl MqttTransport {
                     // поэтому после каждого reconnect подписываемся заново.
                     match self.client.subscribe("p2pm2/#", QoS::AtLeastOnce).await {
                         Ok(_) => tracing::info!(
-                            "MQTT: connection restored; re-subscribed to p2pm2/# (node={})",
+                            "MQTT: connection restored; subscription requested for p2pm2/# (node={})",
                             self.node_id
                         ),
                         Err(e) => tracing::warn!(
-                            "MQTT: connection restored but re-subscribe failed: {}",
+                            "MQTT: connection restored but subscription request failed: {}",
                             e
                         ),
                     }
