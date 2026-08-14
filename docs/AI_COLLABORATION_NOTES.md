@@ -751,6 +751,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot`, `--no-daemon`, с восстановлением
   env после команды; system JAVA_HOME не менять. Сначала guarded `java -version` +
   `gradlew --version`, без assemble, и проверка отсутствия нового hs_err.
+- **2026-08-14 (доп.73)** — первый C-drive JDK17 preflight остановился **до Java/Gradle**:
+  он успешно проверил signed/stable JDK17 `jimage.dll`, скопировал `hs_err_pid7760.log` в
+  `%TEMP%\apu-v11.16.12-hs_err_pid7760.log` с hash-check и удалил только исходную уже сохранённую
+  копию из worktree. Затем strict `hs_err_pid*.log count == 0` обнаружил другой исторический
+  crash-report и остановил блок до создания preflight state/log. Нельзя удалять неизвестный файл
+  или повторять блок. Workaround: сначала read-only inventory exact path/size/SHA/time всех repo и
+  TEMP hs_err, отделить известные 8788/7760 от historical, затем архивировать каждый отдельно.
+  Новый Java preflight сравнивает baseline set с post-run set, а не требует абсолютный zero.
 
 ---
 
