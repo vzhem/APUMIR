@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.1/r4.2 Android Rust build PASS; следующий шаг APK v11.16.11 без установки**
+Статус: **r4.1/r4.2 Rust и APK build PASS; existing v11.16.11 ждёт artifact/signature verify**
 
 Дата: 2026-08-14
 
@@ -9,7 +9,10 @@
 r4.1 добавил изолированный bounded duplicate helper; Android Rust release build прошёл за
 1m02s. r4.2 оставляет один primary HiveMQ session, но убирает ложный network success: EventLoop
 сначала должен получить настоящий ConnAck, и только потом ставятся subscription/presence requests.
-r4.2 Android Rust release build прошёл за 1m01s. Второй broker и duplicate filter ещё не подключены.
+r4.2 Android Rust release build прошёл за 1m01s; APK build — за 32s. Artifact verification
+остановился после успешной сборки только из-за expected `11.16.11` вместо фактического
+канонического versionName `v11.16.11`; существующий APK нужно проверить без rebuild. Второй broker
+и duplicate filter ещё не подключены.
 
 ## 1. Зачем это нужно
 

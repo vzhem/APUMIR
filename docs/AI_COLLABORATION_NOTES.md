@@ -347,10 +347,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 **M3(c.2-r3), milestone-backup и первый security smoke завершены. Пользователь выбрал следующим
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
-cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1 и r4.2 Android
-Rust build PASS. r4.2 оставляет один HiveMQ session и ждёт реальный ConnAck до subscription/
-presence; следующий шаг — собрать, но не ставить APK `v11.16.11`. Второго broker/fanout пока нет.
-M3(d), UI/background не начинать.**
+cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1/r4.2 Rust и APK
+`v11.16.11` build PASS; existing APK ждёт artifact/signature verify без rebuild. r4.2 оставляет
+один HiveMQ session и ждёт реальный ConnAck до subscription/presence; второго broker/fanout пока
+нет. M3(d), UI/background не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -590,7 +590,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   current presence; reconnect по-прежнему делает subscription request при clean session. Логи
   различают initialized/ConnAck/subscription-request, не называют enqueue SubAck. Windows Android
   Rust release build PASS за 1m01s, 9 warnings без errors; EMQX, fanout и r4.1 filter production
-  path пока не подключены. Следующий шаг — APK `v11.16.11` без установки.
+  path пока не подключены.
+- **2026-08-14 (доп.51)** — release APK build фактически PASS за 32 s (52 tasks), metadata
+  versionCode=`11016011`; harness затем дал ложный fail, потому что ожидал versionName `11.16.11`,
+  а канонический `$env:GITHUB_REF_NAME` сохраняется как `v11.16.11`. Ошибка произошла ПОСЛЕ
+  BUILD SUCCESSFUL и создания APK, поэтому rebuild запрещён/не нужен: проверить существующие
+  APK hash, embedded native hash и signature с expected `v11.16.11`. Nonfatal warnings:
+  strip `.so`, Kapt 2.0→1.9, processor options и Gradle deprecations.
 
 ---
 
