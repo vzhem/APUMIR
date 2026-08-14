@@ -302,7 +302,8 @@ transient sender остаётся отдельным долгом.
 observer hard-gated в module/core, использует только EMQX, один EventLoop task и client cap1.
 Subscribe/publish отсутствуют; markers всегда сообщают `subscriptions=0 publishes=0`; status
 counters + bounded 1→30s backoff + Drop abort. Legacy switching `MultiBroker` не активирован.
-`build-rust.ps1 -Features mqtt-secondary-observe` добавлен для exact gated compile.
+`build-rust.ps1 -Features mqtt-secondary-observe` добавлен для exact gated compile. Versioned
+Windows build harness готов; execution pending.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 

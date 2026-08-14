@@ -1104,6 +1104,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Windows feature-build/static policy scans PASS; host cargo/test не запускались. APK/phones/
   public traffic не менялись. Следующий gate — exact Windows `build-rust.ps1 -Features
   mqtt-secondary-observe`, generated `.so` only.
+- **2026-08-14 (доп.104)** — добавлен versioned `scripts/r43_observe_build.ps1`: exact r1b4
+  previous `.so` E706…E7E5, application diff guard от source `2689dbb`, parser check для
+  `build-rust.ps1`, child PowerShell с exact `-Features mqtt-secondary-observe`, separate
+  stdout/stderr, required feature marker + one Finished release + errors=0 + changed `.so`, final
+  Git generated-only. State в finally, APK/phones/public traffic=false, no retry. Parser-trap,
+  feature invocation/marker, ordering и no-phone scans PASS. Первый ordering checker ошибочно взял
+  initialization `$GeneratedSoHash=$null` вместо post-build assignment; corrected targeted search
+  PASS, harness defect отсутствует. Следующий gate — sync exact versioned harness и Windows run.
 
 ---
 
