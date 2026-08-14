@@ -221,9 +221,11 @@ RelayMessage {
   получил первый setup relay; новый generation-2 setup после cold start прошёл.
   Cold start подтвердил ConnAck у Анны/Жени; Стас после 5 initial errors подключился позже
   20-секундного gate и снова видел live presence. TCP probe Стаса: HiveMQ failed, EMQX passed.
-  Причина broker-fallback в коде: `AsyncClient.publish().await` до polling подтверждает enqueue,
-  не TCP/ConnAck, поэтому доступный второй broker не выбирается. Нужен bounded ConnAck gate +
-  broker rotation/circuit breaker; одна строка `subscribed` не connectivity evidence.
+  Причина broker-fallback в старом коде: `AsyncClient.publish().await` до polling подтверждал
+  enqueue, не TCP/ConnAck, поэтому доступный второй broker не выбирался. M3(c.2-r4 меняет initial
+  connect: до 8 s ждёт настоящий ConnAck каждого broker и при ошибке идёт к следующему; Windows
+  Android build/test ещё нужен. Rotation/circuit breaker после падения уже выбранного broker
+  остаётся follow-up; одна queued `subscribed`-строка сама по себе не connectivity evidence.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:

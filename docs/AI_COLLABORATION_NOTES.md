@@ -80,15 +80,17 @@ receipt-cleanup → интеграция в отправку → переисп�
 
 ### 0.1. Обязательное напоминание о milestone-backup
 
-После каждой существенно важной **проверенной** сборки (новый milestone, исправленный blocker,
-release candidate/стабильный release или точка перед рискованной миграцией) ИИ обязан сам
-предложить владельцу сохранить APU на внешний диск/флешку. Не копировать без согласия: сначала
+Только после действительно крупной **проверенной** точки (новая существенно изменённая APK,
+release candidate/стабильный release, завершённый большой этап или точка перед рискованной
+миграцией) ИИ предлагает сохранить APU на внешний диск/флешку. Не дёргать флешку для docs-only,
+повторной проверки той же APK, небольшого security checkpoint или промежуточного коммита:
+remote Git и существующего milestone-backup достаточно. Не копировать без согласия: сначала
 спросить букву диска и проверить место. Полная копия включает Git bundle+history, точный source
 commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/milestone manifests, docs и
 инструкцию восстановления/сборки/запуска на чистом Windows-ПК. Проверить bundle и все hashes.
 Учитывать signing material: рекомендовать зашифрованный носитель, не копировать tokens/`.env`/
 переписку/private identity keys. Каноническая процедура:
-`docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`. Обычную неудачную промежуточную сборку milestone не считать.
+`docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`. Обычную неудачную/промежуточную сборку milestone не считать.
 
 ### 0.2. Обязательный журнал ошибок и обходов
 
@@ -342,8 +344,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   не появился, но exact второй ConnAck/re-subscribe и live probe напрямую доказывают reconnect;
   старый guard `errors>=1` был излишне строгим, это не ошибка продукта.
 
-**M3(c.2-r3) завершён. Следующий предлагаемый шаг — milestone-backup `v11.16.10` на внешний
-носитель; M3(d) не начинать без отдельного согласования.**
+**M3(c.2-r3), milestone-backup и первый security smoke завершены. Текущий малый шаг до M3(d):
+M3(c.2-r4 — initial MQTT connection считать успешным только после bounded broker ConnAck и при
+ошибке пробовать следующий broker. Код ждёт Windows Android build; runtime broker rotation после
+уже установленного соединения остаётся отдельным follow-up. M3(d) пока не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -559,6 +563,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `10/7/10`, expected PID membership 3/3. Post-control battery `100/100/60%`, temperature
   `38/29.6/31°C`, PSS `117511/90608/126208 KiB`, CPU `0.7/0.5/0.7%`, threads `59/52/66`.
   Control recovery и весь первый low-volume security smoke завершены; logs оставлены, state PASS.
+- **2026-08-14 (доп.47)** — пользователь уточнил: флешку не подключать для мелких checkpoints;
+  backup предлагать только на крупных новых APK/release/этапах, а не после docs или повторного
+  smoke той же сборки. Начат M3(c.2-r4 до M3(d): `MqttTransport::connect` больше не принимает
+  queued publish за network success, а ждёт ConnAck до 8 s на broker и затем пробует следующий.
+  Initial ConnAck уже consumed, поэтому любой следующий ConnAck считается reconnect и запускает
+  clean-session re-subscribe. Sandbox не имеет `cargo`/`rustfmt`; нужен Windows `build-rust.ps1`.
 
 ---
 
