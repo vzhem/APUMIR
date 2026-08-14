@@ -639,17 +639,17 @@ self.runtime = Some(runtime);
     async fn connect_ready_mqtt_session(
         node_id: &str,
         display_name: &str,
-        loss_intolerant_inbox: Arc<crate::network::mqtt_transport::MqttLossIntolerantInbox>,
+        shared_state: Arc<crate::network::mqtt_transport::MqttSharedRuntimeState>,
     ) -> Result<crate::network::mqtt_transport::MqttTransport, String> {
         use crate::network::mqtt_transport::MqttTransport;
 
         const MQTT_SESSION_READY_TIMEOUT: std::time::Duration =
             std::time::Duration::from_secs(45);
 
-        let mut transport = MqttTransport::connect_with_loss_intolerant_inbox(
+        let mut transport = MqttTransport::connect_with_shared_state(
             node_id,
             display_name,
-            loss_intolerant_inbox,
+            shared_state,
         )
         .await?;
         match tokio::time::timeout(MQTT_SESSION_READY_TIMEOUT, transport.subscribe()).await {
@@ -713,11 +713,14 @@ self.runtime = Some(runtime);
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
         use crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY;
-        use crate::network::mqtt_transport::MqttLossIntolerantInbox;
+        use crate::network::mqtt_transport::MqttSharedRuntimeState;
 
         const MQTT_SESSION_RESTART_BACKOFF_MAX_SECS: u64 = 30;
 
-        #[cfg(feature = "mqtt-secondary-observe")]
+        #[cfg(all(
+            feature = "mqtt-secondary-observe",
+            not(feature = "mqtt-dual-broker")
+        ))]
         let _secondary_observer = {
             let observer =
                 crate::network::mqtt_secondary_observer::SecondaryBrokerObserver::spawn(&node_id);
@@ -729,9 +732,10 @@ self.runtime = Some(runtime);
             observer
         };
 
-        // Core owns this bounded FIFO across every single-session replacement. MQTT transports
-        // only borrow it through Arc, so dropping a stalled session cannot drop relay/receipt.
-        let loss_intolerant_inbox = Arc::new(MqttLossIntolerantInbox::new(
+        // Core owns the critical inbox and, under r4.4, duplicate/retained-target state across
+        // every primary transport replacement. Accepted delivery events and the 30-second
+        // cross-broker dedup window therefore survive a generation restart.
+        let mqtt_shared_state = Arc::new(MqttSharedRuntimeState::new(
             MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
         ));
 
@@ -751,7 +755,7 @@ self.runtime = Some(runtime);
             match Self::connect_ready_mqtt_session(
                 &node_id,
                 &display_name,
-                Arc::clone(&loss_intolerant_inbox),
+                Arc::clone(&mqtt_shared_state),
             )
             .await {
                 Ok(transport) => {
@@ -867,7 +871,7 @@ self.runtime = Some(runtime);
                         match Self::connect_ready_mqtt_session(
                             &node_id,
                             &display_name,
-                            Arc::clone(&loss_intolerant_inbox),
+                            Arc::clone(&mqtt_shared_state),
                         )
                         .await {
                             Ok(recovered_transport) => break recovered_transport,

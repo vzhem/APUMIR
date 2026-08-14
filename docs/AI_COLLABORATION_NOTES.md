@@ -1277,6 +1277,39 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   ADB проверяет generated `.so` nonempty, changed от D7A2…FE95 и generated-only Git, затем пишет
   distinct PASS state. Static saved-only, ordering/state, parser-trap, automatic-variable и
   no-phone scans PASS. Следующий gate — sync/parser и один recovery run; build не повторять.
+- **2026-08-15 (доп.120)** — r4.4 fanout-policy saved-build recovery Windows ParseFile/safety и
+  execution PASS; recovery script SHA-256 `385C833037881576F8974DBD3EBCEED3B8173CFD36D69D140C4D1A58E2616C49`.
+  Recovery state `%TEMP%\apu-r4.4-fanout-policy-rust-build-recovery.json`, SHA-256
+  `55590C7AB6E431EE301A933267E742DDCFA13277A421318D9B513C971A4CAF03`, outcome
+  `PASS_FROM_COMPLETED_BUILD_EVIDENCE`. Parent 311C…7495 exact; stdout/stderr feature markers=1/1,
+  child exit0, Finished release=1, warnings/errors=25/0. Generated arm64 `.so` 7,180,888 B,
+  SHA-256 `C8665B5DD723D6853A7D2AA0D88B9E3775B6D3AD6AD2A01E1BC8AC13807E4FCC`; policy source
+  F411…F7E exact. BuildRepeated/runtime/APK/ADB/phones/public traffic=false. r4.4 isolated fanout/
+  retained-target policy compile gate закрыт; parent false incomplete и logs immutable, ничего не
+  повторять. Следующий source step — atomic secondary subscribe/publish + shared production dedup;
+  mixed-version invariant сохраняет HiveMQ common path для N-1.
+- **2026-08-15 (доп.121)** — r4.4 atomic dual-session integration source complete; Windows compile
+  pending. Под default-off `mqtt-dual-broker` persistent transport создаёт exact pair HiveMQ+EMQX,
+  максимум 2 AsyncClient/EventLoop sessions; r4.3 observer одновременно не spawn. Secondary имеет
+  clean_session/keepalive60, bounded request cap100 и independent poll/backoff 1→30; active только
+  после real ConnAck + queued wildcard subscription, повторяемой после reconnect. Primary также
+  исключается из fanout между disconnect и re-subscribe. Все persistent presence/message/relay/
+  receipt/clear/gossip/registration проходят единый max2 fanout; partial outcome explicit degraded,
+  zero queued = error. Existing SHA-256 topic+payload filter теперь shared до core/UI для обоих
+  brokers, cap4096/window30s, payload-free duplicate counter log 1/powers-of-two; core-owned state
+  переживает primary generation replacement. Retained target ledger shared/limited 4096; cleanup
+  удаляет obligation только после всех attempted targets queued. Dual producers больше не могут
+  race past critical inbox cap256: каждый EventLoop до post-ConnAck poll резервирует owned
+  semaphore slot; loss-intolerant event переносит permit в core queue, control/best-effort его
+  освобождает. Поэтому accepted delivery уже имеет bounded core capacity до обработки и переживает
+  session abort; добавлен two-producer regression test. Retained receipt envelope ради N-1 не
+  меняется и не несёт remote broker mask, поэтому origin ставит empty tombstone в exact configured
+  pair как safe bounded superset (в inactive client queue тоже bounded); obligation удаляется лишь
+  после enqueue обоих. Exact configured broker list сокращён до HiveMQ/EMQX; N-1 остаётся совместим
+  через общий HiveMQ. Legacy synchronous unused `send_message_mqtt` и secondary-startup-with-primary-down
+  остаются отдельными долгами/r4.5, не скрывать. Static feature/fanout/dedup/ownership/cap/mixed-
+  version scans PASS; host cargo/test не запускался. Следующий gate — Windows Android Rust compile
+  feature `mqtt-dual-broker`, до PASS никакой APK/phone/public runtime.
 
 ---
 

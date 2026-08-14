@@ -5,9 +5,9 @@
 //! receipts, acknowledgements and unknown formats are never classified as droppable.
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use tokio::sync::Notify;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Slots kept free from best-effort traffic. Loss-intolerant publishes use their own core-owned
 /// inbox; this reserve keeps reconnect/control notifications out of refreshable FIFO saturation.
@@ -16,17 +16,17 @@ pub(crate) const MQTT_LOSS_INTOLERANT_RESERVE: usize = 32;
 /// Separate bounded handoff owned by the core and shared by every replacement MQTT session.
 pub(crate) const MQTT_LOSS_INTOLERANT_INBOX_CAPACITY: usize = 256;
 
-/// A single-producer FIFO that survives transport replacement through `Arc` ownership.
+/// A core-owned FIFO that survives transport replacement through `Arc` ownership.
 ///
-/// The producer checks `wait_for_capacity` before polling the next broker packet, then calls
-/// `push_owned` for a loss-intolerant event. Therefore every packet already returned by
-/// `EventLoop::poll` has an owned location before another packet can be acknowledged. `push_owned`
-/// deliberately never drops: a violated producer invariant remains observable as depth > capacity
-/// instead of silently losing a relay or receipt.
+/// Every EventLoop reserves an owned semaphore slot before polling its next post-ConnAck packet.
+/// A loss-intolerant packet moves that permit into the queue; best-effort/control packets drop it.
+/// Two sessions therefore cannot race past the hard cap, and an accepted delivery event is already
+/// backed by core-owned capacity before parsing/forwarding. The direct `push_owned` helper exists
+/// only for deterministic unit setup. No path silently drops relay/receipt/message events.
 pub(crate) struct LossIntolerantInbox<T> {
-    entries: Mutex<VecDeque<T>>,
+    entries: Mutex<VecDeque<(T, OwnedSemaphorePermit)>>,
     capacity: usize,
-    capacity_available: Notify,
+    capacity_slots: Arc<Semaphore>,
 }
 
 impl<T> LossIntolerantInbox<T> {
@@ -35,29 +35,49 @@ impl<T> LossIntolerantInbox<T> {
         Self {
             entries: Mutex::new(VecDeque::with_capacity(capacity)),
             capacity,
-            capacity_available: Notify::new(),
+            capacity_slots: Arc::new(Semaphore::new(capacity)),
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn push_owned(&self, item: T) -> usize {
+        let permit = Arc::clone(&self.capacity_slots)
+            .try_acquire_owned()
+            .expect("test setup must not exceed inbox capacity");
+        self.push_reserved(item, permit)
+    }
+
+    pub(crate) async fn reserve_owned(&self) -> OwnedSemaphorePermit {
+        Arc::clone(&self.capacity_slots)
+            .acquire_owned()
+            .await
+            .expect("loss-intolerant inbox semaphore is never closed")
+    }
+
+    pub(crate) fn push_reserved(&self, item: T, permit: OwnedSemaphorePermit) -> usize {
         let mut entries = self
             .entries
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        entries.push_back(item);
+        entries.push_back((item, permit));
         entries.len()
     }
 
+    pub(crate) async fn push_owned_bounded(&self, item: T) -> usize {
+        let permit = self.reserve_owned().await;
+        self.push_reserved(item, permit)
+    }
+
     pub(crate) fn pop(&self) -> Option<(T, usize)> {
-        let (item, remaining) = {
+        let ((item, permit), remaining) = {
             let mut entries = self
                 .entries
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let item = entries.pop_front()?;
-            (item, entries.len())
+            let entry = entries.pop_front()?;
+            (entry, entries.len())
         };
-        self.capacity_available.notify_one();
+        drop(permit);
         Some((item, remaining))
     }
 
@@ -73,17 +93,13 @@ impl<T> LossIntolerantInbox<T> {
     }
 
     pub(crate) fn is_full(&self) -> bool {
-        self.len() >= self.capacity
+        self.capacity_slots.available_permits() == 0
     }
 
+    #[cfg(test)]
     pub(crate) async fn wait_for_capacity(&self) {
-        loop {
-            let notified = self.capacity_available.notified();
-            if !self.is_full() {
-                return;
-            }
-            notified.await;
-        }
+        let permit = self.reserve_owned().await;
+        drop(permit);
     }
 }
 
@@ -223,6 +239,32 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(10), inbox.wait_for_capacity())
             .await
             .expect("drain must notify the producer");
+    }
+
+    #[tokio::test]
+    async fn second_broker_owned_push_cannot_race_past_capacity() {
+        let inbox = Arc::new(LossIntolerantInbox::new(1));
+        assert_eq!(inbox.push_owned_bounded("primary").await, 1);
+
+        let second_session = Arc::clone(&inbox);
+        let mut second_push = tokio::spawn(async move {
+            second_session.push_owned_bounded("secondary").await
+        });
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut second_push)
+            .await
+            .is_err());
+        assert_eq!(inbox.len(), 1);
+
+        assert_eq!(inbox.pop(), Some(("primary", 0)));
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(50), second_push)
+                .await
+                .expect("second broker must resume after drain")
+                .expect("second broker task must not panic"),
+            1
+        );
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox.pop(), Some(("secondary", 0)));
     }
 
     #[test]

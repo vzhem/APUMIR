@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.4 policy child build completed; saved-artifact recovery pending**
+Статус: **r4.4 atomic dual-session+dedup source complete; Windows compile pending**
 
 Дата: 2026-08-15
 
@@ -352,9 +352,28 @@ subscribe/publish и существующий `MqttDuplicateFilter` к productio
 `r44_fanout_policy_build.ps1` выполнил child build: exit0, Finished release=1, compiler errors=0,
 67.85s. Parent дал false incomplete только потому, что feature marker посчитан вместе в stdout и
 CLIXML/host stderr (combined=2) до artifact inspection. State SHA-256 `311C29BF…57495`; build не
-повторять. Saved-only `r44_fanout_policy_build_recover.ps1` готов: exact parent/source/log shape,
-stdout marker=1, stderr duplicate=1, generated `.so` nonempty/changed и generated-only worktree;
-Windows recovery run pending, no build/ADB/phones.
+повторять. Saved-only recovery затем PASS: state SHA-256 `55590C7A…CAF03`, stdout/stderr marker
+1/1, child exit0, Finished1, warnings/errors=25/0. Generated arm64 `.so` 7,180,888 B /
+`C8665B5D…E4FCC`, policy source exact; rebuild/runtime/APK/ADB/phones/public traffic=false. Policy
+compile gate закрыт.
+
+**Atomic integration source complete, Windows compile pending:** `mqtt-dual-broker` теперь создаёт
+ровно HiveMQ+EMQX persistent sessions; observe-only supervisor при этом feature не spawn. Каждая
+session имеет свой EventLoop/readiness: real ConnAck, затем wildcard subscription request, повтор
+после reconnect; disconnected/unsubscribed session исключается из fanout. Все persistent publish
+policies идут через max2 fanout с explicit partial degraded/zero-target error. Shared core-owned
+`MqttDuplicateFilter` применяется к raw topic+payload до core/UI и переживает primary replacement;
+metric payload-free/rate-limited. Retained target ledger также shared и bounded. Поскольку теперь
+два EventLoop producer, каждый до post-ConnAck poll резервирует owned semaphore permit; critical
+event перемещает permit в core queue, остальные packet types освобождают его. Поэтому cap256 нельзя
+превысить гонкой и accepted delivery имеет core-owned slot до обработки/session abort; regression
+моделирует два broker. Legacy-compatible receipt не несёт remote broker mask, поэтому clear
+консервативно queue'ится в exact configured pair (bounded safe superset, включая временно inactive
+client) и obligation удаляется только после обоих enqueue. Wire payload не изменён, exact broker
+pair оставляет HiveMQ common path для N-1. Startup при primary down и legacy transient sender
+остаются r4.5/debt. Static integration checks PASS;
+следующий gate только Windows `build-rust.ps1 -Features mqtt-dual-broker`, без APK/phones/public
+runtime.
 
 ### Mixed-version acceptance для MQTT overlay
 
