@@ -235,6 +235,16 @@ impl MqttTransport {
             .map_err(|e| e.to_string())
     }
 
+    /// M3(c.2-r3): relay, пересылаемый уже появившемуся recipient, должен быть live-only.
+    /// Retained relay переживал receipt cleanup и повторно доставлялся после reconnect.
+    pub async fn send_mesh_relay(&self, to_node_id: &str, payload: &str) -> Result<(), String> {
+        let topic = format!("p2pm2/msg/{}", to_node_id);
+        self.client
+            .publish(&topic, QoS::AtLeastOnce, false, payload.as_bytes())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     pub async fn send_message(&self, to_node_id: &str, payload: &str) -> Result<(), String> {
         let topic = format!("p2pm2/msg/{}", to_node_id);
         self.client.publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())

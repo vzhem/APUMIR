@@ -161,6 +161,9 @@ v2.0 добавляет практический путь развития пр�
 - [ ] Провести аудит всех видимых строк: launcher label, onboarding, профиль/share, settings,
   notifications, dialogs, APK/update texts, invite pages и accessibility descriptions.
 - [ ] Ввести единый строковый ресурс имени `APU`, исключить hardcoded старые названия из UI.
+- [ ] Исправить регистрацию/onboarding: убрать персональный пример `Например: Владимир`;
+  нейтральная подпись поля — `Имя или имя и фамилия`, placeholder — `Как к вам обращаться`.
+  Пояснить, что это публичное неуникальное display name, а уникальный `@username` задаётся отдельно.
 - [ ] Новые APK/releases называть `APU-vX.Y.Z`; GitHub repo/локальные папки могут быть APUMIR.
 - [ ] Для новых links/сайта использовать бренд APU, сохранив чтение старых `p2pmessenger://`,
   `.apumir` и legacy invite links ради обратной совместимости.
@@ -492,6 +495,30 @@ InviteFriendScreen
 - relay candidates;
 - последние network events;
 - export logs.
+
+### Удалённая отправка диагностических отчётов
+
+- [ ] Кнопка `Отправить отчёт об ошибке` и отдельный opt-in для автоматических crash reports;
+  никаких скрытых uploads по умолчанию.
+- [ ] Настраиваемый project-controlled endpoint/provider (например, self-hosted collector или
+  выбранный issue/crash tracker); адрес и ключи не hardcode-ить в APK и не отправлять «ИИ» напрямую.
+- [ ] В отчёт включать: версию APU, Android/device model, timestamp, stack trace, тип ошибки,
+  bounded recent logs и безопасный network state.
+- [ ] Перед отправкой автоматически удалять plaintext сообщений, private keys/tokens, точные
+  контакты, username, IP/SSID и другие персональные данные; node ID — только salted hash.
+- [ ] Показать пользователю preview/redaction и получить явное подтверждение перед manual send.
+- [ ] Шифрование отчёта публичным support key + HTTPS, checksum, report ID и статус доставки.
+- [ ] Жёсткие лимиты размера/частоты, dedup одинаковых crashes, backoff, Wi-Fi-only option и
+  bounded offline queue; после успешной отправки локальный пакет удалять.
+- [ ] Локальный export в зашифрованный ZIP/JSON для ручного прикрепления к задаче или передачи
+  разработчику; пользователь может удалить все pending/sent reports.
+- [ ] Retention policy и удаление на collector; доступ только владельцу проекта. Не включать
+  telemetry/analytics сверх необходимой диагностики без отдельного согласия.
+- [ ] ИИ анализирует только явно предоставленный пользователем export либо доступный проектный
+  issue/report; приложение не должно иметь прямой «секретный канал» к конкретной ИИ-сессии.
+
+Критерий: пользователь может безопасно прислать воспроизводимый crash/error report туда, где
+команда проекта сможет его обработать, не раскрывая переписку, ключи и личные данные.
 
 ---
 

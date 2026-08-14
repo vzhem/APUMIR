@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -18,6 +18,44 @@ use crate::network::message_queue::MessageQueue;
 use crate::network::relay_queue::{RelayMessage, RelayQueue, DEFAULT_RELAY_TTL};
 use crate::network::wire::MeshEnvelope;
 use crate::network::adaptive_polling::AdaptivePolling;
+
+fn remember_bounded_id(
+    entries: &mut HashSet<String>,
+    order: &mut VecDeque<String>,
+    id: &str,
+    capacity: usize,
+) {
+    if capacity == 0 || entries.contains(id) {
+        return;
+    }
+    while order.len() >= capacity {
+        if let Some(oldest) = order.pop_front() {
+            entries.remove(&oldest);
+        }
+    }
+    let owned = id.to_string();
+    entries.insert(owned.clone());
+    order.push_back(owned);
+}
+
+fn remember_bounded_delivery(
+    entries: &mut HashMap<String, String>,
+    order: &mut VecDeque<String>,
+    msg_id: &str,
+    origin: &str,
+    capacity: usize,
+) {
+    if capacity == 0 || entries.contains_key(msg_id) {
+        return;
+    }
+    while order.len() >= capacity {
+        if let Some(oldest) = order.pop_front() {
+            entries.remove(&oldest);
+        }
+    }
+    entries.insert(msg_id.to_string(), origin.to_string());
+    order.push_back(msg_id.to_string());
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineState {
@@ -676,6 +714,15 @@ self.runtime = Some(runtime);
         let mut mesh_relay_bytes_sent_in_window: usize = 0;
         let mut mesh_relay_cursor: usize = 0;
 
+        // M3(c.2-r3): bounded tombstones не дают позднему/повторному relay
+        // снова попасть в очередь после receipt cleanup или повторно появиться в UI.
+        const MAX_SEEN_MESH_RELAY_IDS: usize = 10_000;
+        const MAX_DELIVERED_MESH_RELAY_IDS: usize = 4_096;
+        let mut seen_mesh_relay_ids: HashSet<String> = HashSet::new();
+        let mut seen_mesh_relay_order: VecDeque<String> = VecDeque::new();
+        let mut delivered_mesh_relay_origins: HashMap<String, String> = HashMap::new();
+        let mut delivered_mesh_relay_order: VecDeque<String> = VecDeque::new();
+
         loop {
             if let Some(evt) = transport.poll_event().await {
                 if evt.topic.starts_with("p2pm2/ping/") {
@@ -858,58 +905,104 @@ self.runtime = Some(runtime);
                                 if msg_id.is_empty() || recipient.is_empty() || origin.is_empty() {
                                     tracing::warn!("MESH relay: missing required metadata, dropped");
                                 } else if recipient == node_id {
-                                    // M7 добавит настоящее E2E-расшифрование. Пока wire payload
-                                    // содержит байты текста, и читать их имеет право только получатель.
-                                    match String::from_utf8(e2e_payload) {
-                                        Ok(text) => {
-                                            let now = std::time::SystemTime::now()
-                                                .duration_since(std::time::UNIX_EPOCH)
-                                                .unwrap_or_default();
-                                            events.emit(CoreEvent::MessageReceived {
-                                                message_id: msg_id.clone(),
-                                                chat_id: chat_scope,
-                                                sender_id: origin.clone(),
-                                                text,
-                                                timestamp: now.as_millis() as i64,
-                                            });
+                                    // M3(c.2-r3): одно msg_id показываем локальному recipient
+                                    // не больше раза. Повтор от того же origin получает новый
+                                    // receipt (для cleanup relay), но не второе UI-событие.
+                                    let previous_origin = delivered_mesh_relay_origins
+                                        .get(&msg_id)
+                                        .cloned();
+                                    let should_send_receipt = match previous_origin {
+                                        Some(ref known_origin) if known_origin == &origin => {
                                             tracing::info!(
-                                                "MESH relay: {} delivered to local recipient",
+                                                "MESH relay: duplicate local delivery {} suppressed",
                                                 msg_id
                                             );
-
-                                            // M3(b.1): получатель автоматически рассылает
-                                            // mesh receipt. Все узлы на p2pm2/# увидят его,
-                                            // relay-узлы очистят очередь, origin получит ✓✓.
-                                            let receipt = crate::network::wire::build_receipt(
-                                                &msg_id,
-                                                &node_id,
-                                                now.as_secs(),
-                                            );
-                                            match transport
-                                                .send_mesh_receipt(&origin, &msg_id, &receipt)
-                                                .await
-                                            {
-                                                Ok(_) => tracing::info!(
-                                                    "MESH receipt: {} sent automatically to unique origin topic",
-                                                    msg_id
-                                                ),
-                                                Err(e) => tracing::warn!(
-                                                    "MESH receipt: failed to send {}: {}",
-                                                    msg_id,
-                                                    e
-                                                ),
-                                            }
+                                            true
                                         }
-                                        Err(_) => tracing::warn!(
-                                            "MESH relay: payload for {} is not valid UTF-8, dropped",
-                                            msg_id
-                                        ),
+                                        Some(known_origin) => {
+                                            tracing::warn!(
+                                                "MESH relay: conflicting origin for {}, dropped ({} != {})",
+                                                msg_id,
+                                                origin,
+                                                known_origin
+                                            );
+                                            false
+                                        }
+                                        None => match String::from_utf8(e2e_payload) {
+                                            Ok(text) => {
+                                                let now = std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .unwrap_or_default();
+                                                events.emit(CoreEvent::MessageReceived {
+                                                    message_id: msg_id.clone(),
+                                                    chat_id: chat_scope,
+                                                    sender_id: origin.clone(),
+                                                    text,
+                                                    timestamp: now.as_millis() as i64,
+                                                });
+                                                remember_bounded_delivery(
+                                                    &mut delivered_mesh_relay_origins,
+                                                    &mut delivered_mesh_relay_order,
+                                                    &msg_id,
+                                                    &origin,
+                                                    MAX_DELIVERED_MESH_RELAY_IDS,
+                                                );
+                                                tracing::info!(
+                                                    "MESH relay: {} delivered to local recipient",
+                                                    msg_id
+                                                );
+                                                true
+                                            }
+                                            Err(_) => {
+                                                tracing::warn!(
+                                                    "MESH relay: payload for {} is not valid UTF-8, dropped",
+                                                    msg_id
+                                                );
+                                                false
+                                            }
+                                        },
+                                    };
+
+                                    if should_send_receipt {
+                                        let now = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default();
+                                        let receipt = crate::network::wire::build_receipt(
+                                            &msg_id,
+                                            &node_id,
+                                            now.as_secs(),
+                                        );
+                                        match transport
+                                            .send_mesh_receipt(&origin, &msg_id, &receipt)
+                                            .await
+                                        {
+                                            Ok(_) => tracing::info!(
+                                                "MESH receipt: {} sent automatically to unique origin topic",
+                                                msg_id
+                                            ),
+                                            Err(e) => tracing::warn!(
+                                                "MESH receipt: failed to send {}: {}",
+                                                msg_id,
+                                                e
+                                            ),
+                                        }
                                     }
                                 } else if let Some(ref q) = relay_queue {
                                     // КРИТИЧНО: contains ОБЯЗАТЕЛЕН перед каждым enqueue.
                                     // Без этого self-receive MQTT создаёт бесконечную петлю/шторм.
                                     if q.contains(&msg_id) {
+                                        remember_bounded_id(
+                                            &mut seen_mesh_relay_ids,
+                                            &mut seen_mesh_relay_order,
+                                            &msg_id,
+                                            MAX_SEEN_MESH_RELAY_IDS,
+                                        );
                                         tracing::trace!("MESH relay: duplicate {} ignored", msg_id);
+                                    } else if seen_mesh_relay_ids.contains(&msg_id) {
+                                        tracing::info!(
+                                            "MESH relay: previously seen {} ignored after cleanup",
+                                            msg_id
+                                        );
                                     } else if ttl_secs == 0 {
                                         tracing::warn!("MESH relay: {} has expired TTL, dropped", msg_id);
                                     } else {
@@ -930,6 +1023,14 @@ self.runtime = Some(runtime);
                                         match message.next_hop() {
                                             Some(next_hop_message) => {
                                                 let stored_hop = next_hop_message.hop_count;
+                                                // Tombstone ставим до enqueue attempt: переполненный
+                                                // телефон не должен бесконечно разбирать один spam ID.
+                                                remember_bounded_id(
+                                                    &mut seen_mesh_relay_ids,
+                                                    &mut seen_mesh_relay_order,
+                                                    &msg_id,
+                                                    MAX_SEEN_MESH_RELAY_IDS,
+                                                );
                                                 match q.enqueue(next_hop_message) {
                                                     Ok(true) => tracing::info!(
                                                         "MESH relay: stored {} for {} at hop {}",
@@ -1151,7 +1252,7 @@ self.runtime = Some(runtime);
                                                         }
 
                                                         match transport
-                                                            .send_message(
+                                                            .send_mesh_relay(
                                                                 &message.recipient,
                                                                 &relay,
                                                             )
@@ -1706,6 +1807,39 @@ mod tests {
         let mut e = make_engine();
         e.start();
         e
+    }
+
+    #[test]
+    fn bounded_id_cache_evicts_oldest() {
+        let mut entries = HashSet::new();
+        let mut order = VecDeque::new();
+        remember_bounded_id(&mut entries, &mut order, "m1", 2);
+        remember_bounded_id(&mut entries, &mut order, "m2", 2);
+        remember_bounded_id(&mut entries, &mut order, "m3", 2);
+
+        assert!(!entries.contains("m1"));
+        assert!(entries.contains("m2"));
+        assert!(entries.contains("m3"));
+        assert_eq!(order.len(), 2);
+    }
+
+    #[test]
+    fn bounded_delivery_cache_keeps_first_origin_and_evicts_oldest() {
+        let mut entries = HashMap::new();
+        let mut order = VecDeque::new();
+        remember_bounded_delivery(&mut entries, &mut order, "m1", "pk_a", 2);
+        remember_bounded_delivery(&mut entries, &mut order, "m1", "pk_attacker", 2);
+
+        assert_eq!(entries.get("m1").map(String::as_str), Some("pk_a"));
+        assert_eq!(order.len(), 1);
+
+        remember_bounded_delivery(&mut entries, &mut order, "m2", "pk_b", 2);
+        remember_bounded_delivery(&mut entries, &mut order, "m3", "pk_c", 2);
+
+        assert!(!entries.contains_key("m1"));
+        assert_eq!(entries.get("m2").map(String::as_str), Some("pk_b"));
+        assert_eq!(entries.get("m3").map(String::as_str), Some("pk_c"));
+        assert_eq!(order.len(), 2);
     }
 
     #[test]

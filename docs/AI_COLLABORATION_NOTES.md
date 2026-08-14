@@ -223,7 +223,14 @@ receipt-cleanup → интеграция в отправку → переисп�
   **APU**. APUMIR/P2P Messenger остаются лишь техническими/историческими именами repo, папок,
   package/classes и legacy links; не делать рискованный массовый rename. Нужны аудит всех UI
   strings, новый оригинальный modern logo (adaptive/monochrome/notification/splash/vector),
-  design system и последовательное light/dark/accessibility оформление. План — фаза 0.3.
+  design system и последовательное light/dark/accessibility оформление. Регистрация: убрать
+  `Например: Владимир`, использовать `Имя или имя и фамилия` / `Как к вам обращаться`, пояснить
+  отличие display name от уникального `@username`. План — фаза 0.3.
+- **Диагностические отчёты — решение пользователя (2026-08-14):** телефоны должны уметь
+  отправлять ошибки в выбранное проектом место для удобного исправления. Только manual send или
+  явный opt-in auto-crash; redaction plaintext/keys/tokens/PII, preview, encryption, size/rate
+  limits, dedup/backoff/retention и локальный export. Не отправлять напрямую «ИИ»: ИИ получает
+  только явно приложенный export или доступный project issue/report. План — фаза 2.4.
 
 ---
 
@@ -233,7 +240,7 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1) + код r2):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1/r2) + код r3):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -285,7 +292,12 @@ receipt-cleanup → интеграция в отправку → переисп�
   retained на base recipient topic. После reconnect Анна получила старый relay, снова сохранила
   его и вызвала вторую доставку/receipt (`originDelivery=2`). Это не норма.
 
-**Следующий шаг = согласовать M3(c.2-r3): c2 relay non-retained + recipient dedup; M3(d) не начинать.**
+- **M3(c.2-r3), код готов:** gossip relay resend теперь `retain=false`; bounded seen-cache
+  `10 000` не даёт повторно enqueue после receipt cleanup, а local delivery-cache `4 096`
+  подавляет второе UI-событие и конфликтующий origin. Повтор того же origin может заново
+  отправить receipt для cleanup. M3(d) не изменён.
+
+**Следующий шаг = Windows `build-rust.ps1` для M3(c.2-r3); M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -369,6 +381,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.12)** — r2 unique retained receipt доказан и корректно очищен, но stale
   retained relay после reconnect породил вторые store/delivery/receipt/origin-delivery.
   Нужен отдельный r3: c2 resend non-retained + bounded recipient delivery dedup.
+- **2026-08-14 (доп.13)** — регистрация должна использовать нейтральное `Имя или имя и
+  фамилия`, без примера «Владимир». В фазу 2.4 добавлены безопасные opt-in remote error reports:
+  redaction/preview/encryption/limits/export и project-controlled collector/issue tracker.
+- **2026-08-14 (доп.14)** — код r3: c2 relay resend non-retained; bounded seen tombstones
+  10k предотвращают re-enqueue после cleanup; local delivery cache 4096 подавляет duplicate UI
+  и conflicting origin, но повторяет receipt для того же origin. Ждёт Windows build/test.
 
 ---
 
@@ -491,8 +509,8 @@ APK появится: `app\build\outputs\apk\release\app-release.apk`
    - **(c.1)** на presence → адресно отправить `gsumm`; target принимает/парсит, без relay.
      Лимиты: 256 items, 64 KiB, 60 с/peer, 8 summaries/30 с global.
    - **(c.2)** сравнить summary и переслать отсутствующие relay: 16/256 KiB за round,
-     32/512 KiB за 30 с, envelope ≤64 KiB, ≤64 кандидата, fair cursor. Relay-path и r1
-     reconnect проверены; код r2 unique retained receipt topic ждёт Windows build/test.
+     32/512 KiB за 30 с, envelope ≤64 KiB, ≤64 кандидата, fair cursor. Relay-path/r1/r2
+     проверены; код r3 non-retained resend + bounded dedup ждёт Windows build/test.
 5. **(d) send-path**: в `send_message`, если recipient офлайн (нет addr) — собрать `relay`-конверт
    (`wire::build_relay`, `e2e_payload`=байты текста, hop=0, ttl) и опубликовать в mesh-топик →
    онлайн-узлы примут в RelayQueue.
@@ -521,6 +539,6 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
    one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
 5. r1 проверен. r2 unique receipt/cleanup проверен на `v11.16.9`, но stale retained relay
-   вызвал вторую доставку и origin-delivery. Следующий только после согласия: r3 non-retained
-   c2 resend + recipient dedup. M3(d)/UI/background пока не трогать.
+   вызвал duplicate. Код r3 (non-retained c2 resend + seen/local dedup) готов; следующий шаг
+   `build-rust.ps1`, затем новый 3-phone test. M3(d)/UI/background пока не трогать.
 
