@@ -348,9 +348,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 этапом надёжный multi-broker MQTT, не M3(d). Design r4 сохранён в
 `docs/MQTT_MULTI_BROKER_DESIGN.md`: максимум 2 sessions, реальный ConnAck, bounded 30 s/4096 exact
 cross-broker dedup, global traffic budgets и сначала два локальных brokers. r4.1/r4.2 Rust и APK
-`v11.16.11` build PASS; existing APK ждёт artifact/signature verify без rebuild. r4.2 оставляет
-один HiveMQ session и ждёт реальный ConnAck до subscription/presence; второго broker/fanout пока
-нет. M3(d), UI/background не начинать.**
+`v11.16.11` artifact/signature PASS; перед установкой осталось сравнить signer с установленной
+`v11.16.10`. r4.2 оставляет один HiveMQ session и ждёт реальный ConnAck до subscription/presence;
+второго broker/fanout пока нет. M3(d), UI/background не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -594,9 +594,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.51)** — release APK build фактически PASS за 32 s (52 tasks), metadata
   versionCode=`11016011`; harness затем дал ложный fail, потому что ожидал versionName `11.16.11`,
   а канонический `$env:GITHUB_REF_NAME` сохраняется как `v11.16.11`. Ошибка произошла ПОСЛЕ
-  BUILD SUCCESSFUL и создания APK, поэтому rebuild запрещён/не нужен: проверить существующие
-  APK hash, embedded native hash и signature с expected `v11.16.11`. Nonfatal warnings:
-  strip `.so`, Kapt 2.0→1.9, processor options и Gradle deprecations.
+  BUILD SUCCESSFUL и создания APK, поэтому rebuild не требовался. Nonfatal warnings: strip `.so`,
+  Kapt 2.0→1.9, processor options и Gradle deprecations.
+- **2026-08-14 (доп.52)** — existing APK artifact verify PASS (read-only block был безопасно
+  повторён дважды): 22,550,028 B, SHA-256 `DDC836A142D899B0A70EA805313B416744A5C68DA8562E7CF93F9D5605003A12`;
+  source/embedded native оба `B0905083B734886B46BA2EB1B7AE9CBC76E77FAABC6C3359CD091352EE105C65`;
+  apksigner exit=0. Regex не распарсил certificate (`NOT_PARSED`), поэтому до install нужно
+  read-only сравнить signer SHA-256 нового APK и установленной v11.16.10, не полагаться лишь на exit.
 
 ---
 
