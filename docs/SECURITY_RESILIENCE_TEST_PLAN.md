@@ -290,6 +290,7 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   timeout при VALIDATED network клиент обязан reconnect либо явно перейти в recoverable state.
 - Controlled cold start дал Анна/Женя subscription+ConnAck=`1+1`, errors=0; Стас не уложился
   в 20 s gate, но после 5 initial errors поздно получил ConnAck и live presence. Bounded TCP:
-  HiveMQ:1883 failed, EMQX:1883 passed. Code review: `AsyncClient.publish().await` до event-loop
-  polling подтверждает только queue, поэтому доступный fallback не выбирается. Baseline обязан
-  требовать ConnAck + live incoming после Ack; новый ID только после fresh-state adoption.
+  HiveMQ:1883 failed, EMQX:1883 passed. Code review: queued `AsyncClient.publish()` не доказывает
+  connection, поэтому доступный fallback не выбирается. Поздний ConnAck затем вытеснился из
+  logcat до state adoption; robust equivalent gate = live subscribed peer traffic после последнего
+  MQTT error + stable PID/identity. Важные late events сразу сохранять snapshot/state marker.

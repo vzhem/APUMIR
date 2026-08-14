@@ -511,8 +511,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   и затем стабильно видел presence Анны/Жени; это late initial connection, не re-subscribe.
   Bounded TCP probe: `broker.hivemq.com:1883` exit=1, `broker.emqx.io:1883` exit=0. Значит,
   fallback-дефект практически значим: доступный второй broker не выбирается, пока first retry
-  когда-нибудь не сработает. Старый state PID stale; дальше adopt fresh PIDs/new ID без restart
-  и без relay, при gate ConnAck + live incoming после Ack.
+  когда-нибудь не сработает.
+- **2026-08-14 (доп.34)** — fresh-state adoption прошёл Анну/Женю (live peers=14/14), но снова
+  остановился на Стасе: доказанная ранее поздняя ConnAck-строка уже вытеснена из ring, а startup
+  snapshot был снят до неё. State/new ID/log clear опять не выполнялись. Safe gate теперь:
+  текущий PID + startup subscription/identity + live peer traffic ПОСЛЕ последнего MQTT error;
+  это прямое доказательство connected subscriber без повторного restart/relay.
 
 ---
 
@@ -537,6 +541,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   последующий `Get-Content` упал, хотя `$LASTEXITCODE=0`. Сначала получать `Out-String`, затем
   явно писать через `[IO.File]::WriteAllText(...)`; отдельно проверять `Test-Path`. Failed
   snapshot не означает failed publish: доверять persisted `setupPublishConfirmed` и не повторять.
+- **ConnAck может вытесниться из logcat до следующего интерактивного шага:** поздний ConnAck
+  Стаса был доказан, но ранний startup snapshot снят до него, а live ring позже вытеснил строку;
+  повторный gate дал ложный missing ConnAck. После важного позднего события сразу сохранять
+  snapshot/state marker. Если строка уже потеряна, live `MQTT: peer online` после последнего
+  `MQTT error` логически доказывает действующее subscribed connection; не требовать недоступную
+  старую строку и не перезапускать лишь ради лога.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -705,8 +715,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke: old ID abandoned. Fresh PID Анна/Женя/Стас =
-   `14734/24000/13746`; Стас после 5 errors поздно получил initial ConnAck и live presence.
-   HiveMQ TCP probe failed, EMQX passed; fallback bug documented. Следующий шаг — atomic adopt
-   fresh baseline/new ID без restart/relay. M3(d), UI/background не трогать.
+7. Low-volume security smoke: old ID abandoned. Fresh PID `14734/24000/13746`; Стас connected,
+   но ConnAck line вытеснена после её доказательства. State всё ещё старый. Следующий шаг — adopt
+   fresh baseline/new ID по live-peer-after-last-error evidence, без restart/relay; затем setup.
+   M3(d), UI/background не трогать.
 
