@@ -197,7 +197,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   **Лечение**: `git fetch origin arena/019ffc32-apumir`; узнать tip через `git ls-remote origin
   arena/019ffc32-apumir`; `git reset --mixed <tip-hash>` (сохраняет рабочее дерево); проверить
   `git status` (остаться должны только новые изменения); закоммитить + `git push origin
-  arena/019ffc32-apumir` (fast-forward). **НИКОГДА не делать `--force` push** — затрёт remote.
+  arena/019ffc32-apumir` (fast-forward). Если после reset среды уже случайно создан локальный
+  commit от base и push отклонён как `fetch first`, не merge и не force-push: fetch remote tip,
+  filter-aware сравнить каждый рабочий файл с remote tree, отдельно сохранить только реальные
+  отличия, вернуть branch на remote tip и заново сделать малый commit. `reset --hard` допустим
+  только после полного hash-сравнения и временной копии отличий; обычно безопаснее `--mixed`.
+  **НИКОГДА не делать `--force` push** — затрёт remote.
 - **Перенос в новую сессионную ветку выполнен 2026-08-13:** `arena/019ff7c3-apumir`
   fast-forward-слита в `arena/019ffc32-apumir` (`991da05` → `e5b171c`) и новая ветка запушена.
   Команды переноса были: `git fetch origin`; `git merge origin/arena/019ff7c3-apumir`;
@@ -473,6 +478,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   client/connect/publish. Atomic recovery доказал test-ID log count `0/0/0`, PID остались
   `12571/22100/2529`, записал no-network outcome, очистил logs и разрешил ровно один controlled
   retry. Исправленный вызов обязан быть `py -3 $PythonPath $SecurityStatePath`.
+- **2026-08-14 (доп.28)** — Arena sandbox внезапно пере-клонировался к `991da05` перед docs
+  commit; рабочие файлы сохранились, но commit получил неверного base и push был rejected.
+  Remote `84e5104` не пострадал. После fetch filter-aware hash всех remote-tracked файлов доказал:
+  отличаются только 2 новых docs-правки, missing=0. Они сохранены, branch возвращён на remote,
+  правки повторно закоммичены как fast-forward `1b15270`; remote sync и clean tree проверены.
 
 ---
 
