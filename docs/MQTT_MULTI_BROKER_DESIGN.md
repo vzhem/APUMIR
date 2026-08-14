@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **APK/signer PASS; install paused before adb install for package-schema diagnostic**
+Статус: **APK/signer PASS; package schema resolved, corrected install -r ready**
 
 Дата: 2026-08-14
 
