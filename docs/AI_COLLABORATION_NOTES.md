@@ -193,18 +193,19 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; mesh M0–M2 + M3.1 в ветке):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; mesh M0–M2, M3.1 + код M3(a) в ветке):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
 - Архитектурный принцип (телефоны = серверы; mesh) + `docs/MESH_DELIVERY.md`.
 - **M1 `RelayQueue`** + **M2 `network/wire.rs`** (mesh-конверты relay/receipt/gsumm) — компилируются.
 - **M3.1:** `RelayQueue` добавлена в `P2PCore`, создаётся в `start()` и передаётся параметром
-  в `run_mqtt_transport`; обработка relay/receipt/gossip ещё НЕ добавлена. Ожидает проверки
-  `build-rust.ps1` на Windows перед следующим подшагом.
+  в `run_mqtt_transport`. Windows `build-rust.ps1` успешно завершён 2026-08-13.
+- **M3(a), код готов:** `relay|…` разбирается через `wire::parse`; локальный получатель
+  получает `MessageReceived`, чужое сообщение хранится с TTL/hop. Перед единственным
+  `enqueue` явно вызывается `contains(msg_id)`. Receipt/gossip/send-path ещё НЕ добавлены.
 
-**Следующий шаг = проверить M3.1 сборкой, затем M3(a) только после подтверждения пользователя.**
-M3(a) трогает `p2pm2/msg/` хендлер в `core.rs` и впервые начинает использовать `RelayQueue`.
+**Следующий шаг = проверить M3(a) через `build-rust.ps1`; дальше не идти без результата.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -240,7 +241,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   commit + push в arena-ветку + `git fetch`/`checkout` пользователем.
 - **2026-08-13 (доп.9)** — состояние fast-forward перенесено из `arena/019ff7c3-apumir` в
   `arena/019ffc32-apumir`. Выполнен M3.1: `RelayQueue` проброшена в `run_mqtt_transport` без
-  обработки mesh-конвертов; следующий шаг только после Windows-сборки `build-rust.ps1`.
+  обработки mesh-конвертов; Windows-сборка прошла успешно.
+- **2026-08-13 (доп.10)** — выполнен код M3(a): приём `relay`-конверта, доставка локальному
+  получателю либо сохранение для другого узла. Шторм-защита: явный `contains(msg_id)` перед
+  `enqueue`, плюс TTL и hop. Receipt/gossip/send-path не тронуты; ожидается Windows-сборка.
 
 ---
 
@@ -384,9 +388,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 ### 9.7. Старт новой сессии
 1. Прочитать **весь** `docs/AI_COLLABORATION_NOTES.md` (⚙️ принцип, 🌐 mesh, раздел 9).
 2. Прочитать `docs/MESH_DELIVERY.md`.
-3. Проверить, что текущая ветка — `arena/019ffc32-apumir`, и что M3.1 уже на месте:
-   поле `relay_queue` в `P2PCore`, init в `start()`, параметр `run_mqtt_transport`.
-4. Сначала дождаться результата `build-rust.ps1` от пользователя. Только после успешной
-   сборки и отдельного «да»: (a) → тест → (b) → тест → (c) → тест → (d) → тест 3 тел.
+3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1 уже собран успешно; код
+   M3(a) уже добавлен в `run_mqtt_transport`, но ещё ждёт Windows `build-rust.ps1`.
+4. Сначала дождаться результата сборки M3(a). Только после успешной сборки и отдельного
+   «да» обсуждать тест relay-конверта/следующий M3(b). Receipt/gossip/send-path пока не трогать.
    Маленькими шагами, с подтверждением; перед каждым `enqueue` обязателен `contains(msg_id)`.
 

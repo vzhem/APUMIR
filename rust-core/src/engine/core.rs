@@ -15,7 +15,8 @@ use crate::network::relay::RelayManager;
 use crate::network::mqtt_transport::MqttTransport;
 use crate::network::presence::PresenceManager;
 use crate::network::message_queue::MessageQueue;
-use crate::network::relay_queue::RelayQueue;
+use crate::network::relay_queue::{RelayMessage, RelayQueue, DEFAULT_RELAY_TTL};
+use crate::network::wire::MeshEnvelope;
 use crate::network::adaptive_polling::AdaptivePolling;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -604,7 +605,7 @@ self.runtime = Some(runtime);
         display_name: String,
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         queue: Option<Arc<MessageQueue>>,
-        _relay_queue: Option<Arc<RelayQueue>>,
+        relay_queue: Option<Arc<RelayQueue>>,
     ) {
         use crate::network::mqtt_transport::MqttTransport;
 
@@ -734,9 +735,7 @@ self.runtime = Some(runtime);
                         }
                     }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
-                    // Р¤РѕСЂРјР°С‚: senderId|messageId|chatId|recipientId|text
-                    // ACK: "ack|messageId" — подтверждение доставки (получатель → отправитель).
-                    // Не является сообщением чата — обновляем статус и не парсим как 5-полей.
+                    // ACK: "ack|messageId" — подтверждение обычной прямой доставки.
                     if let Some(rest) = evt.payload.strip_prefix("ack|") {
                         let mid = rest.trim();
                         if !mid.is_empty() {
@@ -745,35 +744,128 @@ self.runtime = Some(runtime);
                                 message_id: mid.to_string(),
                             });
                         }
-                    }
-                    let parts: Vec<&str> = evt.payload.splitn(5, '|').collect();
-                    if parts.len() == 5 && parts[0] != node_id {  // Skip own messages
-                        let sender_id = parts[0];
-                        let message_id = parts[1];
-                        let chat_id = parts[2];
-                        let recipient_id = parts[3];
-                        let text = parts[4];
-                        
-                        // Р¤РР›Р¬РўР РђР¦РРЇ: РїСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ Р°РґСЂРµСЃРѕРІР°РЅРѕ РЅР°Рј
-                        if recipient_id == node_id {
-                            // Сообщение адресовано НАМ → MessageReceived (Kotlin сохранит + ACK-нет).
-                            // Чужие (recipient != я) ИГНОРИРУЕМ: старый relay (enqueue-for-others)
-                            // создавал бесконечный шторм (self-receive → re-enqueue → повтор). Relay
-                            // отключён до настоящего mesh (M2-M6, RelayQueue с защитой от петель).
-                            // Базовая доставка (прямой MQTT/QUIC + sender-side retry) работает без relay.
-                            tracing::info!("MQTT: message from {} to me", sender_id);
-                            let ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis() as i64;
-                            events.emit(CoreEvent::MessageReceived {
-                                message_id: message_id.to_string(),
-                                chat_id: chat_id.to_string(),
-                                sender_id: sender_id.to_string(),
-                                text: text.to_string(),
-                                timestamp: ts,
-                            });
-                            tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
+                    } else if evt.payload.starts_with("relay|") {
+                        // M3(a): принимаем только relay-конверт. Receipt и gossip будут
+                        // добавлены отдельными маленькими шагами после телефонных тестов.
+                        match crate::network::wire::parse(&evt.payload) {
+                            Some(MeshEnvelope::Relay {
+                                msg_id,
+                                recipient,
+                                origin,
+                                chat_scope,
+                                ttl_secs,
+                                hop,
+                                e2e_payload,
+                            }) => {
+                                if msg_id.is_empty() || recipient.is_empty() || origin.is_empty() {
+                                    tracing::warn!("MESH relay: missing required metadata, dropped");
+                                } else if recipient == node_id {
+                                    // M7 добавит настоящее E2E-расшифрование. Пока wire payload
+                                    // содержит байты текста, и читать их имеет право только получатель.
+                                    match String::from_utf8(e2e_payload) {
+                                        Ok(text) => {
+                                            let ts = std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_millis() as i64;
+                                            events.emit(CoreEvent::MessageReceived {
+                                                message_id: msg_id.clone(),
+                                                chat_id: chat_scope,
+                                                sender_id: origin,
+                                                text,
+                                                timestamp: ts,
+                                            });
+                                            tracing::info!(
+                                                "MESH relay: {} delivered to local recipient",
+                                                msg_id
+                                            );
+                                        }
+                                        Err(_) => tracing::warn!(
+                                            "MESH relay: payload for {} is not valid UTF-8, dropped",
+                                            msg_id
+                                        ),
+                                    }
+                                } else if let Some(ref q) = relay_queue {
+                                    // КРИТИЧНО: contains ОБЯЗАТЕЛЕН перед каждым enqueue.
+                                    // Без этого self-receive MQTT создаёт бесконечную петлю/шторм.
+                                    if q.contains(&msg_id) {
+                                        tracing::trace!("MESH relay: duplicate {} ignored", msg_id);
+                                    } else if ttl_secs == 0 {
+                                        tracing::warn!("MESH relay: {} has expired TTL, dropped", msg_id);
+                                    } else {
+                                        // Ограничиваем входной TTL текущим максимумом очереди:
+                                        // это защищает от переполнения/слишком долгого хранения.
+                                        let bounded_ttl_secs =
+                                            ttl_secs.min(DEFAULT_RELAY_TTL.as_secs());
+                                        let mut message = RelayMessage::with_ttl(
+                                            msg_id.clone(),
+                                            recipient.clone(),
+                                            origin,
+                                            chat_scope,
+                                            e2e_payload,
+                                            std::time::Duration::from_secs(bounded_ttl_secs),
+                                        );
+                                        message.hop_count = hop;
+
+                                        match message.next_hop() {
+                                            Some(next_hop_message) => {
+                                                let stored_hop = next_hop_message.hop_count;
+                                                match q.enqueue(next_hop_message) {
+                                                    Ok(true) => tracing::info!(
+                                                        "MESH relay: stored {} for {} at hop {}",
+                                                        msg_id,
+                                                        recipient,
+                                                        stored_hop
+                                                    ),
+                                                    Ok(false) => tracing::trace!(
+                                                        "MESH relay: {} not stored (duplicate/hop limit)",
+                                                        msg_id
+                                                    ),
+                                                    Err(e) => tracing::warn!(
+                                                        "MESH relay: failed to store {}: {}",
+                                                        msg_id,
+                                                        e
+                                                    ),
+                                                }
+                                            }
+                                            None => tracing::warn!(
+                                                "MESH relay: {} reached hop limit, dropped",
+                                                msg_id
+                                            ),
+                                        }
+                                    }
+                                } else {
+                                    tracing::warn!("MESH relay: queue unavailable, dropped {}", msg_id);
+                                }
+                            }
+                            _ => tracing::warn!("MESH relay: malformed envelope dropped"),
+                        }
+                    } else {
+                        // Обычный формат: senderId|messageId|chatId|recipientId|text.
+                        let parts: Vec<&str> = evt.payload.splitn(5, '|').collect();
+                        if parts.len() == 5 && parts[0] != node_id {  // Skip own messages
+                            let sender_id = parts[0];
+                            let message_id = parts[1];
+                            let chat_id = parts[2];
+                            let recipient_id = parts[3];
+                            let text = parts[4];
+
+                            // Получаем и показываем только адресованные этому телефону сообщения.
+                            if recipient_id == node_id {
+                                tracing::info!("MQTT: message from {} to me", sender_id);
+                                let ts = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as i64;
+                                events.emit(CoreEvent::MessageReceived {
+                                    message_id: message_id.to_string(),
+                                    chat_id: chat_id.to_string(),
+                                    sender_id: sender_id.to_string(),
+                                    text: text.to_string(),
+                                    timestamp: ts,
+                                });
+                                tracing::info!("MQTT: MessageReceived EMITTED to EventBus");
+                            }
                         }
                     }
                 }
