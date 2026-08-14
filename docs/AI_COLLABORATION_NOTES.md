@@ -833,14 +833,33 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   сейчас нужен для data-preserving signer continuity; не удалять без отдельного migration plan.
   Во время аудита Arena снова локально вернула HEAD на `991da05`; безопасно исправлено exact fetch
   `arena/01a000bc-apumir` + mixed reset до `44f1aa3`, без branch switch/hard reset/потери файлов.
-- **2026-08-14 (доп.82)** — current ADB transport serials отличаются от stale harness serials,
-  но read-only package identity mapping PASS 3/3 по независимым app UID, version и сохранённым
-  firstInstallTime: Anna `AUYF6R5923006121` / MTN-NX1 / UID 10425 / PID 24022 /
-  firstInstallTime `2026-08-08 11:40:39`; Zhenya `3B665800EES00000` / PLR110 / UID 10395 /
-  PID 7439 / `2026-08-08 17:31:18`; Stas `11567254BK001192` / TECNO LI6 / UID 10387 /
-  PID 20786 / `2026-08-10 12:41:10`. Все versionCode 11016012, processRunning=true.
-  Это те же три data-preserved APU installations. Native-recovery capture должен использовать
-  только эти current serials и повторно guard'ить exact UID/version/firstInstallTime перед dump.
+- **2026-08-14 (доп.82)** — read-only package identity mapping после ошибочного serial в первом
+  recovery block PASS 3/3; serials совпали с original launch state. Независимые identity values:
+  Anna `AUYF6R5923006121` / MTN-NX1 / UID 10425 / PID 24022 / firstInstallTime
+  `2026-08-08 11:40:39`; Zhenya `3B665800EES00000` / PLR110 / UID 10395 / PID 7439 /
+  `2026-08-08 17:31:18`; Stas `11567254BK001192` / TECNO LI6 / UID 10387 / PID 20786 /
+  `2026-08-10 12:41:10`. Все versionCode 11016012, processRunning=true. Это те же три
+  data-preserved APU installations; capture guard'ил exact serial/UID/version/firstInstallTime.
+- **2026-08-14 (доп.83)** — one-shot native recovery capture завершён и не повторяется. State:
+  `%TEMP%\apu-r4.2-r1b2-v11.16.12-native-recovery.json`, outcome
+  `CAPTURED_READ_ONLY_ANALYSIS_PENDING`; immutable snapshots `...-native-recovery-{Anna,Zhenya,Stas}.log`.
+  Snapshot hash/parse PASS, all lines exact unchanged cold-launch PID: Anna 24022 (122 lines),
+  Zhenya 7439 (78), Stas 20786 (286). Original launch 18:21:48Z–18:24:20Z; native buffers start
+  only 18:34:11Z–18:39:35Z, поэтому exact startup `MQTT SESSION READY` lines вытеснены и direct
+  cold-start-marker evidence остаётся incomplete; launch/log clear не повторять. Runtime
+  readiness/liveness при этом PASS 3/3: до последних секунд capture пришли wildcard events
+  Anna/Zhenya/Stas 48/33/137 (`presence`, `gossip`, `message-or-receipt`), core consumer обработал
+  peer-online 12/8/34, warnings/errors/stall/EventLoop end/channel close/session start failure/
+  restart/recovery/request timeout/request error = 0 на всех. Anna heartbeat: polls 963/964,
+  incoming 349, connacks 1, forwarded 350, poll_errors 0. Stas: три heartbeat через ~135 с,
+  counters 694/695→938/939 и incoming 249→337, connacks 1, forwarded 250→338; historical
+  poll_errors=3 не растут и current `MQTT error`=0. Zhenya buffer span лишь 83.5 с (<120-секундного
+  heartbeat interval), но 33 incoming + 8 consumer peer events до capture end доказывают progress;
+  по source order `MQTT IN` невозможен до initial ConnAck + wildcard subscribe readiness gate.
+  Старые analyzer markers `MQTT INITIAL READY`/`MQTT PEER TRAFFIC` также были неверны; exact source
+  literals: `MQTT SESSION READY`, `MQTT: connection acknowledged by broker`,
+  `MQTT: subscription requested after ConnAck`, `MQTT IN`, `MQTT LIVENESS HEARTBEAT`.
+  User payload не публиковался; увиденные public-broker 5-byte message/receipt events чужие/служебные.
 
 ---
 
@@ -1071,5 +1090,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 7. Первый low-volume security smoke generation 2 полностью PASSED: normal setup, один
    conflicting-origin drop и normal control после attack дали exact expected semantics, PID 3/3,
    errors/crash=0; post-control resources записаны в доп.46. Ничего не повторять. Следующий этап
+   не начинать без согласования; M3(d), UI/background пока не трогать.
+
+ost-control resources записаны в доп.46. Ничего не повторять. Следующий этап
    не начинать без согласования; M3(d), UI/background пока не трогать.
 

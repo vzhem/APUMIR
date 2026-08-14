@@ -250,9 +250,10 @@ RelayMessage {
   arm64 `.so` 7,167,112 B, SHA-256 `7C9537E6…86517194`. C-drive JDK17 APK build3 PASS:
   v11.16.12/11016012, 22,582,796 B, SHA-256 `6765FC7A…649A3F55`, embedded native exact.
   Signer preflight PASS: V2 new/installed=true, cert SHA-256 `F843CBE7…A4A5F7`. Data-preserving
-  v11.16.12 install PASS 3/3; appId/UID/firstInstallTime/dataDir preserved. Controlled launch 3/3
-  выполнен; первый analyzer ошибочно не включил native tag `p2p_core`, поэтому read-only log
-  recovery pending. EMQX/fanout не подключены; public delivery probe до
+  v11.16.12 install PASS 3/3; appId/UID/firstInstallTime/dataDir preserved. Controlled launch 3/3;
+  runtime readiness/liveness recovered PASS 3/3 from `p2p_core` snapshots: same launch PID, active
+  subscribed traffic through capture end, no stall/restart/request failures. Exact cold-start READY
+  lines were evicted; launch is not repeated. EMQX/fanout не подключены; public delivery probe до
   новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
