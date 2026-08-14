@@ -84,6 +84,7 @@ pub enum NetworkError {
     ConnectionNotFound(String),
 }
 
+pub mod mqtt_backpressure;
 pub mod mqtt_dedup;
 pub mod mqtt_liveness;
 pub mod mqtt_transport;

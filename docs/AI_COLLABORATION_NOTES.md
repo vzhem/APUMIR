@@ -682,6 +682,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   новым stash; старые stashes не pop. Строка PowerShell `NativeCommandError` была только stderr
   progress Cargo при фактическом exit=0. Build state/log: `%TEMP%\apu-r4.2-r1a-rust-build.json`
   и `%TEMP%\apu-r4.2-r1a-rust-build.log`. APK/phones не менялись; следующий код — r1b.
+- **2026-08-14 (доп.65)** — r4.2-r1b1 source добавил чистый `mqtt_backpressure.rs`: generic
+  bounded await максимум 5 с, отдельные timeout/client errors и 4 deterministic tests без сети.
+  Все 8 publish операций persistent `MqttTransport` (presence/clear/receipt/receipt-clear/relay/
+  message/gossip/registration) и initial+reconnect subscribe переведены на wrapper. Timeout/error
+  увеличивают fixed-memory liveness counters и пишут `MQTT REQUEST TIMEOUT/ERROR` без topic/payload;
+  hidden retry нет. QoS/retain/topics, AsyncClient cap 100, event cap 256 и backoff 30 с прежние.
+  Это должно разорвать вероятный mutual deadlock: core через 5 с перестаёт ждать outgoing channel
+  и снова освобождает EventLoop→core queue. Но forwarding `.send().await`, другие core stalls,
+  task restart и transient `send_message_mqtt` пока не исправлены — r1b2. Windows build pending.
 
 ---
 

@@ -54,6 +54,8 @@ pub struct MqttLivenessSnapshot {
     pub connacks: u64,
     pub notifications_forwarded: u64,
     pub poll_errors: u64,
+    pub request_timeouts: u64,
+    pub request_errors: u64,
 }
 
 impl MqttLivenessSnapshot {
@@ -108,6 +110,8 @@ pub struct MqttLivenessProbe {
     connacks: AtomicU64,
     notifications_forwarded: AtomicU64,
     poll_errors: AtomicU64,
+    request_timeouts: AtomicU64,
+    request_errors: AtomicU64,
 }
 
 impl Default for MqttLivenessProbe {
@@ -129,6 +133,8 @@ impl MqttLivenessProbe {
             connacks: AtomicU64::new(0),
             notifications_forwarded: AtomicU64::new(0),
             poll_errors: AtomicU64::new(0),
+            request_timeouts: AtomicU64::new(0),
+            request_errors: AtomicU64::new(0),
         }
     }
 
@@ -169,6 +175,15 @@ impl MqttLivenessProbe {
         self.mark_progress();
     }
 
+    pub fn mark_request_timeout(&self) {
+        self.request_timeouts.fetch_add(1, Ordering::Relaxed);
+        self.request_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn mark_request_error(&self) {
+        self.request_errors.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn mark_backoff(&self) {
         self.set_phase(MqttLoopPhase::Backoff);
     }
@@ -190,6 +205,8 @@ impl MqttLivenessProbe {
             connacks: self.connacks.load(Ordering::Relaxed),
             notifications_forwarded: self.notifications_forwarded.load(Ordering::Relaxed),
             poll_errors: self.poll_errors.load(Ordering::Relaxed),
+            request_timeouts: self.request_timeouts.load(Ordering::Relaxed),
+            request_errors: self.request_errors.load(Ordering::Relaxed),
         }
     }
 
@@ -229,6 +246,8 @@ mod tests {
             connacks: 0,
             notifications_forwarded: 0,
             poll_errors: 0,
+            request_timeouts: 0,
+            request_errors: 0,
         }
     }
 
@@ -272,6 +291,8 @@ mod tests {
         probe.mark_notification_forwarded();
         probe.mark_connack();
         probe.mark_poll_error();
+        probe.mark_request_timeout();
+        probe.mark_request_error();
         probe.mark_backoff();
 
         let state = probe.snapshot();
@@ -282,6 +303,8 @@ mod tests {
         assert_eq!(state.notifications_forwarded, 1);
         assert_eq!(state.connacks, 1);
         assert_eq!(state.poll_errors, 1);
+        assert_eq!(state.request_timeouts, 1);
+        assert_eq!(state.request_errors, 2);
     }
 
     #[test]

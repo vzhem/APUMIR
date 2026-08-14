@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
+use crate::network::mqtt_backpressure::{await_mqtt_request, MqttRequestError};
 use crate::network::mqtt_liveness::{
     assess_mqtt_liveness, MqttLivenessAssessment, MqttLivenessProbe,
 };
@@ -21,6 +22,7 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 const MQTT_EVENT_BUFFER: usize = 256;
 const MQTT_RECONNECT_BACKOFF_MAX_SECS: u64 = 30;
+const MQTT_REQUEST_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(5);
 const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
 const MQTT_LIVENESS_STALL_AFTER: Duration = Duration::from_secs(90);
 const MQTT_LIVENESS_WARNING_REPEAT: Duration = Duration::from_secs(60);
@@ -120,6 +122,52 @@ impl MqttTransport {
         })
     }
 
+    async fn enqueue_publish(
+        &self,
+        operation: &'static str,
+        topic: &str,
+        qos: QoS,
+        retain: bool,
+        payload: Vec<u8>,
+    ) -> Result<(), String> {
+        let result = await_mqtt_request(
+            operation,
+            MQTT_REQUEST_ENQUEUE_TIMEOUT,
+            self.client.publish(topic, qos, retain, payload),
+        )
+        .await;
+        self.record_request_result(&result);
+        result.map_err(|error| error.to_string())
+    }
+
+    async fn enqueue_subscribe(
+        &self,
+        operation: &'static str,
+        topic: &str,
+        qos: QoS,
+    ) -> Result<(), String> {
+        let result = await_mqtt_request(
+            operation,
+            MQTT_REQUEST_ENQUEUE_TIMEOUT,
+            self.client.subscribe(topic, qos),
+        )
+        .await;
+        self.record_request_result(&result);
+        result.map_err(|error| error.to_string())
+    }
+
+    fn record_request_result<T>(&self, result: &Result<T, MqttRequestError>) {
+        if let Err(error) = result {
+            if error.is_timeout() {
+                self.liveness.mark_request_timeout();
+                tracing::warn!("MQTT REQUEST TIMEOUT: {}", error);
+            } else {
+                self.liveness.mark_request_error();
+                tracing::warn!("MQTT REQUEST ERROR: {}", error);
+            }
+        }
+    }
+
     pub async fn publish_presence(
         &self, display_name: &str, public_addr: Option<&str>, is_relay: bool,
     ) -> Result<(), String> {
@@ -129,8 +177,14 @@ impl MqttTransport {
             if is_relay { "relay" } else { "client" }
         );
         let topic = format!("p2pm2/presence/{}", self.node_id);
-        self.client.publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
-            .await.map_err(|e| e.to_string())
+        self.enqueue_publish(
+            "presence publish",
+            &topic,
+            QoS::AtLeastOnce,
+            true,
+            payload.into_bytes(),
+        )
+        .await
     }
 
     pub async fn subscribe(&mut self) -> Result<(), String> {
@@ -241,7 +295,7 @@ impl MqttTransport {
                         let snapshot = watchdog_liveness.snapshot();
                         match exit_result {
                             Ok(reason) => tracing::error!(
-                                "MQTT LIVENESS: EventLoop task exited: reason={} phase={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                "MQTT LIVENESS: EventLoop task exited: reason={} phase={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
                                 reason,
                                 snapshot.phase.as_str(),
                                 snapshot.polls_completed,
@@ -249,13 +303,15 @@ impl MqttTransport {
                                 snapshot.incoming_publishes,
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
-                                snapshot.poll_errors
+                                snapshot.poll_errors,
+                                snapshot.request_timeouts,
+                                snapshot.request_errors
                             ),
                             Err(_) if watchdog_shutdown_requested.load(Ordering::Acquire) => {
                                 tracing::info!("MQTT LIVENESS: EventLoop task closed during requested shutdown")
                             }
                             Err(_) => tracing::error!(
-                                "MQTT LIVENESS: EventLoop task ended without completion signal; possible panic/abort; phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                "MQTT LIVENESS: EventLoop task ended without completion signal; possible panic/abort; phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
                                 snapshot.phase.as_str(),
                                 snapshot.phase_age_ms(),
                                 snapshot.progress_age_ms(),
@@ -264,7 +320,9 @@ impl MqttTransport {
                                 snapshot.incoming_publishes,
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
-                                snapshot.poll_errors
+                                snapshot.poll_errors,
+                                snapshot.request_timeouts,
+                                snapshot.request_errors
                             ),
                         }
                         break;
@@ -281,7 +339,7 @@ impl MqttTransport {
                                     .unwrap_or(true);
                                 if should_warn {
                                     tracing::warn!(
-                                        "MQTT LIVENESS STALLED: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                        "MQTT LIVENESS STALLED: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
                                         phase.as_str(),
                                         stalled_for_ms,
                                         snapshot.progress_age_ms(),
@@ -290,7 +348,9 @@ impl MqttTransport {
                                         snapshot.incoming_publishes,
                                         snapshot.connacks,
                                         snapshot.notifications_forwarded,
-                                        snapshot.poll_errors
+                                        snapshot.poll_errors,
+                                        snapshot.request_timeouts,
+                                        snapshot.request_errors
                                     );
                                     last_stall_warning = Some(Instant::now());
                                 }
@@ -304,7 +364,7 @@ impl MqttTransport {
 
                         if last_heartbeat.elapsed() >= MQTT_LIVENESS_HEARTBEAT_INTERVAL {
                             tracing::info!(
-                                "MQTT LIVENESS HEARTBEAT: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} errors={}",
+                                "MQTT LIVENESS HEARTBEAT: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} poll_errors={} request_timeouts={} request_errors={}",
                                 snapshot.phase.as_str(),
                                 snapshot.phase_age_ms(),
                                 snapshot.progress_age_ms(),
@@ -313,7 +373,9 @@ impl MqttTransport {
                                 snapshot.incoming_publishes,
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
-                                snapshot.poll_errors
+                                snapshot.poll_errors,
+                                snapshot.request_timeouts,
+                                snapshot.request_errors
                             );
                             last_heartbeat = Instant::now();
                         }
@@ -329,10 +391,12 @@ impl MqttTransport {
 
         // Queue the wildcard subscription only after the broker has acknowledged
         // the connection. The EventLoop task continues polling and sends it.
-        self.client
-            .subscribe("p2pm2/#", QoS::AtLeastOnce)
-            .await
-            .map_err(|error| error.to_string())?;
+        self.enqueue_subscribe(
+            "initial wildcard subscribe",
+            "p2pm2/#",
+            QoS::AtLeastOnce,
+        )
+        .await?;
         tracing::info!(
             "MQTT: subscription requested after ConnAck for p2pm2/# (node={})",
             self.node_id
@@ -342,8 +406,13 @@ impl MqttTransport {
         // current presence. Both requests preserve their order in the client queue.
         let topic = format!("p2pm2/presence/{}", self.node_id);
         if let Err(error) = self
-            .client
-            .publish(&topic, QoS::AtLeastOnce, true, b"")
+            .enqueue_publish(
+                "retained presence clear",
+                &topic,
+                QoS::AtLeastOnce,
+                true,
+                Vec::new(),
+            )
             .await
         {
             tracing::warn!("MQTT: retained presence clear request failed: {}", error);
@@ -361,10 +430,14 @@ impl MqttTransport {
         payload: &str,
     ) -> Result<(), String> {
         let topic = mesh_receipt_topic(origin_node_id, msg_id)?;
-        self.client
-            .publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
-            .await
-            .map_err(|e| e.to_string())
+        self.enqueue_publish(
+            "mesh receipt publish",
+            &topic,
+            QoS::AtLeastOnce,
+            true,
+            payload.as_bytes().to_vec(),
+        )
+        .await
     }
 
     /// Только локальный origin имеет право очистить свой retained receipt.
@@ -376,38 +449,64 @@ impl MqttTransport {
 
     pub async fn clear_own_mesh_receipt(&self, msg_id: &str) -> Result<(), String> {
         let topic = mesh_receipt_topic(&self.node_id, msg_id)?;
-        self.client
-            .publish(&topic, QoS::AtLeastOnce, true, Vec::<u8>::new())
-            .await
-            .map_err(|e| e.to_string())
+        self.enqueue_publish(
+            "mesh receipt clear",
+            &topic,
+            QoS::AtLeastOnce,
+            true,
+            Vec::new(),
+        )
+        .await
     }
 
     /// M3(c.2-r3): relay, пересылаемый уже появившемуся recipient, должен быть live-only.
     /// Retained relay переживал receipt cleanup и повторно доставлялся после reconnect.
     pub async fn send_mesh_relay(&self, to_node_id: &str, payload: &str) -> Result<(), String> {
         let topic = format!("p2pm2/msg/{}", to_node_id);
-        self.client
-            .publish(&topic, QoS::AtLeastOnce, false, payload.as_bytes())
-            .await
-            .map_err(|e| e.to_string())
+        self.enqueue_publish(
+            "mesh relay publish",
+            &topic,
+            QoS::AtLeastOnce,
+            false,
+            payload.as_bytes().to_vec(),
+        )
+        .await
     }
 
     pub async fn send_message(&self, to_node_id: &str, payload: &str) -> Result<(), String> {
         let topic = format!("p2pm2/msg/{}", to_node_id);
-        self.client.publish(&topic, QoS::AtLeastOnce, true, payload.as_bytes())
-            .await.map_err(|e| e.to_string())
+        self.enqueue_publish(
+            "message publish",
+            &topic,
+            QoS::AtLeastOnce,
+            true,
+            payload.as_bytes().to_vec(),
+        )
+        .await
     }
-
 
     /// GOSSIP: Broadcast known peers to all subscribers via p2pm2/gossip/broadcast
     pub async fn publish_gossip(&self, payload: &str) -> Result<(), String> {
-        self.client.publish("p2pm2/gossip/broadcast", QoS::AtLeastOnce, false, payload.as_bytes())
-            .await.map_err(|e| e.to_string())
+        self.enqueue_publish(
+            "gossip publish",
+            "p2pm2/gossip/broadcast",
+            QoS::AtLeastOnce,
+            false,
+            payload.as_bytes().to_vec(),
+        )
+        .await
     }
+
     pub async fn register_as_relay(&self, public_addr: &str) -> Result<(), String> {
         let payload = format!("{}|{}", self.node_id, public_addr);
-        self.client.publish("p2pm2/relay/register", QoS::AtLeastOnce, true, payload.as_bytes())
-            .await.map_err(|e| e.to_string())
+        self.enqueue_publish(
+            "relay registration publish",
+            "p2pm2/relay/register",
+            QoS::AtLeastOnce,
+            true,
+            payload.into_bytes(),
+        )
+        .await
     }
 
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
@@ -417,7 +516,14 @@ impl MqttTransport {
                 if self.has_connected_once {
                     // clean_session=true удаляет подписки на broker при разрыве,
                     // поэтому после каждого reconnect подписываемся заново.
-                    match self.client.subscribe("p2pm2/#", QoS::AtLeastOnce).await {
+                    match self
+                        .enqueue_subscribe(
+                            "reconnect wildcard subscribe",
+                            "p2pm2/#",
+                            QoS::AtLeastOnce,
+                        )
+                        .await
+                    {
                         Ok(_) => tracing::info!(
                             "MQTT: connection restored; subscription requested for p2pm2/# (node={})",
                             self.node_id

@@ -222,6 +222,15 @@ QoS/retain/brokers/channels/backoff/reconnect не менялись; recovery и
 errors=0. Новая arm64 `.so`: 7,148,552 B, SHA-256
 `BC35DE5C760111B20312E189BFF4C7AC99010B4F1CB512E88652EDDD0AA53995`.
 
+**r4.2-r1b1 source pending Windows build:** новый transport-agnostic `mqtt_backpressure.rs`
+ограничивает ожидание постановки AsyncClient request пятью секундами и различает timeout/client
+error без topic/payload. 4 async/pure tests покрывают success, client error, pending future timeout
+и безопасный error text. Все 8 persistent publish policies и initial/reconnect subscribe используют
+единый wrapper; скрытого retry нет. Liveness heartbeat получил `request_timeouts/request_errors`.
+QoS/retain/topics/caps/backoff не менялись. Это разрывает предполагаемый mutual channel deadlock,
+но EventLoop→core stall и automatic session recovery остаются следующим r1b2; transient
+`send_message_mqtt` пока вне этого wrapper.
+
 ### r4.3 — вторая session за feature gate
 
 - Подключить EMQX параллельно, но сначала только собирать ConnAck/status.
