@@ -304,5 +304,6 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   (QoS1/non-retained/179 B) дала exact semantics PASS: Анна/Женя previously-seen=1/1, Стас
   conflict-drop=1; store/delivery/receipt/UI/errors/crash=0. Membership-aware finalizer сохранил
   PASS; post-attack max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery `0/0/+1`. Первый normal
-  control helper прошёл live gate, но PC HiveMQ connect timeout случился до publish; attempted=true,
-  confirmed=false. Перед единственным retry обязательны 0 control ID в logs и TCP reachability.
+  control helper прошёл live gate, но PC HiveMQ connect timeout случился до publish. Recovery:
+  confirmed=false, control ID refs=`0/0/0`, HiveMQ:1883 TCP reachable=true, no publish persisted;
+  разрешён ровно один retry того же ID. Не создавать новый ID и не повторять после send attempt.

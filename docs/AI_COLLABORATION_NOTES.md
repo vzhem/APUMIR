@@ -546,9 +546,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   conflict-drop=`1+1`; все receipt/store/local/UI/cleanup/origin/errors/crash=`0`. Post-attack:
   max 35°C, PSS delta `-3043/-15721/+9613 KiB`, battery delta `0/0/+1`. Logs очищены.
 - **2026-08-14 (доп.44)** — control ID создан и pre-live gate `6/15/15` прошёл, но PC Paho не
-  подключился к HiveMQ за 10 s и упал ДО `client.publish`; control не отправлен. State:
-  attempted=true, confirmed=false, snapshots absent. Нужна no-publish recovery (0 ID в logs +
-  TCP probe), затем не более одного retry того же ID; attack остаётся завершённым.
+  подключился к HiveMQ за 10 s и упал ДО `client.publish`; control не отправлен. Recovery доказал
+  control ID refs=`0/0/0`, confirmed=false и TCP HiveMQ:1883 reachable=true. State сохранил
+  no-network-publish и разрешил ровно один retry того же ID; attack остаётся завершённым.
 
 ---
 
