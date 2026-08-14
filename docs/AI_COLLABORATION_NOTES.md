@@ -470,8 +470,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   он идемпотентен, сеть/logcat не затрагивал.
 - **2026-08-14 (доп.27)** — первая normal-setup попытка НЕ отправила relay: PowerShell создал
   marker, но вызвал Python без обязательного state-path; `IndexError: sys.argv[1]` возник до MQTT
-  client/connect/publish. PID precheck `12571/22100/2529` прошёл. Нужна atomic no-network
-  recovery с проверкой нулевого test ID в phone logs, затем исправленный controlled publish.
+  client/connect/publish. Atomic recovery доказал test-ID log count `0/0/0`, PID остались
+  `12571/22100/2529`, записал no-network outcome, очистил logs и разрешил ровно один controlled
+  retry. Исправленный вызов обязан быть `py -3 $PythonPath $SecurityStatePath`.
 
 ---
 
@@ -660,7 +661,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
 7. Low-volume security smoke baseline/identity прошли: ID `sec-origin-1786707178388`, PID
-   `12571/22100/2529`. Первая setup-попытка остановилась до MQTT из-за пропущенного Python argv;
-   следующий шаг — no-network marker/log recovery, затем исправленный один normal relay. Conflict,
-   M3(d), UI и background пока не трогать.
+   `12571/22100/2529`. Failed-before-MQTT setup recovery полностью доказан (`0/0/0` test ID),
+   controlled retry разрешён. Следующий шаг — исправленный один normal relay, затем отдельный
+   анализ. Conflict, M3(d), UI и background пока не трогать.
 

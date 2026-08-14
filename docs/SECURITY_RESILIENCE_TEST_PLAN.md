@@ -278,6 +278,6 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   очищены. Identity preflight затем подтвердил origin/recipient из original r3 state и поставил
   `identityValidated=true`; повтор local-only preflight безопасен и не отправляет сеть.
 - Первая normal-setup попытка завершилась до сети: helper ожидал `sys.argv[1]`, но PowerShell не
-  передал state-path; traceback возник до MQTT client/connect/publish. PID precheck прошёл.
-  Controlled retry разрешать только после atomic проверки `publishConfirmed=false`, нулевого
-  test ID в трёх phone logs и записи failed-before-network marker.
+  передал state-path; traceback возник до MQTT client/connect/publish. Atomic recovery затем
+  подтвердил `publishConfirmed=false`, test-ID counts `0/0/0`, прежние три PID и записал
+  failed-before-network marker; logs очищены. Разрешён один controlled retry с исправленным argv.
