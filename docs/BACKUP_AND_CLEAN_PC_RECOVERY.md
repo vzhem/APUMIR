@@ -505,6 +505,19 @@ verify уже завершились, parser failure исправлять read-o
 не удалять evidence, не rebuild и не перезаписывать готовый APK. Тот же принцип применять к
 `aapt`, `apksigner`, `dumpsys`, Cargo/Gradle markers и любым version-dependent CLI outputs.
 
+**Long critical harness и ParserError:** большие install/test/backup blocks хранить versioned `.ps1`
+в `scripts/`, а не вставлять сотнями строк в interactive prompt. Перед запуском использовать
+`[System.Management.Automation.Language.Parser]::ParseFile` и требовать zero parse errors. Не
+разрывать binary operators (`-join`, `-f`, `-replace`, `+`) между строками; безопаснее сначала
+получить `$RawLines`, затем отдельным atomic expression `$Text = $RawLines -join "`n"`.
+
+PowerShell полностью парсит scriptblock до исполнения. Если большой paste получил `ParserError`,
+outer `& {}` не начинался, но оставшиеся строки clipboard могут затем автоматически выполниться
+уже вне guard с NULL/stale variables. После первого `ParserError` немедленно остановиться и не
+выполнять остаток. Последующий текст `PASS` недействителен, если перед ним нет успешной записи
+non-empty state path, проверки `Test-Path` и state SHA-256. Для нового исправленного запуска
+использовать distinct state/evidence names; старый parser output не выдавать за test attempt.
+
 ### Backup остановился после создания части файлов
 
 **Симптом:** папка milestone уже существует, некоторые большие файлы готовы, но остался

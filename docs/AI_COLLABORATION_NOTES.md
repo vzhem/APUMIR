@@ -955,8 +955,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Embedded arm64 `.so` 7,180,888 B / `E706A9009F28E842F6A030D0CCC7BABB28D56E20DEFB5FB34117FD87F032E7E5`
   exact r1b4. Причина old parser stop: actual label `V2 Signer: certificate SHA-256 digest`, не
   ожидавшийся `Signer #1 ...`; normalized semantic parser PASS. BuildRepeated/phones/ADB/install/
-  launch/public traffic=false. APK не перезаписывать. Следующий шаг — distinct read-only
-  v11.16.13 preinstall snapshot; install требует отдельного guarded data-preserving блока.
+  launch/public traffic=false. APK не перезаписывать.
+- **2026-08-14 (доп.92)** — первый interactive v11.16.13 preinstall block имел parser defect:
+  binary operator был разорван как `@(...) -` newline `join`, вместо atomic `$Lines -join ""`.
+  PowerShell полностью не распарсил outer `& {}` и поэтому не выполнил его ни частично: `$Adb`,
+  `$Device`, `$Results`, `$StatePath` не создавались. Остаток большого paste затем попал в prompt
+  отдельными командами; `& $Adb` явно упал на NULL, state write имел NULL path. Напечатанный позже
+  `PREINSTALL READ-ONLY PASS` недействителен (state/hash пустые); ADB/phones/files не менялись.
+  После любого `ParserError` немедленно STOP: не выполнять/не доверять auto-pasted remainder и
+  любой PASS без non-empty persisted state+hash. Long critical harness больше не давать inline:
+  versioned `scripts/v111613_preinstall.ps1` сначала sync exact branch, проверяется встроенным
+  `[System.Management.Automation.Language.Parser]::ParseFile`, затем выполняется `-File`/call.
+  Операторы `-join`, `-f`, `-replace`, `+` держать с обоими operands в одном expression либо
+  сначала присваивать raw value. Новый preinstall2 использует `Start-Process` stdout/stderr evidence
+  для каждого ADB call, command-specific pidof exit 0/1, final state write+hash до PASS; install/
+  force-stop/launch/log clear/network отсутствуют.
 
 ---
 

@@ -264,8 +264,8 @@ RelayMessage {
   APK block остановился harness-only до Gradle на PowerShell handling штатного Java stderr;
   read-only no-effect/native-hash preflight PASS. Build2 собрал v11.16.13 APK, version/V2 PASS,
   но certificate output regex остановил first state. Read-only recovery затем PASS без rebuild:
-  signer/embedded r1b4 exact; authoritative APK 22,599,180 B / `5A26728B…D7C03BA`. Preinstall
-  snapshot pending; EMQX/fanout не
+  signer/embedded r1b4 exact; authoritative APK 22,599,180 B / `5A26728B…D7C03BA`. Первый inline
+  preinstall не парсился/не выполнялся; versioned parser-validated preinstall2 pending. EMQX/fanout не
   подключены; public delivery probe до новой APK и её liveness gate не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
