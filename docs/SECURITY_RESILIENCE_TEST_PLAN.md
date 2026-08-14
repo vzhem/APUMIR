@@ -276,5 +276,8 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   `12571/22100/2529`; temperature = `30/28.8/30°C`; PSS = `118986/88012/53898 KiB`;
   battery = `100/100/57%`. Женя cold-start, MQTT subscription подтверждена; все три logcat
   очищены. Identity preflight затем подтвердил origin/recipient из original r3 state и поставил
-  `identityValidated=true`; повтор local-only preflight безопасен и не отправляет сеть. Следом
-  нужен один normal setup relay и отдельный анализ до attack.
+  `identityValidated=true`; повтор local-only preflight безопасен и не отправляет сеть.
+- Первая normal-setup попытка завершилась до сети: helper ожидал `sys.argv[1]`, но PowerShell не
+  передал state-path; traceback возник до MQTT client/connect/publish. PID precheck прошёл.
+  Controlled retry разрешать только после atomic проверки `publishConfirmed=false`, нулевого
+  test ID в трёх phone logs и записи failed-before-network marker.

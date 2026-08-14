@@ -467,7 +467,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.26)** — identity preflight взял origin/recipient из проверенного original r3
   state, а не доверился ручному вводу: `pk_591a…4ecc` / `pk_7dc6…bd0c`, оба совпали. State имеет
   `identityValidated=true`. Один и тот же local-only validation block случайно выполнен дважды;
-  он идемпотентен, сеть/logcat не затрагивал. Следующий шаг: один normal non-retained setup relay.
+  он идемпотентен, сеть/logcat не затрагивал.
+- **2026-08-14 (доп.27)** — первая normal-setup попытка НЕ отправила relay: PowerShell создал
+  marker, но вызвал Python без обязательного state-path; `IndexError: sys.argv[1]` возник до MQTT
+  client/connect/publish. PID precheck `12571/22100/2529` прошёл. Нужна atomic no-network
+  recovery с проверкой нулевого test ID в phone logs, затем исправленный controlled publish.
 
 ---
 
@@ -482,6 +486,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Критические тестовые сценарии оборачивать целиком в один `& { ... }`, ставить
   `$ErrorActionPreference = "Stop"`, сохранять state и печатать PASS только внутри него после всех
   assertions. Следующая фаза обязана проверять explicit `baselineComplete=true`, а не текст PASS.
+- **Python helper с `sys.argv[1]` требует сам аргумент:** вызов `py -3 $PythonPath` без
+  `$SecurityStatePath` дал `IndexError` до создания MQTT client/connect/publish. Не повторять
+  вслепую после pre-publish marker: сначала доказать `publishConfirmed=false` и ноль test ID в
+  phone logs, записать failed-before-network recovery, затем исправить вызов на
+  `py -3 $PythonPath $SecurityStatePath`.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -650,8 +659,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke baseline прошёл atomic-сценарием: ID
-   `sec-origin-1786707178388`, PID `12571/22100/2529`, три безопасные resource baseline сохранены.
-   Следующий шаг — ровно один normal non-retained setup relay и анализ; conflict только после него.
-   M3(d)/UI/background пока не трогать.
+7. Low-volume security smoke baseline/identity прошли: ID `sec-origin-1786707178388`, PID
+   `12571/22100/2529`. Первая setup-попытка остановилась до MQTT из-за пропущенного Python argv;
+   следующий шаг — no-network marker/log recovery, затем исправленный один normal relay. Conflict,
+   M3(d), UI и background пока не трогать.
 
