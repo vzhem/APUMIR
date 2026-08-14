@@ -785,6 +785,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   exact source match. Saved APK/state/log: `%TEMP%\apu-r4.2-r1b2-v11.16.12-build3.apk`,
   `...apk-build3.json/.log`. APK ещё не установлена. Следующий gate: apksigner V2/cert SHA-256
   compare с установленной v11.16.11 + devices/version/current PID preflight; install только PASS.
+- **2026-08-14 (доп.77)** — первый v11.16.12 signer/device preflight остановился до state,
+  apksigner и APK pull: `adb shell pidof` Жени вернул exit=1/empty, потому что процесс APU не
+  запущен; generic ADB wrapper ошибочно объявил это ADB failure. Package/version уже читались,
+  install/data/phones не менялись, Java env не переключался. Для signer/install preflight процесс
+  не обязателен: corrected wrapper принимает только exact `pidof exit=1 + empty` как
+  `processRunning=false/processIds=[]`; exit=0 требует PID tokens, другие exit/output = STOP.
+  После install нужен отдельный controlled launch и новые dynamic PID/liveness gates; старые PID
+  не использовать как обязательные.
 
 ---
 
