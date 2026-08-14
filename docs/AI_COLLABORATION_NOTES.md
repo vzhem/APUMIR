@@ -1056,6 +1056,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   доказан: accepted critical events drain to pending=0. Relaunch/ADB/logcat/user payload=false.
   Readiness/liveness gate закрыт; следующий разрешённый network action — только один explicit-user-
   approved synthetic QoS1 non-retained relay smoke, без retry/high load.
+- **2026-08-14 (доп.100)** — пользователь разрешил functional smoke и последующие необходимые
+  проверки («сколько раз надо»), но public-broker safety остаётся: сначала ровно один publish;
+  повтор только отдельным решением при persisted `publishCalled=false`, никогда automatic/high-load.
+  Добавлены versioned `scripts/v111613_publish_once.py` и `v111613_delivery_smoke.ps1`. Python
+  имеет один `client.publish`, QoS1/retain=false, atomic result перед/после publish/PUBACK и
+  `--check`. PowerShell exact runtime-state/PID/version guards, node IDs выводит из immutable
+  launch peer-set intersections, GUID test ID absent proof, final PID check, затем запускает
+  publisher once и ждёт 30 с только если publishCalled. Captures correct `p2p_core` + Kotlin tags
+  without clear/relaunch. Matrix: Anna relay/store/receipt/remove/origin/clear=1; Zhenya relay/
+  store/receipt/remove=1; Stas relay/local/receipt-sent/UI=1; все unrelated roles 0, PID stable,
+  overflow/backpressure/invariant/stall/restart/request/crash=0. State в finally, automatic retry
+  false. Python py_compile, one-call, parser-trap, action/acceptance, ordering/state scans PASS.
+  Следующий gate — sync both scripts, Windows ParseFile + `py -3 ... --check`, затем one shot.
 
 ---
 

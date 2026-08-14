@@ -286,8 +286,8 @@ installed identity/data/PID exact. Guarded data-preserving v11.16.13 install з�
 UID/firstInstall/dataDir preserved, processes post-install absent. User approved one controlled
 launch выполнен once: 2/3 direct startup PASS, Anna missing only READY/ConnAck/subscription lines;
 state/evidence immutable, relaunch forbidden. Saved-evidence recovery proved runtime PASS 3/3;
-Anna startup lines evicted, direct markers remain 2/3. One explicit-approved functional smoke is
-now the next gate. EMQX, dual publish
+Anna startup lines evicted, direct markers remain 2/3. Functional smoke approved; versioned
+one-publish QoS1/non-retained harness pending execution. EMQX, dual publish
 и cross-broker dedup не подключены;
 transient sender остаётся отдельным долгом.
 
