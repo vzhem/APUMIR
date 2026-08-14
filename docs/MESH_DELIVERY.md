@@ -211,7 +211,8 @@ RelayMessage {
   → stop; никакого enqueue/forward чужого. Exact wake Android не гарантирует; real-time только
   через отдельный opt-in foreground service. Нужны sender/recipient quotas против offline-load.
 - **Надёжность receipt:** r1 reconnect и r2 unique retained receipt+cleanup проверены на
-  Android 2026-08-14. Код r3 готов: c2 resend стал non-retained; bounded seen-cache не даёт
-  re-enqueue после cleanup, local delivery-cache подавляет duplicate UI/conflicting origin и
-  повторяет receipt тому же origin. Нужны Windows build + 3-phone test.
+  Android 2026-08-14. R3 `v11.16.10` build/install + delivery-фаза прошли: два relay дали одно
+  local `MessageReceived`, второй подавлен с повторным receipt; обе очереди cleanup, origin
+  delivery один раз, seen tombstones исключили re-enqueue. Остались fresh-subscriber проверка
+  `retain=false` и reconnect origin без повтора.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).

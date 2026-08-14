@@ -78,6 +78,18 @@ receipt-cleanup → интеграция в отправку → переисп�
 Никаких больших пачек задач без подтверждения. Каждое действие — отдельный маленький шаг
 с проверкой результата, потом согласование следующего.
 
+### 0.1. Обязательное напоминание о milestone-backup
+
+После каждой существенно важной **проверенной** сборки (новый milestone, исправленный blocker,
+release candidate/стабильный release или точка перед рискованной миграцией) ИИ обязан сам
+предложить владельцу сохранить APU на внешний диск/флешку. Не копировать без согласия: сначала
+спросить букву диска и проверить место. Полная копия включает Git bundle+history, точный source
+commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/milestone manifests, docs и
+инструкцию восстановления/сборки/запуска на чистом Windows-ПК. Проверить bundle и все hashes.
+Учитывать signing material: рекомендовать зашифрованный носитель, не копировать tokens/`.env`/
+переписку/private identity keys. Каноническая процедура:
+`docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`. Обычную неудачную промежуточную сборку milestone не считать.
+
 ### 🐣 Пользователь — новичок. Это важно.
 
 - Объясняй **простым языком, без жаргона**. Если нужен технический термин — сразу
@@ -240,7 +252,7 @@ receipt-cleanup → интеграция в отправку → переисп�
 `C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
 (см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
 
-**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1/r2) + код r3):**
+**Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1/r2) + r3 delivery):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
 - Базовая офлайн-доставка (отправитель онлайн, получатель офлайн→онлайн) — работает.
 - Recipient-aware routing + отключён старый relay-шторм (Rust-фиксы `7e8586b`, `b83d9b3`).
@@ -292,12 +304,16 @@ receipt-cleanup → интеграция в отправку → переисп�
   retained на base recipient topic. После reconnect Анна получила старый relay, снова сохранила
   его и вызвала вторую доставку/receipt (`originDelivery=2`). Это не норма.
 
-- **M3(c.2-r3), код готов:** gossip relay resend теперь `retain=false`; bounded seen-cache
-  `10 000` не даёт повторно enqueue после receipt cleanup, а local delivery-cache `4 096`
-  подавляет второе UI-событие и конфликтующий origin. Повтор того же origin может заново
-  отправить receipt для cleanup. M3(d) не изменён.
+- **M3(c.2-r3), build + основная доставка ПРОШЛИ на `v11.16.10`:** commit `e055471`,
+  APK SHA-256 `E68F6EC976428AF5A2910A652653C41DFA9E4A84F4D1A149C8A0E3CF5F16D9DB` установлен
+  на 3 телефона. Для `m3c2r3-1786702254585` Анна/Женя отдельно подтвердили store=1;
+  затем Стас получил ровно 1 `MessageReceived`, второй live relay подавлен, receipts=2.
+  Анна/Женя cleanup=1, только Анна origin-delivery=1; оба relay-узла поздний второй relay
+  проигнорировали через seen tombstone. Итоговый `Anna stored=0` в позднем агрегате — только
+  вытеснение старой строки из logcat: предыдущая store-фаза уже доказала `1`.
 
-**Следующий шаг = Windows `build-rust.ps1` для M3(c.2-r3); M3(d) не начинать.**
+**Следующий шаг = доказать fresh subscription, что c2 relay не retained, затем reconnect Анны
+без повторной store/delivery/origin-delivery. M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -386,7 +402,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   redaction/preview/encryption/limits/export и project-controlled collector/issue tracker.
 - **2026-08-14 (доп.14)** — код r3: c2 relay resend non-retained; bounded seen tombstones
   10k предотвращают re-enqueue после cleanup; local delivery cache 4096 подавляет duplicate UI
-  и conflicting origin, но повторяет receipt для того же origin. Ждёт Windows build/test.
+  и conflicting origin, но повторяет receipt для того же origin.
+- **2026-08-14 (доп.15)** — пользователь требует после каждой существенно важной проверенной
+  сборки автоматически предлагать milestone-backup APU на внешний носитель с полной инструкцией
+  восстановления на чистом ПК. Добавлен `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`; копировать только
+  после согласия, проверить Git bundle/hashes, учитывать signing secrets и шифрование носителя.
+- **2026-08-14 (доп.16)** — r3 Rust/APK `v11.16.10` собраны; 3-phone delivery для
+  `m3c2r3-1786702254585`: store Анна/Женя=1, Стас delivery=1 + duplicate suppressed=1 +
+  receipts=2, cleanup Анна/Женя=1, origin-delivery только Анна=1, seen tombstone сработал.
+  Осталось доказать отсутствие retained relay fresh subscription и reconnect без повтора.
 
 ---
 
@@ -533,12 +557,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 
 ### 9.7. Старт новой сессии
 1. Прочитать **весь** `docs/AI_COLLABORATION_NOTES.md` (⚙️ принцип, 🌐 mesh, раздел 9).
-2. Прочитать `docs/MESH_DELIVERY.md`.
+2. Прочитать `docs/MESH_DELIVERY.md` и правило milestone-backup в
+   `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`.
 3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1, M3(a), M3(b) и авто-receipt
    M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
-4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
-   one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
-5. r1 проверен. r2 unique receipt/cleanup проверен на `v11.16.9`, но stale retained relay
-   вызвал duplicate. Код r3 (non-retained c2 resend + seen/local dedup) готов; следующий шаг
-   `build-rust.ps1`, затем новый 3-phone test. M3(d)/UI/background пока не трогать.
+4. M3(c.1), c.2 relay-path, r1 reconnect и r2 unique receipt проверены. R2 выявил stale
+   retained relay blocker.
+5. R3 `v11.16.10`: build/install и delivery-фаза прошли — local delivery=1, duplicate
+   suppressed=1, receipts=2, обе очереди cleanup=1, origin-delivery=1, seen tombstones сработали.
+   Следующий шаг: fresh MQTT subscription доказывает отсутствие retained relay, затем reconnect
+   Анны без повторов. M3(d)/UI/background пока не трогать.
 
