@@ -1004,6 +1004,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   повторять/не удалять. Следующий gate требует separate approval: one controlled launch новой
   версии без force-stop и без `logcat -c`; early 45s + late additional 120s snapshots с exact new
   PID и native `p2p_core`, чтобы одновременно сохранить startup READY и heartbeat evidence.
+- **2026-08-14 (доп.96)** — пользователь отдельно разрешил one controlled launch v11.16.13.
+  Добавлен versioned `scripts/v111613_launch.ps1`: exact install-state hash/version/UID/data/
+  process-absent preflight 3/3 до первого launch; ровно один `am start -W` call site; no force-stop,
+  no `logcat -c`, no network/user payload. Early wait 45 с сохраняет startup markers; late ещё
+  120 с (total 165) — heartbeat. `p2p_core` snapshots фильтруются exact new PID **и** per-device
+  pre-launch epoch, исключая старый buffer/PID reuse. Process PID обязан остаться один и прежний.
+  Analyzer использует exact literals (`MQTT SESSION READY`, ConnAck/subscription, heartbeat),
+  требует latest connacks>=1, loss_intolerant_pending=0, request counters=0 и ноль best-effort
+  drop/backpressure/invariant/stall/channel close/session start/restart/recovery/request failure/
+  crash-ANR. Poll errors только измеряются: transient stable errors сами по себе не означают stall.
+  Separate early/late/crash evidence, state в finally, no automatic retry. Known parser/action,
+  ordering/evidence/state и forbidden-command scans PASS. Phones остаются stopped после install;
+  следующий gate — sync exact script, Windows ParseFile zero errors, затем approved launch once.
 
 ---
 
