@@ -518,8 +518,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.35)** — generation-2 baseline READY без relay: старый ID abandoned;
   новый `sec-origin2-1786710017189`, TTL 3600, logs cleared. PID Анна/Женя/Стас =
   `14734/24000/13746`; live-peer-after-error=true у всех; battery `100/100/58%`, temperature
-  `31/28.7/30°C`, PSS `117764/98527/142225 KiB`. Следом ровно один normal setup publish,
-  отдельное сохранение logs и только потом анализ/conflict.
+  `31/28.7/30°C`, PSS `117764/98527/142225 KiB`.
+- **2026-08-14 (доп.36)** — после immediate live gate `8/16/28` peer lines generation-2 normal
+  relay опубликован ровно один раз: QoS1, retain=false, 183 bytes, TTL 3600. PID неизменны;
+  immediate snapshots сохранены, test-ID refs Анна/Женя/Стас=`10/7/10`. Не повторять и не
+  атаковать до exact local analysis delivery/UI/receipt/cleanup; logs пока не очищены.
 
 ---
 
@@ -718,8 +721,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke generation 2 READY: ID `sec-origin2-1786710017189`, TTL 3600,
-   PID `14734/24000/13746`, fresh live connection gate и resource baseline прошли, logs очищены.
-   Следующий шаг — один normal non-retained setup relay и snapshot, затем анализ. Conflict,
+7. Low-volume security smoke generation 2: ID `sec-origin2-1786710017189`, normal relay
+   опубликован один раз (QoS1/non-retained/183 B), snapshots refs `10/7/10`, PID стабильны.
+   Следующий шаг — local exact setup analysis; publish/conflict до результата запрещены.
    M3(d), UI/background пока не трогать.
 
