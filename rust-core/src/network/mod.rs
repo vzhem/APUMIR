@@ -86,6 +86,8 @@ pub enum NetworkError {
 
 pub mod mqtt_backpressure;
 pub mod mqtt_dedup;
+#[cfg(feature = "mqtt-dual-broker")]
+pub mod mqtt_fanout;
 pub mod mqtt_liveness;
 pub mod mqtt_overflow;
 #[cfg(feature = "mqtt-secondary-observe")]

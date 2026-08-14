@@ -2,6 +2,7 @@
 # спользование: .\build-rust.ps1
 # пционально: .\build-rust.ps1 -Arch armeabi-v7a,x86_64
 # Feature-gated build: .\build-rust.ps1 -Features mqtt-secondary-observe
+# r4.4 policy build: .\build-rust.ps1 -Features mqtt-dual-broker
 
 param(
     [string[]]$Arch = @("arm64-v8a"),

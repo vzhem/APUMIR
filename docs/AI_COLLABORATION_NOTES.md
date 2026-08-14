@@ -1224,6 +1224,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   incomplete и missing early lifecycle markers остаются immutable facts, ничего не повторять.
   Следующий выбранный этап — r4.4 bounded dual publish max2 + production cross-broker dedup;
   сначала source/local compile gates, public high-load запрещён.
+- **2026-08-15 (доп.115)** — r4.4 source audit и первый isolated policy step complete; Windows
+  compile pending. Все восемь persistent publish policies сходятся в private
+  `MqttTransport::enqueue_publish`, а весь primary inbound `Packet::Publish` — в одном admission
+  path перед core; это безопасные будущие точки atomic fanout+dedup. r4.3 observer нельзя просто
+  «научить publish»: он не связан с shared event channel/loss-intolerant inbox/restart ownership.
+  Legacy `multi_broker.rs` по-прежнему запрещён (sequential switch split mesh). Добавлен default-off
+  feature `mqtt-dual-broker` и pure `mqtt_fanout.rs`: fixed broker bitset HiveMQ/EMQX, stable
+  primary-first fanout max2 без per-message allocation, partial/complete queued outcome и bounded
+  retained-target ledger cap4096. Ledger хранит только SHA-256 logical ID + 2-bit target mask,
+  unions повторные targets, deterministic oldest eviction и очищает order при remove/re-record.
+  Пять tests покрывают 0/1/2 sessions, partial outcome, target union/remove, cap eviction и stale-
+  order regression. Модуль не содержит AsyncClient/EventLoop/publish/subscribe/spawn; current
+  default и r4.3 network behavior не изменены. Host cargo test запрещён/недоступен; следующий gate
+  — exact Windows `build-rust.ps1 -Features mqtt-dual-broker`, generated `.so` only. Только после
+  compile PASS atomic integration включает secondary subscribe/publish и shared production dedup.
 
 ---
 

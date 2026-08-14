@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.3 v11.16.14 Anna observe-only runtime PASS; r4.4 next**
+Статус: **r4.4 bounded fanout/retained-target policy source complete; Windows compile pending**
 
 Дата: 2026-08-15
 
@@ -331,6 +331,24 @@ runtime2/analyzer не повторять. Следующий этап — r4.4 
 - Включить publish max 2 и общий exact-duplicate filter атомарно.
 - Сначала локальные brokers; затем один low-volume тест на собственных телефонах.
 - Проверить один UI event, bounded receipts/cleanup и отсутствие relay storm.
+
+**Source audit/policy step complete, Windows compile pending:** все persistent publish paths
+используют один private `MqttTransport::enqueue_publish`; все primary inbound publications проходят
+одну ветку admission перед core. Поэтому будущая atomic integration должна fanout'ить именно в
+первой точке, а shared filter применять во второй до String/core/UI. Filter и core-owned
+loss-intolerant inbox должны переживать replacement primary session. r4.3 observer отдельно от
+этих ownership paths и не может быть production session без integration; legacy sequential
+`MultiBroker` не использовать. Старый synchronous `send_message_mqtt` также обходит persistent
+transport, но остаётся отдельным долгом и не должен раздувать текущий r4.4 шаг.
+
+Добавлен default-off feature `mqtt-dual-broker` и pure `mqtt_fanout.rs`: fixed HiveMQ/EMQX bitset,
+primary-first fixed array max2, partial/complete queued outcome и digest-only retained target ledger
+cap4096. Ledger нужен, чтобы unique receipt clear не объявлялся полным после очистки лишь одного
+broker; он хранит SHA-256 logical ID и 2-bit mask, bounded oldest eviction, union targets и safe
+remove/re-record без stale order. Пять deterministic tests без сети. Модуль пока не содержит
+AsyncClient/EventLoop/publish/subscribe и не меняет default/r4.3 runtime. Следующий gate — Windows
+`build-rust.ps1 -Features mqtt-dual-broker`; только после PASS одновременно подключать secondary
+subscribe/publish и существующий `MqttDuplicateFilter` к production path.
 
 ### r4.5 — failure/recovery matrix
 

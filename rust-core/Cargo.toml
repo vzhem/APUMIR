@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 default = []
 mqtt-secondary-observe = []
+mqtt-dual-broker = []
 
 # Собираем как динамическую библиотеку для Android (.so файл)
 [lib]
