@@ -527,6 +527,11 @@ child PowerShell, который сам запускает Cargo/Gradle process 
 сначала доказать отсутствие cargo/rustc/child descendants, безопасно освободить только wrapper,
 затем оформить read-only recovery state. Не удалять logs и не rebuild готовый artifact.
 
+Wait helper не должен возвращать bare scalar exit code 0: в сложном PowerShell pipeline такой
+результат может стать `$null` и дать ложный preflight failure. Возвращать объект с явными полями
+`Exited`, `ExitCode`, `ProcessId`, затем читать `.ExitCode`; после успешного bounded wait вызвать
+parameterless `.WaitForExit()` для flush redirected stdout/stderr.
+
 ### Backup остановился после создания части файлов
 
 **Симптом:** папка milestone уже существует, некоторые большие файлы готовы, но остался

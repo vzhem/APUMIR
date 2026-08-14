@@ -1151,6 +1151,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   generated-only Git. State в finally; APK/phones/ADB/install/launch/public traffic false. Parser-
   trap, bounded-wait/identity и no-phone scans PASS. Следующий gate — sync parser-validated harness
   и artifact-only Windows run.
+- **2026-08-14 (доп.109)** — first v11.16.14 APK harness stopped safely before Gradle after 0.13s.
+  State `%TEMP%\apu-r4.3-observe-v11.16.14-apk-build.json`, SHA-256
+  `828C2F47976F7E9E081A491236324318CF1483EE9259AAE8AFEB5B8A0708CF0B`; outcome FAIL,
+  buildAttempted=false, build PID/exit empty, APK absent, phones=false. Java process started, but
+  `Wait-ExactProcess` returned scalar exit code 0 which was lost as `$null` in assignment; guard
+  stopped before Gradle. Это harness return-shape defect, не Java/APU failure. Old block/state/logs
+  не повторять/не удалять. Added distinct `r43_v111614_apk_build2.ps1`: verifies old state hash and
+  pre-Gradle stop; Wait helper returns non-null object `{Exited,ExitCode,ProcessId}` and callers read
+  `.ExitCode`; calls parameterless WaitForExit after bounded wait for redirected-stream flush.
+  Separate build2 paths; same exact artifact/signature/native gates. Следующий gate parser/static
+  checks then one corrected artifact build2, no phones.
 
 ---
 

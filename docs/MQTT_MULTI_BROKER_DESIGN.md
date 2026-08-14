@@ -307,7 +307,8 @@ Windows feature child build фактически завершён (`Finished rel
 `Start-Process -Wait` wrapper завис после child exit и был прерван; parent FAIL state immutable.
 Corrected recovery PASS: feature marker/Finished release/errors=1/1/0; `.so` 7,193,912 B /
 `D7A2216E…D95FE95`, observe-only binary markers exact. Feature compile gate closed; APK v11.16.14
-artifact build harness ready with bounded exact-child waits; execution pending, no install.
+First artifact harness stopped before Gradle on scalar-zero Wait helper defect; state proves no
+build/phones. Corrected build2 uses object-shaped wait result and distinct paths; pending.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 
