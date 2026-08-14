@@ -1322,6 +1322,29 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   runtimeIntegration=true; APK/ADB/phones/public traffic/retry=false. Parser-trap, one-build,
   bounded-wait, auto-variable, C-drive, ordering/state и forbidden-action scans PASS. Следующий gate
   — sync exact harness commit и один Windows build; incomplete не повторять автоматически.
+- **2026-08-15 (доп.123)** — r4.4 atomic dual integration Windows Android Rust build PASS.
+  Harness ParseFile/safety PASS, worktree SHA-256
+  `9277AD99125946EF58F7BD1E7C99355EF13A8E508F3043BD64439CEE602FC089`. State
+  `%TEMP%\apu-r4.4-dual-integration-rust-build.json`, SHA-256
+  `A3E247756AC92DC77B836DDF19DC8B509B6A6DE9E6CB493AD22287A36DB5B3E4`; child PID10948,
+  exit0, Finished release=1, stdout/stderr feature markers=1/1, warnings/errors=7/0, duration65.22s.
+  Generated arm64 `.so` 7,248,576 B, SHA-256
+  `E6C34E86F18D9F63B9A641E3FD9FAFD67D5F1B7101729B2CB3DF25163380095B`, changed from policy C866.
+  State exact: runtimeIntegration=true, wireFormatChanged=false, configured pair HiveMQ/EMQX,
+  sessions/fanout max2, dedup30s/4096, critical cap256, retained targets4096. APK/ADB/phones/public
+  traffic=false. Source compile gate закрыт; build/state/native не повторять/не удалять. Следующий
+  safe gate — C-drive signed v11.16.15 APK artifact with embedded E6C3…095B, no phones; после artifact
+  PASS mixed-version install/runtime требует отдельного явного разрешения.
+- **2026-08-15 (доп.124)** — добавлен versioned `scripts/r44_v111615_apk_build.ps1`: exact source
+  `0181b34`, integration state A3E2…B3E4 и native 7,248,576 B/E6C3…095B; C-drive Adoptium JDK17,
+  SDK C, `--no-daemon`, no Gradle stop. Один assembleRelease строит v11.16.15/11016015, затем
+  stable TEMP APK проверяется AAPT package/version, V2 exact cert F843…A5F7 и embedded native
+  size/hash. Все Java/Gradle/AAPT/signer child waits exact bounded со structured outcome/separate
+  streams. Historical hs_err path/size/hash manifest до/после обязан совпасть; process-local env
+  восстанавливается и проверяется. Final Git generated-only; state в finally, automatic retry,
+  APK install/launch/ADB/phones/public traffic=false. Parser-trap, one-Gradle, bounded waits,
+  automatic-variable, ordering/state, signer/native/version, C-drive и no-phone static scans PASS.
+  Следующий gate — sync exact harness commit и один artifact-only Windows run; failure не retry.
 
 ---
 

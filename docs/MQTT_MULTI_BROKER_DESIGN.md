@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.4 atomic dual-session+dedup source complete; Windows compile pending**
+Статус: **r4.4 atomic dual-session+dedup Android compile PASS; v11.16.15 artifact next**
 
 Дата: 2026-08-15
 
@@ -372,9 +372,12 @@ event перемещает permit в core queue, остальные packet types
 client) и obligation удаляется только после обоих enqueue. Wire payload не изменён, exact broker
 pair оставляет HiveMQ common path для N-1. Startup при primary down и legacy transient sender
 остаются r4.5/debt. Static integration checks PASS. Versioned
-`r44_dual_integration_build.ps1` готов для source `0181b34`: exact policy recovery/native guards,
-one bounded feature build, authoritative stdout marker, artifact/generated-only gates и no
-APK/ADB/phones/public traffic. Windows compile pending.
+`r44_dual_integration_build.ps1` Windows PASS для source `0181b34`: state SHA-256
+`A3E24775…B5B3E4`, child exit0, Finished1, markers1/1, warnings/errors7/0. Generated arm64 `.so`
+7,248,576 B / `E6C34E86…80095B`; runtimeIntegration=true, wireChanged=false. APK/ADB/phones/public
+traffic=false. Source compile gate закрыт. Versioned `r44_v111615_apk_build.ps1` готов: exact
+integration state/native, C-drive JDK17/SDK, bounded children, v11.16.15 package/version, V2 cert,
+embedded E6C3…095B, unchanged hs_err/env restore и no ADB/phones; artifact-only Windows run pending.
 
 ### Mixed-version acceptance для MQTT overlay
 
