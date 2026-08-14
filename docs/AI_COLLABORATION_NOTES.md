@@ -214,10 +214,11 @@ receipt-cleanup → интеграция в отправку → переисп�
   подписан и проверен клиентом; нужны case normalization, uniqueness, rate limits/privacy,
   rename/recovery и защита от squatting. Подробный backlog — `MASTER_PLAN_v2.md`, фаза 1.7.
 - **Медиа/файлы — подтверждено пользователем (2026-08-14):** план обязан включать фото,
-  видео, аудио, voice notes, документы и произвольные файлы, GIF/stickers, previews, progress,
-  pause/resume/retry, encrypted chunks/checksums, offline relay с квотами и storage cleanup.
-  Большие media не помещать в MQTT text envelope; manifest/chunks идут отдельным bounded P2P/
-  QUIC/relay transport. Расширенный backlog — `MASTER_PLAN_v2.md`, фаза 5.3.
+  видео, аудио, voice notes, видеокружочки, документы/любые файлы, GIF/stickers, previews,
+  progress/resume, encrypted chunks/checksums, offline quotas и storage cleanup. Также нужны
+  личные Stories: фото/видео/текст, audience privacy, signed manifest, E2E chunks, TTL 24 ч,
+  views/reactions/replies и friend-only bounded relay без flood. Большие media не помещать в
+  MQTT text envelope. Backlog — `MASTER_PLAN_v2.md`, фазы 5.3–5.4.
 
 ---
 
@@ -353,9 +354,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.9)** — записана продуктовая идея пользователя: глобальный поиск только
   по уникальному латинскому `@username`, привязанному подписанной записью к одному `pk_…`;
   display names могут совпадать. Добавлена фаза 1.7 в `MASTER_PLAN_v2.md`.
-- **2026-08-14 (доп.10)** — расширена фаза 5.3: фото/видео/аудио/voice/files/GIF/stickers,
-  previews, progress/resume, E2E chunks/checksums, offline quotas и storage/cache cleanup.
-  Большие media не идут внутри MQTT text envelope.
+- **2026-08-14 (доп.10)** — расширены media-фазы: 5.3 включает любые files и видеокружочки;
+  новая 5.4 — Stories (photo/video/text, privacy audience, signed/E2E, TTL 24 ч, reactions,
+  bounded friend relay). Большие media не идут внутри MQTT text envelope.
 
 ---
 
