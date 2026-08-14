@@ -344,10 +344,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   не появился, но exact второй ConnAck/re-subscribe и live probe напрямую доказывают reconnect;
   старый guard `errors>=1` был излишне строгим, это не ошибка продукта.
 
-**M3(c.2-r3), milestone-backup и первый security smoke завершены. Текущий малый шаг до M3(d):
-M3(c.2-r4 — initial MQTT connection считать успешным только после bounded broker ConnAck и при
-ошибке пробовать следующий broker. Код ждёт Windows Android build; runtime broker rotation после
-уже установленного соединения остаётся отдельным follow-up. M3(d) пока не начинать.**
+**M3(c.2-r3), milestone-backup и первый security smoke завершены. До M3(d) нужен отдельный выбор
+следующего этапа. Простой ConnAck→next-broker fallback отклонён review до сборки: независимые
+публичные brokers не bridge topics, поэтому телефоны на HiveMQ и EMQX образуют две изолированные
+сети. Надёжный вариант требует bounded multi-broker overlay/координации с дедупом. M3(d) пока
+не начинать без отдельного решения пользователя.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -565,10 +566,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Control recovery и весь первый low-volume security smoke завершены; logs оставлены, state PASS.
 - **2026-08-14 (доп.47)** — пользователь уточнил: флешку не подключать для мелких checkpoints;
   backup предлагать только на крупных новых APK/release/этапах, а не после docs или повторного
-  smoke той же сборки. Начат M3(c.2-r4 до M3(d): `MqttTransport::connect` больше не принимает
-  queued publish за network success, а ждёт ConnAck до 8 s на broker и затем пробует следующий.
-  Initial ConnAck уже consumed, поэтому любой следующий ConnAck считается reconnect и запускает
-  clean-session re-subscribe. Sandbox не имеет `cargo`/`rustfmt`; нужен Windows `build-rust.ps1`.
+  smoke той же сборки. Попытка исправить initial fallback через bounded ConnAck и переход к
+  следующему broker остановлена code review ДО Windows build: public HiveMQ/EMQX/Mosquitto не
+  bridge topics, поэтому разные выбранные brokers разделят APU-узлы и сообщения не дойдут.
+  Код возвращён к проверенному r3; commit `8544b6e` superseded следующим revert-коммитом. Нужен
+  design: parallel/overlapping broker subscriptions + bounded publish/dedup либо coordinated
+  primary migration; затем local tests. Sandbox не имеет `cargo`/`rustfmt`.
 
 ---
 

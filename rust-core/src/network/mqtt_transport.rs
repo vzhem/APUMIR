@@ -14,7 +14,6 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
 
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 const MQTT_EVENT_BUFFER: usize = 256;
-const MQTT_INITIAL_CONNACK_TIMEOUT: Duration = Duration::from_secs(8);
 const MQTT_RECONNECT_BACKOFF_MAX_SECS: u64 = 30;
 const MAX_MESH_TOPIC_SEGMENT_BYTES: usize = 128;
 const MAX_MESH_MESSAGE_ID_BYTES: usize = 256;
@@ -73,23 +72,6 @@ pub struct MqttTransport {
     relay_nodes: Arc<Mutex<Vec<PeerInfo>>>,
 }
 
-async fn wait_for_initial_connack(eventloop: &mut EventLoop) -> Result<(), String> {
-    let started_at = tokio::time::Instant::now();
-
-    loop {
-        let remaining = MQTT_INITIAL_CONNACK_TIMEOUT
-            .checked_sub(started_at.elapsed())
-            .ok_or_else(|| "ConnAck timeout".to_string())?;
-
-        match tokio::time::timeout(remaining, eventloop.poll()).await {
-            Ok(Ok(Event::Incoming(Packet::ConnAck(_)))) => return Ok(()),
-            Ok(Ok(_)) => continue,
-            Ok(Err(error)) => return Err(error.to_string()),
-            Err(_) => return Err("ConnAck timeout".to_string()),
-        }
-    }
-}
-
 impl MqttTransport {
     pub async fn connect(node_id: &str, _display_name: &str) -> Result<Self, String> {
         let client_id = format!("p2pm_{}", &node_id[..16.min(node_id.len())]);
@@ -100,17 +82,14 @@ impl MqttTransport {
             opts.set_keep_alive(Duration::from_secs(60));
             opts.set_clean_session(true);
 
-            let (client, mut eventloop) = AsyncClient::new(opts, 100);
+            let (client, eventloop) = AsyncClient::new(opts, 100);
 
-            // AsyncClient methods only enqueue requests. They do not prove that a
-            // TCP/MQTT connection exists until EventLoop yields a broker ConnAck.
-            // Bound each attempt so an unavailable first public broker cannot pin
-            // startup forever and prevent trying the remaining fallback brokers.
-            match wait_for_initial_connack(&mut eventloop).await {
-                Ok(()) => {
-                    tracing::info!("MQTT: ConnAck received from {}:{}", host, port);
-                    // Keep the established diagnostic marker, now backed by a real ConnAck.
-                    tracing::info!("MQTT: connection acknowledged by broker");
+            match client.publish(
+                format!("p2pm2/ping/{}", node_id),
+                QoS::AtMostOnce, false, b"ping",
+            ).await {
+                Ok(_) => {
+                    tracing::info!("MQTT: connected to {}:{}", host, port);
                     let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
                     return Ok(Self {
                         client,
@@ -118,27 +97,18 @@ impl MqttTransport {
                         event_tx: Some(event_tx),
                         event_rx,
                         eventloop_task: None,
-                        // The initial ConnAck was consumed by the bounded gate above.
-                        // Every later ConnAck is therefore a reconnect and must trigger
-                        // a clean-session re-subscription in poll_event().
-                        has_connected_once: true,
+                        has_connected_once: false,
                         node_id: node_id.to_string(),
                         peers: Arc::new(Mutex::new(Vec::new())),
                         relay_nodes: Arc::new(Mutex::new(Vec::new())),
                     });
                 }
-                Err(error) => {
-                    tracing::warn!(
-                        "MQTT: no ConnAck from {}:{} within {}s: {}",
-                        host,
-                        port,
-                        MQTT_INITIAL_CONNACK_TIMEOUT.as_secs(),
-                        error
-                    );
+                Err(e) => {
+                    tracing::warn!("MQTT: {}:{} failed: {}", host, port, e);
                 }
             }
         }
-        Err("All MQTT brokers failed before ConnAck".to_string())
+        Err("All MQTT brokers failed".to_string())
     }
 
     pub async fn publish_presence(
