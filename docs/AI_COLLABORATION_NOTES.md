@@ -970,6 +970,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   сначала присваивать raw value. Новый preinstall2 использует `Start-Process` stdout/stderr evidence
   для каждого ADB call, command-specific pidof exit 0/1, final state write+hash до PASS; install/
   force-stop/launch/log clear/network отсутствуют.
+- **2026-08-14 (доп.93)** — versioned parser-validated `scripts/v111613_preinstall.ps1` PASS.
+  Windows parser=0 errors; worktree script SHA-256 (CRLF checkout)
+  `3B5504C15F8173FCE9B0FD6729E71D7C53673553D9D747B1EBD63A9289916956`. State
+  `%TEMP%\apu-r4.2-r1b4-v11.16.13-preinstall2.json`, SHA-256
+  `F57C880884CE7AFDD177393DF5BA879372CD2BF3C0E04998B89795D33B90C575`, outcome PASS 3/3.
+  APK hash 5A26…03BA exact. Installed v11.16.12/11016012 identities exact: Anna current PID 24022 /
+  UID 10425 / firstInstallTime `2026-08-08 11:40:39`; Zhenya PID 7439 / UID 10395 /
+  `2026-08-08 17:31:18`; Stas PID 20786 / UID 10387 / `2026-08-10 12:41:10`; dataDir
+  `/data/user/0/com.vladimir.messenger` 3/3. Это те же unchanged cold-launch PID. All native
+  calls captured separate stdout/stderr; install/force-stop/launch/logcat/network/public traffic
+  false. Следующий phone-changing gate требует explicit approval: versioned guarded `adb install -r`
+  v11.16.13; package replacement штатно остановит process, но block не делает force-stop/launch.
 
 ---
 

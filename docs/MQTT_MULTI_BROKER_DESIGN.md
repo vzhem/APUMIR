@@ -281,8 +281,9 @@ APK/phones не менялись. Corrected build2 затем собрал v11.1
 `5A26728B…D7C03BA`), version/V2/build exits PASS, но exact certificate-line parser остановил state
 до cert/native extraction. Read-only recovery PASS без rebuild: signer cert exact, embedded r1b4
 native exact; authoritative APK v11.16.13 22,599,180 B / `5A26728B…D7C03BA`. Первый inline
-preinstall не парсился и ничего не выполнил; parser-validated versioned preinstall2 script pending.
-EMQX, dual publish
+preinstall не парсился и ничего не выполнил; versioned parser-validated preinstall2 затем PASS 3/3:
+installed identity/data/PID exact, phones unchanged. v11.16.13 guarded install awaits explicit
+approval. EMQX, dual publish
 и cross-broker dedup не подключены;
 transient sender остаётся отдельным долгом.
 
