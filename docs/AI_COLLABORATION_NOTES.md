@@ -208,6 +208,11 @@ receipt-cleanup → интеграция в отправку → переисп�
   окно приёма → stop. В этом режиме запрещены enqueue/хранение/forward чужих relay. Android
   не гарантирует точный момент wake; для real-time нужен отдельный opt-in foreground service.
   Телефон без сети/выключенный не разбудить — сообщение ждёт у relay до следующего окна.
+- **Уникальный `@username` — решение пользователя (2026-08-14):** глобально искать не по
+  display name (имена могут совпадать), а по единственному латинскому `@username`, связанному
+  с конкретным `pk_…`/public key. Display name остаётся неуникальным. Binding должен быть
+  подписан и проверен клиентом; нужны case normalization, uniqueness, rate limits/privacy,
+  rename/recovery и защита от squatting. Подробный backlog — `MASTER_PLAN_v2.md`, фаза 1.7.
 
 ---
 
@@ -266,8 +271,9 @@ receipt-cleanup → интеграция в отправку → переисп�
   `p2pm2/msg/<origin>/receipt/<sha256(msg_id)>`, поэтому ACK/summary его не перезаписывают.
   Origin проверяет exact own topic и удаляет retained receipt пустой публикацией после обработки.
   Origin segment ограничен safe ASCII/128 B, msg_id — 256 B; старые base-topic receipts читаются.
+  Windows Android Rust build успешен за 1m01s.
 
-**Следующий шаг = Windows `build-rust.ps1` для M3(c.2-r2); M3(d) не начинать.**
+**Следующий шаг = собрать APK `v11.16.9` для M3(c.2-r2); M3(d) не начинать.**
 **Критично: дедуп `RelayQueue.contains(msg_id)` перед любым relay** — иначе петля/шторм
 (как со старым relay). Подшаги M3 (каждый — телефонный тест):
 - (a) handle `relay`-конверт → получатель я → доставить; иначе → `RelayQueue` (с дедупом) + hop/TTL;
@@ -338,7 +344,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-14 (доп.8)** — код M3(c.2-r2): unique retained receipt topic использует
   SHA-256 msg_id, safe origin segment и limits; ACK/summary остаются на base topic и не могут
   перезаписать receipt. Только локальный origin очищает exact retained topic после обработки.
-  Старый receipt совместим. Следующий шаг — Windows build; M3(d) не трогать.
+  Старый receipt совместим. Windows Android Rust build успешен за 1m01s; дальше APK/test.
+- **2026-08-14 (доп.9)** — записана продуктовая идея пользователя: глобальный поиск только
+  по уникальному латинскому `@username`, привязанному подписанной записью к одному `pk_…`;
+  display names могут совпадать. Добавлена фаза 1.7 в `MASTER_PLAN_v2.md`.
 
 ---
 
@@ -491,6 +500,6 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 4. M3(c.1) проверен. M3(c.2) relay-path проверен на 3 телефонах: Женя resend → Стас
    one delivery/receipt → Женя cleanup. Выявлен reconnect blocker финального origin.
 5. r1 проверен на `v11.16.8`: Wi-Fi off/on без restart процесса, bounded backoff,
-   reconnect+re-subscribe=1 и live probe=1. Код r2 unique retained receipt готов: сначала
-   `build-rust.ps1`, потом отдельный 3-phone test. M3(d)/UI/background пока не трогать.
+   reconnect+re-subscribe=1 и live probe=1. Код r2 собран через `build-rust.ps1` за 1m01s;
+   дальше APK `v11.16.9` и отдельный 3-phone test. M3(d)/UI/background пока не трогать.
 

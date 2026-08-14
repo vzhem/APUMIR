@@ -213,5 +213,5 @@ RelayMessage {
 - **Надёжность receipt:** r1 reconnect + re-subscribe после смены сети проверен на Android
   2026-08-14. Код r2 готов: retained receipt идёт в отдельный
   `p2pm2/msg/<origin>/receipt/<sha256(msg_id)>`, а origin удаляет retained topic после обработки;
-  ACK/summary больше его не перезаписывают. Нужны Windows build + 3-phone test.
+  ACK/summary больше его не перезаписывают. Windows build успешен; нужен 3-phone test.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).
