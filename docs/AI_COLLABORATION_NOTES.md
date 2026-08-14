@@ -455,6 +455,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   хранить физически безопасно и не публиковать.
 - **2026-08-14 (доп.23)** — `F:` успешно безопасно извлечён через Shell `Eject`; проверка
   `Test-Path F:\` дала false, пользователь физически вынул флешку. Milestone-copy завершена.
+- **2026-08-14 (доп.24)** — выбран первый low-volume security smoke. Старый-cache baseline
+  НЕ готов: Анна PID 12571/100%/31°C/118238 KiB, но процесс Жени уже остановлен; `throw` прервал
+  только текущий интерактивный foreach, а последующие отдельно выполненные команды ошибочно
+  записали partial state, очистили logcat и напечатали READY. Не использовать этот state/PASS.
+  Перезапустить Женю и создать новый security msg_id в одном atomic `& { ... }` scriptblock.
 
 ---
 
@@ -464,6 +469,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `else is not recognized`. Давать `if { ... } else { ... }` одним цельным paste-блоком либо
   вообще не использовать отдельный `else`. Если ветка `if` уже успешно выполнилась, эта ошибка
   сама по себе не отменяет её результат.
+- **`throw` в одном интерактивно выполненном блоке не отменяет следующие отдельно вставленные
+  блоки:** пользователь может после failed precheck невольно выполнить save/clear/`PASSED`.
+  Критические тестовые сценарии оборачивать целиком в один `& { ... }`, ставить
+  `$ErrorActionPreference = "Stop"`, сохранять state и печатать PASS только внутри него после всех
+  assertions. Следующая фаза обязана проверять explicit `baselineComplete=true`, а не текст PASS.
 - **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
   `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
   Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
@@ -632,5 +642,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Следующий этап отдельно согласовать; M3(d)/UI/background пока не трогать.
+7. Выбран low-volume security smoke. Старый-cache baseline invalid из-за остановленного процесса
+   Жени и интерактивного продолжения после throw; следующий шаг — atomic restart/baseline и новый
+   security msg_id. M3(d)/UI/background пока не трогать.
 
