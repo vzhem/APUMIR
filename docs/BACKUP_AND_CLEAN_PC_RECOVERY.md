@@ -455,3 +455,41 @@ commit. Перед backup доказать `git diff --quiet <code> <docs> -- ru
 `MILESTONE.txt` записать оба SHA. Bundle обязан содержать оба; restore делает checkout нужной
 ветки и `reset --hard` на documentation commit. Если application code между ними отличается,
 такой docs commit нельзя приписывать уже протестированному APK без новой сборки/теста.
+
+### Source ZIP даёт raw Git blob mismatch на Windows
+
+**Симптом:** ZIP проходит общий SHA-256 и воспроизводится новым `git archive`, но
+`git hash-object --no-filters <extracted-file>` не равен `git rev-parse <commit>:<path>`.
+
+**Причина:** Windows `git archive`/attributes могут выдать text с CRLF, тогда как blob в Git
+нормализован с LF. Raw hash сравнивает разные представления одного текста и создаёт ложный fail.
+
+**Правильная проверка:** одновременно доказать:
+
+1. SHA-256 извлечённого файла USB ZIP равен SHA-256 файла из свежего `git archive` того же commit;
+2. filter-aware hash совпадает с commit blob:
+
+```powershell
+Set-Location C:\APUMIR-arena-test
+
+$RelativePath = "rust-core/src/engine/core.rs"
+$ExtractedFile = "C:\TEMP\archive\rust-core\src\engine\core.rs"
+$Commit = "FULL_DOCUMENTATION_COMMIT"
+
+$PathArgument = "--path={0}" -f $RelativePath
+$FilteredBlob = (git hash-object $PathArgument $ExtractedFile).Trim()
+$ExpectedBlob = (git rev-parse ("{0}:{1}" -f $Commit, $RelativePath)).Trim()
+
+if ($FilteredBlob -ne $ExpectedBlob) {
+    throw "Filter-aware source ZIP check failed"
+}
+```
+
+Не заменять общий SHA-256 manifest только filter-aware проверкой: нужны оба независимых слоя.
+
+### `git fsck` показывает dangling commits после clone из полного bundle
+
+Полный `--all` bundle может содержать stash и дополнительные remote refs. Пробный clone не
+обязан привязать каждый такой объект к своей рабочей ветке, поэтому `git fsck` может напечатать
+`dangling commit`. Если `fsck` завершился с exit code 0, connectivity проверена, нужные commits
+доступны и checkout чистый — это информационное сообщение, а не повреждение backup.

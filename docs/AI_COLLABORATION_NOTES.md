@@ -441,9 +441,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   тест неполным: второй ConnAck/re-subscribe и probe доказаны. `v11.16.10` — важная точка.
 - **2026-08-14 (доп.20)** — пользователь требует записывать все ошибки/обходы для новой ИИ-
   сессии. Milestone backup на незашифрованный FAT32 `F:` создан (22 files, 50,920,869 bytes,
-  21 hash entries), но ещё ждёт independent hash/restore verify. Гэтчи: отдельный `else` в
-  интерактивном PowerShell 5; `java -version` stderr + ErrorAction Stop; безопасное resume по
-  `INCOMPLETE.tmp`. Перед финальной verify обновить backup новым docs commit с этими обходами.
+  21 hash entries). Гэтчи: отдельный `else` в интерактивном PowerShell 5; `java -version`
+  stderr + ErrorAction Stop; безопасное resume по `INCOMPLETE.tmp`.
+- **2026-08-14 (доп.21)** — independent verify: 21 hashes, known APK/native hashes, bundle,
+  offline clone/reset на docs commit и Git connectivity прошли. Raw source-ZIP blob check дал
+  ложный fail из-за CRLF; fresh archive SHA-256 совпал с USB и filter-aware `hash-object --path`
+  совпал с commit для 4/4 файлов. `dangling commit` при fsck — stash refs и exit=0. Осталось
+  записать final report/status, пересчитать manifest и выполнить его последний recheck.
 
 ---
 
@@ -461,6 +465,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   уже созданные bundle/source/artifacts и их hashes, продолжить с точки остановки, заново создать
   `SHA256SUMS.txt`, и удалять marker только после завершения. Отдельная независимая verify-фаза
   всё равно обязательна. Полный recovery — `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`.
+- **Windows `git archive` может положить text files в ZIP с CRLF:** тогда
+  `git hash-object --no-filters <extracted>` не совпадает с LF blob commit и даёт ложную ошибку.
+  Проверять двумя независимыми способами: USB bytes совпадают со свежим `git archive` того же
+  commit по SHA-256; `git hash-object --path=<repo-relative> <file>` после clean-фильтра совпадает
+  с `git rev-parse <commit>:<path>`. Для `v11.16.10` оба условия прошли на 4 файлах.
+- **`git fsck --connectivity-only` может показать `dangling commit` из stash/доп.refs:** если
+  exit code=0 и connectivity завершена, это информационное сообщение, не повреждение bundle.
 - **PowerShell ломает аргументы вида `-Pname=value` для `gradlew.bat`** → ошибка
   `Task '.16.5' not found`. **Лечится**: задавать версию через env-переменную
   `$env:GITHUB_REF_NAME = "v11.16.X"` (build.gradle.kts её читает), БЕЗ `-P`.
@@ -611,8 +622,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 5. R3 `v11.16.10` полностью проверен: local delivery=1, duplicate suppressed=1, receipts=2,
    обе очереди cleanup=1, origin-delivery=1, seen tombstones, retained relay=0; после reconnect
    Анны re-subscribe/probe=1, все повторные mesh/UI counts=0 при тех же PID.
-6. Milestone-backup создаётся на незашифрованном `F:` по backup guide: базовый набор создан,
-   но нужно включить последний docs commit с PowerShell-workarounds, пересчитать hashes и сделать
-   independent bundle/hash/temporary restore verify. Только после этого копия готова.
+6. Milestone-backup на незашифрованном `F:`: 21 hashes, bundle, offline clone/reset и source
+   ZIP CRLF-aware проверки прошли. Осталось записать final verification report/status, пересчитать
+   manifest и выполнить последний recheck; только затем копия готова.
 7. Затем отдельно согласовать продолжение; M3(d)/UI/background пока не трогать.
 
