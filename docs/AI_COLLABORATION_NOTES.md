@@ -1172,6 +1172,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   data-preserving install+one launch только Anna, while Zhenya/Stas remain v11.16.13 primary peers;
   this does not switch Anna away from HiveMQ because EMQX observer has subscriptions/publishes=0.
   Require explicit phone-change approval before versioned harness.
+- **2026-08-14 (доп.111)** — пользователь разрешил Anna-only r4.3 runtime install+launch.
+  Добавлен `scripts/r43_anna_runtime.ps1`: exact APK/runtime states and identities, all-three
+  precheck before one `adb install -r` Anna, data-preserving postcheck/process absent, one launch;
+  Zhenya/Stas remain v11.16.13 with exact PID. No force-stop/logcat clear/user payload. Early
+  snapshot shortened to 15s (Anna old 45s buffer already evicted startup); late additional 135s,
+  total150 for heartbeat. Gates: secondary supervisor+starting exactly1, EMQX connected>=1,
+  `subscriptions=0 publishes=0`, no secondary backoff; primary READY/heartbeat/incoming and zero
+  error/stall/restart/request failures. State finally/no retry. Parser-contract and exact one-install/
+  one-launch/forbidden-action scans PASS. Next sync, Windows ParseFile, approved execution once.
 
 ---
 

@@ -309,7 +309,7 @@ Corrected recovery PASS: feature marker/Finished release/errors=1/1/0; `.so` 7,1
 `D7A2216E…D95FE95`, observe-only binary markers exact. Feature compile gate closed; APK v11.16.14
 First artifact harness stopped before Gradle on scalar-zero Wait helper defect. Corrected build2
 PASS: v11.16.14 APK 22,615,564 B / `6C4D29DA…E13F5C`, signer/native exact. Minimal Anna-only
-observe runtime install/launch awaits approval; primary HiveMQ remains active.
+observe runtime approved; versioned one-install/one-launch harness ready, primary HiveMQ remains active.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 
