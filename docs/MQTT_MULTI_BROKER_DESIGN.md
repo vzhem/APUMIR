@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **cold evidence saved; semantic-equivalent finalizer pending without restart**
+Статус: **v11.16.11 cold-start PASS 3/3; controlled reconnect pending**
 
 Дата: 2026-08-14
 

@@ -229,8 +229,9 @@ RelayMessage {
   migration; затем circuit breaker/re-subscribe без flood. Queued `subscribed` не ConnAck.
   Принятый staged design: `docs/MQTT_MULTI_BROKER_DESIGN.md` (2 sessions, bounded duplicate
   window/cap, global budgets, local two-broker failure matrix до public smoke). r4.1 helper
-  скомпилирован; r4.2 pending build делает truthful ConnAck gate на прежнем single HiveMQ path,
-  до подключения EMQX/fanout.
+  скомпилирован; r4.2 single-HiveMQ truthful ConnAck gate собран/установлен как v11.16.11 и дал
+  effective cold-start readiness 3/3 без false success/crash. Reconnect test ещё pending;
+  EMQX/fanout не подключены.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:
