@@ -725,6 +725,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   compile defect APU. Старый one-shot state/log не удалять и блок не повторять. Перед одним
   controlled retry сохранить `hs_err` в TEMP с hash, вернуть worktree к одной generated `.so`,
   использовать новый build2 state/log и не вызывать аварийный `gradlew --stop` повторно.
+- **2026-08-14 (доп.70)** — controlled APK build2 снова упал через ~11 с в том же JBR
+  `jimage.dll`/`0xc0000006`, до Android tasks/готовой APK; новый `hs_err_pid7760.log`, phones не
+  менялись, дальнейшие build retry запрещены до environment fix. Первый read-only environment
+  analyzer сам остановился до диагностики: PowerShell `Test-Path` разрешил relative path от
+  `C:\APUMIR-arena-test`, но .NET `[IO.File]::ReadAllText` разрешил его от process cwd
+  `C:\Users\User`. Ничего не менялось, diagnostic JSON не создан. Workaround: каждый path для
+  .NET IO сначала превращать в absolute через `(Resolve-Path -LiteralPath ...).Path`.
 
 ---
 
