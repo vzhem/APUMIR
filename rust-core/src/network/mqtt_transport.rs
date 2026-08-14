@@ -14,7 +14,8 @@ use crate::network::mqtt_liveness::{
 };
 use crate::network::mqtt_overflow::{
     classify_mqtt_ingress, mqtt_ingress_disposition, should_log_best_effort_drop,
-    MqttIngressDisposition, MQTT_LOSS_INTOLERANT_RESERVE,
+    should_log_bounded_counter, LossIntolerantInbox, MqttIngressDisposition,
+    MQTT_LOSS_INTOLERANT_INBOX_CAPACITY, MQTT_LOSS_INTOLERANT_RESERVE,
 };
 
 pub const MQTT_BROKERS: &[(&str, u16)] = &[
@@ -39,6 +40,8 @@ enum MqttNotification {
     Message(MqttEvent),
     ConnectionAcknowledged,
 }
+
+pub(crate) type MqttLossIntolerantInbox = LossIntolerantInbox<MqttEvent>;
 
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
@@ -82,6 +85,7 @@ pub struct MqttTransport {
     eventloop: Option<EventLoop>,
     event_tx: Option<mpsc::Sender<MqttNotification>>,
     event_rx: mpsc::Receiver<MqttNotification>,
+    loss_intolerant_inbox: Arc<MqttLossIntolerantInbox>,
     eventloop_task: Option<tokio::task::JoinHandle<()>>,
     eventloop_watchdog_task: Option<tokio::task::JoinHandle<()>>,
     liveness: Arc<MqttLivenessProbe>,
@@ -94,7 +98,23 @@ pub struct MqttTransport {
 }
 
 impl MqttTransport {
-    pub async fn connect(node_id: &str, _display_name: &str) -> Result<Self, String> {
+    pub async fn connect(node_id: &str, display_name: &str) -> Result<Self, String> {
+        let loss_intolerant_inbox = Arc::new(MqttLossIntolerantInbox::new(
+            MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
+        ));
+        Self::connect_with_loss_intolerant_inbox(
+            node_id,
+            display_name,
+            loss_intolerant_inbox,
+        )
+        .await
+    }
+
+    pub(crate) async fn connect_with_loss_intolerant_inbox(
+        node_id: &str,
+        _display_name: &str,
+        loss_intolerant_inbox: Arc<MqttLossIntolerantInbox>,
+    ) -> Result<Self, String> {
         let client_id = format!("p2pm_{}", &node_id[..16.min(node_id.len())]);
         let (host, port) = MQTT_BROKERS
             .first()
@@ -110,6 +130,8 @@ impl MqttTransport {
 
         let (client, eventloop) = AsyncClient::new(opts, 100);
         let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
+        let liveness = Arc::new(MqttLivenessProbe::new());
+        liveness.set_loss_intolerant_pending(loss_intolerant_inbox.len());
 
         tracing::info!("MQTT: primary session created; awaiting broker ConnAck");
         Ok(Self {
@@ -117,9 +139,10 @@ impl MqttTransport {
             eventloop: Some(eventloop),
             event_tx: Some(event_tx),
             event_rx,
+            loss_intolerant_inbox,
             eventloop_task: None,
             eventloop_watchdog_task: None,
-            liveness: Arc::new(MqttLivenessProbe::new()),
+            liveness,
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             notification_channel_closed: false,
             has_connected_once: false,
@@ -198,7 +221,8 @@ impl MqttTransport {
         // EventLoop должен поллиться непрерывно. Старый timeout(1s) отменял
         // eventloop.poll() именно в момент reconnect-backoff, поэтому после возврата
         // сети клиент больше не подключался. Отдельная задача не отменяет poll;
-        // основной цикл получает уже готовые события через bounded channel.
+        // основной цикл получает refreshable события через bounded channel, а delivery-bearing
+        // события — через отдельный core-owned bounded inbox.
         let mut eventloop = self
             .eventloop
             .take()
@@ -210,6 +234,7 @@ impl MqttTransport {
         let (initial_connack_tx, initial_connack_rx) = oneshot::channel::<()>();
         let (eventloop_exit_tx, mut eventloop_exit_rx) = oneshot::channel::<&'static str>();
         let eventloop_liveness = Arc::clone(&self.liveness);
+        let eventloop_loss_intolerant_inbox = Arc::clone(&self.loss_intolerant_inbox);
         let watchdog_liveness = Arc::clone(&self.liveness);
         let watchdog_shutdown_requested = Arc::clone(&self.shutdown_requested);
 
@@ -217,6 +242,25 @@ impl MqttTransport {
             let mut reconnect_backoff_secs = 1u64;
             let mut initial_connack_tx = Some(initial_connack_tx);
             let exit_reason = loop {
+                // The first ConnAck must remain pollable so a replacement session can become ready
+                // even when it inherits a full core-owned inbox. Afterwards, stop reading broker
+                // packets until core drains capacity; every previously returned critical event is
+                // already owned by the shared inbox and survives transport replacement.
+                if initial_connack_tx.is_none() && eventloop_loss_intolerant_inbox.is_full() {
+                    let pending = eventloop_loss_intolerant_inbox.len();
+                    let total_waits = eventloop_liveness.mark_loss_intolerant_backpressure();
+                    if should_log_bounded_counter(total_waits) {
+                        tracing::warn!(
+                            "MQTT LOSS-INTOLERANT BACKPRESSURE: total={} pending={} capacity={}",
+                            total_waits,
+                            pending,
+                            eventloop_loss_intolerant_inbox.capacity()
+                        );
+                    }
+                    eventloop_loss_intolerant_inbox.wait_for_capacity().await;
+                    eventloop_liveness.mark_loss_intolerant_capacity_available();
+                }
+
                 eventloop_liveness.mark_poll_started();
                 let poll_result = eventloop.poll().await;
                 eventloop_liveness.mark_poll_completed();
@@ -281,14 +325,15 @@ impl MqttTransport {
                                 }
                             }
                         } else {
-                            if event_tx
-                                .send(MqttNotification::Message(event))
-                                .await
-                                .is_err()
-                            {
-                                break "core notification channel closed while forwarding publish";
+                            let pending = eventloop_loss_intolerant_inbox.push_owned(event);
+                            eventloop_liveness.mark_loss_intolerant_buffered(pending);
+                            if pending > eventloop_loss_intolerant_inbox.capacity() {
+                                tracing::error!(
+                                    "MQTT LOSS-INTOLERANT INBOX INVARIANT: pending={} capacity={}; event retained",
+                                    pending,
+                                    eventloop_loss_intolerant_inbox.capacity()
+                                );
                             }
-                            eventloop_liveness.mark_notification_forwarded();
                         }
                     }
                     Ok(Event::Incoming(Packet::ConnAck(_))) => {
@@ -345,7 +390,7 @@ impl MqttTransport {
                         let snapshot = watchdog_liveness.snapshot();
                         match exit_result {
                             Ok(reason) => tracing::error!(
-                                "MQTT LIVENESS: EventLoop task exited: reason={} phase={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
+                                "MQTT LIVENESS: EventLoop task exited: reason={} phase={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} loss_intolerant_buffered={} loss_intolerant_pending={} loss_intolerant_backpressure={} poll_errors={} request_timeouts={} request_errors={}",
                                 reason,
                                 snapshot.phase.as_str(),
                                 snapshot.polls_completed,
@@ -354,6 +399,9 @@ impl MqttTransport {
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
                                 snapshot.best_effort_drops,
+                                snapshot.loss_intolerant_buffered,
+                                snapshot.loss_intolerant_pending,
+                                snapshot.loss_intolerant_backpressure,
                                 snapshot.poll_errors,
                                 snapshot.request_timeouts,
                                 snapshot.request_errors
@@ -362,7 +410,7 @@ impl MqttTransport {
                                 tracing::info!("MQTT LIVENESS: EventLoop task closed during requested shutdown")
                             }
                             Err(_) => tracing::error!(
-                                "MQTT LIVENESS: EventLoop task ended without completion signal; possible panic/abort; phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
+                                "MQTT LIVENESS: EventLoop task ended without completion signal; possible panic/abort; phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} loss_intolerant_buffered={} loss_intolerant_pending={} loss_intolerant_backpressure={} poll_errors={} request_timeouts={} request_errors={}",
                                 snapshot.phase.as_str(),
                                 snapshot.phase_age_ms(),
                                 snapshot.progress_age_ms(),
@@ -372,6 +420,9 @@ impl MqttTransport {
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
                                 snapshot.best_effort_drops,
+                                snapshot.loss_intolerant_buffered,
+                                snapshot.loss_intolerant_pending,
+                                snapshot.loss_intolerant_backpressure,
                                 snapshot.poll_errors,
                                 snapshot.request_timeouts,
                                 snapshot.request_errors
@@ -391,7 +442,7 @@ impl MqttTransport {
                                     .unwrap_or(true);
                                 if should_warn {
                                     tracing::warn!(
-                                        "MQTT LIVENESS STALLED: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
+                                        "MQTT LIVENESS STALLED: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} loss_intolerant_buffered={} loss_intolerant_pending={} loss_intolerant_backpressure={} poll_errors={} request_timeouts={} request_errors={}",
                                         phase.as_str(),
                                         stalled_for_ms,
                                         snapshot.progress_age_ms(),
@@ -401,6 +452,9 @@ impl MqttTransport {
                                         snapshot.connacks,
                                         snapshot.notifications_forwarded,
                                         snapshot.best_effort_drops,
+                                        snapshot.loss_intolerant_buffered,
+                                        snapshot.loss_intolerant_pending,
+                                        snapshot.loss_intolerant_backpressure,
                                         snapshot.poll_errors,
                                         snapshot.request_timeouts,
                                         snapshot.request_errors
@@ -417,7 +471,7 @@ impl MqttTransport {
 
                         if last_heartbeat.elapsed() >= MQTT_LIVENESS_HEARTBEAT_INTERVAL {
                             tracing::info!(
-                                "MQTT LIVENESS HEARTBEAT: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} poll_errors={} request_timeouts={} request_errors={}",
+                                "MQTT LIVENESS HEARTBEAT: phase={} phase_age_ms={} progress_age_ms={} polls={}/{} incoming={} connacks={} forwarded={} best_effort_drops={} loss_intolerant_buffered={} loss_intolerant_pending={} loss_intolerant_backpressure={} poll_errors={} request_timeouts={} request_errors={}",
                                 snapshot.phase.as_str(),
                                 snapshot.phase_age_ms(),
                                 snapshot.progress_age_ms(),
@@ -427,6 +481,9 @@ impl MqttTransport {
                                 snapshot.connacks,
                                 snapshot.notifications_forwarded,
                                 snapshot.best_effort_drops,
+                                snapshot.loss_intolerant_buffered,
+                                snapshot.loss_intolerant_pending,
+                                snapshot.loss_intolerant_backpressure,
                                 snapshot.poll_errors,
                                 snapshot.request_timeouts,
                                 snapshot.request_errors
@@ -582,6 +639,13 @@ impl MqttTransport {
     }
 
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
+        // Delivery-bearing events always bypass refreshable FIFO traffic and remain owned by this
+        // core-level inbox across a transport/session replacement.
+        if let Some((event, remaining)) = self.loss_intolerant_inbox.pop() {
+            self.liveness.mark_loss_intolerant_drained(remaining);
+            return Some(event);
+        }
+
         match tokio::time::timeout(Duration::from_secs(1), self.event_rx.recv()).await {
             Ok(Some(MqttNotification::Message(event))) => Some(event),
             Ok(Some(MqttNotification::ConnectionAcknowledged)) => {

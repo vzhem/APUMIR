@@ -639,13 +639,19 @@ self.runtime = Some(runtime);
     async fn connect_ready_mqtt_session(
         node_id: &str,
         display_name: &str,
+        loss_intolerant_inbox: Arc<crate::network::mqtt_transport::MqttLossIntolerantInbox>,
     ) -> Result<crate::network::mqtt_transport::MqttTransport, String> {
         use crate::network::mqtt_transport::MqttTransport;
 
         const MQTT_SESSION_READY_TIMEOUT: std::time::Duration =
             std::time::Duration::from_secs(45);
 
-        let mut transport = MqttTransport::connect(node_id, display_name).await?;
+        let mut transport = MqttTransport::connect_with_loss_intolerant_inbox(
+            node_id,
+            display_name,
+            loss_intolerant_inbox,
+        )
+        .await?;
         match tokio::time::timeout(MQTT_SESSION_READY_TIMEOUT, transport.subscribe()).await {
             Ok(Ok(())) => Ok(transport),
             Ok(Err(error)) => Err(error),
@@ -706,8 +712,16 @@ self.runtime = Some(runtime);
         relay_queue: Option<Arc<RelayQueue>>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
+        use crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY;
+        use crate::network::mqtt_transport::MqttLossIntolerantInbox;
 
         const MQTT_SESSION_RESTART_BACKOFF_MAX_SECS: u64 = 30;
+
+        // Core owns this bounded FIFO across every single-session replacement. MQTT transports
+        // only borrow it through Arc, so dropping a stalled session cannot drop relay/receipt.
+        let loss_intolerant_inbox = Arc::new(MqttLossIntolerantInbox::new(
+            MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
+        ));
 
         // Wait for STUN to complete
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -722,7 +736,12 @@ self.runtime = Some(runtime);
         let mut session_start_attempt = 1u64;
 
         let mut transport = loop {
-            match Self::connect_ready_mqtt_session(&node_id, &display_name).await {
+            match Self::connect_ready_mqtt_session(
+                &node_id,
+                &display_name,
+                Arc::clone(&loss_intolerant_inbox),
+            )
+            .await {
                 Ok(transport) => {
                     tracing::info!(
                         "MQTT SESSION READY: generation={} attempt={} ConnAck=true subscription_request=true",
@@ -833,7 +852,12 @@ self.runtime = Some(runtime);
                         );
                         tokio::time::sleep(std::time::Duration::from_secs(retry_delay_secs)).await;
 
-                        match Self::connect_ready_mqtt_session(&node_id, &display_name).await {
+                        match Self::connect_ready_mqtt_session(
+                            &node_id,
+                            &display_name,
+                            Arc::clone(&loss_intolerant_inbox),
+                        )
+                        .await {
                             Ok(recovered_transport) => break recovered_transport,
                             Err(error) => {
                                 session_restart_backoff_secs = next_mqtt_restart_backoff_secs(

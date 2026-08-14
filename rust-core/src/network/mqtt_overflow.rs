@@ -4,9 +4,88 @@
 //! explicit metric when the channel reaches its loss-intolerant reserve. Messages, relays,
 //! receipts, acknowledgements and unknown formats are never classified as droppable.
 
-/// Slots kept free from best-effort traffic so a short burst of messages/relay/receipts can still
-/// be forwarded without waiting behind refreshable discovery traffic.
+use std::collections::VecDeque;
+use std::sync::Mutex;
+
+use tokio::sync::Notify;
+
+/// Slots kept free from best-effort traffic. Loss-intolerant publishes use their own core-owned
+/// inbox; this reserve keeps reconnect/control notifications out of refreshable FIFO saturation.
 pub(crate) const MQTT_LOSS_INTOLERANT_RESERVE: usize = 32;
+
+/// Separate bounded handoff owned by the core and shared by every replacement MQTT session.
+pub(crate) const MQTT_LOSS_INTOLERANT_INBOX_CAPACITY: usize = 256;
+
+/// A single-producer FIFO that survives transport replacement through `Arc` ownership.
+///
+/// The producer checks `wait_for_capacity` before polling the next broker packet, then calls
+/// `push_owned` for a loss-intolerant event. Therefore every packet already returned by
+/// `EventLoop::poll` has an owned location before another packet can be acknowledged. `push_owned`
+/// deliberately never drops: a violated producer invariant remains observable as depth > capacity
+/// instead of silently losing a relay or receipt.
+pub(crate) struct LossIntolerantInbox<T> {
+    entries: Mutex<VecDeque<T>>,
+    capacity: usize,
+    capacity_available: Notify,
+}
+
+impl<T> LossIntolerantInbox<T> {
+    pub(crate) fn new(capacity: usize) -> Self {
+        let capacity = capacity.max(1);
+        Self {
+            entries: Mutex::new(VecDeque::with_capacity(capacity)),
+            capacity,
+            capacity_available: Notify::new(),
+        }
+    }
+
+    pub(crate) fn push_owned(&self, item: T) -> usize {
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries.push_back(item);
+        entries.len()
+    }
+
+    pub(crate) fn pop(&self) -> Option<(T, usize)> {
+        let (item, remaining) = {
+            let mut entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let item = entries.pop_front()?;
+            (item, entries.len())
+        };
+        self.capacity_available.notify_one();
+        Some((item, remaining))
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+    }
+
+    pub(crate) fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub(crate) fn is_full(&self) -> bool {
+        self.len() >= self.capacity
+    }
+
+    pub(crate) async fn wait_for_capacity(&self) {
+        loop {
+            let notified = self.capacity_available.notified();
+            if !self.is_full() {
+                return;
+            }
+            notified.await;
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MqttIngressKind {
@@ -89,13 +168,70 @@ pub(crate) fn mqtt_ingress_disposition(
 
 /// Log the first drop and powers of two. The metric remains exact while a public-broker burst
 /// cannot turn overflow observability into a second log flood.
+pub(crate) fn should_log_bounded_counter(total: u64) -> bool {
+    total == 1 || total.is_power_of_two()
+}
+
 pub(crate) fn should_log_best_effort_drop(total_drops: u64) -> bool {
-    total_drops == 1 || total_drops.is_power_of_two()
+    should_log_bounded_counter(total_drops)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use super::*;
+
+    #[test]
+    fn loss_intolerant_inbox_is_fifo_and_bounded_by_producer_gate() {
+        let inbox = LossIntolerantInbox::new(2);
+        assert_eq!(inbox.capacity(), 2);
+        assert_eq!(inbox.push_owned("relay"), 1);
+        assert_eq!(inbox.push_owned("receipt"), 2);
+        assert!(inbox.is_full());
+
+        assert_eq!(inbox.pop(), Some(("relay", 1)));
+        assert!(!inbox.is_full());
+        assert_eq!(inbox.pop(), Some(("receipt", 0)));
+        assert_eq!(inbox.pop(), None);
+    }
+
+    #[test]
+    fn shared_inbox_survives_one_session_owner_drop() {
+        let core_owner = Arc::new(LossIntolerantInbox::new(2));
+        let session_owner = Arc::clone(&core_owner);
+        session_owner.push_owned("receipt");
+        drop(session_owner);
+
+        assert_eq!(core_owner.pop(), Some(("receipt", 0)));
+    }
+
+    #[tokio::test]
+    async fn full_inbox_waits_until_core_drains_capacity() {
+        let inbox = LossIntolerantInbox::new(1);
+        inbox.push_owned("relay");
+
+        assert!(tokio::time::timeout(
+            Duration::from_millis(10),
+            inbox.wait_for_capacity()
+        )
+        .await
+        .is_err());
+
+        assert_eq!(inbox.pop(), Some(("relay", 0)));
+        tokio::time::timeout(Duration::from_millis(10), inbox.wait_for_capacity())
+            .await
+            .expect("drain must notify the producer");
+    }
+
+    #[test]
+    fn zero_capacity_is_normalized_to_one_owned_slot() {
+        let inbox = LossIntolerantInbox::new(0);
+        assert_eq!(inbox.capacity(), 1);
+        assert_eq!(inbox.push_owned("message"), 1);
+        assert!(inbox.is_full());
+    }
 
     #[test]
     fn refreshable_topics_are_best_effort() {

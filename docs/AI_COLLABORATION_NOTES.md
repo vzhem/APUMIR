@@ -883,8 +883,25 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `E36F32E8CB1E6FA641D380550A496523840D174CC70B4888C04D5E2DD6B9B066`; hash отличается от
   r1b2. Windows HEAD/remote exact, Git modified только generated arm64 `.so`, не commit.
   State/log: `%TEMP%\apu-r4.2-r1b3-rust-build.json` и `.log`; APK/phones/public traffic не
-  менялись. Следующий source-only r1b4 — durable/owned pending handoff loss-intolerant event при
-  full critical reserve и session replacement, без silent relay/receipt loss.
+  менялись.
+- **2026-08-14 (доп.86)** — r4.2-r1b4 loss-intolerant owned handoff source complete, Windows
+  compile pending. `LossIntolerantInbox<MqttEvent>` — core-owned `Arc` FIFO cap 256, созданный до
+  generation-1 и передаваемый initial/replacement sessions. Message/relay/receipt/ACK/unknown
+  больше не идут в refreshable `mpsc.send().await`: EventLoop сначала кладёт их в shared inbox,
+  core `poll_event` drain'ит inbox раньше best-effort. После initial ConnAck producer перед каждым
+  следующим broker poll ждёт capacity через `Notify`; accepted packet уже owned и переживает Drop
+  old transport. Initial ConnAck новой session разрешён даже при inherited full inbox, иначе
+  recovery loop не смог бы вернуть transport core для drain. `push_owned` намеренно не drop даже
+  при invariant violation: depth>cap + payload-free error, затем producer backpressure. General
+  mpsc cap 256/reserve 32 теперь защищает ConnAck/control от refreshable flood. Liveness получил
+  phase `loss_intolerant_backpressure` и counters buffered/pending/backpressure во всех heartbeat/
+  stall/task-exit markers; новая session инициализирует inherited pending gauge. 7 sync + 1 async
+  tests покрывают FIFO, Arc owner survival после session drop, full wait+drain notify, zero cap и
+  taxonomy/reserve/log schedule; targeted ownership/route/field/delimiter checks PASS. Один общий
+  самодельный delimiter scan дал false result на legacy large `core.rs` strings/comments и был
+  отброшен; это не Rust defect. Host cargo/test не запускались. Broker/QoS/retain/topics не
+  изменены. Safety только между sessions внутри живого process; process persistence остаётся M8.
+  APK/phones/public traffic не менялись.
 
 ---
 

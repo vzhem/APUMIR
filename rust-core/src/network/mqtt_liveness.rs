@@ -15,7 +15,8 @@ pub enum MqttLoopPhase {
     Forwarding = 2,
     Backoff = 3,
     Idle = 4,
-    Stopped = 5,
+    LossIntolerantBackpressure = 5,
+    Stopped = 6,
 }
 
 impl MqttLoopPhase {
@@ -26,6 +27,7 @@ impl MqttLoopPhase {
             2 => Self::Forwarding,
             3 => Self::Backoff,
             4 => Self::Idle,
+            5 => Self::LossIntolerantBackpressure,
             _ => Self::Stopped,
         }
     }
@@ -37,6 +39,7 @@ impl MqttLoopPhase {
             Self::Forwarding => "forwarding",
             Self::Backoff => "backoff",
             Self::Idle => "idle",
+            Self::LossIntolerantBackpressure => "loss_intolerant_backpressure",
             Self::Stopped => "stopped",
         }
     }
@@ -54,6 +57,9 @@ pub struct MqttLivenessSnapshot {
     pub connacks: u64,
     pub notifications_forwarded: u64,
     pub best_effort_drops: u64,
+    pub loss_intolerant_buffered: u64,
+    pub loss_intolerant_pending: u64,
+    pub loss_intolerant_backpressure: u64,
     pub poll_errors: u64,
     pub request_timeouts: u64,
     pub request_errors: u64,
@@ -166,6 +172,9 @@ pub struct MqttLivenessProbe {
     connacks: AtomicU64,
     notifications_forwarded: AtomicU64,
     best_effort_drops: AtomicU64,
+    loss_intolerant_buffered: AtomicU64,
+    loss_intolerant_pending: AtomicU64,
+    loss_intolerant_backpressure: AtomicU64,
     poll_errors: AtomicU64,
     request_timeouts: AtomicU64,
     request_errors: AtomicU64,
@@ -190,6 +199,9 @@ impl MqttLivenessProbe {
             connacks: AtomicU64::new(0),
             notifications_forwarded: AtomicU64::new(0),
             best_effort_drops: AtomicU64::new(0),
+            loss_intolerant_buffered: AtomicU64::new(0),
+            loss_intolerant_pending: AtomicU64::new(0),
+            loss_intolerant_backpressure: AtomicU64::new(0),
             poll_errors: AtomicU64::new(0),
             request_timeouts: AtomicU64::new(0),
             request_errors: AtomicU64::new(0),
@@ -229,15 +241,40 @@ impl MqttLivenessProbe {
     }
 
     pub fn mark_best_effort_drop(&self) -> u64 {
-        let previous = self
-            .best_effort_drops
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                Some(current.saturating_add(1))
-            })
-            .unwrap_or_else(|current| current);
+        let total = saturating_increment(&self.best_effort_drops);
         self.mark_progress();
         self.set_phase(MqttLoopPhase::Idle);
-        previous.saturating_add(1)
+        total
+    }
+
+    pub fn mark_loss_intolerant_buffered(&self, pending: usize) {
+        saturating_increment(&self.loss_intolerant_buffered);
+        self.set_loss_intolerant_pending(pending);
+        self.mark_notification_forwarded();
+    }
+
+    pub fn mark_loss_intolerant_drained(&self, pending: usize) {
+        self.set_loss_intolerant_pending(pending);
+        self.mark_progress();
+        self.set_phase(MqttLoopPhase::Idle);
+    }
+
+    pub fn set_loss_intolerant_pending(&self, pending: usize) {
+        self.loss_intolerant_pending.store(
+            u64::try_from(pending).unwrap_or(u64::MAX),
+            Ordering::Release,
+        );
+    }
+
+    pub fn mark_loss_intolerant_backpressure(&self) -> u64 {
+        let total = saturating_increment(&self.loss_intolerant_backpressure);
+        self.set_phase(MqttLoopPhase::LossIntolerantBackpressure);
+        total
+    }
+
+    pub fn mark_loss_intolerant_capacity_available(&self) {
+        self.mark_progress();
+        self.set_phase(MqttLoopPhase::Idle);
     }
 
     pub fn mark_poll_error(&self) {
@@ -275,6 +312,11 @@ impl MqttLivenessProbe {
             connacks: self.connacks.load(Ordering::Relaxed),
             notifications_forwarded: self.notifications_forwarded.load(Ordering::Relaxed),
             best_effort_drops: self.best_effort_drops.load(Ordering::Relaxed),
+            loss_intolerant_buffered: self.loss_intolerant_buffered.load(Ordering::Relaxed),
+            loss_intolerant_pending: self.loss_intolerant_pending.load(Ordering::Acquire),
+            loss_intolerant_backpressure: self
+                .loss_intolerant_backpressure
+                .load(Ordering::Relaxed),
             poll_errors: self.poll_errors.load(Ordering::Relaxed),
             request_timeouts: self.request_timeouts.load(Ordering::Relaxed),
             request_errors: self.request_errors.load(Ordering::Relaxed),
@@ -297,6 +339,15 @@ impl MqttLivenessProbe {
     }
 }
 
+fn saturating_increment(counter: &AtomicU64) -> u64 {
+    let previous = counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(current.saturating_add(1))
+        })
+        .unwrap_or_else(|current| current);
+    previous.saturating_add(1)
+}
+
 fn duration_millis_u64(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
@@ -317,6 +368,9 @@ mod tests {
             connacks: 0,
             notifications_forwarded: 0,
             best_effort_drops: 0,
+            loss_intolerant_buffered: 0,
+            loss_intolerant_pending: 0,
+            loss_intolerant_backpressure: 0,
             poll_errors: 0,
             request_timeouts: 0,
             request_errors: 0,
@@ -388,6 +442,26 @@ mod tests {
     }
 
     #[test]
+    fn loss_intolerant_backpressure_is_observable_before_recovery() {
+        let state = snapshot(
+            MqttLoopPhase::LossIntolerantBackpressure,
+            100_000,
+            5_000,
+        );
+        assert_eq!(
+            mqtt_restart_reason(false, false, state, Duration::from_secs(90)),
+            Some(MqttRestartReason::Stalled {
+                phase: MqttLoopPhase::LossIntolerantBackpressure,
+                stalled_for_ms: 95_000,
+            })
+        );
+        assert_eq!(
+            MqttLoopPhase::LossIntolerantBackpressure.as_str(),
+            "loss_intolerant_backpressure"
+        );
+    }
+
+    #[test]
     fn stopped_probe_requires_restart_even_before_task_handle_finishes() {
         let state = snapshot(MqttLoopPhase::Stopped, 1_000, 999);
         let reason = mqtt_restart_reason(false, false, state, Duration::from_secs(90));
@@ -442,6 +516,10 @@ mod tests {
         probe.mark_notification_forwarded();
         assert_eq!(probe.mark_best_effort_drop(), 1);
         assert_eq!(probe.mark_best_effort_drop(), 2);
+        probe.mark_loss_intolerant_buffered(2);
+        probe.mark_loss_intolerant_drained(1);
+        assert_eq!(probe.mark_loss_intolerant_backpressure(), 1);
+        probe.mark_loss_intolerant_capacity_available();
         probe.mark_connack();
         probe.mark_poll_error();
         probe.mark_request_timeout();
@@ -453,8 +531,11 @@ mod tests {
         assert_eq!(state.polls_started, 1);
         assert_eq!(state.polls_completed, 1);
         assert_eq!(state.incoming_publishes, 1);
-        assert_eq!(state.notifications_forwarded, 1);
+        assert_eq!(state.notifications_forwarded, 2);
         assert_eq!(state.best_effort_drops, 2);
+        assert_eq!(state.loss_intolerant_buffered, 1);
+        assert_eq!(state.loss_intolerant_pending, 1);
+        assert_eq!(state.loss_intolerant_backpressure, 1);
         assert_eq!(state.connacks, 1);
         assert_eq!(state.poll_errors, 1);
         assert_eq!(state.request_timeouts, 1);

@@ -261,9 +261,20 @@ pure tests покрывают taxonomy, unknown safety, exact reserve boundary �
 integration checks PASS, host cargo не запускался. Windows Android Rust build source `a69c1a0`
 PASS за 65.99 с, exit=0/errors=0; arm64 `.so` 7,169,720 B, SHA-256
 `E36F32E8CB1E6FA641D380550A496523840D174CC70B4888C04D5E2DD6B9B066`. Loss-intolerant path
-по-прежнему ждёт `send` и никогда не drop; durable pending handoff перед session replacement
-остаётся отдельным r1b4. EMQX, dual publish и cross-broker dedup не подключены; transient sender
-остаётся отдельным долгом.
+больше не использует refreshable FIFO.
+
+**r4.2-r1b4 source complete, Windows compile pending:** core создаёт отдельный
+`LossIntolerantInbox<MqttEvent>` cap 256 до generation-1 и передаёт тот же `Arc` каждой replacement
+session. Message/relay/receipt/ACK/unknown сначала получают owned FIFO slot; `poll_event` всегда
+drain'ит их раньше best-effort. EventLoop после initial ConnAck не читает следующий broker packet,
+пока inbox full; accepted event уже в shared inbox и переживает Drop old transport. Initial ConnAck
+replacement session остаётся pollable даже при inherited full inbox, чтобы recovery не deadlock.
+General channel cap 256/reserve 32 теперь держит место для ConnAck/control. Depth/buffered/
+backpressure — fixed-memory counters в heartbeat/stall/exit; invariant violation сохраняет event и
+пишет payload-free error. 7 sync + 1 async tests покрывают FIFO, core/session Arc ownership,
+capacity wait+notify, zero-cap normalization и r1b3 taxonomy. Это session-level in-memory safety,
+не process restart persistence (она остаётся M8). Targeted static checks PASS; Windows build pending.
+EMQX, dual publish и cross-broker dedup не подключены; transient sender остаётся отдельным долгом.
 
 ### r4.3 — вторая session за feature gate
 
