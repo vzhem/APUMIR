@@ -276,9 +276,13 @@ RelayMessage {
   default-off feature; no subscribe/publish. Windows child feature build completed, wrapper wait
   was interrupted after child exit; corrected recovery PASS, feature `.so` D7A2…FE95 and
   observe-only markers exact. Corrected v11.16.14 APK build PASS, signer/native exact. Minimal
-  First Anna runtime harness stopped pre-ADB on PowerShell automatic-variable conflict; corrected
-  runtime2 pending, HiveMQ primary unchanged. EMQX fanout не
-  подключены; public delivery probe до новой APK и её liveness gate не повторять.
+  first Anna runtime harness stopped pre-ADB on PowerShell automatic-variable conflict. Corrected
+  runtime2 затем выполнил data-preserving Anna-only install+one launch: v11.16.14 PID `21678`
+  stable, peers unchanged. EMQX connected ConnAck=1/poll_errors=0 и contract
+  subscriptions/publishes=0/0; primary HiveMQ после одного bounded initial timeout восстановился
+  в том же generation/attempt, дал READY+heartbeat+64 incoming без stall/restart/request failure.
+  Parent incomplete вызван strict marker/error harness gate; saved-evidence-only analyzer pending,
+  runtime2/relaunch не повторять. EMQX fanout не подключён; public delivery probe не повторять.
   После fresh connection generation-2 normal setup прошёл exact: relay/store/cleanup/origin у
   Анны `1/1/1/1`, у Жени `1/1/1/0`, recipient Стас local/receipt/UI=`1/1/1`, без duplicate/
   error/crash. После successful conflict rejection отдельный normal control также прошёл exact:

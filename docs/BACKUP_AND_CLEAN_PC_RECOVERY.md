@@ -433,6 +433,23 @@ PowerShell variable names case-insensitive. Нельзя использоват�
 wrappers всегда `$ProcessId`/`$AndroidProcessId` и `$ArgumentList`. Проверять versioned scripts
 case-insensitive scan по списку automatic variables до phone/build actions.
 
+### Runtime-marker eviction и восстановившаяся сетевая ошибка
+
+Lifecycle-строки `starting`/`supervisor`/первый `ConnAck` могут исчезнуть из Android logcat до
+snapshot. Не перезапускать приложение только ради таких breadcrumbs. Более поздний status
+`connected` с реальным `connacks>=1`, нулём protocol errors и точным safety contract является
+более сильным доказательством состоявшейся session; ранние markers при этом честно записываются как
+`NOT_PRESERVED`, а не искусственно объявляются найденными.
+
+Так же нельзя использовать `MQTT error count == 0` как универсальный runtime gate. Допустимый
+случай: единичная bounded timeout/backoff-ошибка, после которой в короткий ограниченный срок та же
+session/generation/attempt получает настоящий ConnAck/READY, продолжает polling/incoming/heartbeat,
+не имеет stall/restart/request failure, не накапливает pending/backpressure и сохраняет PID.
+Ошибка считается реальной незакрытой проблемой, если последующего ready/progress нет, ошибки
+повторяются tight loop, растут backoff/pending, появляется stall/restart/request timeout либо
+меняется process. Классификацию делать versioned saved-evidence-only analyzer по immutable parent
+state + manifest hashes; analyzer не вызывает ADB/logcat/install/launch и пишет отдельный recovery
+state. Исходный incomplete state никогда не переписывать.
 
 ### `else` не распознан как команда
 

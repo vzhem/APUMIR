@@ -1192,6 +1192,26 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   and pre-ADB proof, separate state/evidence; other gates unchanged. Automatic-variable scan PASS.
   General rule: PowerShell variables case-insensitive applies to **all** automatic names, not only
   assignment sites; never use `$Args`/`$Pid` as function parameters. Next parser-validated runtime2.
+- **2026-08-14 (доп.113)** — approved corrected Anna runtime2 выполнен один раз; не повторять.
+  Parent state `%TEMP%\apu-r4.3-observe-v11.16.14-anna-runtime2.json`, SHA-256
+  `E4AADB476E794C8F2DD12223A4BD555FCE55D159A5051BD002F104D579B98425`, outcome
+  `INCOMPLETE_DO_NOT_REPEAT` из-за слишком строгой status matrix после полностью завершённых
+  install/launch/final-device gates. Anna data-preserving v11.16.14 install+one launch состоялись;
+  PID `21678` stable. Zhenya/Stas final evidence сохранило v11.16.13 и PID `20562/23149`.
+  Immutable evidence: 60 files, manifest SHA-256
+  `2A3CADDD0908E5FA566E0432DC4A68460AF1620C664BAC8CAA7C3F8262CE3FA0`; early/late p2p SHA-256
+  `A0A4063…D2830` / `5E32A7E…509E6`. EMQX status доказал настоящий ConnAck: connected,
+  connacks=1, polls=1/1, poll_errors=0, subscriptions=0, publishes=0, backoff=0. Более ранние
+  supervisor/starting breadcrumbs не сохранились; connected — более сильное acceptance-событие,
+  поэтому их отсутствие не означает connection failure и не разрешает relaunch. Primary HiveMQ
+  имел один initial `Network timeout; retrying in 1s`, затем через 1.432 с READY в том же
+  generation=1/attempt=1, 64 incoming и heartbeat polling с connacks=1, pending/backpressure/
+  request errors=0; no stall/restart. Это bounded transient recovery, не runtime failure. Добавлен
+  saved-evidence-only `scripts/r43_anna_runtime2_analyze.ps1`: exact parent/manifest/device/event
+  gates, без ADB/logcat/install/launch; Windows ParseFile+one analyzer run pending. До его PASS
+  r4.3 формально не закрывать. Общее правило: не требовать `MQTT error=0` как самоцель — норма
+  только bounded error с последующим same-session ready/progress; отсутствие последующего ready,
+  repeated/tight errors, stall/restart, pending growth или PID change остаются failure.
 
 ---
 

@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **v11.16.11 cold-start/reconnect PASS; delivery blocked by silent MQTT liveness loss; no test publish**
+Статус: **r4.3 v11.16.14 Anna runtime captured; immutable-evidence recovery analyzer pending**
 
 Дата: 2026-08-14
 
@@ -310,7 +310,18 @@ Corrected recovery PASS: feature marker/Finished release/errors=1/1/0; `.so` 7,1
 First artifact harness stopped before Gradle on scalar-zero Wait helper defect. Corrected build2
 PASS: v11.16.14 APK 22,615,564 B / `6C4D29DA…E13F5C`, signer/native exact. Minimal Anna-only
 First Anna harness stopped pre-ADB on `$Args` automatic-variable conflict; phones unchanged.
-Corrected runtime2 with distinct state pending; primary HiveMQ remains active.
+Corrected runtime2 выполнен один раз и не повторяется. Parent state SHA-256
+`E4AADB47…98425` сохранил `INCOMPLETE_DO_NOT_REPEAT`, хотя install/launch и final device checks
+завершились: Anna v11.16.14 PID `21678` stable; Zhenya/Stas остались v11.16.13 с PID
+`20562/23149`. Evidence manifest 60 files / SHA-256 `2A3CADDD…3FA0`. EMQX дал connected
+ConnAck=1, polls=1/1, poll_errors=0 и exact `subscriptions=0 publishes=0`; backoff=0. Ранние
+supervisor/starting breadcrumbs не сохранились, но connected ConnAck — достаточное и более сильное
+r4.3 acceptance-событие. Primary остался HiveMQ: один initial network timeout восстановился через
+1.432 с в том же generation=1/attempt=1, затем READY, heartbeat и 64 incoming; pending,
+backpressure, request failures, stall и restart=0. Поэтому strict `primaryErrors==0` дал ложный
+incomplete: одиночная bounded ошибка допустима только при доказанном последующем same-session
+ready/progress. Добавлен saved-only `r43_anna_runtime2_analyze.ps1`; до его Windows ParseFile/PASS
+r4.3 формально pending. Analyzer не использует ADB/logcat и не повторяет install/launch.
 
 ### r4.4 — bounded dual publish + cross-broker dedup
 
