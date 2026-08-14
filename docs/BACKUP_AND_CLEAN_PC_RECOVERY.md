@@ -438,28 +438,63 @@ Write-Host "EXTERNAL DRIVE SAFELY EJECTED"
 не отменяет этот результат. Не повторять опасные/изменяющие команды только ради удаления текста
 ошибки из консоли.
 
-### `NativeCommandError` на успешном `java -version`
+### Native stderr, `NativeCommandError` и command-specific exit codes
 
-**Симптом:** при `$ErrorActionPreference = "Stop"` backup прекращается на `java -version`, хотя
-Java исправна и выводит нормальную версию.
+**Симптом:** при `$ErrorActionPreference = "Stop"` guarded block прекращается на исправной native
+программе, например `java -version`, хотя она печатает правильную версию и фактически должна
+завершиться с exit code 0.
 
-**Причина:** Java штатно пишет version text в stderr; Windows PowerShell 5 может превратить
-stderr native-программы в terminating `NativeCommandError`.
+**Общая причина:** внешняя программа сама выбирает stdout/stderr. Windows PowerShell 5 при
+перенаправлении native stderr через `2>&1` превращает строки stderr в `ErrorRecord`; при
+`$ErrorActionPreference = "Stop"` первый такой record становится terminating
+`NativeCommandError` **до** проверки `$LASTEXITCODE`. Наличие stderr само по себе не означает
+ошибку программы.
 
-**Безопасный обход:** не отключать строгую проверку всего backup. Для environment capture
-направлять stderr в stdout внутри `cmd.exe`, отдельно записывать exit code:
+Известные взаимосвязанные случаи:
+
+- `java -version` штатно пишет всю версию в stderr;
+- Cargo / `cargo ndk` пишут progress и compiler warnings в stderr даже при успешном build;
+- Gradle/JVM, Git fetch и ADB daemon могут писать нормальный progress/diagnostics в stderr;
+- `adb shell pidof <package>` возвращает exit 1 + empty output, когда process просто отсутствует;
+- `git diff --quiet` возвращает exit 1, когда differences есть; `git grep` — когда совпадений нет.
+
+**Обязательное правило для critical harness:** не вызывать expected-stderr native command как
+`(& command 2>&1)` внутри outer `ErrorActionPreference=Stop`. Запускать через `Start-Process` с
+раздельными stdout/stderr files, затем проверять `.ExitCode`, command-specific allowed outcomes,
+positive success marker и artifact/hash. Пример для Java:
 
 ```powershell
 Set-Location C:\APUMIR-arena-test
+& {
+    $ErrorActionPreference = "Stop"
 
-$Output = cmd.exe /d /c "java -version 2>&1" | Out-String
-$ExitCode = $LASTEXITCODE
-Write-Host $Output.Trim()
-Write-Host ("Exit code: {0}" -f $ExitCode)
+    $Java = "C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot\bin\java.exe"
+    $Stdout = Join-Path $env:TEMP "apu-java-version.stdout.log"
+    $Stderr = Join-Path $env:TEMP "apu-java-version.stderr.log"
+
+    $Process = Start-Process -FilePath $Java -ArgumentList "-version" `
+        -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -Wait -PassThru
+    $Text = (@(Get-Content $Stdout) + @(Get-Content $Stderr)) -join "`n"
+
+    if ($Process.ExitCode -ne 0 -or $Text -notmatch '17\.0\.17') {
+        throw "Approved Java check failed: exit=$($Process.ExitCode)"
+    }
+    Write-Host $Text
+}
 ```
 
-Тот же шаблон применять к `git`, `rustc`, `cargo`, `cargo ndk`, `adb` и `gradlew` при сборе
-`ENVIRONMENT.txt`. Не считать команду успешной только по тексту: сохранять и exit code.
+Для Cargo/Gradle дополнительно требовать `Finished release`/`BUILD SUCCESSFUL`; для APK — exact
+version, signer и embedded native hash. Exit 0 без positive marker/artifact недостаточен. Stderr
+при exit 0 не скрывать: сохранять в evidence log и отличать warning/progress от `error:`.
+
+Для команд с нормальным nonzero outcome parser обязан явно разрешать только точную комбинацию,
+например `pidof exit=1 + empty`; любой другой exit/output — failure. Нельзя глобально считать
+exit 1 успешным и нельзя ослаблять весь outer guard через `ErrorActionPreference=Continue`.
+
+Если старый one-shot block уже остановился на `NativeCommandError`, его state/log не удалять и
+блок не повторять. Сначала read-only доказать `BuildAttempted/publishCalled=false`, отсутствие
+artifact/network effect и сохранность входных hashes; затем использовать distinct `build2`/
+`recovery2` state paths с исправленным native wrapper.
 
 ### Backup остановился после создания части файлов
 

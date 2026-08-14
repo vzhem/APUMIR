@@ -277,7 +277,8 @@ capacity wait+notify, zero-cap normalization и r1b3 taxonomy. Это session-le
 Rust build source `1a43342` PASS за 66.01 с, exit=0/errors=0; arm64 `.so` 7,180,888 B, SHA-256
 `E706A9009F28E842F6A030D0CCC7BABB28D56E20DEFB5FB34117FD87F032E7E5`. Первый v11.16.13 APK
 block остановился до Gradle из-за PowerShell `java -version` stderr handling; build не attempted,
-APK/phones не менялись. Read-only preflight и distinct corrected build2 pending. EMQX, dual publish
+APK/phones не менялись. Read-only no-effect/native-hash preflight PASS; distinct corrected build2
+pending. EMQX, dual publish
 и cross-broker dedup не подключены;
 transient sender остаётся отдельным долгом.
 

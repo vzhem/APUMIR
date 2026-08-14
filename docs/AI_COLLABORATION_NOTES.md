@@ -920,6 +920,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Сначала read-only подтвердить `BuildAttempted=false`, stable APK absent, exact r1b4 `.so` и
   generated-only Git status. Затем один corrected build2 с distinct state/log/APK; Java version
   получать через child `Start-Process`/redirect, чтобы штатный stderr не был terminating error.
+- **2026-08-14 (доп.89)** — read-only APK failure preflight PASS: old outcome
+  `FAIL_DO_NOT_RETRY_AUTOMATICALLY`, `BuildAttempted=false`, build exit empty, stable APK absent,
+  phones/ADB/install/launch=false; Windows HEAD `5dfa53c`; r1b4 native 7,180,888 B / E706…E7E5
+  exact; old state SHA-256 `A2C91AAF40F1241B6255C6B302573656C614FA63E0FD03CA6C119D17730FC039`.
+  Ничего не изменено. Общий Windows PowerShell 5 rule расширен в этом документе и
+  `BACKUP_AND_CLEAN_PC_RECOVERY.md`: redirected native stderr + outer EAP Stop может terminate до
+  `$LASTEXITCODE`; касается Java, Cargo/cargo-ndk, Gradle/JVM, Git progress, ADB diagnostics.
+  Critical harness обязан использовать `Start-Process` с separate stdout/stderr, ExitCode +
+  command-specific allowed outcomes + positive marker/artifact/hash. Нормальные nonzero отдельно:
+  `pidof exit=1+empty` = process absent, `git diff --quiet exit=1` = differences, `git grep exit=1`
+  = no match; никакого global allowance. После harness-only stop — immutable old evidence,
+  read-only no-effect proof и distinct build2/recovery2 paths, без удаления/повтора old block.
 
 ---
 
@@ -979,10 +991,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Не retry вслепую: проверить `confirmed=false`, ноль control ID в 3 phone logs и bounded TCP
   reachability; записать pre-publish failure. Только после этого разрешён один controlled retry
   того же ещё не опубликованного ID. Fallback broker бесполезен, если телефоны сидят на HiveMQ.
-- **`$ErrorActionPreference = "Stop"` превращает обычный stderr native-команды в
-  `NativeCommandError`** (проверено на `java -version`, который штатно пишет версию в stderr).
-  Для environment capture запускать через `cmd.exe /d /c "<command> 2>&1"`, записывать exit
-  code и output; не отключать проверки всего backup-скрипта ради одной команды.
+- **Windows PowerShell 5 + redirected native stderr + `$ErrorActionPreference="Stop"` может дать
+  ложный terminating `NativeCommandError` до проверки exit code.** Не только `java -version`:
+  Cargo/cargo-ndk progress, Gradle/JVM, Git fetch и ADB diagnostics также могут штатно писать в
+  stderr. В critical harness не использовать прямое `(& native 2>&1)`; запускать через
+  `Start-Process` с separate stdout/stderr, затем проверять ExitCode + command-specific outcome +
+  positive marker/artifact/hash. `pidof exit=1+empty`, `git diff --quiet exit=1`, `git grep exit=1`
+  имеют свои узкие нормальные значения; остальные nonzero не разрешать глобально. Полная матрица
+  и шаблон — `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md` §6.
 - **Прерванный milestone-backup не удалять вслепую:** пока есть `INCOMPLETE.tmp`, проверить
   уже созданные bundle/source/artifacts и их hashes, продолжить с точки остановки, заново создать
   `SHA256SUMS.txt`, и удалять marker только после завершения. Отдельная независимая verify-фаза
