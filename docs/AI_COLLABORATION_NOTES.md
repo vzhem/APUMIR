@@ -1181,6 +1181,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `subscriptions=0 publishes=0`, no secondary backoff; primary READY/heartbeat/incoming and zero
   error/stall/restart/request failures. State finally/no retry. Parser-contract and exact one-install/
   one-launch/forbidden-action scans PASS. Next sync, Windows ParseFile, approved execution once.
+- **2026-08-14 (доп.112)** — first Anna r4.3 runtime harness Windows parser PASS but stopped before
+  first ADB process: function parameter `$Args` conflicts case-insensitively with automatic `$args`,
+  so Start-Process ArgumentList was NULL. State
+  `%TEMP%\apu-r4.3-observe-v11.16.14-anna-runtime.json`, SHA-256
+  `D33273ACC3A728ED2DB883CC6D096D8D9BB1200B4D803E5177A6B81193137EDD`, outcome incomplete,
+  installStarted/launchStarted=false, PID empty; phones unchanged. Source review also found future
+  `$Pid` parameter conflict with read-only `$PID`. Old harness/state не повторять/не удалять.
+  Added distinct `r43_anna_runtime2.ps1`: `$ArgumentList`/`$AndroidProcessId`, exact old-state hash
+  and pre-ADB proof, separate state/evidence; other gates unchanged. Automatic-variable scan PASS.
+  General rule: PowerShell variables case-insensitive applies to **all** automatic names, not only
+  assignment sites; never use `$Args`/`$Pid` as function parameters. Next parser-validated runtime2.
 
 ---
 

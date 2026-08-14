@@ -425,6 +425,15 @@ Write-Host "EXTERNAL DRIVE SAFELY EJECTED"
 
 ## 6. Известные ошибки PowerShell и безопасное продолжение
 
+### Automatic variables case-insensitive
+
+PowerShell variable names case-insensitive. Нельзя использовать `$Pid` как локальную переменную
+или parameter: это read-only automatic `$PID`. Нельзя использовать `$Args` как function parameter:
+это automatic `$args`, и binder/call может передать NULL вместо ожидаемого ArgumentList. Для native
+wrappers всегда `$ProcessId`/`$AndroidProcessId` и `$ArgumentList`. Проверять versioned scripts
+case-insensitive scan по списку automatic variables до phone/build actions.
+
+
 ### `else` не распознан как команда
 
 **Симптом:** `else : Имя "else" не распознано...` после того, как пользователь отдельно вставил
