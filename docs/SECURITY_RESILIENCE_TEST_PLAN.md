@@ -282,7 +282,9 @@ pinned/reviewed dependencies и доказанная clean-PC recovery по
   подтвердил `publishConfirmed=false`, test-ID counts `0/0/0`, прежние три PID и записал
   failed-before-network marker; logs очищены.
 - Controlled retry опубликовал ровно один normal relay `sec-origin-1786707178388`: QoS1,
-  retain=false, 160 bytes. До/через 15 с PID стабильны. Full diagnostic доказал: Женя input=1,
-  stored=1; Стас input/delivery/receipt/UI=0 и имел `MQTT Network timeout`, retry 16 s. Setup
-  incomplete, publish того же ID и attack запрещены. Ранние строки Анны вытеснены из live log,
-  но immediate snapshot сохранён; сначала проверить его и поздний reconnect без новой сети.
+  retain=false, 160 bytes. Saved evidence: Анна/Женя input+stored=`1/1`; Стас
+  input/delivery/receipt/UI=`0/0/0/0`, `MQTT Network timeout`, retry 16 s. Позднее у всех
+  airplane=0/VALIDATED network и стабильные PID, но Стас так и не дал reconnect/re-subscribe.
+  ID abandoned: повтор publish и attack запрещены. Это availability/reconnect finding; следующий
+  шаг — fresh controlled restart baseline. Нужен будущий watchdog/liveness regression: после
+  timeout при VALIDATED network клиент обязан reconnect либо явно перейти в recoverable state.

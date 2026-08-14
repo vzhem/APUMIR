@@ -215,4 +215,8 @@ RelayMessage {
   `MessageReceived`, второй подавлен с повторным receipt; обе очереди cleanup, origin delivery
   один раз, seen tombstones исключили re-enqueue. Fresh subscriber: retained relay=0. После
   reconnect origin: re-subscribe/probe=1, все повторные mesh/UI counts=0, PID не изменились.
+  Отдельный security smoke позже выявил availability edge: Стас после `Network timeout` не дал
+  reconnect/re-subscribe даже при airplane=0 и VALIDATED network; non-retained setup relay
+  сохранили Анна/Женя, но recipient его не получил. ID abandoned, повтор запрещён. Нужен bounded
+  liveness/watchdog regression и recoverable reconnect state; это не опровергает r3 dedup.
 - **Объём relay-очереди** на телефоне (лимиты per-recipient/global — есть в MessageQueue).

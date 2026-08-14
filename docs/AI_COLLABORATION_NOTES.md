@@ -492,8 +492,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   relay один раз и stored=1; Стас test ID/input/delivery/receipt/UI=`0/0/0/0/0`, а log показал
   `MQTT error: Network timeout; retrying in 16s`. Поэтому setup incomplete, conflicting-origin
   запрещён. Текущий full log Анны уже вытеснил ранние relay строки (остались queue summaries),
-  поэтому её immediate saved snapshot нужно читать отдельно. Следом только late-reconnect/
-  saved-snapshot diagnostic; original relay больше не публиковать.
+  поэтому её immediate saved snapshot нужно читать отдельно; original не публиковать повторно.
+- **2026-08-14 (доп.31)** — saved evidence подтвердил store Анна/Женя=1/1; late diagnostic при
+  airplane=0 и VALIDATED network у всех не нашёл у Стаса ни reconnect/re-subscribe, ни relay/UI.
+  Первый security ID окончательно непригоден/abandoned. Это availability/reconnect наблюдение,
+  не crash и не доказанный dedup defect. Следующий безопасный шаг: force-stop всех трёх, fresh
+  start/PID/subscription/ConnAck baseline, новый ID и TTL 3600; старые relay не переиздавать.
 
 ---
 
@@ -686,8 +690,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
    23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
    в доп.22. Флешку хранить физически защищённо.
-7. Low-volume security smoke ID `sec-origin-1786707178388`: normal relay опубликован один раз,
-   Женя stored=1, но Стас не получил его из-за MQTT network timeout; setup incomplete, повтор и
-   conflict запрещены. Следующий шаг — local late-reconnect + immediate-snapshot diagnostic без
-   publish/clear; затем решить controlled restart/new ID. M3(d), UI/background не трогать.
+7. Low-volume security smoke ID `sec-origin-1786707178388` abandoned: Анна/Женя stored=1/1,
+   Стас при VALIDATED network после MQTT timeout не reconnect-нулся и delivery=0. Publish/conflict
+   старого ID запрещены. Следующий шаг — controlled restart всех трёх и fresh baseline с новым ID,
+   без relay publish. M3(d), UI/background не трогать.
 
