@@ -408,8 +408,10 @@ incomplete: state `FBD7A045…E44CE`, all 3 connected, Anna v15/PID12943 PASS, s
 identity/process gate до Stas snapshot. Phone changes/traffic=false. Preflight1 не повторять.
 Saved-only analyzer Windows PASS, state `ED0A3850…74D2C0`: Zhenya exact v11.16.13 identity/data,
 but process count=0; Anna exact v15/PID12943; Stas not attempted. Это readiness, не compatibility
-failure. Corrected read-only preflight2 готов/static PASS: snapshots saved before gates, all identities,
-dynamic process 0/1. Pending Windows ParseFile/once до любых launches.
+failure. Corrected read-only preflight2 Windows PASS, state `3E02E3A4…D0AD90`: all identities exact;
+Anna v15/PID12943 + Stas v13/PID23149 running, Zhenya v13 stopped, connected 3/3, actions/traffic=0.
+Pending minimal one controlled launch only Zhenya (no install/relaunch Anna/Stas), then mixed matrix.
+Active state/evidence не cleanup до закрытия gate; они hash-linked следующими harness.
 
 ### Mixed-version acceptance для MQTT overlay
 

@@ -573,6 +573,14 @@ verify уже завершились, parser failure исправлять read-o
 не удалять evidence, не rebuild и не перезаписывать готовый APK. Тот же принцип применять к
 `aapt`, `apksigner`, `dumpsys`, Cargo/Gradle markers и любым version-dependent CLI outputs.
 
+**Cleanup временных test-файлов:** пока gate не закрыт, все state/evidence в `%TEMP%`, на которые
+ссылаются последующие harness hashes, считаются активными и не удаляются. Versioned scripts в Git и
+точные APK/native artifacts не являются временным мусором. После итогового PASS сначала сделать
+read-only inventory: путь, размер, SHA-256, кем referenced и final/intermediate classification.
+Удалять можно только согласованный bounded список unreferenced intermediate logs/states; final PASS
+manifests/evidence и authoritative artifacts сначала включить в принятую milestone/evidence копию.
+Не использовать широкие `Remove-Item $env:TEMP\apu-* -Recurse` и не чистить evidence автоматически.
+
 **Long critical harness и ParserError:** большие install/test/backup blocks хранить versioned `.ps1`
 в `scripts/`, а не вставлять сотнями строк в interactive prompt. Перед запуском использовать
 `[System.Management.Automation.Language.Parser]::ParseFile` и требовать zero parse errors. Не

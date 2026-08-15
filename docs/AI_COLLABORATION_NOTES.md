@@ -1566,6 +1566,22 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   0-install/0-launch, forbidden, automatic-variable и marker checks PASS; LF SHA-256
   `6522B5B4…896A3C`. Следующий gate — sync/ParseFile и один preflight2; перед командой предупредить,
   что нужны подключённые Анна, Женя и Стас. Это read-only, preflight1 не повторяется.
+- **2026-08-15 (доп.146)** — corrected mixed preflight2 Windows ParseFile/execution **PASS**,
+  state `%TEMP%\apu-r4.4-mixed-v15-v13-preflight2.json`, SHA-256
+  `3E02E3A438D9D79F804FA4A94970618E56D5608507275AC6B5A2FA6D46D0AD90`. Connected=3/3,
+  running=2/3: Anna v11.16.15 PID12943, Zhenya v11.16.13 stopped (PID empty), Stas v11.16.13
+  PID23149. All identities/data exact; phone changes/user payload=false. Значит минимальное
+  необходимое действие перед mixed acceptance — один controlled launch только Zhenya, без install;
+  Anna/Stas не relaunch.
+- **Cleanup rule (уточнение пользователя, 2026-08-15):** не оставлять бесконтрольно временный
+  мусор, но и не удалять active immutable evidence. Во время незакрытого gate все referenced
+  `%TEMP%` state/evidence и authoritative APK/native сохранять: следующие harness сверяют hashes,
+  а удаление уничтожит audit/recovery. Versioned `scripts/*.ps1` — часть репозитория, не temp.
+  Generated E6C3 `.so` сохранять вне commit до завершения этапа. После закрытия mixed acceptance
+  сделать отдельную read-only inventory временных файлов и предложить bounded cleanup только
+  действительно ненужных intermediate logs/states; итоговые PASS manifests/artifacts сначала
+  сохранить по принятой evidence/milestone процедуре. Не удалять evidence автоматически или без
+  явного согласования состава.
 
 ---
 
