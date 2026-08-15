@@ -1639,6 +1639,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   observe1 не повторять. Следующий отдельный gate — controlled mixed-version delivery N→N-1 и
   N-1→N, затем third-phone relay другого version; сначала audit existing delivery/relay harness и
   определить минимальный test payload/identity evidence без ложных UI/ACK.
+- **2026-08-15 (доп.153)** — перед controlled delivery добавлен read-only
+  `scripts/r44_mixed_identity1.ps1`: exact observe1 90BC…86B5F, source/E6C3/worktree, three
+  serial/version/PID guards; baseline epoch на каждом и 135 s presence window. Для каждого current
+  PID сохраняет full/fresh p2p logs, получает own NodeId из startup marker либо безопасным
+  three-peer set-difference fallback, требует 3 unique safe `pk_…` и чтобы каждый телефон свежо
+  увидел NodeId двух остальных. Это одновременно доказывает common-HiveMQ full mesh и даёт точные
+  адреса для двух one-shot relay deliveries. No install/launch/log clear/network/payload/injected
+  traffic. Static parent/PIDs/wait, 0-install/0-launch, peer/node parsing, raw-exit/forbidden/auto-var/
+  payload/marker PASS; LF SHA-256 `BFFF7EDC…D17AAD`. Следующий gate sync/ParseFile/once; перед
+  командой предупредить, что нужны подключённые Анна, Женя и Стас, но шаг read-only.
 
 ---
 

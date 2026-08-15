@@ -416,8 +416,9 @@ running на live gate, launchStarted=false, install/payload/Anna/Stas launch=fa
 pre-action files, no launch command, PIDs Anna12943/Zhenya14811/Stas23149. Observe1 Windows PASS,
 state `90BC69AB…86B5F`: PID14811 stable 150 s, incoming HiveMQ=48, healthy heartbeat=1, all errors/
 overflow/stall/restart/request failures=0, all 3 PIDs stable, actions/payload=0. Common-broker readiness
-закрыт. Pending controlled N→N-1/N-1→N delivery then different-version third-phone relay. Active
-evidence не cleanup до закрытия gate.
+закрыт. Read-only identity1 готов/static PASS: 135 s fresh pairwise presence + 3 exact NodeIds, no
+traffic/actions. Затем controlled N→N-1/N-1→N delivery and different-version relay. Active evidence
+не cleanup до закрытия gate.
 
 ### Mixed-version acceptance для MQTT overlay
 
