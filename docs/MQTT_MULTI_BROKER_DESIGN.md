@@ -402,8 +402,10 @@ ADB/phone actions=0. One-shot wrapper затем увидел exact Anna `device
 `3375CA6B…CCDC3B`, install=false/launch=true, stable PID 12943; primary/secondary ready=1/1,
 fanoutTwo=6, duplicateDrops=3, Hive ingress/duplicate=21/2, EMQX ingress/duplicate=0/1, heartbeat=1,
 все stalls/restarts/request errors/timeouts/inbox invariant=0. User payload=false, Zhenya/Stas
-untouched. Anna-only public runtime gate закрыт; не повторять. Следующий gate — отдельный 3-phone
-mixed-version N↔N-1/relay acceptance; перед командой предупредить подключить Анну, Женю и Стаса.
+untouched. Anna-only public runtime gate закрыт; не повторять. Для отдельного 3-phone mixed-version
+N↔N-1/relay gate добавлен сначала read-only `r44_mixed_preflight1.ps1`: exact Anna v15 + Zhenya/
+Stas v13 identities/one-PID, без traffic/actions. Static PASS; pending Windows ParseFile/once.
+Перед командой явно предупредить, что должны быть подключены Анна, Женя и Стас.
 
 ### Mixed-version acceptance для MQTT overlay
 

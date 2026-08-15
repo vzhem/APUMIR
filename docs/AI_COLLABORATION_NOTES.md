@@ -1518,6 +1518,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   stable heartbeat/PID и common HiveMQ path без wire change. Следующий отдельный gate —
   mixed-version 3-phone N↔N-1/relay acceptance; перед его phone-командой предупредить подключить
   Анну, Женю и Стаса, отдельного подтверждения не ждать.
+- **2026-08-15 (доп.141)** — пользователь сообщил, что Анна, Женя и Стас подключены. Перед
+  дальнейшей phone-командой всё равно явно предупредить, что нужны все три. Добавлен versioned
+  read-only `scripts/r44_mixed_preflight1.ps1`: exact runtime3 PASS state/hash, branch/application/
+  E6C3 native guards, exact three serials, live UID/version/firstInstall/dataDir/one-PID snapshot.
+  Expected matrix: Anna v11.16.15/code11016015 UID10425; Zhenya v11.16.13/code11016013 UID10395;
+  Stas v11.16.13/code11016013 UID10387. Distinct immutable state/evidence; no install/launch/
+  force-stop/log clear/network/user payload. Correct raw ExitCode availability semantics. Static
+  delimiter, exact serial/version, parent, 0-install/0-launch, forbidden-action, automatic-variable,
+  one-shot/state checks PASS; script LF SHA-256 `C4BAF05E…81935F`. Следующий gate — Windows sync,
+  ParseFile/static exact and execute preflight1 once. Это только чтение телефонов, не acceptance
+  traffic; при incomplete не повторять автоматически.
 
 ---
 
