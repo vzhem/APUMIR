@@ -366,9 +366,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. **Никогда больше не
 > форматировать эту флешку:** future updates replace/rotate files only; retain previous+latest and
 > delete older only after new pair verifies. Compact v1 stopped before F: copy; do not repeat.
-> Compact v2 copied and hash-verified 278 files, then stopped only in final commit-spec formatting;
-> do not repeat. Resume v3 reuses all files/existing successful restore clone and recopies 0 files;
-> execution pending:
+> Compact v2 copied/hash-verified 278 files, then stopped in commit-spec formatting; do not repeat.
+> Resume v3 reverified all 278, then stopped on PS5 JSON outer-array Count=1; do not repeat. Resume v4
+> uses direct JSON array Count, reuses all files/existing restore clone and recopies 0; execution pending:
 > source/Git history/required overlays+signing material, previous v11.16.15,
 > latest v11.16.16, `LATEST.txt/json`; no build/.gradle/target/cache/log/bulk evidence, dependencies
 > download on new PC. Authoritative procedure: `docs/FLASH_BACKUP_RUNBOOK.md`; full read mandatory
@@ -2159,6 +2159,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   writes separate v3 state. Harness 9,565 B / SHA-256
   `25FE08F4573FB2885A67814C4EFB62CF6A34A00D5E13748744E80626ADDAB6DE`; execution pending; no
   format/network/phone/copy call.
+- **2026-08-15 (доп.186) — resume v3 hashes PASS, PS5 JSON count bug; resume v4 prepared:** v3
+  transfer/raw/ParseFile PASS and flash verifier again printed `ALL PORTABLE BACKUP HASHES PASSED:
+  278 files`, then `@(<ConvertFrom-Json array>).Count` returned 1 due outer-array wrapping. It stopped
+  before bundle/commit/final-marker changes; existing restore clone and INCOMPLETE remain, complete
+  absent. v3 state `INCOMPLETE_DO_NOT_REPEAT`, reusedCopiedFiles=true/filesRecopied=0/format=false;
+  do not repeat. v4 requires v2+v3 states, uses the same direct assignment as successful verifier
+  (`$ManifestEntries = ... | ConvertFrom-Json`, then `.Count`), expects 278, and otherwise retains the
+  zero-copy finalization sequence. `scripts/v111616_compact_flash_backup_resume_v4.ps1` 10,262 B /
+  SHA-256 `8015CD2C9433D684C68ED57807137207D59BCCD05665E9BD7ECF8A34B7C13F29`;
+  execution pending; no format/copy/network/phone action.
 
 ---
 
