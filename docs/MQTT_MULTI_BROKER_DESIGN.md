@@ -396,10 +396,10 @@ Corrected runtime2 связал old pre-action state + visibility hashes и вы
 ExitCode был cast в ложный0. Saved-only exact state/install/package/process analysis PASS: Anna
 v11.16.15/code11016015, UID/firstInstall/dataDir unchanged, process stopped; runtime/launch ещё не
 начинались. Distinct `r44_anna_runtime3.ps1` готов: все parent hashes, no install, live stopped-v15
-preflight, один launch и исходная 150 s matrix. Windows adoption exact `ed221bd` завершён; raw
-harness SHA остановил launcher до ParseFile/ADB из-за штатного CRLF/LF различия. Pending только
-local filter-aware Git identity + ParseFile/static gate, затем отдельное предупреждение подключить
-Анну и launch-only command. Zhenya/Stas USB не нужны и остаются v11.16.13.
+preflight, один launch и исходная 150 s matrix. Windows adoption exact `ed221bd` завершён;
+filter-aware committed/working blob exact и ParseFile/static gate PASS, install=0/launch=1,
+ADB/phone actions=0. Pending: отдельно попросить подключить только Анну и дождаться подтверждения,
+затем one-shot launch-only command. Zhenya/Stas USB не нужны и остаются v11.16.13.
 
 ### Mixed-version acceptance для MQTT overlay
 

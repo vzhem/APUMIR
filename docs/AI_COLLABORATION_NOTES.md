@@ -1487,6 +1487,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   evidence runtime3 absent, ADB/phones/actions=0. Пользователь отдельно закрепил обязательное
   правило: до выдачи любой phone-dependent команды заранее назвать конкретные нужные телефоны,
   попросить подключить и дождаться подтверждения; PC-only шаги явно так и называть.
+- **2026-08-15 (доп.138)** — local-only runtime3 filter-aware/parser gate PASS на Windows HEAD
+  `ed221bd`: committed и filtered working blob оба exact
+  `c7cbc2bf7d372db52bc56fc9d88059c68edeffed`; raw CRLF SHA ожидаемо
+  `9E3BA002…505AB3`. ParseFile zero errors, install calls=0, launch calls=1, forbidden actions=0;
+  runtime3 state/evidence absent, ADB commands/phone actions=0. Старые sync/hash blocks не
+  повторять. Следующий шаг требует **только Анну**: сначала отдельно попросить подключить Анну по
+  USB, разблокировать, включить USB debugging/подтвердить RSA и дождаться явного ответа; Женю и
+  Стаса не подключать. Лишь после подтверждения дать короткую one-shot команду запуска runtime3.
 
 ---
 
