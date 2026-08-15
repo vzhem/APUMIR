@@ -600,6 +600,14 @@ refs/heads/<session-branch>`. Но **наличие bundle у агента не 
    artifact/hash; raw process ExitCode может быть unavailable в Windows wrapper, поэтому один blank
    exit не отменяет сильные независимые markers, но availability обязана быть честно записана.
 
+Если inline Base64 прошёл `FromBase64String`, но decoded gzip не совпал по size/SHA-256, это
+**transfer-integrity failure**: чат/clipboard передал не те байты, даже если текст визуально похож.
+Не повторять тот же огромный block и не удалять созданный gzip. Поскольку hash gate стоит до
+`GzipStream`, `git apply` и build, такой stop сам по себе не меняет source/APK. Следующий шаг только
+read-only: фактические path/size/SHA-256 сохранённого gzip, наличие decompressed runner/patch/state,
+branch/HEAD/status и hashes охраняемых native/icon. Затем distinct recovery payload/paths; old bytes
+остаются evidence. Не обвинять пользователя и не ослаблять hash gate ради продолжения.
+
 Offline patch переносит содержимое, но не Git history: Windows `HEAD` остаётся base commit, а
 worktree становится dirty. Не объявлять его синхронизированным target commit. Историю позже
 согласовать отдельно; generated `.so` не commit, untracked icon не терять. Запрещены `git clean`,

@@ -1833,7 +1833,7 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   повторять/не удалять. Следующий PC-only шаг: authenticated inline Kotlin-only overlay, затем
   exact source/native/icon gates и APK compile; телефоны только после готового APK и отдельного
   трёхтелефонного visibility gate.
-- **2026-08-15 (доп.165) — Kotlin/APK gate подготовлен, execution pending:** versioned
+- **2026-08-15 (доп.165) — Kotlin/APK gate подготовлен:** versioned
   `scripts/m3d_kotlin_apk_build.ps1` добавлен commit `dfd36d9`; он не вызывает Rust build/ADB и
   собирает v11.16.16 только после exact Rust state/native/icon и 8 Rust+Kotlin blob gates. C-drive
   JDK17/SDK, one bounded Gradle child, BUILD SUCCESSFUL, package/version, V2 cert F843…, embedded
@@ -1842,8 +1842,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `B84E9F88156C8D4BB6D72B1D42CE7BFE9C00B2F776C77395510F28783FD7BC0A`; deterministic gzip
   9,081 B, SHA-256 `FF688DF96AD270E96B34886E29953E56F265D5C17033FC8696AF13C82FA2138D`, Base64 12,108 chars.
   Disposable exact-base apply/check и 5/5 target blobs PASS; harness blob
-  `715483c8a758a967df6e9a17cf2834cfcaaf4572`. Следующий шаг — один inline transfer/apply/parser/run;
-  outcome пока неизвестен, APK не построен. При incomplete automatic retry запрещён.
+  `715483c8a758a967df6e9a17cf2834cfcaaf4572`.
+- **2026-08-15 (доп.166) — первый Kotlin inline transfer остановлен до распаковки/apply:**
+  wrapper ожидал gzip runner 13,794 B / SHA-256 `E081A906…65332`, но после decode exact gate дал
+  `Embedded M3(d) runner gzip failed verification`. Значит сохранённые из чата Base64-байты не
+  совпали с подготовленным payload; это transfer-integrity failure, не ошибка пользователя и не
+  Kotlin/APU compile failure. По порядку кода stop произошёл до GzipStream, runner ParseFile,
+  inner patch, Git apply, Gradle, APK, ADB/phones. Большой block не повторять и созданный transfer
+  file не удалять: следующий PC-only шаг только read-only выводит его actual size/SHA-256, наличие
+  runner/patch/state paths, exact branch/HEAD/status/native/icon. После этого использовать distinct
+  recovery transfer; не угадывать и не переписывать evidence. APK всё ещё не построен.
 
 ---
 
