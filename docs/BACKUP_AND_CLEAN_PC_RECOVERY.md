@@ -549,6 +549,12 @@ outer `& {}` не начинался, но оставшиеся строки cli
 non-empty state path, проверки `Test-Path` и state SHA-256. Для нового исправленного запуска
 использовать distinct state/evidence names; старый parser output не выдавать за test attempt.
 
+**Cross-script literal с `$variable`:** double-quoted launcher string интерполирует переменную
+самого launcher. Если она там не объявлена, expected text незаметно превращается в empty/другую
+строку и даёт ложный count. Для поиска буквального кода вроде `$Gradlew` использовать single-quoted
+PowerShell string с doubled inner quotes или AST. До retry доказать, что throw был выше вызова
+harness и output state/artifacts отсутствуют; старый launcher не повторять.
+
 **Nested PowerShell build и `Start-Process -Wait`:** не использовать неограниченный `-Wait` для
 child PowerShell, который сам запускает Cargo/Gradle process tree. На Windows child может уже
 завершиться и записать `Finished release`/artifact, но parent wrapper продолжит ждать до `Ctrl+C`,

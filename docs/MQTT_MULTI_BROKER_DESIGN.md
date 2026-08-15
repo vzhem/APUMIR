@@ -377,7 +377,10 @@ pair оставляет HiveMQ common path для N-1. Startup при primary do
 7,248,576 B / `E6C34E86…80095B`; runtimeIntegration=true, wireChanged=false. APK/ADB/phones/public
 traffic=false. Source compile gate закрыт. Versioned `r44_v111615_apk_build.ps1` готов: exact
 integration state/native, C-drive JDK17/SDK, bounded children, v11.16.15 package/version, V2 cert,
-embedded E6C3…095B, unchanged hs_err/env restore и no ADB/phones; artifact-only Windows run pending.
+embedded E6C3…095B, unchanged hs_err/env restore и no ADB/phones. Первый outer launcher stopped
+pre-harness из-за `$Gradlew` interpolation в double-quoted literal scan; build/output отсутствуют.
+Versioned corrected runner использует single-quoted literal и exact absent-output proof; Windows
+artifact run pending.
 
 ### Mixed-version acceptance для MQTT overlay
 

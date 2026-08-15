@@ -1345,6 +1345,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   APK install/launch/ADB/phones/public traffic=false. Parser-trap, one-Gradle, bounded waits,
   automatic-variable, ordering/state, signer/native/version, C-drive и no-phone static scans PASS.
   Следующий gate — sync exact harness commit и один artifact-only Windows run; failure не retry.
+- **2026-08-15 (доп.125)** — первый outer launcher для v11.16.15 остановился **до вызова APK
+  harness**: проверка literal Gradle invocation была записана в double-quoted launcher string, и
+  отсутствующая там переменная `$Gradlew` интерполировалась в empty; count=0 вместо1. Windows HEAD
+  успел sync к `4419172`, parser/safety harness PASS, но строка `& $HarnessPath` ниже throw не
+  выполнялась. Поэтому Gradle/Java/AAPT/signer не запускались, v11.16.15 state/log/APK paths не
+  создавались, native E6C3…095B и phones неизменны. Старый launcher не повторять. Общее правило:
+  при cross-script literal scan текст с `$variable` задавать single-quoted строкой с doubled inner
+  quotes либо анализировать AST; double quotes без escape проверяют уже искажённый текст.
+- **2026-08-15 (доп.126)** — добавлен versioned `scripts/r44_v111615_apk_run.ps1`: exact source/
+  integration-state/native/worktree guards, требует отсутствие всех v11.16.15 output paths как
+  доказательство pre-harness stop, ParseFile harness и safe single-quoted literal Gradle count=1;
+  затем имеет ровно один call approved harness. Runner сам не содержит Gradle/Java/build/ADB/phone
+  action. Static parser-shape, literal-interpolation, one-call, automatic-variable и no-ADB scans
+  PASS. Следующий gate — sync exact runner commit, ParseFile и один runner execution.
 
 ---
 
