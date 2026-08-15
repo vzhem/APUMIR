@@ -1649,6 +1649,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   traffic. Static parent/PIDs/wait, 0-install/0-launch, peer/node parsing, raw-exit/forbidden/auto-var/
   payload/marker PASS; LF SHA-256 `BFFF7EDC…D17AAD`. Следующий gate sync/ParseFile/once; перед
   командой предупредить, что нужны подключённые Анна, Женя и Стас, но шаг read-only.
+- **2026-08-15 (доп.154)** — identity1 Windows ParseFile/execution **PASS**, state
+  `%TEMP%\apu-r4.4-mixed-v15-v13-identity1.json`, SHA-256
+  `ED16F594A36E388B7ABED0172FAD5AE43839F72B8167BBED5BEB55FF94EF5435`. Exact NodeIds:
+  Anna=`pk_591a15c0f5d659ebbb407bd377214ecc`, Zhenya=`pk_9f43c5971a820d4f6bc5dc4f4dca4f8b`,
+  Stas=`pk_7dc6b7c52ae086094e7b367b4df5bd0c`; каждый fresh peer set содержит ровно два остальных.
+  Phone changes/injected traffic=false. На основе этого добавлен первый controlled delivery
+  `scripts/r44_mixed_delivery_n_to_n1.ps1`: один QoS1 non-retained HiveMQ relay, Anna N origin →
+  Zhenya N-1 recipient, Stas N-1 third relay. Ожидается exact relay/store/local/receipt/remove/
+  origin/UI matrix: Anna 1/1/0/1/1/1/0, Zhenya 1/0/1/1/0/0/1, Stas 1/1/0/1/1/0/0; no errors,
+  all PIDs stable, receipt cleanup. Это **один видимый controlled test message** на Жене и один
+  public publish; не user-generated content. Install/launch/network/log clear отсутствуют.
+  Correct raw-exit + exact publisher helper hash; static parent/IDs/direction, 0-install/0-launch,
+  one external publish, expected matrix, forbidden/auto-var/state/marker PASS; LF SHA-256
+  `705B436A…DF9FE2`. Перед командой явно предупредить о 3 phones и одном тестовом сообщении;
+  automatic retry запрещён. Reverse direction только отдельным следующим gate после PASS.
 
 ---
 
