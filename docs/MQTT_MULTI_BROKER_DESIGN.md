@@ -418,8 +418,10 @@ state `90BC69AB…86B5F`: PID14811 stable 150 s, incoming HiveMQ=48, healthy hea
 overflow/stall/restart/request failures=0, all 3 PIDs stable, actions/payload=0. Common-broker readiness
 закрыт. Identity1 Windows PASS `ED16F594…F5435`: fresh pairwise presence + 3 exact NodeIds.
 Первый controlled delivery N→N-1 готов/static PASS: one HiveMQ QoS1 non-retained relay Anna(v15)→
-Zhenya(v13), Stas(v13) stores/cleans, exact one UI on Zhenya, one public test payload. Pending
-Windows ParseFile/once; reverse direction только после результата. Active evidence не cleanup.
+Zhenya(v13), Stas(v13) stores/cleans, exact one UI on Zhenya, one public test payload. Первый sync
+launcher stopped на GitHub:443 fetch outage до reset/ADB/publish; phones/state unchanged. Pending
+отдельный PC network fetch, затем local parser/once; reverse direction только после результата.
+Active evidence не cleanup.
 
 ### Mixed-version acceptance для MQTT overlay
 

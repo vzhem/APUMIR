@@ -186,6 +186,11 @@ v2.0 добавляет практический путь развития пр�
   но не копирующий Telegram или другие продукты.
 - [ ] Подготовить vector source (SVG), Android adaptive icon foreground/background, monochrome
   themed icon, launcher icon, notification icon, splash и безопасные поля для малых размеров.
+  Каноническое место исходника/экспортов: `design/branding/app-icon/README.md`; пользователь выбрал
+  neon speech-bubble + P2P mesh artwork 2026-08-15. Сначала сохранить exact original PNG + SHA-256
+  и rights/provenance, затем square master/adaptive/round/monochrome exports. Не менять текущие
+  Android mipmaps посреди r4.4 mixed acceptance: интеграция иконки требует новой APK и полного
+  artifact/upgrade/launcher regression gate.
 - [ ] Проверить узнаваемость на 16/24/48 px, светлом/тёмном фоне и в grayscale; закрепить права
   и исходники, чтобы логотип можно было законно использовать в релизах.
 - [ ] Создать UI design system: цветовые tokens, typography, spacing, shapes, icons, motion,

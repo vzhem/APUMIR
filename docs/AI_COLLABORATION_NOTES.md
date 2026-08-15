@@ -1665,6 +1665,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   expected matrix, forbidden/auto-var/state/marker PASS; final LF SHA-256 `E27C4A72…72493C`.
   Перед командой явно предупредить о 3 phones и одном тестовом сообщении;
   automatic retry запрещён. Reverse direction только отдельным следующим gate после PASS.
+- **2026-08-15 (доп.155)** — первый Windows launcher к N→N-1 delivery stopped на `git fetch`:
+  GitHub:443 недоступен ~21 s. Stop до reset/ParseFile/harness/ADB/Python/publication; delivery state/
+  evidence отсутствуют, phones unchanged. Windows HEAD остаётся `8cea566`; старый большой launcher
+  целиком не повторять. Следующий network step PC-only: TCP443 + exact fetch `d650499`, затем local
+  adoption/parser/delivery отдельно. Пользователь также передал новое neon speech-bubble/P2P-mesh
+  artwork для APU icon. Решение: сохранить immutable original в
+  `design/branding/app-icon/source/apu-icon-original.png`, затем square master/adaptive background+
+  foreground/round/monochrome/legacy exports по `design/branding/app-icon/README.md`. Не менять
+  Android resources посреди r4.4: это создаст новую APK и потребует artifact/upgrade/launcher
+  regression. Attachment виден в чате, но injected `/home/user/uploads/1786786331.png` фактически
+  отсутствовал в filesystem; не генерировать неточную копию, попросить повторно прикрепить original.
 
 ---
 
