@@ -357,13 +357,16 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > durable receipt cleanup и eventually origin DELIVERED. До M8 это best-effort в живых RAM queues.
 >
 > **Release checkpoint:** пользователь выбрал GitHub prerelease v11.16.16 и backup на Windows F:.
-> Draft создан, assets пока empty/unpublished. v1 остановился до F: copy из-за GitHub TCP 443 +
-> PS5 native stderr; не повторять. Длинный v2 payload повредился до execute; не повторять. v3
-> patch/hash/parser PASS, но backup остановился до F: directories: strict-mode `Get-TreeBytes` не
-> нашёл `.Sum` для пустого temp tree; v3 не повторять. Следующий single step — v4 patch поверх exact
-> v3: safe empty-tree sum + `previous v11.16.15`/`latest v11.16.16`, `LATEST.txt/json`, APK hashes и
-> verified V2 signer fingerprint. После F: PASS отдельно загрузить exact latest APK 22,664,712 B /
-> SHA-256 `446A1EE9…429DC0D`. Не запускать
+> Draft создан, assets пока empty/unpublished. v1/v2/v3 не повторять. v4 patch применился с CRLF,
+> read-only normalization доказала expected LF hash, затем normalization/write/parser PASS и full
+> workspace robocopy начался. Пользователь правильно остановил его: full build/cache/evidence copy не
+> соответствует portable backup. Partial F: tree будет полностью удалён отдельно разрешённым format.
+> Read-only gate доказал F:=Disk2 `General UDisk`, USB/MBR, FAT32 `SMARTBUY`, 14.62 GiB, healthy,
+> DriveType2, IsSystem/IsBoot=false. Пользователь явно разрешил format F: и требует compact restore:
+> source/history/required overlays+signing material, previous v11.16.15, latest v11.16.16,
+> `LATEST.txt/json`; no build/.gradle/target/cache/log/evidence, dependencies download on new PC.
+> Следующий step — guarded exFAT format only, then verify empty; compact copy отдельно. После F: PASS
+> загрузить exact latest APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D`. Не запускать
 > tag-trigger auto-build: tracked Rust `.so` не совпадает с verified APK. Mixed N↔N-1 и r4.5
 > остаются будущими stable-release gates. Иконка пока заморожена.
 >
@@ -2061,6 +2064,23 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   2,364 B / SHA-256 `193D5D7A242A0B4F2AB7129304F3844E036055B3086AD9340F07E4CC1727A7E8`, Base64 3,152 chars.
   Local `git apply --check --unidiff-zero` + apply reconstruction produced exact v4 target hash.
   Expected terminal marker: `PREVIOUS v11.16.15 + LATEST v11.16.16 VERIFIED; DRAFT UPLOAD PENDING`.
+- **2026-08-15 (доп.181) — v4 full copy stopped by user; F: format authorized and gated:** zero-context
+  patch source/compressed/patch/apply PASS but Windows `git apply` rewrote target as 502 CRLF lines:
+  24,055 B / `87FC4D99…9954`; read-only normalization gave exact LF 23,553 B /
+  `70BDDC91…5648`. Normalization/write/ParseFile PASS; v4 then started workspace robocopy and created
+  partial `F:\APU-backup-2026-08-15-v11.16.16\metadata\robocopy-workspace.log`. Пользователь
+  остановил command (`Ctrl+C`), prompt returned; v4 не повторять. Correction: portable clean backup,
+  not full caches/evidence. User explicitly authorized complete F: format. Read-only exact gate PASS:
+  label SMARTBUY, FAT32, healthy, 14.62 GiB/free13.34, DiskNumber2, FriendlyName `General UDisk`,
+  BusType USB, MBR, DriveType2, IsSystem=false, IsBoot=false, SafeToFormat=true. Versioned destructive
+  harness `scripts/v111616_flash_format_v1.ps1` binds all those identities and size 14–16 GiB,
+  rejects other mounted partitions, has exactly one `Format-Volume` call to exFAT/`APU_BACKUP`, then
+  verifies physical identity, filesystem/label and empty root. Harness 6,231 B / SHA-256
+  `A0FBC37C960F24D08A596DBDE7DCC5BA172E707BC709089BFA9C883BBF1B86F7`; execution pending. It writes
+  `%TEMP%\apu-v11.16.16-flash-format-v1.json`; after PASS compact copy is separate. Compact scope:
+  source/Git bundle + exact working overlays/signing material + restore/bootstrap instructions + two
+  signed APKs/hashes/latest marker; exclude `.git` duplication, build/.gradle/target/caches/logs and
+  bulk runtime evidence; new PC downloads Java/Android/Rust dependencies from internet.
 
 ---
 
