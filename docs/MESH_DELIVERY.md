@@ -42,6 +42,22 @@
 fanout/bytes и explicit relay consent. Каждый handoff требует хотя бы короткого разрешённого общего
 online-окна двух соседних custody nodes; если его физически нет, сообщение честно остаётся в Outbox.
 
+### 0.2. Цикл relay «уснул → проснулся»
+
+Если Женя получил custody, но никому не смог его передать, он перед сном атомарно сохраняет
+зашифрованный envelope, metadata и absolute expiry в persistent storage. После network/app/periodic
+wake APU в ограниченном foreground-окне:
+
+1. восстанавливает старую очередь и удаляет только expired/receipt-confirmed entries;
+2. рассылает bounded summary и пытается передать старые entries доступным совместимым узлам;
+3. запрашивает по missing IDs доступные новые relay entries, но только в пределах consent, TTL,
+   hop, friend-priority, per-peer/global quota и traffic/battery budget;
+4. если адресат/следующий relay опять недоступен, атомарно сохраняет старые и новые entries и снова
+   засыпает без busy-loop; следующий wake продолжает с того же состояния без продления TTL.
+
+Process death/reboot между любыми шагами не должен терять подтверждённую custody. Временная ошибка
+сети не равна receipt и не разрешает удалять envelope.
+
 Внешние ресурсы (MQTT/STUN/registry) — **только discovery**: помочь телефонам найти друг
 друга. Содержимое живёт **только на телефонах** (E2E-зашифрованное).
 

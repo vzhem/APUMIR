@@ -617,9 +617,11 @@ InviteFriendScreen
 - [ ] **M8 hard requirement — persistent relay custody:** encrypted RelayQueue переживает Android
   process death, reboot, app update и длительный сон; absolute `created/expires` timestamps, hop,
   origin/recipient/chat scope и dedup tombstones восстанавливаются без продления TTL и дублей.
-- [ ] Background relay scheduling: после возвращения сети телефон с persistent custody получает
-  bounded wake/foreground window по явному relay consent, обменивается summary и передаёт custody
-  следующему узлу; обычный receive-only mode по-прежнему не хранит чужие сообщения.
+- [ ] Background relay sleep/wake cycle: перед сном телефон атомарно сохраняет encrypted custody;
+  после network/app/periodic wake получает bounded foreground window, сначала восстанавливает старую
+  очередь, затем обменивается summary и запрашивает доступные новые relay items в пределах consent,
+  TTL/hop/quota/traffic budgets. Недоставленные старые и новые items снова durable сохраняются до
+  следующего wake без busy-loop и потери; обычный receive-only mode чужие сообщения не принимает.
 - [ ] Обязательный delayed multi-carrier gate: Анна→офлайн-Стас, Женя хранит; все offline; через
   день Женя пересекается online с новым relay D и передаёт ему; Женя снова offline/process killed;
   затем D пересекается со Стасом и доставляет ровно одно UI message. Receipt очищает D/Женю/Анну

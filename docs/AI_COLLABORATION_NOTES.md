@@ -349,12 +349,17 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Phone steps не повторять и телефоны сейчас не менять.
 >
 > **Следующий product priority — M8 durable delayed multi-hop custody:** encrypted persistent
-> RelayQueue должен пережить process death/reboot/sleep. Обязательный gate: Anna→offline Stas,
-> Zhenya stores; через день Zhenya→new relay D в коротком online overlap; Zhenya offline/killed;
-> позже D→Stas без Anna/Zhenya online, ровно одно UI message, durable receipt cleanup и eventually
-> origin DELIVERED. До M8 текущий multi-hop gossip работает только best-effort, пока RAM queues и
-> процессы живы; он не гарантирует сутки/перезапуск. Mixed N↔N-1 и r4.5 остаются release gates.
-> Иконка заморожена до завершения offline delivery.
+> RelayQueue должен пережить process death/reboot/sleep. Перед sleep custody flush; после wake APU
+> сначала восстанавливает старые items, bounded summary/missing-ID exchange запрашивает ещё доступные
+> relay items, пытается передать их и снова durable хранит всё недоставленное без продления TTL.
+> Обязательный gate: Anna→offline Stas, Zhenya stores; через день Zhenya→new relay D в коротком
+> overlap; Zhenya offline/killed; позже D→Stas без Anna/Zhenya online, ровно одно UI message,
+> durable receipt cleanup и eventually origin DELIVERED. До M8 это best-effort в живых RAM queues.
+>
+> **Release checkpoint:** пользователь выбрал GitHub prerelease v11.16.16 и backup на Windows F:.
+> Не tag-trigger auto-build: tracked Rust `.so` не совпадает с verified Windows APK. Публиковать
+> только exact APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D` как test prerelease с явным M8 gap.
+> Mixed N↔N-1 и r4.5 остаются будущими stable-release gates. Иконка пока заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -1978,6 +1983,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   startup recovery/expiry, tombstones/receipts, bounded background participation and controlled
   non-overlapping-window + restart/reboot acceptance. No common transport overlap means no handoff;
   UI must honestly retain Outbox/restricted state, never promise physically impossible transfer.
+- **2026-08-15 (доп.176) — relay sleep/wake requirement + authorized checkpoint release:** если
+  custody не удалось передать, relay атомарно сохраняет encrypted envelope перед sleep. На каждом
+  network/app/periodic wake сначала restores old queue, затем bounded summary/missing-ID exchange
+  запрашивает eligible новые relay items, attempts old+new delivery и снова durable сохраняет всё
+  недоставленное без TTL reset/busy-loop; transient error never deletes custody. Пользователь выбрал
+  GitHub **prerelease v11.16.16** и backup на Windows **F:**. Stable release не выбран. Exact verified
+  APK: 22,664,712 B, SHA-256
+  `446A1EE9254B7F57E037398E81209DB9E60C915CE2E3ADBCFA43A3FC8429DC0D`. Tag-triggered Actions
+  auto-build запрещён для этого checkpoint: tracked arm64 `.so` 6,935,552 B / `3C5E0D64…B2832`
+  отличается от embedded verified `.so` 7,263,416 B / `27B9D4DC…D1FD26C`. Создать draft prerelease
+  first, upload exact Windows APK+sha256, verify remote asset hash, then publish; release notes must
+  state manual functional success but missing exact runtime chain proof and M8 not implemented.
 
 ---
 
