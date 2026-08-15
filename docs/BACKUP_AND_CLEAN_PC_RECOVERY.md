@@ -451,6 +451,18 @@ session/generation/attempt получает настоящий ConnAck/READY, п
 state + manifest hashes; analyzer не вызывает ADB/logcat/install/launch и пишет отдельный recovery
 state. Исходный incomplete state никогда не переписывать.
 
+### USB подключён, но `adb devices` пуст
+
+Физически вставленный кабель не доказывает ADB visibility. Если saved stdout содержит только
+`List of devices attached` без serial, это не `unauthorized` и не ошибка APU: Windows/ADB вообще
+не видит телефон. До install/launch ничего не повторять. Разблокировать нужный телефон, выбрать
+USB mode «Передача файлов», проверить Developer options → USB debugging, принять RSA prompt;
+проверить data-capable cable/другой USB port. Не делать app data clear/force-stop/relaunch.
+Следующий gate — только read-only `adb devices -l`; продолжать phone-changing harness можно лишь
+при exact ожидаемом serial со status `device`. `unauthorized`, `offline`, другой serial или пустой
+list — STOP. Другие телефоны подключать только после явного предупреждения, если сценарий их
+действительно требует.
+
 ### `else` не распознан как команда
 
 **Симптом:** `else : Имя "else" не распознано...` после того, как пользователь отдельно вставил

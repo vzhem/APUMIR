@@ -387,8 +387,10 @@ v11.16.15 APK artifact PASS: state SHA-256 `3D893F5A…44078`, 22,664,716 B,
 APK/ADB/install/phones/public traffic=false. Пользователь разрешил Anna-only data-preserving
 install+one launch. Первый runtime harness stopped на read-only `adb devices`: state SHA-256
 `FF4F61A3…BEB7968`, install/launch=false, phones unchanged. Это pre-action ADB visibility gate,
-не runtime failure; old attempt не повторять. Saved adb-devices evidence analysis pending, затем
-только distinct runtime2 при exact Anna `device`. Zhenya/Stas USB не нужны и остаются v11.16.13.
+не runtime failure; old attempt не повторять. Saved stdout exact empty device list (28 B,
+`BBFCC723…65A630`), stderr empty: ADB вообще не видел Анну, не даже unauthorized/offline. После
+USB mode/debugging/RSA проверки нужен live read-only `adb devices -l`; distinct runtime2 допустим
+только при exact Anna `device`. Zhenya/Stas USB не нужны и остаются v11.16.13.
 
 ### Mixed-version acceptance для MQTT overlay
 

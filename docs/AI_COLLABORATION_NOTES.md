@@ -1409,6 +1409,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   не повторять/не удалять. Следующий шаг только saved evidence read: exact adb-devices stdout/stderr
   + hashes. После классификации можно создать distinct runtime2, но только при доказанном pre-action
   stop и exact current Anna `device`; никакого automatic retry.
+- **2026-08-15 (доп.131)** — immutable saved ADB evidence объяснило pre-action stop: stdout 28 B,
+  SHA-256 `BBFCC7239A6F1BE3544814EBDC6BCC9B66BF5B1F0B03BAA3340808F19265A630`, содержит только
+  `List of devices attached` и пустую строку; stderr empty SHA E3B0…B855. Значит Anna не была даже
+  `unauthorized/offline`: ADB вообще не видел USB device. Install/launch false подтверждены повторно,
+  phones unchanged. Физическое подключение кабеля не равно ADB visibility. Пользователю нужно
+  разблокировать Анну, выбрать USB mode «Передача файлов», убедиться, что USB debugging включён,
+  принять prompt RSA (если появится), при необходимости переподключить data-capable cable/USB port;
+  не force-stop/relaunch APU и не подключать Женю/Стаса. Затем только live read-only `adb devices -l`.
+  Runtime2 разрешён после exact `AUYF6R5923006121 device` и old-state hash/pre-action proof.
 
 ---
 
