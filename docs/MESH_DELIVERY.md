@@ -109,16 +109,27 @@ Process death/reboot между любыми шагами не должен те
 
 ```
 RelayMessage {
-  msg_id:        String      // глобальный UUID — ключ дедупликации
-  recipient:     NodeId      // кому адресовано (только он расшифрует)
-  origin_sender: NodeId      // кто изначально отправил (для ACK/статуса)
-  chat_scope:    String      // chat_id (1:1) ИЛИ group_id/topic (группы/каналы)
-  e2e_payload:   Bytes       // ciphertext — relay НЕ читает
-  created_at:    Instant
-  expires_at:    Instant     // TTL (по умолчанию 7 дней)
-  hop_count:     u8          // защита от петель (max hops)
+  msg_id:         String     // глобальный UUID — ключ дедупликации
+  recipient:      NodeId     // кому адресовано (только он расшифрует)
+  origin_sender:  NodeId     // кто изначально отправил (для ACK/статуса)
+  chat_scope:     String     // chat_id (1:1) ИЛИ group_id/topic (группы/каналы)
+  e2e_payload:    Bytes      // ciphertext — relay НЕ читает
+  created_at_ms:  i64        // абсолютные UTC epoch-миллисекунды
+  expires_at_ms:  i64        // абсолютный TTL-дедлайн (по умолчанию +7 дней)
+  hop_count:      u8         // защита от петель (max hops)
 }
 ```
+
+**M8-A (durable model boundary, 2026-08-15):** время записи — абсолютные UTC
+epoch-миллисекунды, а не process-local `Instant`, поэтому запись сериализуема
+(`serde`) и готова к SQLite-персистентности. Дедлайн TTL фиксируется один раз и
+НЕ продлевается после restart/recovery. Загрузка durable-записи обязана проходить
+`RelayMessage::from_persisted` (reject: пустые/oversized метаданные, wire-разделитель
+`|`, пустой/oversized payload, `expires < created`, уже истёкшие, `hop >= MAX_HOPS`;
+без panic при clock-before-epoch). Общие bounded-лимиты метаданных (msg_id/node ID
+128 B, chat scope 256 B, envelope 64 KiB) вынесены в `relay_queue.rs` и переиспользуются
+`offline_send.rs`/`engine/core.rs`. Wire format `relay|...` при этом не менялся:
+по сети по-прежнему передаётся относительный `ttl_secs`.
 
 ### 3.2. RelayQueue (на каждом телефоне)
 
@@ -236,6 +247,9 @@ RelayMessage {
 - **M8** — encrypted persistent RelayQueue + custody tombstones: SQLite переживает process death,
   reboot и update, хранит absolute expiry без продления TTL; bounded background relay wake передаёт
   следующему узлу. Gate — delayed chain Anna→Zhenya→D→Stas через сутки с reboot Zhenya/D.
+  Состояние 2026-08-15: **M8-A source slice выполнен** (durable epoch-ms timestamps, serde-запись,
+  validation/loading constructor, детерминированные unit tests; без SQLite write и без изменения
+  wire). Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-B RelayStore/SQLite migration.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).
 
 Каждый шаг: код → сборка (Rust + APK) → установка на 2–3 телефона → тест → запись в памятку.

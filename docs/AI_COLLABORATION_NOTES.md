@@ -323,8 +323,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 
 ## 6. Текущий фокус работы (resume here — следующая сессия)
 
-> **CURRENT OVERRIDE 2026-08-15:** активная ветка только `arena/01a000bc-apumir`; не
-> переключаться на старые session branches из исторического журнала ниже. Sandbox source M3(d) —
+> **CURRENT OVERRIDE 2026-08-15:** активная ветка этой сессии — только
+> `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
+> `arena/01a000bc-apumir`, tip `99ac840`). Не переключаться на старые session branches из
+> исторического журнала ниже и не создавать новую ветку. Sandbox source M3(d) —
 > commit `61e1580ff85aa1cfaed1f9e7a7522f1cd8e5d602`; versioned Kotlin/APK harness — commit
 > `dfd36d9`. Канонический Windows clone: `C:\APUMIR-arena-test`, его HEAD намеренно пока
 > `8cea566e50f439810e29fb1dc4ac14dc69b5fbc6`.
@@ -374,9 +376,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > workflow release-exists PASS/build skipped. Preferred next-time flow: Arena creates draft → user
 > uploads two flash files in browser → Arena verifies server digests and publishes. Version baseline
 > lives in `docs/VERSION_STATISTICS.md` and must get a short immutable entry+LOC delta for every global
-> version. Full no-questions handoff prompt: `docs/NEXT_AI_CHAT_BOOTSTRAP.md`. Next product priority:
-> M8-A durable timestamp/schema boundary; mixed N↔N-1/r4.5 remain stable-release gates. Иконка пока
-> заморожена.
+> version. Full no-questions handoff prompt: `docs/NEXT_AI_CHAT_BOOTSTRAP.md`. **M8-A source slice
+> выполнен 2026-08-15** (durable epoch-ms model + validation + tests, см. доп.193); compile/runtime
+> ждут Windows `build-rust.ps1`. Next product priority: **M8-B RelayStore/SQLite boundary** (после
+> compile gate M8-A). Mixed N↔N-1/r4.5 remain stable-release gates. Иконка пока заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2232,6 +2235,32 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   queue semantics, add deterministic clock/round-trip/TTL/hop tests, static checks+commit only; no
   SQLite write in the same slice and no sandbox cargo test. Then M8-B store, M8-C encryption/key
   lifecycle, M8-D restart/reboot recovery, M8-E bounded sleep/wake and M8-F phone acceptance.
+- **2026-08-15 (доп.193) — M8-A durable timestamp/model boundary source slice complete; Windows
+  compile pending:** новая Arena сессия стартовала на сгенерированной ветке
+  `arena/01a00674-apumir` (база `991da05`); handoff-коммит подтянут предписанным read-only
+  `git fetch origin arena/01a000bc-apumir` + `git merge --ff-only` в текущую ветку (tip `99ac840`,
+  worktree был clean, переключения веток не было). Изменения source: `relay_queue.rs` переводит
+  durable-facing `RelayMessage` с process-local `Instant` на абсолютные UTC epoch-ms
+  (`created_at_ms`/`expires_at_ms`, `i64`); добавлены serde derive, безопасные `utc_now_ms()`
+  (clock-before-epoch → 0, без panic) и `ttl_to_ms` (saturating), explicit-clock методы
+  `new_at_ms`/`with_ttl_at_ms`/`is_expired_at`/`remaining_ttl_secs_at` и `cleanup_expired_at`
+  (`is_expired`/`cleanup_expired`/`remaining_ttl_secs` — thin wrappers над системным UTC),
+  validation/loading constructor `from_persisted` + `validate_durable` (reject: пустые/oversized
+  msg_id/recipient/origin/chat_scope, wire-разделитель `|`, пустой/oversized payload,
+  `expires < created`, already-expired, `hop >= MAX_HOPS`) с отдельным `RelayValidationError`;
+  TTL абсолютный и НЕ продлевается serialize/deserialize/next_hop/restart. Общие bounded-лимиты
+  метаданных (msg_id/node ID 128 B, chat scope 256 B, envelope 64 KiB) вынесены в `relay_queue.rs`
+  и переиспользованы `offline_send.rs` (публичный реэкспорт сохранён) и `engine/core.rs`
+  (локальный дубль константы удалён; gossip resend считает остаток TTL через
+  `remaining_ttl_secs()` вместо `Instant`). 12 новых unit tests: round-trip, TTL-not-extended,
+  expired rejected/cleaned, invalid timestamps/hop rejected, delimiter/empty/oversized reject,
+  next_hop keeps absolute expiry, clock-before-epoch/saturation no panic, deterministic cleanup.
+  Существующие API/поведение (`new`, `with_ttl`, dedup, limits, gossip, hop, receipt path) и wire
+  format `relay|...` не менялись. `git diff --check` PASS; grep всех callsites выполнен.
+  Sandbox cargo test запрещён и не запускался: **compile/runtime ждут отдельного Windows gate
+  `build-rust.ps1 -Features mqtt-dual-broker`**. В этом slice нет SQLite write; следующий шаг —
+  M8-B RelayStore boundary + отдельная SQLite migration (relay records + tombstones, atomic
+  persist до enqueue/ACK/offer).
 
 ---
 

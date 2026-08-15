@@ -7,13 +7,15 @@
 
 use std::time::Duration;
 
-use crate::network::relay_queue::{RelayMessage, DEFAULT_RELAY_TTL};
-use crate::network::wire;
+// Общие bounded-лимиты mesh-метаданных живут в `relay_queue` (durable model
+// boundary, M8-A). Реэкспорт сохраняет прежний публичный путь этого модуля.
+pub use crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES;
 
-pub const MAX_MESH_RELAY_ENVELOPE_BYTES: usize = 64 * 1024;
-const MAX_MESSAGE_ID_BYTES: usize = 128;
-const MAX_NODE_ID_BYTES: usize = 128;
-const MAX_CHAT_SCOPE_BYTES: usize = 256;
+use crate::network::relay_queue::{
+    valid_metadata_atom, RelayMessage, DEFAULT_RELAY_TTL, MAX_CHAT_SCOPE_BYTES,
+    MAX_MESSAGE_ID_BYTES, MAX_NODE_ID_BYTES,
+};
+use crate::network::wire;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OfflineRelayPrepareError {
@@ -44,10 +46,6 @@ pub struct PreparedOfflineRelay {
     pub envelope: String,
 }
 
-fn valid_wire_atom(value: &str, max_bytes: usize) -> bool {
-    !value.is_empty() && value.len() <= max_bytes && !value.contains('|')
-}
-
 pub fn prepare_offline_relay(
     message_id: &str,
     recipient: &str,
@@ -55,16 +53,16 @@ pub fn prepare_offline_relay(
     chat_scope: &str,
     payload: &[u8],
 ) -> Result<PreparedOfflineRelay, OfflineRelayPrepareError> {
-    if !valid_wire_atom(message_id, MAX_MESSAGE_ID_BYTES) {
+    if !valid_metadata_atom(message_id, MAX_MESSAGE_ID_BYTES) {
         return Err(OfflineRelayPrepareError::InvalidMessageId);
     }
-    if !valid_wire_atom(recipient, MAX_NODE_ID_BYTES) {
+    if !valid_metadata_atom(recipient, MAX_NODE_ID_BYTES) {
         return Err(OfflineRelayPrepareError::InvalidRecipient);
     }
-    if !valid_wire_atom(origin, MAX_NODE_ID_BYTES) {
+    if !valid_metadata_atom(origin, MAX_NODE_ID_BYTES) {
         return Err(OfflineRelayPrepareError::InvalidOrigin);
     }
-    if !valid_wire_atom(chat_scope, MAX_CHAT_SCOPE_BYTES) {
+    if !valid_metadata_atom(chat_scope, MAX_CHAT_SCOPE_BYTES) {
         return Err(OfflineRelayPrepareError::InvalidChatScope);
     }
 

@@ -15,7 +15,9 @@ use crate::network::relay::RelayManager;
 use crate::network::presence::PresenceManager;
 use crate::network::message_queue::MessageQueue;
 use crate::network::offline_send::prepare_offline_relay;
-use crate::network::relay_queue::{RelayMessage, RelayQueue, DEFAULT_RELAY_TTL};
+use crate::network::relay_queue::{
+    RelayMessage, RelayQueue, DEFAULT_RELAY_TTL, MAX_MESH_RELAY_ENVELOPE_BYTES,
+};
 use crate::network::wire::MeshEnvelope;
 use crate::network::adaptive_polling::AdaptivePolling;
 
@@ -841,7 +843,8 @@ self.runtime = Some(runtime);
         const MAX_MESH_RELAYS_PER_ROUND: usize = 16;
         const MAX_MESH_RELAY_CANDIDATES_PER_ROUND: usize = 64;
         const MAX_MESH_RELAY_BYTES_PER_ROUND: usize = 256 * 1024;
-        const MAX_MESH_RELAY_ENVELOPE_BYTES: usize = 64 * 1024;
+        // MAX_MESH_RELAY_ENVELOPE_BYTES импортирован из relay_queue (общий
+        // bounded-лимит mesh-метаданных, M8-A).
         const MESH_RELAY_WINDOW_SECS: u64 = 30;
         const MAX_MESH_RELAYS_PER_WINDOW: usize = 32;
         const MAX_MESH_RELAY_BYTES_PER_WINDOW: usize = 512 * 1024;
@@ -1443,11 +1446,7 @@ self.runtime = Some(runtime);
                                                         examined += 1;
 
                                                         let ttl_secs = message
-                                                            .expires_at
-                                                            .saturating_duration_since(
-                                                                std::time::Instant::now(),
-                                                            )
-                                                            .as_secs();
+                                                            .remaining_ttl_secs();
                                                         if ttl_secs == 0
                                                             || message.hops_exceeded()
                                                         {
