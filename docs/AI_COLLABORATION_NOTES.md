@@ -358,10 +358,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 >
 > **Release checkpoint:** пользователь выбрал GitHub prerelease v11.16.16 и backup на Windows F:.
 > Draft создан, assets пока empty/unpublished. v1 остановился до F: copy из-за GitHub TCP 443 +
-> PS5 native stderr; не повторять. Длинный v2 inline payload повредился и `FromBase64String` остановил
-> wrapper до write/parse/execute, поэтому v2 также не повторять. Следующий single step — короткий v3
-> patch поверх уже hash-verified v1: отдельный state, no network execution, full local F: backup.
-> После PASS отдельно загрузить exact APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D`. Не запускать
+> PS5 native stderr; не повторять. Длинный v2 payload повредился до execute; не повторять. v3
+> patch/hash/parser PASS, но backup остановился до F: directories: strict-mode `Get-TreeBytes` не
+> нашёл `.Sum` для пустого temp tree; v3 не повторять. Следующий single step — v4 patch поверх exact
+> v3: safe empty-tree sum + `previous v11.16.15`/`latest v11.16.16`, `LATEST.txt/json`, APK hashes и
+> verified V2 signer fingerprint. После F: PASS отдельно загрузить exact latest APK 22,664,712 B /
+> SHA-256 `446A1EE9…429DC0D`. Не запускать
 > tag-trigger auto-build: tracked Rust `.so` не совпадает с verified APK. Mixed N↔N-1 и r4.5
 > остаются будущими stable-release gates. Иконка пока заморожена.
 >
@@ -2042,6 +2044,23 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   replaced by fixed offline warning before execution, and backup exits before unreachable legacy gh
   branch. Local reconstruction test proves 8 replacements produce exact target bytes/hash. Expected
   terminal marker remains `BACKUP COMPLETE ON F:; NETWORK RETRY SKIPPED; DRAFT UPLOAD PENDING`.
+- **2026-08-15 (доп.180) — v3 stopped before F: copy; mandatory two-version v4 prepared:** v3
+  transfer/source/target/parser all PASS, then `Get-TreeBytes` failed under StrictMode reading `.Sum`
+  for an empty `%TEMP%\apu-*` directory. Order proves no F: directory/copy yet; v3 state at
+  `%TEMP%\apu-v11.16.16-prerelease-backup-v3.json` must be preserved and v3 not repeated. User added
+  permanent flash policy: minimum old+new APK, with an explicit label identifying latest. v4 uses an
+  explicit file-length loop safe for empty trees and requires exact signed previous v11.16.15
+  22,664,716 B / `B675770D…3E9B2` plus latest v11.16.16 22,664,712 B / `446A1EE9…DC0D`.
+  Both build states/hash/content must prove V2 signer cert `F843CBE7…A5F7`. F: layout adds
+  `versions/previous-v11.16.15`, `versions/latest-v11.16.16`, per-APK `.sha256`, `LATEST.txt` and
+  `LATEST.json`; critical manifest includes all. Target
+  `scripts/v111616_prerelease_backup_offline_v4.ps1` 23,553 B / SHA-256
+  `70BDDC913F52048312CA749331505D208054582903D2D98BA785EB308A565648`. Authenticated zero-context
+  patch `scripts/v111616_offline_v4_from_v3.patch` 8,811 B / SHA-256
+  `007CDD0ECC86A6F9FA20ADFDAFD4E80F2B453BDE55E908BD6F6D0A31D838C096`; deterministic gzip
+  2,364 B / SHA-256 `193D5D7A242A0B4F2AB7129304F3844E036055B3086AD9340F07E4CC1727A7E8`, Base64 3,152 chars.
+  Local `git apply --check --unidiff-zero` + apply reconstruction produced exact v4 target hash.
+  Expected terminal marker: `PREVIOUS v11.16.15 + LATEST v11.16.16 VERIFIED; DRAFT UPLOAD PENDING`.
 
 ---
 

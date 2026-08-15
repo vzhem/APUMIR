@@ -1,0 +1,158 @@
+--- a/scripts/v111616_prerelease_backup_offline_v4.ps1
++++ b/scripts/v111616_prerelease_backup_offline_v4.ps1
+@@ -12,2 +12,2 @@
+-$StatePath = Join-Path $env:TEMP 'apu-v11.16.16-prerelease-backup-v3.json'
+-$FlashStatePath = Join-Path $MetadataBackup 'apu-v11.16.16-prerelease-backup-v3.json'
++$StatePath = Join-Path $env:TEMP 'apu-v11.16.16-prerelease-backup-v4.json'
++$FlashStatePath = Join-Path $MetadataBackup 'apu-v11.16.16-prerelease-backup-v4.json'
+@@ -19,0 +20,17 @@
++$LatestVersion = 'v11.16.16'
++$PreviousVersion = 'v11.16.15'
++$PreviousApkPath = Join-Path $env:TEMP 'apu-r4.4-dual-v11.16.15.apk'
++$ExpectedPreviousApkBytes = [int64]22664716
++$ExpectedPreviousApkSha256 = 'B675770D043E4ABA5D6D099275F489DB9666A9B16792DD45000A9EC2D243E9B2'
++$ExpectedSignerCertificateSha256 = 'F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7'
++$LatestBuildStatePath = Join-Path $env:TEMP 'apu-m3d-v11.16.16-apk-build.json'
++$ExpectedLatestBuildStateSha256 = '917077E82C25DFF9A020713BA4A391DD49D7AFD81446367F87A23B17216AFABC'
++$PreviousBuildStatePath = Join-Path $env:TEMP 'apu-r4.4-dual-v11.16.15-apk-build.json'
++$ExpectedPreviousBuildStateSha256 = '3D893F5A546008C3166C68026203EF2B395144EA9C072D6E9583E9FE84644078'
++$VersionsRoot = Join-Path $BackupRoot 'versions'
++$PreviousVersionDir = Join-Path $VersionsRoot 'previous-v11.16.15'
++$LatestVersionDir = Join-Path $VersionsRoot 'latest-v11.16.16'
++$PreviousVersionApkPath = Join-Path $PreviousVersionDir 'APU-v11.16.15.apk'
++$LatestVersionApkPath = Join-Path $LatestVersionDir 'APU-v11.16.16.apk'
++$LatestMarkerPath = Join-Path $VersionsRoot 'LATEST.txt'
++$LatestManifestPath = Join-Path $VersionsRoot 'LATEST.json'
+@@ -49,4 +66,4 @@
+-    $Measure = Get-ChildItem -LiteralPath $Path -Force -File -Recurse -ErrorAction Stop |
+-        Measure-Object -Property Length -Sum
+-    if ($null -eq $Measure.Sum) {
+-        return [int64]0
++    [int64]$TotalBytes = 0
++    $Files = @(Get-ChildItem -LiteralPath $Path -Force -File -Recurse -ErrorAction Stop)
++    foreach ($File in $Files) {
++        $TotalBytes += [int64]$File.Length
+@@ -54 +71 @@
+-    return [int64]$Measure.Sum
++    return $TotalBytes
+@@ -90 +107 @@
+-        schema = 3
++        schema = 4
+@@ -111,0 +129,8 @@
++        versionPolicy = 'minimum-two-previous-and-latest'
++        latestVersion = $LatestVersion
++        latestVersionApk = $LatestVersionApkPath
++        previousVersion = $PreviousVersion
++        previousVersionApk = $PreviousVersionApkPath
++        previousApkSha256 = $ExpectedPreviousApkSha256
++        signerCertificateSha256 = $ExpectedSignerCertificateSha256
++        latestMarker = $LatestMarkerPath
+@@ -164,0 +190,30 @@
++    if (-not (Test-Path -LiteralPath $PreviousApkPath -PathType Leaf)) {
++        throw "Previous verified APK is missing: $PreviousApkPath"
++    }
++    $PreviousApk = Get-Item -LiteralPath $PreviousApkPath
++    $PreviousApkHash = (Get-FileHash -LiteralPath $PreviousApkPath -Algorithm SHA256).Hash.ToUpperInvariant()
++    if ([int64]$PreviousApk.Length -ne $ExpectedPreviousApkBytes) {
++        throw "Previous APK size mismatch: expected $ExpectedPreviousApkBytes, got $($PreviousApk.Length)"
++    }
++    if ($PreviousApkHash -ne $ExpectedPreviousApkSha256) {
++        throw "Previous APK SHA-256 mismatch: expected $ExpectedPreviousApkSha256, got $PreviousApkHash"
++    }
++    foreach ($BuildStateSpec in @(
++        [pscustomobject]@{ Path = $LatestBuildStatePath; Hash = $ExpectedLatestBuildStateSha256; Version = $LatestVersion; ApkHash = $ExpectedApkSha256 },
++        [pscustomobject]@{ Path = $PreviousBuildStatePath; Hash = $ExpectedPreviousBuildStateSha256; Version = $PreviousVersion; ApkHash = $ExpectedPreviousApkSha256 }
++    )) {
++        if (-not (Test-Path -LiteralPath $BuildStateSpec.Path -PathType Leaf)) {
++            throw "Signed APK build state is missing: $($BuildStateSpec.Path)"
++        }
++        $BuildStateHash = (Get-FileHash -LiteralPath $BuildStateSpec.Path -Algorithm SHA256).Hash.ToUpperInvariant()
++        if ($BuildStateHash -ne $BuildStateSpec.Hash) {
++            throw "Signed APK build state hash mismatch for $($BuildStateSpec.Version): $BuildStateHash"
++        }
++        $BuildState = Get-Content -LiteralPath $BuildStateSpec.Path -Raw | ConvertFrom-Json
++        if ($BuildState.outcome -ne 'PASS' -or
++            $BuildState.apkSha256 -ne $BuildStateSpec.ApkHash -or
++            $BuildState.signerV2 -ne $true -or
++            $BuildState.signerCertificateSha256 -ne $ExpectedSignerCertificateSha256) {
++            throw "Signed APK build state content mismatch for $($BuildStateSpec.Version)"
++        }
++    }
+@@ -190 +245 @@
+-    $script:FetchWarning = 'Network intentionally skipped in offline v3 after the confirmed GitHub connectivity failure.'
++    $script:FetchWarning = 'Network intentionally skipped in offline v4 after the confirmed GitHub connectivity failure.'
+@@ -211 +266,2 @@
+-    [int64]$RequiredFreeBytes = $RepoBytes + $GitBytes + $TempBytes + $SafetyBytes
++    [int64]$ExplicitVersionCopiesBytes = ($ExpectedApkBytes * 2) + $ExpectedPreviousApkBytes
++    [int64]$RequiredFreeBytes = $RepoBytes + $GitBytes + $TempBytes + $ExplicitVersionCopiesBytes + $SafetyBytes
+@@ -220,0 +277,2 @@
++    New-Item -ItemType Directory -Path $PreviousVersionDir -Force | Out-Null
++    New-Item -ItemType Directory -Path $LatestVersionDir -Force | Out-Null
+@@ -248,0 +307,57 @@
++    Copy-Item -LiteralPath $PreviousApkPath -Destination $PreviousVersionApkPath -Force
++    Copy-Item -LiteralPath $SourceApkPath -Destination $LatestVersionApkPath -Force
++    $PreviousVersionCopy = Get-Item -LiteralPath $PreviousVersionApkPath
++    $LatestVersionCopy = Get-Item -LiteralPath $LatestVersionApkPath
++    $PreviousVersionCopyHash = (Get-FileHash -LiteralPath $PreviousVersionApkPath -Algorithm SHA256).Hash.ToUpperInvariant()
++    $LatestVersionCopyHash = (Get-FileHash -LiteralPath $LatestVersionApkPath -Algorithm SHA256).Hash.ToUpperInvariant()
++    if ([int64]$PreviousVersionCopy.Length -ne $ExpectedPreviousApkBytes -or
++        $PreviousVersionCopyHash -ne $ExpectedPreviousApkSha256) {
++        throw 'Previous version verification failed after F: copy'
++    }
++    if ([int64]$LatestVersionCopy.Length -ne $ExpectedApkBytes -or
++        $LatestVersionCopyHash -ne $ExpectedApkSha256) {
++        throw 'Latest version verification failed after F: copy'
++    }
++    $PreviousVersionHashPath = Join-Path $PreviousVersionDir 'APU-v11.16.15.apk.sha256'
++    $LatestVersionHashPath = Join-Path $LatestVersionDir 'APU-v11.16.16.apk.sha256'
++    Write-Utf8NoBom -Path $PreviousVersionHashPath -Text ("{0} *APU-v11.16.15.apk`n" -f $ExpectedPreviousApkSha256)
++    Write-Utf8NoBom -Path $LatestVersionHashPath -Text ("{0} *APU-v11.16.16.apk`n" -f $ExpectedApkSha256)
++
++    $LatestManifest = [ordered]@{
++        schema = 1
++        generatedAtUtc = [DateTime]::UtcNow.ToString('o')
++        policy = 'Keep at least previous and latest APU versions'
++        latest = [ordered]@{
++            version = $LatestVersion
++            folder = 'latest-v11.16.16'
++            apk = 'APU-v11.16.16.apk'
++            bytes = $ExpectedApkBytes
++            sha256 = $ExpectedApkSha256
++            androidSignature = 'V2 verified'
++            signerCertificateSha256 = $ExpectedSignerCertificateSha256
++        }
++        previous = [ordered]@{
++            version = $PreviousVersion
++            folder = 'previous-v11.16.15'
++            apk = 'APU-v11.16.15.apk'
++            bytes = $ExpectedPreviousApkBytes
++            sha256 = $ExpectedPreviousApkSha256
++            androidSignature = 'V2 verified'
++            signerCertificateSha256 = $ExpectedSignerCertificateSha256
++        }
++    }
++    Write-Utf8NoBom -Path $LatestManifestPath -Text ($LatestManifest | ConvertTo-Json -Depth 6)
++    $LatestMarker = @(
++        'LATEST APU VERSION: v11.16.16',
++        'Folder: latest-v11.16.16',
++        "APK SHA-256: $ExpectedApkSha256",
++        "Android signer certificate SHA-256: $ExpectedSignerCertificateSha256",
++        '',
++        'PREVIOUS APU VERSION: v11.16.15',
++        'Folder: previous-v11.16.15',
++        "APK SHA-256: $ExpectedPreviousApkSha256",
++        '',
++        'The APK files themselves have verified Android V2 digital signatures.'
++    ) -join "`r`n"
++    Write-Utf8NoBom -Path $LatestMarkerPath -Text $LatestMarker
++
+@@ -292,0 +408,6 @@
++        $PreviousVersionApkPath,
++        $PreviousVersionHashPath,
++        $LatestVersionApkPath,
++        $LatestVersionHashPath,
++        $LatestMarkerPath,
++        $LatestManifestPath,
+@@ -312 +433 @@
+-        Write-Host 'APU v11.16.16 BACKUP COMPLETE ON F:; NETWORK RETRY SKIPPED; DRAFT UPLOAD PENDING'
++        Write-Host 'APU BACKUP COMPLETE ON F:; PREVIOUS v11.16.15 + LATEST v11.16.16 VERIFIED; DRAFT UPLOAD PENDING'

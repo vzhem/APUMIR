@@ -144,6 +144,9 @@ v2.0 добавляет практический путь развития пр�
 - [ ] Создать `docs/RELEASE_PROCESS.md`.
 - [ ] Создать checklist ручной проверки перед релизом.
 - [ ] Создать rollback plan.
+- [ ] На флешке/внешнем backup всегда держать минимум две проверенные APK: `previous` и `latest`.
+  `LATEST.txt`/`LATEST.json` однозначно называют последнюю версию, содержат размеры, SHA-256 и
+  отпечаток Android signer certificate; APK обеих версий сохраняют проверенную цифровую подпись.
 - [ ] Ввести security/resilience gate по
   [`SECURITY_RESILIENCE_TEST_PLAN.md`](SECURITY_RESILIENCE_TEST_PLAN.md): короткий abuse smoke
   для каждой важной APK, полный controlled regression/local load для release candidate.

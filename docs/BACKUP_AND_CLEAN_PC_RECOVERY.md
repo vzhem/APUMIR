@@ -30,12 +30,16 @@
 
 1. `APU-source.bundle` — полный Git bundle со всеми доступными ветками, тегами и историей;
 2. `APU-source-<commit>.zip` — удобная копия файлов точно из проверенного коммита;
-3. проверенный `APU-<version>.apk`, его размер и SHA-256;
-4. проверенный `libp2p_core.so` для `arm64-v8a` как отдельный артефакт;
-5. `MILESTONE.txt`: версия, полный commit, ветка, дата, результаты теста и известные ограничения;
-6. `ENVIRONMENT.txt`: версии Java, Git, Gradle, Rust, `cargo-ndk`, ADB/SDK/NDK и пути;
-7. эту инструкцию и основные документы из `docs/`;
-8. `SHA256SUMS.txt` для всех файлов копии.
+3. минимум две проверенные APK: `versions/previous-<version>` и `versions/latest-<version>`,
+   каждая со своим размером, SHA-256 и сохранённой Android-подписью;
+4. `versions/LATEST.txt` и `versions/LATEST.json`: явно подписано, какая версия последняя, где
+   лежит предыдущая, их SHA-256 и отпечаток signer certificate; при каждом новом backup прежняя
+   `latest` становится `previous`, а новую нельзя помечать `latest` до проверки APK/signature/hash;
+5. проверенный `libp2p_core.so` для `arm64-v8a` как отдельный артефакт;
+6. `MILESTONE.txt`: версия, полный commit, ветка, дата, результаты теста и известные ограничения;
+7. `ENVIRONMENT.txt`: версии Java, Git, Gradle, Rust, `cargo-ndk`, ADB/SDK/NDK и пути;
+8. эту инструкцию и основные документы из `docs/`;
+9. `SHA256SUMS.txt` для всех файлов копии.
 
 GitHub полезен как дополнительная копия, но не заменяет автономный внешний носитель.
 Сборочные кэши (`build`, `.gradle`, `target`), `local.properties`, временные логи и stash в
