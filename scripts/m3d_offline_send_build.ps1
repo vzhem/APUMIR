@@ -9,6 +9,10 @@ $ExpectedApplicationCommit = "61e1580ff85aa1cfaed1f9e7a7522f1cd8e5d602"
 $GeneratedSoRelative = "android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so"
 $ExpectedBaselineSoSize = 7248576
 $ExpectedBaselineSoHash = "E6C34E86F18D9F63B9A641E3FD9FAFD67D5F1B7101729B2CB3DF25163380095B"
+$IconRelative = "design/branding/app-icon/source/apu-icon-original.png"
+$IconPath = Join-Path $RepoRoot $IconRelative
+$ExpectedIconSize = 1980451
+$ExpectedIconHash = "F2638C88A3EAB243766B8F4755183C89A3E1FFCB72B45A0BBC5F3D398C83ACA9"
 $IntegrationStatePath = Join-Path $env:TEMP "apu-r4.4-dual-integration-rust-build.json"
 $ExpectedIntegrationStateHash = "A3E247756AC92DC77B836DDF19DC8B509B6A6DE9E6CB493AD22287A36DB5B3E4"
 $BuildScript = Join-Path $RepoRoot "build-rust.ps1"
@@ -34,7 +38,7 @@ if ($ExistingArtifacts.Count -gt 0) {
 }
 foreach ($RequiredPath in @(
     $BuildScript, $SoPath, $CargoToml, $CoreSource, $OfflineSource, $BridgeSource,
-    $RepositorySource, $DaoSource, $IntegrationStatePath, $PowerShellExe
+    $RepositorySource, $DaoSource, $IntegrationStatePath, $IconPath, $PowerShellExe
 )) {
     if (-not (Test-Path -LiteralPath $RequiredPath -PathType Leaf)) {
         throw "Required M3(d) build input missing: $RequiredPath"
@@ -57,14 +61,23 @@ if ($LASTEXITCODE -ne 0) { throw "Cannot resolve Windows HEAD" }
 if ($LASTEXITCODE -ne 0) { throw "Application source differs from exact M3(d) commit" }
 
 $StatusBefore = @(& git status --porcelain=v1 --untracked-files=all)
-$UnexpectedBefore = @($StatusBefore | Where-Object { $_ -ne " M $GeneratedSoRelative" })
-if ($UnexpectedBefore.Count -gt 0) {
-    throw "Unexpected pre-build worktree changes: $($UnexpectedBefore -join '; ')"
-}
+$AllowedStatus = @(" M $GeneratedSoRelative", "?? $IconRelative")
+$UnexpectedBefore = @($StatusBefore | Where-Object { $_ -notin $AllowedStatus })
+if (
+    $UnexpectedBefore.Count -gt 0 -or
+    $StatusBefore.Count -ne 2 -or
+    $StatusBefore -notcontains " M $GeneratedSoRelative" -or
+    $StatusBefore -notcontains "?? $IconRelative"
+) { throw "Unexpected pre-build worktree changes: $($StatusBefore -join '; ')" }
 $BaselineSo = Get-Item -LiteralPath $SoPath
 $BaselineSoHash = (Get-FileHash -LiteralPath $SoPath -Algorithm SHA256).Hash
 if ($BaselineSo.Length -ne $ExpectedBaselineSoSize -or $BaselineSoHash -ne $ExpectedBaselineSoHash) {
     throw "M3(d) baseline native mismatch: size=$($BaselineSo.Length) hash=$BaselineSoHash"
+}
+$IconFile = Get-Item -LiteralPath $IconPath
+$IconHash = (Get-FileHash -LiteralPath $IconPath -Algorithm SHA256).Hash
+if ($IconFile.Length -ne $ExpectedIconSize -or $IconHash -ne $ExpectedIconHash) {
+    throw "APU icon original mismatch: size=$($IconFile.Length) hash=$IconHash"
 }
 $IntegrationStateHash = (Get-FileHash -LiteralPath $IntegrationStatePath -Algorithm SHA256).Hash
 if ($IntegrationStateHash -ne $ExpectedIntegrationStateHash) {
@@ -173,8 +186,15 @@ exit `$LASTEXITCODE
         throw "Generated M3(d) native is empty or unchanged"
     }
     $FinalStatus = @(& git status --porcelain=v1 --untracked-files=all)
-    $UnexpectedFinal = @($FinalStatus | Where-Object { $_ -ne " M $GeneratedSoRelative" })
-    if ($UnexpectedFinal.Count -gt 0) { throw "Unexpected build outputs: $($UnexpectedFinal -join '; ')" }
+    $UnexpectedFinal = @($FinalStatus | Where-Object { $_ -notin $AllowedStatus })
+    $IconHashAfter = (Get-FileHash -LiteralPath $IconPath -Algorithm SHA256).Hash
+    if (
+        $UnexpectedFinal.Count -gt 0 -or
+        $FinalStatus.Count -ne 2 -or
+        $FinalStatus -notcontains " M $GeneratedSoRelative" -or
+        $FinalStatus -notcontains "?? $IconRelative" -or
+        $IconHashAfter -ne $ExpectedIconHash
+    ) { throw "Unexpected build outputs/icon change: $($FinalStatus -join '; ')" }
     $Outcome = "PASS"
 }
 catch { $Failure = $_.Exception.Message; throw }
@@ -195,6 +215,8 @@ finally {
         generatedSoSize=$GeneratedSoSize; generatedSoSha256=$GeneratedSoHash
         stdoutPath=$StdoutPath; stderrPath=$StderrPath; logPath=$LogPath
         commandCapacity=256; commandDrainPerLoop=32; maxRelayEnvelopeBytes=65536
+        iconOriginalPath=$IconPath; iconOriginalSize=$IconFile.Length; iconOriginalSha256=$IconHash
+        iconOriginalTracked=$false; iconOriginalChanged=$false
         wireFormatChanged=$false; roomSchemaChanged=$false; transientMessageMqttRemoved=$true
         cloudflareContentFallbackRemoved=$true; apkBuilt=$false; adbUsed=$false
         phonesChanged=$false; publicTrafficSent=$false; automaticRetry=$false
@@ -208,6 +230,7 @@ finally {
     Write-Host "Finished/feature marker: $FinishedReleaseCount / $StdoutFeatureMarkerCount"
     Write-Host "Warnings/errors:         $CompilerWarningCount / $CompilerErrorCount"
     Write-Host "Generated .so size:      $GeneratedSoSize"; Write-Host "Generated .so SHA256:    $GeneratedSoHash"
+    Write-Host "Icon original SHA256:    $IconHash (unchanged/untracked)"
     Write-Host "Wire/Room schema changed: False / False"
     Write-Host "APK/ADB/phones/traffic:  False / False / False / False"
 }

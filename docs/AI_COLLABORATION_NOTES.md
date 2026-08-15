@@ -1724,9 +1724,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   source `61e1580`: C-drive/r4.4 integration/E6C3 baseline, source static contract, one bounded child
   `build-rust.ps1 -Features mqtt-dual-broker`, 900 s timeout, Finished/feature/error/native/status
   gates, distinct state/logs. APK/ADB/phones/public traffic=false. Static Parse-shape, source/baseline/
-  feature, one build, no Gradle/ADB/phone action, bounded wait/state/marker/auto-var PASS; LF SHA-256
-  `293A2D38…8E5C07`. Этот compile gate выполнить сразу после восстановления Windows GitHub и
-  переноса icon original; дополнительных разрешений не спрашивать.
+  feature, one build, no Gradle/ADB/phone action, bounded wait/state/marker/auto-var PASS; final LF
+  SHA-256 `4870BDB2…CECD3E`. Harness теперь явно допускает только exact untracked icon
+  F263…ACA9 рядом с modified native, проверяет её до/после и не требует icon commit для сборки.
+  Этот compile gate выполнить сразу после восстановления Windows GitHub; дополнительных разрешений
+  не спрашивать, перенос icon в Git можно завершить после основного offline gate.
 - **2026-08-15 (доп.161)** — пользователь запустил bare `./build-rust.ps1 -Features
   mqtt-dual-broker` из `C:\Users\User`; PowerShell дал CommandNotFound до script/build. Причина —
   отсутствовал обязательный `Set-Location C:\APUMIR-arena-test`; source/native/phones unchanged.
