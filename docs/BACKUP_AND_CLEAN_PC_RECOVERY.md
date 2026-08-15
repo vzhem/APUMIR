@@ -569,13 +569,44 @@ redundant `ls-remote` timeout/empty не отменяет fetch. Продолж�
 сделать отдельный read-only DNS/TCP/`curl.exe -I` report, подождать и позже выполнить один isolated
 fetch. Untracked artifact не удалять через `git clean`; обычный fetch/mixed reset его не трогает.
 
-**GitHub долго недоступен, но source нужен на Windows:** агент может создать incremental `git
-bundle` текущей session branch с prerequisite=точный Windows HEAD, выполнить `git bundle verify` и
-передать bundle через Arena file viewer. На Windows сначала проверить exact size/SHA-256 и
-`git bundle verify`, затем `git fetch <local.bundle> refs/heads/<session-branch>` без destination ref;
-FETCH_HEAD должен равняться ожидаемому commit. Только после этого обычный guarded mixed reset/
-restore. Bundle сохраняет Git objects/history и безопаснее inline patch больших source файлов.
-Он не переносит untracked artifacts и не заменяет eventual push, когда GitHub восстановится.
+### GitHub недоступен и Arena не передаёт скачиваемый файл
+
+Incremental `git bundle` с prerequisite=точный Windows HEAD остаётся правильным переносимым
+форматом: агент создаёт его, выполняет `git bundle verify`, фиксирует size/SHA-256; Windows после
+реального получения файла повторяет size/SHA/verify и делает `git fetch <local.bundle>
+refs/heads/<session-branch>`. Но **наличие bundle у агента не доказывает, что пользователь смог его
+скачать**. В проверенном случае Arena file viewer/Download и поиск в browser Downloads не доставили
+файл на Windows. Это ограничение интерфейса передачи, а не ошибка пользователя. Не отправлять его
+повторно искать карточку, кнопку Download или файл в Downloads.
+
+Рабочий fallback без скачивания — authenticated source overlay прямо в PowerShell:
+
+1. Зафиксировать exact Windows branch/HEAD/worktree и target application commit.
+2. Создать минимальный patch только нужной независимой части (например сначала Rust, затем Kotlin)
+   через Git diff от exact base; не включать generated binaries или untracked artwork.
+3. Deterministic gzip-сжать patch, записать размер/SHA-256 gzip и размер/SHA-256 raw patch,
+   закодировать gzip в Base64.
+4. Встроить Base64 в полный PC-only PowerShell here-string. Блок начинается с
+   `Set-Location C:\APUMIR-arena-test` и одного atomic
+   `& { $ErrorActionPreference = "Stop"; ... }`; сам создаёт `C:\APUMIR-transfer`.
+5. После Base64 decode проверить **размер и SHA-256 gzip**, после распаковки отдельно проверить
+   **размер и SHA-256 patch**. Base64 без этих проверок не является identity/authenticity gate.
+6. До apply проверить exact branch/HEAD, ожидаемый `git status`, hashes generated `.so` и каждого
+   сохраняемого untracked artifact. Затем выполнить `git apply --check --whitespace=error-all`,
+   `git apply`, проверить exact список изменённых paths и filter-aware `git hash-object --path`
+   каждого target против заранее записанного blob ID.
+7. Build запускать только после всех source gates, bounded child process с отдельными stdout/stderr
+   и immutable state. PASS требует positive completion marker, zero compiler errors и exact нового
+   artifact/hash; raw process ExitCode может быть unavailable в Windows wrapper, поэтому один blank
+   exit не отменяет сильные независимые markers, но availability обязана быть честно записана.
+
+Offline patch переносит содержимое, но не Git history: Windows `HEAD` остаётся base commit, а
+worktree становится dirty. Не объявлять его синхронизированным target commit. Историю позже
+согласовать отдельно; generated `.so` не commit, untracked icon не терять. Запрещены `git clean`,
+broad stash/pop, blind hard reset и automatic retry после partial/ambiguous attempt. Если overlay
+разделён Rust/Kotlin, Rust compile PASS не разрешает APK compile до применения и проверки Kotlin
+части. Bundle можно снова выбрать только когда есть реально работающий канал доставки файла; он не
+переносит untracked artifacts и не заменяет eventual push/history reconciliation.
 
 **Связанное правило parser compatibility:** raw stdout/stderr должны быть записаны до parsing.
 Нельзя считать build неуспешным только потому, что новая версия native tool изменила английский

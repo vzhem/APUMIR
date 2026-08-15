@@ -605,8 +605,10 @@ InviteFriendScreen
 ## Фаза 2.3 — P2P store-and-forward
 
 - [x] M3(d) source: app offline send → origin RelayQueue → bounded persistent MQTT mesh command;
-  backward-compatible N-1 wire, truthful `QUEUED_OFFLINE`, Room retry. **Build/runtime pending**
-  (2026-08-15; пользователь явно поднял приоритет выше оставшегося r4.5 test gate).
+  backward-compatible N-1 wire, truthful `QUEUED_OFFLINE`, Room retry. Rust Android feature-build
+  PASS 2026-08-15 после authenticated inline gzip/Base64 transfer: errors=0, generated arm64
+  `.so` 7,263,416 B / SHA-256 `27B9D4DC…D1FD26C`. **Kotlin overlay, APK и runtime pending**;
+  пользователь явно поднял приоритет выше оставшегося r4.5 test gate.
 - [ ] Перенести store-and-forward на Tier 1/Tier 2 nodes.
 - [ ] Relay nodes хранят только E2E encrypted payload.
 - [ ] Пользователь может разрешить устройству быть relay.

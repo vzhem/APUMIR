@@ -139,14 +139,16 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   тестируем в **одном каноническом клоне `C:\APUMIR-arena-test`**. Версионные снапшоты
   (`C:\APUMIR-v11.16.4-final`, `C:\APUMIR\main-validation-v11.16.3`) — НЕ мутировать.
   `C:\APUMIR` содержит `release-staging\`, но это НЕ рабочий git-клон.
-- ⚠️ **Код из Arena-sandbox не виден на моей машине, пока его не запушить.** Чтобы я мог
-  собрать/протестировать, ИИ должен закоммитить + запушить в `arena/<id>-apumir`, а я
-  подтягиваю ветку в `C:\APUMIR-arena-test`:
+- ⚠️ **Код из Arena-sandbox сам по себе не виден на моей Windows-машине.** Нормальный путь — ИИ
+  коммитит+пушит только текущую session branch, а Windows clone получает её через Git. Для этой
+  сессии branch fixed: `arena/01a000bc-apumir`; не checkout старые branch names из журнала:
   ```powershell
   Set-Location C:\APUMIR-arena-test
-  git fetch origin
-  git checkout arena/019ffc32-apumir
+  git fetch origin arena/01a000bc-apumir
+  git checkout arena/01a000bc-apumir
   ```
+  Если GitHub TCP 443 недоступен или Arena не отдаёт скачиваемый файл, не повторять Download/
+  Downloads: использовать authenticated inline gzip/Base64 процедуру из раздела 2.1.
 - Если путь к клону вдруг неизвестен — найди `gradlew.bat`:
   ```powershell
   Get-ChildItem -Path C:\ -Filter gradlew.bat -Recurse -ErrorAction SilentlyContinue | Select-Object -First 5 FullName
@@ -154,6 +156,40 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 - ⚠️ Чат/терминал иногда превращает точки в пакете (`com.vladimir.messenger.data`) в
   гиперссылку. В командах вида `gradlew --tests "..."` следи, чтобы FQN не исказился —
   лучше скажи мне вставить строку вручную.
+
+### 2.1. Передача файлов из Arena на Windows: обязательный рабочий порядок
+
+- **Проверенный факт 2026-08-15:** карточка Arena file viewer / `Download`, повторный поиск
+  файла в браузерных `Downloads` и просьба пользователю «найти скачанный файл» не передали bundle
+  на Windows. Это ограничение интерфейса передачи, а не ошибка пользователя. Новая ИИ-сессия не
+  должна снова отправлять пользователя к карточке, кнопке Download или папке Downloads.
+- Если GitHub недоступен и файл нельзя скачать из Arena, передавать нужные байты **непосредственно
+  внутри готового PowerShell-блока**: создать минимальный deterministic patch от точно
+  проверенного Windows base, gzip-сжать его, закодировать Base64 и встроить payload в here-string.
+  Если full overlay велик, сначала разделить его на независимые минимальные части (например Rust,
+  затем Kotlin), а не заставлять пользователя вручную копировать исходники.
+- Блок всегда начинается с `Set-Location C:\APUMIR-arena-test`, затем единый atomic
+  `& { $ErrorActionPreference = "Stop"; ... }`. До записи/apply он проверяет exact branch/HEAD,
+  ожидаемый `git status` и hashes сохраняемых generated/untracked artifacts. В текущем кейсе нельзя
+  потерять generated `.so` и untracked original icon; `git clean`, broad stash/pop и hard reset
+  запрещены.
+- Base64 нельзя считать аутентифицированным сам по себе. Обязательны два независимых identity
+  gate: размер+SHA-256 сжатых байтов **сразу после decode** и размер+SHA-256 распакованного patch.
+  Только затем `git apply --check --whitespace=error-all`, сам `git apply`, проверка точного списка
+  worktree paths и filter-aware Git blob каждого target source file. Любое несовпадение = STOP до
+  build; не применять частично и не делать automatic retry.
+- После offline patch Windows `HEAD` намеренно остаётся на base commit, а source становится dirty.
+  Это доказывает exact содержимое и compile, но **не** переносит Git history/commit identity. Нельзя
+  писать, что ветка синхронизирована с target commit. Историю позже согласовать отдельно без commit
+  generated `.so` и без потери untracked icon.
+- Incremental Git bundle остаётся хорошим автономным форматом и должен проходить `git bundle
+  verify`, size/SHA-256 и prerequisite checks, но в этой среде его передача через Arena download
+  фактически не сработала. Не выбирать bundle как пользовательский путь, пока нет реально
+  доступного канала доставки байтов; рабочий fallback здесь — inline gzip/Base64 с hashes.
+- Critical inline payload обязан быть **полным**: не давать отдельно короткую строку build, которую
+  новичок может запустить из `C:\Users\User`. Блок сам создаёт `C:\APUMIR-transfer`, сохраняет
+  immutable state/logs, имеет bounded child wait и печатает PASS только после source/artifact/hash
+  gates. Телефоны для source transfer/Rust/APK compile не нужны — это нужно прямо сказать.
 
 ---
 
@@ -287,9 +323,35 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 
 ## 6. Текущий фокус работы (resume here — следующая сессия)
 
-Ветка: `arena/019ffc32-apumir` (все коммиты на remote). Канонический клон для сборки/теста:
-`C:\APUMIR-arena-test` (arm64-v8a). Сборки: `build-rust.ps1` (Rust) + gradlew assembleRelease
-(см. раздел 8.1). Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC) — см. раздел 8.
+> **CURRENT OVERRIDE 2026-08-15:** активная ветка только `arena/01a000bc-apumir`; не
+> переключаться на старые session branches из исторического журнала ниже. Sandbox source M3(d) —
+> commit `61e1580ff85aa1cfaed1f9e7a7522f1cd8e5d602`; documentation tip перед этой записью —
+> `da2344fa9899d3787ca169d56a4c140e50ce68c7`. Канонический Windows clone:
+> `C:\APUMIR-arena-test`, его HEAD намеренно пока `8cea566e50f439810e29fb1dc4ac14dc69b5fbc6`.
+>
+> **Последний доказанный результат:** Rust-only M3(d) overlay передан inline gzip/Base64, exact
+> source blobs проверены и `build-rust.ps1 -Features mqtt-dual-broker` дал PASS: Finished/feature
+> `1/1`, compiler errors `0`, generated `.so` 7,263,416 B / SHA-256
+> `27B9D4DC87CA7046D9F862F9ED153FDDD48C26E4053B620FE46986D25D1FD26C`; state
+> `%TEMP%\apu-m3d-rust-direct-build.json` SHA-256
+> `7589A0349386640443039B2C09EB311F269C342473715CB22E23E5314A1716A1`. Не повторять build и не
+> удалять state/logs. Windows worktree ожидаемо содержит dirty Rust overlay, generated native и
+> exact untracked icon F263…ACA9; HEAD/history ещё не reconciled.
+>
+> **Непосредственный следующий шаг PC-only:** подготовить и передать таким же встроенным
+> authenticated gzip/Base64 блоком только Kotlin M3(d) overlay; проверить exact pre-state, текущий
+> regenerated native, icon, compressed/raw hashes, `git apply --check`, target Git blobs и полный
+> status. Затем собрать/проверить test APK на C-drive JDK17. Никаких Arena Download/Downloads и
+> никакого phone action на этом шаге. После APK PASS отдельно предупредить подключить Анну, Женю и
+> Стаса; phone-команда начинается read-only visibility gate. Mixed N↔N-1 и r4.5 остаются release
+> gates, но не блокируют M3(d). Иконка заморожена до завершения offline delivery.
+>
+> Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
+> labels не переопределяют CURRENT OVERRIDE.
+
+Канонический клон для сборки/теста: `C:\APUMIR-arena-test` (arm64-v8a). Сборки:
+`build-rust.ps1` (Rust) + gradlew assembleRelease (см. раздел 8.1). Хостовый `cargo test` НЕ
+работает (ring/aws-lc MSVC) — см. раздел 8.
 
 **Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1/r2/r3)):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
@@ -1742,14 +1804,35 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   обязательный Phase 0.6 добавлен в MASTER_PLAN. При нулевом разрешённом общем endpoint обещать
   bypass нельзя: truthful restricted status + phone Outbox/retry, без ложного SENT. Random public
   proxies, hidden VPN и unsupported domain fronting запрещены.
-- **2026-08-15 (доп.162)** — Windows GitHub TCP outage обойдён без inline source и без смены ветки:
-  создан incremental Git bundle `/home/user/APU-M3d-offline-send.bundle`, 38,526 B, SHA-256
-  `D95CF88AD76FCE34FE271F0CA7E15DA5D395E285BCCEF5A09140F76BE846AF1F`. Ref session branch =
-  `8d82d473…`, prerequisite Windows HEAD=`8cea566…`; `git bundle verify` PASS. Пользователь
-  скачивает bundle на C:, local `git fetch <bundle> <ref>` → FETCH_HEAD, mixed reset/restore с
-  сохранением E6C3 `.so` и untracked icon, затем versioned M3(d) build. Это reusable offline
-  source-transfer path при outage; bundle не содержит icon binary и не заменяет eventual remote
-  push/history sync. Не использовать patch/paste больших source файлов.
+- **2026-08-15 (доп.162, superseded transfer route)** — создан и проверен incremental Git bundle
+  `/home/user/APU-M3d-offline-send.bundle`, 38,526 B, SHA-256
+  `D95CF88AD76FCE34FE271F0CA7E15DA5D395E285BCCEF5A09140F76BE846AF1F`; prerequisite Windows
+  HEAD=`8cea566…`, `git bundle verify` PASS. Но Arena file viewer/Download фактически не передал
+  файл пользователю: повторный поиск в browser Downloads тоже не помог. Это сбой доступного канала
+  передачи, не действие пользователя. Bundle как формат остаётся valid, но этот пользовательский
+  маршрут abandoned: не отправлять снова к карточке/Download/Downloads и не утверждать, что файл
+  уже находится на Windows.
+- **2026-08-15 (доп.163) — проверенный обход передачи без скачивания:** из exact Windows base
+  `8cea566` к M3(d) app source `61e1580` создан минимальный Rust-only patch: 23,530 B, SHA-256
+  `BCB546D61C01852790FB0EAF7B2BD1BD85A20B3D6DCB5570F1B1CD42DE45F7F9`; deterministic gzip:
+  5,862 B, SHA-256 `9087F7C58CD0983FAC07F2B9ECCC89A3B4A1EB26BB9AD0F4CDEE25E06DC84655`, Base64 7,816 chars.
+  Payload встроен прямо в один PC-only PowerShell block. Он проверил branch/HEAD, exact исходный
+  E6C3 `.so` и icon F263…, восстановил оба файла в `C:\APUMIR-transfer`, проверил их size/SHA,
+  выполнил `git apply --check` + apply и проверил blobs четырёх Rust targets. Это канонический
+  fallback при недоступных GitHub и Arena download: minimal gzip/Base64 + hashes, не ручная вставка
+  исходников. Rust-only overlay намеренно не переносит Kotlin и Git history; Windows HEAD остаётся
+  `8cea566`, worktree dirty, Kotlin overlay нужен отдельным следующим шагом до APK.
+- **2026-08-15 (доп.164) — M3(d) Android Rust compile PASS:** exact Rust overlay собран через
+  `build-rust.ps1 -Features mqtt-dual-broker`. Marker Finished/feature=`1/1`, compiler errors=0;
+  новый arm64 `.so` 7,263,416 B, SHA-256
+  `27B9D4DC87CA7046D9F862F9ED153FDDD48C26E4053B620FE46986D25D1FD26C`, отличается от baseline
+  E6C3…. State `%TEMP%\apu-m3d-rust-direct-build.json`, SHA-256
+  `7589A0349386640443039B2C09EB311F269C342473715CB22E23E5314A1716A1`; child PID 8996,
+  raw exit недоступен/blank, но exact completion marker, zero compiler errors и regenerated native
+  identity дали bounded evidence PASS. GitHub/ADB/phones=false; icon unchanged. Build и state не
+  повторять/не удалять. Следующий PC-only шаг: authenticated inline Kotlin-only overlay, затем
+  exact source/native/icon gates и APK compile; телефоны только после готового APK и отдельного
+  трёхтелефонного visibility gate.
 
 ---
 
@@ -1970,24 +2053,28 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 Хостовый `cargo test` НЕ работает (ring/aws-lc MSVC).
 
 ### 9.7. Старт новой сессии
-1. Прочитать **весь** `docs/AI_COLLABORATION_NOTES.md` (⚙️ принцип, 🌐 mesh, раздел 9).
-2. Прочитать `docs/MESH_DELIVERY.md`, `docs/SECURITY_RESILIENCE_TEST_PLAN.md` и правило
-   milestone-backup в `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`.
-3. Проверить, что текущая ветка — `arena/019ffc32-apumir`. M3.1, M3(a), M3(b) и авто-receipt
-   M3(b.1) собраны и проверены на Анне/Жене/Стасе: дедуп, cleanup, origin-delivery без шторма.
-4. M3(c.1), c.2 relay-path, r1 reconnect и r2 unique receipt проверены. R2 выявил stale
-   retained relay blocker.
-5. R3 `v11.16.10` полностью проверен: local delivery=1, duplicate suppressed=1, receipts=2,
-   обе очереди cleanup=1, origin-delivery=1, seen tombstones, retained relay=0; после reconnect
-   Анны re-subscribe/probe=1, все повторные mesh/UI counts=0 при тех же PID.
-6. Milestone-backup на незашифрованном `F:` полностью проверен и безопасно извлечён: 24 files,
-   23 manifest entries, bundle/offline restore/source ZIP/artifacts passed; manifest SHA-256 —
-   в доп.22. Флешку хранить физически защищённо.
-7. Первый low-volume security smoke generation 2 полностью PASSED: normal setup, один
-   conflicting-origin drop и normal control после attack дали exact expected semantics, PID 3/3,
-   errors/crash=0; post-control resources записаны в доп.46. Ничего не повторять. Следующий этап
-   не начинать без согласования; M3(d), UI/background пока не трогать.
-
-ost-control resources записаны в доп.46. Ничего не повторять. Следующий этап
-   не начинать без согласования; M3(d), UI/background пока не трогать.
+1. Прочитать **весь** `docs/AI_COLLABORATION_NOTES.md` (⚙️ принцип, 🌐 mesh, разделы 2.1, 6 и 9),
+   `docs/MASTER_PLAN_v2.md` и `docs/MESH_DELIVERY.md`; перед relevant gate также прочитать
+   `docs/SECURITY_RESILIENCE_TEST_PLAN.md` и `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md`.
+2. Проверить, что текущая Arena-ветка — только `arena/01a000bc-apumir`; не checkout старые branch
+   names из исторического журнала. Не менять фиксированную ветку и не делать release/tag/PR без
+   отдельного разрешения.
+3. M3(a/b/c), reconnect, unique receipt, dedup/cleanup и первый low-volume security smoke уже
+   проверены; не повторять. r4.4 dual runtime также PASS. Mixed N↔N-1 и r4.5 остаются release gates,
+   но пользователь явно разрешил не блокировать ими M3(d).
+4. M3(d) source commit `61e1580…` готов. Windows Rust-only overlay уже exact applied и feature-build
+   PASS: `.so` 7,263,416 B / `27B9D4DC…D1FD26C`; state/hash — в CURRENT OVERRIDE и доп.164.
+   Build/state не повторять и не удалять. Windows HEAD всё ещё base `8cea566…`; это offline content
+   overlay, не Git history synchronization.
+5. Следующий шаг только ПК: передать Kotlin-only patch встроенным gzip/Base64 PowerShell-блоком по
+   разделу 2.1, затем собрать и проверить APK. Не использовать Arena Download/Downloads. Generated
+   `.so` не commit; icon F263…ACA9 сохранить, иконку не интегрировать до offline acceptance.
+6. Перед первой следующей phone-командой назвать Анну, Женю и Стаса и предупредить подключить;
+   отдельного подтверждения не ждать, но начать с exact read-only visibility gate и остановиться до
+   install/launch/change при absent/unauthorized/offline. Acceptance: recipient offline, origin
+   отправляет через app, third phone stores, origin disconnects, recipient returns и получает ровно
+   одно UI message, receipt cleans relay и origin eventually DELIVERED.
+7. Активные `%TEMP%` states/logs, APK/native и hash-linked evidence не удалять. После закрытия gate
+   сделать bounded inventory/cleanup; milestone-backup предлагать только после действительно крупной
+   проверенной APK/этапа, не после docs-only или промежуточного Rust compile.
 
