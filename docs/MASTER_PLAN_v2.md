@@ -251,6 +251,68 @@ logo и согласованный современный интерфейс в 
 доставляют сообщения/receipts без дублей и потери cleanup; несовместимость определяется явно и
 безопасно, а mixed-version test matrix входит в release gate.
 
+## Фаза 0.6 — Глобальный инвариант доступности: соединение при NAT, блокировках и белых списках
+
+**Обязательное решение пользователя (2026-08-15):** когда абоненты пытаются связаться напрямую,
+APU должен автоматически использовать все доступные, законные и явно разрешённые пользователем
+способы установления канала. Жёсткий NAT, блокировка UDP/TCP/DNS, мобильная фильтрация, captive
+portal и сеть «разрешены только белые домены» не должны приводить к молчаливой потере сообщений.
+Содержимое всегда E2E-зашифровано; промежуточный proxy/VPN/relay не становится хранилищем.
+
+**Честное техническое ограничение:** если сеть не разрешает вообще ни одного общего адреса/канала,
+создать интернет-соединение физически невозможно. Для strict whitelist нужен хотя бы один заранее
+разрешённый endpoint: пользовательский/корпоративный proxy или VPN, APU bridge/relay на разрешённом
+домене, либо локальный Wi-Fi Direct/Bluetooth путь. В этом случае APU показывает `restricted/no
+reachable transport`, сохраняет Outbox и продолжает bounded retry — никогда не сообщает ложный
+`SENT`/`DELIVERED`.
+
+Обязательная transport matrix, управляемая единым `TransportManager`:
+
+1. **Прямые пути:** QUIC/UDP; TCP; TLS 1.3 на 443; WebSocket Secure; HTTP/2 и HTTP/3; IPv4/IPv6,
+   NAT64 и Happy Eyeballs; ICE/STUN, WebRTC data channel и TURN только как realtime transit.
+2. **NAT traversal:** hole punching, port mapping там, где это безопасно, несколько ICE candidates,
+   signed peer endpoints и одновременные bounded попытки без connection storm.
+3. **Пользовательские proxy:** SOCKS5, HTTP CONNECT, HTTPS proxy, системный proxy; импорт QR/file и
+   подписанные private subscription lists. Не скачивать случайные public proxy pools и не передавать
+   им plaintext/ключи.
+4. **VPN/tunnel с явным согласием:** уважать уже активный системный VPN; optional Android
+   `VpnService` только для APU, WireGuard-compatible tunnel, MASQUE `CONNECT-UDP/CONNECT-IP` и
+   split tunneling. Никакого скрытого VPN или обхода системного consent dialog.
+5. **APU bridges:** пользовательские seed/relay nodes, собственный домен на 443, CDN/edge или
+   enterprise gateway, если правила провайдера это допускают. Bridge передаёт E2E bytes в реальном
+   времени и не хранит message inbox; endpoint manifests подписаны и ротируются.
+6. **Phone mesh:** друзья/друзья друзей как Tier relay, store-and-forward на телефонах, gossip,
+   Wi-Fi Direct, Nearby, Bluetooth, LAN/mDNS; интернет отправителя после handoff не обязателен.
+7. **Устойчивый bootstrap:** обычный DNS + DoH/DoT, signed bootstrap IP/domain manifest, QR/invite
+   file/NFC/Bluetooth discovery. DNS fallback не отключает проверку подписи и TLS identity.
+8. **Pluggable transports:** TLS/WebSocket wrapping, padding и obfs-like framing как отдельные
+   opt-in модули. Domain fronting — только там, где это законно и явно поддержано владельцем CDN;
+   не полагаться на запрещённое или нестабильное поведение третьих сторон.
+9. **Restricted-network policy:** Normal → UDP-blocked → TCP/TLS-only → proxy/VPN/bridge → local
+   mesh. Несколько кандидатов можно пробовать параллельно с bounded budgets; запрещено старое
+   последовательное переключение всего mesh на независимый broker без общего пересечения.
+10. **Совместимость:** transport/capability negotiation versioned; N и N-1 выбирают общий путь.
+    Неизвестный обязательный transport format безопасно отклоняется без enqueue/UI/ACK.
+
+Безопасность и UX:
+
+- [ ] E2E до входа в любой transit; proxy/VPN/relay не получает private identity keys.
+- [ ] Явные настройки `Авто / Только прямое / Restricted / Offline mesh` и понятный индикатор пути.
+- [ ] Пользователь видит причину fallback, текущий endpoint class и честный degraded status, но не
+  секреты, полный NodeId, plaintext или proxy credentials в обычных логах.
+- [ ] Credentials хранятся в Android Keystore; manifests/updates подписаны; защита от malicious
+  proxy, downgrade, MITM, replay, DNS poisoning и captive-portal impersonation.
+- [ ] Circuit breaker, jitter, global/per-endpoint rate limits, battery/thermal/data quotas и
+  cancellation проигравших Happy-Eyeballs попыток.
+- [ ] Ограниченные сети тестируются локально: UDP drop, DNS block, TCP-only, proxy auth, IPv6-only,
+  captive portal, whitelist simulator, endpoint outage/recovery. Не атаковать публичные сети.
+- [ ] После каждого fallback обычное сообщение, receipt/cleanup и offline relay проходят ровно один
+  раз; нет split-brain, duplicate UI, ложного SENT или потери Outbox при смене транспорта.
+
+Критерий: при наличии хотя бы одного разрешённого общего канала APU автоматически находит его и
+восстанавливает связь без действий пользователя; при полном отсутствии пути честно остаётся
+офлайн, хранит сообщение на телефонах и продолжает безопасный retry.
+
 ---
 
 # 🔴 ПРИОРИТЕТ 1 — Лёгкое приглашение друга, установка и добавление контакта
@@ -906,7 +968,8 @@ InviteFriendScreen
 
 - [ ] Обнаружение доступных прокси (SOCKS5, HTTP, MTProto).
 - [ ] Поддержка пользовательских прокси-списков.
-- [ ] Поддержка подписок / public proxy pools.
+- [ ] Поддержка подписанных private/user-approved proxy subscriptions; случайные public proxy pools
+  не использовать из-за перехвата метаданных, нестабильности и abuse-риска.
 - [ ] Автоматическая проверка reachability каждого прокси.
 - [ ] Тестовое соединение через прокси (handshake + round-trip).
 - [ ] Отбраковка мёртвых / медленных / подозрительных прокси.
@@ -916,7 +979,8 @@ InviteFriendScreen
 
 - [ ] SOCKS5 proxy transport.
 - [ ] HTTP CONNECT proxy transport.
-- [ ] MTProto proxy transport.
+- [ ] MTProto-compatible bridge — только если используется собственный/проверенный encapsulation;
+  обычный MTProto proxy не считать универсальным транспортом произвольных APU bytes.
 - [ ] Каскадный fallback: при сбое одного типа пробуется следующий.
 - [ ] Туннелирование QUIC / WebSocket через прокси.
 - [ ] Параллельные попытки на нескольких прокси (happy-eyeballs).
@@ -982,7 +1046,8 @@ InviteFriendScreen
 ## Фаза 7+.8 — Pluggable transports и обфускация (будущее)
 
 - [ ] obfs4-like transport.
-- [ ] Domain fronting.
+- [ ] Domain fronting только при законности и явной поддержке CDN/provider; обязательный fallback,
+  потому что большинство крупных CDN это ограничивает.
 - [ ] Meek / новые типы pluggable transports.
 - [ ] Обфускация формы трафика (padding, dummy traffic).
 - [ ] Маскировка под обычный HTTPS / WebSocket.

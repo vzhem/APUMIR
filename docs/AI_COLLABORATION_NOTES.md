@@ -1727,6 +1727,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   feature, one build, no Gradle/ADB/phone action, bounded wait/state/marker/auto-var PASS; LF SHA-256
   `293A2D38…8E5C07`. Этот compile gate выполнить сразу после восстановления Windows GitHub и
   переноса icon original; дополнительных разрешений не спрашивать.
+- **2026-08-15 (доп.161)** — пользователь запустил bare `./build-rust.ps1 -Features
+  mqtt-dual-broker` из `C:\Users\User`; PowerShell дал CommandNotFound до script/build. Причина —
+  отсутствовал обязательный `Set-Location C:\APUMIR-arena-test`; source/native/phones unchanged.
+  Не считать compile attempt и не создавать recovery state. Больше не показывать короткую build
+  строку отдельно так, чтобы новичок мог принять её за готовую команду: давать только полный
+  guarded block с Set-Location после exact fetch/adoption.
+- **Глобальный connectivity-инвариант пользователя (2026-08-15):** APU обязан при прямом
+  соединении автоматически использовать все доступные законные пути при NAT/блокировках/strict
+  mobile whitelist: QUIC/TCP/TLS443/WSS/H2/H3/WebRTC ICE-TURN, user proxy, consented app VPN/
+  WireGuard/MASQUE, signed own bridge, phone mesh, local radios и pluggable transports. Подробный
+  обязательный Phase 0.6 добавлен в MASTER_PLAN. При нулевом разрешённом общем endpoint обещать
+  bypass нельзя: truthful restricted status + phone Outbox/retry, без ложного SENT. Random public
+  proxies, hidden VPN и unsupported domain fronting запрещены.
 
 ---
 
