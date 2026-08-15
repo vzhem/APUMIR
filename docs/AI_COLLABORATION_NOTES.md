@@ -369,10 +369,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Compact portable backup PASS: `F:\APU_PORTABLE`, 278 hashes, previous v11.16.15 + latest
 > v11.16.16, bundle/forbidden/restore rehearsal PASS, state SHA-256 `A9650061…2D2483`.
 > Флешку никогда больше не форматировать; rotate files only. v1/v2/resume-v3/full-v4 transfer и
-> alias-H wrappers не повторять. Следующий step — загрузить exact latest APK 22,664,712 B / SHA-256
-> `446A1EE9…429DC0D` в draft prerelease, remote re-download/hash verify, then publish. Не запускать
-> tag-trigger auto-build: tracked Rust `.so` не совпадает с verified APK. Mixed N↔N-1 и r4.5
-> остаются будущими stable-release gates. Иконка пока заморожена.
+> alias-H wrappers не повторять. **v11.16.16 prerelease published**: exact APK 22,664,712 B /
+> SHA-256 `446A1EE9…429DC0D`, checksum asset exact; GitHub server digests PASS, tag target `85aecb0`,
+> workflow release-exists PASS/build skipped. Preferred next-time flow: Arena creates draft → user
+> uploads two flash files in browser → Arena verifies server digests and publishes. Mixed N↔N-1,
+> r4.5 и durable M8 остаются будущими stable-release gates. Иконка пока заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2197,6 +2198,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   deterministic gzip 2,367 B / `A42109FDB2734B34B90DF6428FB11724FED9C9D428995A97F9FBBBFFB67E8C5E`,
   Base64 3,156 chars. Outer read-only gh/auth/TCP gate must pass before transfer/execution. After PASS,
   sandbox independently checks assets/download hash and publishes existing prerelease without build.
+- **2026-08-15 (доп.190) — browser asset upload + v11.16.16 prerelease publication PASS:** Windows
+  outer gate found `gh.exe` keyring token invalid and stopped before transfer/upload/state; no release
+  change and do not repeat. User confirmed browser upload is convenient/preferred. User uploaded exact
+  `APU-v11.16.16.apk` and `.apk.sha256` to draft and saved draft. Arena API verified asset IDs
+  515862302/515862281, states uploaded, sizes 22,664,712/84 B. First independent asset download hit
+  transient release-assets EOF; no blind retry. GitHub server digests independently proved APK
+  `sha256:446a1ee9…429dc0d` and checksum `sha256:cc4f947f…8cf78d`; expected checksum bytes/hash were
+  locally reproduced exactly. Existing draft published as **prerelease**, URL
+  `https://github.com/vzhem/APUMIR/releases/tag/v11.16.16`, publishedAt 2026-08-15T16:35:19Z,
+  target/tag `85aecb0fa9893184e357b6c565869d0f1ebd69b7`. Final assets/URLs/digests unchanged. Tag workflow
+  run 31895919402 success: release-exists check success, build job skipped — no auto-build or asset
+  replacement. Future default: Arena draft → browser upload exact previous/latest-selected files
+  (release uploads latest APK+sha) → Arena server-digest verification → Arena publish. Never request
+  Windows GitHub token/password and never treat invalid Windows gh keyring as user error.
 
 ---
 

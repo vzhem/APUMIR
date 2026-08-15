@@ -305,5 +305,27 @@ Gradle dependencies. Не переносить их кэши с флешки. П
 - final backup state SHA-256:
   `A96500612DD1AC80D908F1F49ADE9536931E512D387C2FD0EDA8CB82772D2483`.
 
-Флешку больше никогда не форматировать. Draft GitHub prerelease остаётся unpublished/empty до
-отдельной загрузки exact latest APK и remote re-download/hash verification.
+Флешку больше никогда не форматировать.
+
+## 10. Предпочтительная публикация GitHub Release
+
+Пользователь подтвердил, что browser upload удобен. Для следующих версий использовать по умолчанию:
+
+1. ИИ в Arena создаёт **draft prerelease** с notes/target commit, но без tag-trigger auto-build.
+2. ИИ даёт точный путь к `latest` APK и `.sha256` на флешке.
+3. Пользователь открывает GitHub draft в браузере, загружает ровно эти два файла и нажимает
+   **Save draft**, не `Publish release`.
+4. ИИ через authenticated Arena GitHub API проверяет names, sizes, `state=uploaded` и серверные
+   `digest=sha256:...` обоих assets. Серверный digest APK обязан совпасть с flash/build hash.
+5. При transient asset-download EOF не повторять blind download: сначала проверить GitHub asset
+   metadata digest. Повторное скачивание — только отдельным обоснованным шагом.
+6. ИИ публикует existing draft как prerelease, проверяет tag target, final URL и assets.
+7. Если tag workflow стартовал, дождаться: release-exists check PASS, build job **skipped**. Любая
+   автоматическая пересборка/замена assets блокирует завершение.
+
+Не требовать Windows `gh` и не просить token/password. Если Windows `gh` keyring invalid, browser
+upload — штатный путь, а не ошибка пользователя. Arena GitHub connection используется для независимой
+проверки и публикации.
+
+Текущий prerelease опубликован:
+`https://github.com/vzhem/APUMIR/releases/tag/v11.16.16`.
