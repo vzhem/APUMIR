@@ -1,0 +1,32 @@
+--- a/scripts/v111616_compact_flash_backup_resume_v4.ps1
++++ b/scripts/v111616_compact_flash_backup_resume_v4.ps1
+@@ -14 +14,2 @@
+-$StatePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-flash-backup-resume-v3.json'
++$V3StatePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-flash-backup-resume-v3.json'
++$StatePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-flash-backup-resume-v4.json'
+@@ -83 +84 @@
+-        schema = 3
++        schema = 4
+@@ -87 +88 @@
+-        purpose = 'Resume compact backup after post-copy commit-format bug'
++        purpose = 'Resume compact backup after post-copy JSON array count bug'
+@@ -112,0 +114,7 @@
++    if (-not (Test-Path -LiteralPath $V3StatePath -PathType Leaf)) { throw 'Resume v3 state missing' }
++    $V3State = Get-Content -LiteralPath $V3StatePath -Raw | ConvertFrom-Json
++    $V3StateValid = $V3State.outcome -eq 'INCOMPLETE_DO_NOT_REPEAT'
++    $V3StateValid = $V3StateValid -and $V3State.reusedCopiedFiles -eq $true
++    $V3StateValid = $V3StateValid -and [int]$V3State.filesRecopied -eq 0
++    $V3StateValid = $V3StateValid -and $V3State.formatRepeated -eq $false
++    if (-not $V3StateValid) { throw 'Resume v3 state does not prove zero-copy incomplete stop' }
+@@ -145,2 +153,3 @@
+-    $ManifestEntries = @(Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json)
+-    if ($ManifestEntries.Count -ne 278) { throw "Unexpected manifest entry count: $($ManifestEntries.Count)" }
++    $ManifestEntries = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
++    $ManifestEntryCount = [int]$ManifestEntries.Count
++    if ($ManifestEntryCount -ne 278) { throw "Unexpected manifest entry count: $ManifestEntryCount" }
+@@ -160 +169 @@
+-        schema = 3
++        schema = 4
+@@ -166 +175 @@
+-        manifestEntries = $ManifestEntries.Count
++        manifestEntries = $ManifestEntryCount

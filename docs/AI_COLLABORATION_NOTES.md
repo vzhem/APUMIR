@@ -2169,6 +2169,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   zero-copy finalization sequence. `scripts/v111616_compact_flash_backup_resume_v4.ps1` 10,262 B /
   SHA-256 `8015CD2C9433D684C68ED57807137207D59BCCD05665E9BD7ECF8A34B7C13F29`;
   execution pending; no format/copy/network/phone action.
+- **2026-08-15 (доп.187) — full v4 transfer rejected before write; tiny v3→v4 patch prepared:**
+  copied Base64 had invalid length; wrapper failed at `FromBase64String` before decompression/write/
+  ParseFile/execute, so no v4 state or F: change. Do not repeat full payload; not user error.
+  Authenticated zero-context `scripts/v111616_resume_v4_from_v3.patch` is 1,846 B / SHA-256
+  `41CEE317C63790EC7A5E2A1E05C55D7A4BD710400326F82509297BB20258F767`; deterministic gzip 641 B /
+  `63410DFCAB8F1DE94CD3BE5311EC62D98B1AF09D879E23B7285751F4F9509693`, Base64 856 chars.
+  Local apply reconstructs exact v4 hash 8015…13F29. Transfer patch only from verified v3, normalize
+  CRLF→LF, verify target/Parser, then execute zero-copy finalizer.
 
 ---
 
