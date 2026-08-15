@@ -527,6 +527,13 @@ exit 1 успешным и нельзя ослаблять весь outer guard 
 artifact/network effect и сохранность входных hashes; затем использовать distinct `build2`/
 `recovery2` state paths с исправленным native wrapper.
 
+**Fetch уже прошёл, поздний `ls-remote` недоступен:** не повторять network step вслепую. Если
+`git fetch` завершился exit0, `FETCH_HEAD` равен ожидаемому commit и соответствующий local
+`refs/remotes/origin/<branch>` тоже равен ему, fetched object уже локально проверяем. Поздний
+redundant `ls-remote` timeout/empty не отменяет fetch. Продолжить отдельным local-only block:
+проверить branch/worktree/artifact hashes, оба local refs, затем mixed reset/точечный restore.
+Если FETCH_HEAD или tracking ref расходятся — STOP, не угадывать и не force/reset.
+
 **Связанное правило parser compatibility:** raw stdout/stderr должны быть записаны до parsing.
 Нельзя считать build неуспешным только потому, что новая версия native tool изменила английский
 label, пробелы, регистр или separators digest. Для certificate/hash искать однозначную semantic

@@ -379,8 +379,9 @@ traffic=false. Source compile gate закрыт. Versioned `r44_v111615_apk_buil
 integration state/native, C-drive JDK17/SDK, bounded children, v11.16.15 package/version, V2 cert,
 embedded E6C3…095B, unchanged hs_err/env restore и no ADB/phones. Первый outer launcher stopped
 pre-harness из-за `$Gradlew` interpolation в double-quoted literal scan; build/output отсутствуют.
-Versioned corrected runner использует single-quoted literal и exact absent-output proof; Windows
-artifact run pending.
+Versioned corrected runner использует single-quoted literal и exact absent-output proof. Первый
+sync к runner commit получил exact FETCH_HEAD/tracking ref, но redundant `ls-remote` упал по
+GitHub:443 до reset/runner; local-only adoption+runner pending, build не начинался.
 
 ### Mixed-version acceptance для MQTT overlay
 

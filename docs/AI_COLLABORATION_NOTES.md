@@ -1359,6 +1359,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   затем имеет ровно один call approved harness. Runner сам не содержит Gradle/Java/build/ADB/phone
   action. Static parser-shape, literal-interpolation, one-call, automatic-variable и no-ADB scans
   PASS. Следующий gate — sync exact runner commit, ParseFile и один runner execution.
+- **2026-08-15 (доп.127)** — runner sync launcher сделал успешный `git fetch`: FETCH_HEAD и local
+  tracking ref получили exact `d654569`, затем отдельный `git ls-remote` не смог соединиться с
+  GitHub:443 и вернул empty remote value. Guard остановился **до `git reset` и до runner/harness**;
+  Java/Gradle/APK/phones не затронуты. Старый network launcher не повторять: безопасное продолжение
+  использует уже проверенные локальные FETCH_HEAD + `refs/remotes/origin/...`, без нового network
+  call, затем mixed reset/restore с сохранением E6C3…095B и versioned runner. Общее правило: если
+  fetch уже exit0 и exact ref сохранён, поздний redundant `ls-remote` outage не отменяет fetched
+  object; сначала проверить оба local refs, не делать blind refetch/rebuild.
+- **Операционный контекст 2026-08-15:** пользователь подключил по USB Анну. Женю и Стаса не
+  считать подключёнными; если следующий mixed-version/3-phone test потребует их, заранее простыми
+  словами предупредить пользователя подключить конкретные телефоны. Текущий APK artifact gate не
+  использует ADB и не требует ни одного телефона.
 
 ---
 
