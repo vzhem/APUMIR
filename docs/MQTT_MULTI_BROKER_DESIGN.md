@@ -393,9 +393,10 @@ USB mode/debugging/RSA проверки live `adb devices -l` дал exact Anna 
 `0E481BBC…35E05`, stderr empty. Blank direct Process.ExitCode вызвал только false wrapper fail.
 Corrected runtime2 связал old pre-action state + visibility hashes и выполнил approved install.
 Затем false-stopped в postinstall `pidof`: empty stdout означает stopped app, но unavailable raw
-ExitCode был cast в ложный0. State `78AF1BFC…4DA0B5`, install=true/launch=false; Anna вероятно уже
-v11.16.15, runtime ещё не начинался. Pending saved-only install/package evidence; затем launch-only
-runtime3 без reinstall. Zhenya/Stas USB не нужны и остаются v11.16.13.
+ExitCode был cast в ложный0. Saved-only exact state/install/package/process analysis PASS: Anna
+v11.16.15/code11016015, UID/firstInstall/dataDir unchanged, process stopped; runtime/launch ещё не
+начинались. Distinct `r44_anna_runtime3.ps1` готов: все parent hashes, no install, live stopped-v15
+preflight, один launch и исходная 150 s matrix. Zhenya/Stas USB не нужны и остаются v11.16.13.
 
 ### Mixed-version acceptance для MQTT overlay
 

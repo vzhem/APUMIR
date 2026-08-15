@@ -1454,6 +1454,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   runtime3, если data-preservation/v15/stopped доказаны. General rule: `[int]$null == 0`, поэтому
   cast не доказывает native success; обязательны HasExited/real exit availability и command-specific
   positive output/semantic markers.
+- **2026-08-15 (доп.136)** — saved-only runtime2 evidence analysis PASS без ADB: parent state exact
+  `78AF1BFC…4DA0B5`; install stdout 38 B / `C4AA470A…1306D3` содержит single `Success`, stderr
+  empty; postinstall UID=10425, v11.16.15/code11016015, firstInstall=`2026-08-08 11:40:39`,
+  dataDir unchanged, process stdout/stderr empty. Package evidence 16,387 B /
+  `E353F7F6…41C6199`; UID `B6D5357A…4E34FD7`; все empty files имеют standard E3B0…B855.
+  Data-preserving install окончательно PASS, app stopped, launch не выполнялся. Добавлен distinct
+  `scripts/r44_anna_runtime3.ps1`: exact parent state + все 8 evidence hashes/semantics, no install,
+  exact installed/stopped live prelaunch gate, один `am start`, 150 s PID/log runtime matrix и
+  immutable runtime3 state/evidence. Wrapper хранит raw ExitCode и availability до cast; при null
+  опирается только на command-specific positive output, stderr и identity markers. Static delimiter,
+  ordering, 0-install/1-launch, forbidden-action, state и marker checks PASS. Первый internal hash
+  counter дал false FAIL из-за regex, требовавшего лишний hyphen после `install`; scoped corrected
+  parser доказал 8/8 distinct entries, harness не менялся. Следующий gate — Windows sync exact
+  commit, ParseFile/static safety и один launch-only runtime3; no automatic retry.
 
 ---
 

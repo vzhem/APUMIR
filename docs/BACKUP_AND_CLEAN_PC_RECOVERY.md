@@ -471,6 +471,13 @@ unavailable, success разрешается лишь command-specific semantic g
 или exact install `Success` при empty stderr и последующих package/hash checks. Не объявлять generic
 native success по cast 0 и не повторять уже выполненный phone-changing command.
 
+Если install уже дал single exact `Success`, а harness остановился на postinstall snapshot до
+launch, recovery сначала только saved-only: immutable state hash с install=true/launch=false,
+install stdout/stderr hashes, package UID/versionCode/versionName/firstInstallTime/dataDir и empty
+postinstall process evidence. При полном совпадении install считается завершённым и не повторяется;
+следующий distinct harness делает live installed/stopped preflight и ровно один оставшийся launch.
+Если хотя бы один saved marker/hash расходится — STOP, не угадывать и не reinstall автоматически.
+
 ### `else` не распознан как команда
 
 **Симптом:** `else : Имя "else" не распознано...` после того, как пользователь отдельно вставил
