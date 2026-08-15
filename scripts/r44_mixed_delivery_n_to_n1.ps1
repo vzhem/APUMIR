@@ -11,7 +11,8 @@ $ExpectedNativeSize = 7248576
 $ExpectedNativeHash = "E6C34E86F18D9F63B9A641E3FD9FAFD67D5F1B7101729B2CB3DF25163380095B"
 $Adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 $PublisherScript = Join-Path $PSScriptRoot "v111613_publish_once.py"
-$ExpectedPublisherHash = "988F9F6C917084A76B6671C523DDEED05A2BAC564CDF85368FD7A37F9C49CFC3"
+$PublisherRelative = "scripts/v111613_publish_once.py"
+$ExpectedPublisherBlob = "7252d9cf8e3c25fa346d18811be71e1f3c44cd67"
 $IdentityStatePath = Join-Path $env:TEMP "apu-r4.4-mixed-v15-v13-identity1.json"
 $ExpectedIdentityStateHash = "ED16F594A36E388B7ABED0172FAD5AE43839F72B8167BBED5BEB55FF94EF5435"
 $StatePath = Join-Path $env:TEMP "apu-r4.4-mixed-v15-v13-delivery-n-to-n1.json"
@@ -39,8 +40,13 @@ foreach ($RequiredPath in @($Adb, $PublisherScript, $IdentityStatePath)) {
         throw "Required mixed delivery input missing: $RequiredPath"
     }
 }
-$PublisherHash = (Get-FileHash -LiteralPath $PublisherScript -Algorithm SHA256).Hash
-if ($PublisherHash -ne $ExpectedPublisherHash) { throw "Publisher helper hash mismatch: $PublisherHash" }
+$PublisherCommittedBlob = ((& git rev-parse ("HEAD:{0}" -f $PublisherRelative)) -join "").Trim()
+$PublisherPathArgument = "--path={0}" -f $PublisherRelative
+$PublisherWorkingBlob = ((& git hash-object $PublisherPathArgument -- $PublisherScript) -join "").Trim()
+if (
+    $PublisherCommittedBlob -ne $ExpectedPublisherBlob -or
+    $PublisherWorkingBlob -ne $ExpectedPublisherBlob
+) { throw "Publisher helper filter-aware Git identity mismatch" }
 $IdentityStateHash = (Get-FileHash -LiteralPath $IdentityStatePath -Algorithm SHA256).Hash
 if ($IdentityStateHash -ne $ExpectedIdentityStateHash) { throw "Identity state hash mismatch: $IdentityStateHash" }
 $IdentityState = Get-Content -LiteralPath $IdentityStatePath -Raw | ConvertFrom-Json

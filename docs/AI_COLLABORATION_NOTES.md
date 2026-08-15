@@ -1660,9 +1660,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   origin/UI matrix: Anna 1/1/0/1/1/1/0, Zhenya 1/0/1/1/0/0/1, Stas 1/1/0/1/1/0/0; no errors,
   all PIDs stable, receipt cleanup. Это **один видимый controlled test message** на Жене и один
   public publish; не user-generated content. Install/launch/network/log clear отсутствуют.
-  Correct raw-exit + exact publisher helper hash; static parent/IDs/direction, 0-install/0-launch,
-  one external publish, expected matrix, forbidden/auto-var/state/marker PASS; LF SHA-256
-  `705B436A…DF9FE2`. Перед командой явно предупредить о 3 phones и одном тестовом сообщении;
+  Correct raw-exit + filter-aware exact publisher helper blob (не raw SHA, чтобы не повторить
+  CRLF/LF false fail); static parent/IDs/direction, 0-install/0-launch, one external publish,
+  expected matrix, forbidden/auto-var/state/marker PASS; final LF SHA-256 `E27C4A72…72493C`.
+  Перед командой явно предупредить о 3 phones и одном тестовом сообщении;
   automatic retry запрещён. Reverse direction только отдельным следующим gate после PASS.
 
 ---
