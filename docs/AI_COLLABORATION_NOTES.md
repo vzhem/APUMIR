@@ -340,12 +340,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Windows HEAD всё ещё base `8cea566…`, worktree содержит exact Rust+Kotlin overlays, generated
 > native, untracked build harness и icon; history reconciliation отложен.
 >
-> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** data-preserving install
-> v11.16.16 уже PASS 3/3; все apps stopped. Следующий phone change — один controlled launch всех
-> трёх — требует отдельного явного разрешения. Перед командой назвать все три телефона; начать с
-> exact read-only visibility/install-state/version/UID/firstInstall/data/process-absent gate и
-> остановиться до launch при mismatch. Не делать force-stop, uninstall/data clear, logcat clear или
-> network change. После runtime readiness следующий отдельно согласованный acceptance:
+> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** пользователь явно
+> разрешил ровно один controlled launch v11.16.16 на всех трёх. Перед командой назвать все три;
+> outer и versioned harness начинают с exact read-only visibility/install-state/version/UID/
+> firstInstall/data/process-absent gate и останавливаются до launch при mismatch. Launch ровно 3,
+> затем early15s+late135s PID/epoch-filtered dual-broker readiness/heartbeat/crash analysis; no
+> force-stop, install, uninstall/data clear, logcat clear, network change or user payload. После
+> runtime readiness следующий отдельно согласованный acceptance:
 > origin app sends while recipient offline,
 > third phone stores, origin disconnects, recipient returns and gets exactly one UI message, receipt
 > cleans relay and eventually marks origin DELIVERED. Mixed N↔N-1 и r4.5 остаются release gates.
@@ -1911,6 +1912,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Uninstall/data clear/force-stop/launch/logcat/network/public traffic=false. Install/state/evidence
   не повторять/не удалять. Следующий phone-changing gate — отдельно разрешённый one controlled
   launch 3/3, затем readiness evidence; automatic offline scenario только после него.
+- **2026-08-15 (доп.171) — пользователь разрешил controlled launch v11.16.16 3/3; execution
+  pending:** versioned `scripts/m3d_v111616_launch.ps1` commit `06fa3f1` требует install state
+  59D5…6295, exact branch/base HEAD/source/native/icon/status и stopped identity 3/3 до first launch.
+  Ровно один launch callsite в loop/count=3; no install/force-stop/logcat clear/network/payload.
+  Early15s + late135s captures `p2p_core` by new PID+device epoch; PASS требует stable PID,
+  primary ConnAck/subscription/READY, secondary EMQX READY, fanout brokers=2, cross-broker dedup and
+  both broker evidence, healthy heartbeat pending/request=0, bounded recovery after any transient
+  error/backoff, zero overflow/backpressure/invariant/stall/restart/request failure/crash. State
+  finally/no retry. Harness 35,816 B / SHA-256
+  `A4AAE5A5EFEFB608C75AD4B5F3CDAF616B78C8B54AF8444635A308D1201A58B9`, blob
+  `18cefa2f651f84eaae5eff1b4473046e68ae779d`; gzip 8,111 B / SHA-256
+  `50FDE4A1DD301A49D2706D07877F2D312EC7505A229D26B5CCD30889B683EC59`, Base64 10,816 chars.
+  Static delimiter/action/order/identity checks PASS; Windows ParseFile/runtime pending. Перед
+  command предупредить подключить/разблокировать Anna/Zhenya/Stas; outer visibility is first phone
+  interaction.
 
 ---
 
@@ -2145,9 +2161,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    и evidence не удалять. Windows HEAD остаётся base `8cea566…`; dirty overlay не равен Git history
    synchronization, generated `.so` не commit, icon F263…ACA9 сохранить.
 5. Data-preserving install v11.16.16 PASS 3/3, state SHA 59D5…6295; все apps stopped. Не
-   переустанавливать. Следующий phone-changing gate — отдельное разрешение на controlled launch всех
-   трёх; до него только source/preflight preparation. Force-stop, data clear, network/logcat changes
-   и relaunch ради старых markers запрещены.
+   переустанавливать. Controlled launch 3/3 уже явно разрешён и versioned harness 06fa3f1 prepared;
+   execution pending. Force-stop, data clear, network/logcat changes и relaunch ради старых markers
+   запрещены; attempt не повторять при incomplete.
 6. Перед phone-командой назвать все три телефона и предупредить подключить; отдельного подтверждения
    подключения не ждать, но начать с exact read-only visibility/install-state/version/UID/
    firstInstall/data/process gate и остановиться до launch при absent/unauthorized/offline. Acceptance: recipient
