@@ -398,8 +398,9 @@ v11.16.15/code11016015, UID/firstInstall/dataDir unchanged, process stopped; run
 начинались. Distinct `r44_anna_runtime3.ps1` готов: все parent hashes, no install, live stopped-v15
 preflight, один launch и исходная 150 s matrix. Windows adoption exact `ed221bd` завершён;
 filter-aware committed/working blob exact и ParseFile/static gate PASS, install=0/launch=1,
-ADB/phone actions=0. Pending: отдельно попросить подключить только Анну и дождаться подтверждения,
-затем one-shot launch-only command. Zhenya/Stas USB не нужны и остаются v11.16.13.
+ADB/phone actions=0. Pending: непосредственно перед one-shot command предупредить подключить только
+Анну; отдельного подтверждения не ждать. Wrapper сначала делает read-only exact device preflight,
+затем launch-only runtime3. Zhenya/Stas USB не нужны и остаются v11.16.13.
 
 ### Mixed-version acceptance для MQTT overlay
 

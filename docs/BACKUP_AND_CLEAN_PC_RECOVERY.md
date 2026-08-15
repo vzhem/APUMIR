@@ -460,10 +460,11 @@ USB mode «Передача файлов», проверить Developer options
 проверить data-capable cable/другой USB port. Не делать app data clear/force-stop/relaunch.
 Следующий gate — только read-only `adb devices -l`; продолжать phone-changing harness можно лишь
 при exact ожидаемом serial со status `device`. `unauthorized`, `offline`, другой serial или пустой
-list — STOP. **До выдачи любой команды с ADB/install/launch/logcat ИИ обязан заранее назвать
-конкретные нужные телефоны, попросить пользователя подключить их и дождаться подтверждения.**
-Нельзя молча считать старое подключение актуальным. Если шаг PC-only, явно сказать, что телефоны
-не требуются.
+list — STOP. **Непосредственно перед любой командой с ADB/install/launch/logcat ИИ обязан назвать
+конкретные нужные телефоны и предупредить подключить их.** Отдельного ответа-подтверждения ждать
+не нужно: команду можно дать сразу после предупреждения, но её read-only visibility gate обязан
+остановить дальнейшие изменения при absent/unauthorized/offline. Если шаг PC-only, явно сказать,
+что телефоны не требуются.
 
 После `Start-Process -PassThru` direct `$Process.ExitCode` иногда остаётся blank/$null даже после
 bounded + parameterless WaitForExit/Refresh. `$null -ne 0` создаёт false fail, а `[int]$null`
