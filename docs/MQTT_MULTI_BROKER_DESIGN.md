@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.4 atomic dual-session+dedup Android compile PASS; v11.16.15 artifact next**
+Статус: **r4.4 v11.16.15 APK artifact PASS; Anna-only mixed-version runtime approval pending**
 
 Дата: 2026-08-15
 
@@ -381,7 +381,11 @@ embedded E6C3…095B, unchanged hs_err/env restore и no ADB/phones. Первы�
 pre-harness из-за `$Gradlew` interpolation в double-quoted literal scan; build/output отсутствуют.
 Versioned corrected runner использует single-quoted literal и exact absent-output proof. Первый
 sync к runner commit получил exact FETCH_HEAD/tracking ref, но redundant `ls-remote` упал по
-GitHub:443 до reset/runner; local-only adoption+runner pending, build не начинался.
+GitHub:443 до reset/runner. Local-only adoption затем PASS; versioned runner вызвал harness once.
+v11.16.15 APK artifact PASS: state SHA-256 `3D893F5A…44078`, 22,664,716 B,
+`B675770D…43E9B2`; package/version/V2 cert/embedded E6C3…095B exact, hs_err/env gates PASS.
+APK/ADB/install/phones/public traffic=false. Следующий Anna-only data-preserving install+launch
+требует explicit approval; Zhenya/Stas остаются v11.16.13 для common-HiveMQ mixed-version proof.
 
 ### Mixed-version acceptance для MQTT overlay
 

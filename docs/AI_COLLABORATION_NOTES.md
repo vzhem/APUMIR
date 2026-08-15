@@ -1371,6 +1371,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   считать подключёнными; если следующий mixed-version/3-phone test потребует их, заранее простыми
   словами предупредить пользователя подключить конкретные телефоны. Текущий APK artifact gate не
   использует ADB и не требует ни одного телефона.
+- **2026-08-15 (доп.128)** — local-only FETCH_HEAD/tracking adoption exact `d654569` PASS после
+  GitHub outage; runner ParseFile PASS, SHA-256
+  `E476404507CBBB2E290D4201179BE332F13B64E0F7BE4A446B6241AB284F52CA`. Versioned runner доказал
+  все v11.16.15 output paths absent и один раз вызвал harness SHA-256
+  `9DB7639E1170BB600619870C86432D3673700E97AA70BDE34751B2E2D73A16F5`. r4.4 dual APK artifact
+  PASS: state `%TEMP%\apu-r4.4-dual-v11.16.15-apk-build.json`, SHA-256
+  `3D893F5A546008C3166C68026203EF2B395144EA9C072D6E9583E9FE84644078`; Gradle PID12220/exit0,
+  BUILD SUCCESSFUL=1, duration91.53s. APK `%TEMP%\apu-r4.4-dual-v11.16.15.apk`:
+  v11.16.15/11016015, 22,664,716 B, SHA-256
+  `B675770D043E4ABA5D6D099275F489DB9666A9B16792DD45000A9EC2D243E9B2`; package exact, V2 cert
+  F843…A5F7, embedded native 7,248,576 B/E6C3…095B exact. hs_err set/env restore gates входят в
+  PASS. APK/ADB/install/launch/phones/public traffic=false. Artifact/state/runner/build не
+  повторять/не удалять. Следующий phone-changing gate только после explicit approval: data-
+  preserving v11.16.15 install на Анну + one launch для secondary ready/fanout/dedup и mixed-version
+  HiveMQ common-path observation. Женя/Стас для первого Anna-only gate не нужны и не обновляются.
 
 ---
 
