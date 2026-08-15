@@ -1440,6 +1440,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   отдельный шаг только PC network: `Test-NetConnection github.com -Port 443`; при PASS один fetch
   exact current session branch и hash check, без reset/ADB. Если TCP false — STOP и подождать,
   никаких source/phone обходов или inline копирования большого harness.
+- **2026-08-15 (доп.135)** — corrected r4.4 Anna runtime2 synced/parser PASS и выполнил approved
+  install, затем stopped до launch в postinstall snapshot. State
+  `%TEMP%\apu-r4.4-dual-v11.16.15-anna-runtime2.json`, SHA-256
+  `78AF1BFC1AC9A3869973EAE5C2E1CCE8C6A08E6B081F8540C0CF3F74B34DA0B5`, outcome
+  `INCOMPLETE_DO_NOT_REPEAT`, installStarted=true/launchStarted=false, new PID/metrics empty,
+  Zhenya/Stas/user payload=false. Install command уже прошёл exit/single `Success` gate, иначе code
+  не дошёл бы до postinstall snapshot. Stop вызван wrapper semantics: postinstall `pidof` stdout
+  empty (ожидаемый stopped process), но `[int]$Process.ExitCode` превратил unavailable `$null` в
+  ложный 0; strict rule `0 requires PID` дал false failure. Это не runtime/product failure, но Anna
+  уже, вероятно, v11.16.15; не reinstall/relaunch и не повторять runtime2. Сначала saved-only exact
+  install/postinstall UID/package/process evidence + hashes; только затем distinct launch-only
+  runtime3, если data-preservation/v15/stopped доказаны. General rule: `[int]$null == 0`, поэтому
+  cast не доказывает native success; обязательны HasExited/real exit availability и command-specific
+  positive output/semantic markers.
 
 ---
 

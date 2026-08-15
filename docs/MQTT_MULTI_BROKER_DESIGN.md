@@ -391,9 +391,11 @@ install+one launch. Первый runtime harness stopped на read-only `adb dev
 `BBFCC723…65A630`), stderr empty: ADB вообще не видел Анну, не даже unauthorized/offline. После
 USB mode/debugging/RSA проверки live `adb devices -l` дал exact Anna `device`; stdout
 `0E481BBC…35E05`, stderr empty. Blank direct Process.ExitCode вызвал только false wrapper fail.
-Corrected runtime2 связывает old pre-action state + visibility hashes. Первый sync stopped на
-GitHub:443 fetch outage до reset/ADB/runtime; phones unchanged. Pending отдельный TCP443 check+fetch,
-затем local-only runtime2. Zhenya/Stas USB не нужны и остаются v11.16.13.
+Corrected runtime2 связал old pre-action state + visibility hashes и выполнил approved install.
+Затем false-stopped в postinstall `pidof`: empty stdout означает stopped app, но unavailable raw
+ExitCode был cast в ложный0. State `78AF1BFC…4DA0B5`, install=true/launch=false; Anna вероятно уже
+v11.16.15, runtime ещё не начинался. Pending saved-only install/package evidence; затем launch-only
+runtime3 без reinstall. Zhenya/Stas USB не нужны и остаются v11.16.13.
 
 ### Mixed-version acceptance для MQTT overlay
 

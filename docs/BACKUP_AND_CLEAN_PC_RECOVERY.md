@@ -463,12 +463,13 @@ USB mode «Передача файлов», проверить Developer options
 list — STOP. Другие телефоны подключать только после явного предупреждения, если сценарий их
 действительно требует.
 
-После `Start-Process -PassThru` direct `$Process.ExitCode` в интерактивном PowerShell иногда может
-остаться blank/$null даже после визуально успешного вывода. `$null -ne 0` тогда создаёт false fail.
-Versioned wrapper обязан сначала bounded `.WaitForExit(timeout)`, затем parameterless
-`.WaitForExit()`/`.Refresh()`, вернуть structured object и явно cast `[int]$Process.ExitCode`.
-Если saved stdout уже содержит exact expected serial/status и stderr empty, blank ExitCode — defect
-wrapper, не повод повторять read-only command или phone-changing harness.
+После `Start-Process -PassThru` direct `$Process.ExitCode` иногда остаётся blank/$null даже после
+bounded + parameterless WaitForExit/Refresh. `$null -ne 0` создаёт false fail, а `[int]$null`
+опаснее: превращается в ложный `0`. Wrapper обязан сначала сохранить raw value и отдельный
+`ExitCodeAvailable=($null -ne $RawExitCode)`; cast допустим только при available=true. Если exit
+unavailable, success разрешается лишь command-specific semantic gate: например exact device line
+или exact install `Success` при empty stderr и последующих package/hash checks. Не объявлять generic
+native success по cast 0 и не повторять уже выполненный phone-changing command.
 
 ### `else` не распознан как команда
 
