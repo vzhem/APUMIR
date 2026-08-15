@@ -372,8 +372,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > alias-H wrappers не повторять. **v11.16.16 prerelease published**: exact APK 22,664,712 B /
 > SHA-256 `446A1EE9…429DC0D`, checksum asset exact; GitHub server digests PASS, tag target `85aecb0`,
 > workflow release-exists PASS/build skipped. Preferred next-time flow: Arena creates draft → user
-> uploads two flash files in browser → Arena verifies server digests and publishes. Mixed N↔N-1,
-> r4.5 и durable M8 остаются будущими stable-release gates. Иконка пока заморожена.
+> uploads two flash files in browser → Arena verifies server digests and publishes. Version baseline
+> lives in `docs/VERSION_STATISTICS.md` and must get a short immutable entry+LOC delta for every global
+> version. Next product priority: durable M8; mixed N↔N-1/r4.5 remain stable-release gates. Иконка
+> пока заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2212,6 +2214,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   replacement. Future default: Arena draft → browser upload exact previous/latest-selected files
   (release uploads latest APK+sha) → Arena server-digest verification → Arena publish. Never request
   Windows GitHub token/password and never treat invalid Windows gh keyring as user error.
+- **2026-08-15 (доп.191) — global version statistics ledger created:**
+  `docs/VERSION_STATISTICS.md` is append-only per published stable/prerelease milestone. Required
+  fields: code/docs/tag commits, Rust/handwritten Kotlin/UDL/XML/generated/tests files+physical/nonblank
+  LOC, delta using same method, APK bytes/hash/signer, key changes, acceptance, limitations, release
+  and previous/latest backup. Initial v11.16.16 baseline at count commit `03c9768`: core 149 files /
+  31,645 physical / 27,685 nonblank; with generated 34,155 / 29,750; Android tests 241; automation
+  17,117; all tracked code/config/automation excluding docs/logs 53,173. Future AI must add a new
+  section rather than rewrite history. Next product work is M8 durable encrypted relay custody.
 
 ---
 
