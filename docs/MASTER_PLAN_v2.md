@@ -614,6 +614,19 @@ InviteFriendScreen
   и r4.5 остаются release gates.
 - [ ] Перенести store-and-forward на Tier 1/Tier 2 nodes.
 - [ ] Relay nodes хранят только E2E encrypted payload.
+- [ ] **M8 hard requirement — persistent relay custody:** encrypted RelayQueue переживает Android
+  process death, reboot, app update и длительный сон; absolute `created/expires` timestamps, hop,
+  origin/recipient/chat scope и dedup tombstones восстанавливаются без продления TTL и дублей.
+- [ ] Background relay scheduling: после возвращения сети телефон с persistent custody получает
+  bounded wake/foreground window по явному relay consent, обменивается summary и передаёт custody
+  следующему узлу; обычный receive-only mode по-прежнему не хранит чужие сообщения.
+- [ ] Обязательный delayed multi-carrier gate: Анна→офлайн-Стас, Женя хранит; все offline; через
+  день Женя пересекается online с новым relay D и передаёт ему; Женя снова offline/process killed;
+  затем D пересекается со Стасом и доставляет ровно одно UI message. Receipt очищает D/Женю/Анну
+  при их следующих появлениях и eventually ставит Анне DELIVERED. Проверить также reboot Жени/D,
+  TTL 7 дней, hop≤8, quotas и отсутствие общего одновременного online-окна origin↔recipient.
+- [ ] Если ни один custody-holder не пережил процесс/reboot или не было разрешённого общего окна,
+  показывать честный Outbox/restricted status; не обещать физически невозможную доставку.
 - [ ] Пользователь может разрешить устройству быть relay.
 - [ ] Ограничения по батарее, Wi-Fi, зарядке, трафику.
 - [ ] Per-origin/per-recipient/global quotas, fair friend-priority queues, bounded replay cache,

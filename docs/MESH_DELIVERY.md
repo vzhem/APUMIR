@@ -25,6 +25,23 @@
 5. Когда Стас появляется — **любой узел доставляет** ему сообщение.
 6. Стас рассылает **«я получил msg_id»** → все узлы **удаляют** это сообщение у себя.
 
+### 0.1. Обязательный delayed multi-carrier сценарий
+
+Сеть не должна требовать, чтобы Анна, Женя и Стас когда-либо были online одновременно:
+
+1. Анна передаёт сообщение Жене, пока Стас offline; затем все уходят offline.
+2. Через день Женя появляется вместе с новым relay D, summary/gossip передаёт custody D и снова
+   уходит offline/в сон.
+3. Позже только D и Стас пересекаются online; D доставляет Стасу ровно одно UI message.
+4. Receipt хранится/распространяется до следующих появлений Жени и Анны, очищает все custody copies
+   и eventually переводит origin в DELIVERED.
+5. Gate повторяется с process death/reboot Жени и D. Без persistent RelayQueue это лишь best-effort
+   в живом процессе, а не гарантированная доставка «через день».
+
+Ограничения остаются hard: TTL 7 дней, max hops 8, dedup, per-recipient/global quotas, bounded
+fanout/bytes и explicit relay consent. Каждый handoff требует хотя бы короткого разрешённого общего
+online-окна двух соседних custody nodes; если его физически нет, сообщение честно остаётся в Outbox.
+
 Внешние ресурсы (MQTT/STUN/registry) — **только discovery**: помочь телефонам найти друг
 друга. Содержимое живёт **только на телефонах** (E2E-зашифрованное).
 
@@ -195,10 +212,14 @@ RelayMessage {
   outgoing path. APK v11.16.16/11016016: 22,664,712 B / SHA-256 `446A1EE9…429DC0D`, V2 signer
   preserved, embedded `.so` 7,263,416 B / `27B9D4DC…D1FD26C` exact. Data-preserving install и
   controlled launch/readiness PASS 3/3: primary+secondary READY, dual fanout/dedup, healthy
-  heartbeat, stable PIDs, no crash/stall/restart. Следующий gate — automatic offline UI acceptance;
-  build/transfer/recovery/install/launch не повторять.
+  heartbeat, stable PIDs, no crash/stall/restart. Пользователь вручную наблюдал successful offline UI
+  delivery, но post-capture не содержит exact text/protocol markers, поэтому full message-ID chain,
+  receipt cleanup и origin DELIVERED ещё не доказаны. Single-use phone steps и build/install/launch
+  не повторять; следующий durability gate — M8 delayed multi-carrier scenario ниже.
 - **M7** — E2E-шифрование payload получателю (Фаза 8.1; пока payload «как есть» — небезопасно).
-- **M8** — персистентность RelayQueue (SQLite) — переживать рестарт.
+- **M8** — encrypted persistent RelayQueue + custody tombstones: SQLite переживает process death,
+  reboot и update, хранит absolute expiry без продления TTL; bounded background relay wake передаёт
+  следующему узлу. Gate — delayed chain Anna→Zhenya→D→Stas через сутки с reboot Zhenya/D.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).
 
 Каждый шаг: код → сборка (Rust + APK) → установка на 2–3 телефона → тест → запись в памятку.

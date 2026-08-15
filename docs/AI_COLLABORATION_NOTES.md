@@ -340,15 +340,20 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Windows HEAD всё ещё base `8cea566…`, worktree содержит exact Rust+Kotlin overlays, generated
 > native, untracked build harness и icon; history reconciliation отложен.
 >
-> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** пользователь разрешил
-> controlled automatic offline acceptance и bounded network toggles Stas/Anna + ровно одно manual
-> UI message Anna→Stas. Первый prepared step только exact read-only visibility/state/PID/network
-> baseline, затем отключает Wi-Fi+data лишь у Stas, ждёт 35s и требует Anna/Zhenya healthy online,
-> all PIDs stable; message ещё не отправляется. Перед command назвать все три. No install/relaunch/
-> force-stop/log clear/data clear/synthetic publish. Acceptance:
-> origin app sends while recipient offline,
-> third phone stores, origin disconnects, recipient returns and gets exactly one UI message, receipt
-> cleans relay and eventually marks origin DELIVERED. Mixed N↔N-1 и r4.5 остаются release gates.
+> **CURRENT product state:** approved M3(d) prepare уже выполнен один раз и завершён
+> `INCOMPLETE_DO_NOT_REPEAT`: Wi-Fi Стаса стал 0, mobile data остался 1, поэтому строгий harness
+> правильно остановился до message/install/launch/force-stop/log clear/data clear. Пользователь
+> затем вручную выполнил сценарий и сообщает, что UI delivery сработала. Последующий single-use
+> read-only capture сохранил stable PIDs/no crash, но exact text и protocol markers=0, поэтому это
+> полезное functional observation, не финальное engineering proof relay chain/receipt cleanup.
+> Phone steps не повторять и телефоны сейчас не менять.
+>
+> **Следующий product priority — M8 durable delayed multi-hop custody:** encrypted persistent
+> RelayQueue должен пережить process death/reboot/sleep. Обязательный gate: Anna→offline Stas,
+> Zhenya stores; через день Zhenya→new relay D в коротком online overlap; Zhenya offline/killed;
+> позже D→Stas без Anna/Zhenya online, ровно одно UI message, durable receipt cleanup и eventually
+> origin DELIVERED. До M8 текущий multi-hop gossip работает только best-effort, пока RAM queues и
+> процессы живы; он не гарантирует сутки/перезапуск. Mixed N↔N-1 и r4.5 остаются release gates.
 > Иконка заморожена до завершения offline delivery.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
@@ -1950,6 +1955,29 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `b5d47d55df3d7c27ea85dbb8d0c8d8ab3563e51b`; gzip 5,170 B / SHA-256
   `945A9776DBF32887D49B4138C8B1CF4DFB17062F3825776EC2019D2F30D1712C`, Base64 6,896 chars.
   Static action/order/state/delimiter checks PASS; Windows ParseFile/execution pending.
+- **2026-08-15 (доп.174) — M3(d) prepare consumed/incomplete; manual success report + read-only
+  capture:** approved prepare executed once; outer 3/3 visibility, payload/blob/parser/preflight PASS,
+  then exact Stas Wi-Fi/data disable callsites ran. State
+  `%TEMP%\apu-m3d-offline-acceptance-prepare.json`, SHA-256
+  `0FCA3B35B5887C3F56C3A5D0BB23EA5F370200EA7CBDB22132693B082469607A`, outcome
+  `INCOMPLETE_DO_NOT_REPEAT`, text `M3D-OFFLINE-1786800490`: post-toggle predicate found Stas not
+  fully offline, so no user message/install/launch/force-stop/log clear/data clear. Пользователь
+  вручную закончил сценарий и сообщает successful delivery. Separate read-only capture state
+  `%TEMP%\apu-m3d-manual-offline-capture.json`, SHA-256
+  `27D9B17773349E36060D869A866DA73B2EE20DA423B9F3323A16BC025238C98A`: PIDs 22055/11575/11449
+  stable; settings Anna 1/1/0, Zhenya 1/0/0, Stas 0/1/0 (Wi-Fi/data/airplane); no crash/ANR.
+  Exact text и searched M3(d) origin/relay/receipt/delivery markers all zero, поэтому capture не
+  доказывает exact message-ID chain. Оба state/evidence immutable; не повторять, телефоны не менять.
+- **2026-08-15 (доп.175) — delayed multi-carrier custody is hard requirement / current gap:**
+  Anna→offline Stas may be stored by Zhenya; after a day Zhenya must hand custody to relay D during
+  a separate overlap, then D later delivers to Stas exactly once while Anna/Zhenya remain offline.
+  Source inspection confirms `gsumm`/bounded missing-relay forwarding, TTL=7 days, max hops=8,
+  per-recipient=200/global=10000, but `RelayQueue` is only process-RAM `Mutex<HashMap<...>>` with
+  `Instant`. Поэтому chain сейчас возможна лишь пока custody processes survive; process death/reboot
+  теряет relay. Before claiming scenario: M8 encrypted persistent storage, absolute timestamps,
+  startup recovery/expiry, tombstones/receipts, bounded background participation and controlled
+  non-overlapping-window + restart/reboot acceptance. No common transport overlap means no handoff;
+  UI must honestly retain Outbox/restricted state, never promise physically impossible transfer.
 
 ---
 
