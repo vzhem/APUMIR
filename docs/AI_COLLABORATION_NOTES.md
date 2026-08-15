@@ -2187,6 +2187,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   names, requires unique Verb-Noun names, named parameters and `Get-Command <name> -All` alias conflict
   gate. Never format flash again. Immediate next: draft asset upload → remote exact hash → publish
   prerelease; draft currently empty/unpublished.
+- **2026-08-15 (доп.189) — exact draft upload harness prepared:**
+  `scripts/v111616_draft_upload_v1.ps1` requires compact backup marker+state A965…2D2483, exact flash
+  APK 22,664,712 B / 446A…DC0D and checksum text. It requires Windows `gh.exe` already installed and
+  authenticated, verifies target is empty draft+prerelease, uploads exactly APK+sha256 once, downloads
+  APK to distinct C: temp, rechecks bytes/hash and remote asset names, and proves release remains
+  unpublished draft. State is separate/finally/no auto-retry; no format/phone/build. Harness 7,133 B /
+  SHA-256 `19CE187B2B9D4D488D9D23403F114DBF1C6143C9055087B01524AC79F6147F6C`;
+  deterministic gzip 2,367 B / `A42109FDB2734B34B90DF6428FB11724FED9C9D428995A97F9FBBBFFB67E8C5E`,
+  Base64 3,156 chars. Outer read-only gh/auth/TCP gate must pass before transfer/execution. After PASS,
+  sandbox independently checks assets/download hash and publishes existing prerelease without build.
 
 ---
 
