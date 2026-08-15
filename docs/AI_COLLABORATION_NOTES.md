@@ -340,12 +340,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Windows HEAD всё ещё base `8cea566…`, worktree содержит exact Rust+Kotlin overlays, generated
 > native, untracked build harness и icon; history reconciliation отложен.
 >
-> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** пользователь явно
-> разрешил data-preserving install v11.16.16 на всех трёх. Непосредственно перед phone-командой
-> назвать все три телефона; outer block и versioned harness начинают с read-only exact visibility,
-> затем version/UID/firstInstall/data/APK/evidence gates и останавливаются до первого install при
-> absent/unauthorized/offline/mismatch. Install использует только `adb install -r`, не делает launch,
-> force-stop, data clear, logcat/network change. Acceptance после отдельного launch approval:
+> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** data-preserving install
+> v11.16.16 уже PASS 3/3; все apps stopped. Следующий phone change — один controlled launch всех
+> трёх — требует отдельного явного разрешения. Перед командой назвать все три телефона; начать с
+> exact read-only visibility/install-state/version/UID/firstInstall/data/process-absent gate и
+> остановиться до launch при mismatch. Не делать force-stop, uninstall/data clear, logcat clear или
+> network change. После runtime readiness следующий отдельно согласованный acceptance:
 > origin app sends while recipient offline,
 > third phone stores, origin disconnects, recipient returns and gets exactly one UI message, receipt
 > cleans relay and eventually marks origin DELIVERED. Mixed N↔N-1 и r4.5 остаются release gates.
@@ -1902,6 +1902,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Static action/order/state/automatic-variable/delimiter checks PASS; Windows ParseFile/runtime
   pending. Перед командой предупредить подключить/разблокировать все три; outer visibility gate
   выполняется до transfer/apply/install.
+- **2026-08-15 (доп.170) — M3(d) v11.16.16 data-preserving install PASS 3/3:** outer read-only
+  visibility и versioned harness ParseFile/hash/blob PASS. Pre: Anna v11.16.15 PID12943,
+  Zhenya v11.16.13 PID5714, Stas v11.16.13 PID23149; UID=10425/10395/10387 exact. Ровно три
+  approved sequential `adb install -r`; post v11.16.16/11016016 3/3, UID, firstInstallTime и
+  dataDir preserved, process stopped 3/3. State `%TEMP%\apu-m3d-v11.16.16-install.json`, SHA-256
+  `59D5F8EDDBBEF2865CFFF5C48E349514502D6635C6F794CD0DBFDD6908846295`; install calls/verified=3/3.
+  Uninstall/data clear/force-stop/launch/logcat/network/public traffic=false. Install/state/evidence
+  не повторять/не удалять. Следующий phone-changing gate — отдельно разрешённый one controlled
+  launch 3/3, затем readiness evidence; automatic offline scenario только после него.
 
 ---
 
@@ -2135,15 +2144,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    APK/native/state hashes — в CURRENT OVERRIDE и доп.167. Rust/transfer/recovery/Gradle не повторять
    и evidence не удалять. Windows HEAD остаётся base `8cea566…`; dirty overlay не равен Git history
    synchronization, generated `.so` не commit, icon F263…ACA9 сохранить.
-5. Следующий product gate требует отдельного разрешения на data-preserving install v11.16.16 на
-   Анну, Женю и Стаса. До разрешения можно только подготовить/read-only проверить harness; uninstall,
-   data clear, force-stop старых consumed attempts, network changes и relaunch ради markers запрещены.
+5. Data-preserving install v11.16.16 PASS 3/3, state SHA 59D5…6295; все apps stopped. Не
+   переустанавливать. Следующий phone-changing gate — отдельное разрешение на controlled launch всех
+   трёх; до него только source/preflight preparation. Force-stop, data clear, network/logcat changes
+   и relaunch ради старых markers запрещены.
 6. Перед phone-командой назвать все три телефона и предупредить подключить; отдельного подтверждения
-   подключения не ждать, но начать с exact read-only visibility/version/signer/UID/firstInstall/data
-   gate и остановиться до install/launch при absent/unauthorized/offline. Acceptance: recipient
+   подключения не ждать, но начать с exact read-only visibility/install-state/version/UID/
+   firstInstall/data/process gate и остановиться до launch при absent/unauthorized/offline. Acceptance: recipient
    offline, origin app sends, third phone stores, origin disconnects, recipient returns and gets
    exactly one UI message, receipt cleans relay and origin eventually DELIVERED.
 7. Активные `%TEMP%` states/logs, APK/native и hash-linked evidence не удалять. После закрытия gate
    сделать bounded inventory/cleanup; milestone-backup предлагать только после действительно крупной
    проверенной APK/этапа, не после docs-only или промежуточного Rust compile.
-
