@@ -563,6 +563,11 @@ artifact/network effect и сохранность входных hashes; зат�
 redundant `ls-remote` timeout/empty не отменяет fetch. Продолжить отдельным local-only block:
 проверить branch/worktree/artifact hashes, оба local refs, затем mixed reset/точечный restore.
 Если FETCH_HEAD или tracking ref расходятся — STOP, не угадывать и не force/reset.
+`Test-NetConnection github.com -Port 443=True` доказывает только один TCP handshake и не гарантирует,
+что следующий Git HTTPS-запрос переживёт временный outage. Если fetch после такого PASS всё же
+таймаутится, не менять proxy/DNS/config и не повторять большой launcher: сохранить worktree,
+сделать отдельный read-only DNS/TCP/`curl.exe -I` report, подождать и позже выполнить один isolated
+fetch. Untracked artifact не удалять через `git clean`; обычный fetch/mixed reset его не трогает.
 
 **Связанное правило parser compatibility:** raw stdout/stderr должны быть записаны до parsing.
 Нельзя считать build неуспешным только потому, что новая версия native tool изменила английский
