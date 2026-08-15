@@ -1582,6 +1582,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   действительно ненужных intermediate logs/states; итоговые PASS manifests/artifacts сначала
   сохранить по принятой evidence/milestone процедуре. Не удалять evidence автоматически или без
   явного согласования состава.
+- **2026-08-15 (доп.147)** — подготовлен versioned
+  `scripts/r44_mixed_zhenya_launch1.ps1`: exact preflight2 state/hash, source/E6C3/worktree guards,
+  exact three-device/identity/PID pre-gate; Zhenya обязана быть stopped, Anna PID12943 и Stas
+  PID23149 не меняются. Ровно один `am start -W` только serial Zhenya, install=0; затем 15+135 s
+  current-PID/launch-epoch filtered HiveMQ readiness (ConnAck/subscription/ready/incoming/heartbeat),
+  recovered-after-last-error rule, stable all-three final PIDs, zero overflow/backpressure/invariant/
+  stalls/restart/request failure. No force-stop/log clear/network/user payload; distinct immutable
+  state/evidence, no automatic retry. Static delimiter/parent/serial, 0-install/1-launch exact target,
+  no Anna/Stas launch, 150 s, raw-exit, forbidden/auto-var/payload/state/marker checks PASS; LF
+  SHA-256 `942523F0…1DD38A`. Следующий gate — sync/ParseFile/once. Непосредственно перед командой
+  предупредить: подключены и разблокированы должны быть Анна, Женя и Стас; изменяется только запуск
+  APU на Жене.
 
 ---
 
