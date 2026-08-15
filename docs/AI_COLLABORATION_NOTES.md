@@ -363,8 +363,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > соответствует portable backup. Partial F: tree будет полностью удалён отдельно разрешённым format.
 > Read-only gate доказал F:=Disk2 `General UDisk`, USB/MBR, FAT32 `SMARTBUY`, 14.62 GiB, healthy,
 > DriveType2, IsSystem/IsBoot=false. Explicitly authorized guarded format PASS: F: теперь exFAT,
-> label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. Следующий step — только
-> compact portable copy: source/Git history/required overlays+signing material, previous v11.16.15,
+> label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. **Никогда больше не
+> форматировать эту флешку:** future updates replace/rotate files only; retain previous+latest and
+> delete older only after new pair verifies. Следующий step — compact portable copy:
+> source/Git history/required overlays+signing material, previous v11.16.15,
 > latest v11.16.16, `LATEST.txt/json`; no build/.gradle/target/cache/log/bulk evidence, dependencies
 > download on new PC. Authoritative procedure: `docs/FLASH_BACKUP_RUNBOOK.md`; full read mandatory
 > before any flash command. После compact copy/restore verify загрузить exact latest APK 22,664,712 B

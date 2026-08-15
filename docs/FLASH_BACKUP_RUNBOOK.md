@@ -26,11 +26,14 @@ APU — Android-приложение: на новом ПК сама APK не з�
 2. Сначала спросить/получить букву диска. Никогда её не угадывать.
 3. До изменения — отдельный read-only gate: drive letter, label, filesystem, size/free, DiskNumber,
    FriendlyName, BusType, PartitionStyle, DriveType, IsSystem, IsBoot.
-4. Форматирование — только после отдельного явного разрешения пользователя и только отдельным
-   versioned `.ps1` из elevated PowerShell. Формат и copy не объединять.
-5. Destructive harness повторно не запускать после ambiguous/incomplete. Сначала читать state.
-6. После format отдельно доказать filesystem/label, прежний физический DiskNumber/name/USB identity
-   и пустой root. Только затем начинать copy.
+4. **Форматирование этой флешки навсегда запрещено.** Одноразовый format уже завершён и принят.
+   Будущий ИИ не предлагает и не выполняет `Format-Volume`, `format`, `Clear-Disk` или пересоздание
+   partition даже при partial/старой копии. Если identity/filesystem/health неверны — остановиться и
+   попросить другой носитель; не «исправлять» форматированием.
+5. Принятый format state immutable и не повторяется. Partial portable backup исправляется только
+   bounded заменой файлов/версий после read-only inventory.
+6. Перед каждой ротацией заново доказать filesystem/label, физический DiskNumber/name/USB identity
+   и health. Наличие принятой старой копии нормально: флешка не обязана быть пустой.
 7. Portable copy строится **allowlist-ом**, а не `robocopy <repo> /E` без исключений.
 8. Всегда хранить минимум две проверенные подписанные APK: `previous` и `latest`.
 9. Новую APK нельзя назвать `latest` до проверки size, SHA-256, package/version и Android signer.
@@ -167,16 +170,15 @@ SHA-256, перечисленные явно в `MILESTONE.json`. Не копи�
 
 Read-only gate ничего не форматирует и не удаляет.
 
-### Шаг C — format только при явном разрешении
+### Шаг C — одноразовый format уже завершён; никогда не повторять
 
-1. Пользователь отдельно говорит форматировать конкретную букву.
-2. Открыть PowerShell от имени администратора.
-3. Versioned harness заново проверяет exact identity непосредственно перед единственным
-   `Format-Volume` callsite.
-4. Использовать exFAT и понятную label `APU_BACKUP`, если пользователь не выбрал другое.
-5. Записать state на C:, SHA-256 state и outcome.
-6. Доказать remount, filesystem/label, physical identity и empty root.
-7. Не начинать copy в этом же harness.
+Исторический format F: принят state SHA-256 из раздела 9. Это не шаблон для будущих запусков.
+Начиная со следующей ротации разрешены только чтение, staged copy, hash verification и bounded
+удаление версии старше `previous` **после** успешной записи новой `latest`.
+
+Если copy прервана, не форматировать и не очищать корень целиком. Прочитать `INCOMPLETE.json`,
+сверить manifests и продолжить/заменить только известные portable paths. Не трогать последнюю
+проверенную пару previous/latest до готовности новой пары.
 
 ### Шаг D — preflight portable contents
 
@@ -196,7 +198,12 @@ largest files/directories. Не «решать» это копированием
 
 ### Шаг E — staged compact copy
 
-Сначала создать `<FLASH>:\APU_PORTABLE\INCOMPLETE.json`. Затем независимо:
+Сначала создать `<FLASH>:\APU_PORTABLE\INCOMPLETE.json`. При ротации существующую пару не
+удалять. Сначала записать новую APK во временную `versions/incoming-*`, проверить hash/signature,
+затем атомарно переименовать прежнюю `latest` в `previous`, `incoming` в `latest`, обновить
+`LATEST.*` и только после final verify удалить версию старше нового `previous`.
+
+Затем независимо сохранить/обновить:
 
 1. versions previous/latest;
 2. source bundle и verify;
@@ -257,7 +264,8 @@ Gradle dependencies. Не переносить их кэши с флешки. П
 1. **Нельзя:** `robocopy C:\APUMIR-arena-test F:\... /E` без exclusions. Это тащит build-кэши,
    `.git`, временные артефакты и может занимать гигабайты.
 2. **Нельзя:** копировать все `%TEMP%\apu-*` «на всякий случай». Portable backup не evidence dump.
-3. **Нельзя:** объединять format и copy; после format нужен отдельный empty-drive PASS.
+3. **Нельзя:** когда-либо снова форматировать принятую APU-флешку. Старые версии удаляются только
+   bounded rotation после проверки новой previous/latest пары; partial copy не повод форматировать.
 4. **Нельзя:** повторять consumed destructive/ambiguous harness. Новый version/state после анализа.
 5. **PowerShell 5 native stderr:** при `$ErrorActionPreference='Stop'` конструкция `2>&1` может дать
    terminating `NativeCommandError` до проверки `$LASTEXITCODE`. Для Git/robocopy использовать

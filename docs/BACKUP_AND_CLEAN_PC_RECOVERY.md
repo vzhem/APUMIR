@@ -5,8 +5,9 @@
 
 > **Для любой флешки сначала полностью читать
 > [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md).** Это authoritative hard procedure:
-> compact portable backup по умолчанию, previous+latest APK, allowlist source, format отдельно,
-> no caches/full `%TEMP%`/blind recursive workspace copy. При конфликте старых примеров ниже с
+> compact portable backup по умолчанию, previous+latest APK, allowlist source, **никогда больше не
+> форматировать принятую APU-флешку**, no caches/full `%TEMP%`/blind recursive workspace copy. При
+> конфликте старых примеров ниже с
 > runbook следовать runbook; старый шаблон нельзя запускать без адаптации и нового exact gate.
 
 ## 1. Обязательное правило для ИИ

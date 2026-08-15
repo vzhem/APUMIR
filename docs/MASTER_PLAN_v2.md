@@ -18,7 +18,8 @@
   на внешний носитель с Git history, APK, hashes и clean-PC recovery guide; общая процедура:
   [`BACKUP_AND_CLEAN_PC_RECOVERY.md`](BACKUP_AND_CLEAN_PC_RECOVERY.md). Для флешки authoritative
   hard procedure — [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md): compact portable allowlist,
-  previous+latest, format отдельно; никогда не blind-copy caches/full workspace/evidence.
+  previous+latest; принятую APU-флешку больше никогда не форматировать; никогда не blind-copy
+  caches/full workspace/evidence.
 - Spam/DoS/replay и другие defensive tests повторять по важным сборкам; high load только на
   собственной локальной инфраструктуре: [`SECURITY_RESILIENCE_TEST_PLAN.md`](SECURITY_RESILIENCE_TEST_PLAN.md).
 - Каждую ошибку инструмента и безопасный workaround сразу записывать в collaboration notes и
