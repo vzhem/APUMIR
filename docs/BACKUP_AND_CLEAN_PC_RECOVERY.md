@@ -605,8 +605,12 @@ refs/heads/<session-branch>`. Но **наличие bundle у агента не 
 Не повторять тот же огромный block и не удалять созданный gzip. Поскольку hash gate стоит до
 `GzipStream`, `git apply` и build, такой stop сам по себе не меняет source/APK. Следующий шаг только
 read-only: фактические path/size/SHA-256 сохранённого gzip, наличие decompressed runner/patch/state,
-branch/HEAD/status и hashes охраняемых native/icon. Затем distinct recovery payload/paths; old bytes
-остаются evidence. Не обвинять пользователя и не ослаблять hash gate ради продолжения.
+branch/HEAD/status и hashes охраняемых native/icon. Если размер совпадает, сравнить fixed-size chunk
+hashes (например 1024 B). При малом числе mismatch не пересылать весь payload: передать только exact
+chunk bytes, проверить chunk length/SHA, скопировать старый файл в новый distinct byte array,
+заменить exact offset и потребовать полный expected file SHA. Только затем decompress/ParseFile/run.
+Старые bytes остаются evidence; recovery не перезаписывает их. Не обвинять пользователя и не
+ослаблять hash gate ради продолжения.
 
 Offline patch переносит содержимое, но не Git history: Windows `HEAD` остаётся base commit, а
 worktree становится dirty. Не объявлять его синхронизированным target commit. Историю позже

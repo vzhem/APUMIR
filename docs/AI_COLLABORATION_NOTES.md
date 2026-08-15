@@ -1855,9 +1855,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `6070E0882C7EA87E398F35A2683014001CF9067259400B501CFC892D13CC37A5`; runner/inner patch/transfer
   state/APK state/APK все absent. Branch/HEAD/status, native 27B9… и icon F263… exact. Значит
   изменились байты внутри Base64 при сохранённой длине; source/build/phones не затронуты. Recovery:
-  old gzip оставить evidence, read-only сравнить 1024-byte chunk hashes, затем в distinct copy
-  заменить только mismatched chunks и потребовать полный expected SHA до распаковки. Не повторять
-  full payload и не ослаблять hash gate. APK всё ещё не построен.
+  old gzip оставить evidence. Read-only сравнение 14 chunks по 1024 B нашло ровно один mismatch:
+  index=2, offset=2048, length=1024, actual SHA-256
+  `14794B07FC0D41677B4DB5E26413364AAE5B5337F3D0917892DC8D5D9705BE96`, expected
+  `A0F8453468F60AAEC22B081EB3926AB279CAD341AD725BF23FB4E2B06DEBD8A1`; остальные 13 exact.
+  Recovery создаёт distinct copy, заменяет только этот authenticated chunk и требует полный
+  expected gzip SHA `E081A906…65332` до распаковки/ParseFile/run. Не повторять full payload и не
+  ослаблять hash gate. APK всё ещё не построен.
 
 ---
 
