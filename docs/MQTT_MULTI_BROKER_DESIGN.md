@@ -413,9 +413,11 @@ Anna v15/PID12943 + Stas v13/PID23149 running, Zhenya v13 stopped, connected 3/3
 Controlled Zhenya launch1 Windows stopped safely pre-action: state `DCC2C15…6D0A4`, Zhenya уже
 running на live gate, launchStarted=false, install/payload/Anna/Stas launch=false. Это readiness race,
 не failure; launch1 не повторять. Saved analyzer Windows PASS `5325CDB8…21CAF4`: exact 20
-pre-action files, no launch command, PIDs Anna12943/Zhenya14811/Stas23149. Distinct observe-only
-current-PID HiveMQ window готов/static PASS: 150 s new heartbeat/incoming + three-PID stability,
-launch/install=0. Pending Windows ParseFile/once. Active evidence не cleanup до закрытия gate.
+pre-action files, no launch command, PIDs Anna12943/Zhenya14811/Stas23149. Observe1 Windows PASS,
+state `90BC69AB…86B5F`: PID14811 stable 150 s, incoming HiveMQ=48, healthy heartbeat=1, all errors/
+overflow/stall/restart/request failures=0, all 3 PIDs stable, actions/payload=0. Common-broker readiness
+закрыт. Pending controlled N→N-1/N-1→N delivery then different-version third-phone relay. Active
+evidence не cleanup до закрытия gate.
 
 ### Mixed-version acceptance для MQTT overlay
 

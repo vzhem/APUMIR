@@ -1628,6 +1628,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   0-install/0-launch, 150 s/epoch/heartbeat/incoming, raw-exit/forbidden/auto-var/state/marker PASS;
   LF SHA-256 `309A7511…83C1DC`. Следующий gate sync/ParseFile/once; перед командой предупредить, что
   нужны подключённые Анна, Женя и Стас, но команда только читает и ждёт.
+- **2026-08-15 (доп.152)** — Zhenya observe1 Windows ParseFile/execution **PASS**, state
+  `%TEMP%\apu-r4.4-mixed-v15-v13-zhenya-observe1.json`, SHA-256
+  `90BC69ABFB5E5BE0D1A37623C13324F0D276402290AF5E6C4B385BDB78886B5F`. PID14811 stable over
+  150 s; Anna12943/Stas23149 also stable. New-window metrics: incomingPublish=48, heartbeat=1,
+  pollErrors/overflow/backpressure/invariant/stalls/eventLoopEnded/channelClosed/restart required/
+  scheduled/failed/request timeouts/errors=0. sessionReady/reconnect=0 ожидаемо для процесса,
+  начавшегося до observation epoch; healthy polling heartbeat с connacks>0 подтверждён harness.
+  Install/launch/phone changes/user payload=false. Common HiveMQ N↔N-1 readiness gate закрыт;
+  observe1 не повторять. Следующий отдельный gate — controlled mixed-version delivery N→N-1 и
+  N-1→N, затем third-phone relay другого version; сначала audit existing delivery/relay harness и
+  определить минимальный test payload/identity evidence без ложных UI/ACK.
 
 ---
 
