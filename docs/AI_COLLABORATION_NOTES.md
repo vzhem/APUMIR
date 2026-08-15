@@ -357,9 +357,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > durable receipt cleanup и eventually origin DELIVERED. До M8 это best-effort в живых RAM queues.
 >
 > **Release checkpoint:** пользователь выбрал GitHub prerelease v11.16.16 и backup на Windows F:.
-> Не tag-trigger auto-build: tracked Rust `.so` не совпадает с verified Windows APK. Публиковать
-> только exact APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D` как test prerelease с явным M8 gap.
-> Mixed N↔N-1 и r4.5 остаются будущими stable-release gates. Иконка пока заморожена.
+> Draft создан, assets пока empty/unpublished. Первый backup/upload harness остановился до F: copy:
+> GitHub TCP 443 unavailable, а PS5 `$ErrorActionPreference=Stop` превратил native stderr redirect в
+> terminating `NativeCommandError`. Его не повторять. v2 — offline-only backup без network retry;
+> после PASS отдельно загрузить exact APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D`. Не запускать
+> tag-trigger auto-build: tracked Rust `.so` не совпадает с verified APK. Mixed N↔N-1 и r4.5
+> остаются будущими stable-release gates. Иконка пока заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2008,6 +2011,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   C: workspace + all `%TEMP%\apu-*` evidence + git bundle/patches/APK to F:, then if Windows `gh` is
   authenticated uploads APK+sha256 to draft and re-downloads/hash-verifies. Publish only after remote
   asset exact hash verification; if gh/fetch unavailable, backup remains complete and upload pending.
+- **2026-08-15 (доп.178) — v1 backup stopped before F: copy; offline-only v2 prepared:** authenticated
+  transfer gzip/raw/parser PASS, then first network operation `git fetch` failed after ~21s:
+  `Failed to connect to github.com:443`. Because PS5 EAP=Stop + `2>&1` surfaced native stderr as a
+  terminating `NativeCommandError`, intended nonfatal branch did not run. No phones/build/install;
+  script order proves no F: directories/copy/upload before fetch. v1 state, if written at
+  `%TEMP%\apu-v11.16.16-prerelease-backup.json`, must be preserved; do not rerun v1. Draft remains
+  empty/unpublished. Corrected `scripts/v111616_prerelease_backup_upload_v2.ps1` is offline-only:
+  deliberately no fetch/gh retry, uses Start-Process stdout/stderr capture for local git diff/bundle,
+  verifies APK, copies full exact workspace + all prior `%TEMP%\apu-*` (including v1 state/evidence)
+  + APK/hash/patches/bundle/manifest to same F: backup root, and records v2 state separately. Harness
+  16,436 B / SHA-256 `2E5CCAD547B23A91B973188FFED6EA73DB85FE11B61316B3094B95B1E260F82E`;
+  deterministic gzip 4,727 B / SHA-256
+  `1BBF74DDD18E31144937C7BD10474D8B5C5B93DD09B6DA72C33217317195BA95`, Base64 6,304 chars.
+  Expected end: `BACKUP COMPLETE ON F:; NETWORK RETRY SKIPPED; DRAFT UPLOAD PENDING`. Only after
+  local backup PASS may a separate bounded upload be attempted when GitHub connectivity is available.
 
 ---
 
