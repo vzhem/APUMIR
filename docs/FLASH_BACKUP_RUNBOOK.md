@@ -277,9 +277,15 @@ Gradle dependencies. Не переносить их кэши с флешки. П
 8. **Большой inline Base64:** transfer может повредиться. Gzip/raw hashes должны остановить процесс
    до write/execute. Не называть это ошибкой пользователя и не повторять тот же payload вслепую;
    использовать меньший exact patch от уже verified source.
-9. **Не считать backup готовым**, если был только copy. Нужны hashes, bundle verify, forbidden scan,
+9. **PowerShell aliases регистронезависимы:** никогда не называть helper одной буквой или коротким
+   общим словом (`H`, `h`, `?`, `%`, `r`, `cat` и т. п.). В Windows PowerShell имя `H` разрешилось
+   как встроенный alias `Get-History`, поэтому вызов `H $bytes` стал ошибочным `Get-History -Id 0`.
+   Использовать уникальные Verb-Noun имена вроде `Get-ApuBytesSha256Exact` и вызывать полным именем
+   с named parameters. Перед критическим wrapper проверять `Get-Command <name> -All`; любой alias/
+   cmdlet conflict блокирует запуск до write/execute. Не повторять тот же wrapper после alias error.
+10. **Не считать backup готовым**, если был только copy. Нужны hashes, bundle verify, forbidden scan,
    restore rehearsal и final marker.
-10. **Не коммитить generated `.so`/keystore** ради backup. Сохранить их как private artifacts.
+11. **Не коммитить generated `.so`/keystore** ради backup. Сохранить их как private artifacts.
 
 ## 9. Текущая ротация v11.16.16
 
@@ -293,7 +299,11 @@ Gradle dependencies. Не переносить их кэши с флешки. П
   `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7`;
 - F: format state SHA-256:
   `A75443F8D302B8D856237F63C2122ABA4C676A6456078066125EF1455E1FACFF`;
-- flash after verified format: F:, Disk 2, `General UDisk`, USB, exFAT, label `APU_BACKUP`, empty.
+- flash identity: F:, Disk 2, `General UDisk`, USB, exFAT, label `APU_BACKUP`;
+- accepted portable backup: `F:\APU_PORTABLE`, 278 manifest entries, previous+latest hashes PASS,
+  bundle verify PASS, forbidden scan PASS, restore rehearsal PASS;
+- final backup state SHA-256:
+  `A96500612DD1AC80D908F1F49ADE9536931E512D387C2FD0EDA8CB82772D2483`.
 
-Draft GitHub prerelease остаётся unpublished/empty до отдельной загрузки exact latest APK и
-remote re-download/hash verification.
+Флешку больше никогда не форматировать. Draft GitHub prerelease остаётся unpublished/empty до
+отдельной загрузки exact latest APK и remote re-download/hash verification.

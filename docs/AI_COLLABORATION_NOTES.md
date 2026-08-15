@@ -366,14 +366,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. **Никогда больше не
 > форматировать эту флешку:** future updates replace/rotate files only; retain previous+latest and
 > delete older only after new pair verifies. Compact v1 stopped before F: copy; do not repeat.
-> Compact v2 copied/hash-verified 278 files, then stopped in commit-spec formatting; do not repeat.
-> Resume v3 reverified all 278, then stopped on PS5 JSON outer-array Count=1; do not repeat. Resume v4
-> uses direct JSON array Count, reuses all files/existing restore clone and recopies 0; execution pending:
-> source/Git history/required overlays+signing material, previous v11.16.15,
-> latest v11.16.16, `LATEST.txt/json`; no build/.gradle/target/cache/log/bulk evidence, dependencies
-> download on new PC. Authoritative procedure: `docs/FLASH_BACKUP_RUNBOOK.md`; full read mandatory
-> before any flash command. После compact copy/restore verify загрузить exact latest APK 22,664,712 B
-> / SHA-256 `446A1EE9…429DC0D`. Не запускать
+> Compact portable backup PASS: `F:\APU_PORTABLE`, 278 hashes, previous v11.16.15 + latest
+> v11.16.16, bundle/forbidden/restore rehearsal PASS, state SHA-256 `A9650061…2D2483`.
+> Флешку никогда больше не форматировать; rotate files only. v1/v2/resume-v3/full-v4 transfer и
+> alias-H wrappers не повторять. Следующий step — загрузить exact latest APK 22,664,712 B / SHA-256
+> `446A1EE9…429DC0D` в draft prerelease, remote re-download/hash verify, then publish. Не запускать
 > tag-trigger auto-build: tracked Rust `.so` не совпадает с verified APK. Mixed N↔N-1 и r4.5
 > остаются будущими stable-release gates. Иконка пока заморожена.
 >
@@ -2177,6 +2174,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `63410DFCAB8F1DE94CD3BE5311EC62D98B1AF09D879E23B7285751F4F9509693`, Base64 856 chars.
   Local apply reconstructs exact v4 hash 8015…13F29. Transfer patch only from verified v3, normalize
   CRLF→LF, verify target/Parser, then execute zero-copy finalizer.
+- **2026-08-15 (доп.188) — alias collision recorded; compact portable backup final PASS:** first two
+  tiny-wrapper attempts stopped before patch write because PowerShell is case-insensitive and helper
+  `H` resolved to built-in alias `h`=`Get-History`; `H $bytes` became invalid `Get-History -Id 0`.
+  No F: change. Corrected unique `Get-BytesSha256Exact` wrapper passed source/gzip/patch/target/Parser.
+  Resume v4 then printed `ALL PORTABLE BACKUP HASHES PASSED: 278 files` and final
+  `APU COMPACT FLASH BACKUP PASS; 278 HASHES; PREVIOUS+LATEST; RESTORE REHEARSAL PASS; NEVER FORMAT`.
+  Backup `F:\APU_PORTABLE`; state
+  `%TEMP%\apu-v11.16.16-compact-flash-backup-resume-v4.json`, SHA-256
+  `A96500612DD1AC80D908F1F49ADE9536931E512D387C2FD0EDA8CB82772D2483`. INCOMPLETE removed,
+  BACKUP_COMPLETE written, files recopied by resumes=0. Runbook now hard-bans one-letter/common helper
+  names, requires unique Verb-Noun names, named parameters and `Get-Command <name> -All` alias conflict
+  gate. Never format flash again. Immediate next: draft asset upload → remote exact hash → publish
+  prerelease; draft currently empty/unpublished.
 
 ---
 

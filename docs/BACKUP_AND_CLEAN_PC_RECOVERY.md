@@ -653,6 +653,11 @@ read-only inventory: путь, размер, SHA-256, кем referenced и final
 manifests/evidence и authoritative artifacts сначала включить в принятую milestone/evidence копию.
 Не использовать широкие `Remove-Item $env:TEMP\apu-* -Recurse` и не чистить evidence автоматически.
 
+**PowerShell alias collision:** имена команд регистронезависимы. Не использовать helper names из
+одной буквы/общего слова (`H`, `h`, `r`, `cat`, `%`, `?`): `H` разрешился как alias `Get-History` и
+превратил hash helper в `Get-History -Id 0`. Использовать уникальный Verb-Noun (`Get-ApuBytesSha256Exact`),
+полное имя + named parameters и до critical wrapper проверять `Get-Command <name> -All`.
+
 **Long critical harness и ParserError:** большие install/test/backup blocks хранить versioned `.ps1`
 в `scripts/`, а не вставлять сотнями строк в interactive prompt. Перед запуском использовать
 `[System.Management.Automation.Language.Parser]::ParseFile` и требовать zero parse errors. Не
