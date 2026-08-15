@@ -2134,8 +2134,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   state into bounded provenance. Embedded new-PC restore clone also avoids Start-Process ExitCode.
   `scripts/v111616_compact_flash_backup_v2.ps1`: 30,337 B / SHA-256
   `466D05A84DD2E4E915ED3F045ACDB29BC20EB060EFA5B6F07DCB1F3E79774565`; deterministic gzip
-  8,294 B / SHA-256 `8B840BE487DBEA7D9327923C50A018984832B71956F808D559B3D9D1402E8FE7`,
-  Base64 11,060 chars. Transfer in small authenticated chunks; execution pending; never format.
+  8,294 B / SHA-256 `8B840BE487DBEA7D9327923C50A018984832B71956F808D559B3D9D1402E8FE7`.
+  Prefer compact exact patch from already verified v1:
+  `scripts/v111616_compact_v2_from_v1.patch` 3,963 B / SHA-256
+  `6CDDEA227CFD47141004024C8C3CBE9E2DE3091E120C257CFCACD406E3B901B1`; gzip 1,318 B /
+  `3FE55BF579197FD8856DD37F0F670BED37033C8892B7355050B75AA296B62819`, Base64 1,760 chars.
+  Normalize CRLF→LF after Windows git apply before expected target hash/Parser. Execution pending;
+  never format.
 
 ---
 

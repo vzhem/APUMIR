@@ -1,0 +1,69 @@
+--- a/scripts/v111616_compact_flash_backup_v2.ps1
++++ b/scripts/v111616_compact_flash_backup_v2.ps1
+@@ -7,3 +7,3 @@
+-$StatePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-flash-backup-v1.json'
+-$NativeCaptureDir = Join-Path $env:TEMP 'apu-v11.16.16-compact-native-v1'
+-$VerifyClonePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-restore-verify-v1'
++$StatePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-flash-backup-v2.json'
++$NativeCaptureDir = Join-Path $env:TEMP 'apu-v11.16.16-compact-native-v2'
++$VerifyClonePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-restore-verify-v2'
+@@ -11,0 +12 @@
++$PreviousAttemptStatePath = Join-Path $env:TEMP 'apu-v11.16.16-compact-flash-backup-v1.json'
+@@ -63,0 +65,3 @@
++    foreach ($Argument in $ArgumentList) {
++        if ($Argument -match '[\s"]') { throw "Native argument requires unsupported quoting: $Label" }
++    }
+@@ -67,3 +71,13 @@
+-    $NativeProcess = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
+-        -WorkingDirectory $RepoRoot -RedirectStandardOutput $StdoutPath `
+-        -RedirectStandardError $StderrPath -PassThru
++    $StartInfo = New-Object Diagnostics.ProcessStartInfo
++    $StartInfo.FileName = $FilePath
++    $StartInfo.Arguments = $ArgumentList -join ' '
++    $StartInfo.WorkingDirectory = $RepoRoot
++    $StartInfo.UseShellExecute = $false
++    $StartInfo.CreateNoWindow = $true
++    $StartInfo.RedirectStandardOutput = $true
++    $StartInfo.RedirectStandardError = $true
++    $NativeProcess = New-Object Diagnostics.Process
++    $NativeProcess.StartInfo = $StartInfo
++    if (-not $NativeProcess.Start()) { throw "Native command did not start: $Label" }
++    $StdoutTask = $NativeProcess.StandardOutput.ReadToEndAsync()
++    $StderrTask = $NativeProcess.StandardError.ReadToEndAsync()
+@@ -72,0 +87 @@
++        $NativeProcess.WaitForExit()
+@@ -76,4 +91,6 @@
+-    $NativeProcess.Refresh()
+-    if ($null -eq $NativeProcess.ExitCode) { throw "Native exit code unavailable: $Label" }
+-    $Stdout = if (Test-Path -LiteralPath $StdoutPath) { [IO.File]::ReadAllText($StdoutPath) } else { '' }
+-    $Stderr = if (Test-Path -LiteralPath $StderrPath) { [IO.File]::ReadAllText($StderrPath) } else { '' }
++    $Stdout = $StdoutTask.Result
++    $Stderr = $StderrTask.Result
++    $ExitCode = [int]$NativeProcess.ExitCode
++    $NativeProcess.Dispose()
++    Write-Utf8NoBom $StdoutPath $Stdout
++    Write-Utf8NoBom $StderrPath $Stderr
+@@ -81 +98 @@
+-        ExitCode = [int]$NativeProcess.ExitCode
++        ExitCode = $ExitCode
+@@ -119 +136 @@
+-        schema = 1
++        schema = 2
+@@ -169,0 +187,7 @@
++    if (-not (Test-Path -LiteralPath $PreviousAttemptStatePath -PathType Leaf)) { throw 'Compact v1 failure state missing' }
++    $PreviousAttempt = Get-Content -LiteralPath $PreviousAttemptStatePath -Raw | ConvertFrom-Json
++    $PreviousAttemptValid = $PreviousAttempt.outcome -eq 'INCOMPLETE_DO_NOT_REPEAT'
++    $PreviousAttemptValid = $PreviousAttemptValid -and $PreviousAttempt.copyStarted -eq $false
++    $PreviousAttemptValid = $PreviousAttemptValid -and $PreviousAttempt.copyComplete -eq $false
++    $PreviousAttemptValid = $PreviousAttemptValid -and $PreviousAttempt.formatRepeated -eq $false
++    if (-not $PreviousAttemptValid) { throw 'Compact v1 state does not prove pre-copy stop' }
+@@ -328,0 +353 @@
++    Copy-Item $PreviousAttemptStatePath (Join-Path $ProvenanceRoot 'compact-v1-pre-copy-stop-state.json') -Force
+@@ -356,2 +381,5 @@
+-$Clone = Start-Process -FilePath 'git.exe' -ArgumentList @('clone','--no-checkout',$Bundle,$Destination) -Wait -PassThru
+-if ($Clone.ExitCode -ne 0) { throw "Bundle clone failed: $($Clone.ExitCode)" }
++$SavedErrorActionPreference = $ErrorActionPreference
++$ErrorActionPreference = 'Continue'
++try { & git.exe clone --no-checkout $Bundle $Destination; $CloneExitCode = $LASTEXITCODE }
++finally { $ErrorActionPreference = $SavedErrorActionPreference }
++if ($CloneExitCode -ne 0) { throw "Bundle clone failed: $CloneExitCode" }
