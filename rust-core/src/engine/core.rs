@@ -16,9 +16,10 @@ use crate::network::presence::PresenceManager;
 use crate::network::message_queue::MessageQueue;
 use crate::network::offline_send::prepare_offline_relay;
 use crate::network::relay_queue::{
-    RelayMessage, RelayQueue, DEFAULT_RELAY_TTL, MAX_MESH_RELAY_ENVELOPE_BYTES,
+    RelayMessage, RelayQueue, DEFAULT_RELAY_TTL, MAX_MESH_RELAY_ENVELOPE_BYTES, MAX_TOTAL,
 };
 use crate::network::wire::MeshEnvelope;
+use crate::storage::relay_store::RelayStore;
 use crate::network::adaptive_polling::AdaptivePolling;
 
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
@@ -30,6 +31,91 @@ enum MqttOutboundCommand {
         envelope: String,
         message_id: String,
     },
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// M8-B/D: durable relay custody helpers
+// ═══════════════════════════════════════════════════════════════════
+
+/// Открыть durable relay-хранилище. Если основной `db_path` задан — рядом
+/// создаётся отдельный relay-файл (отдельная миграция/схема); иначе in-memory
+/// (тесты/дефолт). Ошибка открытия файла честно переключает в RAM-only режим:
+/// mesh продолжает работать как v11.16.16, но custody не переживает restart.
+fn open_relay_store(db_path: Option<&str>) -> RelayStore {
+    match db_path {
+        Some(path) => {
+            let relay_path = format!("{}.relay.sqlite", path);
+            match RelayStore::open(&relay_path) {
+                Ok(store) => {
+                    tracing::info!("MESH durable: relay store opened at {}", relay_path);
+                    store
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "MESH durable: cannot open relay store at {} ({}); relay custody is RAM-only",
+                        relay_path,
+                        e
+                    );
+                    RelayStore::open_in_memory().expect("in-memory relay store must open")
+                }
+            }
+        }
+        None => RelayStore::open_in_memory().expect("in-memory relay store must open"),
+    }
+}
+
+/// Восстановить RAM RelayQueue из durable-хранилища при старте (M8-D).
+///
+/// - Сначала удаляются истёкшие записи (БЕЗ доставки в UI).
+/// - Затем загружаются не-истёкшие (bounded, `MAX_TOTAL`) и ставятся в очередь.
+/// - TTL НЕ продлевается: записи восстанавливаются с исходным абсолютным
+///   `expires_at_ms`; дедуп/hop сохраняются самим содержимым записи.
+///
+/// Ошибки не роняют движок: восстановление best-effort, логируется.
+fn restore_relay_custody(
+    relay_queue: Option<&Arc<RelayQueue>>,
+    relay_store: Option<&Arc<RelayStore>>,
+) {
+    let (queue, store) = match (relay_queue, relay_store) {
+        (Some(q), Some(s)) => (q, s),
+        _ => return,
+    };
+
+    let now_ms = crate::network::relay_queue::utc_now_ms();
+
+    match store.purge_expired(now_ms) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(
+            "MESH durable: purged {} expired relay record(s) at startup",
+            n
+        ),
+        Err(e) => tracing::warn!("MESH durable: purge_expired failed at startup: {}", e),
+    }
+
+    match store.load_unexpired(now_ms, MAX_TOTAL) {
+        Ok(records) => {
+            let total = records.len();
+            let mut restored = 0usize;
+            for record in records {
+                match queue.enqueue(record) {
+                    Ok(true) => restored += 1,
+                    Ok(false) => {} // дубль/исчерпанный hop — ожидаемо пропускаем
+                    Err(e) => {
+                        tracing::warn!("MESH durable: restore enqueue failed: {}", e);
+                        break; // лимит очереди — дальше восстанавливать бессмысленно
+                    }
+                }
+            }
+            if total > 0 || restored > 0 {
+                tracing::info!(
+                    "MESH durable: restored {}/{} relay record(s) after startup",
+                    restored,
+                    total
+                );
+            }
+        }
+        Err(e) => tracing::warn!("MESH durable: startup load failed: {}", e),
+    }
 }
 
 fn remember_bounded_id(
@@ -161,6 +247,7 @@ pub struct P2PCore {
     presence: Option<Arc<PresenceManager>>,
     message_queue: Option<Arc<MessageQueue>>,
     relay_queue: Option<Arc<RelayQueue>>,
+    relay_store: Option<Arc<RelayStore>>,
     mqtt_outbound_tx: Option<tokio::sync::mpsc::Sender<MqttOutboundCommand>>,
     adaptive_polling: Arc<Mutex<AdaptivePolling>>,
     node_id_str: Option<String>,
@@ -185,6 +272,7 @@ impl P2PCore {
             presence: None,
             message_queue: None,
             relay_queue: None,
+            relay_store: None,
             mqtt_outbound_tx: None,
             adaptive_polling: Arc::new(Mutex::new(AdaptivePolling::with_defaults())),
             node_id_str: None,
@@ -258,9 +346,16 @@ impl P2PCore {
             self.presence = Some(Arc::new(PresenceManager::new(nid)));
             self.message_queue = Some(Arc::new(MessageQueue::new()));
             self.relay_queue = Some(Arc::new(RelayQueue::new()));
+            self.relay_store = Some(Arc::new(open_relay_store(self.config.db_path.as_deref())));
             let _ = 0; // modules initialized
         }
-        tracing::info!("Network stack initialized: Router+DHT+Relay+Presence+Queue+RelayQueue");
+        tracing::info!("Network stack initialized: Router+DHT+Relay+Presence+Queue+RelayQueue+RelayStore");
+
+        // M8-B/D: durable relay custody. Восстанавливаем RAM RelayQueue из
+        // RelayStore после process death/reboot: берём только не-истёкшие
+        // записи (bounded), истёкшие удаляем БЕЗ доставки в UI. Абсолютный
+        // expires_at_ms при этом НЕ продлевается — дедлайн сохраняется как был.
+        restore_relay_custody(self.relay_queue.as_ref(), self.relay_store.as_ref());
 
         let _ = self
             .storage
@@ -293,6 +388,7 @@ impl P2PCore {
         let dht2 = self.dht.clone();
         let queue2 = self.message_queue.clone();
         let relay_queue2 = self.relay_queue.clone();
+        let relay_store2 = self.relay_store.clone();
         let display_name = self.config.display_name.clone();
         let quic_port = self.config.quic_port;
 
@@ -338,6 +434,7 @@ impl P2PCore {
                 let public_addr_mqtt = Arc::clone(&public_addr_arc);
                 let queue_mqtt = queue2.clone();
                 let relay_queue_mqtt = relay_queue2.clone();
+                let relay_store_mqtt = relay_store2.clone();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -351,6 +448,7 @@ impl P2PCore {
                             public_addr_mqtt,
                             queue_mqtt,
                             relay_queue_mqtt,
+                            relay_store_mqtt,
                             mqtt_outbound_rx,
                         ).await;
                     });
@@ -731,6 +829,7 @@ self.runtime = Some(runtime);
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         queue: Option<Arc<MessageQueue>>,
         relay_queue: Option<Arc<RelayQueue>>,
+        relay_store: Option<Arc<RelayStore>>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
@@ -861,6 +960,32 @@ self.runtime = Some(runtime);
         let mut seen_mesh_relay_order: VecDeque<String> = VecDeque::new();
         let mut delivered_mesh_relay_origins: HashMap<String, String> = HashMap::new();
         let mut delivered_mesh_relay_order: VecDeque<String> = VecDeque::new();
+
+        // M8-D: после restart восстанавливаем durable tombstones в RAM seen-set,
+        // чтобы уже доставленные/очищенные relay ID не были повторно поставлены
+        // в очередь или показаны в UI из retained/поздних конвертов.
+        if let Some(ref rs) = relay_store {
+            match rs.load_tombstone_ids(MAX_SEEN_MESH_RELAY_IDS) {
+                Ok(ids) => {
+                    let restored = ids.len();
+                    for id in ids {
+                        remember_bounded_id(
+                            &mut seen_mesh_relay_ids,
+                            &mut seen_mesh_relay_order,
+                            &id,
+                            MAX_SEEN_MESH_RELAY_IDS,
+                        );
+                    }
+                    if restored > 0 {
+                        tracing::info!(
+                            "MESH durable: restored {} tombstone(s) into seen set",
+                            restored
+                        );
+                    }
+                }
+                Err(e) => tracing::warn!("MESH durable: tombstone restore failed: {}", e),
+            }
+        }
 
         loop {
             // M3(d): drain a bounded number of origin send commands into the already-running
@@ -1167,28 +1292,61 @@ self.runtime = Some(runtime);
                                         }
                                         None => match String::from_utf8(e2e_payload) {
                                             Ok(text) => {
-                                                let now = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .unwrap_or_default();
-                                                events.emit(CoreEvent::MessageReceived {
-                                                    message_id: msg_id.clone(),
-                                                    chat_id: chat_scope,
-                                                    sender_id: origin.clone(),
-                                                    text,
-                                                    timestamp: now.as_millis() as i64,
-                                                });
-                                                remember_bounded_delivery(
-                                                    &mut delivered_mesh_relay_origins,
-                                                    &mut delivered_mesh_relay_order,
-                                                    &msg_id,
-                                                    &origin,
-                                                    MAX_DELIVERED_MESH_RELAY_IDS,
-                                                );
-                                                tracing::info!(
-                                                    "MESH relay: {} delivered to local recipient",
-                                                    msg_id
-                                                );
-                                                true
+                                                // M8-D: после restart RAM-мапа доставок пуста;
+                                                // durable tombstone защищает от повторной UI-доставки.
+                                                // Receipt при этом всё равно шлём (идемпотентный
+                                                // cleanup чужих custody-копий).
+                                                let durable_tombstoned = relay_store
+                                                    .as_ref()
+                                                    .map(|rs| {
+                                                        rs.has_tombstone(&msg_id).unwrap_or(false)
+                                                    })
+                                                    .unwrap_or(false);
+                                                if durable_tombstoned {
+                                                    tracing::info!(
+                                                        "MESH relay: {} already delivered before restart, UI suppressed",
+                                                        msg_id
+                                                    );
+                                                    true
+                                                } else {
+                                                    let now = std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .unwrap_or_default();
+                                                    events.emit(CoreEvent::MessageReceived {
+                                                        message_id: msg_id.clone(),
+                                                        chat_id: chat_scope,
+                                                        sender_id: origin.clone(),
+                                                        text,
+                                                        timestamp: now.as_millis() as i64,
+                                                    });
+                                                    remember_bounded_delivery(
+                                                        &mut delivered_mesh_relay_origins,
+                                                        &mut delivered_mesh_relay_order,
+                                                        &msg_id,
+                                                        &origin,
+                                                        MAX_DELIVERED_MESH_RELAY_IDS,
+                                                    );
+                                                    // M8-B/D: durable tombstone — после restart поздний/
+                                                    // повторный relay с этим ID не даст вторую UI-доставку.
+                                                    if let Some(ref rs) = relay_store {
+                                                        let now_durable =
+                                                            crate::network::relay_queue::utc_now_ms();
+                                                        if let Err(e) =
+                                                            rs.record_tombstone(&msg_id, now_durable)
+                                                        {
+                                                            tracing::warn!(
+                                                                "MESH relay: durable tombstone failed for {}: {}",
+                                                                msg_id,
+                                                                e
+                                                            );
+                                                        }
+                                                    }
+                                                    tracing::info!(
+                                                        "MESH relay: {} delivered to local recipient",
+                                                        msg_id
+                                                    );
+                                                    true
+                                                }
                                             }
                                             Err(_) => {
                                                 tracing::warn!(
@@ -1268,22 +1426,58 @@ self.runtime = Some(runtime);
                                                     &msg_id,
                                                     MAX_SEEN_MESH_RELAY_IDS,
                                                 );
-                                                match q.enqueue(next_hop_message) {
-                                                    Ok(true) => tracing::info!(
-                                                        "MESH relay: stored {} for {} at hop {}",
-                                                        msg_id,
-                                                        recipient,
-                                                        stored_hop
-                                                    ),
-                                                    Ok(false) => tracing::trace!(
-                                                        "MESH relay: {} not stored (duplicate/hop limit)",
-                                                        msg_id
-                                                    ),
-                                                    Err(e) => tracing::warn!(
-                                                        "MESH relay: failed to store {}: {}",
-                                                        msg_id,
-                                                        e
-                                                    ),
+
+                                                // M8-B: durable custody persist-ится ДО enqueue.
+                                                // Если store отклоняет (tombstone/валидация/IO) —
+                                                // в RAM не ставим: custody не подтверждена durable.
+                                                let durable_admitted = match relay_store.as_ref() {
+                                                    Some(rs) => {
+                                                        let now_durable =
+                                                            crate::network::relay_queue::utc_now_ms();
+                                                        if rs
+                                                            .has_tombstone(&next_hop_message.msg_id)
+                                                            .unwrap_or(false)
+                                                        {
+                                                            tracing::info!(
+                                                                "MESH relay: {} already tombstoned, not stored",
+                                                                msg_id
+                                                            );
+                                                            false
+                                                        } else {
+                                                            match rs.store(&next_hop_message, now_durable) {
+                                                                Ok(_) => true,
+                                                                Err(e) => {
+                                                                    tracing::warn!(
+                                                                        "MESH relay: durable store failed for {}: {}",
+                                                                        msg_id,
+                                                                        e
+                                                                    );
+                                                                    false
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    None => true, // RAM-only режим: legacy поведение
+                                                };
+
+                                                if durable_admitted {
+                                                    match q.enqueue(next_hop_message) {
+                                                        Ok(true) => tracing::info!(
+                                                            "MESH relay: stored {} for {} at hop {}",
+                                                            msg_id,
+                                                            recipient,
+                                                            stored_hop
+                                                        ),
+                                                        Ok(false) => tracing::trace!(
+                                                            "MESH relay: {} not stored (duplicate/hop limit)",
+                                                            msg_id
+                                                        ),
+                                                        Err(e) => tracing::warn!(
+                                                            "MESH relay: failed to store {}: {}",
+                                                            msg_id,
+                                                            e
+                                                        ),
+                                                    }
                                                 }
                                             }
                                             None => tracing::warn!(
@@ -1354,6 +1548,28 @@ self.runtime = Some(runtime);
                                     );
                                 }
 
+                                // M8-B: receipt авторитетен независимо от RAM-копии: durable
+                                // custody удаляется и tombstone-ится даже если запись после
+                                // restart осталась только в SQLite (RAM о ней не знает).
+                                if !msg_id.is_empty() && !recipient.is_empty() {
+                                    if let Some(ref rs) = relay_store {
+                                        let now_durable =
+                                            crate::network::relay_queue::utc_now_ms();
+                                        match rs.remove_and_tombstone(&msg_id, now_durable) {
+                                            Ok(true) => tracing::info!(
+                                                "MESH receipt: durable custody removed for {}",
+                                                msg_id
+                                            ),
+                                            Ok(false) => {}
+                                            Err(e) => tracing::warn!(
+                                                "MESH receipt: durable cleanup failed for {}: {}",
+                                                msg_id,
+                                                e
+                                            ),
+                                        }
+                                    }
+                                }
+
                                 // Удаляет retained receipt только его локальный origin и
                                 // только с topic, чей SHA-256 key совпал с msg_id.
                                 if is_own_retained_receipt {
@@ -1410,6 +1626,24 @@ self.runtime = Some(runtime);
                                                         "MESH gossip: removed {} expired relay(s)",
                                                         expired
                                                     );
+                                                }
+
+                                                // M8-B: durable-слой тоже чистим по абсолютному
+                                                // expiry (без доставки в UI).
+                                                if let Some(ref rs) = relay_store {
+                                                    let now_durable =
+                                                        crate::network::relay_queue::utc_now_ms();
+                                                    match rs.purge_expired(now_durable) {
+                                                        Ok(0) => {}
+                                                        Ok(purged) => tracing::info!(
+                                                            "MESH gossip: purged {} expired durable relay(s)",
+                                                            purged
+                                                        ),
+                                                        Err(e) => tracing::warn!(
+                                                            "MESH gossip: durable purge failed: {}",
+                                                            e
+                                                        ),
+                                                    }
                                                 }
 
                                                 let (candidates, total_missing) = q
@@ -1878,32 +2112,59 @@ self.runtime = Some(runtime);
                 );
                 false
             }
-            Some(queue) => match queue.enqueue(prepared.message) {
-                Ok(true) => {
-                    tracing::info!(
-                        "MESH origin: retained offline relay {} for {} at hop 0",
-                        message_id,
-                        recipient_id
-                    );
-                    true
-                }
-                Ok(false) => {
-                    tracing::info!(
-                        "MESH origin: offline relay {} not inserted (duplicate/hop limit)",
-                        message_id
-                    );
+            Some(queue) => {
+                // M8-B: durable custody собственного offline relay persist-ится ДО
+                // enqueue. Если store недоступен/отклоняет — честно не заявляем
+                // локальное retention (Outbox/Room retry при этом сохраняются).
+                let durable_admitted = match self.relay_store.as_ref() {
+                    Some(rs) => {
+                        let now_durable = crate::network::relay_queue::utc_now_ms();
+                        match rs.store(&prepared.message, now_durable) {
+                            Ok(_) => true,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "MESH origin: durable store failed for {}: {}",
+                                    message_id,
+                                    e
+                                );
+                                false
+                            }
+                        }
+                    }
+                    None => true, // RAM-only режим: legacy поведение
+                };
+
+                if !durable_admitted {
                     false
+                } else {
+                    match queue.enqueue(prepared.message) {
+                        Ok(true) => {
+                            tracing::info!(
+                                "MESH origin: retained offline relay {} for {} at hop 0",
+                                message_id,
+                                recipient_id
+                            );
+                            true
+                        }
+                        Ok(false) => {
+                            tracing::info!(
+                                "MESH origin: offline relay {} not inserted (duplicate/hop limit)",
+                                message_id
+                            );
+                            false
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                "MESH origin: cannot retain offline relay {} for {}: {}",
+                                message_id,
+                                recipient_id,
+                                error
+                            );
+                            false
+                        }
+                    }
                 }
-                Err(error) => {
-                    tracing::warn!(
-                        "MESH origin: cannot retain offline relay {} for {}: {}",
-                        message_id,
-                        recipient_id,
-                        error
-                    );
-                    false
-                }
-            },
+            }
             None => {
                 tracing::warn!(
                     "MESH origin: relay queue unavailable for offline message {}",

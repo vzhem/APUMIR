@@ -138,8 +138,14 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   структурой с разными ролями (своя / relay).
 - API: `enqueue`, `for_recipient(B)` (выдать всё для B, когда B появился), `remove(msg_id)`
   (cleanup), `digest()` (сводка `{msg_id, recipient}` для gossip), `cleanup_expired()`.
-- **Персистентность:** пока RAM (как MessageQueue); SQLite-персистентность — отдельный шаг (M8),
-  чтобы переживать рестарт.
+- **Персистентность (M8-B, source 2026-08-15):** `storage/relay_store.rs` — отдельный SQLite
+  store (`RelayStore`) с собственной миграцией: `relay_messages` (PK `msg_id`, индексы по
+  `recipient` и абсолютному `expires_at_ms`) и `relay_tombstones` (PK `msg_id`, индекс по
+  `removed_at_ms`). Custody persist-ится ДО enqueue (MESH-relay и origin offline пути), receipt
+  атомарно делает `remove + tombstone`, локальная доставка ставит durable tombstone (UI ровно
+  один раз после restart), при старте очередь восстанавливается bounded-load без продления TTL,
+  истёкшие/битые записи удаляются без UI. RAM `RelayQueue` остаётся рабочей копией. Compile/
+  runtime — Windows gate; encryption at rest и Keystore — M8-C, sleep/wake — M8-E.
 
 ### 3.3. Wire-формат (расширение envelope)
 
@@ -249,7 +255,11 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   следующему узлу. Gate — delayed chain Anna→Zhenya→D→Stas через сутки с reboot Zhenya/D.
   Состояние 2026-08-15: **M8-A source slice выполнен** (durable epoch-ms timestamps, serde-запись,
   validation/loading constructor, детерминированные unit tests; без SQLite write и без изменения
-  wire). Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-B RelayStore/SQLite migration.
+  wire) и **M8-B/D source slice выполнен** (RelayStore + отдельная миграция, persist-before-enqueue,
+  receipt cleanup + durable tombstones, bounded startup restore, UI exactly-once после restart;
+  SQL-семантика и отложенный сценарий Anna→Zhenya→D→Stas проверены sqlite3-прототипом и симуляцией).
+  Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-C encryption at rest / key lifecycle,
+  M8-E bounded sleep/wake, затем телефонный acceptance M8-F.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).
 
 Каждый шаг: код → сборка (Rust + APK) → установка на 2–3 телефона → тест → запись в памятку.

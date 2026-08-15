@@ -376,10 +376,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > workflow release-exists PASS/build skipped. Preferred next-time flow: Arena creates draft → user
 > uploads two flash files in browser → Arena verifies server digests and publishes. Version baseline
 > lives in `docs/VERSION_STATISTICS.md` and must get a short immutable entry+LOC delta for every global
-> version. Full no-questions handoff prompt: `docs/NEXT_AI_CHAT_BOOTSTRAP.md`. **M8-A source slice
-> выполнен 2026-08-15** (durable epoch-ms model + validation + tests, см. доп.193); compile/runtime
-> ждут Windows `build-rust.ps1`. Next product priority: **M8-B RelayStore/SQLite boundary** (после
-> compile gate M8-A). Mixed N↔N-1/r4.5 remain stable-release gates. Иконка пока заморожена.
+> version. Full no-questions handoff prompt: `docs/NEXT_AI_CHAT_BOOTSTRAP.md`. **M8-A и M8-B/D
+> source slices выполнены 2026-08-15** (durable epoch-ms model + RelayStore/migration + engine
+> persist/restore/tombstone wiring + tests; sqlite3-прототип и delayed-сценарий симуляция PASS,
+> tree-sitter syntax PASS — см. доп.193/194); compile/runtime ждут Windows `build-rust.ps1
+> -Features mqtt-dual-broker`. Next product priority: **Windows compile gate M8-A/B/D**, затем
+> **M8-C encryption at rest / key lifecycle**. Mixed N↔N-1/r4.5 remain stable-release gates.
+> Иконка пока заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2261,6 +2264,35 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `build-rust.ps1 -Features mqtt-dual-broker`**. В этом slice нет SQLite write; следующий шаг —
   M8-B RelayStore boundary + отдельная SQLite migration (relay records + tombstones, atomic
   persist до enqueue/ACK/offer).
+- **2026-08-15 (доп.194) — M8-B/D durable custody source slice complete; максимум тестирования
+  в sandbox выполнен; Windows compile pending:** пользователь дал полную волю на процесс и
+  maximum testing. Sandbox не имеет cargo/rustc, crates.io/rustup недоступны (проверено),
+  поэтому Rust-компиляция по-прежнему невозможна локально — вместо неё выполнен расширенный
+  статический/семантический контроль. Добавлен `storage/relay_store.rs`: `RelayStore`
+  (Mutex<Connection>, sync-only, никогда не удерживается через await) с отдельной миграцией
+  `MIGRATION_RELAY_V1` — таблицы `relay_messages` (PK msg_id, индексы recipient/expires_at_ms)
+  и `relay_tombstones` (PK msg_id, индекс removed_at_ms), своя `relay_schema_version`.
+  API: store (validate_durable до записи, INSERT OR IGNORE), load_unexpired/load_for_recipient
+  (bounded, битые строки удаляются без UI), remove/remove_for_recipient/purge_expired,
+  remove_and_tombstone (одна транзакция), record_tombstone/has_tombstone/prune_tombstones
+  (возраст + top-N), load_tombstone_ids, счётчики; 14 unit tests. Engine integration
+  (`engine/core.rs`): P2PCore.relay_store создаётся в start() (файл `<db_path>.relay.sqlite`
+  либо in-memory; при ошибке открытия честный RAM-only fallback), `restore_relay_custody`
+  восстанавливает RAM RelayQueue bounded-load без продления TTL и purges expired; relay_store
+  прокинут в run_mqtt_transport: MESH-relay путь persist-ит custody ДО enqueue (tombstone/
+  validation reject → не enqueue), receipt атомарно remove+tombstone независимо от RAM-копии,
+  локальная доставка ставит durable tombstone И подавляет повторную UI-доставку после restart
+  (UI exactly-once), gossip чистит expired и в durable-слое, seen-set стартует с durable
+  tombstones; origin offline send persist-ит ДО enqueue. Поведение при relay_store=None —
+  legacy RAM-only. Проведённые проверки: (1) sqlite3-прототип SQL-семантики 25/25 PASS;
+  (2) end-to-end симуляция отложенного сценария Anna→Zhenya→D→Stas на реальной SQLite 17/17
+  PASS (custody переживает kill+сутки, TTL не продлевается, hop/payload сохраняются, ровно
+  одна UI-доставка, replay после restart блокируется durable tombstone, истёкшие не
+  доставляются); (3) tree-sitter Rust parse всех изменённых файлов 6/6 PASS (синтаксис, не
+  типы); (4) git diff --check PASS. Артефакты прототипов: `.arena/m8b/` (вне Git-снапшота).
+  **Compile/runtime по-прежнему ждут Windows `build-rust.ps1 -Features mqtt-dual-broker`.**
+  Остаток M8: M8-C encryption at rest + Android Keystore key lifecycle (Kotlin/JNI seam),
+  M8-E bounded WorkManager sleep/wake, M8-F телефонный acceptance (требует телефонов и APK).
 
 ---
 

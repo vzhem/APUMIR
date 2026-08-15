@@ -2,3 +2,4 @@
 
 pub mod db;
 pub mod models;
+pub mod relay_store;
