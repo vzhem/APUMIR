@@ -1685,6 +1685,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   остаётся release gate. Чтобы перенести binary агенту, сначала PC-only network fetch latest branch
   без reset; затем отдельный local adoption, допускающий exact untracked icon, и commit/push только
   original. Не делать `git clean`, stash/pop или broad add. Android mipmaps пока не менять.
+- **2026-08-15 (доп.158)** — isolated Windows network diagnosis окончательно локализовал outage:
+  DNS PASS (`github.com` A=`140.82.121.4`), но `Test-NetConnection :443=False`; независимый
+  `curl.exe -I` дал zero bytes и timeout `(28)` через 15.011 s. Git fetch/reset/add/commit/ADB/
+  publication=false; icon F263…ACA9 и native E6C3…095B unchanged; status ровно `.so` modified +
+  exact untracked icon. Это external TCP path, не repository/config failure. Не менять DNS/proxy/
+  firewall вслепую и не повторять fetch немедленно; подождать восстановления. Телефоны пока можно
+  отключить, следующий phone step снова потребует явного предупреждения о трёх устройствах.
 - **2026-08-15 (доп.157)** — Windows icon network block подтвердил exact `.so` + original icon,
   `Test-NetConnection github.com:443=True`, но немедленный `git fetch` снова timed out через ~21 s.
   Stop до reset/add/commit/ADB/publication; Windows HEAD остаётся `8cea566`, icon остаётся exact

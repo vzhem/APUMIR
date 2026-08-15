@@ -420,9 +420,10 @@ overflow/stall/restart/request failures=0, all 3 PIDs stable, actions/payload=0.
 Первый controlled delivery N→N-1 готов/static PASS: one HiveMQ QoS1 non-retained relay Anna(v15)→
 Zhenya(v13), Stas(v13) stores/cleans, exact one UI on Zhenya, one public test payload. Первый sync
 launcher stopped на GitHub:443 fetch outage до reset/ADB/publish; phones/state unchanged. Second
-isolated attempt had TCP443=True but fetch timed out ~21 s; still no reset/ADB/publish. Pending
-PC-only DNS/TCP/curl diagnosis + wait, then one isolated fetch; reverse direction only after result.
-Active evidence/icon original не cleanup.
+isolated attempt had TCP443=True but fetch timed out ~21 s; still no reset/ADB/publish. Final
+read-only diagnosis: DNS resolves `140.82.121.4`, TCP443 false and curl timeout 15 s. External path
+outage confirmed; wait, do not alter config/retry now. Delivery state absent, phones/icon unchanged;
+reverse direction only after first result. Active evidence/icon original не cleanup.
 
 ### Mixed-version acceptance для MQTT overlay
 
