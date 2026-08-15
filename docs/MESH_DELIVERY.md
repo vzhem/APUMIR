@@ -189,12 +189,12 @@ RelayMessage {
 - **M4** — доставка: `recipient == я` → расшифровать → `MessageReceived`.
 - **M5** — receipt → cleanup RelayQueue + `DELIVERED` у origin.
 - **M6 / M3(d)** — интеграция в отправку: recipient офлайн → флуд онлайн-узлам + Outbox.
-  **Source complete; Rust Android feature-build PASS 2026-08-15; APK/runtime pending:** origin
-  RelayQueue + bounded command в persistent dual-broker transport, совместимый N-1 relay encoding,
-  честный `QUEUED_OFFLINE`, Room retry; transient per-message MQTT и CF content-inbox fallback
-  удалены из outgoing path. Rust перенесён на Windows authenticated inline gzip/Base64 patch и
-  собран без compiler errors; `.so` 7,263,416 B / SHA-256 `27B9D4DC…D1FD26C`. Windows ещё не
-  получил Kotlin overlay и Git history, поэтому до его exact apply/verify APK собирать нельзя.
+  **Source + Rust/Kotlin compile + signed APK PASS 2026-08-15; runtime pending:** origin RelayQueue +
+  bounded command в persistent dual-broker transport, совместимый N-1 relay encoding, честный
+  `QUEUED_OFFLINE`, Room retry; transient per-message MQTT и CF content-inbox fallback удалены из
+  outgoing path. APK v11.16.16/11016016: 22,664,712 B / SHA-256 `446A1EE9…429DC0D`, V2 signer
+  preserved, embedded `.so` 7,263,416 B / `27B9D4DC…D1FD26C` exact. Следующий gate — data-preserving
+  3-phone install и automatic offline acceptance; build/transfer/recovery не повторять.
 - **M7** — E2E-шифрование payload получателю (Фаза 8.1; пока payload «как есть» — небезопасно).
 - **M8** — персистентность RelayQueue (SQLite) — переживать рестарт.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).

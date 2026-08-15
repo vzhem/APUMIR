@@ -329,22 +329,25 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > `dfd36d9`. Канонический Windows clone: `C:\APUMIR-arena-test`, его HEAD намеренно пока
 > `8cea566e50f439810e29fb1dc4ac14dc69b5fbc6`.
 >
-> **Последний доказанный результат:** Rust-only M3(d) overlay передан inline gzip/Base64, exact
-> source blobs проверены и `build-rust.ps1 -Features mqtt-dual-broker` дал PASS: Finished/feature
-> `1/1`, compiler errors `0`, generated `.so` 7,263,416 B / SHA-256
-> `27B9D4DC87CA7046D9F862F9ED153FDDD48C26E4053B620FE46986D25D1FD26C`; state
-> `%TEMP%\apu-m3d-rust-direct-build.json` SHA-256
-> `7589A0349386640443039B2C09EB311F269C342473715CB22E23E5314A1716A1`. Не повторять build и не
-> удалять state/logs. Windows worktree ожидаемо содержит dirty Rust overlay, generated native и
-> exact untracked icon F263…ACA9; HEAD/history ещё не reconciled.
+> **Последний доказанный результат:** Rust+Kotlin M3(d) exact overlays применены на Windows и
+> signed test APK v11.16.16/11016016 собран PASS: 22,664,712 B, SHA-256
+> `446A1EE9254B7F57E037398E81209DB9E60C915CE2E3ADBCFA43A3FC8429DC0D`; V2 cert
+> F843…A5F7, embedded `.so` 7,263,416 B / `27B9D4DC…D1FD26C`. APK state
+> `%TEMP%\apu-m3d-v11.16.16-apk-build.json` SHA-256
+> `917077E82C25DFF9A020713BA4A391DD49D7AFD81446367F87A23B17216AFABC`; transfer state
+> A4D8…5154; chunk-recovery state 545D…CA98. Kotlin patch target blobs=5/5, parser errors=0,
+> BUILD SUCCESSFUL=1, build exit=0. Rust build и APK build не повторять; evidence/APK не удалять.
+> Windows HEAD всё ещё base `8cea566…`, worktree содержит exact Rust+Kotlin overlays, generated
+> native, untracked build harness и icon; history reconciliation отложен.
 >
-> **Непосредственный следующий шаг PC-only:** подготовить и передать таким же встроенным
-> authenticated gzip/Base64 блоком только Kotlin M3(d) overlay; проверить exact pre-state, текущий
-> regenerated native, icon, compressed/raw hashes, `git apply --check`, target Git blobs и полный
-> status. Затем собрать/проверить test APK на C-drive JDK17. Никаких Arena Download/Downloads и
-> никакого phone action на этом шаге. После APK PASS отдельно предупредить подключить Анну, Женю и
-> Стаса; phone-команда начинается read-only visibility gate. Mixed N↔N-1 и r4.5 остаются release
-> gates, но не блокируют M3(d). Иконка заморожена до завершения offline delivery.
+> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** data-preserving install
+> v11.16.16 и затем controlled three-phone automatic offline acceptance. Перед install получить
+> отдельное разрешение пользователя; непосредственно перед phone-командой назвать все три телефона,
+> затем начать с read-only exact visibility/version/UID/firstInstall/data/signer gate и остановиться
+> до изменения при absent/unauthorized/offline. Acceptance: origin app sends while recipient offline,
+> third phone stores, origin disconnects, recipient returns and gets exactly one UI message, receipt
+> cleans relay and eventually marks origin DELIVERED. Mixed N↔N-1 и r4.5 остаются release gates.
+> Иконка заморожена до завершения offline delivery.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -1861,7 +1864,28 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `A0F8453468F60AAEC22B081EB3926AB279CAD341AD725BF23FB4E2B06DEBD8A1`; остальные 13 exact.
   Recovery создаёт distinct copy, заменяет только этот authenticated chunk и требует полный
   expected gzip SHA `E081A906…65332` до распаковки/ParseFile/run. Не повторять full payload и не
-  ослаблять hash gate. APK всё ещё не построен.
+  ослаблять hash gate.
+- **2026-08-15 (доп.167) — single-chunk recovery + M3(d) APK artifact PASS:** authenticated chunk
+  A0F8…D8A1 восстановил distinct gzip к exact E081…65332; runner 27,992 B / SHA-256
+  CB21…8762 и ParseFile=0. Kotlin patch B84E…BC0A applied, target blobs=5/5. C-drive Gradle build
+  PID15684/exit0, BUILD SUCCESSFUL=1 за 70.28s. APK
+  `%TEMP%\apu-m3d-v11.16.16.apk`: v11.16.16/11016016, 22,664,712 B, SHA-256
+  `446A1EE9254B7F57E037398E81209DB9E60C915CE2E3ADBCFA43A3FC8429DC0D`; V2 cert
+  F843…A5F7, embedded native 7,263,416 B / 27B9…D26C exact. APK state SHA
+  `917077E82C25DFF9A020713BA4A391DD49D7AFD81446367F87A23B17216AFABC`; transfer state SHA
+  `A4D8DB1165B1427CB3C23BDB612B183769CE1746D3175C966C17AC880F205154`; recovery state SHA
+  `545DC670A643EE017A71E4CC46374764FA891EA810D3AFE099C2E875B685CA98`. Old corrupted gzip kept;
+  GitHub/ADB/phones=false. Build/transfer/recovery не повторять. Runtime acceptance pending.
+- **2026-08-15 (доп.168) — глобальная growth-цель пользователя:** после launch-readiness APU
+  должен быстро и честно распространяться тысячам и десяткам тысяч людей, чтобы они хотели им
+  пользоваться и добровольно приглашать друзей. В MASTER_PLAN добавлен Global Stage 2.5 после core
+  invite/delivery и до optional feature-completeness: polished brand/onboarding, useful core/media/
+  social loop, security/data/update и scale-safe network hard gates; затем waves 50–100 → 300–1k →
+  1k–5k → 10k–50k+, privacy-preserving activation/retention/referral/reliability metrics, landing/
+  stores/offline share/community channels, support/rollback и stop conditions. Advanced topics,
+  channels, Stories, calls, desktop и часть media допустимы после launch; data/key/E2E/update/
+  truthful delivery/bounded traffic/basic accessibility/capacity откладывать нельзя. Spam, bots,
+  scraped contacts, fake reviews/installs и deceptive ads запрещены.
 
 ---
 
@@ -2091,18 +2115,18 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 3. M3(a/b/c), reconnect, unique receipt, dedup/cleanup и первый low-volume security smoke уже
    проверены; не повторять. r4.4 dual runtime также PASS. Mixed N↔N-1 и r4.5 остаются release gates,
    но пользователь явно разрешил не блокировать ими M3(d).
-4. M3(d) source commit `61e1580…` готов. Windows Rust-only overlay уже exact applied и feature-build
-   PASS: `.so` 7,263,416 B / `27B9D4DC…D1FD26C`; state/hash — в CURRENT OVERRIDE и доп.164.
-   Build/state не повторять и не удалять. Windows HEAD всё ещё base `8cea566…`; это offline content
-   overlay, не Git history synchronization.
-5. Следующий шаг только ПК: передать Kotlin-only patch встроенным gzip/Base64 PowerShell-блоком по
-   разделу 2.1, затем собрать и проверить APK. Не использовать Arena Download/Downloads. Generated
-   `.so` не commit; icon F263…ACA9 сохранить, иконку не интегрировать до offline acceptance.
-6. Перед первой следующей phone-командой назвать Анну, Женю и Стаса и предупредить подключить;
-   отдельного подтверждения не ждать, но начать с exact read-only visibility gate и остановиться до
-   install/launch/change при absent/unauthorized/offline. Acceptance: recipient offline, origin
-   отправляет через app, third phone stores, origin disconnects, recipient returns и получает ровно
-   одно UI message, receipt cleans relay и origin eventually DELIVERED.
+4. M3(d) source commit `61e1580…`, Rust+Kotlin overlays и signed APK v11.16.16 уже PASS. Exact
+   APK/native/state hashes — в CURRENT OVERRIDE и доп.167. Rust/transfer/recovery/Gradle не повторять
+   и evidence не удалять. Windows HEAD остаётся base `8cea566…`; dirty overlay не равен Git history
+   synchronization, generated `.so` не commit, icon F263…ACA9 сохранить.
+5. Следующий product gate требует отдельного разрешения на data-preserving install v11.16.16 на
+   Анну, Женю и Стаса. До разрешения можно только подготовить/read-only проверить harness; uninstall,
+   data clear, force-stop старых consumed attempts, network changes и relaunch ради markers запрещены.
+6. Перед phone-командой назвать все три телефона и предупредить подключить; отдельного подтверждения
+   подключения не ждать, но начать с exact read-only visibility/version/signer/UID/firstInstall/data
+   gate и остановиться до install/launch при absent/unauthorized/offline. Acceptance: recipient
+   offline, origin app sends, third phone stores, origin disconnects, recipient returns and gets
+   exactly one UI message, receipt cleans relay and origin eventually DELIVERED.
 7. Активные `%TEMP%` states/logs, APK/native и hash-linked evidence не удалять. После закрытия gate
    сделать bounded inventory/cleanup; milestone-backup предлагать только после действительно крупной
    проверенной APK/этапа, не после docs-only или промежуточного Rust compile.

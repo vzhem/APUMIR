@@ -604,11 +604,12 @@ InviteFriendScreen
 
 ## Фаза 2.3 — P2P store-and-forward
 
-- [x] M3(d) source: app offline send → origin RelayQueue → bounded persistent MQTT mesh command;
-  backward-compatible N-1 wire, truthful `QUEUED_OFFLINE`, Room retry. Rust Android feature-build
-  PASS 2026-08-15 после authenticated inline gzip/Base64 transfer: errors=0, generated arm64
-  `.so` 7,263,416 B / SHA-256 `27B9D4DC…D1FD26C`. **Kotlin overlay, APK и runtime pending**;
-  пользователь явно поднял приоритет выше оставшегося r4.5 test gate.
+- [x] M3(d) source + APK compile: app offline send → origin RelayQueue → bounded persistent MQTT
+  mesh command; backward-compatible N-1 wire, truthful `QUEUED_OFFLINE`, Room retry. Rust feature
+  build и Kotlin overlay PASS; signed APK v11.16.16/11016016 собран 2026-08-15: 22,664,712 B,
+  SHA-256 `446A1EE9…429DC0D`, embedded arm64 `.so` 7,263,416 B / `27B9D4DC…D1FD26C`, V2 signer
+  preserved. **Three-phone automatic offline runtime acceptance pending**; mixed N↔N-1 и r4.5
+  остаются release gates, но не блокировали source/APK implementation.
 - [ ] Перенести store-and-forward на Tier 1/Tier 2 nodes.
 - [ ] Relay nodes хранят только E2E encrypted payload.
 - [ ] Пользователь может разрешить устройству быть relay.
@@ -665,6 +666,183 @@ InviteFriendScreen
 
 Критерий: пользователь может безопасно прислать воспроизводимый crash/error report туда, где
 команда проекта сможет его обработать, не раскрывая переписку, ключи и личные данные.
+
+---
+
+# 🚀 ГЛОБАЛЬНЫЙ ЭТАП 2.5 — красивый APU, публичный запуск и быстрый рост сети
+
+**Обязательное решение пользователя (2026-08-15):** в плане должна быть отдельная большая точка,
+после которой APU уже красивый, удобный и достаточно надёжный, чтобы его быстро распространять
+тысячам и десяткам тысяч людей. Продукт должен давать понятную пользу, вызывать желание остаться и
+естественно делиться APU с друзьями. Не ждать завершения всего многолетнего backlog: часть групп,
+каналов, stories, звонков, desktop и других расширений можно выпускать после запуска.
+
+Это не обещание автоматически получить десятки тысяч пользователей. Это управляемая стратегия
+**product-led growth**: сам хороший продукт, простой invite и полезный сетевой эффект приводят новых
+людей, а каждая волна расширяется только после измеримого качества предыдущей.
+
+## Фаза 2.5.1 — Launch Readiness Gate: когда массовое распространение разрешено
+
+Этап запуска расположен после core invite/delivery hardening, но начинается не просто по номеру
+версии. До первой широкой волны должны одновременно пройти обязательные ворота:
+
+### Красота и удобство
+
+- [ ] Во всём пользовательском UI название только **APU**, оригинальная иконка и единый modern
+  design system; качественные light/dark themes, понятные empty/error/offline states.
+- [ ] Onboarding без технического жаргона: имя → `@username`/invite → первый контакт → первое
+  сообщение. Новый человек понимает основную пользу APU за первый экран.
+- [ ] Базовые сценарии проверены на маленьких/больших экранах, разных Android, плохой сети,
+  accessibility font scale и screen reader; нет blocker по crash/ANR/нечитаемому UI.
+- [ ] Первое полезное действие занимает минуты, а не часы: получить ссылку/QR, безопасно установить,
+  добавить друга и отправить первое сообщение без ручного копирования `pk_…`.
+
+### Польза, ради которой люди остаются
+
+- [ ] Надёжный 1:1 чат, контакты, уведомления и честные статусы Outbox/SENT/DELIVERED.
+- [ ] Главная отличительная функция доказана на реальных телефонах: online/offline доставка через
+  phone relay, sender может уйти offline, recipient получает ровно одно сообщение, receipt делает
+  cleanup; reconnect и rolling N↔N-1 не разделяют сеть.
+- [ ] Минимальный удобный media slice для обычного общения: хотя бы фото, файл и voice message либо
+  явно выбранный меньший набор без потери/дублей. Полный media backlog можно продолжать после launch.
+- [ ] Для волны около 10 000 нужен хотя бы один сильный социальный loop: Groups MVP либо другой
+  проверенный сценарий, где существующий пользователь приглашает нескольких друзей ради общей
+  пользы, а не только ради рекламной награды.
+
+### Безопасность, данные и обновления — откладывать нельзя
+
+- [ ] Ни MQTT, ни proxy/relay/diagnostics не получают plaintext или private keys; E2E и identity
+  verification проходят отдельный audit. Нельзя массово рекламировать приватность до этого gate.
+- [ ] `adb install -r`/обычное обновление сохраняет chats, identity и keys; нет destructive Room
+  migration, downgrade confusion или silent account reset.
+- [ ] Reproducible release procedure: один подписанный APK, version/provenance/SHA-256, проверенный
+  update channel, rollback и минимум два доступных download route без подмены signer.
+- [ ] Low-volume defensive smoke и local abuse/load matrix закрывают replay/spam/malformed input,
+  queue/storage exhaustion, reconnect storm и recovery обычным control message.
+- [ ] Privacy policy, permissions explanation, export/delete data и законные правила distribution
+  готовы до public listing; никакой скрытой telemetry, VPN или загрузки contacts/messages.
+
+### Масштаб сети — отдельный hard gate
+
+- [ ] Текущий prototype `p2pm2/#` all-to-all presence/wildcard нельзя просто открыть десяткам тысяч
+  телефонов. До массовой волны нужны bounded neighbours, own/target topics, sharding/DHT или другая
+  измеренная схема, чтобы один пользователь не получал presence/traffic всей сети.
+- [ ] На собственной local infrastructure пройти ступенчатые simulation/load tests для 100, 1 000,
+  10 000 и целевого диапазона concurrent nodes: messages/receipts/gossip, reconnect wave, offline
+  queues, broker/bridge outage и recovery. Не создавать load на public HiveMQ/чужих endpoints.
+- [ ] Зафиксировать capacity budget: active sessions, messages/sec, egress, storage, CPU/RAM,
+  battery/data на телефоне, p95 delivery latency, duplicate/drop/rate-limit counters и стоимость.
+- [ ] Circuit breakers, quotas, backoff+jitter, signed endpoint rotation и аварийный restricted/
+  Outbox mode не допускают storm или ложный DELIVERED при перегрузке.
+
+**Решение gate:** массовая кампания начинается только после signed Launch Readiness manifest с
+точной APK/commit, пройденными пунктами, known limitations и rollback. Наличие красивой иконки без
+надёжности не считается готовностью; наличие transport prototype без понятного UX — тоже.
+
+## Фаза 2.5.2 — Встроенный цикл «пригласил → друг получил пользу → поделился дальше»
+
+- [ ] Одна заметная кнопка `Пригласить друга` в подходящих местах, но без навязчивых popup.
+- [ ] Share package одним действием: красивая APU-карточка + HTTPS link + QR + при необходимости
+  signed APK/invite file; получателю сразу понятно, зачем APU и как проверить установку.
+- [ ] Deep link сохраняет invite через установку/onboarding и открывает нужный контакт/группу после
+  первого запуска; не заставляет повторно искать отправителя.
+- [ ] Короткий сценарий `приглашение → установка → контакт → первое сообщение` измеряется end-to-end
+  на чистом телефоне и работает при обычном интернете, restricted network и nearby/offline transfer.
+- [ ] После первого успешного сообщения ненавязчиво показать доступные способы пригласить ещё одного
+  друга. Не блокировать функции требованием пригласить людей.
+- [ ] Referral attribution — только минимальный signed/opaque campaign ID, без contacts, message
+  content и скрытого social graph. Награды, если появятся, не должны стимулировать spam/fake installs.
+- [ ] Group/community invite становится отдельным viral loop после Groups MVP: человек приходит ради
+  конкретной беседы/сообщества, а не ради абстрактной установки приложения.
+- [ ] Локализация launch flow минимум для выбранных первых рынков; landing/share text автоматически
+  использует язык получателя, а не технические англоязычные сообщения.
+
+## Фаза 2.5.3 — Каналы быстрого и законного распространения
+
+- [ ] Быстрый официальный landing: ценность APU, screenshots/video, privacy explanation, platforms,
+  signed download, SHA-256, install/update guide, FAQ и статус известных ограничений.
+- [ ] Публикация там, где это законно и соответствует правилам площадки: собственный сайт/mirrors,
+  GitHub Releases как один из routes, подходящие Android stores/F-Droid после review требований.
+- [ ] Offline distribution: Quick Share/Nearby, Bluetooth, Wi-Fi Direct, QR и передача signed APK +
+  invite; подпись/хэш проверяются приложением или понятной инструкцией.
+- [ ] Набор честных demo materials: 30–60 секунд до первого сообщения, offline relay в действии,
+  privacy model простыми словами, сравнение не через ложные обещания и не через атаки на конкурентов.
+- [ ] Первые communities/ambassadors: privacy, travel, слабая связь, локальные сообщества, семьи,
+  small teams и emergency/offline use cases. Дать им onboarding kit и прямой feedback route.
+- [ ] Product directories, тематические СМИ, creators и open-source communities подключать после
+  стабильной pilot wave. Никаких купленных ботов, массового unsolicited DM, contact scraping,
+  fake reviews, скрытых installs или вводящей в заблуждение рекламы.
+- [ ] Public roadmap и регулярные release notes показывают, что исправлено и что ещё ограничено;
+  пользователи могут голосовать за следующие функции без раскрытия переписки.
+
+## Фаза 2.5.4 — Волны роста до тысяч и десятков тысяч
+
+Рост идёт ступенчато; install count не равен успешному продукту. Главные показатели — activation,
+retention, успешная доставка и добровольные приглашения.
+
+1. **Founding pilot: 50–100 людей.** Разные Android/сети/страны; ручная поддержка, исправление
+   blocker onboarding, delivery, battery, data loss и update.
+2. **Closed beta: 300–1 000.** Проверить invite funnel, D1/D7 retention, background delivery,
+   support load, endpoint capacity и безопасное обновление предыдущей версии.
+3. **Open beta: 1 000–5 000.** Landing/stores/community launch, localized onboarding, staged APK
+   rollout 5%→25%→100%, публичный status/known issues и быстрый rollback.
+4. **Growth wave: 10 000–50 000+.** Только после scale gate и стабильной open beta; несколько
+   регионов/communities, Groups/social loop, mirrors/bridges, on-call incident process и capacity
+   reserve. Следующую волну не открывать только ради красивого числа installs.
+
+На каждой волне смотреть privacy-preserving aggregate или добровольные diagnostics:
+
+- install → first launch → profile → first contact → first sent → first delivered;
+- время до первого полезного сообщения и доля завершивших invite;
+- D1/D7/D30 retention, active senders/recipients и invitations per active user;
+- доля приглашений, приведших к активному другу, и органический referral coefficient;
+- p50/p95 delivery latency, offline success, duplicate UI, Outbox age, reconnect success;
+- crash-free/ANR-free sessions, battery/data/storage, support tickets и update success;
+- network capacity и cost per active user без message content, точного social graph и permanent
+  cross-app tracking IDs.
+
+**Stop conditions:** data/key loss, plaintext leak, signer/update mismatch, duplicate delivery,
+unbounded traffic, widespread battery drain, crash/ANR spike, недоступный rollback или перегрузка
+support/network. При stop новая волна замораживается; существующим пользователям даётся status,
+безопасный fix/rollback и сохранение Outbox — маркетинг не важнее данных и доверия.
+
+## Фаза 2.5.5 — Операционная готовность после публичного запуска
+
+- [ ] Release train с staged rollout, signed manifests, minimum supported version и rollback.
+- [ ] Несколько download/bootstrap/bridge routes с health checks; ни GitHub, ни один broker/domain
+  не являются единственной точкой отказа.
+- [ ] Privacy-safe monitoring только технических counters; opt-in crash reports с redaction,
+  support inbox/issue triage, incident severity и публичный status channel.
+- [ ] Abuse/report/block tools, rate limits и понятные community rules до появления больших групп.
+- [ ] FAQ для установки, restricted networks, смены телефона, backup/recovery и проверки подписи.
+- [ ] Маленькая команда/процесс может обработать рост: owner release, Android/Rust, infrastructure,
+  support/community и security response; роли могут совмещаться, но ответственность явная.
+- [ ] Еженедельный review funnel/retention/reliability и приоритизация реальных причин ухода вместо
+  бесконечного добавления функций.
+
+## Что можно оставить после запуска
+
+Допустимо выпускать постепенно, если это честно указано и core gate закрыт:
+
+- advanced group roles/topics и очень большие группы;
+- полноценные channels, Stories и creator analytics;
+- video/voice calls, group voice chats;
+- полный набор stickers/GIF/video circles и сложный media editor;
+- desktop/multi-device, LoRa, post-quantum hybrid и advanced onion/traffic padding;
+- дополнительные themes, animations и power-user настройки.
+
+**Нельзя оставлять «на потом»:** data/key preservation, E2E для заявленной приватности, безопасные
+updates/signing, truthful delivery statuses, bounded queues/traffic, basic accessibility, простой
+invite/onboarding, crash/ANR blockers, privacy/legal basics и измеренную способность сети выдержать
+текущую rollout wave.
+
+### Критерий завершения глобального этапа
+
+APU имеет signed launch-ready build, красивый и понятный onboarding, доказанную core-доставку,
+безопасное обновление и измеренную capacity. Первые пользователи не просто устанавливают APU, а
+успешно общаются, возвращаются и добровольно приводят друзей. Рост проходит контролируемые волны
+100 → 1 000 → 10 000 → десятки тысяч без потери данных, приватности и качества; необязательные
+функции продолжают выходить после запуска по обратной связи.
 
 ---
 
@@ -1247,6 +1425,19 @@ InviteFriendScreen
 - [ ] При слиянии сохранять историю сообщений и не терять статусы доставки.
 - [ ] Добавить безопасный dry-run режим диагностики дублей перед изменением БД.
 
+## Launch-ready APU — публичный запуск и рост 100 → 1 000 → 10 000+
+
+> Номер версии назначается только после прохождения Global Stage 2.5, а не заранее ради рекламы.
+
+- [ ] Завершить core visual/onboarding polish из Фазы 0.3 и минимальный everyday media slice.
+- [ ] Закрыть invite/install, offline delivery, background/update/data/security и Groups MVP gates.
+- [ ] Закрыть scale-safe routing/capacity simulation: public wildcard prototype не идёт в 10k wave.
+- [ ] Выпустить signed Launch Readiness manifest, landing/share kit, support/status и rollback.
+- [ ] Провести founding pilot 50–100 → closed beta 300–1 000 → open beta 1 000–5 000.
+- [ ] Только по метрикам качества открыть 10 000–50 000+ growth wave.
+- [ ] После запуска продолжить topics/channels/media/calls/desktop по feedback, не задерживая весь
+  публичный запуск ради необязательного feature completeness.
+
 ## v11.19.0 — Group topics MVP
 
 - [ ] Включение тем в группе.
@@ -1296,10 +1487,15 @@ InviteFriendScreen
 # 12. Главная стратегическая линия
 
 1. Сначала — лёгкое приглашение, установка, добавление контакта.
-2. Затем — стабильная доставка сообщений.
-3. Затем — Groups MVP.
-4. Затем — темы, каналы, медиа.
-5. Затем — звонки.
-6. Параллельно — уход от внешних ресурсов к собственной P2P/DHT/relay сети.
+2. Затем — стабильная online/offline доставка, сохранение данных и безопасные обновления.
+3. Довести APU до launch-ready качества: красивый UI/onboarding, everyday media slice, Groups MVP,
+   diagnostics/security и измеренная scale-safe сеть.
+4. Запустить контролируемые волны 100 → 1 000 → 10 000 → десятки тысяч пользователей; улучшать
+   activation, retention и добровольные приглашения, а не гнаться только за installs.
+5. После запуска продолжать темы, каналы, Stories, расширенные media, звонки и desktop по feedback.
+6. Параллельно — уход от внешних ресурсов к собственной P2P/DHT/relay сети и расширение законных
+   restricted-network transports без потери E2E/Outbox.
 
-APUMIR должен стать удобным как Telegram, но архитектурно независимым как настоящая P2P-сеть.
+APU должен стать удобным и желанным для обмена с друзьями, как зрелый массовый messenger, но
+архитектурно независимым как настоящая P2P-сеть. Маркетинг никогда не опережает сохранность данных,
+приватность, измеренную capacity и честную доставку.
