@@ -1610,6 +1610,24 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   evidence делает analysis fail. Distinct state; analyzer ADB/actions=false. Static delimiter,
   parent/evidence, no-ADB/no-action, launch=false, all identities/auto-var/marker checks PASS; LF
   SHA-256 `7965BD79…2A0E58`. Следующий шаг PC-only sync/ParseFile/analyzer once; телефоны не нужны.
+- **2026-08-15 (доп.150)** — Zhenya launch1 saved analyzer Windows ParseFile/execution **PASS**,
+  state `%TEMP%\apu-r4.4-mixed-v15-v13-zhenya-launch1-analysis.json`, SHA-256
+  `5325CDB85CC6A3D88019270BFCE1E7ACDDD8E56A18FF17CEE89F3F1FBB21CAF4`. Evidence exact 20
+  pre-action files; launch command=false, analyzer ADB/actions=0. PIDs: Anna12943, Zhenya14811,
+  Stas23149. Значит все 3 apps уже running, никакой controlled launch больше не нужен. Следующий
+  gate — distinct observe-only current-PID window для Zhenya14811: baseline device epoch, 15+135 s,
+  new heartbeat/incoming HiveMQ evidence и all-three PID stability, без startup-marker требования,
+  launch/install/payload=0. Launch1 и analyzer не повторять.
+- **2026-08-15 (доп.151)** — добавлен `scripts/r44_mixed_zhenya_observe1.ps1`: exact analyzer
+  5325…1CAF4, source/E6C3/worktree and exact three PID/identity guards; no install/launch. После
+  Zhenya device epoch наблюдает PID14811 15+135 s, требует новый healthy polling heartbeat с
+  connacks>0/pending=0/request counters=0, incoming HiveMQ publish>=1, recovered-after-last-error,
+  zero overflow/backpressure/invariant/stall/event-loop-end/restart/request failure и финальную
+  стабильность Anna12943/Zhenya14811/Stas23149. Startup ready marker необязателен, потому что PID
+  начался до окна. Distinct state/evidence; no network/log clear/payload/retry. Static parent/PIDs,
+  0-install/0-launch, 150 s/epoch/heartbeat/incoming, raw-exit/forbidden/auto-var/state/marker PASS;
+  LF SHA-256 `309A7511…83C1DC`. Следующий gate sync/ParseFile/once; перед командой предупредить, что
+  нужны подключённые Анна, Женя и Стас, но команда только читает и ждёт.
 
 ---
 

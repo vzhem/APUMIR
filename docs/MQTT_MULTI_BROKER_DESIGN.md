@@ -412,9 +412,10 @@ failure. Corrected read-only preflight2 Windows PASS, state `3E02E3A4…D0AD90`:
 Anna v15/PID12943 + Stas v13/PID23149 running, Zhenya v13 stopped, connected 3/3, actions/traffic=0.
 Controlled Zhenya launch1 Windows stopped safely pre-action: state `DCC2C15…6D0A4`, Zhenya уже
 running на live gate, launchStarted=false, install/payload/Anna/Stas launch=false. Это readiness race,
-не failure; launch1 не повторять. PC-only saved PID/no-launch analyzer готов/static PASS; pending
-Windows ParseFile/once, затем observe-only current-PID HiveMQ readiness без relaunch. Active evidence
-не cleanup до закрытия gate.
+не failure; launch1 не повторять. Saved analyzer Windows PASS `5325CDB8…21CAF4`: exact 20
+pre-action files, no launch command, PIDs Anna12943/Zhenya14811/Stas23149. Distinct observe-only
+current-PID HiveMQ window готов/static PASS: 150 s new heartbeat/incoming + three-PID stability,
+launch/install=0. Pending Windows ParseFile/once. Active evidence не cleanup до закрытия gate.
 
 ### Mixed-version acceptance для MQTT overlay
 
