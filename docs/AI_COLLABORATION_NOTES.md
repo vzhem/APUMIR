@@ -357,10 +357,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > durable receipt cleanup и eventually origin DELIVERED. До M8 это best-effort в живых RAM queues.
 >
 > **Release checkpoint:** пользователь выбрал GitHub prerelease v11.16.16 и backup на Windows F:.
-> Draft создан, assets пока empty/unpublished. Первый backup/upload harness остановился до F: copy:
-> GitHub TCP 443 unavailable, а PS5 `$ErrorActionPreference=Stop` превратил native stderr redirect в
-> terminating `NativeCommandError`. Его не повторять. v2 — offline-only backup без network retry;
-> после PASS отдельно загрузить exact APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D`. Не запускать
+> Draft создан, assets пока empty/unpublished. v1 остановился до F: copy из-за GitHub TCP 443 +
+> PS5 native stderr; не повторять. Длинный v2 inline payload повредился и `FromBase64String` остановил
+> wrapper до write/parse/execute, поэтому v2 также не повторять. Следующий single step — короткий v3
+> patch поверх уже hash-verified v1: отдельный state, no network execution, full local F: backup.
+> После PASS отдельно загрузить exact APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D`. Не запускать
 > tag-trigger auto-build: tracked Rust `.so` не совпадает с verified APK. Mixed N↔N-1 и r4.5
 > остаются будущими stable-release gates. Иконка пока заморожена.
 >
@@ -2026,6 +2027,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `1BBF74DDD18E31144937C7BD10474D8B5C5B93DD09B6DA72C33217317195BA95`, Base64 6,304 chars.
   Expected end: `BACKUP COMPLETE ON F:; NETWORK RETRY SKIPPED; DRAFT UPLOAD PENDING`. Only after
   local backup PASS may a separate bounded upload be attempted when GitHub connectivity is available.
+- **2026-08-15 (доп.179) — v2 transfer rejected before write; shorter v3 patch prepared:** copied v2
+  Base64 was malformed; authenticated wrapper failed at `FromBase64String` with invalid length before
+  decompression, `WriteAllBytes`, ParseFile or v2 execution. Therefore no v2 state/F: mutation; this
+  is transfer-channel corruption, not user error. Do not repeat long v2. Existing v1 script remains
+  exact 16,645 B / `DE5C3303…C3014`. New authenticated patcher
+  `scripts/v111616_offline_v3_from_v1.ps1` verifies that v1 hash, applies 8 unique exact replacements,
+  verifies target hash and ParseFile, then executes `scripts/v111616_prerelease_backup_offline_v3.ps1`.
+  Patcher 6,867 B / SHA-256 `763F8DAC979493450BEB3CEFCB419F50AFBFF910F450554C1ED67BF1A3077330`;
+  deterministic gzip 2,874 B / SHA-256
+  `1C4E80631F24C17704A416F238FE7DBF740D1CB23FD51DE9B2DCBBE4C7D0171B`, Base64 3,832 chars.
+  Target v3 16,653 B / SHA-256
+  `74F098F1BC76871B916C30EA32722BA914C42C5C68E2FAE449099505ADFF10A8`, separate v3 state; fetch is
+  replaced by fixed offline warning before execution, and backup exits before unreachable legacy gh
+  branch. Local reconstruction test proves 8 replacements produce exact target bytes/hash. Expected
+  terminal marker remains `BACKUP COMPLETE ON F:; NETWORK RETRY SKIPPED; DRAFT UPLOAD PENDING`.
 
 ---
 
