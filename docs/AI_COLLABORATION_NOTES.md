@@ -365,7 +365,8 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > DriveType2, IsSystem/IsBoot=false. Explicitly authorized guarded format PASS: F: теперь exFAT,
 > label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. **Никогда больше не
 > форматировать эту флешку:** future updates replace/rotate files only; retain previous+latest and
-> delete older only after new pair verifies. Compact harness prepared; execution pending:
+> delete older only after new pair verifies. Compact v1 stopped before F: copy on null native ExitCode;
+> do not repeat. Corrected compact v2 harness prepared; execution pending:
 > source/Git history/required overlays+signing material, previous v11.16.15,
 > latest v11.16.16, `LATEST.txt/json`; no build/.gradle/target/cache/log/bulk evidence, dependencies
 > download on new PC. Authoritative procedure: `docs/FLASH_BACKUP_RUNBOOK.md`; full read mandatory
@@ -2122,6 +2123,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Transfer must use smaller authenticated chunks, raw+gzip+Parser gates; execution pending. After
   compact PASS, upload exact v11.16.16 asset to draft, remote re-download/hash verify, then publish
   prerelease; tag-triggered auto-build remains forbidden.
+- **2026-08-15 (доп.184) — compact v1 stopped before F: copy; .NET Process v2 prepared:** 4/4 chunk,
+  combined gzip/raw and ParseFile PASS. v1 verified format/APKs/build states/native/keystore, then its
+  first Git command (`git branch`) completed but PowerShell `Start-Process` exposed null ExitCode;
+  state outcome `INCOMPLETE_DO_NOT_REPEAT`, `copyStarted=false`, so no `F:\APU_PORTABLE` creation.
+  Do not repeat v1. v2 uses `Diagnostics.ProcessStartInfo` with redirected async stdout/stderr,
+  bounded wait and direct non-null `.ExitCode`; arguments containing whitespace/quotes are rejected
+  (all current exact paths/args have none). Separate v2 state/native/restore paths preserve v1 state;
+  preflight requires v1 outcome/copyStarted/copyComplete/formatRepeated proof and copies that small
+  state into bounded provenance. Embedded new-PC restore clone also avoids Start-Process ExitCode.
+  `scripts/v111616_compact_flash_backup_v2.ps1`: 30,337 B / SHA-256
+  `466D05A84DD2E4E915ED3F045ACDB29BC20EB060EFA5B6F07DCB1F3E79774565`; deterministic gzip
+  8,294 B / SHA-256 `8B840BE487DBEA7D9327923C50A018984832B71956F808D559B3D9D1402E8FE7`,
+  Base64 11,060 chars. Transfer in small authenticated chunks; execution pending; never format.
 
 ---
 
