@@ -1850,8 +1850,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Kotlin/APU compile failure. По порядку кода stop произошёл до GzipStream, runner ParseFile,
   inner patch, Git apply, Gradle, APK, ADB/phones. Большой block не повторять и созданный transfer
   file не удалять: следующий PC-only шаг только read-only выводит его actual size/SHA-256, наличие
-  runner/patch/state paths, exact branch/HEAD/status/native/icon. После этого использовать distinct
-  recovery transfer; не угадывать и не переписывать evidence. APK всё ещё не построен.
+  runner/patch/state paths, exact branch/HEAD/status/native/icon. Диагностика PASS: gzip существует
+  и имеет ожидаемый размер 13,794 B, но другой SHA-256
+  `6070E0882C7EA87E398F35A2683014001CF9067259400B501CFC892D13CC37A5`; runner/inner patch/transfer
+  state/APK state/APK все absent. Branch/HEAD/status, native 27B9… и icon F263… exact. Значит
+  изменились байты внутри Base64 при сохранённой длине; source/build/phones не затронуты. Recovery:
+  old gzip оставить evidence, read-only сравнить 1024-byte chunk hashes, затем в distinct copy
+  заменить только mismatched chunks и потребовать полный expected SHA до распаковки. Не повторять
+  full payload и не ослаблять hash gate. APK всё ещё не построен.
 
 ---
 
