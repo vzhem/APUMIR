@@ -1418,6 +1418,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   принять prompt RSA (если появится), при необходимости переподключить data-capable cable/USB port;
   не force-stop/relaunch APU и не подключать Женю/Стаса. Затем только live read-only `adb devices -l`.
   Runtime2 разрешён после exact `AUYF6R5923006121 device` и old-state hash/pre-action proof.
+- **2026-08-15 (доп.132)** — live read-only `adb devices -l` сохранил exact Anna line
+  `AUYF6R5923006121 device product:MTN-NX1 model:MTN_NX1 ...`; stdout SHA-256
+  `0E481BBCDDABC8556ACEA4E8720014BA2289B656678230E5E9EDCD8296A35E05`, stderr empty E3B0…B855.
+  Значит ADB visibility READY. Inline wrapper затем дал false fail: после WaitForExit direct
+  `$Process.ExitCode` отобразился blank/$null и условие `$null -ne 0` сработало, хотя exact output и
+  empty stderr доказали успешный read-only command. Это wrapper defect, не ADB/device failure;
+  visibility command не повторять. Versioned wrappers cast exit only after bounded+parameterless
+  WaitForExit в structured object, как существующий `Invoke-Captured`.
+- **2026-08-15 (доп.133)** — добавлен corrected `scripts/r44_anna_runtime2.ps1`: distinct state/
+  evidence, exact old runtime SHA FF4F…7968 с install/launch=false и exact visibility hashes/Anna
+  ready line. Остальной approved one-install/one-launch contract неизменён; only Anna serial,
+  no uninstall/data clear/force-stop/log clear/network/user payload, no automatic retry. State
+  связывает old failure и visibility evidence. Parser/action/automatic-variable, one-install/
+  one-launch, ordering/state, dual marker и forbidden-action static scans PASS. Следующий gate —
+  sync exact commit, ParseFile и once; Женя/Стас не нужны.
 
 ---
 

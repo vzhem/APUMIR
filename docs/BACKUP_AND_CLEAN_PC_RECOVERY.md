@@ -463,6 +463,13 @@ USB mode «Передача файлов», проверить Developer options
 list — STOP. Другие телефоны подключать только после явного предупреждения, если сценарий их
 действительно требует.
 
+После `Start-Process -PassThru` direct `$Process.ExitCode` в интерактивном PowerShell иногда может
+остаться blank/$null даже после визуально успешного вывода. `$null -ne 0` тогда создаёт false fail.
+Versioned wrapper обязан сначала bounded `.WaitForExit(timeout)`, затем parameterless
+`.WaitForExit()`/`.Refresh()`, вернуть structured object и явно cast `[int]$Process.ExitCode`.
+Если saved stdout уже содержит exact expected serial/status и stderr empty, blank ExitCode — defect
+wrapper, не повод повторять read-only command или phone-changing harness.
+
 ### `else` не распознан как команда
 
 **Симптом:** `else : Имя "else" не распознано...` после того, как пользователь отдельно вставил

@@ -389,8 +389,10 @@ install+one launch. Первый runtime harness stopped на read-only `adb dev
 `FF4F61A3…BEB7968`, install/launch=false, phones unchanged. Это pre-action ADB visibility gate,
 не runtime failure; old attempt не повторять. Saved stdout exact empty device list (28 B,
 `BBFCC723…65A630`), stderr empty: ADB вообще не видел Анну, не даже unauthorized/offline. После
-USB mode/debugging/RSA проверки нужен live read-only `adb devices -l`; distinct runtime2 допустим
-только при exact Anna `device`. Zhenya/Stas USB не нужны и остаются v11.16.13.
+USB mode/debugging/RSA проверки live `adb devices -l` дал exact Anna `device`; stdout
+`0E481BBC…35E05`, stderr empty. Blank direct Process.ExitCode вызвал только false wrapper fail.
+Corrected runtime2 связывает old pre-action state + visibility hashes, pending one approved run.
+Zhenya/Stas USB не нужны и остаются v11.16.13.
 
 ### Mixed-version acceptance для MQTT overlay
 
