@@ -1529,6 +1529,24 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   one-shot/state checks PASS; script LF SHA-256 `C4BAF05E…81935F`. Следующий gate — Windows sync,
   ParseFile/static exact and execute preflight1 once. Это только чтение телефонов, не acceptance
   traffic; при incomplete не повторять автоматически.
+- **2026-08-15 (доп.142)** — mixed preflight1 sync/ParseFile PASS и read-only attempt завершился
+  `INCOMPLETE_DO_NOT_REPEAT`, state `%TEMP%\apu-r4.4-mixed-v15-v13-preflight1.json`, SHA-256
+  `FBD7A04551572762E2FD1FC95A39E10723DE21F7D06ED8F43C1BE357A78E44CE`. Все 3 serial имели exact
+  `device`; Anna exact v11.16.15/code11016015 PID12943 PASS. Stop на Zhenya identity/process gate;
+  state не сохранил failing snapshot, потому что harness добавлял snapshot только после expectation
+  checks; Stas snapshot ещё не выполнялся. Phone changes/user payload=false, install/launch calls=0.
+  Preflight1 не повторять и evidence не менять. Следующий шаг только PC saved-only analyzer exact
+  parent state/hash + raw Zhenya UID/package/process evidence, без ADB. General harness rule: сначала
+  записать observed snapshot в state, затем применять expected gate, чтобы incomplete state не терял
+  причину; preflight2 после анализа обязан это исправить.
+- **2026-08-15 (доп.143)** — добавлен saved-only
+  `scripts/r44_mixed_preflight1_analyze.ps1`: exact parent FBD7…E44CE, 14 required ADB/Anna/Zhenya
+  raw evidence files + hashes, empty stderr/semantic package/process parsing, exact Anna recheck,
+  explicit Zhenya mismatch list и proof, что Stas snapshot не начинался. Analysis state distinct;
+  ADB/phone changes/user payload/retry=false. Static delimiters, parent/evidence count, no-ADB,
+  no-action, no-auto-variable и marker checks PASS; LF SHA-256 `9D7CBFAD…98B337`. Следующий шаг
+  PC-only: sync/ParseFile и analyzer once; телефоны не нужны. Только после exact mismatch решать,
+  нужен ли corrected read-only preflight2 или разрешённый запуск stopped old-version app.
 
 ---
 
