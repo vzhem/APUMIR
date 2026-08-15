@@ -384,8 +384,10 @@ sync к runner commit получил exact FETCH_HEAD/tracking ref, но redunda
 GitHub:443 до reset/runner. Local-only adoption затем PASS; versioned runner вызвал harness once.
 v11.16.15 APK artifact PASS: state SHA-256 `3D893F5A…44078`, 22,664,716 B,
 `B675770D…43E9B2`; package/version/V2 cert/embedded E6C3…095B exact, hs_err/env gates PASS.
-APK/ADB/install/phones/public traffic=false. Следующий Anna-only data-preserving install+launch
-требует explicit approval; Zhenya/Stas остаются v11.16.13 для common-HiveMQ mixed-version proof.
+APK/ADB/install/phones/public traffic=false. Пользователь разрешил Anna-only data-preserving
+install+one launch; versioned runtime harness готов. Он требует secondary ready, fanout2, shared
+dedup и обоих broker evidence при stable PID/identity, без user payload/network/log clear;
+Zhenya/Stas USB сейчас не нужны и остаются v11.16.13.
 
 ### Mixed-version acceptance для MQTT overlay
 

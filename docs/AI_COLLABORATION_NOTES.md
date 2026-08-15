@@ -1386,6 +1386,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   повторять/не удалять. Следующий phone-changing gate только после explicit approval: data-
   preserving v11.16.15 install на Анну + one launch для secondary ready/fanout/dedup и mixed-version
   HiveMQ common-path observation. Женя/Стас для первого Anna-only gate не нужны и не обновляются.
+- **2026-08-15 (доп.129)** — пользователь явно разрешил data-preserving v11.16.15 install только
+  на Анну и один controlled launch. Добавлен versioned `scripts/r44_anna_runtime.ps1`: exact APK/
+  integration/native/source/signer guards, требует по USB только Anna `AUYF6R5923006121`; precheck
+  v11.16.14 UID10425/firstInstall/dataDir, затем один `adb install -r`, postinstall v11.16.15 с
+  сохранёнными identity/data и stopped process, один `am start -W`. No force-stop/logcat clear/
+  network toggle/user payload; Zhenya/Stas serials отсутствуют и touched=false. Early15s + late135s
+  saved PID/epoch-filtered `p2p_core` evidence, final stable PID. Runtime matrix требует secondary
+  READY after any backoff, fanout brokers=2, cross-broker duplicate drop, evidence обоих broker,
+  primary heartbeat pending/request=0, no stopped/stall/restart/request/inbox invariant; bounded
+  transient errors допустимы только с более поздним ready/reconnect. State в finally/no retry.
+  Parser-shape, exact one-install/one-launch, automatic-variable, forbidden action, ordering/state,
+  dual markers и Anna-only static scans PASS. Следующий gate — sync exact harness, ParseFile и once;
+  Женю/Стаса сейчас подключать не требуется.
 
 ---
 
