@@ -365,8 +365,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > DriveType2, IsSystem/IsBoot=false. Explicitly authorized guarded format PASS: F: теперь exFAT,
 > label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. **Никогда больше не
 > форматировать эту флешку:** future updates replace/rotate files only; retain previous+latest and
-> delete older only after new pair verifies. Compact v1 stopped before F: copy on null native ExitCode;
-> do not repeat. Corrected compact v2 harness prepared; execution pending:
+> delete older only after new pair verifies. Compact v1 stopped before F: copy; do not repeat.
+> Compact v2 copied and hash-verified 278 files, then stopped only in final commit-spec formatting;
+> do not repeat. Resume v3 reuses all files/existing successful restore clone and recopies 0 files;
+> execution pending:
 > source/Git history/required overlays+signing material, previous v11.16.15,
 > latest v11.16.16, `LATEST.txt/json`; no build/.gradle/target/cache/log/bulk evidence, dependencies
 > download on new PC. Authoritative procedure: `docs/FLASH_BACKUP_RUNBOOK.md`; full read mandatory
@@ -2141,6 +2143,22 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `3FE55BF579197FD8856DD37F0F670BED37033C8892B7355050B75AA296B62819`, Base64 1,760 chars.
   Normalize CRLF→LF after Windows git apply before expected target hash/Parser. Execution pending;
   never format.
+- **2026-08-15 (доп.185) — compact v2 copy/hash PASS; final marker resume v3 prepared:** v1→v2
+  source/gzip/patch/normalized target/ParseFile PASS. Plan PASS sourceFiles=252, source=14.36 MiB,
+  reserved minimum=320.52 MiB; top files were exact native 7,263,416 B, armv7 native 2,076,080 B
+  and icon 1,980,451 B, confirming no cache explosion. Portable tree/two APKs/bundle/patches/native/
+  private signing/restore docs/manifests copied; forbidden scan passed and
+  `ALL PORTABLE BACKUP HASHES PASSED: 278 files`. Bundle restore clone also succeeded. v2 then failed
+  before commit check call because PowerShell `("{0}^{commit}" -f HEAD)` parsed `{commit}` as invalid
+  format placeholder. State is `INCOMPLETE_DO_NOT_REPEAT`, copyStarted=true/copyComplete=false;
+  `F:\APU_PORTABLE\INCOMPLETE.json` remains and BACKUP_COMPLETE absent. Do not repeat copy/v2.
+  Resume `scripts/v111616_compact_flash_backup_resume_v3.ps1` revalidates v2 state, F: identity,
+  both APK hashes, Parser+all 278 manifest hashes and bundle; requires/reuses existing successful
+  v2 clone, builds commit spec by concatenation `HEAD + '^{commit}'`, verifies commit, deletes only
+  that exact temp clone, writes BACKUP_COMPLETE, removes only exact INCOMPLETE, recopies 0 files and
+  writes separate v3 state. Harness 9,565 B / SHA-256
+  `25FE08F4573FB2885A67814C4EFB62CF6A34A00D5E13748744E80626ADDAB6DE`; execution pending; no
+  format/network/phone/copy call.
 
 ---
 
