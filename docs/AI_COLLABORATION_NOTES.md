@@ -1399,6 +1399,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Parser-shape, exact one-install/one-launch, automatic-variable, forbidden action, ordering/state,
   dual markers и Anna-only static scans PASS. Следующий gate — sync exact harness, ParseFile и once;
   Женю/Стаса сейчас подключать не требуется.
+- **2026-08-15 (доп.130)** — approved first r4.4 Anna runtime harness ParseFile/safety PASS, но
+  остановился на первом read-only `adb devices` gate: Anna не была представлена ровно одной строкой
+  `<serial> device`. State `%TEMP%\apu-r4.4-dual-v11.16.15-anna-runtime.json`, SHA-256
+  `FF4F61A3320A5A78B344C9E344A04E69FF34CCC3275CC37E519E73E64BEB7968`, outcome
+  `INCOMPLETE_DO_NOT_REPEAT`, installStarted/launchStarted=false, process/metrics empty;
+  Zhenya/Stas touched=false, user payload=false. Значит APK не устанавливался и APU не запускался;
+  это ADB visibility/authorization precheck, не product/runtime failure. Old harness/state/evidence
+  не повторять/не удалять. Следующий шаг только saved evidence read: exact adb-devices stdout/stderr
+  + hashes. После классификации можно создать distinct runtime2, но только при доказанном pre-action
+  stop и exact current Anna `device`; никакого automatic retry.
 
 ---
 
