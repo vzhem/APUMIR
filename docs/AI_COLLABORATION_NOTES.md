@@ -325,9 +325,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 
 > **CURRENT OVERRIDE 2026-08-15:** активная ветка только `arena/01a000bc-apumir`; не
 > переключаться на старые session branches из исторического журнала ниже. Sandbox source M3(d) —
-> commit `61e1580ff85aa1cfaed1f9e7a7522f1cd8e5d602`; documentation tip перед этой записью —
-> `da2344fa9899d3787ca169d56a4c140e50ce68c7`. Канонический Windows clone:
-> `C:\APUMIR-arena-test`, его HEAD намеренно пока `8cea566e50f439810e29fb1dc4ac14dc69b5fbc6`.
+> commit `61e1580ff85aa1cfaed1f9e7a7522f1cd8e5d602`; versioned Kotlin/APK harness — commit
+> `dfd36d9`. Канонический Windows clone: `C:\APUMIR-arena-test`, его HEAD намеренно пока
+> `8cea566e50f439810e29fb1dc4ac14dc69b5fbc6`.
 >
 > **Последний доказанный результат:** Rust-only M3(d) overlay передан inline gzip/Base64, exact
 > source blobs проверены и `build-rust.ps1 -Features mqtt-dual-broker` дал PASS: Finished/feature
@@ -1833,6 +1833,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   повторять/не удалять. Следующий PC-only шаг: authenticated inline Kotlin-only overlay, затем
   exact source/native/icon gates и APK compile; телефоны только после готового APK и отдельного
   трёхтелефонного visibility gate.
+- **2026-08-15 (доп.165) — Kotlin/APK gate подготовлен, execution pending:** versioned
+  `scripts/m3d_kotlin_apk_build.ps1` добавлен commit `dfd36d9`; он не вызывает Rust build/ADB и
+  собирает v11.16.16 только после exact Rust state/native/icon и 8 Rust+Kotlin blob gates. C-drive
+  JDK17/SDK, one bounded Gradle child, BUILD SUCCESSFUL, package/version, V2 cert F843…, embedded
+  native 27B9…, unchanged hs_err/icon/status и env restore входят в PASS. Для Windows создан patch
+  из base `8cea566` только по четырём Kotlin files + harness: 34,081 B, SHA-256
+  `B84E9F88156C8D4BB6D72B1D42CE7BFE9C00B2F776C77395510F28783FD7BC0A`; deterministic gzip
+  9,081 B, SHA-256 `FF688DF96AD270E96B34886E29953E56F265D5C17033FC8696AF13C82FA2138D`, Base64 12,108 chars.
+  Disposable exact-base apply/check и 5/5 target blobs PASS; harness blob
+  `715483c8a758a967df6e9a17cf2834cfcaaf4572`. Следующий шаг — один inline transfer/apply/parser/run;
+  outcome пока неизвестен, APK не построен. При incomplete automatic retry запрещён.
 
 ---
 
