@@ -410,9 +410,11 @@ Saved-only analyzer Windows PASS, state `ED0A3850…74D2C0`: Zhenya exact v11.16
 but process count=0; Anna exact v15/PID12943; Stas not attempted. Это readiness, не compatibility
 failure. Corrected read-only preflight2 Windows PASS, state `3E02E3A4…D0AD90`: all identities exact;
 Anna v15/PID12943 + Stas v13/PID23149 running, Zhenya v13 stopped, connected 3/3, actions/traffic=0.
-Controlled `r44_mixed_zhenya_launch1.ps1` готов/static PASS: exact parent, one Zhenya-only launch,
-150 s HiveMQ ready/heartbeat/current-PID evidence, Anna/Stas PID stability, no install/payload/actions.
-Pending Windows ParseFile/once, then mixed matrix. Active state/evidence не cleanup до закрытия gate.
+Controlled Zhenya launch1 Windows stopped safely pre-action: state `DCC2C15…6D0A4`, Zhenya уже
+running на live gate, launchStarted=false, install/payload/Anna/Stas launch=false. Это readiness race,
+не failure; launch1 не повторять. PC-only saved PID/no-launch analyzer готов/static PASS; pending
+Windows ParseFile/once, затем observe-only current-PID HiveMQ readiness без relaunch. Active evidence
+не cleanup до закрытия gate.
 
 ### Mixed-version acceptance для MQTT overlay
 

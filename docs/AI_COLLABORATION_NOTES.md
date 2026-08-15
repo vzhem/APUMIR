@@ -1594,6 +1594,22 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   SHA-256 `942523F0…1DD38A`. Следующий gate — sync/ParseFile/once. Непосредственно перед командой
   предупредить: подключены и разблокированы должны быть Анна, Женя и Стас; изменяется только запуск
   APU на Жене.
+- **2026-08-15 (доп.148)** — Zhenya launch1 sync/ParseFile PASS, но live pre-action guard увидел,
+  что Zhenya уже не stopped, и корректно остановил attempt **до launch**. State
+  `%TEMP%\apu-r4.4-mixed-v15-v13-zhenya-launch1.json`, SHA-256
+  `DCC2C15E8FF7BD03656851417B3E85F52B1F36ABCD07B78FD0D15EDA9216D0A4`, outcome
+  `INCOMPLETE_DO_NOT_REPEAT`, launchStarted=false, new PID/metrics empty, install/user payload=false,
+  Anna/Stas launched=false. Это precondition race/desired state reached между snapshots, не product
+  failure; guard предотвратил лишний relaunch. Launch1 не повторять. Сначала PC-only exact state/raw
+  evidence analyzer должен извлечь Zhenya pre PID, проверить Anna12943/Stas23149 и доказать отсутствие
+  launch epoch/command evidence; затем observe-only current-PID HiveMQ readiness без launch.
+- **2026-08-15 (доп.149)** — добавлен saved-only
+  `scripts/r44_mixed_zhenya_launch1_analyze.ps1`: exact parent DCC2…6D0A4, expected evidence set
+  ровно 20 pre-action files (adb devices + UID/package/process для 3 phones), hashes/empty stderr,
+  exact identities и Anna/Stas PIDs, one numeric observed Zhenya PID. Любой launch/start/final/epoch
+  evidence делает analysis fail. Distinct state; analyzer ADB/actions=false. Static delimiter,
+  parent/evidence, no-ADB/no-action, launch=false, all identities/auto-var/marker checks PASS; LF
+  SHA-256 `7965BD79…2A0E58`. Следующий шаг PC-only sync/ParseFile/analyzer once; телефоны не нужны.
 
 ---
 
