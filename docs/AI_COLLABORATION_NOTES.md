@@ -360,12 +360,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Draft создан, assets пока empty/unpublished. v1/v2/v3 не повторять. v4 patch применился с CRLF,
 > read-only normalization доказала expected LF hash, затем normalization/write/parser PASS и full
 > workspace robocopy начался. Пользователь правильно остановил его: full build/cache/evidence copy не
-> соответствует portable backup. Partial F: tree будет полностью удалён отдельно разрешённым format.
+> соответствует portable backup. One-time approved format уже удалил partial tree; не повторять.
 > Read-only gate доказал F:=Disk2 `General UDisk`, USB/MBR, FAT32 `SMARTBUY`, 14.62 GiB, healthy,
 > DriveType2, IsSystem/IsBoot=false. Explicitly authorized guarded format PASS: F: теперь exFAT,
 > label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. **Никогда больше не
 > форматировать эту флешку:** future updates replace/rotate files only; retain previous+latest and
-> delete older only after new pair verifies. Следующий step — compact portable copy:
+> delete older only after new pair verifies. Compact harness prepared; execution pending:
 > source/Git history/required overlays+signing material, previous v11.16.15,
 > latest v11.16.16, `LATEST.txt/json`; no build/.gradle/target/cache/log/bulk evidence, dependencies
 > download on new PC. Authoritative procedure: `docs/FLASH_BACKUP_RUNBOOK.md`; full read mandatory
@@ -2101,6 +2101,27 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   known PS5 stderr, empty-tree, CRLF and Base64 failures. `BACKUP_AND_CLEAN_PC_RECOVERY.md` now points
   to it and labels its old generic section non-executable for portable flash backup. Immediate next:
   build/run a new compact-copy harness against already-empty F:, never rerun v1-v4 or format.
+- **2026-08-15 (доп.183) — format permanently forbidden; compact-copy v1 prepared:** user corrected
+  the permanent policy: never format accepted APU flash again. Future rotation writes/verifies
+  incoming latest first, old latest→previous, then may delete only versions older than previous.
+  Runbook/master/recovery/current override updated in commit `1fdb73a`; authoritative full commit
+  `1fdb73a512db97ccecca8990a79410b095290acd`. New
+  `scripts/v111616_compact_flash_backup_v1.ps1` is one-use/no-network/no-phone and contains no format
+  call. It requires immutable format state A754…ACFF and exact F: identity/exFAT label, empty root for
+  this first compact copy, signed previous/latest APK+build states, native 27B9…D1FD26C and private
+  keystore. Source is selected by `git ls-files --cached --others --exclude-standard` plus explicit
+  forbidden segment/file filter; tracked logs/hs_err/temp_core, caches/build/target/.git, local props,
+  JDK/SDK/Rust and bulk `%TEMP%` evidence are excluded. Hard plan gates: 100–2000 source files,
+  source≤512 MiB, free-space reserve and top-10 listing. Output includes two APKs/LATEST markers,
+  exact portable tree, bundle+verify, working/index patches, essential untracked list, source/all-file
+  manifests, exact native, private keystore warning, only three bounded state JSONs, restore/verify
+  scripts, forbidden scan, full flash hash verify and temporary bundle clone/commit rehearsal.
+  Harness 28,811 B / SHA-256 `5121A8B9FBCCCDAA31EF722A1C679DC2C4F6FF295A746A6A97DDAE81DCCBCA34`;
+  deterministic gzip 8,006 B / SHA-256
+  `8B2233DF6462E252E06E520162F84043694685A7CAB7C921D7411F811A44391C`, Base64 10,676 chars.
+  Transfer must use smaller authenticated chunks, raw+gzip+Parser gates; execution pending. After
+  compact PASS, upload exact v11.16.16 asset to draft, remote re-download/hash verify, then publish
+  prerelease; tag-triggered auto-build remains forbidden.
 
 ---
 
