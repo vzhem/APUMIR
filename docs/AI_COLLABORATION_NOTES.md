@@ -1433,6 +1433,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   связывает old failure и visibility evidence. Parser/action/automatic-variable, one-install/
   one-launch, ordering/state, dual marker и forbidden-action static scans PASS. Следующий gate —
   sync exact commit, ParseFile и once; Женя/Стас не нужны.
+- **2026-08-15 (доп.134)** — первый sync launcher к corrected runtime2 остановился на `git fetch`:
+  GitHub:443 недоступен ~21 с, fetch exit nonzero. Stop произошёл до FETCH_HEAD checks/reset,
+  ParseFile/runtime2/ADB/install/launch; Windows HEAD/worktree/native и все phones неизменны, Anna
+  остаётся v11.16.14. Старый большой launcher не повторять целиком при неизвестной сети. Следующий
+  отдельный шаг только PC network: `Test-NetConnection github.com -Port 443`; при PASS один fetch
+  exact current session branch и hash check, без reset/ADB. Если TCP false — STOP и подождать,
+  никаких source/phone обходов или inline копирования большого harness.
 
 ---
 
