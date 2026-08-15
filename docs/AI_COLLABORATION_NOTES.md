@@ -1503,6 +1503,21 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   unauthorized или offline. Для текущего runtime3 предупредить: нужна только Анна; затем дать
   one-shot wrapper, который сначала read-only проверяет exact Anna `device` вне immutable attempt
   и лишь при PASS один раз вызывает harness. Женя/Стас не нужны.
+- **2026-08-15 (доп.140)** — Anna-only r4.4 launch-only runtime3 окончательно **PASS**, не
+  повторять. Read-only wrapper увидел exact `AUYF6R5923006121 device`, затем harness один раз
+  запустил уже установленную v11.16.15 без install. State
+  `%TEMP%\apu-r4.4-dual-v11.16.15-anna-runtime3.json`, SHA-256
+  `3375CA6B351D82CA4B5B4B2C6E2961E7CC79A9085437A8042486599710CCDC3B`; install=false,
+  launch=true, stable new PID=12943. Metrics: secondary connected/ready=1/1,
+  backoff/stopped=0/0; primary ready/heartbeat=1/1, reconnect/errors=0/0; fanoutTwo=6,
+  duplicateDrops=3, Hive ingress/duplicate=21/2, EMQX ingress/duplicate=0/1; stalls/restarts/
+  request errors/timeouts/secondary errors/inbox invariant — все 0. EMQX duplicate=1 при ingress=0
+  означает ожидаемый shared admission: копия дошла через EMQX и была подавлена до core после уже
+  принятой HiveMQ copy. Zhenya/Stas touched=false, user payload=false. Это закрывает single-phone
+  public low-volume r4.4 runtime gate: оба sessions ready, bounded max2 fanout, cross-broker dedup,
+  stable heartbeat/PID и common HiveMQ path без wire change. Следующий отдельный gate —
+  mixed-version 3-phone N↔N-1/relay acceptance; перед его phone-командой предупредить подключить
+  Анну, Женю и Стаса, отдельного подтверждения не ждать.
 
 ---
 
