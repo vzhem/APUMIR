@@ -460,8 +460,10 @@ USB mode «Передача файлов», проверить Developer options
 проверить data-capable cable/другой USB port. Не делать app data clear/force-stop/relaunch.
 Следующий gate — только read-only `adb devices -l`; продолжать phone-changing harness можно лишь
 при exact ожидаемом serial со status `device`. `unauthorized`, `offline`, другой serial или пустой
-list — STOP. Другие телефоны подключать только после явного предупреждения, если сценарий их
-действительно требует.
+list — STOP. **До выдачи любой команды с ADB/install/launch/logcat ИИ обязан заранее назвать
+конкретные нужные телефоны, попросить пользователя подключить их и дождаться подтверждения.**
+Нельзя молча считать старое подключение актуальным. Если шаг PC-only, явно сказать, что телефоны
+не требуются.
 
 После `Start-Process -PassThru` direct `$Process.ExitCode` иногда остаётся blank/$null даже после
 bounded + parameterless WaitForExit/Refresh. `$null -ne 0` создаёт false fail, а `[int]$null`
@@ -625,13 +627,21 @@ commit. Перед backup доказать `git diff --quiet <code> <docs> -- ru
 ветки и `reset --hard` на documentation commit. Если application code между ними отличается,
 такой docs commit нельзя приписывать уже протестированному APK без новой сборки/теста.
 
-### Source ZIP даёт raw Git blob mismatch на Windows
+### Text file даёт raw hash mismatch на Windows
 
-**Симптом:** ZIP проходит общий SHA-256 и воспроизводится новым `git archive`, но
+**Симптом:** рабочий `.ps1`/другой text file проходит `git diff --quiet`, но его raw SHA-256
+отличается от sandbox; либо ZIP проходит общий SHA-256 и воспроизводится новым `git archive`, но
 `git hash-object --no-filters <extracted-file>` не равен `git rev-parse <commit>:<path>`.
 
-**Причина:** Windows `git archive`/attributes могут выдать text с CRLF, тогда как blob в Git
-нормализован с LF. Raw hash сравнивает разные представления одного текста и создаёт ложный fail.
+**Причина:** Windows `core.autocrlf`/attributes могут выдать text с CRLF, тогда как Git blob и
+sandbox используют LF. Raw hash сравнивает разные представления одного текста и создаёт ложный
+fail. Для executable APK/native raw SHA обязателен; для committed text cross-platform identity
+проверять filter-aware, а raw working-tree SHA использовать только при заранее закреплённом EOL.
+
+Для рабочего harness безопасный gate: `git diff --quiet HEAD -- <path>`, затем
+`git hash-object --path=<path> <working-file>` == `git rev-parse HEAD:<path>`, затем PowerShell
+`Parser::ParseFile` и semantic/static checks. При одном лишь raw CRLF/LF mismatch не делать новый
+fetch/reset и не запускать harness автоматически.
 
 **Правильная проверка:** одновременно доказать:
 

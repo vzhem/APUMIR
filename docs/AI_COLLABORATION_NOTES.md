@@ -101,6 +101,15 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 риск и будущий правильный fix. Перед похожим шагом новая ИИ-сессия сначала ищет существующий
 гэтч и не заставляет пользователя повторно проходить уже известную ошибку.
 
+### 0.3. Обязательное предупреждение перед подключением телефонов
+
+Перед **любой** командой или тестом, которому нужен хотя бы один телефон, ИИ обязан заранее
+простыми словами назвать конкретные телефоны, которые нужно подключить по USB: Анна, Женя и/или
+Стас. Сначала попросить пользователя подключить их и дождаться подтверждения; только после этого
+давать команду с ADB/install/launch/logcat или иным обращением к телефону. Нельзя молча считать
+телефон подключённым по старому сообщению или прятать phone action внутри большого PC-блока.
+Если телефоны не нужны, прямо отметить, что шаг только для ПК и подключать ничего не требуется.
+
 ### 🐣 Пользователь — новичок. Это важно.
 
 - Объясняй **простым языком, без жаргона**. Если нужен технический термин — сразу
@@ -1468,6 +1477,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   counter дал false FAIL из-за regex, требовавшего лишний hyphen после `install`; scoped corrected
   parser доказал 8/8 distinct entries, harness не менялся. Следующий gate — Windows sync exact
   commit, ParseFile/static safety и один launch-only runtime3; no automatic retry.
+- **2026-08-15 (доп.137)** — runtime3 Windows sync/adoption дошёл до exact commit `ed221bd`,
+  сохранил E6C3 native и stopped на raw harness SHA до ParseFile/ADB/launch: Windows checkout
+  CRLF hash `9E3BA002…505AB3` отличается от sandbox LF `26052F49…DB6289`. Это не изменение Git
+  content: raw working-tree SHA нельзя делать cross-platform identity gate для text files при
+  `core.autocrlf`. Проверять exact committed text через `git diff --quiet HEAD -- <path>` плюс
+  filter-aware `git hash-object --path=<path> <working-file>` == `git rev-parse HEAD:<path>`;
+  затем ParseFile/static checks. Старый sync block не повторять, fetch/reset не нужны. State/
+  evidence runtime3 absent, ADB/phones/actions=0. Пользователь отдельно закрепил обязательное
+  правило: до выдачи любой phone-dependent команды заранее назвать конкретные нужные телефоны,
+  попросить подключить и дождаться подтверждения; PC-only шаги явно так и называть.
 
 ---
 
