@@ -569,6 +569,14 @@ redundant `ls-remote` timeout/empty не отменяет fetch. Продолж�
 сделать отдельный read-only DNS/TCP/`curl.exe -I` report, подождать и позже выполнить один isolated
 fetch. Untracked artifact не удалять через `git clean`; обычный fetch/mixed reset его не трогает.
 
+**GitHub долго недоступен, но source нужен на Windows:** агент может создать incremental `git
+bundle` текущей session branch с prerequisite=точный Windows HEAD, выполнить `git bundle verify` и
+передать bundle через Arena file viewer. На Windows сначала проверить exact size/SHA-256 и
+`git bundle verify`, затем `git fetch <local.bundle> refs/heads/<session-branch>` без destination ref;
+FETCH_HEAD должен равняться ожидаемому commit. Только после этого обычный guarded mixed reset/
+restore. Bundle сохраняет Git objects/history и безопаснее inline patch больших source файлов.
+Он не переносит untracked artifacts и не заменяет eventual push, когда GitHub восстановится.
+
 **Связанное правило parser compatibility:** raw stdout/stderr должны быть записаны до parsing.
 Нельзя считать build неуспешным только потому, что новая версия native tool изменила английский
 label, пробелы, регистр или separators digest. Для certificate/hash искать однозначную semantic

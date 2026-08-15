@@ -1742,6 +1742,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   обязательный Phase 0.6 добавлен в MASTER_PLAN. При нулевом разрешённом общем endpoint обещать
   bypass нельзя: truthful restricted status + phone Outbox/retry, без ложного SENT. Random public
   proxies, hidden VPN и unsupported domain fronting запрещены.
+- **2026-08-15 (доп.162)** — Windows GitHub TCP outage обойдён без inline source и без смены ветки:
+  создан incremental Git bundle `/home/user/APU-M3d-offline-send.bundle`, 38,526 B, SHA-256
+  `D95CF88AD76FCE34FE271F0CA7E15DA5D395E285BCCEF5A09140F76BE846AF1F`. Ref session branch =
+  `8d82d473…`, prerequisite Windows HEAD=`8cea566…`; `git bundle verify` PASS. Пользователь
+  скачивает bundle на C:, local `git fetch <bundle> <ref>` → FETCH_HEAD, mixed reset/restore с
+  сохранением E6C3 `.so` и untracked icon, затем versioned M3(d) build. Это reusable offline
+  source-transfer path при outage; bundle не содержит icon binary и не заменяет eventual remote
+  push/history sync. Не использовать patch/paste больших source файлов.
 
 ---
 
