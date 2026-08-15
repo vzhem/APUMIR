@@ -1720,6 +1720,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   source не менялся из-за false check. Следующий обязательный gate — Windows
   `build-rust.ps1 -Features mqtt-dual-broker`, затем Kotlin/APK compile и один combined 3-phone
   offline acceptance; host cargo test запрещён.
+- **2026-08-15 (доп.160)** — добавлен versioned `scripts/m3d_offline_send_build.ps1` для exact app
+  source `61e1580`: C-drive/r4.4 integration/E6C3 baseline, source static contract, one bounded child
+  `build-rust.ps1 -Features mqtt-dual-broker`, 900 s timeout, Finished/feature/error/native/status
+  gates, distinct state/logs. APK/ADB/phones/public traffic=false. Static Parse-shape, source/baseline/
+  feature, one build, no Gradle/ADB/phone action, bounded wait/state/marker/auto-var PASS; LF SHA-256
+  `293A2D38…8E5C07`. Этот compile gate выполнить сразу после восстановления Windows GitHub и
+  переноса icon original; дополнительных разрешений не спрашивать.
 
 ---
 
