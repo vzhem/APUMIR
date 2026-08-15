@@ -187,8 +187,9 @@ v2.0 добавляет практический путь развития пр�
 - [ ] Подготовить vector source (SVG), Android adaptive icon foreground/background, monochrome
   themed icon, launcher icon, notification icon, splash и безопасные поля для малых размеров.
   Каноническое место исходника/экспортов: `design/branding/app-icon/README.md`; пользователь выбрал
-  neon speech-bubble + P2P mesh artwork 2026-08-15. Сначала сохранить exact original PNG + SHA-256
-  и rights/provenance, затем square master/adaptive/round/monochrome exports. Не менять текущие
+  neon speech-bubble + P2P mesh artwork 2026-08-15. Original Windows-verified: 1664×928,
+  1,980,451 B, SHA-256 `F2638C88…83ACA9`; binary Git transfer pending, provenance записан. Затем
+  square master/adaptive/round/monochrome exports. Не менять текущие
   Android mipmaps посреди r4.4 mixed acceptance: интеграция иконки требует новой APK и полного
   artifact/upgrade/launcher regression gate.
 - [ ] Проверить узнаваемость на 16/24/48 px, светлом/тёмном фоне и в grayscale; закрепить права

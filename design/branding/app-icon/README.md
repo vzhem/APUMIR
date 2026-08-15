@@ -42,6 +42,8 @@ r4.4 mixed-version acceptance. Icon integration changes the APK and therefore re
 versioned Android artifact build, exact signer/embedded-native verification, install/upgrade check
 and launcher appearance test. Integrate after the current network gate is closed.
 
-The first chat attachment was visible in the conversation but was not mounted at the injected
-workspace path. Reattach the original PNG before creating exports; do not recreate it from a
-screenshot or an AI approximation.
+The chat attachment was visible but was not mounted in the agent workspace. The owner therefore
+placed the exact original at the canonical path in the Windows clone. Windows verification PASS:
+1,980,451 bytes, 1664×928, `Format24bppRgb`, SHA-256
+`F2638C88A3EAB243766B8F4755183C89A3E1FFCB72B45A0BBC5F3D398C83ACA9`. Its Git transfer remains
+pending; see `SOURCE_PROVENANCE.md`. Do not recreate it from a screenshot or AI approximation.

@@ -1676,6 +1676,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Android resources посреди r4.4: это создаст новую APK и потребует artifact/upgrade/launcher
   regression. Attachment виден в чате, но injected `/home/user/uploads/1786786331.png` фактически
   отсутствовал в filesystem; не генерировать неточную копию, попросить повторно прикрепить original.
+- **2026-08-15 (доп.156)** — пользователь положил exact icon original в Windows clone:
+  `C:\APUMIR-arena-test\design\branding\app-icon\source\apu-icon-original.png`. Read-only PNG
+  check PASS: 1,980,451 B, 1664×928, `Format24bppRgb`, SHA-256
+  `F2638C88A3EAB243766B8F4755183C89A3E1FFCB72B45A0BBC5F3D398C83ACA9`; Windows status = E6C3
+  `.so` modified + `?? design/`. Это landscape/no-alpha source: сохранить byte-exact, derived square
+  assets отдельно. Добавлен `design/branding/app-icon/SOURCE_PROVENANCE.md`; rights confirmation
+  остаётся release gate. Чтобы перенести binary агенту, сначала PC-only network fetch latest branch
+  без reset; затем отдельный local adoption, допускающий exact untracked icon, и commit/push только
+  original. Не делать `git clean`, stash/pop или broad add. Android mipmaps пока не менять.
 
 ---
 
