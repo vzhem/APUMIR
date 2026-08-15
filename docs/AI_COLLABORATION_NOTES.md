@@ -1547,6 +1547,25 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   no-action, no-auto-variable и marker checks PASS; LF SHA-256 `9D7CBFAD…98B337`. Следующий шаг
   PC-only: sync/ParseFile и analyzer once; телефоны не нужны. Только после exact mismatch решать,
   нужен ли corrected read-only preflight2 или разрешённый запуск stopped old-version app.
+- **2026-08-15 (доп.144)** — preflight1 saved analyzer Windows ParseFile/execution **PASS**, state
+  `%TEMP%\apu-r4.4-mixed-v15-v13-preflight1-analysis.json`, SHA-256
+  `ED0A3850AE2F5A381F3D73FD32476CBFCADDB47006583760CBE0A51F8C74D2C0`. ADB/phone changes=0.
+  Exact причина: Zhenya identity полностью правильная v11.16.13/code11016013, но saved process
+  output empty, `ProcessCount expected=1 actual=0`; Anna повторно exact v11.16.15 PID12943; Stas
+  snapshot не начинался. Это readiness condition, не compatibility/product failure. Не запускать
+  Женю вслепую до corrected read-only preflight2: он должен сохранить observed snapshot **до**
+  expected checks, проверить identities всех трёх, дочитать Стаса и допускает dynamic process count
+  0 или 1, чтобы точно определить минимальный список необходимых controlled launches.
+- **2026-08-15 (доп.145)** — добавлен corrected read-only `scripts/r44_mixed_preflight2.ps1`:
+  exact runtime3/preflight1/analysis hash+contract guards, all 3 serial/identity snapshots, но
+  process count принимается dynamic 0 или 1. Критическое исправление: каждый parsed observed
+  snapshot записывается в `$Snapshots` **до** identity/process-shape gate, поэтому incomplete не
+  потеряет failing values. State показывает connected/running counts и минимальный список будущих
+  launches можно вывести без догадок. Install/launch/network/log clear/user payload отсутствуют;
+  raw ExitCode availability preserved. Static parent/path/serial, ordering, dynamic-shape,
+  0-install/0-launch, forbidden, automatic-variable и marker checks PASS; LF SHA-256
+  `6522B5B4…896A3C`. Следующий gate — sync/ParseFile и один preflight2; перед командой предупредить,
+  что нужны подключённые Анна, Женя и Стас. Это read-only, preflight1 не повторяется.
 
 ---
 

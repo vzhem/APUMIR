@@ -406,8 +406,10 @@ untouched. Anna-only public runtime gate закрыт; не повторять. 
 N↔N-1/relay gate read-only `r44_mixed_preflight1.ps1` sync/ParseFile PASS, но attempt immutable
 incomplete: state `FBD7A045…E44CE`, all 3 connected, Anna v15/PID12943 PASS, stop на Zhenya
 identity/process gate до Stas snapshot. Phone changes/traffic=false. Preflight1 не повторять.
-Saved-only analyzer exact parent/raw Anna+Zhenya evidence готов и static PASS; pending Windows
-ParseFile/once для точной причины, затем corrected preflight2.
+Saved-only analyzer Windows PASS, state `ED0A3850…74D2C0`: Zhenya exact v11.16.13 identity/data,
+but process count=0; Anna exact v15/PID12943; Stas not attempted. Это readiness, не compatibility
+failure. Corrected read-only preflight2 готов/static PASS: snapshots saved before gates, all identities,
+dynamic process 0/1. Pending Windows ParseFile/once до любых launches.
 
 ### Mixed-version acceptance для MQTT overlay
 
