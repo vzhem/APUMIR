@@ -340,13 +340,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Windows HEAD всё ещё base `8cea566…`, worktree содержит exact Rust+Kotlin overlays, generated
 > native, untracked build harness и icon; history reconciliation отложен.
 >
-> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** controlled launch/
-> readiness v11.16.16 уже PASS 3/3 на PID Anna22055/Zhenya11575/Stas11449; не relaunch и не очищать
-> logs. Следующий acceptance требует отдельного явного разрешения временно выключить/восстановить
-> сеть Стаса (recipient) и Анны (origin) и вручную отправить ровно одно уникальное UI message
-> Anna→Stas, пока Zhenya остаётся online relay. Перед каждой phone-командой назвать все три и начать
-> с exact read-only visibility/state/PID/readiness gate. No install/force-stop/log clear/data clear.
-> Acceptance:
+> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** пользователь разрешил
+> controlled automatic offline acceptance и bounded network toggles Stas/Anna + ровно одно manual
+> UI message Anna→Stas. Первый prepared step только exact read-only visibility/state/PID/network
+> baseline, затем отключает Wi-Fi+data лишь у Stas, ждёт 35s и требует Anna/Zhenya healthy online,
+> all PIDs stable; message ещё не отправляется. Перед command назвать все три. No install/relaunch/
+> force-stop/log clear/data clear/synthetic publish. Acceptance:
 > origin app sends while recipient offline,
 > third phone stores, origin disconnects, recipient returns and gets exactly one UI message, receipt
 > cleans relay and eventually marks origin DELIVERED. Mixed N↔N-1 и r4.5 остаются release gates.
@@ -1939,6 +1938,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Следующий gate — separately approved automatic offline UI scenario Anna origin → Stas offline
   recipient, Zhenya online relay; one unique message, then Anna offline, Stas online delivery,
   receipt cleanup and eventual origin DELIVERED.
+- **2026-08-15 (доп.173) — пользователь разрешил automatic offline acceptance; prepare pending:**
+  `scripts/m3d_offline_prepare.ps1` commit `5c63d1b` требует launch state 6561…84E2, exact
+  branch/base/status, versions/UID/firstInstall/data and PIDs Anna/Zhenya/Stas=22055/11575/11449.
+  До network action завершает read-only 3-device preflight и device epochs; затем exact two callsites
+  disable Wi-Fi+mobile data only Stas, wait35s, require Stas toggles=0, all PIDs/identity stable and
+  Anna/Zhenya fresh MQTT input with no stall/restart. Generates short unique manual UI text in state
+  but does not send it. State finally records original network settings for later exact restore.
+  No install/launch/force-stop/log clear/data clear/synthetic publish/retry. Harness 18,936 B /
+  SHA-256 `6C405BEAC52642D8CF3400AF4EBCEE5A3F54F7455C16820913A27FB9B0029693`, blob
+  `b5d47d55df3d7c27ea85dbb8d0c8d8ab3563e51b`; gzip 5,170 B / SHA-256
+  `945A9776DBF32887D49B4138C8B1CF4DFB17062F3825776EC2019D2F30D1712C`, Base64 6,896 chars.
+  Static action/order/state/delimiter checks PASS; Windows ParseFile/execution pending.
 
 ---
 
@@ -2174,8 +2185,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    synchronization, generated `.so` не commit, icon F263…ACA9 сохранить.
 5. Data-preserving install и controlled launch/readiness v11.16.16 PASS 3/3; state SHAs
    59D5…6295/6561…84E2, stable PIDs 22055/11575/11449. Не reinstall/relaunch, не clear logs.
-   Следующий gate требует отдельного разрешения на bounded network toggles Stas/Anna и one manual
-   Anna→Stas UI message; no synthetic publish/retry.
+   Automatic offline acceptance/network toggles/one manual Anna→Stas UI message уже разрешены;
+   prepare harness 5c63d1b execution pending. No synthetic publish/retry.
 6. Перед phone-командой назвать все три телефона и предупредить подключить; отдельного подтверждения
    подключения не ждать, но начать с exact read-only visibility/install-state/version/UID/
    firstInstall/data/process gate и остановиться до launch при absent/unauthorized/offline. Acceptance: recipient
