@@ -362,11 +362,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > workspace robocopy начался. Пользователь правильно остановил его: full build/cache/evidence copy не
 > соответствует portable backup. Partial F: tree будет полностью удалён отдельно разрешённым format.
 > Read-only gate доказал F:=Disk2 `General UDisk`, USB/MBR, FAT32 `SMARTBUY`, 14.62 GiB, healthy,
-> DriveType2, IsSystem/IsBoot=false. Пользователь явно разрешил format F: и требует compact restore:
-> source/history/required overlays+signing material, previous v11.16.15, latest v11.16.16,
-> `LATEST.txt/json`; no build/.gradle/target/cache/log/evidence, dependencies download on new PC.
-> Следующий step — guarded exFAT format only, then verify empty; compact copy отдельно. После F: PASS
-> загрузить exact latest APK 22,664,712 B / SHA-256 `446A1EE9…429DC0D`. Не запускать
+> DriveType2, IsSystem/IsBoot=false. Explicitly authorized guarded format PASS: F: теперь exFAT,
+> label `APU_BACKUP`, empty; immutable format state SHA-256 `A75443F8…FACFF`. Следующий step — только
+> compact portable copy: source/Git history/required overlays+signing material, previous v11.16.15,
+> latest v11.16.16, `LATEST.txt/json`; no build/.gradle/target/cache/log/bulk evidence, dependencies
+> download on new PC. Authoritative procedure: `docs/FLASH_BACKUP_RUNBOOK.md`; full read mandatory
+> before any flash command. После compact copy/restore verify загрузить exact latest APK 22,664,712 B
+> / SHA-256 `446A1EE9…429DC0D`. Не запускать
 > tag-trigger auto-build: tracked Rust `.so` не совпадает с verified APK. Mixed N↔N-1 и r4.5
 > остаются будущими stable-release gates. Иконка пока заморожена.
 >
@@ -2081,6 +2083,22 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   source/Git bundle + exact working overlays/signing material + restore/bootstrap instructions + two
   signed APKs/hashes/latest marker; exclude `.git` duplication, build/.gradle/target/caches/logs and
   bulk runtime evidence; new PC downloads Java/Android/Rust dependencies from internet.
+- **2026-08-15 (доп.182) — F: format PASS; authoritative compact flash runbook added:** elevated
+  authenticated harness transfer/raw/ParseFile PASS; exact pre-format identity remained Disk2
+  `General UDisk`/USB/MBR/FAT32 `SMARTBUY`, non-system/non-boot, no additional mounted partition.
+  Exactly one approved `Format-Volume` call completed. Post: F: exFAT, label `APU_BACKUP`, same
+  physical identity, empty root. State `%TEMP%\apu-v11.16.16-flash-format-v1.json`, SHA-256
+  `A75443F8D302B8D856237F63C2122ABA4C676A6456078066125EF1455E1FACFF`, outcome
+  `PASS_FORMATTED_EMPTY`; do not repeat/delete. No phones/build/APK changes. User requires future AI
+  never repeat full recursive workspace/cache/evidence copy. New authoritative
+  `docs/FLASH_BACKUP_RUNBOOK.md` must be read before any flash command and defines: portable recovery
+  default vs separately authorized forensic archive; separate identity/format/copy/verify steps;
+  source allowlist and explicit exclusions; exact Windows overlays + bundle/patch/untracked recovery;
+  private signing material; mandatory previous+latest signed APK rotation and LATEST markers;
+  internet-restored toolchains; size/largest-file preflight; hash/bundle/forbidden/restore rehearsal;
+  known PS5 stderr, empty-tree, CRLF and Base64 failures. `BACKUP_AND_CLEAN_PC_RECOVERY.md` now points
+  to it and labels its old generic section non-executable for portable flash backup. Immediate next:
+  build/run a new compact-copy harness against already-empty F:, never rerun v1-v4 or format.
 
 ---
 

@@ -3,6 +3,12 @@
 Этот документ входит в проект и должен попадать в каждую milestone-копию. Репозиторий и
 папки могут технически называться `APUMIR`, но пользовательское имя продукта — только **APU**.
 
+> **Для любой флешки сначала полностью читать
+> [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md).** Это authoritative hard procedure:
+> compact portable backup по умолчанию, previous+latest APK, allowlist source, format отдельно,
+> no caches/full `%TEMP%`/blind recursive workspace copy. При конфликте старых примеров ниже с
+> runbook следовать runbook; старый шаблон нельзя запускать без адаптации и нового exact gate.
+
 ## 1. Обязательное правило для ИИ
 
 После каждой **существенно важной и проверенной** версии ИИ обязан сам напомнить владельцу:
@@ -53,7 +59,12 @@ GitHub tokens, пароли, `.env`, Git credentials, переписку и priv
 Пользовательские данные телефонов требуют отдельного явно согласованного зашифрованного export.
 Milestone-копию с signing material нельзя публиковать в общий доступ.
 
-## 3. Создание копии на внешний диск
+## 3. Исторический общий шаблон (не запускать как portable flash backup)
+
+Этот раздел сохранён только как справочный пример отдельных Git/hash операций. Он не реализует
+обязательную previous/latest rotation, exact Windows overlays и compact allowlist. Для реальной
+флешки использовать только [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md) и отдельный
+versioned harness. Запрещено копировать repo root/`%TEMP%` рекурсивно на основе этого примера.
 
 Ниже шаблон. ИИ перед выполнением обязан подставить фактические `<version>`, `<branch>`,
 `<commit>`, SHA-256 проверенного APK и выбранную пользователем букву диска. Не предлагать

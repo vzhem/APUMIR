@@ -15,8 +15,10 @@
 - Правки одного файла — строго по одной с проверкой (параллельные правки одного файла ломают файл).
 - Android/Rust в sandbox агента не собираются — код пишется диффами, сборка/тест на машине пользователя.
 - После каждой существенно важной проверенной сборки ИИ сам предлагает milestone-backup APU
-  на внешний носитель с Git history, APK, hashes и clean-PC recovery guide; процедура:
-  [`BACKUP_AND_CLEAN_PC_RECOVERY.md`](BACKUP_AND_CLEAN_PC_RECOVERY.md).
+  на внешний носитель с Git history, APK, hashes и clean-PC recovery guide; общая процедура:
+  [`BACKUP_AND_CLEAN_PC_RECOVERY.md`](BACKUP_AND_CLEAN_PC_RECOVERY.md). Для флешки authoritative
+  hard procedure — [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md): compact portable allowlist,
+  previous+latest, format отдельно; никогда не blind-copy caches/full workspace/evidence.
 - Spam/DoS/replay и другие defensive tests повторять по важным сборкам; high load только на
   собственной локальной инфраструктуре: [`SECURITY_RESILIENCE_TEST_PLAN.md`](SECURITY_RESILIENCE_TEST_PLAN.md).
 - Каждую ошибку инструмента и безопасный workaround сразу записывать в collaboration notes и
