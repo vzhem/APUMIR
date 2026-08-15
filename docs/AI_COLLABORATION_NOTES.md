@@ -374,8 +374,9 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > workflow release-exists PASS/build skipped. Preferred next-time flow: Arena creates draft → user
 > uploads two flash files in browser → Arena verifies server digests and publishes. Version baseline
 > lives in `docs/VERSION_STATISTICS.md` and must get a short immutable entry+LOC delta for every global
-> version. Next product priority: durable M8; mixed N↔N-1/r4.5 remain stable-release gates. Иконка
-> пока заморожена.
+> version. Full no-questions handoff prompt: `docs/NEXT_AI_CHAT_BOOTSTRAP.md`. Next product priority:
+> M8-A durable timestamp/schema boundary; mixed N↔N-1/r4.5 remain stable-release gates. Иконка пока
+> заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2222,6 +2223,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   31,645 physical / 27,685 nonblank; with generated 34,155 / 29,750; Android tests 241; automation
   17,117; all tracked code/config/automation excluding docs/logs 53,173. Future AI must add a new
   section rather than rewrite history. Next product work is M8 durable encrypted relay custody.
+- **2026-08-15 (доп.192) — complete next-chat bootstrap prompt added:**
+  `docs/NEXT_AI_CHAT_BOOTSTRAP.md` is the authoritative paste-ready handoff. It captures current
+  release/backup/stats, consumed phone/Windows steps, all user workflow constraints and reusable
+  PowerShell hazards, exact delayed multi-carrier requirement, current RAM/Instant gap, required
+  reading/source files, and a no-questions first task. Immediate coding slice M8-A: replace
+  persistent-facing `Instant` with validated serializable epoch-ms timestamps, preserve current wire/
+  queue semantics, add deterministic clock/round-trip/TTL/hop tests, static checks+commit only; no
+  SQLite write in the same slice and no sandbox cargo test. Then M8-B store, M8-C encryption/key
+  lifecycle, M8-D restart/reboot recovery, M8-E bounded sleep/wake and M8-F phone acceptance.
 
 ---
 

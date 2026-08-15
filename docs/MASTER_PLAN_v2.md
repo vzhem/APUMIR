@@ -27,6 +27,9 @@
   полезное решение только в чате.
 - Для каждой крупной published/prerelease версии обновлять короткий отчёт и LOC delta в
   [`VERSION_STATISTICS.md`](VERSION_STATISTICS.md); старые записи не переписывать.
+- При передаче работы в новый чат использовать готовый authoritative prompt
+  [`NEXT_AI_CHAT_BOOTSTRAP.md`](NEXT_AI_CHAT_BOOTSTRAP.md); пользователь не должен заново объяснять
+  историю, запреты и следующий M8-шаг.
 
 ---
 
