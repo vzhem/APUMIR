@@ -1995,6 +1995,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   отличается от embedded verified `.so` 7,263,416 B / `27B9D4DC…D1FD26C`. Создать draft prerelease
   first, upload exact Windows APK+sha256, verify remote asset hash, then publish; release notes must
   state manual functional success but missing exact runtime chain proof and M8 not implemented.
+- **2026-08-15 (доп.177) — v11.16.16 draft prerelease created; exact asset/flash backup pending:**
+  release prep commit `85aecb0`, notes `docs/RELEASE_NOTES_v11.16.16.md`, backup/upload harness
+  `scripts/v111616_prerelease_backup_upload.ps1` 16,645 B / SHA-256
+  `DE5C3303EDBA3CFE02806959BB14F4E0D64B7EC65BB067356B228B2DDC8C3014`; deterministic gzip
+  4,679 B / SHA-256 `63C607040CE986340D54A3D87B94101565079C74FE8398C9DB7916C5CD6CBEC2`, Base64 6,240 chars.
+  Draft `v11.16.16` isDraft/isPrerelease=true, target full commit
+  `85aecb0fa9893184e357b6c565869d0f1ebd69b7`, assets empty, not published and no tag/Actions build.
+  First `gh release create --target 85aecb0` failed safely HTTP 422 because API rejected abbreviated
+  target; no release/tag created. Retry with full 40-char commit created draft successfully. Next:
+  authenticated inline harness on Windows (no phones/build/install) verifies exact APK, copies full
+  C: workspace + all `%TEMP%\apu-*` evidence + git bundle/patches/APK to F:, then if Windows `gh` is
+  authenticated uploads APK+sha256 to draft and re-downloads/hash-verifies. Publish only after remote
+  asset exact hash verification; if gh/fetch unavailable, backup remains complete and upload pending.
 
 ---
 
