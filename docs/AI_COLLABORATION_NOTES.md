@@ -340,11 +340,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Windows HEAD всё ещё base `8cea566…`, worktree содержит exact Rust+Kotlin overlays, generated
 > native, untracked build harness и icon; history reconciliation отложен.
 >
-> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** data-preserving install
-> v11.16.16 и затем controlled three-phone automatic offline acceptance. Перед install получить
-> отдельное разрешение пользователя; непосредственно перед phone-командой назвать все три телефона,
-> затем начать с read-only exact visibility/version/UID/firstInstall/data/signer gate и остановиться
-> до изменения при absent/unauthorized/offline. Acceptance: origin app sends while recipient offline,
+> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** пользователь явно
+> разрешил data-preserving install v11.16.16 на всех трёх. Непосредственно перед phone-командой
+> назвать все три телефона; outer block и versioned harness начинают с read-only exact visibility,
+> затем version/UID/firstInstall/data/APK/evidence gates и останавливаются до первого install при
+> absent/unauthorized/offline/mismatch. Install использует только `adb install -r`, не делает launch,
+> force-stop, data clear, logcat/network change. Acceptance после отдельного launch approval:
+> origin app sends while recipient offline,
 > third phone stores, origin disconnects, recipient returns and gets exactly one UI message, receipt
 > cleans relay and eventually marks origin DELIVERED. Mixed N↔N-1 и r4.5 остаются release gates.
 > Иконка заморожена до завершения offline delivery.
@@ -1886,6 +1888,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   channels, Stories, calls, desktop и часть media допустимы после launch; data/key/E2E/update/
   truthful delivery/bounded traffic/basic accessibility/capacity откладывать нельзя. Spam, bots,
   scraped contacts, fake reviews/installs и deceptive ads запрещены.
+- **2026-08-15 (доп.169) — пользователь разрешил M3(d) v11.16.16 install 3/3; execution pending:**
+  versioned `scripts/m3d_v111616_install.ps1` commit `db5821f` проверяет exact APK/build/transfer/
+  recovery states, branch/base HEAD, 8 source blobs, native/icon и expected dirty status. Outer и
+  harness требуют exact `device` Anna/Zhenya/Stas; все live UID/version/firstInstall/data checks
+  завершаются до первого phone-changing call. Expected preversions: Anna v11.16.15, Zhenya/Stas
+  v11.16.13; UID 10425/10395/10387. Ровно один code callsite `adb install -r`, sequential max3;
+  post gate требует v11.16.16, UID/firstInstall/data preserved и process stopped. No uninstall/data
+  clear/force-stop/launch/logcat/network/public traffic; state finally/no retry. Harness LF raw
+  24,537 B / SHA-256 `A3AA5ACA8AE6AA13D7C8B127F3B97225B57B3CA31B41D3746CA0034F0E20CB8F`,
+  Git blob `ec05c31127849fa042e59e49696c2b52889ec95c`; deterministic gzip 6,403 B / SHA-256
+  `2E4E1F4B40BA72DC3808DA76255153FDFACC1AE1A66D47CD6F5A9D5835CDB3F7`, Base64 8,540 chars.
+  Static action/order/state/automatic-variable/delimiter checks PASS; Windows ParseFile/runtime
+  pending. Перед командой предупредить подключить/разблокировать все три; outer visibility gate
+  выполняется до transfer/apply/install.
 
 ---
 
