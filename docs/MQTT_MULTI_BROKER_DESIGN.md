@@ -1,6 +1,6 @@
 # APU — безопасный multi-broker MQTT overlay
 
-Статус: **r4.4 v11.16.15 artifact + Anna dual-session runtime PASS; 3-phone mixed-version acceptance pending**
+Статус: **r4.4 runtime PASS; user-prioritized M3(d) send-path source complete/build pending; mixed/r4.5 acceptance retained**
 
 Дата: 2026-08-15
 
@@ -425,6 +425,14 @@ read-only diagnosis: DNS resolves `140.82.121.4`, TCP443 false and curl timeout 
 outage confirmed; wait, do not alter config/retry now. Delivery state absent, phones/icon unchanged;
 reverse direction only after first result. Active evidence/icon original не cleanup.
 
+**M3(d) source integration (user-prioritized 2026-08-15):** `P2PCore` получил bounded outbound
+command channel cap256 к persistent MQTT owner. Origin offline relay сначала сохраняется в
+RelayQueue (dedup/TTL/hop/size gates), затем max32 commands/loop уходят через существующий
+`send_mesh_relay` и r4.4 max2 fanout. Queue full/closed/publish error оставляет phone-owned copy и
+возвращает truthful queued result. Kotlin убрал transient message MQTT и CF content-storage path,
+пишет `QUEUED_OFFLINE`/`STORE_FORWARD`; Room retry включает queued. Existing wire unchanged для
+v11.16.13. Build/runtime pending; legacy transient ACK остаётся debt.
+
 ### Mixed-version acceptance для MQTT overlay
 
 Dual-broker rollout обязан сохранять одну сеть при поддерживаемых разных версиях APU. Пока N-1
@@ -444,8 +452,10 @@ receipt/retained cleanup, no storm/split и честный degraded/upgrade-requ
 - Both down: no fake success, bounded backoff, no queue growth.
 - Both recover: subscriptions restored, one normal control delivery.
 
-M3(d) можно начинать только после r4 acceptance либо после отдельного решения пользователя
-временно принять single-broker limitation.
+M3(d) можно было начинать только после r4 acceptance либо отдельного решения пользователя.
+**2026-08-15 пользователь явно изменил приоритет:** source implementation M3(d) начат немедленно,
+не ожидая r4.5; r4.4 mixed и r4.5 не отменены, а объединены с будущим release acceptance. Production
+send-path всё равно не считается PASS до dual-feature build и 3-phone automatic offline test.
 
 ## 7. Проверка без нагрузки на публичные сервисы
 

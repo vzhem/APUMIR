@@ -188,7 +188,10 @@ RelayMessage {
 - **M3** — gossip-обмен при peer-discovered (сводки + пересылка недоставленных).
 - **M4** — доставка: `recipient == я` → расшифровать → `MessageReceived`.
 - **M5** — receipt → cleanup RelayQueue + `DELIVERED` у origin.
-- **M6** — интеграция в отправку: recipient офлайн → флуд онлайн-узлам + Outbox.
+- **M6 / M3(d)** — интеграция в отправку: recipient офлайн → флуд онлайн-узлам + Outbox.
+  **Source complete 2026-08-15, build/runtime pending:** origin RelayQueue + bounded command в
+  persistent dual-broker transport, совместимый N-1 relay encoding, честный `QUEUED_OFFLINE`,
+  Room retry; transient per-message MQTT и CF content-inbox fallback удалены из outgoing path.
 - **M7** — E2E-шифрование payload получателю (Фаза 8.1; пока payload «как есть» — небезопасно).
 - **M8** — персистентность RelayQueue (SQLite) — переживать рестарт.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).

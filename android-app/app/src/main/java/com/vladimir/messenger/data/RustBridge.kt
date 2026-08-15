@@ -105,16 +105,12 @@ object RustBridge {
         text: String
     ): Boolean {
         return try {
-            val sent = engine?.sendMessage(messageId, chatId, recipientId, text) == true
-            // MQTT fallback: only pk_ recipients (avoid duplicate chats)
-            if (recipientId.startsWith("pk_")) {
-                val myId = nodeId() ?: "unknown"
-                // Формат: senderId|messageId|chatId|recipientId|text
-                val payload = "$myId|$messageId|$chatId|$recipientId|$text"
-                val mqttOk = sendMessageMqtt(recipientId, payload)
-                Log.i(TAG, "MQTT fallback to $recipientId: $mqttOk")
-            }
-            sent
+            // Rust owns the persistent direct/offline mesh send path. A false result means the
+            // message remains phone-owned QUEUED_OFFLINE; do not create a transient MQTT session
+            // or claim SENT merely because a local publish request was accepted.
+            val sentDirectly = engine?.sendMessage(messageId, chatId, recipientId, text) == true
+            Log.i(TAG, "Rust send result: direct=$sentDirectly recipient=$recipientId")
+            sentDirectly
         } catch (ex: Exception) {
             Log.e(TAG, "sendMessage error", ex)
             false

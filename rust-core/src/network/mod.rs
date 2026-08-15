@@ -23,6 +23,7 @@ pub mod ice;
 pub mod mdns;
 pub mod message_queue;
 pub mod nat_types;
+pub mod offline_send;
 pub mod presence;
 pub mod quic_client;
 pub mod relay;

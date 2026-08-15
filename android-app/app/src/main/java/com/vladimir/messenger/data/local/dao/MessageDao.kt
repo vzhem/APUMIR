@@ -27,14 +27,14 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :messageId")
     suspend fun getMessageById(messageId: String): MessageEntity?
 
-    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status = 'PENDING' ORDER BY timestamp ASC")
+    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC")
     suspend fun getPendingOutgoingMessages(): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentOutgoingMessagesForChat(chatId: String, limit: Int): List<MessageEntity>
 
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 AND status IN ('PENDING', 'SENT') ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT') ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getUnconfirmedOutgoingMessages(chatId: String, limit: Int): List<MessageEntity>
 
     @Query("UPDATE messages SET channel = :channel WHERE id = :messageId")

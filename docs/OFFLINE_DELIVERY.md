@@ -4,6 +4,16 @@
 
 ---
 
+## Статус 2026-08-15 — M3(d) source complete, build pending
+
+Automatic app send-path теперь формирует существующий backward-compatible `relay|...`, сначала
+сохраняет origin copy в phone-owned RelayQueue и через bounded channel передаёт один command в
+persistent r4.4 dual-broker transport. Full/closed transport queue не создаёт ложный SENT: relay
+остаётся локально, Room получает `QUEUED_OFFLINE`/`STORE_FORWARD` и участвует в retry. Старый
+per-message transient MQTT и Cloudflare content-inbox fallback удалены из нового outgoing path;
+Cloudflare receive compatibility пока не удаляется. Wire и Room schema не менялись. Windows
+Android Rust/Kotlin/APK build и 3-phone automatic offline acceptance ещё обязательны.
+
 ## 0. Назначение
 
 Фиксирует дизайн и план надёжной доставки сообщений и файлов получателю, который
@@ -158,6 +168,9 @@ FAILED         — исчерпаны retry / истёк TTL
 - [ ] **D4.** Дедуп CF poll по `messageId` (вместо `hashCode`).
 - [ ] **D5.** Запуск OutboxProcessor на старте / `onNetworkConnected` / `peer_discovered` / таймер.
 - [ ] **D6.** Smoke-тест на 3 телефонах: отправить офлайн → включить через час/день → доставка + `DELIVERED` у отправителя.
+- [x] **M3(d) source integration:** app `sendMessage` → origin RelayQueue → bounded persistent MQTT
+  relay command; truthful `QUEUED_OFFLINE`; no transient MQTT/CF content fallback. Compile/runtime
+  ещё не отмечать PASS до Windows build и automatic 3-phone test.
 
 ### v11.16.6 — Worker retention + durability
 

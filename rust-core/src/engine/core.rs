@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use crate::ffi::crypto_ffi::CryptoManager;
-use crate::ffi::network_ffi::{NetworkManagerFfi, NetworkStatus, OutboundMessage, PeerInfo};
+use crate::ffi::network_ffi::{NetworkManagerFfi, NetworkStatus, PeerInfo};
 use crate::ffi::storage_ffi::StorageManagerFfi;
 use crate::storage::models::MessageStatus;
 
@@ -14,9 +14,21 @@ use crate::network::dht::{RoutingTable, DhtNodeInfo};
 use crate::network::relay::RelayManager;
 use crate::network::presence::PresenceManager;
 use crate::network::message_queue::MessageQueue;
+use crate::network::offline_send::prepare_offline_relay;
 use crate::network::relay_queue::{RelayMessage, RelayQueue, DEFAULT_RELAY_TTL};
 use crate::network::wire::MeshEnvelope;
 use crate::network::adaptive_polling::AdaptivePolling;
+
+const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
+
+#[derive(Debug)]
+enum MqttOutboundCommand {
+    MeshRelay {
+        recipient: String,
+        envelope: String,
+        message_id: String,
+    },
+}
 
 fn remember_bounded_id(
     entries: &mut HashSet<String>,
@@ -147,6 +159,7 @@ pub struct P2PCore {
     presence: Option<Arc<PresenceManager>>,
     message_queue: Option<Arc<MessageQueue>>,
     relay_queue: Option<Arc<RelayQueue>>,
+    mqtt_outbound_tx: Option<tokio::sync::mpsc::Sender<MqttOutboundCommand>>,
     adaptive_polling: Arc<Mutex<AdaptivePolling>>,
     node_id_str: Option<String>,
 }
@@ -170,6 +183,7 @@ impl P2PCore {
             presence: None,
             message_queue: None,
             relay_queue: None,
+            mqtt_outbound_tx: None,
             adaptive_polling: Arc::new(Mutex::new(AdaptivePolling::with_defaults())),
             node_id_str: None,
         }
@@ -290,6 +304,10 @@ impl P2PCore {
                 tracing::error!("Failed to create tokio runtime: {}", e);
             }
             Ok(runtime) => {
+                let (mqtt_outbound_tx, mqtt_outbound_rx) =
+                    tokio::sync::mpsc::channel(MQTT_OUTBOUND_COMMAND_CAPACITY);
+                self.mqtt_outbound_tx = Some(mqtt_outbound_tx);
+
                 let events_quic = Arc::clone(&events_arc);
                 let network_quic = Arc::clone(&network_arc);
                 let node_id_quic = node_id.clone();
@@ -331,6 +349,7 @@ impl P2PCore {
                             public_addr_mqtt,
                             queue_mqtt,
                             relay_queue_mqtt,
+                            mqtt_outbound_rx,
                         ).await;
                     });
                 });
@@ -710,6 +729,7 @@ self.runtime = Some(runtime);
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         queue: Option<Arc<MessageQueue>>,
         relay_queue: Option<Arc<RelayQueue>>,
+        mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
         use crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY;
@@ -840,6 +860,33 @@ self.runtime = Some(runtime);
         let mut delivered_mesh_relay_order: VecDeque<String> = VecDeque::new();
 
         loop {
+            // M3(d): drain a bounded number of origin send commands into the already-running
+            // persistent transport. `try_send` on the producer side never claims SENT; local
+            // RelayQueue ownership remains the durability/retry source until a receipt arrives.
+            for _ in 0..32 {
+                match outbound_rx.try_recv() {
+                    Ok(MqttOutboundCommand::MeshRelay {
+                        recipient,
+                        envelope,
+                        message_id,
+                    }) => match transport.send_mesh_relay(&recipient, &envelope).await {
+                        Ok(()) => tracing::info!(
+                            "MESH origin: relay publish request queued {} for {}",
+                            message_id,
+                            recipient
+                        ),
+                        Err(error) => tracing::warn!(
+                            "MESH origin: relay publish request failed {} for {}: {}; retained locally",
+                            message_id,
+                            recipient,
+                            error
+                        ),
+                    },
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+                }
+            }
+
             let polled_event = transport.poll_event().await;
 
             // Never discard an event already handed to core. If a terminal/stalled condition is
@@ -1678,6 +1725,7 @@ self.runtime = Some(runtime);
     }
     pub fn stop(&mut self) {
         self.network.stop();
+        self.mqtt_outbound_tx = None;
         if let Some(rt) = self.runtime.take() {
             rt.shutdown_background();
         }
@@ -1764,92 +1812,177 @@ self.runtime = Some(runtime);
 
         let addr_opt = {
             let addrs = self.peer_addrs.lock().unwrap();
-            addrs.get(&recipient_id).copied()
+            addrs
+                .get(&recipient_id)
+                .copied()
                 .or_else(|| addrs.get(&format!("{}_public", recipient_id)).copied())
         };
 
-        let send_ok = if let Some(addr) = addr_opt {
+        let direct_send_ok = if let Some(addr) = addr_opt {
             if let Some(rt) = &self.runtime {
-                let payload = format!("{}|{}|{}|{}", sender_id, message_id, sender_id, text);
+                let payload = format!("{}|{}|{}|{}", sender_id, message_id, chat_id, text);
                 tracing::info!("send_via_quic: to {}", recipient_id);
-                tracing::info!("send_via_quic_text: {}", payload);
-                rt.block_on(async move {
-                    Self::send_via_quic(addr, payload).await
-                })
+                rt.block_on(async move { Self::send_via_quic(addr, payload).await })
             } else {
                 false
             }
         } else {
-            tracing::warn!("No address known for {} - PENDING", recipient_id);
-            // Store-and-forward: queue message for offline peer
-            if let Some(ref queue) = self.message_queue {
-                use sha2::{Sha256, Digest};
-                let mut rh = Sha256::new();
-                rh.update(recipient_id.as_bytes());
-                let rhash = rh.finalize();
-                let mut rid = [0u8; 32];
-                rid.copy_from_slice(&rhash);
-                let mut mh = Sha256::new();
-                mh.update(message_id.as_bytes());
-                let mhash = mh.finalize();
-                let mut mid = [0u8; 16];
-                mid.copy_from_slice(&mhash[..16]);
-                let formatted = format!("{}|{}|{}|{}", sender_id, message_id, sender_id, text);
-                let qmsg = crate::network::message_queue::QueuedMessage::new(mid, rid, formatted.as_bytes().to_vec());
-                if let Some(rt) = &self.runtime {
-                    let queue2 = Arc::clone(queue);
-                    rt.block_on(async move {
-                        let _ = queue2.enqueue(qmsg).await;
-                    });
-                }
-                tracing::info!("Message queued for offline peer {}", recipient_id);
-            }
             false
         };
 
-        let status = if send_ok {
-            MessageStatus::Sent
-        } else {
-            MessageStatus::Failed
+        if direct_send_ok {
+            let _ = self
+                .storage
+                .update_message_status(&message_id, MessageStatus::Sent);
+            self.events.emit(CoreEvent::MessageStatusChanged {
+                message_id,
+                status: "sent".into(),
+            });
+            return true;
+        }
+
+        // M3(d): no direct address (or direct send failed). Keep the existing N-1-compatible
+        // relay encoding, own the origin copy in RelayQueue first, and only then offer one bounded
+        // command to the persistent MQTT session. This is QUEUED_OFFLINE, never a SENT claim.
+        let prepared = match prepare_offline_relay(
+            &message_id,
+            &recipient_id,
+            &sender_id,
+            &chat_id,
+            text.as_bytes(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                tracing::warn!(
+                    "MESH origin: rejected offline relay {} for {}: {}",
+                    message_id,
+                    recipient_id,
+                    error
+                );
+                let _ = self
+                    .storage
+                    .update_message_status(&message_id, MessageStatus::Pending);
+                self.events.emit(CoreEvent::MessageStatusChanged {
+                    message_id,
+                    status: "pending".into(),
+                });
+                return false;
+            }
         };
 
-        let _ = self.storage.update_message_status(&message_id, status);
-
-        self.events.emit(CoreEvent::MessageStatusChanged {
-            message_id: message_id.clone(),
-            status: "sent".into(),  // Р’СЃРµРіРґР° sent - retry РїСЂРѕРґРѕР»Р¶РёС‚СЃСЏ С‡РµСЂРµР· queue
-        });
-
-        // Store-and-forward: Р’РЎР•Р“Р”Рђ queue РґР»СЏ РѕС„С„Р»Р°Р№РЅ РїРѕР»СѓС‡Р°С‚РµР»РµР№
-        // Р”Р°Р¶Рµ РµСЃР»Рё MQTT РїСЂРёРЅСЏР» СЃРѕРѕР±С‰РµРЅРёРµ, Р±СЂРѕРєРµСЂ РЅРµ СЃРѕС…СЂР°РЅСЏРµС‚ РґР»СЏ offline
-        // РџРѕР»СѓС‡Р°С‚РµР»СЊ РїРѕР»СѓС‡РёС‚ РїРѕРІС‚РѕСЂРЅРѕ С‡РµСЂРµР· dequeue_for РїСЂРё peer_discovered
-        if recipient_id != self.node_id_str.clone().unwrap_or_default() {
-            if let Some(ref queue) = self.message_queue {
-                use sha2::{Sha256, Digest};
-                let mut rh = Sha256::new();
-                rh.update(recipient_id.as_bytes());
-                let rhash = rh.finalize();
-                let mut rid = [0u8; 32];
-                rid.copy_from_slice(&rhash);
-                let mut mh = Sha256::new();
-                mh.update(message_id.as_bytes());
-                let mhash = mh.finalize();
-                let mut mid = [0u8; 16];
-                mid.copy_from_slice(&mhash[..16]);
-                let formatted = format!("{}|{}|{}|{}", sender_id, message_id, sender_id, text);
-                let qmsg = crate::network::message_queue::QueuedMessage::new(mid, rid, formatted.as_bytes().to_vec());
-                if let Some(rt) = &self.runtime {
-                    let queue2 = Arc::clone(queue);
-                    rt.block_on(async move {
-                        let _ = queue2.enqueue(qmsg).await;
-                    });
+        let relay_inserted = match self.relay_queue.as_ref() {
+            Some(queue) if queue.contains(&message_id) => {
+                tracing::info!(
+                    "MESH origin: offline relay {} already retained for {}",
+                    message_id,
+                    recipient_id
+                );
+                false
+            }
+            Some(queue) => match queue.enqueue(prepared.message) {
+                Ok(true) => {
+                    tracing::info!(
+                        "MESH origin: retained offline relay {} for {} at hop 0",
+                        message_id,
+                        recipient_id
+                    );
+                    true
                 }
-                tracing::info!("Message queued for retry: {}", recipient_id);
+                Ok(false) => {
+                    tracing::info!(
+                        "MESH origin: offline relay {} not inserted (duplicate/hop limit)",
+                        message_id
+                    );
+                    false
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "MESH origin: cannot retain offline relay {} for {}: {}",
+                        message_id,
+                        recipient_id,
+                        error
+                    );
+                    false
+                }
+            },
+            None => {
+                tracing::warn!(
+                    "MESH origin: relay queue unavailable for offline message {}",
+                    message_id
+                );
+                false
+            }
+        };
+
+        if relay_inserted {
+            // Preserve the legacy same-LAN retry queue during rollout. It is populated only once,
+            // after RelayQueue dedup admitted this msg_id, so Kotlin retries do not multiply it.
+            if let (Some(queue), Some(rt)) = (&self.message_queue, &self.runtime) {
+                use sha2::{Digest, Sha256};
+                let mut recipient_hasher = Sha256::new();
+                recipient_hasher.update(recipient_id.as_bytes());
+                let recipient_hash = recipient_hasher.finalize();
+                let mut recipient_key = [0u8; 32];
+                recipient_key.copy_from_slice(&recipient_hash);
+
+                let mut message_hasher = Sha256::new();
+                message_hasher.update(message_id.as_bytes());
+                let message_hash = message_hasher.finalize();
+                let mut message_key = [0u8; 16];
+                message_key.copy_from_slice(&message_hash[..16]);
+
+                let legacy_payload =
+                    format!("{}|{}|{}|{}", sender_id, message_id, chat_id, text);
+                let queued = crate::network::message_queue::QueuedMessage::new(
+                    message_key,
+                    recipient_key,
+                    legacy_payload.into_bytes(),
+                );
+                let queue = Arc::clone(queue);
+                if let Err(error) = rt.block_on(async move { queue.enqueue(queued).await }) {
+                    tracing::warn!(
+                        "MESH origin: legacy retry queue rejected {}: {}",
+                        message_id,
+                        error
+                    );
+                }
+            }
+
+            match self.mqtt_outbound_tx.as_ref() {
+                Some(sender) => match sender.try_send(MqttOutboundCommand::MeshRelay {
+                    recipient: recipient_id.clone(),
+                    envelope: prepared.envelope,
+                    message_id: message_id.clone(),
+                }) {
+                    Ok(()) => tracing::info!(
+                        "MESH origin: offline relay command accepted {} for {}",
+                        message_id,
+                        recipient_id
+                    ),
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => tracing::warn!(
+                        "MESH origin: outbound command queue full for {}; retained locally",
+                        message_id
+                    ),
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => tracing::warn!(
+                        "MESH origin: outbound command queue closed for {}; retained locally",
+                        message_id
+                    ),
+                },
+                None => tracing::warn!(
+                    "MESH origin: MQTT outbound channel unavailable for {}; retained locally",
+                    message_id
+                ),
             }
         }
 
-        let msg = OutboundMessage::new(message_id, recipient_id, Vec::new());
-        self.network.send_message(msg).is_ok()
+        let _ = self
+            .storage
+            .update_message_status(&message_id, MessageStatus::Pending);
+        self.events.emit(CoreEvent::MessageStatusChanged {
+            message_id,
+            status: "queued_offline".into(),
+        });
+        false
     }
     async fn send_via_quic(addr: SocketAddr, payload: String) -> bool {
         use crate::network::quic_client::QuicClient;

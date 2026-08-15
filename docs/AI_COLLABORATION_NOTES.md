@@ -1699,6 +1699,27 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   работал), не повод менять proxy/DNS/Git config или повторять большой block. Не делать `git clean`:
   untracked icon безопасно переживёт fetch/mixed reset. Следующий шаг PC-only diagnostic без fetch:
   DNS/TCP/curl + read-only proxy/config report; затем подождать и сделать ровно один isolated fetch.
+- **2026-08-15 (доп.159, новый приоритет пользователя)** — пользователь потребовал прекратить
+  отвлечения/многоступенчатые разрешения и немедленно перейти к реальной офлайн-доставке в app.
+  Это явное решение начать M3(d) до незавершённого r4.5 local matrix; mixed/r4.5 остаются release
+  acceptance, но больше не блокируют source implementation. Icon заморожен после сохранения source.
+  Обычные code/static/commit шаги выполнять без дополнительных вопросов; спрашивать только перед
+  destructive phone action/install/release/tag.
+- **M3(d) automatic offline send-path source complete, build pending:** добавлен pure bounded
+  `network/offline_send.rs`: delimiter/length/64 KiB gates, origin `RelayMessage` hop0/TTL7d и exact
+  старый `relay|...` encoding для N-1, 3 tests. `P2PCore` теперь владеет bounded mpsc cap256 к
+  persistent MQTT task; offline/direct-failed send сначала dedup+enqueue origin RelayQueue, один раз
+  кладёт legacy LAN retry, затем `try_send` command. MQTT loop bounded-drain max32 и вызывает
+  existing `send_mesh_relay` (r4.4 fanout max2/non-retained); full/closed/session error сохраняет
+  relay локально и не заявляет SENT. Rust offline result=false + `queued_offline`; fake
+  `NetworkManager.send_message().is_ok()` удалён. Kotlin убрал transient per-message MQTT и CF inbox
+  content fallback; Room ставит `QUEUED_OFFLINE`/`STORE_FORWARD`, retry queries включают queued,
+  direct QUIC only → SENT. Wire/Room schema unchanged; Cloudflare receive compatibility пока есть,
+  legacy transient ACK остаётся отдельным debt. Static source checks PASS. Первый internal delimiter
+  scanner false-failed на Rust lifetime `'static`; corrected scanner treats lifetimes correctly,
+  source не менялся из-за false check. Следующий обязательный gate — Windows
+  `build-rust.ps1 -Features mqtt-dual-broker`, затем Kotlin/APK compile и один combined 3-phone
+  offline acceptance; host cargo test запрещён.
 
 ---
 

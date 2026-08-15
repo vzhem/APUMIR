@@ -420,12 +420,19 @@ mod tests {
     }
 
     #[test]
-    fn test_engine_create_chat_and_send() {
+    fn test_engine_create_chat_and_queue_offline() {
         let handle = create_engine("Bob".into());
         handle.start();
         handle.create_chat("c1".into());
-        let ok = handle.send_message("m1".into(), "c1".into(), "peer1".into(), "Hello".into());
-        assert!(ok);
+        let sent_directly =
+            handle.send_message("m1".into(), "c1".into(), "peer1".into(), "Hello".into());
+        assert!(!sent_directly);
+        let events = handle.drain_events();
+        assert!(events.iter().any(|event| {
+            event.event_type == "message_status_changed"
+                && event.message_id.as_deref() == Some("m1")
+                && event.status.as_deref() == Some("queued_offline")
+        }));
     }
 
     #[test]

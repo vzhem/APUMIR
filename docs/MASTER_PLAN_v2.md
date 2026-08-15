@@ -542,6 +542,9 @@ InviteFriendScreen
 
 ## Фаза 2.3 — P2P store-and-forward
 
+- [x] M3(d) source: app offline send → origin RelayQueue → bounded persistent MQTT mesh command;
+  backward-compatible N-1 wire, truthful `QUEUED_OFFLINE`, Room retry. **Build/runtime pending**
+  (2026-08-15; пользователь явно поднял приоритет выше оставшегося r4.5 test gate).
 - [ ] Перенести store-and-forward на Tier 1/Tier 2 nodes.
 - [ ] Relay nodes хранят только E2E encrypted payload.
 - [ ] Пользователь может разрешить устройству быть relay.

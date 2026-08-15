@@ -1,13 +1,6 @@
 package com.vladimir.messenger.data.repository
 
 import com.vladimir.messenger.domain.model.MessageChannel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-
-import com.vladimir.messenger.service.CloudflareRelay
-import com.vladimir.messenger.data.relay.RelayEnvelope
 
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
@@ -81,75 +74,27 @@ class ChatRepository @Inject constructor(
             messageDao.insertMessage(entity)
             chatDao.updateLastMessage(chatId, content, timestamp)
 
-            // ШАГ 3: Отправить через Rust (MQTT/P2P)
-            var usedChannel = MessageChannel.UNKNOWN
-
-            var sent = if (actualRecipientId.isNotBlank()) {
+            // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
+            val sentDirectly = if (actualRecipientId.isNotBlank()) {
                 Log.i(TAG, "🚀 SENDING via Rust: messageId=$messageId recipient=$actualRecipientId")
-                val ok = RustBridge.sendMessage(messageId, chatId, actualRecipientId, content)
-                Log.i(TAG, "  Rust result: $ok")
-                if (ok) usedChannel = MessageChannel.MQTT
-                ok
+                RustBridge.sendMessage(messageId, chatId, actualRecipientId, content)
             } else {
                 Log.w(TAG, "❌ sendMessage: recipient id is blank for chatId=$chatId")
                 false
             }
 
-            // ШАГ 4: Fallback через Cloudflare relay
-            if (!sent && actualRecipientId.isNotBlank()) {
-                Log.w(TAG, "MQTT failed, trying Cloudflare relay fallback")
-                val cfRelay = CloudflareRelay.getInstance()
-                if (cfRelay != null) {
-                    try {
-                        val payload = RelayEnvelope.buildMessage(
-                            messageId, chatId, content, timestamp, RustBridge.nodeId() ?: ""
-                        )
-                        val cfSent = kotlinx.coroutines.runBlocking {
-                            cfRelay.sendMessage(actualRecipientId, payload)
-                        }
-                        if (cfSent) {
-                            sent = true
-                            usedChannel = MessageChannel.CF
-                            Log.i(TAG, "Message sent via Cloudflare relay")
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "CF relay send failed", e)
-                    }
-                }
-            }
+            Log.i(TAG, "sendMessage direct=$sentDirectly messageId=$messageId recipient=$actualRecipientId")
 
-            Log.i(TAG, "sendMessage sent=$sent messageId=$messageId recipient=$actualRecipientId")
-
-            if (sent) {
+            if (sentDirectly) {
                 messageDao.updateMessageStatus(messageId, MessageStatus.SENT.name)
-                if (usedChannel != MessageChannel.UNKNOWN) {
-                    messageDao.updateMessageChannel(messageId, usedChannel.name)
-                }
-
-                // Принудительный CF fallback через 5 секунд
-                if (usedChannel == MessageChannel.MQTT) {
-                    GlobalScope.launch(Dispatchers.IO) {
-                        delay(5000)
-                        val currentStatus = messageDao.getMessageById(messageId)?.status
-                        if (currentStatus == MessageStatus.SENT.name || currentStatus == MessageStatus.PENDING.name) {
-                            val cfRelay = CloudflareRelay.getInstance()
-                            if (cfRelay != null) {
-                                try {
-                                    val payload = RelayEnvelope.buildMessage(
-                                        messageId, chatId, content, timestamp, RustBridge.nodeId() ?: ""
-                                    )
-                                    val cfSent = cfRelay.sendMessage(actualRecipientId, payload)
-                                    if (cfSent) {
-                                        Log.i(TAG, "Message duplicated via CF relay (MQTT unconfirmed)")
-                                        messageDao.updateMessageChannel(messageId, MessageChannel.CF.name)
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "CF duplicate failed", e)
-                                }
-                            }
-                        }
-                    }
-                }
+                messageDao.updateMessageChannel(messageId, MessageChannel.LOCAL.name)
+            } else if (actualRecipientId.isNotBlank()) {
+                // No transport confirmed delivery. Room remains the phone-owned persistent outbox;
+                // Rust may also retain the compatible relay in its bounded mesh queue. Until a
+                // recipient receipt arrives this is queued, never SENT.
+                messageDao.updateMessageStatus(messageId, MessageStatus.QUEUED_OFFLINE.name)
+                messageDao.updateMessageChannel(messageId, MessageChannel.STORE_FORWARD.name)
+                Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
             }
 
             Result.success(entity.toDomain())
