@@ -193,9 +193,10 @@ RelayMessage {
   bounded command в persistent dual-broker transport, совместимый N-1 relay encoding, честный
   `QUEUED_OFFLINE`, Room retry; transient per-message MQTT и CF content-inbox fallback удалены из
   outgoing path. APK v11.16.16/11016016: 22,664,712 B / SHA-256 `446A1EE9…429DC0D`, V2 signer
-  preserved, embedded `.so` 7,263,416 B / `27B9D4DC…D1FD26C` exact. Data-preserving install PASS
-  3/3 с сохранением UID/firstInstall/data; apps stopped. Следующий gate — controlled launch/readiness,
-  затем automatic offline acceptance; build/transfer/recovery/install не повторять.
+  preserved, embedded `.so` 7,263,416 B / `27B9D4DC…D1FD26C` exact. Data-preserving install и
+  controlled launch/readiness PASS 3/3: primary+secondary READY, dual fanout/dedup, healthy
+  heartbeat, stable PIDs, no crash/stall/restart. Следующий gate — automatic offline UI acceptance;
+  build/transfer/recovery/install/launch не повторять.
 - **M7** — E2E-шифрование payload получателю (Фаза 8.1; пока payload «как есть» — небезопасно).
 - **M8** — персистентность RelayQueue (SQLite) — переживать рестарт.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).

@@ -608,9 +608,10 @@ InviteFriendScreen
   mesh command; backward-compatible N-1 wire, truthful `QUEUED_OFFLINE`, Room retry. Rust feature
   build и Kotlin overlay PASS; signed APK v11.16.16/11016016 собран 2026-08-15: 22,664,712 B,
   SHA-256 `446A1EE9…429DC0D`, embedded arm64 `.so` 7,263,416 B / `27B9D4DC…D1FD26C`, V2 signer
-  preserved. Data-preserving install PASS 3/3: v11.16.16, UID/firstInstall/data preserved, apps
-  stopped. **Controlled launch и three-phone automatic offline runtime acceptance pending**;
-  mixed N↔N-1 и r4.5 остаются release gates.
+  preserved. Data-preserving install PASS 3/3; controlled launch/readiness PASS 3/3 with stable
+  PIDs, primary+secondary READY, dual fanout/dedup, healthy heartbeat and zero crash/stall/restart.
+  **Automatic three-phone offline UI delivery/cleanup/DELIVERED acceptance pending**; mixed N↔N-1
+  и r4.5 остаются release gates.
 - [ ] Перенести store-and-forward на Tier 1/Tier 2 nodes.
 - [ ] Relay nodes хранят только E2E encrypted payload.
 - [ ] Пользователь может разрешить устройству быть relay.

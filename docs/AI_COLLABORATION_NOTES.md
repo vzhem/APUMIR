@@ -340,13 +340,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Windows HEAD всё ещё base `8cea566…`, worktree содержит exact Rust+Kotlin overlays, generated
 > native, untracked build harness и icon; history reconciliation отложен.
 >
-> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** пользователь явно
-> разрешил ровно один controlled launch v11.16.16 на всех трёх. Перед командой назвать все три;
-> outer и versioned harness начинают с exact read-only visibility/install-state/version/UID/
-> firstInstall/data/process-absent gate и останавливаются до launch при mismatch. Launch ровно 3,
-> затем early15s+late135s PID/epoch-filtered dual-broker readiness/heartbeat/crash analysis; no
-> force-stop, install, uninstall/data clear, logcat clear, network change or user payload. После
-> runtime readiness следующий отдельно согласованный acceptance:
+> **Непосредственный следующий product gate требует Анну, Женю и Стаса:** controlled launch/
+> readiness v11.16.16 уже PASS 3/3 на PID Anna22055/Zhenya11575/Stas11449; не relaunch и не очищать
+> logs. Следующий acceptance требует отдельного явного разрешения временно выключить/восстановить
+> сеть Стаса (recipient) и Анны (origin) и вручную отправить ровно одно уникальное UI message
+> Anna→Stas, пока Zhenya остаётся online relay. Перед каждой phone-командой назвать все три и начать
+> с exact read-only visibility/state/PID/readiness gate. No install/force-stop/log clear/data clear.
+> Acceptance:
 > origin app sends while recipient offline,
 > third phone stores, origin disconnects, recipient returns and gets exactly one UI message, receipt
 > cleans relay and eventually marks origin DELIVERED. Mixed N↔N-1 и r4.5 остаются release gates.
@@ -1927,6 +1927,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Static delimiter/action/order/identity checks PASS; Windows ParseFile/runtime pending. Перед
   command предупредить подключить/разблокировать Anna/Zhenya/Stas; outer visibility is first phone
   interaction.
+- **2026-08-15 (доп.172) — M3(d) v11.16.16 controlled launch/readiness PASS 3/3:** state
+  `%TEMP%\apu-m3d-v11.16.16-launch.json`, SHA-256
+  `6561A0636034B4782605D008C649F20A7D0A72DB014568B84CEF84AB380F84E2`; launch calls=3, wait150s,
+  PIDs Anna/Zhenya/Stas=`22055/11575/11449` stable. На 3/3 primary init/EventLoop/ConnAck/
+  subscription/READY/heartbeat=1; secondary connected/READY=1; fanoutTwo=8/18/14, duplicateDrops=
+  5/7/6, both HiveMQ+EMQX evidence present. Heartbeat pending/backpressure/request timeout/error=0;
+  crash/stall/restart/overflow/invariant/channel close=0. Stas имел bounded primary poll_errors=4 и
+  secondary backoff=1, но later READY и healthy polling heartbeat доказали recovery; no restart.
+  Force-stop/logcat clear/network/user payload=false. Launch/state/evidence не повторять/не удалять.
+  Следующий gate — separately approved automatic offline UI scenario Anna origin → Stas offline
+  recipient, Zhenya online relay; one unique message, then Anna offline, Stas online delivery,
+  receipt cleanup and eventual origin DELIVERED.
 
 ---
 
@@ -2160,10 +2172,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
    APK/native/state hashes — в CURRENT OVERRIDE и доп.167. Rust/transfer/recovery/Gradle не повторять
    и evidence не удалять. Windows HEAD остаётся base `8cea566…`; dirty overlay не равен Git history
    synchronization, generated `.so` не commit, icon F263…ACA9 сохранить.
-5. Data-preserving install v11.16.16 PASS 3/3, state SHA 59D5…6295; все apps stopped. Не
-   переустанавливать. Controlled launch 3/3 уже явно разрешён и versioned harness 06fa3f1 prepared;
-   execution pending. Force-stop, data clear, network/logcat changes и relaunch ради старых markers
-   запрещены; attempt не повторять при incomplete.
+5. Data-preserving install и controlled launch/readiness v11.16.16 PASS 3/3; state SHAs
+   59D5…6295/6561…84E2, stable PIDs 22055/11575/11449. Не reinstall/relaunch, не clear logs.
+   Следующий gate требует отдельного разрешения на bounded network toggles Stas/Anna и one manual
+   Anna→Stas UI message; no synthetic publish/retry.
 6. Перед phone-командой назвать все три телефона и предупредить подключить; отдельного подтверждения
    подключения не ждать, но начать с exact read-only visibility/install-state/version/UID/
    firstInstall/data/process gate и остановиться до launch при absent/unauthorized/offline. Acceptance: recipient
