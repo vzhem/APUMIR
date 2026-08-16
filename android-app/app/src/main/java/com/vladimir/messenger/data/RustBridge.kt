@@ -6,6 +6,7 @@ import uniffi.p2p_core.CoreEventFfi
 import uniffi.p2p_core.MessageFfi
 import uniffi.p2p_core.P2pCoreHandle
 import uniffi.p2p_core.createEngine
+import uniffi.p2p_core.createEngineDurable
 import uniffi.p2p_core.createEngineWithKeys
 import uniffi.p2p_core.getVersion
 import uniffi.p2p_core.initializeCore
@@ -20,10 +21,18 @@ object RustBridge {
     @Volatile
     private var coreInitialized: Boolean = false
 
+    /**
+     * M8-C: [relayDbPath] — собственный SQLite-файл durable encrypted relay
+     * custody (app-private). Передаётся только после того, как
+     * [com.vladimir.messenger.data.security.RelayAtRestMasterKey.installIntoCore]
+     * попытался установить at-rest ключ: установленный ключ + путь =
+     * durable-encrypted режим; без ключа движок честно уйдёт в RAM-only.
+     */
     fun initialize(
         displayName: String,
         existingPublicKey: String? = null,
         existingPrivateKey: String? = null,
+        relayDbPath: String? = null,
     ): Boolean {
         if (engine != null) {
             Log.w(TAG, "Engine already initialized")
@@ -39,7 +48,16 @@ object RustBridge {
 
             Log.i(TAG, "Rust version: ${getVersion()}")
 
-            val e = if (!existingPublicKey.isNullOrEmpty()) {
+            val e = if (!relayDbPath.isNullOrBlank()) {
+                // M8-C: durable-режим. Пустые строки ключей = «сгенерировать новые».
+                Log.i(TAG, "Creating durable engine, relayDbPath=$relayDbPath")
+                createEngineDurable(
+                    displayName,
+                    existingPublicKey ?: "",
+                    existingPrivateKey ?: "",
+                    relayDbPath,
+                )
+            } else if (!existingPublicKey.isNullOrEmpty()) {
                 Log.i(TAG, "Restoring engine with key: ${existingPublicKey.take(16)}")
                 createEngineWithKeys(displayName, existingPublicKey, existingPrivateKey ?: "")
             } else {
@@ -51,6 +69,11 @@ object RustBridge {
             if (ok) {
                 engine = e
                 Log.i(TAG, "Engine started. NodeId: ${e.nodeId()}")
+                // M8-C: честный режим custody виден в логах (acceptance M8-F).
+                Log.i(
+                    TAG,
+                    "Relay custody mode: ${e.relayCustodyMode()}, quarantined: ${e.relayQuarantineCount()}"
+                )
             } else {
                 Log.e(TAG, "Engine.start() returned false")
             }
@@ -205,6 +228,22 @@ object RustBridge {
     }
 
     fun pendingEvents(): Long = engine?.pendingEvents()?.toLong() ?: 0L
+
+    /** M8-C: честный режим relay custody ("durable-encrypted" / "ram-only" / "disabled"). */
+    fun relayCustodyMode(): String = try {
+        engine?.relayCustodyMode() ?: "disabled"
+    } catch (e: Exception) {
+        Log.w(TAG, "relayCustodyMode failed: ${e.message}")
+        "unknown"
+    }
+
+    /** M8-C: число relay-записей в карантине (диагностика честной потери custody). */
+    fun relayQuarantineCount(): Long = try {
+        engine?.relayQuarantineCount()?.toLong() ?: 0L
+    } catch (e: Exception) {
+        Log.w(TAG, "relayQuarantineCount failed: ${e.message}")
+        0L
+    }
 
     fun sendMessageMqtt(toNodeId: String, payload: String): Boolean {
         return try {

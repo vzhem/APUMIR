@@ -384,12 +384,19 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > `storage/relay_at_rest.rs`: versioned XChaCha20-Poly1305 конверт, AAD-привязка к колонкам,
 > Keystore seam через `key_id`, quarantine-ошибки, 12 tests, без SQL-изменений — см. доп.195) и
 > **M8-C slice 2 выполнен 2026-08-16** (relay schema v2: `relay_records_enc` + `relay_quarantine`,
-> encrypted API в RelayStore, 13 tests, sqlite3-прототип 24/24 PASS — см. доп.196);
-> compile/runtime всего M8 ждут Windows `build-rust.ps1 -Features mqtt-dual-broker`. Next product
-> priority: **Windows compile gate M8 (A→C2)**, затем **M8-C slice 3 — Android Keystore-мост
-> (Kotlin/JNI) + перевод engine на encrypted API**, M8-E, M8-F. Mixed N↔N-1/r4.5 remain
+> encrypted API в RelayStore, 13 tests, sqlite3-прототип 24/24 PASS — см. доп.196); **M8-C slice 3
+> source выполнен 2026-08-16** (Android Keystore-мост `RelayAtRestMasterKey.kt` + Rust
+> `MasterSecretKeySource`/глобальный install-реестр + engine полностью на encrypted API через
+> `RelayCustody`; custody всегда encrypted, без ключа — честный RAM-only ephemeral, durable-файл
+> без ключа не создаётся; UniFFI: `install_relay_at_rest_key`/`create_engine_durable`/
+> `relay_custody_mode`/`relay_quarantine_count`; backup-исключения; 6 новых Rust tests —
+> см. доп.197). **Sandbox push заблокирован** (нет GitHub credentials): локальные commit'ы ждут
+> `git push origin arena/01a00674-apumir` при доступной среде либо переносятся mbox-патчем.
+> Next product priority: **Windows compile gate M8 (A→C3): `build-rust.ps1 -Features
+> mqtt-dual-broker` + uniffi-bindgen регенерация Kotlin bindings + `gradlew assembleDebug`**,
+> затем M8-E (sleep/wake), M8-F (телефонный acceptance). Mixed N↔N-1/r4.5 remain
 > stable-release gates. Иконка пока заморожена. Новых релизов нет и не будет до закрытия гейтов —
-> см. доп.196.
+> см. доп.196/197.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2369,6 +2376,59 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   вместе с Android Keystore-мостом (M8-C slice 3, следующий маленький шаг: Kotlin/JNI key
   source + перевод persist/load в core.rs на encrypted API + честный RAM-only degrade при
   недоступном Keystore).
+
+- **2026-08-16 (доп.197) — M8-C slice 3: Android Keystore-мост + engine переведён на encrypted
+  API; custody всегда encrypted, durable — только с ключом:** пользователь разрешил «делать всё
+  по максимуму» и попросил присылать исполняемые блоки для Windows. Выполнено, source+
+  static-only (compile по-прежнему ждёт Windows gate). Решения: (1) **plaintext-fallback
+  запрещён и удалён как возможность** — V1-методы хранилища остались для тестов, но engine их
+  больше не вызывает; (2) **без ключа durable-файл не создаётся вообще** — честный RAM-only
+  degrade с эфемерным ключом (`ephemeral_key_source`, `key_id=0`), а не «durable с
+  одноразовым ключом» (ложная семантика); (3) **relay custody получил собственный путь**
+  `EngineConfig.relay_db_path` (`with_relay_db`) — main storage поведение не изменено
+  (in-memory, как в v11.16.16); (4) **trait `RelayAtRestKeySource` стал `Send + Sync`**
+  (Arc-снимок разделяется с MQTT-потоком). Rust: `relay_at_rest.rs` += `MasterSecretKeySource`
+  (боевой источник из 32-байт master secret; `InvalidKeyMaterial` на неверную длину; `Drop`
+  зануляет через `wipe_bytes` — volatile write + black_box, без новых зависимостей),
+  глобальный реестр `install_device_key_source`/`installed_key_source`/`installed_key_id`/
+  `clear_device_key_source` (install ДО start; повторный install действует на следующий engine),
+  6 новых tests (wipe, длина среза, lookup, seal/open+redaction, install/clear roundtrip,
+  эфемерный RAM-only и его изоляция). `core.rs`: `RelayCustody { store, keys, durable }`
+  заменил поле `relay_store`; `open_relay_custody` реализует правила (ключ+путь →
+  durable-encrypted; без пути → in-memory encrypted; без ключа → in-memory ephemeral + warn);
+  ВСЕ сайты переведены: startup restore (`purge_expired_encrypted` tuple +
+  `load_unexpired_encrypted` с quarantine-warn), persist-BEFORE-enqueue (inbound MESH relay и
+  origin offline) на `store_encrypted`, receipt → `remove_encrypted_and_tombstone`, gossip →
+  `purge_expired_encrypted`, tombstones без изменений (общая открытая таблица msg_id+время).
+  UniFFI (`lib.udl`+`lib.rs`): `install_relay_at_rest_key(u16, bytes)` [Throws=CoreError],
+  `clear_relay_at_rest_key()`, `relay_at_rest_key_id()` → i64 (-1 = нет), `create_engine_durable(
+  display_name, public_key, private_key, relay_db_path)` (пустые ключи = сгенерировать), методы
+  `P2PCoreHandle.relay_custody_mode()` ("durable-encrypted"/"ram-only"/"disabled") и
+  `relay_quarantine_count()` — это acceptance-датчики для M8-F. Kotlin: новый
+  `data/security/RelayAtRestMasterKey.kt` — Keystore AES/GCM/NoPadding 256 не-извлекаемый
+  wrap-ключ `apu_relay_at_rest_wrap_v1`; 32-байт master secret (SecureRandom) wrap-ится и
+  хранится Base64 в `apu_relay_at_rest` prefs ([keyId:2 BE][IV:12][ct+tag]); unwrap при старте;
+  провал unwrap (data clear/чужой Keystore) = честно новый secret с НОВЫМ keyId (старые записи
+  → quarantine), Kotlin-копия `fill(0)` после передачи; любая ошибка → false = движок RAM-only.
+  Wiring: `CoreServerService.onStartCommand` и `CreateIdentityUseCase` вызывают
+  `installIntoCore()` СТРОГО до `RustBridge.initialize(..., relayDbPath = filesDir/apu_relay.sqlite)`;
+  `RustBridge.initialize` получил 4-й параметр и логирует custody mode+quarantine после старта.
+  Backup-исключения: `data_extraction_rules.xml` + `backup_rules.xml` исключают
+  `apu_relay.sqlite{,-wal,-shm}` и `apu_relay_at_rest.xml` (байты привязаны к Keystore
+  устройства — на другом устройстве это мусор; свежий secret генерируется на месте). Небольшой
+  housekeeping в той же сессии: снят UTF-8 BOM с 6 Kotlin-файлов (data entities + domain models)
+  — отдельный мелкий commit; остальные 11 BOM-файлов сознательно не тронуты (v11.16.16
+  компилировался с ними — не чиним работающее). Проверки в sandbox: git diff --check PASS;
+  brace/string-скан всех 7 затронутых файлов BALANCED; полный diff review PASS; cross-grep
+  (нет лишних ссылок `EngineConfig{}`/`open_relay_store`/`relay_store`) PASS. НЕ доказано:
+  compile (нет toolchain в sandbox) — единый pending gate Windows: `build-rust.ps1 -Features
+  mqtt-dual-broker` + регенерация UniFFI Kotlin bindings (`cargo run --bin uniffi-bindgen
+  generate src/lib.udl --language kotlin --config uniffi.toml --out-dir
+  ..\android-app\app\src\main\java`), затем `gradlew assembleDebug` для Kotlin-части.
+  Wire format не менялся; N↔N-1 безопасно: старый APK новые UniFFI-функции не вызывает; на
+  устройствах V1-файлов relay никогда не было (Kotlin до сих пор не задавал db_path), конфликта
+  файлов нет. Передача кода на Windows — `git format-patch` mbox (push из sandbox по-прежнему
+  заблокирован средой: нет GitHub credentials; не считать ошибкой пользователя).
 
 ---
 

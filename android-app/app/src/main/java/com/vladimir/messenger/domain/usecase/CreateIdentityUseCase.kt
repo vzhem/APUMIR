@@ -1,8 +1,11 @@
 package com.vladimir.messenger.domain.usecase
 
 import android.content.Context
+import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import javax.inject.Inject
 
 data class IdentityResult(val inviteLink: String, val fingerprint: String)
@@ -12,7 +15,12 @@ class CreateIdentityUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(name: String): Result<IdentityResult> {
         return try {
-            val isInitialized = RustBridge.initialize(name)
+            // M8-C slice 3: Keystore-мост строго до старта движка; недоступность
+            // ключа = честный RAM-only degrade первого запуска.
+            val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(context)
+            Log.i("CreateIdentityUseCase", "Relay at-rest key installed: $atRestKeyOk")
+            val relayDbPath = File(context.filesDir, "apu_relay.sqlite").absolutePath
+            val isInitialized = RustBridge.initialize(name, relayDbPath = relayDbPath)
             if (!isInitialized) {
                 return Result.failure(Exception("Failed to initialize Rust core"))
             }

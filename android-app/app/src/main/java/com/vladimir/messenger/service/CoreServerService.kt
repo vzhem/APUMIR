@@ -19,10 +19,12 @@ import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
+import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import com.vladimir.messenger.service.NotificationHelper
 import com.vladimir.messenger.service.BotApi
 import com.vladimir.messenger.data.repository.ContactRepository
 import dagger.hilt.android.AndroidEntryPoint
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -124,7 +126,15 @@ class CoreServerService : Service() {
         Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
 
         serviceScope.launch {
-            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey)
+            // M8-C slice 3: Android Keystore мост. Устанавливаем at-rest ключ
+            // СТРОГО ДО старта движка. Недоступность ключа = честный RAM-only
+            // degrade (durable custody не заявляется, файл не создаётся).
+            val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
+            Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
+
+            // Собственный SQLite-файл relay custody (app-private, WAL).
+            val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
+            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath)
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")

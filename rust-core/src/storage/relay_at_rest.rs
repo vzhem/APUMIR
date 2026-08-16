@@ -36,10 +36,26 @@
 //! а не попытка «угадать» (см. [`AtRestError`]).
 //!
 //! Ключевая иерархия: symmetric key материал поставляет [`RelayAtRestKeySource`].
-//! На Android реализация будет обёрткой над ключом в Android Keystore
-//! (не-извлекаемый ключ; app update сохраняет Keystore-ключ, data clear — теряет;
-//! это честно документируется пользователю). Текущий slice содержит только trait
-//! и тестовый источник ключей.
+//! На Android обёрткой служит мост к Android Keystore (M8-C slice 3): Keystore
+//! хранит не-извлекаемый wrap-ключ; случайный 32-байтный master secret генерируется
+//! один раз (Kotlin, SecureRandom), wrap-ится Keystore-ключом, wrapped blob хранится
+//! в app-private SharedPreferences, при старте unwrap-ится и передаётся в Rust через
+//! UniFFI (`install_device_key_source`). App update переживает Keystore-ключ →
+//! `key_id` стабилен; data clear теряет ключ → старые записи честно уходят в
+//! quarantine (`UnknownKeyId`), без маскировки потери local custody.
+//!
+//! ## Slice 3 добавления
+//!
+//! - [`MasterSecretKeySource`] — боевой источник из предоставленного хостом
+//!   материала (master secret). Хранит ОДИН текущий ключ; ротация — через смену
+//!   `key_id` при повторной установке (действует на следующий запуск движка).
+//! - Глобальный реестр [`install_device_key_source`]/[`installed_key_source`]/
+//!   [`clear_device_key_source`]: точка, куда UniFFI-слой передаёт unwrap-нутый
+//!   материал ДО старта движка. Движок читает снимок в момент открытия хранилища.
+//! - [`ephemeral_key_source`] — эфемерный RAM-only источник (случайный ключ,
+//!   живёт до конца процесса): честный degrade при недоступном Keystore.
+//! - [`wipe_bytes`]: гарантированное зануление (volatile-запись + black_box
+//!   барьер против оптимизатора). `Drop` ключа и источника зануляет материал.
 
 use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
@@ -113,6 +129,12 @@ pub enum AtRestError {
     /// неверный AAD (криптографически неразличимы — так и задумано). Quarantine.
     #[error("at-rest envelope: расшифровка/аутентификация не удалась")]
     DecryptionFailed,
+
+    /// Хост передал материал ключа неверной длины (не 32 байта). Ключ в этом
+    /// случае НЕ устанавливается; caller обязан честно деградировать (RAM-only),
+    /// а не «подрезать»/дополнять чужие байты.
+    #[error("at-rest key material: ожидалось {expected} байт, получено {found}")]
+    InvalidKeyMaterial { expected: usize, found: usize },
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -141,18 +163,174 @@ impl std::fmt::Debug for RelayAtRestKey {
     }
 }
 
-/// Источник ключей конверта. На Android будет реализован мостом к Android
-/// Keystore (не-извлекаемый device-bound ключ). Важно для app update migration:
-/// Keystore переживает обновление APK, поэтому старые записи остаются
+/// Зануление буфера, которое оптимизатор не выбросит: volatile-запись каждого
+/// байта + `black_box` барьер. Используется для ключевого материала в `Drop`.
+/// Без новых зависимостей (zeroize не входит в дерево crate по умолчанию).
+pub fn wipe_bytes(buf: &mut [u8]) {
+    for b in buf.iter_mut() {
+        // SAFETY: `b` — валидная ссылка на байт живого буфера; volatile-запись
+        // нужна только чтобы компилятор не удалил зануление как dead store.
+        unsafe { std::ptr::write_volatile(b, 0) };
+    }
+    std::hint::black_box(buf);
+}
+
+impl Drop for RelayAtRestKey {
+    fn drop(&mut self) {
+        wipe_bytes(&mut self.material);
+    }
+}
+
+/// Источник ключей конверта. На Android реализуется [`MasterSecretKeySource`],
+/// материал которому поставляет Keystore-мост (не-извлекаемый device-bound
+/// wrap-ключ в Keystore + master secret в RAM движка). Важно для app update
+/// migration: Keystore переживает обновление APK, поэтому старые записи остаются
 /// расшифровываемыми тем же `key_id`; data clear ключ стирает — записи после
 /// этого законно не расшифровываются (честная потеря local custody, без
 /// маскировки).
-pub trait RelayAtRestKeySource {
+///
+/// `Send + Sync`: источник разделяется между потоками движка (MQTT transport
+/// живёт в отдельном потоке) через `Arc<dyn RelayAtRestKeySource>`.
+pub trait RelayAtRestKeySource: Send + Sync {
     /// Ключ для НОВЫХ шифрований (текущий).
     fn current_key(&self) -> Result<RelayAtRestKey, AtRestError>;
 
     /// Ключ для расшифровки существующего конверта по `key_id` из заголовка.
     fn key_by_id(&self, key_id: u16) -> Result<RelayAtRestKey, AtRestError>;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MASTER SECRET KEY SOURCE (M8-C slice 3: Android Keystore bridge)
+// ═══════════════════════════════════════════════════════════════════
+
+/// Боевой источник ключей из master secret, предоставленного хост-приложением.
+///
+/// Жизненный цикл (Android): Keystore держит не-извлекаемый AES/GCM wrap-ключ →
+/// Kotlin unwrap-ит persisted master secret при старте сервиса → передаёт байты
+/// сюда через UniFFI ДО `engine.start()`. После передачи Kotlin зануляет свою
+/// копию; эта сторона зануляет свою в `Drop`. Материал никогда не пишется на
+/// диск в открытом виде и не логируется (`Debug` redacted).
+pub struct MasterSecretKeySource {
+    key: RelayAtRestKey,
+}
+
+impl MasterSecretKeySource {
+    pub fn new(key_id: u16, material: [u8; AT_REST_KEY_BYTES]) -> Self {
+        Self {
+            key: RelayAtRestKey { key_id, material },
+        }
+    }
+
+    /// Из среза байт (граница UniFFI: Kotlin передаёт `ByteArray`). Длина
+    /// строго 32 байта — иначе отказ без установки (никакого «подрезания»).
+    pub fn from_shared_slice(key_id: u16, material: &[u8]) -> Result<Self, AtRestError> {
+        if material.len() != AT_REST_KEY_BYTES {
+            return Err(AtRestError::InvalidKeyMaterial {
+                expected: AT_REST_KEY_BYTES,
+                found: material.len(),
+            });
+        }
+        let mut bytes = [0u8; AT_REST_KEY_BYTES];
+        bytes.copy_from_slice(material);
+        Ok(Self::new(key_id, bytes))
+    }
+
+    pub fn key_id(&self) -> u16 {
+        self.key.key_id
+    }
+}
+
+impl std::fmt::Debug for MasterSecretKeySource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MasterSecretKeySource")
+            .field("key_id", &self.key.key_id)
+            .field("material", &"[redacted]")
+            .finish()
+    }
+}
+
+impl RelayAtRestKeySource for MasterSecretKeySource {
+    fn current_key(&self) -> Result<RelayAtRestKey, AtRestError> {
+        Ok(self.key.clone())
+    }
+
+    fn key_by_id(&self, key_id: u16) -> Result<RelayAtRestKey, AtRestError> {
+        if key_id == self.key.key_id {
+            Ok(self.key.clone())
+        } else {
+            Err(AtRestError::UnknownKeyId { key_id })
+        }
+    }
+}
+
+impl Drop for MasterSecretKeySource {
+    fn drop(&mut self) {
+        wipe_bytes(&mut self.key.material);
+    }
+}
+
+/// `key_id` эфемерного RAM-only источника. Записи, зашифрованные эфемерным
+/// ключом, не переживают процесс, поэтому конкретное значение не имеет смысла
+/// persistence-семантики и выбрано явно помеченным.
+pub const EPHEMERAL_AT_REST_KEY_ID: u16 = 0;
+
+/// Эфемерный источник для честного RAM-only degrade (Keystore недоступен):
+/// случайный ключ на время процесса. Durable-файл БЕЗ установленного ключа
+/// сознательно НЕ создаётся — M8-C запрещает незашифрованную durable-запись,
+/// а «заявить durable, но зашифровать одноразовым ключом» было бы нечестной
+/// дурниной (записи на диске, расшифровать которые нельзя уже после выхода).
+pub fn ephemeral_key_source() -> std::sync::Arc<MasterSecretKeySource> {
+    let mut material = [0u8; AT_REST_KEY_BYTES];
+    OsRng.fill_bytes(&mut material);
+    std::sync::Arc::new(MasterSecretKeySource::new(EPHEMERAL_AT_REST_KEY_ID, material))
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ГЛОБАЛЬНЫЙ РЕЕСТР УСТАНОВЛЕННОГО КЛЮЧА (точка входа UniFFI)
+// ═══════════════════════════════════════════════════════════════════
+
+/// Установленный хостом источник. Движок делает `Arc`-снимок в момент открытия
+/// relay-хранилища; повторная установка влияет только на СЛЕДУЮЩИЙ запуск
+/// движка (уже открытое хранилище ключ не меняет — иначе записи одного файла
+/// смешали бы ключи молча).
+static INSTALLED_DEVICE_KEY_SOURCE: std::sync::RwLock<Option<std::sync::Arc<MasterSecretKeySource>>> =
+    std::sync::RwLock::new(None);
+
+/// Установить источник ключа из материала, unwrap-нутого Keystore-мостом.
+/// Вызывается из UniFFI ДО `engine.start()`. Неверная длина — отказ
+/// (`InvalidKeyMaterial`), прежняя установка при этом сохраняется.
+pub fn install_device_key_source(key_id: u16, material: &[u8]) -> Result<(), AtRestError> {
+    let source = MasterSecretKeySource::from_shared_slice(key_id, material)?;
+    let mut guard = INSTALLED_DEVICE_KEY_SOURCE
+        .write()
+        .map_err(|_| AtRestError::KeySourceUnavailable)?;
+    *guard = Some(std::sync::Arc::new(source));
+    Ok(())
+}
+
+/// Снимок установленного источника для движка (None → честный RAM-only путь).
+pub fn installed_key_source() -> Option<std::sync::Arc<MasterSecretKeySource>> {
+    INSTALLED_DEVICE_KEY_SOURCE
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
+/// `key_id` установленного источника (диагностика/acceptance; None = не
+/// установлен). Материал не раскрывается.
+pub fn installed_key_id() -> Option<u16> {
+    INSTALLED_DEVICE_KEY_SOURCE
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|s| s.key_id()))
+}
+
+/// Убрать установленный источник (drop зануляет материал). Для будущего
+/// logout/wipe пути; уже работающий движок держит свой Arc-снимок.
+pub fn clear_device_key_source() {
+    if let Ok(mut guard) = INSTALLED_DEVICE_KEY_SOURCE.write() {
+        *guard = None;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -578,5 +756,109 @@ mod tests {
         let dbg = format!("{:?}", key());
         assert!(dbg.contains("[redacted]"));
         assert!(!dbg.contains("66")); // 0x42 = 66 десятичное
+    }
+
+    // ── M8-C slice 3: MasterSecretKeySource / wipe / реестр ────────
+
+    /// Зануление: все байты нули, вызов на пустом срезе не panic.
+    #[test]
+    fn test_wipe_bytes_zeroes() {
+        let mut buf = vec![0xABu8; 64];
+        wipe_bytes(&mut buf);
+        assert!(buf.iter().all(|&b| b == 0));
+        wipe_bytes(&mut []); // не panic
+    }
+
+    /// Из среза: ровно 32 байта принимаются, любая другая длина — отказ
+    /// без установки (никакого «подрезания» чужих байт).
+    #[test]
+    fn test_master_secret_from_slice_length() {
+        assert!(MasterSecretKeySource::from_shared_slice(7, &[0x11u8; 32]).is_ok());
+        for bad in [0usize, 16, 31, 33, 64] {
+            assert_eq!(
+                MasterSecretKeySource::from_shared_slice(7, &vec![0x11u8; bad]),
+                Err(AtRestError::InvalidKeyMaterial {
+                    expected: AT_REST_KEY_BYTES,
+                    found: bad,
+                })
+            );
+        }
+    }
+
+    /// Источник отдаёт текущий ключ и находит его по id; чужой id — явный
+    /// UnknownKeyId (quarantine-семантика, не угадывание).
+    #[test]
+    fn test_master_secret_key_lookup() {
+        let source = MasterSecretKeySource::from_shared_slice(7, &[0x33u8; 32]).unwrap();
+        assert_eq!(source.key_id(), 7);
+        let current = source.current_key().unwrap();
+        assert_eq!(current.key_id, 7);
+        assert_eq!(current.material, [0x33u8; 32]);
+        assert!(source.key_by_id(7).is_ok());
+        assert_eq!(
+            source.key_by_id(8),
+            Err(AtRestError::UnknownKeyId { key_id: 8 })
+        );
+    }
+
+    /// Сквозной цикл: шифрование текущим ключом источника и расшифровка
+    /// тем же источником; Debug не раскрывает материал.
+    #[test]
+    fn test_master_secret_seal_open_and_redaction() {
+        let source = MasterSecretKeySource::from_shared_slice(7, &[0x5Au8; 32]).unwrap();
+        let aad = build_record_aad("m1", "pk_b", 1);
+        let plaintext = b"custody bytes";
+        let envelope = encrypt_record(&source.current_key().unwrap(), &aad, plaintext).unwrap();
+        assert_eq!(decrypt_record(&source, &aad, &envelope).unwrap(), plaintext);
+        let dbg = format!("{:?}", source);
+        assert!(dbg.contains("[redacted]"));
+        assert!(dbg.contains("7")); // key_id может логироваться, материал — нет
+    }
+
+    /// Глобальный реестр: установка → снимок → key_id → очистка. Единственный
+    /// тест, трогающий глобальное состояние (cargo test гоняет тесты
+    /// параллельно — двух таких тестов быть не должно).
+    #[test]
+    fn test_install_read_clear_roundtrip() {
+        clear_device_key_source();
+        assert!(installed_key_source().is_none());
+        assert_eq!(installed_key_id(), None);
+
+        install_device_key_source(4242, &[0x77u8; AT_REST_KEY_BYTES]).unwrap();
+        let snap = installed_key_source().expect("источник установлен");
+        assert_eq!(snap.key_id(), 4242);
+        assert_eq!(installed_key_id(), Some(4242));
+        // Снимок usable как источник: encrypt → decrypt.
+        let aad = build_record_aad("m", "r", 1);
+        let env = encrypt_record(&snap.current_key().unwrap(), &aad, b"x").unwrap();
+        assert_eq!(decrypt_record(&*snap, &aad, &env).unwrap(), b"x");
+
+        clear_device_key_source();
+        assert!(installed_key_source().is_none());
+        assert_eq!(installed_key_id(), None);
+        // Ранее снятый Arc продолжает работать (движок держит свой снимок).
+        assert_eq!(decrypt_record(&*snap, &aad, &env).unwrap(), b"x");
+
+        // Неверная длина — отказ и состояние не меняется.
+        assert!(install_device_key_source(1, &[0u8; 10]).is_err());
+        assert_eq!(installed_key_id(), None);
+    }
+
+    /// Эфемерный источник: валиден для шифрования/расшифровки в пределах
+    /// процесса; два экземпляра независимы (случайный материал).
+    #[test]
+    fn test_ephemeral_source_is_ram_only_and_random() {
+        let a = ephemeral_key_source();
+        let b = ephemeral_key_source();
+        assert_eq!(a.key_id(), EPHEMERAL_AT_REST_KEY_ID);
+        let aad = build_record_aad("m", "r", 1);
+        let env = encrypt_record(&a.current_key().unwrap(), &aad, b"tmp").unwrap();
+        assert_eq!(decrypt_record(&*a, &aad, &env).unwrap(), b"tmp");
+        // Другой эфемерный ключ тот же envelope расшифровать не может
+        // (крайне маловероятное совпадение 256-бит материала исключено дизайном).
+        assert_eq!(
+            decrypt_record(&*b, &aad, &env),
+            Err(AtRestError::DecryptionFailed)
+        );
     }
 }

@@ -159,8 +159,19 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   переносятся атомарно с reason-кодом: не загружаются, не показываются в UI, не удаляются молча).
   Encrypted API: `store_encrypted` / `load_*_encrypted` / `remove_*_encrypted` /
   `purge_expired_encrypted` / quarantine diagnostics; V1-путь сохранён. SQLite-семантика
-  проверена прототипом на том же движке (24/24 PASS); unit tests добавлены. Engine перейдёт на
-  encrypted-путь вместе с Android Keystore-мостом (slice 3); до этого поведение как M8-B/D.
+  проверена прототипом на том же движке (24/24 PASS); unit tests добавлены.
+- **M8-C slice 3 (source 2026-08-16) — Keystore-мост + engine на encrypted API:** Kotlin
+  `RelayAtRestMasterKey` (не-извлекаемый AES/GCM wrap-ключ в Android Keystore; 32-байт master
+  secret хранится wrapped в app-private prefs; unwrap при старте; провал unwrap = новый secret
+  с новым keyId, старые записи честно в quarantine) устанавливает ключ в Rust ДО `engine.start()`
+  через UniFFI `install_relay_at_rest_key`. Rust `MasterSecretKeySource` (Send+Sync, Drop
+  зануляет материал) + глобальный install-реестр; engine держит `RelayCustody { store, keys,
+  durable }` и все пути (persist-before-enqueue, restore, receipt, purge) работают ТОЛЬКО через
+  encrypted API. Правила открытия: ключ+`relay_db_path` → durable-encrypted файл; без ключа —
+  честный RAM-only с эфемерным ключом (durable-файл без ключа не создаётся; plaintext-fallback
+  исключён). Диагностика для acceptance: `relay_custody_mode()` / `relay_quarantine_count()`.
+  Backup/transfer исключает relay-файл и ключевые prefs (device-bound байты бессмысленны на
+  другом устройстве). Wire снова не менялся; compile ждёт Windows gate.
 
 ### 3.3. Wire-формат (расширение envelope)
 
@@ -273,11 +284,13 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   wire) и **M8-B/D source slice выполнен** (RelayStore + отдельная миграция, persist-before-enqueue,
   receipt cleanup + durable tombstones, bounded startup restore, UI exactly-once после restart;
   SQL-семантика и отложенный сценарий Anna→Zhenya→D→Stas проверены sqlite3-прототипом и симуляцией).
-  Обновление 2026-08-16: **M8-C slices 1–2 выполнены** — versioned at-rest AEAD envelope
-  (`storage/relay_at_rest.rs`, XChaCha20-Poly1305, quarantine-ошибки, Keystore seam; см. §3.2) и
-  encrypted schema v2 в `RelayStore` (`relay_records_enc` + `relay_quarantine`, SQL 24/24 PASS).
-  Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-C slice 3 — Android Keystore-мост и
-  перевод engine на encrypted API, M8-E bounded sleep/wake, затем телефонный acceptance M8-F.
+  Обновление 2026-08-16: **M8-C slices 1–3 выполнены** — versioned at-rest AEAD envelope
+  (`storage/relay_at_rest.rs`, XChaCha20-Poly1305, quarantine-ошибки; см. §3.2), encrypted schema
+  v2 в `RelayStore` (SQL 24/24 PASS) и Android Keystore-мост + полный перевод engine на encrypted
+  API (Rust+Kotlin source, см. §3.2). Compile/runtime ждут Windows gate: `build-rust.ps1
+  -Features mqtt-dual-broker` + регенерация UniFFI Kotlin bindings + `gradlew assembleDebug`.
+  Дальше: M8-E bounded sleep/wake (WorkManager, consent, budgets), затем телефонный
+  acceptance M8-F (Anna→Zhenya→D→Stas с kill/reboot).
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).
 
 Каждый шаг: код → сборка (Rust + APK) → установка на 2–3 телефона → тест → запись в памятку.

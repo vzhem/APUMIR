@@ -3,26 +3,37 @@
 Ниже находится готовый prompt. Пользователь может целиком вставить его в новый Arena Agent Mode
 чат. Следующий ИИ не должен заставлять пользователя заново объяснять проект, историю и правила.
 
-> ## ⚠️ ОБНОВЛЕНИЕ СТАТУСА 2026-08-16 — прочитать ПЕРЕД вставкой текста ниже
+> ## ⚠️ ОБНОВЛЕНИЕ СТАТУСА 2026-08-16 (вечер) — прочитать ПЕРЕД вставкой текста ниже
 >
 > Prompt ниже частично устарел: он требует «начать с M8-A», но с тех пор уже выполнено
 > (ветка `arena/01a00674-apumir`, актуальный tip):
 >
 > - **M8-A** (`b5408e2`) — durable epoch-ms модель RelayQueue + валидация + 12 тестов;
 > - **M8-B/D** (`b881d65`) — durable RelayStore (SQLite) + persist/restore/tombstone wiring;
-> - **M8-C slice 1** — versioned at-rest AEAD envelope `storage/relay_at_rest.rs`
->   (XChaCha20-Poly1305, quarantine-ошибки, Keystore seam);
-> - **M8-C slice 2** (текущий tip) — relay schema v2 в `RelayStore`: `relay_records_enc` +
->   `relay_quarantine`, encrypted API, 13 tests, sqlite3-прототип 24/24 PASS.
+> - **M8-C slice 1** (`aafdb3a`) — versioned at-rest AEAD envelope `storage/relay_at_rest.rs`;
+> - **M8-C slice 2** (`6ebe4ae`) — relay schema v2 + quarantine + encrypted API, SQL 24/24 PASS;
+> - **M8-C slice 3** — Android Keystore-мост (`RelayAtRestMasterKey.kt` + Rust
+>   `MasterSecretKeySource`/install-реестр) и engine полностью на encrypted API (`RelayCustody`);
+>   custody всегда encrypted, без ключа — честный RAM-only ephemeral; UniFFI добавлены
+>   `install_relay_at_rest_key` / `create_engine_durable` / `relay_custody_mode` /
+>   `relay_quarantine_count`; backup-исключения для relay-файла и ключевых prefs.
 >
-> **Следующий маленький шаг — НЕ M8-A**, а M8-C slice 3: Android Keystore-мост (Kotlin/JNI) +
-> перевод engine (`core.rs`) на encrypted API. Windows compile gate `build-rust.ps1 -Features
-> mqtt-dual-broker` для всех M8-slices по-прежнему pending. **Новый релиз НЕ делать** до закрытия
-> релизных гейтов (M8 acceptance, mixed, security) — см. доп.196 в AI_COLLABORATION_NOTES.
-> Остальные правила prompt'а ниже
-> (телефоны, флешка, релизы, PowerShell-гэтчи, запрет sandbox cargo test) остаются в силе.
-> Всегда сначала сверяй этот файл с tip'ом новейшей arena-ветки (`git for-each-ref
-> --sort=-committerdate`) — репозиторий может быть новее текста.
+> ⚠️ **Push из Arena sandbox заблокирован (нет GitHub credentials)** — локальные commit'ы могут
+> опережать origin. Проверяй `git log origin/arena/01a00674-apumir..HEAD` и при появлении доступа
+> одна команда: `git push origin arena/01a00674-apumir`. Альтернатива — `git format-patch` mbox
+> на Windows (`git am`).
+>
+> **Следующий шаг — НЕ M8-A и НЕ M8-C**, а **Windows compile gate M8 (A→C3)**: apply mbox-патча в
+> чистый worktree, `build-rust.ps1 -Features mqtt-dual-broker`, регенерация UniFFI Kotlin
+> bindings (`cargo run --bin uniffi-bindgen generate src/lib.udl --language kotlin --config
+> uniffi.toml --out-dir ..\android-app\app\src\main\java` из `rust-core`), затем `gradlew
+> assembleDebug`. Когда compile PASS → M8-E (sleep/wake), M8-F (телефонный acceptance
+> Anna→Zhenya→D→Stas с kill/reboot, датчики: `relay_custody_mode` + `relay_quarantine_count` +
+> quarantine-warn в logcat). **Новый релиз НЕ делать** до закрытия релизных гейтов — см.
+> доп.196/197 в AI_COLLABORATION_NOTES. Остальные правила prompt'а ниже (телефоны, флешка,
+> релизы, PowerShell-гэтчи, запрет sandbox cargo test) остаются в силе. Всегда сначала сверяй
+> этот файл с tip'ом новейшей arena-ветки (`git for-each-ref --sort=-committerdate`) —
+> репозиторий может быть новее текста.
 
 ---
 

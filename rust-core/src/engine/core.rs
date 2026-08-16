@@ -19,6 +19,7 @@ use crate::network::relay_queue::{
     RelayMessage, RelayQueue, DEFAULT_RELAY_TTL, MAX_MESH_RELAY_ENVELOPE_BYTES, MAX_TOTAL,
 };
 use crate::network::wire::MeshEnvelope;
+use crate::storage::relay_at_rest::{self as at_rest, RelayAtRestKeySource};
 use crate::storage::relay_store::RelayStore;
 use crate::network::adaptive_polling::AdaptivePolling;
 
@@ -34,69 +35,136 @@ enum MqttOutboundCommand {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// M8-B/D: durable relay custody helpers
+// M8-B/D/C: durable encrypted relay custody helpers
 // ═══════════════════════════════════════════════════════════════════
 
-/// Открыть durable relay-хранилище. Если основной `db_path` задан — рядом
-/// создаётся отдельный relay-файл (отдельная миграция/схема); иначе in-memory
-/// (тесты/дефолт). Ошибка открытия файла честно переключает в RAM-only режим:
-/// mesh продолжает работать как v11.16.16, но custody не переживает restart.
-fn open_relay_store(db_path: Option<&str>) -> RelayStore {
-    match db_path {
-        Some(path) => {
+/// M8-C slice 3: relay custody bundle — зашифрованное хранилище + источник
+/// device-ключа. Все записи пишутся/читаются только через encrypted API
+/// (`store_encrypted` / `load_*_encrypted` / `remove_encrypted*` /
+/// `purge_expired_encrypted`). Общие tombstone-таблицы (ненуждающиеся в
+/// шифровании пары msg_id+время) остаются открытыми по дизайну.
+pub(crate) struct RelayCustody {
+    pub store: RelayStore,
+    pub keys: Arc<dyn RelayAtRestKeySource>,
+    /// true = зашифрованный durable-файл на диске; false = RAM-only degrade
+    /// (честно логируется; custody не переживает restart — как v11.16.16).
+    pub durable: bool,
+}
+
+/// Открыть relay custody. Правила M8-C:
+/// - Ключ установлен (Keystore-мост) + путь задан → зашифрованный durable-файл.
+/// - Ключ установлен, пути нет (тесты/дефолт) → in-memory, тот же encrypted API.
+/// - Ключа нет → честный RAM-only с эфемерным ключом: durable-файл без ключа
+///   сознательно НЕ создаётся (незашифрованная durable-запись запрещена, а
+///   «durable, зашифрованное одноразовым ключом» было бы ложной семантикой).
+/// - Ошибка открытия файла → in-memory с тем же ключом (RAM-only, warn).
+fn open_relay_custody(db_path: Option<&str>) -> RelayCustody {
+    match (db_path, at_rest::installed_key_source()) {
+        (Some(path), Some(keys)) => {
             let relay_path = format!("{}.relay.sqlite", path);
             match RelayStore::open(&relay_path) {
                 Ok(store) => {
-                    tracing::info!("MESH durable: relay store opened at {}", relay_path);
-                    store
+                    tracing::info!(
+                        "MESH durable: encrypted relay store opened at {} (key_id={})",
+                        relay_path,
+                        keys.key_id()
+                    );
+                    RelayCustody {
+                        store,
+                        keys,
+                        durable: true,
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "MESH durable: cannot open relay store at {} ({}); relay custody is RAM-only",
+                        "MESH durable: cannot open relay store at {} ({}); relay custody is RAM-only this session",
                         relay_path,
                         e
                     );
-                    RelayStore::open_in_memory().expect("in-memory relay store must open")
+                    RelayCustody {
+                        store: RelayStore::open_in_memory()
+                            .expect("in-memory relay store must open"),
+                        keys,
+                        durable: false,
+                    }
                 }
             }
         }
-        None => RelayStore::open_in_memory().expect("in-memory relay store must open"),
+        (None, Some(keys)) => {
+            tracing::info!("MESH durable: no db path; encrypted relay custody is in-memory");
+            RelayCustody {
+                store: RelayStore::open_in_memory().expect("in-memory relay store must open"),
+                keys,
+                durable: false,
+            }
+        }
+        (path_opt, None) => {
+            if path_opt.is_some() {
+                // Keystore недоступен / ключ ещё не установлен. НЕ создаём
+                // durable-файл: честный RAM-only вместо незашифрованного диска.
+                tracing::warn!(
+                    "MESH durable: at-rest key unavailable (Keystore); relay custody is RAM-only this session (durable custody honestly disabled, no plaintext file written)"
+                );
+            }
+            RelayCustody {
+                store: RelayStore::open_in_memory().expect("in-memory relay store must open"),
+                keys: at_rest::ephemeral_key_source(),
+                durable: false,
+            }
+        }
     }
 }
 
-/// Восстановить RAM RelayQueue из durable-хранилища при старте (M8-D).
+/// Восстановить RAM RelayQueue из durable-хранилища при старте (M8-D),
+/// записи дешифруются at-rest конвертом (M8-C).
 ///
-/// - Сначала удаляются истёкшие записи (БЕЗ доставки в UI).
-/// - Затем загружаются не-истёкшие (bounded, `MAX_TOTAL`) и ставятся в очередь.
+/// - Сначала удаляются истёкшие записи (БЕЗ доставки в UI), включая истёкший
+///   карантин.
+/// - Затем загружаются не-истёкшие (bounded, `MAX_TOTAL`): decrypt →
+///   deserialize → `validate_durable`. Нерасшифровываемые/невалидные строки
+///   уходят в quarantine атомарно (не молча, не в UI) и логируются.
 /// - TTL НЕ продлевается: записи восстанавливаются с исходным абсолютным
 ///   `expires_at_ms`; дедуп/hop сохраняются самим содержимым записи.
 ///
 /// Ошибки не роняют движок: восстановление best-effort, логируется.
 fn restore_relay_custody(
     relay_queue: Option<&Arc<RelayQueue>>,
-    relay_store: Option<&Arc<RelayStore>>,
+    relay_custody: Option<&Arc<RelayCustody>>,
 ) {
-    let (queue, store) = match (relay_queue, relay_store) {
+    let (queue, custody) = match (relay_queue, relay_custody) {
         (Some(q), Some(s)) => (q, s),
         _ => return,
     };
 
     let now_ms = crate::network::relay_queue::utc_now_ms();
 
-    match store.purge_expired(now_ms) {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(
-            "MESH durable: purged {} expired relay record(s) at startup",
-            n
+    match custody.store.purge_expired_encrypted(now_ms) {
+        Ok((0, 0)) => {}
+        Ok((records, quarantined)) => tracing::info!(
+            "MESH durable: purged {} expired relay record(s) (+{} quarantined) at startup",
+            records,
+            quarantined
         ),
         Err(e) => tracing::warn!("MESH durable: purge_expired failed at startup: {}", e),
     }
 
-    match store.load_unexpired(now_ms, MAX_TOTAL) {
-        Ok(records) => {
-            let total = records.len();
+    match custody
+        .store
+        .load_unexpired_encrypted(&*custody.keys, now_ms, MAX_TOTAL)
+    {
+        Ok(outcome) => {
+            if outcome.quarantined > 0 {
+                // Честная потеря: расшифровать нельзя (data clear / другой ключ /
+                // повреждение). Строки не загружаются и не удаляются молча — они
+                // в quarantine-таблице для диагностики; UI их не видит.
+                tracing::warn!(
+                    "MESH durable: {} relay record(s) quarantined at startup (undecryptable/invalid; custody honestly lost for them)",
+                    outcome.quarantined
+                );
+            }
+            let total = outcome.records.len();
             let mut restored = 0usize;
-            for record in records {
+            for record in outcome.records {
                 match queue.enqueue(record) {
                     Ok(true) => restored += 1,
                     Ok(false) => {} // дубль/исчерпанный hop — ожидаемо пропускаем
@@ -190,6 +258,11 @@ impl std::fmt::Display for EngineState {
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub db_path: Option<String>,
+    /// M8-C slice 3: отдельный путь для durable encrypted relay custody.
+    /// Намеренно НЕ переиспользует `db_path` основного storage: legacy-поведение
+    /// основного хранилища (in-memory) не меняется, а relay custody получает
+    /// собственный SQLite-файл (`<relay_db_path>` на диске, encrypted schema v2).
+    pub relay_db_path: Option<String>,
     pub display_name: String,
     pub existing_public_key: Option<String>,
     pub existing_private_key: Option<String>,
@@ -201,6 +274,7 @@ impl Default for EngineConfig {
     fn default() -> Self {
         Self {
             db_path: None,
+            relay_db_path: None,
             display_name: "Anonymous".into(),
             existing_public_key: None,
             existing_private_key: None,
@@ -220,6 +294,11 @@ impl EngineConfig {
 
     pub fn with_db(mut self, path: String) -> Self {
         self.db_path = Some(path);
+        self
+    }
+
+    pub fn with_relay_db(mut self, path: String) -> Self {
+        self.relay_db_path = Some(path);
         self
     }
 
@@ -247,7 +326,7 @@ pub struct P2PCore {
     presence: Option<Arc<PresenceManager>>,
     message_queue: Option<Arc<MessageQueue>>,
     relay_queue: Option<Arc<RelayQueue>>,
-    relay_store: Option<Arc<RelayStore>>,
+    relay_custody: Option<Arc<RelayCustody>>,
     mqtt_outbound_tx: Option<tokio::sync::mpsc::Sender<MqttOutboundCommand>>,
     adaptive_polling: Arc<Mutex<AdaptivePolling>>,
     node_id_str: Option<String>,
@@ -272,7 +351,7 @@ impl P2PCore {
             presence: None,
             message_queue: None,
             relay_queue: None,
-            relay_store: None,
+            relay_custody: None,
             mqtt_outbound_tx: None,
             adaptive_polling: Arc::new(Mutex::new(AdaptivePolling::with_defaults())),
             node_id_str: None,
@@ -346,16 +425,21 @@ impl P2PCore {
             self.presence = Some(Arc::new(PresenceManager::new(nid)));
             self.message_queue = Some(Arc::new(MessageQueue::new()));
             self.relay_queue = Some(Arc::new(RelayQueue::new()));
-            self.relay_store = Some(Arc::new(open_relay_store(self.config.db_path.as_deref())));
+            // M8-C: custody всегда encrypted; durable — только если Keystore-мост
+            // установил ключ И задан relay_db_path (см. open_relay_custody).
+            self.relay_custody = Some(Arc::new(open_relay_custody(
+                self.config.relay_db_path.as_deref(),
+            )));
             let _ = 0; // modules initialized
         }
         tracing::info!("Network stack initialized: Router+DHT+Relay+Presence+Queue+RelayQueue+RelayStore");
 
-        // M8-B/D: durable relay custody. Восстанавливаем RAM RelayQueue из
-        // RelayStore после process death/reboot: берём только не-истёкшие
-        // записи (bounded), истёкшие удаляем БЕЗ доставки в UI. Абсолютный
+        // M8-B/D/C: durable encrypted relay custody. Восстанавливаем RAM
+        // RelayQueue из RelayStore после process death/reboot: берём только
+        // не-истёкшие расшифрованные записи (bounded), истёкшие удаляем БЕЗ
+        // доставки в UI, нерасшифровываемые — в quarantine. Абсолютный
         // expires_at_ms при этом НЕ продлевается — дедлайн сохраняется как был.
-        restore_relay_custody(self.relay_queue.as_ref(), self.relay_store.as_ref());
+        restore_relay_custody(self.relay_queue.as_ref(), self.relay_custody.as_ref());
 
         let _ = self
             .storage
@@ -388,7 +472,7 @@ impl P2PCore {
         let dht2 = self.dht.clone();
         let queue2 = self.message_queue.clone();
         let relay_queue2 = self.relay_queue.clone();
-        let relay_store2 = self.relay_store.clone();
+        let relay_custody2 = self.relay_custody.clone();
         let display_name = self.config.display_name.clone();
         let quic_port = self.config.quic_port;
 
@@ -434,7 +518,7 @@ impl P2PCore {
                 let public_addr_mqtt = Arc::clone(&public_addr_arc);
                 let queue_mqtt = queue2.clone();
                 let relay_queue_mqtt = relay_queue2.clone();
-                let relay_store_mqtt = relay_store2.clone();
+                let relay_custody_mqtt = relay_custody2.clone();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -448,7 +532,7 @@ impl P2PCore {
                             public_addr_mqtt,
                             queue_mqtt,
                             relay_queue_mqtt,
-                            relay_store_mqtt,
+                            relay_custody_mqtt,
                             mqtt_outbound_rx,
                         ).await;
                     });
@@ -829,7 +913,7 @@ self.runtime = Some(runtime);
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         queue: Option<Arc<MessageQueue>>,
         relay_queue: Option<Arc<RelayQueue>>,
-        relay_store: Option<Arc<RelayStore>>,
+        relay_custody: Option<Arc<RelayCustody>>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
@@ -964,8 +1048,9 @@ self.runtime = Some(runtime);
         // M8-D: после restart восстанавливаем durable tombstones в RAM seen-set,
         // чтобы уже доставленные/очищенные relay ID не были повторно поставлены
         // в очередь или показаны в UI из retained/поздних конвертов.
-        if let Some(ref rs) = relay_store {
-            match rs.load_tombstone_ids(MAX_SEEN_MESH_RELAY_IDS) {
+        // (Tombstones — открытые пары msg_id+время, общие для V1/V2 по дизайну.)
+        if let Some(ref custody) = relay_custody {
+            match custody.store.load_tombstone_ids(MAX_SEEN_MESH_RELAY_IDS) {
                 Ok(ids) => {
                     let restored = ids.len();
                     for id in ids {
@@ -1296,10 +1381,10 @@ self.runtime = Some(runtime);
                                                 // durable tombstone защищает от повторной UI-доставки.
                                                 // Receipt при этом всё равно шлём (идемпотентный
                                                 // cleanup чужих custody-копий).
-                                                let durable_tombstoned = relay_store
+                                                let durable_tombstoned = relay_custody
                                                     .as_ref()
-                                                    .map(|rs| {
-                                                        rs.has_tombstone(&msg_id).unwrap_or(false)
+                                                    .map(|custody| {
+                                                        custody.store.has_tombstone(&msg_id).unwrap_or(false)
                                                     })
                                                     .unwrap_or(false);
                                                 if durable_tombstoned {
@@ -1328,11 +1413,11 @@ self.runtime = Some(runtime);
                                                     );
                                                     // M8-B/D: durable tombstone — после restart поздний/
                                                     // повторный relay с этим ID не даст вторую UI-доставку.
-                                                    if let Some(ref rs) = relay_store {
+                                                    if let Some(ref custody) = relay_custody {
                                                         let now_durable =
                                                             crate::network::relay_queue::utc_now_ms();
                                                         if let Err(e) =
-                                                            rs.record_tombstone(&msg_id, now_durable)
+                                                            custody.store.record_tombstone(&msg_id, now_durable)
                                                         {
                                                             tracing::warn!(
                                                                 "MESH relay: durable tombstone failed for {}: {}",
@@ -1427,14 +1512,16 @@ self.runtime = Some(runtime);
                                                     MAX_SEEN_MESH_RELAY_IDS,
                                                 );
 
-                                                // M8-B: durable custody persist-ится ДО enqueue.
-                                                // Если store отклоняет (tombstone/валидация/IO) —
-                                                // в RAM не ставим: custody не подтверждена durable.
-                                                let durable_admitted = match relay_store.as_ref() {
-                                                    Some(rs) => {
+                                                // M8-B/C: durable custody persist-ится ДО enqueue
+                                                // (зашифрованным конвертом). Если store отклоняет
+                                                // (tombstone/валидация/IO/at-rest) — в RAM не ставим:
+                                                // custody не подтверждена durable.
+                                                let durable_admitted = match relay_custody.as_ref() {
+                                                    Some(custody) => {
                                                         let now_durable =
                                                             crate::network::relay_queue::utc_now_ms();
-                                                        if rs
+                                                        if custody
+                                                            .store
                                                             .has_tombstone(&next_hop_message.msg_id)
                                                             .unwrap_or(false)
                                                         {
@@ -1444,7 +1531,11 @@ self.runtime = Some(runtime);
                                                             );
                                                             false
                                                         } else {
-                                                            match rs.store(&next_hop_message, now_durable) {
+                                                            match custody.store.store_encrypted(
+                                                                &*custody.keys,
+                                                                &next_hop_message,
+                                                                now_durable,
+                                                            ) {
                                                                 Ok(_) => true,
                                                                 Err(e) => {
                                                                     tracing::warn!(
@@ -1548,14 +1639,14 @@ self.runtime = Some(runtime);
                                     );
                                 }
 
-                                // M8-B: receipt авторитетен независимо от RAM-копии: durable
-                                // custody удаляется и tombstone-ится даже если запись после
-                                // restart осталась только в SQLite (RAM о ней не знает).
+                                // M8-B/C: receipt авторитетен независимо от RAM-копии: durable
+                                // encrypted custody удаляется и tombstone-ится даже если запись
+                                // после restart осталась только в SQLite (RAM о ней не знает).
                                 if !msg_id.is_empty() && !recipient.is_empty() {
-                                    if let Some(ref rs) = relay_store {
+                                    if let Some(ref custody) = relay_custody {
                                         let now_durable =
                                             crate::network::relay_queue::utc_now_ms();
-                                        match rs.remove_and_tombstone(&msg_id, now_durable) {
+                                        match custody.store.remove_encrypted_and_tombstone(&msg_id, now_durable) {
                                             Ok(true) => tracing::info!(
                                                 "MESH receipt: durable custody removed for {}",
                                                 msg_id
@@ -1628,16 +1719,18 @@ self.runtime = Some(runtime);
                                                     );
                                                 }
 
-                                                // M8-B: durable-слой тоже чистим по абсолютному
-                                                // expiry (без доставки в UI).
-                                                if let Some(ref rs) = relay_store {
+                                                // M8-B/C: durable-слой тоже чистим по абсолютному
+                                                // expiry (без доставки в UI); истёкший карантин
+                                                // тоже удаляется.
+                                                if let Some(ref custody) = relay_custody {
                                                     let now_durable =
                                                         crate::network::relay_queue::utc_now_ms();
-                                                    match rs.purge_expired(now_durable) {
-                                                        Ok(0) => {}
-                                                        Ok(purged) => tracing::info!(
-                                                            "MESH gossip: purged {} expired durable relay(s)",
-                                                            purged
+                                                    match custody.store.purge_expired_encrypted(now_durable) {
+                                                        Ok((0, 0)) => {}
+                                                        Ok((purged, purged_quarantine)) => tracing::info!(
+                                                            "MESH gossip: purged {} expired durable relay(s) (+{} quarantined)",
+                                                            purged,
+                                                            purged_quarantine
                                                         ),
                                                         Err(e) => tracing::warn!(
                                                             "MESH gossip: durable purge failed: {}",
@@ -2009,6 +2102,27 @@ self.runtime = Some(runtime);
         self.network.status_str()
     }
 
+    /// M8-C: честный режим relay custody для диагностики/acceptance.
+    /// "durable-encrypted" — зашифрованный durable-файл; "ram-only" — честный
+    /// degrade (Keystore недоступен или путь не задан); "disabled" — движок
+    /// ещё не стартовал.
+    pub fn relay_custody_mode(&self) -> String {
+        match &self.relay_custody {
+            Some(custody) if custody.durable => "durable-encrypted".into(),
+            Some(_) => "ram-only".into(),
+            None => "disabled".into(),
+        }
+    }
+
+    /// M8-C: число записей в relay-карантине (нерасшифровываемые/невалидные).
+    /// Это диагностика честной потери custody, НЕ UI-доставка.
+    pub fn relay_quarantine_count(&self) -> u64 {
+        match &self.relay_custody {
+            Some(custody) => custody.store.quarantine_count().unwrap_or(0) as u64,
+            None => 0,
+        }
+    }
+
     pub fn connected_peers(&self) -> usize {
         self.network.peer_count()
     }
@@ -2113,13 +2227,18 @@ self.runtime = Some(runtime);
                 false
             }
             Some(queue) => {
-                // M8-B: durable custody собственного offline relay persist-ится ДО
-                // enqueue. Если store недоступен/отклоняет — честно не заявляем
-                // локальное retention (Outbox/Room retry при этом сохраняются).
-                let durable_admitted = match self.relay_store.as_ref() {
-                    Some(rs) => {
+                // M8-B/C: durable encrypted custody собственного offline relay
+                // persist-ится ДО enqueue. Если store недоступен/отклоняет —
+                // честно не заявляем локальное retention (Outbox/Room retry при
+                // этом сохраняются).
+                let durable_admitted = match self.relay_custody.as_ref() {
+                    Some(custody) => {
                         let now_durable = crate::network::relay_queue::utc_now_ms();
-                        match rs.store(&prepared.message, now_durable) {
+                        match custody.store.store_encrypted(
+                            &*custody.keys,
+                            &prepared.message,
+                            now_durable,
+                        ) {
                             Ok(_) => true,
                             Err(e) => {
                                 tracing::warn!(

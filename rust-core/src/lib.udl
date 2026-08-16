@@ -9,6 +9,17 @@ namespace p2p_core {
 
     P2PCoreHandle create_engine(string display_name);
     P2PCoreHandle create_engine_with_keys(string display_name, string public_key, string private_key);
+    // M8-C slice 3: engine с durable encrypted relay custody (relay_db_path —
+    // собственный SQLite-файл relay custody; пустые ключи = сгенерировать новые).
+    P2PCoreHandle create_engine_durable(string display_name, string public_key, string private_key, string relay_db_path);
+
+    // M8-C slice 3: Android Keystore мост. Вызывать ДО start(); материал
+    // передаётся unwrap-нутым из Keystore (ровно 32 байта, иначе CoreError).
+    [Throws=CoreError]
+    void install_relay_at_rest_key(u16 key_id, bytes key_material);
+    void clear_relay_at_rest_key();
+    // key_id установленного ключа или -1 (диагностика; материал не раскрывается).
+    i64 relay_at_rest_key_id();
 };
 
 [Error]
@@ -105,4 +116,8 @@ interface P2PCoreHandle {
     CoreEventFfi? poll_event();
     sequence<CoreEventFfi> drain_events();
     u64 pending_events();
+
+    // M8-C slice 3: честный режим relay custody и размер карантина (диагностика).
+    string relay_custody_mode();
+    u64 relay_quarantine_count();
 };

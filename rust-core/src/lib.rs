@@ -221,6 +221,14 @@ impl P2PCoreHandle {
     pub fn pending_events(&self) -> u64 {
         self.inner.lock().unwrap().pending_events() as u64
     }
+
+    pub fn relay_custody_mode(&self) -> String {
+        self.inner.lock().unwrap().relay_custody_mode()
+    }
+
+    pub fn relay_quarantine_count(&self) -> u64 {
+        self.inner.lock().unwrap().relay_quarantine_count()
+    }
 }
 
 // ============================================================
@@ -262,6 +270,52 @@ pub fn create_engine_with_keys(
     std::sync::Arc::new(P2PCoreHandle {
         inner: std::sync::Mutex::new(P2PCore::new(config)),
     })
+}
+
+/// M8-C slice 3: engine с durable encrypted relay custody. Пустые строки ключей
+/// означают «сгенерировать новые»; пустой путь запрещён (иначе durable-режим
+/// был бы тихо не тем, что заявлено).
+pub fn create_engine_durable(
+    display_name: String,
+    public_key: String,
+    private_key: String,
+    relay_db_path: String,
+) -> std::sync::Arc<P2PCoreHandle> {
+    let mut config = EngineConfig::new(display_name).with_relay_db(relay_db_path);
+    if !public_key.is_empty() && !private_key.is_empty() {
+        config = config.with_keys(public_key, private_key);
+    }
+    std::sync::Arc::new(P2PCoreHandle {
+        inner: std::sync::Mutex::new(P2PCore::new(config)),
+    })
+}
+
+/// M8-C slice 3: установить at-rest ключ из Android Keystore моста.
+/// Вызывается ДО start(); 32 байта unwrap-нутого master secret, иначе
+/// CryptoError и прежняя установка сохраняется. Материал на диск не пишется.
+pub fn install_relay_at_rest_key(
+    key_id: u16,
+    key_material: Vec<u8>,
+) -> Result<(), CoreError> {
+    storage::relay_at_rest::install_device_key_source(key_id, &key_material).map_err(|e| {
+        CoreError::CryptoError {
+            detail: e.to_string(),
+        }
+    })
+}
+
+/// M8-C slice 3: убрать at-rest ключ (будущий logout/wipe; действует на
+/// следующий запуск движка — работающий движок держит свой снимок).
+pub fn clear_relay_at_rest_key() {
+    storage::relay_at_rest::clear_device_key_source();
+}
+
+/// M8-C slice 3: key_id установленного ключа или -1 (диагностика/acceptance;
+/// материал не раскрывается).
+pub fn relay_at_rest_key_id() -> i64 {
+    storage::relay_at_rest::installed_key_id()
+        .map(|id| id as i64)
+        .unwrap_or(-1)
 }
 // ============================================================
 // Conversion helpers
