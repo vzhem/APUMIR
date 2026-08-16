@@ -1,4 +1,4 @@
-﻿package com.vladimir.messenger.data.local.entity
+package com.vladimir.messenger.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey

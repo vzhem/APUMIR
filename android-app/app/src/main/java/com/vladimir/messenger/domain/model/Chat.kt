@@ -1,4 +1,4 @@
-﻿package com.vladimir.messenger.domain.model
+package com.vladimir.messenger.domain.model
 
 data class Chat(
     val id: String,
