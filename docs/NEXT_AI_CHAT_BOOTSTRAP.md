@@ -3,6 +3,23 @@
 Ниже находится готовый prompt. Пользователь может целиком вставить его в новый Arena Agent Mode
 чат. Следующий ИИ не должен заставлять пользователя заново объяснять проект, историю и правила.
 
+> ## ⚠️ ОБНОВЛЕНИЕ СТАТУСА 2026-08-16 — прочитать ПЕРЕД вставкой текста ниже
+>
+> Prompt ниже частично устарел: он требует «начать с M8-A», но с тех пор уже выполнено
+> (ветка `arena/01a00674-apumir`, актуальный tip):
+>
+> - **M8-A** (`b5408e2`) — durable epoch-ms модель RelayQueue + валидация + 12 тестов;
+> - **M8-B/D** (`b881d65`) — durable RelayStore (SQLite) + persist/restore/tombstone wiring;
+> - **M8-C slice 1** (текущий tip) — versioned at-rest AEAD envelope `storage/relay_at_rest.rs`
+>   (XChaCha20-Poly1305, quarantine-ошибки, Keystore seam; SQL пока не менялся).
+>
+> **Следующий маленький шаг — НЕ M8-A**, а M8-C slice 2: relay schema v2 + подключение конверта
+> к `RelayStore` с quarantine-путём. Windows compile gate `build-rust.ps1 -Features
+> mqtt-dual-broker` для всех M8-slices по-прежнему pending. Остальные правила prompt'а ниже
+> (телефоны, флешка, релизы, PowerShell-гэтчи, запрет sandbox cargo test) остаются в силе.
+> Всегда сначала сверяй этот файл с tip'ом новейшей arena-ветки (`git for-each-ref
+> --sort=-committerdate`) — репозиторий может быть новее текста.
+
 ---
 
 ## Текст для вставки в новый ИИ-чат

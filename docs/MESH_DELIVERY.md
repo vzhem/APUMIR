@@ -145,7 +145,14 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   атомарно делает `remove + tombstone`, локальная доставка ставит durable tombstone (UI ровно
   один раз после restart), при старте очередь восстанавливается bounded-load без продления TTL,
   истёкшие/битые записи удаляются без UI. RAM `RelayQueue` остаётся рабочей копией. Compile/
-  runtime — Windows gate; encryption at rest и Keystore — M8-C, sleep/wake — M8-E.
+  runtime — Windows gate; sleep/wake — M8-E.
+- **Encryption at rest (M8-C slice 1, source 2026-08-16):** `storage/relay_at_rest.rs` — чистая
+  версионируемая AEAD-граница для хранимых байт записи: XChaCha20-Poly1305 (уникальный случайный
+  192-битный nonce), заголовок `[version][key_id][nonce]`, AAD связывает `msg_id|recipient|
+  expires_at_ms`, поэтому подмена открытых колонок ломает расшифровку. Ошибки типизированы для
+  quarantine (unknown version/key, malformed, auth-fail); нет panic и нет plaintext-fallback.
+  Ключ придёт из Android Keystore через trait `RelayAtRestKeySource` (seam уже есть); подключение
+  конверта к SQLite (schema v2) — следующий slice 2. Wire format снова не менялся.
 
 ### 3.3. Wire-формат (расширение envelope)
 
@@ -258,7 +265,10 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   wire) и **M8-B/D source slice выполнен** (RelayStore + отдельная миграция, persist-before-enqueue,
   receipt cleanup + durable tombstones, bounded startup restore, UI exactly-once после restart;
   SQL-семантика и отложенный сценарий Anna→Zhenya→D→Stas проверены sqlite3-прототипом и симуляцией).
-  Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-C encryption at rest / key lifecycle,
+  Обновление 2026-08-16: **M8-C slice 1 выполнен** — versioned at-rest AEAD envelope
+  (`storage/relay_at_rest.rs`, XChaCha20-Poly1305, quarantine-ошибки, Keystore seam; см. §3.2);
+  SQL ещё не тронут. Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-C slice 2 —
+  relay schema v2 + проводка конверта в `RelayStore` (затем Keystore-мост на Kotlin/JNI),
   M8-E bounded sleep/wake, затем телефонный acceptance M8-F.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).
 

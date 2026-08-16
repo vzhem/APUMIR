@@ -376,13 +376,17 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > workflow release-exists PASS/build skipped. Preferred next-time flow: Arena creates draft → user
 > uploads two flash files in browser → Arena verifies server digests and publishes. Version baseline
 > lives in `docs/VERSION_STATISTICS.md` and must get a short immutable entry+LOC delta for every global
-> version. Full no-questions handoff prompt: `docs/NEXT_AI_CHAT_BOOTSTRAP.md`. **M8-A и M8-B/D
-> source slices выполнены 2026-08-15** (durable epoch-ms model + RelayStore/migration + engine
-> persist/restore/tombstone wiring + tests; sqlite3-прототип и delayed-сценарий симуляция PASS,
-> tree-sitter syntax PASS — см. доп.193/194); compile/runtime ждут Windows `build-rust.ps1
-> -Features mqtt-dual-broker`. Next product priority: **Windows compile gate M8-A/B/D**, затем
-> **M8-C encryption at rest / key lifecycle**. Mixed N↔N-1/r4.5 remain stable-release gates.
-> Иконка пока заморожена.
+> version. Full no-questions handoff prompt: `docs/NEXT_AI_CHAT_BOOTSTRAP.md` (⚠️ может отставать —
+> сначала сверить с tip новейшей arena-ветки, см. доп.195). **M8-A и M8-B/D source slices выполнены
+> 2026-08-15** (durable epoch-ms model + RelayStore/migration + engine persist/restore/tombstone
+> wiring + tests; sqlite3-прототип и delayed-сценарий симуляция PASS, tree-sitter syntax PASS — см.
+> доп.193/194); **M8-C slice 1 source выполнен 2026-08-16** (pure at-rest AEAD envelope граница
+> `storage/relay_at_rest.rs`: versioned XChaCha20-Poly1305 конверт, AAD-привязка к колонкам,
+> Keystore seam через `key_id`, quarantine-ошибки, 12 tests, без SQL-изменений — см. доп.195);
+> compile/runtime всего M8 ждут Windows `build-rust.ps1 -Features mqtt-dual-broker`. Next product
+> priority: **Windows compile gate M8-A/B/D/C1**, затем **M8-C slice 2 — relay schema v2 +
+> RelayStore at-rest wiring** (затем Keystore-мост, M8-E, M8-F). Mixed N↔N-1/r4.5 remain
+> stable-release gates. Иконка пока заморожена.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2293,6 +2297,43 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   **Compile/runtime по-прежнему ждут Windows `build-rust.ps1 -Features mqtt-dual-broker`.**
   Остаток M8: M8-C encryption at rest + Android Keystore key lifecycle (Kotlin/JNI seam),
   M8-E bounded WorkManager sleep/wake, M8-F телефонный acceptance (требует телефонов и APK).
+- **2026-08-16 (доп.195) — урок устаревшего bootstrap + аудит M8-A/B/D + M8-C envelope slice 1:**
+  новая Arena-сессия стартовала с ПУСТЫМ sandbox (checkout отсутствовал вовсе) и старым текстом
+  bootstrap, требовавшим «сделать M8-A». Read-only clone показал, что M8-A (`b5408e2`), M8-B/D
+  (`b881d65`) и compile-gate harness (`8b376cc`) уже запушены в `arena/01a00674-apumir` —
+  линейном продолжении handoff-коммита `99ac840`. **Правило: прежде чем следовать вставленному
+  handoff, сравнить его с tip'ом НОВЕЙШЕЙ arena-ветки** (`git for-each-ref --sort=-committerdate`);
+  bootstrap может отставать от репозитория, и это разрешённый handoff-ом случай остановиться и
+  спросить. Пользователь выбрал продолжение на `arena/01a00674-apumir` (сознательное одобренное
+  переключение; новых веток не создавалось). Аудит M8-A/B/D проведён полным чтением
+  `relay_queue.rs` (1189 строк), `relay_store.rs` (698 строк), всех diff'ов `core.rs`/
+  `offline_send.rs` и полного `wire.rs`: epoch-ms модель, валидация, persist-before-enqueue,
+  receipt remove+tombstone, exactly-once UI tombstone, bounded startup restore выполнены по
+  спецификации; wire format `relay|.../` не тронут; блокирующих находок нет. Мелкие наблюдения
+  (не блокеры, не править без необходимости): `RelayStore.store()` валидирует caller-provided
+  `now_ms` (вызывающий обязан передавать UTC now); при IO-ошибке file-backed store сообщение
+  честно не попадает в RAM (by design «custody не подтверждена durable»). **M8-C slice 1
+  source complete:** новый pure модуль `storage/relay_at_rest.rs` — версионируемый AEAD-конверт
+  для байт relay-записи: XChaCha20-Poly1305 (192-битный случайный nonce, безопасен для
+  долгоживущего storage-ключа; новых зависимостей нет), заголовок `[version:u8][key_id:u16 LE]
+  [nonce:24]`, AAD доменно отделён и связывает `msg_id|recipient|expires_at_ms` (инвариант
+  «нет `|`» из `valid_metadata_atom` делает поля однозначными), уникальный nonce через `OsRng`,
+  явные quarantine-ошибки `UnsupportedVersion`/`UnknownKeyId`/`KeySourceUnavailable`/
+  `MalformedEnvelope`/`DecryptionFailed` (криптографически неразличимые случаи не различаются
+  нарочно), Никакого plaintext-fallback и ни одного panic-пути (оба `.expect` — на константном
+  32-байтном размере ключа). Trait `RelayAtRestKeySource` (`current_key`/`key_by_id`) — seam для
+  будущего Android Keystore моста; ротация ключа решается через `key_id` в заголовке.
+  12 детерминированных unit tests (явные nonce/ключи): exact layout, round-trip, различие
+  случайных nonce, wrong key/AAD, flipped ciphertext/tag/nonce, unknown version/key_id, все
+  усечения 0..header+tag без panic, size bound на границе, отсутствие plaintext fallback,
+  domain separation AAD, redacted Debug ключа. SQL/`RelayStore`/core НЕ менялись — граница
+  модели сначала, как в M8-A. Проверки ТОЛЬКО разрешённые статические: `git diff --check` PASS,
+  grep name-collision PASS; **в этом sandbox нет cargo/rustc/rustfmt/дерева-sitter** — синтаксис
+  подтверждён только source review, compile/runtime ждут Windows `build-rust.ps1 -Features
+  mqtt-dual-broker` (тот же pending gate, что и у M8-A/B/D). Следующий маленький slice — M8-C
+  slice 2: relay schema v2 (зашифрованная чувствительная часть записи как одна BLOB-колонка +
+  открытые msg_id/recipient/expires_at_ms для индексов) и проводка конверта в `RelayStore` с
+  quarantine-путём; Keystore-мост (Kotlin/JNI) — отдельно позже.
 
 ---
 
