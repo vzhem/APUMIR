@@ -382,11 +382,14 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > wiring + tests; sqlite3-прототип и delayed-сценарий симуляция PASS, tree-sitter syntax PASS — см.
 > доп.193/194); **M8-C slice 1 source выполнен 2026-08-16** (pure at-rest AEAD envelope граница
 > `storage/relay_at_rest.rs`: versioned XChaCha20-Poly1305 конверт, AAD-привязка к колонкам,
-> Keystore seam через `key_id`, quarantine-ошибки, 12 tests, без SQL-изменений — см. доп.195);
+> Keystore seam через `key_id`, quarantine-ошибки, 12 tests, без SQL-изменений — см. доп.195) и
+> **M8-C slice 2 выполнен 2026-08-16** (relay schema v2: `relay_records_enc` + `relay_quarantine`,
+> encrypted API в RelayStore, 13 tests, sqlite3-прототип 24/24 PASS — см. доп.196);
 > compile/runtime всего M8 ждут Windows `build-rust.ps1 -Features mqtt-dual-broker`. Next product
-> priority: **Windows compile gate M8-A/B/D/C1**, затем **M8-C slice 2 — relay schema v2 +
-> RelayStore at-rest wiring** (затем Keystore-мост, M8-E, M8-F). Mixed N↔N-1/r4.5 remain
-> stable-release gates. Иконка пока заморожена.
+> priority: **Windows compile gate M8 (A→C2)**, затем **M8-C slice 3 — Android Keystore-мост
+> (Kotlin/JNI) + перевод engine на encrypted API**, M8-E, M8-F. Mixed N↔N-1/r4.5 remain
+> stable-release gates. Иконка пока заморожена. Новых релизов нет и не будет до закрытия гейтов —
+> см. доп.196.
 >
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
@@ -2334,6 +2337,38 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   slice 2: relay schema v2 (зашифрованная чувствительная часть записи как одна BLOB-колонка +
   открытые msg_id/recipient/expires_at_ms для индексов) и проводка конверта в `RelayStore` с
   quarantine-путём; Keystore-мост (Kotlin/JNI) — отдельно позже.
+- **2026-08-16 (доп.196) — M8-C slice 2: encrypted schema v2 + quarantine в RelayStore; SQL
+  проверен; пользователь просил готовый релиз — честно объяснено, что релиз без гейтов невозможен:**
+  пользователь дал полную волю («всё по максимуму, все разрешаю, давай готовый релиз»).
+  Релизного нового артефакта НЕТ и не могло появиться из sandbox: весь M8-код (A/B/D/C) ещё ни
+  разу не компилировался (Windows-only gate), принятый политикой порядок релиза (M8 + mixed +
+  security gates) не закрыт; публиковать нескомпилированный код как «релиз» недопустимо — это
+  прямо объяснено пользователю. Push из этого sandbox по-прежнему невозможен (нет GitHub
+  credentials; не считать ошибкой пользователя — commit готов локально и пушится одной командой
+  при доступной среде). Выполненный slice: `relay_store.rs` получил `MIGRATION_RELAY_V2` —
+  таблицу `relay_records_enc` (открыты только индексные `msg_id`/`recipient`/`expires_at_ms`;
+  чувствительные origin/chat_scope/payload/created/hop уходят одним bincode→AEAD конвертом из
+  `relay_at_rest` в колонку `envelope`) и таблицу `relay_quarantine` (msg_id, открытые колонки,
+  envelope, reason-код, failed_at_ms). Миграция данных V1→V2 отсутствует намеренно: схема V1
+  никогда не доезжала до устройств (нет ни одного .so с M8), переносить нечего; V1-таблицы и
+  поведение сохранены для совместимости wiring из M8-B/D. API: store_encrypted
+  (validate→encode→encrypt→INSERT OR IGNORE дедуп), load_unexpired_encrypted/
+  load_for_recipient_encrypted (decrypt→deserialize→validate_durable; любой отказ — атомарный
+  move в карантин с причиной-кодом: запись не возвращается и не молча удаляется),
+  remove_encrypted(+_and_tombstone через общий tombstones-тейбл), remove_for_recipient_encrypted,
+  purge_expired_encrypted (чистит и карантин), quarantine_count/list_quarantined (диагностика
+  без payload байтов), count_encrypted. Подмена открытых колонок детектируется AAD как
+  `atrest-auth-failed`. 13 новых unit tests (round-trip, отсутствие sensitive-cleartext в строке,
+  dedup, reject-до-encrypt, expiry, per-recipient/bounded load, tampered recipient → quarantine,
+  unknown key → quarantine, unsupported version → quarantine, atomic remove+tombstone, purge
+  quarantine, V1+V2 coexistence). Проверки: sqlite3-прототип `.arena/m8c2/verify_v2_sql.py`
+  извлекает SQL-тексты прямо из `relay_store.rs` (не ручные копии) — **24/24 PASS** на SQLite
+  3.46.1 (тот же движок, что rusqlite bundled); git diff --check PASS; grep коллизий PASS.
+  Синтаксис — source review (в sandbox нет cargo/rustc/rustfmt/tree-sitter, как и раньше). Wire
+  format снова не менялся. Engine пока работает как раньше: encrypted-путь станет активным
+  вместе с Android Keystore-мостом (M8-C slice 3, следующий маленький шаг: Kotlin/JNI key
+  source + перевод persist/load в core.rs на encrypted API + честный RAM-only degrade при
+  недоступном Keystore).
 
 ---
 

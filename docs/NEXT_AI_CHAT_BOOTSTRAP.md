@@ -10,12 +10,16 @@
 >
 > - **M8-A** (`b5408e2`) — durable epoch-ms модель RelayQueue + валидация + 12 тестов;
 > - **M8-B/D** (`b881d65`) — durable RelayStore (SQLite) + persist/restore/tombstone wiring;
-> - **M8-C slice 1** (текущий tip) — versioned at-rest AEAD envelope `storage/relay_at_rest.rs`
->   (XChaCha20-Poly1305, quarantine-ошибки, Keystore seam; SQL пока не менялся).
+> - **M8-C slice 1** — versioned at-rest AEAD envelope `storage/relay_at_rest.rs`
+>   (XChaCha20-Poly1305, quarantine-ошибки, Keystore seam);
+> - **M8-C slice 2** (текущий tip) — relay schema v2 в `RelayStore`: `relay_records_enc` +
+>   `relay_quarantine`, encrypted API, 13 tests, sqlite3-прототип 24/24 PASS.
 >
-> **Следующий маленький шаг — НЕ M8-A**, а M8-C slice 2: relay schema v2 + подключение конверта
-> к `RelayStore` с quarantine-путём. Windows compile gate `build-rust.ps1 -Features
-> mqtt-dual-broker` для всех M8-slices по-прежнему pending. Остальные правила prompt'а ниже
+> **Следующий маленький шаг — НЕ M8-A**, а M8-C slice 3: Android Keystore-мост (Kotlin/JNI) +
+> перевод engine (`core.rs`) на encrypted API. Windows compile gate `build-rust.ps1 -Features
+> mqtt-dual-broker` для всех M8-slices по-прежнему pending. **Новый релиз НЕ делать** до закрытия
+> релизных гейтов (M8 acceptance, mixed, security) — см. доп.196 в AI_COLLABORATION_NOTES.
+> Остальные правила prompt'а ниже
 > (телефоны, флешка, релизы, PowerShell-гэтчи, запрет sandbox cargo test) остаются в силе.
 > Всегда сначала сверяй этот файл с tip'ом новейшей arena-ветки (`git for-each-ref
 > --sort=-committerdate`) — репозиторий может быть новее текста.

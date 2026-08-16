@@ -151,8 +151,16 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   192-битный nonce), заголовок `[version][key_id][nonce]`, AAD связывает `msg_id|recipient|
   expires_at_ms`, поэтому подмена открытых колонок ломает расшифровку. Ошибки типизированы для
   quarantine (unknown version/key, malformed, auth-fail); нет panic и нет plaintext-fallback.
-  Ключ придёт из Android Keystore через trait `RelayAtRestKeySource` (seam уже есть); подключение
-  конверта к SQLite (schema v2) — следующий slice 2. Wire format снова не менялся.
+  Ключ придёт из Android Keystore через trait `RelayAtRestKeySource` (seam уже есть). Wire format
+  снова не менялся.
+- **M8-C slice 2 (source 2026-08-16):** `RelayStore` получил schema v2 — `relay_records_enc`
+  (открыты только `msg_id`/`recipient`/`expires_at_ms` для индексов/purge; чувствительная часть
+  записи — один AEAD-конверт в `envelope`) и `relay_quarantine` (нечитаемые/подменённые записи
+  переносятся атомарно с reason-кодом: не загружаются, не показываются в UI, не удаляются молча).
+  Encrypted API: `store_encrypted` / `load_*_encrypted` / `remove_*_encrypted` /
+  `purge_expired_encrypted` / quarantine diagnostics; V1-путь сохранён. SQLite-семантика
+  проверена прототипом на том же движке (24/24 PASS); unit tests добавлены. Engine перейдёт на
+  encrypted-путь вместе с Android Keystore-мостом (slice 3); до этого поведение как M8-B/D.
 
 ### 3.3. Wire-формат (расширение envelope)
 
@@ -265,11 +273,11 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   wire) и **M8-B/D source slice выполнен** (RelayStore + отдельная миграция, persist-before-enqueue,
   receipt cleanup + durable tombstones, bounded startup restore, UI exactly-once после restart;
   SQL-семантика и отложенный сценарий Anna→Zhenya→D→Stas проверены sqlite3-прототипом и симуляцией).
-  Обновление 2026-08-16: **M8-C slice 1 выполнен** — versioned at-rest AEAD envelope
-  (`storage/relay_at_rest.rs`, XChaCha20-Poly1305, quarantine-ошибки, Keystore seam; см. §3.2);
-  SQL ещё не тронут. Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-C slice 2 —
-  relay schema v2 + проводка конверта в `RelayStore` (затем Keystore-мост на Kotlin/JNI),
-  M8-E bounded sleep/wake, затем телефонный acceptance M8-F.
+  Обновление 2026-08-16: **M8-C slices 1–2 выполнены** — versioned at-rest AEAD envelope
+  (`storage/relay_at_rest.rs`, XChaCha20-Poly1305, quarantine-ошибки, Keystore seam; см. §3.2) и
+  encrypted schema v2 в `RelayStore` (`relay_records_enc` + `relay_quarantine`, SQL 24/24 PASS).
+  Compile/runtime ждут Windows `build-rust.ps1`. Дальше: M8-C slice 3 — Android Keystore-мост и
+  перевод engine на encrypted API, M8-E bounded sleep/wake, затем телефонный acceptance M8-F.
 - **M9** — группы: fan-out N копий через mesh (Фаза 3.x).
 
 Каждый шаг: код → сборка (Rust + APK) → установка на 2–3 телефона → тест → запись в памятку.
