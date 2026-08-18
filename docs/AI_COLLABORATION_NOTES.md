@@ -2443,6 +2443,20 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   source review, balanced-delimiter check и `git diff --check`; реальный PASS/FAIL по-прежнему
   получается одним запуском harness на каноническом Windows PC. До compile PASS код M8-E не писать.
 
+- **2026-08-18 (доп.199) — первый C3 compile attempt честно остановился на stale MSVC PDB,
+  source error ещё не достигнут:** Windows clean worktree `C:\\APU-M8` fast-forwarded до `746e241`;
+  raw script SHA между Linux/Windows различался из-за LF→CRLF, поэтому дальнейшая верификация —
+  Git blob, не filesystem hash. Gate state `2ABC3ACF…6236FBF6`, Rust stderr: host proc-macro link
+  `LNK1207 incompatible PDB` для `target\\release\\deps\\uniffi_macros-….pdb`, до компиляции
+  project source/bindgen/Gradle не дошло; `.so`/bindings/APK не произведены, ADB/phones/traffic=false.
+  Пустой Process.ExitCode — отдельная ошибка harness diagnostics, не причина build failure; реальная
+  причина доказана stderr. Исходное evidence не удалять и основной gate не повторять. Добавлен
+  single-use `scripts/m8_c3_compile_recovery.ps1`: требует exact prior-state hash+LNK1207 evidence,
+  атомарно переносит весь stale Cargo `target` в `%TEMP%\\apu-m8-c3-stale-target-lnk1207` вместо
+  удаления, делает один fresh Android Rust build прямым `cargo ndk`, затем bindgen+assembleDebug,
+  использует явные exit-marker файлы вместо ненадёжного `Process.ExitCode` и сохраняет отдельный
+  recovery state/logs. До recovery PASS M8-E не начинать.
+
 ---
 
 ---
