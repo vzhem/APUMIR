@@ -39,7 +39,7 @@
 
 | Версия | Тип | Дата | Основной код | С generated | Automation | APK bytes | Статус |
 |---|---|---|---:|---:|---:|---:|---|
-| v11.16.23 | stable / Latest | 2026-08-19 | 35 639 | 38 314 | 19 383 | 22 796 416 | подготовлен к публикации |
+| v11.16.23 | stable / Latest | 2026-08-19 | 35 639 | 38 314 | 19 383 | 22 796 416 | опубликован |
 | v11.16.16 | prerelease checkpoint | 2026-08-15 | 31 645 | 34 155 | 17 117 | 22 664 712 | опубликован |
 
 ---
@@ -54,7 +54,8 @@
 - Tested application commit: `bd7c1e3d603b39737641802fd9ff3d4ab8da481b`.
 - Release build source HEAD: `4dfc3a0d600edbe7e999789a9bc94f1ca31ea22f`.
 - Commit подсчёта строк: documentation/release commit, содержащий эту секцию.
-- Release URL после публикации: <https://github.com/vzhem/APUMIR/releases/tag/v11.16.23>.
+- Release/tag target: `09f7f52fe3822c154b4dcfb7cbdf524d529e17b6`.
+- Release: <https://github.com/vzhem/APUMIR/releases/tag/v11.16.23> (stable, Latest).
 
 ### Строки кода
 
@@ -82,6 +83,9 @@ Windows build/phone/evidence gates, добавленные во время M8 ac
 - V2 signer certificate SHA-256:
   `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7`.
 - Build state SHA-256: `8981A23C7781683381054CF9E0FF4972D37D274D44586EC72199C3075ABBF759`.
+- GitHub server APK digest: `sha256:85480d5caf57b9318986ba9e61f9a2a68b38ddd814c683b5949d8e22e7ea9a68` — совпадает.
+- Checksum asset: 86 B, server digest `sha256:c83d9d3825c125baac6471141b0819f7813487519283bd6a1870bfe09ba2800c`.
+- Release published `2026-08-18T21:23:39Z`; draft=false, prerelease=false, Latest.
 
 ### Основные изменения
 

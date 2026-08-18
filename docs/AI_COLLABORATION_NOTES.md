@@ -2641,7 +2641,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   state `8981A23C…ABBF759`, APK 22,796,416 B / `85480D5C…EA9A68`, signer
   `F843CBE7…A4A5F7`, staging `C:\\APU-RELEASE-v11.16.23`, published=false. Release notes/statistics
   подготовлены; следующий шаг — docs commit → GitHub draft → browser upload APK+sha256 → server
-  digest verify → publish stable/Latest → verified external backup.
+  digest verify → publish stable/Latest → verified external backup. **v11.16.23 опубликован stable/
+  Latest:** <https://github.com/vzhem/APUMIR/releases/tag/v11.16.23>, tag target `09f7f52`,
+  draft=false/prerelease=false; APK server digest `85480D5C…EA9A68` совпал, checksum asset 86 B /
+  server digest `c83d9d38…a2800c` соответствует deterministic checksum bytes. Следующий шаг — только
+  verified external backup/rotation; release/tag/assets не заменять.
 
 ---
 
