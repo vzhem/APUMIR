@@ -2596,7 +2596,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   APK 29,299,813 B / `E89935E8…113ADC`, phones=false. Differential phone gate prepared:
   replace-install all 3 (no uninstall); Anna v20 + Stas v19 legitimate usable Keystore identities
   должны получить marker/preserve profile, Zhenya v20 restored-unusable identity должна быть
-  discarded/show onboarding. Проверяются exact logs/files/version, partial state после каждого.
+  discarded/show onboarding. Gate partial: Anna v22 preserved profile/marker/exact3; Zhenya v22
+  визуально получил onboarding, boolean inventory доказал identity=false/marker=false/wrong0,
+  хотя пустая relay DB успела создаться — harness ошибочно требовал relay=0. Стас затем отдельно
+  safely migrated v19→v22 PASS state `1CD027A8…4DDDD4`: identity/marker true, exact3/wrong0,
+  data clear=false; Anna/Zhenya unchanged. Пользователь зарегистрировал Женю. Добавлен final
+  read-only readiness gate всех 3: v22, identity+marker, key prefs, exact DB, custody durable/
+  quarantine0 log, WorkManager job, no fatal.
 
 ---
 
