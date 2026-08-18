@@ -2571,8 +2571,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   и вообще не ссылался на подготовленные XML rules. Device-bound Keystore identity нельзя
   восстанавливать отдельно от keys; Room chats + stale p2p_prefs приводят к skip onboarding.
   Исправление: `allowBackup=false`, `fullBackupContent=false`, подключён `dataExtractionRules`,
-  а cloud/device/legacy rules исключают все eligible domains. До Android compile + clean install
-  v11.16.20 и доказательства no-restore acceptance не продолжать.
+  а cloud/device/legacy rules исключают все eligible domains. Android compile PASS: state
+  `5D886A5C…754E08`, debug v11.16.20 APK 29,299,817 B / `8FA37AB3…FC3E3A`, phones=false.
+  Добавлен guarded no-restore clean-install test: uninstall/install/launch 3 phones и до onboarding
+  names-only assert, что `p2p_prefs.xml`, exact relay DB и old double-suffix DB отсутствуют.
 
 ---
 
