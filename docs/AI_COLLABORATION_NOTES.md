@@ -2575,6 +2575,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `5D886A5C…754E08`, debug v11.16.20 APK 29,299,817 B / `8FA37AB3…FC3E3A`, phones=false.
   Добавлен guarded no-restore clean-install test: uninstall/install/launch 3 phones и до onboarding
   names-only assert, что `p2p_prefs.xml`, exact relay DB и old double-suffix DB отсутствуют.
+  Первый run остановился после clean install+launch Анны, потому что пользователь успел пройти
+  onboarding до 6-second assertion; state `64BA6573…1E566` пуст по phones и immutable. Read-only
+  inventory доказал: Anna v11.16.20/new firstInstall, exact relay files 3/wrong0; Zhenya/Stas ещё
+  v11.16.19 exact3/wrong0. Визуально Anna действительно показала onboarding, значит no-restore
+  сработал; её не трогать. Добавлен recovery только Zhenya/Stas: clean v11.16.20 и до пользовательских
+  действий assert profile=0/relay=0; Anna PID до/после должен быть неизменен.
 
 ---
 
