@@ -2469,6 +2469,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   gate/recovery/stale-target evidence не удалять; этот continuation запускать один раз. До PASS
   M8-E не начинать.
 
+- **2026-08-18 (доп.201) — Android Rust C3 PASS; старый bindgen invocation ошибочно тянул все
+  host-native зависимости p2p-core:** source-fix state `92693E06…59F9559`; Android Rust process
+  PASS, новый arm64 `.so` 7,369,056 B / SHA-256 `F4D2FABF…DAF824`. Затем `cargo run --bin
+  uniffi-bindgen` внутри основного package попытался собрать на Windows весь dependency graph,
+  включая bundled sqlite/ring/aws-lc; MSVC `cl.exe` дал массовые C errors/`0xc0000006`. Это не
+  UDL/bindgen и не Android Rust defect: CLI binary использует только UniFFI, но Cargo package-level
+  unconditional deps заставляли строить ненужные host-native библиотеки. Исправление build boundary:
+  minimal pinned tool `tools/uniffi-bindgen` (`uniffi = =0.28.3`, CLI only), отдельный target в
+  `%TEMP%`; все M8 harness-команды переведены на его manifest. Добавлен single-use
+  `scripts/m8_c3_isolated_bindgen_gate.ps1`: требует exact prior-state hash, exact successful `.so`
+  hash и только его dirty status, запускает isolated bindgen, проверяет четыре C3 Kotlin API и затем
+  `assembleDebug`. Успешный `.so` не пересобирать/не восстанавливать; old evidence сохранить.
+
 ---
 
 ---
