@@ -1,8 +1,10 @@
 # M8-E / M8-F — подготовительный план (2026-08-16)
 
-Документ написан ПОСЛЕ M8-C slice 3 (source-complete) и ДО Windows compile gate.
-Это план, а не код: код M8-E пишется только после compile PASS M8 (A→C3).
-Правило из журнала: не накапливать нескомпилированные слои.
+Документ написан после M8-C slice 3. Windows compile gate M8 (A→C3) закрыт
+2026-08-18: Rust + isolated UniFFI bindgen + `assembleDebug` PASS; debug APK
+29,283,225 B / SHA-256 `87BE9E22…F2FD76`, state `6D69585B…DC94DD`.
+После этого начат M8-E slice 1; правило остаётся прежним: каждый следующий
+слой добавляется только после compile-проверки предыдущего.
 
 ## Что уже готово под эти шаги
 
@@ -22,11 +24,13 @@
 
 Планируемые маленькие шаги (каждый = отдельный slice с тестом):
 
-1. **WorkManager wake (bounded):** периодический `WorkManager` worker
-   (`PeriodicWorkRequest`, минимальный интервал ОС, без exact-alarms),
-   который: поднимет Rust одним bounded вызовом → drain pending relay →
-   flush custody → завершается. Новые разрешения — только если неизбежно
-   (никаких REQUEST_IGNORE_BATTERY_OPTIMIZATIONS по умолчанию).
+1. **WorkManager wake (bounded) — source slice 1 реализован, compile pending:**
+   уникальный periodic `RelayWakeWorker` (6 ч, flex 1 ч, connected + battery-not-low,
+   initial delay 30 мин, без exact alarms/новых permissions) поднимает durable Rust
+   максимум на 25 с, делает один gossip discovery и гарантированно shutdown-ит
+   только принадлежащий worker-у engine. Если foreground service уже владеет
+   engine, worker его не останавливает. Быстрого retry нет; следующий шанс —
+   следующий periodic window.
 2. **Sleep flush hook:** при `onTaskRemoved`/stop сервиса — явный flush:
    всё недоставленное уже durable (M8-B/D/C), поэтому hook = верификация и
    лог, а не новая persistence-логика.

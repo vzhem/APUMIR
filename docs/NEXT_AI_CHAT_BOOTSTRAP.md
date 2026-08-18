@@ -21,11 +21,11 @@
 > Полная M8-C3 история сохранена на GitHub: tip `arena/01a013d0-apumir` = `24303b4`.
 > Новая Arena-сессия продолжается линейно от этой точки; старые slices повторять нельзя.
 >
-> **Следующий шаг — НЕ M8-A и НЕ M8-C**, а **Windows compile gate M8 (A→C3)**. Для него обновлён
-> единый PC-only harness `scripts/m8_rust_build_gate.ps1`: из чистого worktree на диске C: он
-> последовательно выполняет Rust Android build с `mqtt-dual-broker`, регенерацию UniFFI Kotlin
-> bindings и `gradlew :app:assembleDebug`, сохраняет одноразовое evidence в `%TEMP%` и не вызывает
-> ADB/не меняет телефоны. Когда compile PASS → M8-E (sleep/wake), M8-F (телефонный acceptance
+> **M8 Windows compile gate A→C3 закрыт 2026-08-18:** Rust Android PASS, isolated UniFFI
+> bindgen PASS, `:app:assembleDebug` PASS; APK 29,283,225 B / SHA-256 `87BE9E22…F2FD76`,
+> state `6D69585B…DC94DD`; generated binding commit `9bf45b9`. Rust `.so` не коммитился.
+> **Текущий шаг — M8-E slice 1 bounded WorkManager wake** (source реализован, Windows compile
+> ещё требуется), затем остальные M8-E slices и M8-F (телефонный acceptance
 > Anna→Zhenya→D→Stas с kill/reboot, датчики: `relay_custody_mode` + `relay_quarantine_count` +
 > quarantine-warn в logcat). **Новый релиз НЕ делать** до закрытия релизных гейтов — см.
 > доп.196/197 в AI_COLLABORATION_NOTES. Остальные правила prompt'а ниже (телефоны, флешка,

@@ -2508,6 +2508,22 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   D absent/offline + pagefile C, проверяет JDK21/javac/SDK и запускает только Gradle с process-local
   `JAVA_HOME=C:\\Program Files\\Android\\Android Studio\\jbr`; системную environment не меняет,
   Rust/bindgen/ADB/phones не запускает.
+- **2026-08-18 (доп.204) — M8 A→C3 Windows compile gate PASS и source reconciliation PASS:**
+  process-local JBR21 recovery завершила `assembleDebug`; state SHA `6D69585B…DC94DD`, debug APK
+  29,283,225 B / SHA `87BE9E22…F2FD76`, Rust `.so` `F4D2FABF…DAF824`, normalized binding
+  `982308D9…2596D3`. Rust/bindgen/ADB/phones на финальном шаге не запускались. Generated binding
+  commit `9bf45b9` содержит только `p2p_core.kt` и запушен в fixed branch; `.so` не commit.
+  Compile gate закрыт, поэтому разрешён M8-E. Системный `JAVA_HOME` всё ещё может ссылаться на D:;
+  APU build должен явно использовать JBR21 на C:, пока environment отдельно не исправлена.
+- **2026-08-18 (доп.205) — M8-E slice 1 source: bounded WorkManager wake:** добавлен unique
+  `RelayWakeWorker`: periodic 6h/flex1h/initial30m, constraints connected+battery-not-low, без
+  exact alarm/новых permissions/foreground service/быстрого retry. Worker после identity gate
+  устанавливает Keystore at-rest key, поднимает durable Rust на максимум 25 s, делает один gossip
+  discovery, логирует custody/quarantine и shutdown-ит engine в `finally`. `RustBridge.initialize`
+  и `shutdown` синхронизированы; `runBoundedRelayWake` удерживает lifecycle monitor на всём окне,
+  поэтому service не создаст второй engine. Если engine уже принадлежит foreground service, worker
+  только trigger-ит gossip и не останавливает его. Следующий gate — Windows compile только этого
+  Kotlin slice; до PASS не начинать sleep hook/UI budgets.
 
 ---
 

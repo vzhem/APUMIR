@@ -14,6 +14,7 @@ import uniffi.p2p_core.initializeCore
 object RustBridge {
 
     private const val TAG = "RustBridge"
+    private const val MAX_RELAY_WAKE_WINDOW_MILLIS = 30_000L
 
     @Volatile
     private var engine: P2pCoreHandle? = null
@@ -28,6 +29,7 @@ object RustBridge {
      * попытался установить at-rest ключ: установленный ключ + путь =
      * durable-encrypted режим; без ключа движок честно уйдёт в RAM-only.
      */
+    @Synchronized
     fun initialize(
         displayName: String,
         existingPublicKey: String? = null,
@@ -84,6 +86,7 @@ object RustBridge {
         }
     }
 
+    @Synchronized
     fun shutdown() {
         try {
             engine?.stop()
@@ -91,6 +94,67 @@ object RustBridge {
             Log.i(TAG, "Engine stopped")
         } catch (ex: Exception) {
             Log.e(TAG, "Error stopping engine", ex)
+        }
+    }
+
+    /** Результат одного ограниченного M8-E wake-окна. */
+    data class RelayWakeResult(
+        val engineStartedByWorker: Boolean,
+        val gossipTriggered: Boolean,
+        val custodyMode: String,
+        val quarantineCount: Long,
+    )
+
+    /**
+     * M8-E slice 1: одно bounded receive-only окно для WorkManager.
+     *
+     * Монитор объекта удерживается на всём окне намеренно: обычный foreground
+     * service не сможет одновременно создать второй engine. Если service уже
+     * владеет engine, worker только просит bounded gossip и НЕ останавливает его.
+     * Если engine поднят worker-ом, он гарантированно остановится в finally.
+     */
+    @Synchronized
+    fun runBoundedRelayWake(
+        displayName: String,
+        existingPublicKey: String?,
+        existingPrivateKey: String?,
+        relayDbPath: String,
+        activeWindowMillis: Long,
+    ): RelayWakeResult {
+        require(activeWindowMillis in 1_000L..MAX_RELAY_WAKE_WINDOW_MILLIS) {
+            "relay wake window must be 1s..${MAX_RELAY_WAKE_WINDOW_MILLIS}ms"
+        }
+
+        if (engine?.isRunning() == true) {
+            return RelayWakeResult(
+                engineStartedByWorker = false,
+                gossipTriggered = triggerGossipDiscovery(),
+                custodyMode = relayCustodyMode(),
+                quarantineCount = relayQuarantineCount(),
+            )
+        }
+
+        val started = initialize(
+            displayName = displayName,
+            existingPublicKey = existingPublicKey,
+            existingPrivateKey = existingPrivateKey,
+            relayDbPath = relayDbPath,
+        )
+        if (!started) {
+            return RelayWakeResult(false, false, "disabled", 0L)
+        }
+
+        return try {
+            val gossipTriggered = triggerGossipDiscovery()
+            Thread.sleep(activeWindowMillis)
+            RelayWakeResult(
+                engineStartedByWorker = true,
+                gossipTriggered = gossipTriggered,
+                custodyMode = relayCustodyMode(),
+                quarantineCount = relayQuarantineCount(),
+            )
+        } finally {
+            shutdown()
         }
     }
 
