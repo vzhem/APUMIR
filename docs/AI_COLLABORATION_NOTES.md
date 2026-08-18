@@ -2565,7 +2565,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   build PASS: state `A6DDD4ED…450D5F6`, new `.so` `08E5153E…710C4`, debug v11.16.19 APK
   29,299,613 B / `811E2D3F…48BF02`, ADB/phones=false. Добавлен guarded clean-install v11.16.19
   script; он требует exact build evidence/hashes, удаляет v11.16.18 data/cache на 3 тестовых
-  телефонах и сохраняет partial state после каждого.
+  телефонах и сохраняет partial state после каждого. Clean v11.16.19 install PASS state
+  `8985031B…C1DAF1`, 3/3. На Анне профиль+чаты снова автоматически восстановились, тогда как
+  Женя/Стас получили onboarding: это доказало второй blocker — manifest имел `allowBackup=true`
+  и вообще не ссылался на подготовленные XML rules. Device-bound Keystore identity нельзя
+  восстанавливать отдельно от keys; Room chats + stale p2p_prefs приводят к skip onboarding.
+  Исправление: `allowBackup=false`, `fullBackupContent=false`, подключён `dataExtractionRules`,
+  а cloud/device/legacy rules исключают все eligible domains. До Android compile + clean install
+  v11.16.20 и доказательства no-restore acceptance не продолжать.
 
 ---
 
