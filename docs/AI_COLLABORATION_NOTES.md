@@ -2457,6 +2457,18 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   использует явные exit-marker файлы вместо ненадёжного `Process.ExitCode` и сохраняет отдельный
   recovery state/logs. До recovery PASS M8-E не начинать.
 
+- **2026-08-18 (доп.200) — fresh compile дошёл до project source и нашёл один точный C3 defect:**
+  preserved-target recovery state `D37E5372…61402D8`, exit 101, ADB/phones/traffic=false. После
+  чистой перекомпиляции MSVC/PDB проблема исчезла; единственная Rust error — E0004 в
+  `relay_store.rs::at_rest_reason`: добавленный в C3 `AtRestError::InvalidKeyMaterial` не был
+  покрыт exhaustive match. Исправление bounded: стабильный diagnostics/quarantine reason
+  `atrest-invalid-key-material` + unit test mapping; wire/schema/crypto behavior не меняются.
+  Добавлен single-use `scripts/m8_c3_source_fix_gate.ps1`: требует exact prior recovery hash и
+  E0004/InvalidKeyMaterial evidence, продолжает из fresh incremental target, собирает Rust,
+  bindgen и debug APK, проверяет четыре C3 binding API и сохраняет отдельное evidence. Старые
+  gate/recovery/stale-target evidence не удалять; этот continuation запускать один раз. До PASS
+  M8-E не начинать.
+
 ---
 
 ---
