@@ -24,18 +24,18 @@
 
 Планируемые маленькие шаги (каждый = отдельный slice с тестом):
 
-1. **WorkManager wake (bounded) — source slice 1 реализован, compile pending:**
+1. **WorkManager wake (bounded) — source/compile PASS; delivery foundation runtime PASS:**
    уникальный periodic `RelayWakeWorker` (6 ч, flex 1 ч, connected + battery-not-low,
    initial delay 30 мин, без exact alarms/новых permissions) поднимает durable Rust
    максимум на 25 с, делает один gossip discovery и гарантированно shutdown-ит
    только принадлежащий worker-у engine. Если foreground service уже владеет
-   engine, worker его не останавливает. Быстрого retry нет; следующий шанс —
-   следующий periodic window. PC-only compile harness:
-   `scripts/m8e_slice1_compile_gate.ps1` (Gradle only; Rust/bindgen/ADB не повторяет).
-   Phone readiness выявил blocking path-contract defect: Rust добавлял второй
-   `.relay.sqlite` к уже готовому Kotlin filename, поэтому backup exclusions не
-   совпадали с реальным файлом. Исправлено на exact host path; требуется новый
-   Rust/Android compile и чистая тестовая установка до runtime acceptance.
+   engine, worker его не останавливает. Быстрого retry нет. Compile state
+   `36B20E5C…266C3`; затем исправлены exact DB path, unsafe Auto Backup restore и
+   intermediate receipt cleanup fanout. На v11.16.23 трёхтелефонная chain PASS:
+   Anna→offline Stas, Zhenya durable store + process death/restore, Stas exactly-once,
+   Zhenya RAM+SQLite cleanup, Anna eventual DELIVERED, quarantine0. Final DB state
+   `8CD48812…B2526A`. Осталось отдельно доказать реальное выполнение именно
+   WorkManager wake при неработающем foreground service.
 2. **Sleep flush hook:** при `onTaskRemoved`/stop сервиса — явный flush:
    всё недоставленное уже durable (M8-B/D/C), поэтому hook = верификация и
    лог, а не новая persistence-логика.

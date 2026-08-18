@@ -21,11 +21,13 @@
 > Полная M8-C3 история сохранена на GitHub: tip `arena/01a013d0-apumir` = `24303b4`.
 > Новая Arena-сессия продолжается линейно от этой точки; старые slices повторять нельзя.
 >
-> **M8 Windows compile gate A→C3 закрыт 2026-08-18:** Rust Android PASS, isolated UniFFI
-> bindgen PASS, `:app:assembleDebug` PASS; APK 29,283,225 B / SHA-256 `87BE9E22…F2FD76`,
-> state `6D69585B…DC94DD`; generated binding commit `9bf45b9`. Rust `.so` не коммитился.
-> **Текущий шаг — M8-E slice 1 bounded WorkManager wake** (source реализован, Windows compile
-> ещё требуется), затем остальные M8-E slices и M8-F (телефонный acceptance
+> **M8 A→C3 compile и основной three-phone durable gate закрыты.** На v11.16.23 exact chain
+> Anna→offline Stas через Zhenya PASS: encrypted store, Zhenya process death/restore, exactly one
+> UI delivery, intermediate RAM+SQLite cleanup, Anna eventual DELIVERED, tombstone1/quarantine0
+> на всех; final DB state `8CD48812…B2526A`. В ходе gate исправлены exact relay DB path, unsafe
+> restored identity и receipt cleanup fanout.
+> **Текущий шаг — завершить M8-E/F:** отдельно доказать реальный bounded WorkManager wake при
+> stopped foreground service, затем delayed relay D+reboot и mixed N↔N-1 acceptance
 > Anna→Zhenya→D→Stas с kill/reboot, датчики: `relay_custody_mode` + `relay_quarantine_count` +
 > quarantine-warn в logcat). **Новый релиз НЕ делать** до закрытия релизных гейтов — см.
 > доп.196/197 в AI_COLLABORATION_NOTES. Остальные правила prompt'а ниже (телефоны, флешка,

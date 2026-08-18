@@ -2621,8 +2621,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   relay сохраняет TTL fallback. Добавлен topic-bound test; Rust/Gradle v11.16.23 build PASS:
   state `6F2E47D2…6A51CB`, `.so` `6C3C12EA…B36F78`, APK 29,316,197 B /
   `39111403…A0B30`, phones=false. Anna вернулась online и визуально получила eventual two ticks
-  для старого exact message. Добавлен guarded replace-update всех 3 на v11.16.23 с сохранением
-  identity/marker; затем нужен новый short offline chain и DB cleanup count=0 на relay.
+  для старого exact message. Guarded replace-update v11.16.23 PASS 3/3 state
+  `AC98D29F…62879C`, identity/marker preserved.
+- **2026-08-19 (доп.208) — M8 durable three-phone chain + intermediate cleanup PASS:** новый exact
+  message `64a5829d-e6a6-44da-92a7-6fda14338a35` / `M8-CLEANUP-20260818-02`: offline Stas,
+  Anna retained+accepted, Zhenya stored; Stas online получил/saved exactly one, sent retained
+  origin receipt + cleanup fanout; Zhenya получил `p2pm2/receipt/cleanup/<sha256>`, RAM removed=true,
+  durable removed=true, failures/fatal=false. Phase-B state `8AB2CE34…57DD17`; UI exactly one.
+  Anna вернулась online, eventual two ticks. Final read-only SQLite state
+  `8CD48812…B2526A`: Anna/Zhenya/Stas targetMessageCount=0, tombstone=1, quarantine=0 на всех.
+  Это закрывает основной M8 durable 3-phone delivery/process-death/exactly-once/cleanup gate.
+  Не закрыты: фактический WorkManager wake при stopped foreground service, delayed relay D+reboot,
+  mixed N↔N-1 и security/release gates. Старый message у Zhenya останется до TTL (до fanout fix),
+  это зафиксированный pre-fix evidence, не новый cleanup failure.
 
 ---
 
