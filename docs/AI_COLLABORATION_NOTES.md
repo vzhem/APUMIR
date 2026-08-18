@@ -2524,6 +2524,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   поэтому service не создаст второй engine. Если engine уже принадлежит foreground service, worker
   только trigger-ит gossip и не останавливает его. Следующий gate — Windows compile только этого
   Kotlin slice; до PASS не начинать sleep hook/UI budgets.
+- **2026-08-18 (доп.206) — M8-E slice1 compile + signed APK PASS; первый phone preflight invalid:**
+  slice1 state `36B20E5C…266C3`, debug APK 29,420,535 B / `7D48EF02…9779C`.
+  Signed test v11.16.17 release build (lintVital excluded после известного aggregate-task defect)
+  PASS: 22,779,828 B / SHA `246ED135…FCE44`, signer `F843CBE7…A4A5F7`, unpublished.
+  Первый read-only phone paste не выполнился как block из-за PowerShell parser error на chained
+  `.Trim().ToUpperInvariant()`; пользователь затем вставил остаток построчно с null variables и
+  получил ложный печатный `PASS`/state `F878…`, где phones пусты. Этот state НЕ evidence; ADB/phones
+  фактически не затронуты. Чтобы исключить повтор paste hazard, добавлен проверяемый файл
+  `scripts/m8e_phone_readonly_preflight.ps1` (v3 state/capture names): exact 3-phone visibility,
+  pull installed base APK read-only, signer/version/install-time/UID/PID capture; никаких install,
+  launch, force-stop, log/data clear.
 
 ---
 
