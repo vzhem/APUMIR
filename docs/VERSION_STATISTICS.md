@@ -39,7 +39,74 @@
 
 | Версия | Тип | Дата | Основной код | С generated | Automation | APK bytes | Статус |
 |---|---|---|---:|---:|---:|---:|---|
+| v11.16.23 | stable / Latest | 2026-08-19 | 35 639 | 38 314 | 19 383 | 22 796 416 | подготовлен к публикации |
 | v11.16.16 | prerelease checkpoint | 2026-08-15 | 31 645 | 34 155 | 17 117 | 22 664 712 | опубликован |
+
+---
+
+## v11.16.23 — stable durable relay
+
+### Идентификация
+
+- Дата: 2026-08-19.
+- versionName/versionCode: `v11.16.23` / `11016023`.
+- Тип: stable GitHub release, Latest (явный выбор владельца проекта).
+- Tested application commit: `bd7c1e3d603b39737641802fd9ff3d4ab8da481b`.
+- Release build source HEAD: `4dfc3a0d600edbe7e999789a9bc94f1ca31ea22f`.
+- Commit подсчёта строк: documentation/release commit, содержащий эту секцию.
+- Release URL после публикации: <https://github.com/vzhem/APUMIR/releases/tag/v11.16.23>.
+
+### Строки кода
+
+| Категория | Файлов | Всего строк | Непустых строк | Δ строк к v11.16.16 |
+|---|---:|---:|---:|---:|
+| Rust core `.rs` | 61 | 25 092 | 21 766 | +3 435 |
+| Rust UniFFI UDL | 1 | 123 | 101 | +15 |
+| Handwritten Android Kotlin | 80 | 10 021 | 9 023 | +526 |
+| Android manifest/XML resources | 12 | 403 | 386 | +18 |
+| **Основной код APU** | **154** | **35 639** | **31 276** | **+3 994** |
+| Generated UniFFI Kotlin | 1 | 2 675 | 2 198 | +165 |
+| **Основной код + generated** | **155** | **38 314** | **33 474** | **+4 159** |
+| Android unit/instrumented tests | 5 | 241 | 195 | 0 |
+| Test/release scripts | 79 | 19 383 | 17 587 | +2 266 |
+
+Подсчёт выполнен тем же методом, что v11.16.16. Рост automation включает одноразовые проверяемые
+Windows build/phone/evidence gates, добавленные во время M8 acceptance и восстановления PC.
+
+### APK и подпись
+
+- APK: `APU-v11.16.23.apk`.
+- Размер: `22 796 416` байт.
+- SHA-256: `85480D5CAF57B9318986BA9E61F9A2A68B38DDD814C683B5949D8E22E7EA9A68`.
+- Android package: `com.vladimir.messenger`.
+- V2 signer certificate SHA-256:
+  `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7`.
+- Build state SHA-256: `8981A23C7781683381054CF9E0FF4972D37D274D44586EC72199C3075ABBF759`.
+
+### Основные изменения
+
+- Encrypted persistent relay custody и restore после Android process death.
+- Absolute TTL, bounded restore, durable tombstone и exactly-once UI delivery.
+- Bounded WorkManager wake без exact alarm.
+- Exact relay DB path и запрет небезопасного Auto Backup/device transfer.
+- Device-local identity marker с безопасной миграцией существующих Keystore identities.
+- Receipt cleanup fanout для немедленного удаления custody на online relay nodes.
+
+### Что проверено
+
+- Rust Android + generated UniFFI + debug/release Gradle builds: PASS.
+- Identity-preserving replace update v11.16.23: PASS 3/3.
+- Process death/cold restart, durable-encrypted, exact DB path, quarantine0: PASS 3/3.
+- Anna→offline Stas через Zhenya: store → process death → restore → exactly one delivery →
+  intermediate RAM+SQLite cleanup → eventual origin DELIVERED: PASS.
+- Финальный DB state: target=0, tombstone=1, quarantine=0 на Анне/Жене/Стасе.
+
+### Известные ограничения и backup
+
+- Delayed relay D+reboot, mixed N↔N-1 и отдельный security audit остаются post-release gates.
+- Реальный WorkManager wake при остановленном foreground service требует отдельного OEM-теста.
+- Verified external backup выполняется сразу после публикации; previous/latest rotation будет
+  записана отдельным immutable результатом.
 
 ---
 

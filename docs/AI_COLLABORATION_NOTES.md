@@ -2637,7 +2637,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   решил, что проверок достаточно, и выбрал публичный **stable/Latest v11.16.23**, затем verified
   external backup. Добавлен PC-only signed stable release build gate: exact tested source/native/
   binding, release signer F843…, lintVital aggregate excluded, staging `C:\\APU-RELEASE-v11.16.23`;
-  публикация/ADB/phones отсутствуют до отдельной digest verification.
+  публикация/ADB/phones отсутствуют до отдельной digest verification. Signed stable build PASS:
+  state `8981A23C…ABBF759`, APK 22,796,416 B / `85480D5C…EA9A68`, signer
+  `F843CBE7…A4A5F7`, staging `C:\\APU-RELEASE-v11.16.23`, published=false. Release notes/statistics
+  подготовлены; следующий шаг — docs commit → GitHub draft → browser upload APK+sha256 → server
+  digest verify → publish stable/Latest → verified external backup.
 
 ---
 
