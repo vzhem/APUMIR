@@ -2561,7 +2561,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `.relay.sqlite` к exact host path `apu_relay.sqlite`, а Android backup rules исключали только
   exact host filename. Это могло включить device-bound encrypted custody в backup. Исправление:
   `open_relay_custody` теперь открывает переданный path без suffix. M8 ещё не release, test data
-  disposable; до нового Rust build/clean install/runtime gate acceptance не продолжать.
+  disposable; до нового Rust build/clean install/runtime gate acceptance не продолжать. Path-fix
+  build PASS: state `A6DDD4ED…450D5F6`, new `.so` `08E5153E…710C4`, debug v11.16.19 APK
+  29,299,613 B / `811E2D3F…48BF02`, ADB/phones=false. Добавлен guarded clean-install v11.16.19
+  script; он требует exact build evidence/hashes, удаляет v11.16.18 data/cache на 3 тестовых
+  телефонах и сохраняет partial state после каждого.
 
 ---
 
