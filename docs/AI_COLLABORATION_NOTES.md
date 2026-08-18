@@ -2495,8 +2495,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   (active 16 GiB), failed Disk 1 переведён offline; D: больше не использовать/не форматировать для
   APU. Сохранённые outputs: arm64 `.so` 7,369,056 B `F4D2FABF…DAF824`; binding
   `31BD5505…B610F2`. Добавлен final single-use `scripts/m8_c3_gradle_only_gate.ps1`: требует exact
-  artifacts/evidence, failed disk offline, pagefile C-only и valid SDK local.properties; запускает
-  только `assembleDebug`, Rust/bindgen/ADB/phones не повторяет.
+  artifacts/evidence, failed disk offline/physically absent, pagefile C-only и valid SDK
+  local.properties; запускает только `assembleDebug`, Rust/bindgen/ADB/phones не повторяет.
+  После decommission Windows перестала перечислять Disk 1 через `Get-Disk`; это допустимое ещё
+  более безопасное состояние (HDD физически отсутствует/не виден). Gradle gate исправлен: exact
+  serial может быть либо present+offline, либо отсутствовать; present+online по-прежнему STOP.
 
 ---
 

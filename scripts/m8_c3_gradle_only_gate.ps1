@@ -34,8 +34,10 @@ if($PriorHash -ne $ExpectedPriorHash){throw "Prior state hash mismatch: $PriorHa
 $Prior=Get-Content -LiteralPath $PriorState -Raw|ConvertFrom-Json
 if($Prior.outcome -ne "INCOMPLETE_DO_NOT_REPEAT" -or $Prior.rustSoSha256 -ne $ExpectedSoHash -or $Prior.generatedBindingSha256 -ne $ExpectedBindingHash){throw "Prior state is not exact Rust+bindgen success / Gradle incomplete evidence"}
 
-$FailedDisk=Get-Disk -Number 1
-if($FailedDisk.SerialNumber.Trim() -ne "Z9AM7JYH" -or -not $FailedDisk.IsOffline){throw "Failed D: disk is not safely offline"}
+$FailedDisks=@(Get-Disk -ErrorAction SilentlyContinue|Where-Object{$_.SerialNumber -and $_.SerialNumber.Trim() -eq "Z9AM7JYH"})
+if($FailedDisks.Count -gt 1){throw "Failed D: disk identity is ambiguous"}
+if($FailedDisks.Count -eq 1 -and -not $FailedDisks[0].IsOffline){throw "Failed D: disk is present and not safely offline"}
+$FailedDiskState=if($FailedDisks.Count -eq 0){"physically-absent"}else{"offline"}
 $Pagefiles=@(Get-CimInstance Win32_PageFileUsage)
 if(@($Pagefiles|Where-Object{$_.Name -like "D:\*"}).Count -gt 0 -or @($Pagefiles|Where-Object{$_.Name -like "C:\*"}).Count -eq 0){throw "Pagefile is not active only away from D:"}
 
@@ -78,7 +80,7 @@ Set-Location '$Android'
  $Timer.Stop();$Result=[ordered]@{schema=1;purpose="M8-C3 final Gradle-only compile continuation";outcome=$Outcome;failure=$Failure;priorStateSha256=$PriorHash
  sourceCommit=$ExpectedSource;windowsHead=$Head;branch=$Branch;startedUtc=$Started.ToString("o");completedUtc=(Get-Date).ToUniversalTime().ToString("o");durationSeconds=[math]::Round($Timer.Elapsed.TotalSeconds,2)
  rustSoSha256=$ExpectedSoHash;bindingSha256=$ExpectedBindingHash;gradleProcessId=$ProcessId;debugApkPath=$Apk;debugApkSize=$ApkSize;debugApkSha256=$ApkHash
- failedDiskOffline=$true;pagefileOnC=$true;adbUsed=$false;phonesChanged=$false;publicTrafficSent=$false}
+ failedDiskSafe=$true;failedDiskState=$FailedDiskState;pagefileOnC=$true;adbUsed=$false;phonesChanged=$false;publicTrafficSent=$false}
  $Result|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $State -Encoding UTF8;$Hash=(Get-FileHash -LiteralPath $State -Algorithm SHA256).Hash
  Write-Host "";Write-Host "Gradle-only outcome: $Outcome";Write-Host "State: $State";Write-Host "State SHA256: $Hash";Write-Host "Gradle process: $ProcessId"
  Write-Host "Rust .so: $ExpectedSoHash";Write-Host "Binding: $ExpectedBindingHash";Write-Host "Debug APK: $ApkSize bytes / $ApkHash";Write-Host "ADB/phones/traffic: False / False / False"
