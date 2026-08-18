@@ -2586,8 +2586,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   защита `DeviceIdentityMarker` в `noBackupFilesDir`: создаётся только при успешном onboarding;
   `MessengerApplication` до Room/services удаляет restored p2p prefs, Room DB, relay/key files,
   если identity_created есть, а device marker отсутствует. `CheckIdentityUseCase` требует оба
-  доказательства. Нужны compile и clean v11.16.21 test; это должно нейтрализовать даже уже
-  существующий старый cloud backup.
+  доказательства. v11.16.21 compile PASS (`001E12F3…74513`, APK `840B8CCF…38616`) до phone install.
+  Pre-install review выявил migration hazard: marker отсутствует и у легитимных pre-marker users,
+  поэтому unconditional discard стёр бы их при обычном update. Исправлено до установки v11.16.21:
+  `RelayAtRestMasterKey.hasUsablePersistedKey()` делает read-only unwrap только уже существующим
+  Keystore key. Если usable — создаётся marker и identity сохраняется; если blob restored, а key
+  после uninstall отсутствует — stale state удаляется. Нужен новый compile v11.16.22; v11.16.21
+  на телефоны НЕ ставился.
 
 ---
 

@@ -26,6 +26,17 @@ object DeviceIdentityMarker {
         val restoredIdentity = app.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .getBoolean("identity_created", false)
         if (!restoredIdentity || isPresent(app)) return false
+
+        // One-time migration for a legitimate pre-marker installation: its
+        // wrapped secret still decrypts with this app UID's Keystore key.
+        if (RelayAtRestMasterKey.hasUsablePersistedKey(app)) {
+            create(app)
+            Log.i(TAG, "Created device marker for existing usable local identity")
+            return false
+        }
+
+        // Restored backup: prefs/blob exist, but the device-bound Keystore key
+        // was removed on uninstall or belongs to another installation.
         discardRestoredState(app)
         return true
     }

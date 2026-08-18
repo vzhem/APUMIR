@@ -83,6 +83,27 @@ object RelayAtRestMasterKey {
         }
     }
 
+    /**
+     * Проверка migration marker: persisted blob должен расшифровываться уже
+     * существующим Keystore-ключом. Ничего не создаёт и не изменяет.
+     */
+    fun hasUsablePersistedKey(context: Context): Boolean {
+        val encoded = context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PREF_WRAPPED_BLOB, null) ?: return false
+        return try {
+            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+            val wrapKey = (keyStore.getEntry(WRAP_ALIAS, null) as? KeyStore.SecretKeyEntry)
+                ?.secretKey ?: return false
+            val material = unwrap(encoded, wrapKey)
+            material.secret.fill(0)
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "Persisted at-rest key is not usable on this installation")
+            false
+        }
+    }
+
     /** keyId сохранённого blob (диагностика; материал не возвращается). */
     fun persistedKeyId(context: Context): Int? {
         val encoded = context.applicationContext
@@ -177,14 +198,15 @@ object RelayAtRestMasterKey {
         }
     }
 
-    private fun unwrap(encoded: String): UnwrappedMaster {
+    private fun unwrap(encoded: String): UnwrappedMaster = unwrap(encoded, ensureWrapKey())
+
+    private fun unwrap(encoded: String, wrapKey: SecretKey): UnwrappedMaster {
         val blob = Base64.decode(encoded, Base64.NO_WRAP)
         require(blob.size > BLOB_HEADER_BYTES + GCM_IV_BYTES) { "corrupt wrapped blob length" }
         val keyId = ((blob[0].toInt() and 0xFF) shl 8) or (blob[1].toInt() and 0xFF)
         val iv = blob.copyOfRange(BLOB_HEADER_BYTES, BLOB_HEADER_BYTES + GCM_IV_BYTES)
         val ciphertext = blob.copyOfRange(BLOB_HEADER_BYTES + GCM_IV_BYTES, blob.size)
 
-        val wrapKey = ensureWrapKey()
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, wrapKey, GCMParameterSpec(GCM_TAG_BITS, iv))
         val secret = cipher.doFinal(ciphertext) // AEADBadTagException при чужом ключе
