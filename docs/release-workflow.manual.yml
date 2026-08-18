@@ -1,0 +1,118 @@
+name: Build Release APK (manual)
+
+# РУЧНОЙ запуск (workflow_dispatch). По push тега сборка НЕ запускается.
+#
+# Причина: проверенный релиз APUMIR собирается локально (Windows), потому что
+# Rust-ядро пересобирается через build-rust.bat / build-rust.ps1 и новые .so
+# кладутся в android-app/app/src/main/jniLibs. Этот workflow собирает только
+# Kotlin/Gradle часть и использует УЖЕ закоммиченные .so — он НЕ пересобирает
+# Rust. Поэтому авто-сборка по тегу могла опубликовать APK со старым ядром
+# (проблема v11.16.3: workflow пересобрал APK и добавил лишний asset).
+#
+# Порядок для настоящего релиза — docs/RELEASE_PROCESS.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия, например v11.17.0 (regex ^v[0-9]+\.[0-9]+(\.[0-9]+)?$)'
+        required: false
+        default: ''
+      publish:
+        description: 'Опубликовать DRAFT релиз на GitHub? (true/false)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${GITHUB_REF_NAME:-}"
+          fi
+          VERSION="${VERSION#refs/tags/}"
+          if ! echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::Invalid version format: '$VERSION' (expected ^v[0-9]+\.[0-9]+(\.[0-9]+)?$)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./android-app/gradlew
+
+      - name: Build Release APK
+        working-directory: ./android-app
+        run: ./gradlew :app:assembleRelease --no-daemon -PreleaseVersionName=${{ steps.version.outputs.version }}
+
+      - name: Rename APK and compute checksum
+        id: checksum
+        working-directory: ./android-app
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cp app/build/outputs/apk/release/app-release.apk "P2P-Messenger-$VERSION.apk"
+          SUM=$(sha256sum "P2P-Messenger-$VERSION.apk" | cut -d' ' -f1)
+          echo "$SUM  P2P-Messenger-$VERSION.apk" > "P2P-Messenger-$VERSION.apk.sha256"
+          echo "sha256=$SUM" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: P2P-Messenger-${{ steps.version.outputs.version }}
+          path: |
+            android-app/P2P-Messenger-${{ steps.version.outputs.version }}.apk
+            android-app/P2P-Messenger-${{ steps.version.outputs.version }}.apk.sha256
+
+      - name: Publish draft release
+        if: github.event.inputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: P2P Messenger ${{ steps.version.outputs.version }}
+          draft: true
+          prerelease: false
+          files: |
+            android-app/P2P-Messenger-${{ steps.version.outputs.version }}.apk
+            android-app/P2P-Messenger-${{ steps.version.outputs.version }}.apk.sha256
+          body: |
+            ## P2P Messenger ${{ steps.version.outputs.version }}
+
+            Сборка из workflow (manual dispatch).
+
+            **ВНИМАНИЕ**: этот APK собран из закоммиченных `.so` (Rust-ядро здесь
+            НЕ пересобиралось). Для релиза с изменениями в Rust соберите APK
+            локально по `docs/RELEASE_PROCESS.md` и замените asset вручную.
+
+            ### SHA-256
+            `${{ steps.checksum.outputs.sha256 }}`
+
+            ### Установка
+            1. Скачайте `P2P-Messenger-${{ steps.version.outputs.version }}.apk`
+            2. Разрешите установку из неизвестных источников
+            3. Установите поверх текущей версии (данные сохранятся)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
