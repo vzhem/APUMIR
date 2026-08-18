@@ -2633,7 +2633,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Это закрывает основной M8 durable 3-phone delivery/process-death/exactly-once/cleanup gate.
   Не закрыты: фактический WorkManager wake при stopped foreground service, delayed relay D+reboot,
   mixed N↔N-1 и security/release gates. Старый message у Zhenya останется до TTL (до fanout fix),
-  это зафиксированный pre-fix evidence, не новый cleanup failure.
+  это зафиксированный pre-fix evidence, не новый cleanup failure. Пользователь после PASS явно
+  решил, что проверок достаточно, и выбрал публичный **stable/Latest v11.16.23**, затем verified
+  external backup. Добавлен PC-only signed stable release build gate: exact tested source/native/
+  binding, release signer F843…, lintVital aggregate excluded, staging `C:\\APU-RELEASE-v11.16.23`;
+  публикация/ADB/phones отсутствуют до отдельной digest verification.
 
 ---
 
