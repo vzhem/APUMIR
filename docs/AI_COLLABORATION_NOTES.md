@@ -2482,6 +2482,22 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   hash и только его dirty status, запускает isolated bindgen, проверяет четыре C3 Kotlin API и затем
   `assembleDebug`. Успешный `.so` не пересобирать/не восстанавливать; old evidence сохранить.
 
+- **2026-08-18 (доп.202) — PC storage incident изолирован, recovery backup PASS, D: выведен из
+  эксплуатации:** после bindgen PASS Gradle сначала остановился на отсутствующем `local.properties`;
+  при следующем действии PC получил BSOD. Диагностика доказала два crash (`0x1A PAGE_HASH_ERRORS`,
+  `0x154 UNEXPECTED_STORE_EXCEPTION`), `cl.exe/c1.dll` с `0xc0000006`, NTFS corruption и реальные
+  `c0000483 disk read errors` на HDD D: `ST1000DM010-2EP102` serial `Z9AM7JYH`, где находились
+  Visual Studio и pagefile. Это hardware/storage boundary, не APU defect. USB Disk 2 serial
+  `2240331293279315997` (старый corrupt exFAT, пользователь разрешил стереть) guarded-format NTFS
+  `APU_RECOVERY`, затем backup `E:\\APU_RECOVERY_20260818_M8C3` PASS: repo, 25 evidence items,
+  verified Git bundle SHA `83CE8009…B871F9`, 3 crash dumps, events; backup-state SHA
+  `C8DC7311…D4BEAAA`, USB Healthy/clean. USB безопасно offline/отключён. Pagefile перенесён на C:
+  (active 16 GiB), failed Disk 1 переведён offline; D: больше не использовать/не форматировать для
+  APU. Сохранённые outputs: arm64 `.so` 7,369,056 B `F4D2FABF…DAF824`; binding
+  `31BD5505…B610F2`. Добавлен final single-use `scripts/m8_c3_gradle_only_gate.ps1`: требует exact
+  artifacts/evidence, failed disk offline, pagefile C-only и valid SDK local.properties; запускает
+  только `assembleDebug`, Rust/bindgen/ADB/phones не повторяет.
+
 ---
 
 ---
