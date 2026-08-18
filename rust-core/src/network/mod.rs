@@ -11,6 +11,7 @@ pub mod store_and_forward;
 //! - **relay**             — ретрансляция (следующий этап)
 //! - **router**            — маршрутизация (следующий этап)
 //! - **message_queue**     — store-and-forward (следующий этап)
+//! - **custody**           — зашифрованное постоянное хранилище relay-очереди (M8)
 //! - **presence**          — Gossip Protocol (следующий этап)
 //! - **fallback_chain**    — каскадный поиск соединения (следующий этап)
 //! - **adaptive_polling**  — экспоненциальный backoff (следующий этап)
@@ -18,6 +19,7 @@ pub mod store_and_forward;
 pub mod adaptive_polling;
 pub mod connection_manager;
 pub mod connection_pool;
+pub mod custody;
 pub mod dht;
 pub mod fallback_chain;
 pub mod ice;
@@ -31,11 +33,15 @@ pub mod router;
 
 // Реэкспорты для удобства
 pub use connection_pool::{ConnectionPool, ConnectionPoolError};
+pub use custody::{
+    derive_custody_key, load_custody, save_custody, CustodyError, CustodyResult, CUSTODY_KEY_INFO,
+};
 pub use dht::{bucket_index, xor_distance, Bucket, DhtNodeInfo, RoutingTable};
 pub use ice::{IceError, StunClient, DEFAULT_STUN_SERVERS};
 pub use mdns::{DiscoveredNode, MdnsError, MdnsService};
 pub use message_queue::{
-    MessageQueue, QueueError, QueuedMessage, DEFAULT_MESSAGE_TTL, MAX_RETRY_COUNT,
+    MessageQueue, QueueError, QueuedMessage, QueuedMessageSnapshot, DEFAULT_MESSAGE_TTL,
+    MAX_RETRY_COUNT,
 };
 pub use presence::{GossipDecision, KnownNode, PresenceManager, DEFAULT_GOSSIP_TTL};
 pub use quic_client::{QuicClient, QuicClientError, QuicConnection};

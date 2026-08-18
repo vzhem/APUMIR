@@ -841,6 +841,8 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_p2p_core_fn_func_create_engine_with_keys(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
+    fun uniffi_p2p_core_fn_func_create_engine_with_custody(`displayName`: RustBuffer.ByValue,`custodyPath`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Pointer
     fun uniffi_p2p_core_fn_func_get_protocol_version(uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_func_get_version(uniffi_out_err: UniffiRustCallStatus, 
@@ -2478,6 +2480,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     )
     }
     
+ fun `createEngineWithCustody`(`displayName`: kotlin.String, `custodyPath`: kotlin.String, `publicKey`: kotlin.String, `privateKey`: kotlin.String): P2pCoreHandle {
+            return FfiConverterTypeP2PCoreHandle.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_engine_with_custody(
+        FfiConverterString.lower(`displayName`),FfiConverterString.lower(`custodyPath`),FfiConverterString.lower(`publicKey`),FfiConverterString.lower(`privateKey`),_status)
+}
+    )
+    }
+
  fun `getProtocolVersion`(): kotlin.UByte {
             return FfiConverterUByte.lift(
     uniffiRustCall() { _status ->

@@ -83,6 +83,18 @@ impl CryptoManager {
         self.node_id.lock().unwrap().clone()
     }
 
+    /// Получить приватный ключ (hex).
+    ///
+    /// Используется внутри ядра для вывода детерминированных ключей
+    /// (например, ключа шифрования relay-custody). НЕ передаётся в Kotlin.
+    pub fn private_key(&self) -> Option<String> {
+        self.key_pair
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|kp| kp.private_key.clone())
+    }
+
     /// Есть ли ключи?
     pub fn has_keys(&self) -> bool {
         self.key_pair.lock().unwrap().is_some()

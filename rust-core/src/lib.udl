@@ -9,6 +9,7 @@ namespace p2p_core {
 
     P2PCoreHandle create_engine(string display_name);
     P2PCoreHandle create_engine_with_keys(string display_name, string public_key, string private_key);
+    P2PCoreHandle create_engine_with_custody(string display_name, string custody_path, string public_key, string private_key);
 };
 
 [Error]

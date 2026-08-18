@@ -263,6 +263,27 @@ pub fn create_engine_with_keys(
         inner: std::sync::Mutex::new(P2PCore::new(config)),
     })
 }
+
+/// Создать движок с зашифрованным постоянным хранилищем relay-custody (M8).
+///
+/// `custody_path` — путь к файлу, в котором будет сохраняться/восстанавливаться
+/// очередь store-and-forward (сообщения, которые узел держит для офлайн-получателей).
+/// Пустые `public_key`/`private_key` означают «сгенерировать новую пару ключей».
+pub fn create_engine_with_custody(
+    display_name: String,
+    custody_path: String,
+    public_key: String,
+    private_key: String,
+) -> std::sync::Arc<P2PCoreHandle> {
+    let mut config = EngineConfig::new(display_name)
+        .with_custody(custody_path);
+    if !public_key.is_empty() && !private_key.is_empty() {
+        config = config.with_keys(public_key, private_key);
+    }
+    std::sync::Arc::new(P2PCoreHandle {
+        inner: std::sync::Mutex::new(P2PCore::new(config)),
+    })
+}
 // ============================================================
 // Conversion helpers
 // ============================================================

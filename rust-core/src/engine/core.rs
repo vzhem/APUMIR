@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -51,6 +51,9 @@ impl std::fmt::Display for EngineState {
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub db_path: Option<String>,
+    /// Путь к файлу зашифрованной relay-custody (очередь store-and-forward).
+    /// Если `None` — custody не персистится (работает только в памяти).
+    pub custody_path: Option<String>,
     pub display_name: String,
     pub existing_public_key: Option<String>,
     pub existing_private_key: Option<String>,
@@ -62,6 +65,7 @@ impl Default for EngineConfig {
     fn default() -> Self {
         Self {
             db_path: None,
+            custody_path: None,
             display_name: "Anonymous".into(),
             existing_public_key: None,
             existing_private_key: None,
@@ -81,6 +85,11 @@ impl EngineConfig {
 
     pub fn with_db(mut self, path: String) -> Self {
         self.db_path = Some(path);
+        self
+    }
+
+    pub fn with_custody(mut self, path: String) -> Self {
+        self.custody_path = Some(path);
         self
     }
 
@@ -204,6 +213,9 @@ impl P2PCore {
         }
         tracing::info!("Network stack initialized: Router+DHT+Relay+Presence+Queue");
 
+        // ── M8: восстановить зашифрованную relay-custody после process death/reboot ──
+        self.restore_custody();
+
         let _ = self
             .storage
             .save_user(node_id.clone(), self.config.display_name.clone(), true);
@@ -236,6 +248,13 @@ impl P2PCore {
         let queue2 = self.message_queue.clone();
         let display_name = self.config.display_name.clone();
         let quic_port = self.config.quic_port;
+
+        // M8: путь и ключ для периодического автосохранения relay-custody
+        let custody_parts: Option<(std::path::PathBuf, [u8; 32])> = self
+            .config
+            .custody_path
+            .as_ref()
+            .and_then(|p| self.custody_key().map(|k| (std::path::PathBuf::from(p.clone()), k)));
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -274,6 +293,7 @@ impl P2PCore {
                 let display_mqtt = display_name.clone();
                 let public_addr_mqtt = Arc::clone(&public_addr_arc);
                 let queue_mqtt = queue2.clone();
+                let queue_autosave = queue2.clone();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -303,7 +323,30 @@ impl P2PCore {
                 runtime.spawn(async move {
                     Self::run_stun_discovery(public_addr_stun).await;
                 });
-self.runtime = Some(runtime);
+
+                // ── M8: периодическое автосохранение relay-custody ──
+                if let (Some((custody_path, custody_key)), Some(queue_autosave)) =
+                    (custody_parts, queue_autosave)
+                {
+                    runtime.spawn(async move {
+                        let mut interval =
+                            tokio::time::interval(std::time::Duration::from_secs(30));
+                        interval.tick().await; // пропускаем первый немедленный тик
+                        loop {
+                            interval.tick().await;
+                            let snapshots = queue_autosave.export_snapshots().await;
+                            if let Err(e) = crate::network::custody::save_custody(
+                                &custody_path,
+                                &custody_key,
+                                &snapshots,
+                            ) {
+                                tracing::warn!("Custody autosave failed: {}", e);
+                            }
+                        }
+                    });
+                }
+
+                self.runtime = Some(runtime);
                 tracing::info!("Async runtime started (mDNS + QUIC)");
             }
         }
@@ -929,12 +972,116 @@ self.runtime = Some(runtime);
         true
     }
     pub fn stop(&mut self) {
+        // ── M8: зашифрованно сохранить relay-custody перед «сном» ──
+        self.persist_custody();
+
         self.network.stop();
         if let Some(rt) = self.runtime.take() {
             rt.shutdown_background();
         }
         self.state = EngineState::Stopped;
         self.events.emit(CoreEvent::EngineStopped);
+    }
+
+    /// Детерминированный ключ шифрования relay-custody (из секрета узла).
+    ///
+    /// Один и тот же узел (тот же приватный ключ) получает тот же ключ после
+    /// перезапуска, поэтому сохранённая custody корректно расшифровывается.
+    fn custody_key(&self) -> Option<[u8; 32]> {
+        let secret = self.crypto.private_key()?;
+        let public = self.crypto.public_key()?;
+        crate::network::custody::derive_custody_key(secret.as_bytes(), public.as_bytes()).ok()
+    }
+
+    /// Зашифрованно сохранить relay-custody на диск.
+    ///
+    /// Вызывается в `stop()` (перед остановкой) и периодическим
+    /// автосохранением в фоне. Возвращает `false`, если custody не настроена
+    /// или запись не удалась.
+    pub fn persist_custody(&self) -> bool {
+        let path = match self.config.custody_path.as_ref() {
+            Some(p) => std::path::PathBuf::from(p),
+            None => {
+                tracing::debug!("Custody: путь не задан — пропускаем сохранение");
+                return false;
+            }
+        };
+        let key = match self.custody_key() {
+            Some(k) => k,
+            None => return false,
+        };
+        let queue = match &self.message_queue {
+            Some(q) => Arc::clone(q),
+            None => return false,
+        };
+
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(_) => return false,
+        };
+        let snapshots = rt.block_on(queue.export_snapshots());
+        match crate::network::custody::save_custody(&path, &key, &snapshots) {
+            Ok(()) => {
+                tracing::info!("Custody: сохранено {} сообщений", snapshots.len());
+                true
+            }
+            Err(e) => {
+                tracing::warn!("Custody: не удалось сохранить: {}", e);
+                false
+            }
+        }
+    }
+
+    /// Восстановить relay-custody с диска после перезапуска.
+    ///
+    /// Просроченные сообщения отбрасываются, TTL остальных сохраняется.
+    /// После восстановления очередь продолжает принимать новые relay-items
+    /// и доставлять накопленные сообщения при обнаружении получателя.
+    /// Возвращает число восстановленных сообщений.
+    fn restore_custody(&self) -> usize {
+        let path = match self.config.custody_path.as_ref() {
+            Some(p) => std::path::PathBuf::from(p),
+            None => return 0,
+        };
+        let key = match self.custody_key() {
+            Some(k) => k,
+            None => return 0,
+        };
+        let queue = match &self.message_queue {
+            Some(q) => Arc::clone(q),
+            None => return 0,
+        };
+
+        let snapshots = match crate::network::custody::load_custody(&path, &key) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    "Custody: не удалось загрузить ({}) — начинаем с пустой очереди",
+                    e
+                );
+                return 0;
+            }
+        };
+        if snapshots.is_empty() {
+            return 0;
+        }
+
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(_) => return 0,
+        };
+        let restored = rt.block_on(queue.restore(snapshots));
+        tracing::info!(
+            "Custody: восстановлено {} сообщений для ретрансляции",
+            restored
+        );
+        restored
     }
 
     pub fn node_id(&self) -> Option<String> {

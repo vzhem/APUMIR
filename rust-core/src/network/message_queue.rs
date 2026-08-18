@@ -21,11 +21,15 @@
 //! - API для добавления, получения, удаления
 //! - Автоматическая очистка просроченных
 //!
-//! ## Что НЕ делает (будет в Фазе 1.6):
+//! ## Персистентность (этап M8)
 //!
-//! - Персистентность в SQLite — сейчас всё в RAM
-//! - При перезапуске приложения — очередь теряется
+//! Очередь сама по себе живёт в RAM. Постоянное зашифрованное хранение
+//! («custody») добавлено в модуле `custody`: `export_snapshots()` /
+//! `restore()` переводят сообщения в сериализуемые снапшоты с абсолютным
+//! wall-clock deadline, поэтому TTL переживает перезапуск процесса и не
+//! сбрасывается.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -137,6 +141,80 @@ impl QueuedMessage {
     pub fn increment_retry(&mut self) {
         self.retry_count += 1;
     }
+
+    /// Преобразовать в сериализуемый снапшот (для сохранения custody на диск).
+    ///
+    /// `Instant` не переживает перезапуск процесса, поэтому снапшот хранит
+    /// абсолютное wall-clock время в миллисекундах Unix. Оставшийся TTL
+    /// при этом сохраняется.
+    pub fn to_snapshot(&self) -> QueuedMessageSnapshot {
+        QueuedMessageSnapshot {
+            msg_id: self.msg_id,
+            recipient: self.recipient,
+            payload: self.payload.clone(),
+            queued_at_ms: self.absolute_queued_ms(),
+            expires_at_ms: self.absolute_deadline_ms(),
+            retry_count: self.retry_count,
+        }
+    }
+
+    /// Восстановить сообщение из снапшота, сохранив исходный абсолютный
+    /// deadline (TTL не сбрасывается). Если сообщение уже просрочено,
+    /// возвращаемый объект сразу считается истёкшим.
+    pub fn from_snapshot(snapshot: QueuedMessageSnapshot) -> Self {
+        let now = Instant::now();
+        let now_ms = crate::storage::models::now_ms();
+        let remaining_ms = snapshot.expires_at_ms.saturating_sub(now_ms).max(0) as u64;
+        let elapsed_ms = now_ms.saturating_sub(snapshot.queued_at_ms).max(0) as u64;
+
+        QueuedMessage {
+            msg_id: snapshot.msg_id,
+            recipient: snapshot.recipient,
+            payload: snapshot.payload,
+            queued_at: now
+                .checked_sub(Duration::from_millis(elapsed_ms))
+                .unwrap_or(now),
+            expires_at: now
+                .checked_add(Duration::from_millis(remaining_ms))
+                .unwrap_or(now),
+            retry_count: snapshot.retry_count,
+        }
+    }
+
+    /// Абсолютный deadline (Unix ms) с сохранением оставшегося TTL.
+    fn absolute_deadline_ms(&self) -> i64 {
+        let now = Instant::now();
+        let now_ms = crate::storage::models::now_ms();
+        let remaining = self.expires_at.saturating_duration_since(now);
+        now_ms.saturating_add(remaining.as_millis().min(i64::MAX as u128) as i64)
+    }
+
+    /// Абсолютное время постановки в очередь (Unix ms).
+    fn absolute_queued_ms(&self) -> i64 {
+        let now = Instant::now();
+        let now_ms = crate::storage::models::now_ms();
+        let elapsed = now.saturating_duration_since(self.queued_at);
+        now_ms.saturating_sub(elapsed.as_millis().min(i64::MAX as u128) as i64)
+    }
+}
+
+/// Сериализуемый снапшот одного сообщения очереди.
+///
+/// В отличие от [`QueuedMessage`] (который хранит `Instant`), снапшот хранит
+/// абсолютное wall-clock время в миллисекундах Unix. Благодаря этому TTL
+/// сообщений переживает перезапуск процесса и не сбрасывается при
+/// восстановлении зашифрованной custody (этап M8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueuedMessageSnapshot {
+    pub msg_id: [u8; 16],
+    pub recipient: [u8; 32],
+    pub payload: Vec<u8>,
+    /// Время постановки в очередь (Unix ms).
+    pub queued_at_ms: i64,
+    /// Абсолютный deadline (Unix ms) — когда сообщение истекает.
+    pub expires_at_ms: i64,
+    /// Число уже сделанных попыток доставки.
+    pub retry_count: u32,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -321,6 +399,43 @@ impl MessageQueue {
     /// Есть ли сообщения для получателя.
     pub async fn has_messages_for(&self, recipient: &[u8; 32]) -> bool {
         self.count_for(recipient).await > 0
+    }
+
+    // ─── Persistence / custody (M8) ───────────────────────────────
+
+    /// Экспортировать все сообщения очереди в сериализуемые снапшоты.
+    ///
+    /// Используется для зашифрованного сохранения relay-custody перед «сном»
+    /// (остановкой приложения / завершением процесса).
+    pub async fn export_snapshots(&self) -> Vec<QueuedMessageSnapshot> {
+        let queue = self.queue.lock().await;
+        let mut snapshots = Vec::new();
+        for messages in queue.values() {
+            for msg in messages {
+                snapshots.push(msg.to_snapshot());
+            }
+        }
+        snapshots
+    }
+
+    /// Восстановить очередь из снапшотов после перезапуска.
+    ///
+    /// Просроченные сообщения отбрасываются; у остальных сохраняется
+    /// исходный абсолютный deadline (TTL не сбрасывается). Возвращает число
+    /// восстановленных сообщений.
+    pub async fn restore(&self, snapshots: Vec<QueuedMessageSnapshot>) -> usize {
+        let now_ms = crate::storage::models::now_ms();
+        let mut restored = 0;
+        for snapshot in snapshots {
+            if snapshot.expires_at_ms <= now_ms {
+                continue; // Просрочено — не восстанавливаем
+            }
+            let msg = QueuedMessage::from_snapshot(snapshot);
+            if self.enqueue(msg).await.is_ok() {
+                restored += 1;
+            }
+        }
+        restored
     }
 }
 
@@ -609,5 +724,70 @@ mod tests {
         assert!(MAX_RETRY_COUNT >= 3);
         assert!(MAX_RETRY_COUNT <= 100);
         println!("✅ MAX_RETRY_COUNT разумный: {}", MAX_RETRY_COUNT);
+    }
+
+    // ── Persistence / custody (M8) ────────────────────────────────
+
+    #[tokio::test]
+    async fn test_export_restore_roundtrip_preserves_ttl() {
+        let q = MessageQueue::new();
+        q.enqueue(make_message(0x42, 0x01)).await.unwrap();
+
+        let snapshots = q.export_snapshots().await;
+        assert_eq!(snapshots.len(), 1);
+
+        // Полный TTL ≈ 7 дней (на момент экспорта).
+        let ttl_ms = snapshots[0].expires_at_ms - snapshots[0].queued_at_ms;
+        assert!(
+            ttl_ms > 6 * 24 * 3600 * 1000,
+            "TTL должен быть ~7 дней, получили {}",
+            ttl_ms
+        );
+
+        // Восстанавливаем в новую очередь (имитация перезапуска).
+        let q2 = MessageQueue::new();
+        let restored = q2.restore(snapshots.clone()).await;
+        assert_eq!(restored, 1);
+
+        // Deadline не изменился — TTL не сброшен.
+        let snapshots2 = q2.export_snapshots().await;
+        assert_eq!(snapshots2.len(), 1);
+        let drift = (snapshots2[0].expires_at_ms - snapshots[0].expires_at_ms).abs();
+        assert!(
+            drift <= 100,
+            "Deadline сдвинулся на {} ms — TTL сброшен",
+            drift
+        );
+    }
+
+    #[tokio::test]
+    async fn test_restore_filters_expired() {
+        let q = MessageQueue::new();
+        let now = crate::storage::models::now_ms();
+
+        let expired = QueuedMessageSnapshot {
+            msg_id: make_msg_id(1),
+            recipient: make_recipient(0x42),
+            payload: vec![1, 2, 3],
+            queued_at_ms: now - 10_000,
+            expires_at_ms: now - 1, // уже истекло
+            retry_count: 5,
+        };
+        let fresh = QueuedMessageSnapshot {
+            msg_id: make_msg_id(2),
+            recipient: make_recipient(0x42),
+            payload: vec![4, 5, 6],
+            queued_at_ms: now,
+            expires_at_ms: now + 60_000, // 60 секунд осталось
+            retry_count: 3,
+        };
+
+        let restored = q.restore(vec![expired, fresh]).await;
+        assert_eq!(restored, 1);
+
+        let messages = q.peek_for(&make_recipient(0x42)).await;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].msg_id, make_msg_id(2));
+        assert_eq!(messages[0].retry_count, 3);
     }
 }

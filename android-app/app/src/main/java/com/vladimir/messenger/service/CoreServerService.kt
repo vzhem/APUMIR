@@ -123,7 +123,9 @@ class CoreServerService : Service() {
         Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
 
         serviceScope.launch {
-            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey)
+            // M8: зашифрованное постоянное хранилище relay-custody в файлах приложения
+            val custodyPath = java.io.File(filesDir, "relay_custody.bin").absolutePath
+            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, custodyPath)
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")

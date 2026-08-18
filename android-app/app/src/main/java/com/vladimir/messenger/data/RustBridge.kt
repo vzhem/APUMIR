@@ -6,6 +6,7 @@ import uniffi.p2p_core.CoreEventFfi
 import uniffi.p2p_core.MessageFfi
 import uniffi.p2p_core.P2pCoreHandle
 import uniffi.p2p_core.createEngine
+import uniffi.p2p_core.createEngineWithCustody
 import uniffi.p2p_core.createEngineWithKeys
 import uniffi.p2p_core.getVersion
 import uniffi.p2p_core.initializeCore
@@ -24,6 +25,7 @@ object RustBridge {
         displayName: String,
         existingPublicKey: String? = null,
         existingPrivateKey: String? = null,
+        custodyPath: String? = null,
     ): Boolean {
         if (engine != null) {
             Log.w(TAG, "Engine already initialized")
@@ -39,12 +41,25 @@ object RustBridge {
 
             Log.i(TAG, "Rust version: ${getVersion()}")
 
-            val e = if (!existingPublicKey.isNullOrEmpty()) {
-                Log.i(TAG, "Restoring engine with key: ${existingPublicKey.take(16)}")
-                createEngineWithKeys(displayName, existingPublicKey, existingPrivateKey ?: "")
-            } else {
-                Log.i(TAG, "Creating engine without existing keys")
-                createEngine(displayName)
+            val e = when {
+                // M8: постоянное зашифрованное хранилище relay-custody
+                !custodyPath.isNullOrBlank() ->
+                    createEngineWithCustody(
+                        displayName,
+                        custodyPath,
+                        existingPublicKey.orEmpty(),
+                        existingPrivateKey.orEmpty(),
+                    ).also {
+                        Log.i(TAG, "Creating engine with custody path: $custodyPath")
+                    }
+                !existingPublicKey.isNullOrEmpty() -> {
+                    Log.i(TAG, "Restoring engine with key: ${existingPublicKey.take(16)}")
+                    createEngineWithKeys(displayName, existingPublicKey, existingPrivateKey ?: "")
+                }
+                else -> {
+                    Log.i(TAG, "Creating engine without existing keys")
+                    createEngine(displayName)
+                }
             }
 
             val ok = e.start()
