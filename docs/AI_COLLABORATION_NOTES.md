@@ -2650,7 +2650,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `C8DC7311…D4BEAAA` unchanged. Добавлен compact latest backup harness: release assets, source zip,
   all-refs bundle+restore rehearsal, tested native, new M8/release evidence (старые huge compiler
   caches остаются в previous), full SHA-256 manifest; previous backup не удаляется и диск не
-  форматируется.
+  форматируется. **External backup PASS:** `E:\\APU_BACKUP_v11.16.23_20260819`, 95 files /
+  76 evidence items, APK hash exact, bundle verify+restore rehearsal PASS, previous retained;
+  backup-state `73633F88…965F5F`, manifest `6AC2CEBD…9C17B5`, E: NTFS Healthy/OK clean.
+  Release+backup milestone завершён; эти каталоги/manifest/state не удалять и не перезаписывать.
 
 ---
 

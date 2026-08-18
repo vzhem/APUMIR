@@ -109,8 +109,12 @@ Windows build/phone/evidence gates, добавленные во время M8 ac
 
 - Delayed relay D+reboot, mixed N↔N-1 и отдельный security audit остаются post-release gates.
 - Реальный WorkManager wake при остановленном foreground service требует отдельного OEM-теста.
-- Verified external backup выполняется сразу после публикации; previous/latest rotation будет
-  записана отдельным immutable результатом.
+- Verified external backup PASS: `E:\APU_BACKUP_v11.16.23_20260819`.
+- 95 файлов проверены по SHA-256; 76 evidence items; Git bundle verify + restore rehearsal PASS.
+- Backup state SHA-256: `73633F88E59596F9F6486031D935F6747095945F77877FFE34A0F45243965F5F`.
+- Manifest SHA-256: `6AC2CEBD3DCFE1FEFA3F696BB7744BEE61CFE20E1313110C914464724C9C17B5`.
+- Previous backup `E:\APU_RECOVERY_20260818_M8C3` сохранён без изменений; диск не форматировался.
+- USB `APU_RECOVERY`: NTFS, Healthy/OK, dirty=false после записи.
 
 ---
 
