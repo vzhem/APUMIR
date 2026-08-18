@@ -2608,6 +2608,17 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   wrong0/fatal0. Gate остановился до Zhenya, потому что её процесс уже не работал — это допустимый
   cold-start case, а не failure. Добавлен resume: immutable Anna PASS + Zhenya/Stas, где absent
   process запускается cold, running process получает own-UID SIGKILL; force-stop/clear не используются.
+- **2026-08-18 (доп.207) — strict durable chain выявил relay cleanup defect после delivery:** exact
+  message `710a724f-a560-434d-b084-9bb907cae65e` / `M8-DURABLE-20260818-01`: Anna retained+
+  outbound PASS, Zhenya stored PASS, после SIGKILL PID 28956→10265 restored durable PASS, Anna
+  offline, Stas вернулся online и получил/saved ровно один durable message + sent receipt PASS,
+  UI подтверждает два разных сообщения (online+durable), дубля нет. Но delayed DB capture
+  `EA473A34…7417E2` доказал Zhenya `targetMessageCount=1`, тогда как Stas=0+tombstone1:
+  receipt публиковался только в retained unique-origin topic, поэтому online intermediate relay
+  не видел его и не чистил custody. Исправление: recipient после authoritative retained origin
+  receipt дополнительно публикует non-retained hashed cleanup fanout `p2pm2/receipt/cleanup/<sha256>`;
+  wildcard-subscribed online relays применяют существующий receipt removal+tombstone path. Offline
+  relay сохраняет TTL fallback. Добавлен topic-bound test; нужен Rust build + новый телефонный chain.
 
 ---
 

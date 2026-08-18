@@ -122,6 +122,15 @@ pub struct PeerInfo {
     pub last_seen: i64,
 }
 
+fn mesh_receipt_key(msg_id: &str) -> Result<String, String> {
+    if msg_id.is_empty() || msg_id.len() > MAX_MESH_MESSAGE_ID_BYTES {
+        return Err("invalid receipt message id length".to_string());
+    }
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(msg_id.as_bytes());
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 fn mesh_receipt_topic(origin_node_id: &str, msg_id: &str) -> Result<String, String> {
     let safe_origin = !origin_node_id.is_empty()
         && origin_node_id.len() <= MAX_MESH_TOPIC_SEGMENT_BYTES
@@ -131,22 +140,19 @@ fn mesh_receipt_topic(origin_node_id: &str, msg_id: &str) -> Result<String, Stri
     if !safe_origin {
         return Err("invalid receipt origin topic segment".to_string());
     }
-    if msg_id.is_empty() || msg_id.len() > MAX_MESH_MESSAGE_ID_BYTES {
-        return Err("invalid receipt message id length".to_string());
-    }
-
     // Фиксированный SHA-256 suffix не позволяет msg_id с '/', '+' или '#'
     // создавать произвольные MQTT topics.
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(msg_id.as_bytes());
-    let receipt_key = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let receipt_key = mesh_receipt_key(msg_id)?;
     Ok(format!(
         "p2pm2/msg/{}/receipt/{}",
         origin_node_id, receipt_key
     ))
+}
+
+/// Non-retained cleanup fanout для online custody nodes. Origin всё равно
+/// получает authoritative retained receipt через [mesh_receipt_topic].
+fn mesh_cleanup_receipt_topic(msg_id: &str) -> Result<String, String> {
+    Ok(format!("p2pm2/receipt/cleanup/{}", mesh_receipt_key(msg_id)?))
 }
 
 pub struct MqttTransport {
@@ -1029,6 +1035,42 @@ impl MqttTransport {
         }
     }
 
+    /// Online relay nodes тоже должны удалить custody сразу после доставки.
+    /// Cleanup fanout non-retained: не создаёт вечный retained мусор; offline
+    /// relay в худшем случае удалит запись по исходному TTL.
+    pub async fn send_mesh_cleanup_receipt(
+        &self,
+        msg_id: &str,
+        payload: &str,
+    ) -> Result<(), String> {
+        let topic = mesh_cleanup_receipt_topic(msg_id)?;
+        #[cfg(feature = "mqtt-dual-broker")]
+        {
+            self.enqueue_publish_to_targets(
+                "mesh cleanup receipt publish",
+                &topic,
+                QoS::AtLeastOnce,
+                false,
+                payload.as_bytes().to_vec(),
+                self.active_brokers(),
+                false,
+            )
+            .await?;
+            return Ok(());
+        }
+        #[cfg(not(feature = "mqtt-dual-broker"))]
+        {
+            self.enqueue_publish(
+                "mesh cleanup receipt publish",
+                &topic,
+                QoS::AtLeastOnce,
+                false,
+                payload.as_bytes().to_vec(),
+            )
+            .await
+        }
+    }
+
     /// Только локальный origin имеет право очистить свой retained receipt.
     pub fn is_own_mesh_receipt_topic(&self, topic: &str, msg_id: &str) -> bool {
         mesh_receipt_topic(&self.node_id, msg_id)
@@ -1298,6 +1340,16 @@ mod tests {
         assert!(first.starts_with("p2pm2/msg/pk_origin/receipt/"));
         assert!(!first.contains("message/with+#wildcards"));
         assert_eq!(first.rsplit('/').next().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn cleanup_receipt_topic_is_shared_non_origin_path() {
+        let topic = mesh_cleanup_receipt_topic("message/with+#wildcards").unwrap();
+        assert!(topic.starts_with("p2pm2/receipt/cleanup/"));
+        assert_eq!(topic, mesh_cleanup_receipt_topic("message/with+#wildcards").unwrap());
+        assert!(!topic.contains("message/with+#wildcards"));
+        assert!(mesh_cleanup_receipt_topic("").is_err());
+        assert!(mesh_cleanup_receipt_topic(&"m".repeat(257)).is_err());
     }
 
     #[test]

@@ -1459,10 +1459,26 @@ self.runtime = Some(runtime);
                                             .send_mesh_receipt(&origin, &msg_id, &receipt)
                                             .await
                                         {
-                                            Ok(_) => tracing::info!(
-                                                "MESH receipt: {} sent automatically to unique origin topic",
-                                                msg_id
-                                            ),
+                                            Ok(_) => {
+                                                tracing::info!(
+                                                    "MESH receipt: {} sent automatically to unique origin topic",
+                                                    msg_id
+                                                );
+                                                match transport
+                                                    .send_mesh_cleanup_receipt(&msg_id, &receipt)
+                                                    .await
+                                                {
+                                                    Ok(_) => tracing::info!(
+                                                        "MESH receipt: {} cleanup fanout queued for relay nodes",
+                                                        msg_id
+                                                    ),
+                                                    Err(e) => tracing::warn!(
+                                                        "MESH receipt: cleanup fanout failed for {}: {}",
+                                                        msg_id,
+                                                        e
+                                                    ),
+                                                }
+                                            }
                                             Err(e) => tracing::warn!(
                                                 "MESH receipt: failed to send {}: {}",
                                                 msg_id,
