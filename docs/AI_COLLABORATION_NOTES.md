@@ -2500,6 +2500,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   После decommission Windows перестала перечислять Disk 1 через `Get-Disk`; это допустимое ещё
   более безопасное состояние (HDD физически отсутствует/не виден). Gradle gate исправлен: exact
   serial может быть либо present+offline, либо отсутствовать; present+online по-прежнему STOP.
+- **2026-08-18 (доп.203) — final Gradle attempt не стартовал из-за stale JAVA_HOME:** state
+  `185E997A…FF1AB8E`, duration 0.4 s, stderr exact `JAVA_HOME ... D:\\Android Studio\\jbr`;
+  Gradle/Kotlin compilation не начиналась, artifacts прежних Rust+bindgen PASS неизменны. На C:
+  найдены Android Studio JBR 21.0.10 (требование daemon toolchain=21), Temurin 17/25 и JBR17.
+  Добавлен single-use `scripts/m8_c3_java_home_recovery.ps1`: требует exact prior evidence/hashes,
+  D absent/offline + pagefile C, проверяет JDK21/javac/SDK и запускает только Gradle с process-local
+  `JAVA_HOME=C:\\Program Files\\Android\\Android Studio\\jbr`; системную environment не меняет,
+  Rust/bindgen/ADB/phones не запускает.
 
 ---
 
