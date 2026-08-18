@@ -2592,7 +2592,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `RelayAtRestMasterKey.hasUsablePersistedKey()` делает read-only unwrap только уже существующим
   Keystore key. Если usable — создаётся marker и identity сохраняется; если blob restored, а key
   после uninstall отсутствует — stale state удаляется. Нужен новый compile v11.16.22; v11.16.21
-  на телефоны НЕ ставился.
+  на телефоны НЕ ставился. Safe migration compile v11.16.22 PASS: state `32AA6AED…C90FA9`,
+  APK 29,299,813 B / `E89935E8…113ADC`, phones=false. Differential phone gate prepared:
+  replace-install all 3 (no uninstall); Anna v20 + Stas v19 legitimate usable Keystore identities
+  должны получить marker/preserve profile, Zhenya v20 restored-unusable identity должна быть
+  discarded/show onboarding. Проверяются exact logs/files/version, partial state после каждого.
 
 ---
 
