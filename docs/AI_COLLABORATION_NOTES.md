@@ -2618,7 +2618,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   не видел его и не чистил custody. Исправление: recipient после authoritative retained origin
   receipt дополнительно публикует non-retained hashed cleanup fanout `p2pm2/receipt/cleanup/<sha256>`;
   wildcard-subscribed online relays применяют существующий receipt removal+tombstone path. Offline
-  relay сохраняет TTL fallback. Добавлен topic-bound test; нужен Rust build + новый телефонный chain.
+  relay сохраняет TTL fallback. Добавлен topic-bound test; Rust/Gradle v11.16.23 build PASS:
+  state `6F2E47D2…6A51CB`, `.so` `6C3C12EA…B36F78`, APK 29,316,197 B /
+  `39111403…A0B30`, phones=false. Anna вернулась online и визуально получила eventual two ticks
+  для старого exact message. Добавлен guarded replace-update всех 3 на v11.16.23 с сохранением
+  identity/marker; затем нужен новый short offline chain и DB cleanup count=0 на relay.
 
 ---
 
