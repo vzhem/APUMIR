@@ -2546,7 +2546,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `scripts/m8e_clean_phone_install.ps1`: сначала строит/проверяет distinct debug v11.16.18 с signer
   4044, затем uninstall+clean install+controlled launch Anna/Zhenya/Stas, сохраняет partial state
   после каждого телефона. Uninstall здесь является явным удалением data/cache; отдельный clear не
-  нужен. Force-stop/log clear не используются.
+  нужен. Force-stop/log clear не используются. Clean install v11.16.18 PASS 3/3: state
+  `20FDAC7F…05F110`, APK 29,299,613 B / `3A06F85A…2CCCD`; data/cache deleted, controlled launch
+  PIDs Anna/Zhenya/Stas 15427/31191/27276. На Анне Android restore оставил stale identity flag
+  при пустых чатах; пользователь подтвердил targeted `pm clear` только Анны, reset state
+  `C6CBBC56…7A94CB`, затем вручную создал профиль/permissions; Женя/Стас не менялись. Все три
+  профиля теперь готовы. Добавлен read-only `scripts/m8e_phone_readiness_gate.ps1`: проверяет
+  current PID/version, current-process log markers schedule+engine+durable-encrypted/quarantine0,
+  WorkManager JobScheduler visibility и отсутствие fatal; phone writes отсутствуют.
 
 ---
 
