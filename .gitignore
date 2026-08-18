@@ -6,6 +6,7 @@ Cargo.lock
 
 # Android build outputs
 android-app/.gradle/
+android-app/.kotlin/
 android-app/app/build/
 android-app/build/
 android-app/captures/
