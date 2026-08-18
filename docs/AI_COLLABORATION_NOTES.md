@@ -2579,8 +2579,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   onboarding до 6-second assertion; state `64BA6573…1E566` пуст по phones и immutable. Read-only
   inventory доказал: Anna v11.16.20/new firstInstall, exact relay files 3/wrong0; Zhenya/Stas ещё
   v11.16.19 exact3/wrong0. Визуально Anna действительно показала onboarding, значит no-restore
-  сработал; её не трогать. Добавлен recovery только Zhenya/Stas: clean v11.16.20 и до пользовательских
-  действий assert profile=0/relay=0; Anna PID до/после должен быть неизменен.
+  сработал; её не трогать. Recovery только Zhenya/Stas остановился после Android install-confirm
+  на Жене: пользователь нажал только системную кнопку установки, затем через 6 s profile=1/relay=3,
+  значит старый backup dataset всё ещё восстановился вопреки новой policy (старый backup создан
+  предыдущей allowBackup=true версией/OEM restore semantics). Стас не затронут. Добавлена runtime
+  защита `DeviceIdentityMarker` в `noBackupFilesDir`: создаётся только при успешном onboarding;
+  `MessengerApplication` до Room/services удаляет restored p2p prefs, Room DB, relay/key files,
+  если identity_created есть, а device marker отсутствует. `CheckIdentityUseCase` требует оба
+  доказательства. Нужны compile и clean v11.16.21 test; это должно нейтрализовать даже уже
+  существующий старый cloud backup.
 
 ---
 

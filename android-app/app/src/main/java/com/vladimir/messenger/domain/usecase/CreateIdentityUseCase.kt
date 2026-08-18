@@ -3,6 +3,7 @@ package com.vladimir.messenger.domain.usecase
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -31,6 +32,10 @@ class CreateIdentityUseCase @Inject constructor(
             if (publicKey.isNullOrEmpty() || nodeId.isNullOrEmpty()) {
                 return Result.failure(Exception("Failed to generate keys"))
             }
+
+            // Device-local marker не попадает в backup. Восстановленные prefs без
+            // него не должны пропускать onboarding на новой установке.
+            DeviceIdentityMarker.create(context)
 
             // Сохраняем все данные identity включая "секрет" для восстановления
             val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)

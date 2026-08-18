@@ -1,8 +1,9 @@
-﻿package com.vladimir.messenger
+package com.vladimir.messenger
 
 import android.app.Application
 import android.util.Log
 import java.util.concurrent.TimeUnit
+import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import com.vladimir.messenger.worker.ProxyCollectorWorker
 import com.vladimir.messenger.worker.RelayWakeWorker
 import androidx.work.WorkManager
@@ -20,6 +21,8 @@ class MessengerApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Must run before Room/services/workers can observe restored stale state.
+        DeviceIdentityMarker.discardIfRestored(applicationContext)
         createNotificationChannels()
         scheduleBoundedRelayWake()
 
