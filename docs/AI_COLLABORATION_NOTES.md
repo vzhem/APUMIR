@@ -2539,6 +2539,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Повтор v3 правильно заблокирован immutable evidence. Добавлен read-only v4 signer inventory всех
   трёх телефонов без требования совпадения: группирует cert digests и версии, чтобы найти общий
   upgrade path/правильный historical keystore; по-прежнему только `adb pull` installed APK на PC.
+  V4 PASS state `15DD85A…5E718B`: все 3 уже v11.16.17, один signer group
+  `40448024…3A186`, target release signer F843 несовместим. M8-E debug APK signer 4044 совпадает,
+  но его default version был v11.16. Пользователь затем явно разрешил удалить приложения и все
+  тестовые данные/cache на всех телефонах и поставить начисто. Добавлен guarded destructive script
+  `scripts/m8e_clean_phone_install.ps1`: сначала строит/проверяет distinct debug v11.16.18 с signer
+  4044, затем uninstall+clean install+controlled launch Anna/Zhenya/Stas, сохраняет partial state
+  после каждого телефона. Uninstall здесь является явным удалением data/cache; отдельный clear не
+  нужен. Force-stop/log clear не используются.
 
 ---
 
