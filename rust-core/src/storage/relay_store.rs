@@ -766,6 +766,7 @@ fn at_rest_reason(e: &AtRestError) -> &'static str {
         AtRestError::MalformedEnvelope { .. } => "atrest-malformed-envelope",
         AtRestError::PlaintextTooLarge { .. } => "atrest-plaintext-too-large",
         AtRestError::DecryptionFailed => "atrest-auth-failed",
+        AtRestError::InvalidKeyMaterial { .. } => "atrest-invalid-key-material",
     }
 }
 
@@ -1112,6 +1113,15 @@ mod tests {
     }
 
     // ── M8-C slice 2: encrypted records / quarantine ────────────────
+
+    #[test]
+    fn test_invalid_key_material_has_stable_quarantine_reason() {
+        let error = AtRestError::InvalidKeyMaterial {
+            expected: AT_REST_KEY_BYTES,
+            found: 0,
+        };
+        assert_eq!(at_rest_reason(&error), "atrest-invalid-key-material");
+    }
 
     /// Тестовый источник ключей (боевой — Android Keystore-мост позже).
     struct StaticKeySource {
