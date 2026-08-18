@@ -1,5 +1,6 @@
 # Rust build artifacts
 rust-core/target/
+tools/uniffi-bindgen/target/
 **/*.rs.bk
 Cargo.lock
 

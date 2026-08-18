@@ -88,7 +88,7 @@ try {
     if ($SoHash -eq $BaselineSoHash) { throw "Native library unchanged" }
 
     $BindgenProcess = Invoke-Captured "M8-C3 bindgen" $RustCore `
-        "& cargo run --bin uniffi-bindgen -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ..\android-app\app\src\main\java" `
+        "& cargo run --manifest-path ..\tools\uniffi-bindgen\Cargo.toml -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ..\android-app\app\src\main\java" `
         $BindgenOut $BindgenErr $BindgenExit 1200000
     $BindingHash=(Get-FileHash -LiteralPath $BindingPath -Algorithm SHA256).Hash
     if ($BindingHash -eq $BaselineBindingHash) { throw "UniFFI binding unchanged" }

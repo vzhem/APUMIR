@@ -135,7 +135,7 @@ try {
     $GeneratedSoHash = (Get-FileHash -LiteralPath $BaselineSoPath -Algorithm SHA256).Hash
     if ($GeneratedSoHash -eq $BaselineSoHash) { throw "Fresh Rust build left native library unchanged" }
 
-    $BindgenCommand = "& cargo run --bin uniffi-bindgen -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ..\android-app\app\src\main\java"
+    $BindgenCommand = "& cargo run --manifest-path ..\tools\uniffi-bindgen\Cargo.toml -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ..\android-app\app\src\main\java"
     $BindgenProcessId = Invoke-CapturedCommand -Label "M8-C3 UniFFI generation" `
         -WorkingDirectory $RustCore -Command $BindgenCommand -StdoutPath $RecoveryBindgenOut `
         -StderrPath $RecoveryBindgenErr -ExitMarkerPath $RecoveryBindgenExit -TimeoutMilliseconds 1200000

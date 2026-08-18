@@ -1,0 +1,10 @@
+[package]
+name = "apu-uniffi-bindgen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Keep binding generation isolated from p2p-core's native host dependencies
+# (ring/aws-lc/sqlite). Only the UniFFI CLI is needed to read the UDL.
+[dependencies]
+uniffi = { version = "=0.28.3", features = ["cli"] }

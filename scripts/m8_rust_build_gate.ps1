@@ -204,7 +204,7 @@ if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
     $BindgenCommand = @"
 `$ErrorActionPreference = 'Stop'
 Set-Location '$RustCoreDir'
-& cargo run --bin uniffi-bindgen -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ..\android-app\app\src\main\java
+& cargo run --manifest-path ..\tools\uniffi-bindgen\Cargo.toml -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ..\android-app\app\src\main\java
 if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
 "@
     $BindgenResult = Start-CapturedProcess -Label "M8-C3 UniFFI Kotlin generation" `
