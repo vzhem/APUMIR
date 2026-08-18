@@ -2602,7 +2602,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   safely migrated v19→v22 PASS state `1CD027A8…4DDDD4`: identity/marker true, exact3/wrong0,
   data clear=false; Anna/Zhenya unchanged. Пользователь зарегистрировал Женю. Добавлен final
   read-only readiness gate всех 3: v22, identity+marker, key prefs, exact DB, custody durable/
-  quarantine0 log, WorkManager job, no fatal.
+  quarantine0 log, WorkManager job, no fatal. Старые startup markers отсутствовали; `am kill`
+  не смог завершить foreground process. Controlled `run-as kill -9` доказал на Anna реальную
+  process death/restart: PID 28371→12023, engine/durable-encrypted/quarantine0/exact path PASS,
+  wrong0/fatal0. Gate остановился до Zhenya, потому что её процесс уже не работал — это допустимый
+  cold-start case, а не failure. Добавлен resume: immutable Anna PASS + Zhenya/Stas, где absent
+  process запускается cold, running process получает own-UID SIGKILL; force-stop/clear не используются.
 
 ---
 
