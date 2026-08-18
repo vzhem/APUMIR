@@ -30,7 +30,8 @@
    максимум на 25 с, делает один gossip discovery и гарантированно shutdown-ит
    только принадлежащий worker-у engine. Если foreground service уже владеет
    engine, worker его не останавливает. Быстрого retry нет; следующий шанс —
-   следующий periodic window.
+   следующий periodic window. PC-only compile harness:
+   `scripts/m8e_slice1_compile_gate.ps1` (Gradle only; Rust/bindgen/ADB не повторяет).
 2. **Sleep flush hook:** при `onTaskRemoved`/stop сервиса — явный flush:
    всё недоставленное уже durable (M8-B/D/C), поэтому hook = верификация и
    лог, а не новая persistence-логика.
