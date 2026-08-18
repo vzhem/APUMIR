@@ -2534,7 +2534,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   фактически не затронуты. Чтобы исключить повтор paste hazard, добавлен проверяемый файл
   `scripts/m8e_phone_readonly_preflight.ps1` (v3 state/capture names): exact 3-phone visibility,
   pull installed base APK read-only, signer/version/install-time/UID/PID capture; никаких install,
-  launch, force-stop, log/data clear.
+  launch, force-stop, log/data clear. V3 реально стартовал и безопасно остановился на Анне:
+  installed signer `40448024…3A186` != target `F843CBE7…A4A5F7`; install запрещён, phone changes=false.
+  Повтор v3 правильно заблокирован immutable evidence. Добавлен read-only v4 signer inventory всех
+  трёх телефонов без требования совпадения: группирует cert digests и версии, чтобы найти общий
+  upgrade path/правильный historical keystore; по-прежнему только `adb pull` installed APK на PC.
 
 ---
 
