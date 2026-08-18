@@ -32,6 +32,10 @@
    engine, worker его не останавливает. Быстрого retry нет; следующий шанс —
    следующий periodic window. PC-only compile harness:
    `scripts/m8e_slice1_compile_gate.ps1` (Gradle only; Rust/bindgen/ADB не повторяет).
+   Phone readiness выявил blocking path-contract defect: Rust добавлял второй
+   `.relay.sqlite` к уже готовому Kotlin filename, поэтому backup exclusions не
+   совпадали с реальным файлом. Исправлено на exact host path; требуется новый
+   Rust/Android compile и чистая тестовая установка до runtime acceptance.
 2. **Sleep flush hook:** при `onTaskRemoved`/stop сервиса — явный flush:
    всё недоставленное уже durable (M8-B/D/C), поэтому hook = верификация и
    лог, а не новая persistence-логика.

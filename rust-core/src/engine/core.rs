@@ -61,7 +61,10 @@ pub(crate) struct RelayCustody {
 fn open_relay_custody(db_path: Option<&str>) -> RelayCustody {
     match (db_path, at_rest::installed_key_source()) {
         (Some(path), Some(keys)) => {
-            let relay_path = format!("{}.relay.sqlite", path);
+            // `EngineConfig.relay_db_path` is an exact file path supplied by the
+            // Android host. Do not append another suffix: backup exclusions and
+            // recovery tooling must refer to the file that is actually opened.
+            let relay_path = path.to_owned();
             match RelayStore::open(&relay_path) {
                 Ok(store) => {
                     tracing::info!(

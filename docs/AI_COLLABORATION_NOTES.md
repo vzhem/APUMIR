@@ -2553,7 +2553,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `C6CBBC56…7A94CB`, затем вручную создал профиль/permissions; Женя/Стас не менялись. Все три
   профиля теперь готовы. Добавлен read-only `scripts/m8e_phone_readiness_gate.ps1`: проверяет
   current PID/version, current-process log markers schedule+engine+durable-encrypted/quarantine0,
-  WorkManager JobScheduler visibility и отсутствие fatal; phone writes отсутствуют.
+  WorkManager JobScheduler visibility и отсутствие fatal; phone writes отсутствуют. Первый readiness
+  остановился на Anna из-за выпавших ранних log markers, но доказал v11.16.18/PID/appId/Job/fatal=false.
+  Follow-up names/sizes-only `run-as` PASS state `8655827E…E8ACA`: все 3 имеют profile prefs,
+  wrapped-key prefs, SQLite+WAL+SHM и WorkManager jobs; phone changes=false. При этом обнаружен
+  blocker: фактический файл назывался `apu_relay.sqlite.relay.sqlite` — Rust ошибочно добавлял
+  `.relay.sqlite` к exact host path `apu_relay.sqlite`, а Android backup rules исключали только
+  exact host filename. Это могло включить device-bound encrypted custody в backup. Исправление:
+  `open_relay_custody` теперь открывает переданный path без suffix. M8 ещё не release, test data
+  disposable; до нового Rust build/clean install/runtime gate acceptance не продолжать.
 
 ---
 
