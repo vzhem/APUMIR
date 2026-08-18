@@ -2645,7 +2645,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Latest:** <https://github.com/vzhem/APUMIR/releases/tag/v11.16.23>, tag target `09f7f52`,
   draft=false/prerelease=false; APK server digest `85480D5C…EA9A68` совпал, checksum asset 86 B /
   server digest `c83d9d38…a2800c` соответствует deterministic checksum bytes. Следующий шаг — только
-  verified external backup/rotation; release/tag/assets не заменять.
+  verified external backup/rotation; release/tag/assets не заменять. USB preflight PASS: Disk 2
+  serial `2240331293279315997`, E: `APU_RECOVERY` NTFS Healthy/clean, previous backup state
+  `C8DC7311…D4BEAAA` unchanged. Добавлен compact latest backup harness: release assets, source zip,
+  all-refs bundle+restore rehearsal, tested native, new M8/release evidence (старые huge compiler
+  caches остаются в previous), full SHA-256 manifest; previous backup не удаляется и диск не
+  форматируется.
 
 ---
 
