@@ -2430,6 +2430,19 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   файлов нет. Передача кода на Windows — `git format-patch` mbox (push из sandbox по-прежнему
   заблокирован средой: нет GitHub credentials; не считать ошибкой пользователя).
 
+- **2026-08-18 (доп.198) — новая Arena-сессия продолжена без потери точки остановки; compile-gate
+  harness доведён до полного M8-C3:** старая ветка `arena/01a013d0-apumir` на GitHub и новая
+  фиксированная ветка сессии обе стартуют с exact tip `24303b4`; незакоммиченных изменений старой
+  сессии нет. Исторический `scripts/m8_rust_build_gate.ps1` проверял только M8-A/B/D commit и
+  ожидал специальный dirty Windows overlay, поэтому он не мог честно закрыть актуальный C3 gate.
+  Harness обновлён: требует чистый worktree на C:, проверяет неизменность application source против
+  exact C3 commit `204fb9f`, выполняет `build-rust.ps1 -Features mqtt-dual-broker`, затем UniFFI
+  Kotlin bindgen, проверяет наличие четырёх новых API, выполняет `:app:assembleDebug`, хеширует
+  `.so`/bindings/debug APK и сохраняет одноразовые stdout/stderr + JSON state в
+  `%TEMP%\\apu-m8-c3-*`. ADB/установка/телефоны/traffic отсутствуют. В sandbox доступны только
+  source review, balanced-delimiter check и `git diff --check`; реальный PASS/FAIL по-прежнему
+  получается одним запуском harness на каноническом Windows PC. До compile PASS код M8-E не писать.
+
 ---
 
 ---

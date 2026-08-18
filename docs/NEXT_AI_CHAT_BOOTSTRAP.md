@@ -18,16 +18,14 @@
 >   `install_relay_at_rest_key` / `create_engine_durable` / `relay_custody_mode` /
 >   `relay_quarantine_count`; backup-исключения для relay-файла и ключевых prefs.
 >
-> ⚠️ **Push из Arena sandbox заблокирован (нет GitHub credentials)** — локальные commit'ы могут
-> опережать origin. Проверяй `git log origin/arena/01a00674-apumir..HEAD` и при появлении доступа
-> одна команда: `git push origin arena/01a00674-apumir`. Альтернатива — `git format-patch` mbox
-> на Windows (`git am`).
+> Полная M8-C3 история сохранена на GitHub: tip `arena/01a013d0-apumir` = `24303b4`.
+> Новая Arena-сессия продолжается линейно от этой точки; старые slices повторять нельзя.
 >
-> **Следующий шаг — НЕ M8-A и НЕ M8-C**, а **Windows compile gate M8 (A→C3)**: apply mbox-патча в
-> чистый worktree, `build-rust.ps1 -Features mqtt-dual-broker`, регенерация UniFFI Kotlin
-> bindings (`cargo run --bin uniffi-bindgen generate src/lib.udl --language kotlin --config
-> uniffi.toml --out-dir ..\android-app\app\src\main\java` из `rust-core`), затем `gradlew
-> assembleDebug`. Когда compile PASS → M8-E (sleep/wake), M8-F (телефонный acceptance
+> **Следующий шаг — НЕ M8-A и НЕ M8-C**, а **Windows compile gate M8 (A→C3)**. Для него обновлён
+> единый PC-only harness `scripts/m8_rust_build_gate.ps1`: из чистого worktree на диске C: он
+> последовательно выполняет Rust Android build с `mqtt-dual-broker`, регенерацию UniFFI Kotlin
+> bindings и `gradlew :app:assembleDebug`, сохраняет одноразовое evidence в `%TEMP%` и не вызывает
+> ADB/не меняет телефоны. Когда compile PASS → M8-E (sleep/wake), M8-F (телефонный acceptance
 > Anna→Zhenya→D→Stas с kill/reboot, датчики: `relay_custody_mode` + `relay_quarantine_count` +
 > quarantine-warn в logcat). **Новый релиз НЕ делать** до закрытия релизных гейтов — см.
 > доп.196/197 в AI_COLLABORATION_NOTES. Остальные правила prompt'а ниже (телефоны, флешка,
