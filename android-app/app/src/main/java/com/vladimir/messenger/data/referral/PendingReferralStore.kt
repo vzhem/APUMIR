@@ -29,12 +29,21 @@ object PendingReferralStore {
         context: Context,
         token: ByteArray,
         nowMs: Long = System.currentTimeMillis(),
+    ): Pending? = saveVerifiedIn(context, PREFS_NAME, token, nowMs)
+
+    @Synchronized
+    internal fun saveVerifiedIn(
+        context: Context,
+        prefsName: String,
+        token: ByteArray,
+        nowMs: Long,
     ): Pending? {
+        requireAllowedStore(prefsName)
         val verified = VerifiedReferralInviteLink.verifyToken(token, nowMs) ?: return null
         val encoded = Base64.encodeToString(verified.token, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
         if (encoded.isEmpty() || encoded.length > MAX_ENCODED_TOKEN_CHARS) return null
         val saved = context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getSharedPreferences(prefsName, Context.MODE_PRIVATE)
             .edit()
             .putString(TOKEN_KEY, encoded)
             .putLong(RECEIVED_AT_KEY, nowMs)
@@ -47,39 +56,58 @@ object PendingReferralStore {
     fun loadVerified(
         context: Context,
         nowMs: Long = System.currentTimeMillis(),
+    ): Pending? = loadVerifiedIn(context, PREFS_NAME, nowMs)
+
+    @Synchronized
+    internal fun loadVerifiedIn(
+        context: Context,
+        prefsName: String,
+        nowMs: Long,
     ): Pending? {
-        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        requireAllowedStore(prefsName)
+        val prefs = context.applicationContext.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         val encoded = prefs.getString(TOKEN_KEY, null) ?: return null
         val receivedAt = prefs.getLong(RECEIVED_AT_KEY, -1L)
         if (receivedAt < 0L || receivedAt > nowMs || encoded.length > MAX_ENCODED_TOKEN_CHARS) {
-            clear(context)
+            clearIn(context, prefsName)
             return null
         }
         val token = try {
             Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
         } catch (_: IllegalArgumentException) {
-            clear(context)
+            clearIn(context, prefsName)
             return null
         }
         if (token.isEmpty() || token.size > ReferralInviteLink.MAX_TOKEN_BYTES) {
             token.fill(0)
-            clear(context)
+            clearIn(context, prefsName)
             return null
         }
         val verified = VerifiedReferralInviteLink.verifyToken(token, nowMs)
         token.fill(0)
         if (verified == null) {
-            clear(context)
+            clearIn(context, prefsName)
             return null
         }
         return Pending(verified.inviterNodeId, verified.token.copyOf(), receivedAt)
     }
 
     @Synchronized
-    fun clear(context: Context): Boolean =
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    fun clear(context: Context): Boolean = clearIn(context, PREFS_NAME)
+
+    @Synchronized
+    internal fun clearIn(context: Context, prefsName: String): Boolean {
+        requireAllowedStore(prefsName)
+        return context.applicationContext
+            .getSharedPreferences(prefsName, Context.MODE_PRIVATE)
             .edit()
             .clear()
             .commit()
+    }
+
+    private fun requireAllowedStore(prefsName: String) {
+        require(prefsName == PREFS_NAME || prefsName.startsWith("apu_pending_referral_test_")) {
+            "Unexpected pending referral store"
+        }
+    }
 }
