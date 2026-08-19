@@ -2684,7 +2684,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   unchanged: linker удалил неэкспортируемый foundation module; parent gate state `243DFB68…9482C`
   честно INCOMPLETE до Gradle. Добавлен recovery: не повторяет release build, выполняет Android
   `cargo ndk check --tests` для typecheck всех 7 `#[cfg(test)]` tests, затем Gradle debug; unchanged
-  native теперь explicit expected. Следующий product шаг после PASS — identity lifecycle audit.
+  native теперь explicit expected. Recovery state `DB3A6269…C71C25` остановился до Gradle:
+  Android test check потребовал host proc-macro/build-script linking, но после вывода неисправного D:
+  на C: нет `link.exe` (`error: linker link.exe not found`). Production Android release compile
+  остаётся PASS; test blocks ещё не typechecked/executed. Перед identity migration нужен новый
+  MSVC Build Tools workload на C: (не D:) и guarded resume; не маскировать environment failure.
 
 ---
 
