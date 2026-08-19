@@ -7,8 +7,6 @@ edition = "2021"
 default = []
 mqtt-secondary-observe = []
 mqtt-dual-broker = []
-# Explicit-only Android executable for referral crypto runtime acceptance.
-referral-self-test = []
 
 # Собираем как динамическую библиотеку для Android (.so файл)
 [lib]
@@ -19,11 +17,6 @@ crate-type = ["cdylib", "staticlib"]
 [[bin]]
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
-
-[[bin]]
-name = "referral-selftest"
-path = "src/bin/referral-selftest.rs"
-required-features = ["referral-self-test"]
 
 [dependencies]
 
