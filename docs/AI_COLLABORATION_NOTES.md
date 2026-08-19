@@ -2750,9 +2750,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `3A0B876A…DE2172`, binding `A4A718A5…6AAE7A`, APK `8BB7DFC7…41935B`; generated binding commit
   `f751474`, `.so` not commit. Kotlin persistence source: create-once Base64 binding beside seed,
   verify signature+installed match every startup, malformed/mismatch never overwritten, diagnostics
-  only binding SHA. Startup instrumentation extended. Первый phone gate paste остановился parser-
-  error до precheck/ADB: PowerShell использует backtick, не `\"`, внутри regex string. XmlValue
-  исправлен на safe concatenation + Regex.Escape; app/phone/evidence untouched. Первый persistence build precheck дважды
+  only binding SHA. S3B phone PASS state `2E6BD9D3…413AA4`: Stas v11.16.28, profile/node/seed/
+  binding stable, instrumentation+SIGKILL restart, no clear/force-stop. Первый phone gate paste
+  parser-error до ADB (`\"` вместо PowerShell quoting) был исправлен. Cross-device test source:
+  Anna verifies Stas binding as valid foreign/non-local, tampered signature rejected; binding bounded,
+  not persisted. Первый persistence build precheck дважды
   безопасно остановился до Gradle/evidence: harness ожидал binding dirty, но `f751474` уже tracked;
   исправлено на exact one dirty native file. One-phone restart/tamper gate pending.
 

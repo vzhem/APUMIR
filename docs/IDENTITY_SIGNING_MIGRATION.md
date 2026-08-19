@@ -192,8 +192,12 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 - One-phone migration PASS on Stas v11.16.26: state `28CDCE95…D7FD4B`; profile and legacy
   `node_id` hashes unchanged, sidecar wrapped blob stable across own-UID SIGKILL/restart,
   instrumentation and startup diagnostics PASS. No uninstall/data clear/force-stop.
-- **S3 registry/install-before-engine gate closed.** S3B Rust build PASS state
-  `834FDAF8…1A7F14`: canonical binding APIs/native/binding/Gradle. Kotlin persistence source now
+- One-phone S3B PASS on Stas v11.16.28: state `2E6BD9D3…413AA4`; profile/node/seed/binding
+  stable, instrumentation and SIGKILL restart PASS, no clear/force-stop.
+- Cross-device instrumentation source added: Anna receives only Stas binding bytes, verifies real
+  signature, confirms it does not match Anna's installed sidecar, flips one signature byte and must
+  reject both verify/match. Binding is bounded and never persisted on Anna.
+- Pending: build cross-device test APK, identity-preserving Anna update and two-phone acceptance.
   creates binding once after sidecar install, verifies signature + installed legacy/public/key-id,
   stores Base64 beside wrapped seed and refuses malformed/mismatched existing binding without
   overwrite. Diagnostics expose only SHA-256 binding ID. Startup instrumentation verifies stable
