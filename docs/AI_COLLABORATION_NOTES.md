@@ -2708,6 +2708,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   нельзя. Принят sidecar migration: stable legacy routing ID + device-bound wrapped Ed25519 seed,
   self-signed TOFU binding, pin/dual-signed rotation, install-before-engine, domain-specific UniFFI
   и slices S2–S5 с data-preservation/security gates. Local Build Tools — отдельный maintenance.
+- **2026-08-19 (доп.212) — identity signing S2 Kotlin storage source (ещё не active):** pure strict
+  envelope v1 `[version][IV12][ciphertext32+GCMtag16]`; `IdentitySigningKeyStore` использует отдельный
+  Android Keystore AES-256-GCM alias `apu_identity_signing_wrap_v1`, domain AAD, random 32-byte
+  Ed25519 seed, commit-before-return и `withSeed` zeroization. Existing blob без usable Keystore key
+  = `UNAVAILABLE`/exception, без silent overwrite/rotation; `mode()` read-only. Добавлены 5 JVM
+  framing tests (layout, lengths, every truncation/trailing, version, aliasing). Нет вызова из app/
+  Rust/engine: текущая версия не создаёт seed и не меняет profiles. Следующий gate — Kotlin unit+
+  Gradle compile, затем отдельный Android Keystore instrumented slice.
 
 ---
 

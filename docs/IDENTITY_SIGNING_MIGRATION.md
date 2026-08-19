@@ -151,12 +151,18 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 - Nonce/time/lifetime bounds and negative tests.
 - No engine/UniFFI/UI wiring.
 
-### S2 — key lifecycle model
+### S2 — key lifecycle model (source slice 1 implemented, compile pending)
 
-- Pure Rust `InstalledSigningIdentity` and validation.
-- Android wrap-envelope implementation with no engine use.
-- Device-bound prefs/backup exclusions.
-- Tests for wrong length, wrong key, tamper, restored blob and zeroization boundary.
+- Pure Kotlin versioned envelope `[version][IV12][ciphertext32+tag16]` with strict exact sizes.
+- Android `IdentitySigningKeyStore`: dedicated AES-256-GCM Keystore alias, domain-separated AAD,
+  random 32-byte seed, synchronous persistence and bounded `withSeed` zeroization.
+- Existing-but-unreadable wrapped state returns `UNAVAILABLE`/exception and is never silently
+  overwritten or rotated; read-only `mode()` never creates bytes or keys.
+- Five JVM framing tests: exact layout/roundtrip, invalid lengths, all truncations+trailing bytes,
+  unknown version and no aliasing.
+- No Rust/engine/UniFFI caller yet; production does not create a signing seed in this slice.
+- Next: Android Keystore instrumented roundtrip/tamper/uninstall semantics, then install-before-engine.
+
 
 ### S3 — legacy migration
 
