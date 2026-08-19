@@ -2734,7 +2734,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   alias теперь production state; rerun без isolated namespace запрещён. Compile/one-phone migration
   pending. Read-only startup instrumentation source добавлен: READY sidecar, stable double install,
   public/key-id SHA invariant и unchanged legacy node_id; никаких cleanup/reset/data writes кроме
-  ожидаемого первого sidecar migration.
+  ожидаемого первого sidecar migration. Первый startup build gate остановился до Gradle/evidence:
+  harness ожидал binding dirty, но `fc4199e` уже tracked/clean; фактически dirty только generated
+  `.so`. Precheck исправлен на exact one-file native status, source/artifacts untouched.
 
 ---
 
