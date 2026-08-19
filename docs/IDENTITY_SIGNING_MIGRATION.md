@@ -186,8 +186,11 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
   `key_id == SHA-256(public_key)`; borrowed seed is zeroed.
 - Accepted pre-wiring instrumentation test is now `@Ignore`: its default alias became production
   state and must never be deleted by a routine rerun. Future tests require isolated namespace.
-- Pending: compile startup wiring, one-phone update/data-preservation/stable key restart gate, then
-  self-signed TOFU binding.
+- Read-only startup instrumentation source added: existing identity/marker required, sidecar mode
+  READY, two Rust installs yield identical public key/key ID, SHA-256 invariant holds and legacy
+  `node_id` remains byte-for-byte unchanged. It never deletes/reset sidecar or app data.
+- Pending: compile startup wiring/test APK, one-phone update/data-preservation/stable key restart
+  gate, then self-signed TOFU binding.
 
 ### S4 — engine ownership and diagnostics
 

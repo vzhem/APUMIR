@@ -2732,7 +2732,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   сразу после legacy node generation. Mode/public/key-id SHA invariant checked; failure честно
   legacy-only, node_id unchanged. Pre-wiring instrumented test помечен `@Ignore`, потому что default
   alias теперь production state; rerun без isolated namespace запрещён. Compile/one-phone migration
-  pending.
+  pending. Read-only startup instrumentation source добавлен: READY sidecar, stable double install,
+  public/key-id SHA invariant и unchanged legacy node_id; никаких cleanup/reset/data writes кроме
+  ожидаемого первого sidecar migration.
 
 ---
 
