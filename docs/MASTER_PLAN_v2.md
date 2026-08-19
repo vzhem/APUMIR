@@ -913,6 +913,7 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
    threat model и compatibility policy для legacy links.
 2. **R0.5 — real identity signing foundation:** Ed25519 sign/verify, durable device-bound private key,
    public-key↔node-id binding, migration/rotation/recovery и запрет placeholder signature в referral.
+   Authoritative migration design: `docs/IDENTITY_SIGNING_MIGRATION.md`.
    - [x] Slice 1: pure canonical/domain-separated referral claims + real `Ed25519KeyPair` sign/verify,
      node binding, nonce/time/lifetime bounds и negative tests; без engine/UniFFI/URL wiring.
    - [ ] Slice 2: inventory/migration формата действующих identities и device-bound private key.

@@ -2698,9 +2698,16 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   crate без build.rs/UniFFI/unrelated native deps, который path-компилирует **exact production**
   `keys.rs` + `referral.rs` и использует общий release target cache; Android v2 gate строит/запускает
   его на Стасе и удаляет binary. V2 state `47213A1C…61BA8` остановился до build/adb: cargo-ndk
-  запускает metadata из current directory и не увидел nested manifest. Исправлен gate: Push-Location
-  в standalone tool dir, общий target cache; v3 требует exact immutable v2 state. Local Build Tools
-  остаются отдельным maintenance.
+  запускает metadata из current directory и не увидел nested manifest. V3 из правильного tool dir
+  всё равно потребовал host proc-macro linker; state `3C97A378…B80CAC`, до adb не дошёл. WSL audit:
+  `WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED`; новую ОС ради одного test gate не устанавливаем. После
+  трёх bounded workaround attempts остановились: production Android compile PASS, runtime tests
+  честно pending до supported linker environment; app/phone data untouched.
+  Identity lifecycle audit оформлен в `IDENTITY_SIGNING_MIGRATION.md`: текущий CryptoManager и
+  pk/sk persistence — prototype, Kotlin сохраняет node_id как private; legacy routing ID менять
+  нельзя. Принят sidecar migration: stable legacy routing ID + device-bound wrapped Ed25519 seed,
+  self-signed TOFU binding, pin/dual-signed rotation, install-before-engine, domain-specific UniFFI
+  и slices S2–S5 с data-preservation/security gates. Local Build Tools — отдельный maintenance.
 
 ---
 
