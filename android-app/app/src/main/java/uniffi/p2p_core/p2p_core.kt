@@ -798,6 +798,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -883,6 +889,8 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_p2p_core_fn_func_create_identity_signing_binding(`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_create_referral_invite_token(`identityBinding`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_get_protocol_version(uniffi_out_err: UniffiRustCallStatus,
     ): Byte
     fun uniffi_p2p_core_fn_func_get_version(uniffi_out_err: UniffiRustCallStatus,
@@ -903,7 +911,11 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_relay_at_rest_key_id(uniffi_out_err: UniffiRustCallStatus,
     ): Long
+    fun uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_verify_identity_signing_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
+    fun uniffi_p2p_core_fn_func_verify_referral_invite_token(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): Byte
     fun ffi_p2p_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
@@ -1029,6 +1041,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_create_identity_signing_binding(
     ): Short
+    fun uniffi_p2p_core_checksum_func_create_referral_invite_token(
+    ): Short
     fun uniffi_p2p_core_checksum_func_get_protocol_version(
     ): Short
     fun uniffi_p2p_core_checksum_func_get_version(
@@ -1049,7 +1063,11 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_relay_at_rest_key_id(
     ): Short
+    fun uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id(
+    ): Short
     fun uniffi_p2p_core_checksum_func_verify_identity_signing_binding(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_verify_referral_invite_token(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_add_contact(
     ): Short
@@ -1136,6 +1154,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_create_identity_signing_binding() != 23948.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_create_referral_invite_token() != 6220.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_get_protocol_version() != 24163.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1166,7 +1187,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_relay_at_rest_key_id() != 38408.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id() != 59487.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_verify_identity_signing_binding() != 4896.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_verify_referral_invite_token() != 39808.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_add_contact() != 32965.toShort()) {
@@ -2715,6 +2742,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     )
     }
 
+
+    @Throws(CoreException::class) fun `createReferralInviteToken`(`identityBinding`: kotlin.ByteArray, `createdAtMs`: kotlin.Long, `expiresAtMs`: kotlin.Long): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_referral_invite_token(
+        FfiConverterByteArray.lower(`identityBinding`),FfiConverterLong.lower(`createdAtMs`),FfiConverterLong.lower(`expiresAtMs`),_status)
+}
+    )
+    }
+
  fun `getProtocolVersion`(): kotlin.UByte {
             return FfiConverterUByte.lift(
     uniffiRustCall() { _status ->
@@ -2806,11 +2843,30 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     )
     }
 
+
+    @Throws(CoreException::class) fun `verifiedReferralInviterNodeId`(`token`: kotlin.ByteArray, `nowMs`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(
+        FfiConverterByteArray.lower(`token`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+
  fun `verifyIdentitySigningBinding`(`binding`: kotlin.ByteArray): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verify_identity_signing_binding(
         FfiConverterByteArray.lower(`binding`),_status)
+}
+    )
+    }
+
+ fun `verifyReferralInviteToken`(`token`: kotlin.ByteArray, `nowMs`: kotlin.Long): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verify_referral_invite_token(
+        FfiConverterByteArray.lower(`token`),FfiConverterLong.lower(`nowMs`),_status)
 }
     )
     }
