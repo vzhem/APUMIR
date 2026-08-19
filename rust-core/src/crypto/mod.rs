@@ -53,6 +53,7 @@ pub mod kdf;
 pub mod keys;
 pub mod keystore;
 pub mod ratchet;
+pub mod referral;
 pub mod session;
 
 // ═══════════════════════════════════════════════════════════════════

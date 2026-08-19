@@ -2672,6 +2672,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   запрещено использовать для referral/security claims. В roadmap добавлен R0.5 real Ed25519
   identity signing + device-bound lifecycle/migration до signed referral R1. Legacy unsigned invite
   остаётся contact-only и никогда не даёт reward.
+- **2026-08-19 (доп.211) — referral R0.5 slice 1 source:** добавлен pure Rust
+  `crypto/referral.rs`, пока без engine/UniFFI/UI/wire. `ReferralInviteClaimsV1` получает exact
+  domain-separated canonical binary payload (`apu-referral-invite-v1`), scope direct-friend,
+  canonical `pk_<sha256(ed25519_pub)>`, 16-byte nonce, created/expiry и max lifetime 30 дней.
+  `sign_referral_invite_v1` использует настоящий `Ed25519KeyPair`; verify проверяет node↔pubkey,
+  clock skew/expiry/lifetime/nonce и 64-byte signature. 7 tests: deterministic/domain, real roundtrip,
+  modified claim, wrong key/binding, malformed key/signature, time/nonce bounds, wrong signer.
+  Private key не сериализуется/не логируется. Slice намеренно не подключён к prototype engine:
+  следующий шаг — identity format/lifecycle migration audit, затем Windows Rust compile gate.
 
 ---
 
