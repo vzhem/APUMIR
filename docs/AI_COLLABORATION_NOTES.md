@@ -2731,12 +2731,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Startup wiring source: service и bounded worker устанавливают sidecar до engine; onboarding —
   сразу после legacy node generation. Mode/public/key-id SHA invariant checked; failure честно
   legacy-only, node_id unchanged. Pre-wiring instrumented test помечен `@Ignore`, потому что default
-  alias теперь production state; rerun без isolated namespace запрещён. Compile/one-phone migration
-  pending. Read-only startup instrumentation source добавлен: READY sidecar, stable double install,
-  public/key-id SHA invariant и unchanged legacy node_id; никаких cleanup/reset/data writes кроме
-  ожидаемого первого sidecar migration. Первый startup build gate остановился до Gradle/evidence:
-  harness ожидал binding dirty, но `fc4199e` уже tracked/clean; фактически dirty только generated
-  `.so`. Precheck исправлен на exact one-file native status, source/artifacts untouched.
+  alias теперь production state; rerun без isolated namespace запрещён. Первый startup build gate
+  остановился до Gradle/evidence: binding уже tracked/clean; precheck исправлен. Startup wiring build
+  PASS state `44F038EF…B46DE2`: app `25DB5434…40DBF1`, test `52EBE71F…4D2287`, tests/Gradle PASS,
+  phones=false. Read-only startup instrumentation: READY sidecar, stable double install,
+  public/key-id SHA invariant и unchanged legacy node_id. Добавлен one-phone Stas gate: replace
+  update v11.16.24→v11.16.26, exact profile/node hashes, sidecar blob stability через SIGKILL,
+  instrumentation/logs; no uninstall/data clear/force-stop. Пользователь также заметил, что update
+  notification мог перестать появляться; regression добавлен в MASTER_PLAN Phase 0.5, проверить
+  отдельно на опубликованном N-1 release (debug v11.16.24+ не является валидным кейсом).
 
 ---
 
