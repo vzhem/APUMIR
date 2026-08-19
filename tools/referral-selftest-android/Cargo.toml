@@ -1,0 +1,12 @@
+[package]
+name = "apu-referral-selftest-android"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+rand = "0.8"
+sha2 = "0.10"
+thiserror = "1"

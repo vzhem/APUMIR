@@ -2692,8 +2692,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Winget и direct signed Microsoft bootstrapper оба timeout/TLS fail до download; установка не
   началась. Arena GitHub App также не имеет `workflows` permission, поэтому новый CI workflow нельзя
   безопасно push-нуть. Выбран bounded обход без ослабления теста: feature-gated Android executable
-  `referral-selftest` (не входит в normal build) исполняет те же 7 real Ed25519 scenarios на одном
-  debug-телефоне; binary после capture удаляется. Local Build Tools остаются отдельным maintenance.
+  `referral-selftest` (не входит в normal build) должен исполнить те же 7 real Ed25519 scenarios на
+  Android. Первый package build снова потребовал p2p-core build.rs host linking после Cargo.toml
+  change и остановился до adb (`link.exe` missing); app/data не менялись. Добавлен standalone tool
+  crate без build.rs/UniFFI/unrelated native deps, который path-компилирует **exact production**
+  `keys.rs` + `referral.rs` и использует общий release target cache; Android v2 gate строит/запускает
+  его на Стасе и удаляет binary. Local Build Tools остаются отдельным maintenance.
 
 ---
 
