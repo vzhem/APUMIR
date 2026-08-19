@@ -1,9 +1,9 @@
 //! Signed direct-referral claims foundation (R0.5).
 //!
-//! This module deliberately does not expose a URL/wire token yet. It defines a
-//! canonical, domain-separated payload and proves that a referral is signed by
-//! the Ed25519 key whose public key derives the declared inviter node ID.
-//! Engine/UniFFI wiring comes only after durable identity-key migration exists.
+//! This module defines the canonical, domain-separated signed claims primitive.
+//! It deliberately does not claim that a legacy routing ID derives from the Ed25519
+//! sidecar key. The R1 wire envelope in `signing_identity` verifies that migration
+//! binding before treating a token as identity-bound.
 
 use crate::crypto::keys::{Ed25519KeyPair, NodeId};
 use crate::crypto::CryptoError;
@@ -34,8 +34,8 @@ pub struct SignedReferralInviteV1 {
 pub enum ReferralInviteError {
     #[error("unsupported referral version {0}")]
     UnsupportedVersion(u8),
-    #[error("inviter node id does not match Ed25519 public key")]
-    InviterBindingMismatch,
+    #[error("invalid inviter routing node id")]
+    InvalidInviterNodeId,
     #[error("invalid referral nonce")]
     InvalidNonce,
     #[error("invalid referral time window")]
@@ -57,7 +57,7 @@ impl ReferralInviteClaimsV1 {
         validate_claim_shape(self)?;
         let node = self.inviter_node_id.as_bytes();
         let node_len = u16::try_from(node.len())
-            .map_err(|_| ReferralInviteError::InviterBindingMismatch)?;
+            .map_err(|_| ReferralInviteError::InvalidInviterNodeId)?;
         let mut out = Vec::with_capacity(
             REFERRAL_DOMAIN_V1.len() + 1 + 1 + 2 + node.len() + REFERRAL_NONCE_BYTES + 16,
         );
@@ -78,9 +78,6 @@ pub fn sign_referral_invite_v1(
     identity: &Ed25519KeyPair,
 ) -> Result<SignedReferralInviteV1, ReferralInviteError> {
     let public_key = identity.public_key().0;
-    if claims.inviter_node_id != inviter_node_id(&public_key) {
-        return Err(ReferralInviteError::InviterBindingMismatch);
-    }
     let payload = claims.canonical_bytes()?;
     let signature = identity.sign(&payload);
     Ok(SignedReferralInviteV1 {
@@ -95,8 +92,8 @@ pub fn verify_referral_invite_v1(
     now_ms: i64,
 ) -> Result<(), ReferralInviteError> {
     validate_claim_shape(&token.claims)?;
-    if token.claims.inviter_node_id != inviter_node_id(&token.inviter_ed25519_public_key) {
-        return Err(ReferralInviteError::InviterBindingMismatch);
+    if token.inviter_ed25519_public_key.len() != 32 {
+        return Err(ReferralInviteError::InvalidSignature);
     }
     if now_ms < token.claims.created_at_ms.saturating_sub(MAX_REFERRAL_CLOCK_SKEW_MS)
         || now_ms > token.claims.expires_at_ms
@@ -117,7 +114,7 @@ fn validate_claim_shape(claims: &ReferralInviteClaimsV1) -> Result<(), ReferralI
         return Err(ReferralInviteError::InvalidNonce);
     }
     if !is_canonical_node_id(&claims.inviter_node_id) {
-        return Err(ReferralInviteError::InviterBindingMismatch);
+        return Err(ReferralInviteError::InvalidInviterNodeId);
     }
     let lifetime = claims.expires_at_ms.saturating_sub(claims.created_at_ms);
     if claims.created_at_ms < 0 || lifetime <= 0 || lifetime > MAX_REFERRAL_LIFETIME_MS {
@@ -127,7 +124,7 @@ fn validate_claim_shape(claims: &ReferralInviteClaimsV1) -> Result<(), ReferralI
 }
 
 fn is_canonical_node_id(value: &str) -> bool {
-    value.len() == 67
+    matches!(value.len(), 35 | 67)
         && value.starts_with("pk_")
         && value[3..].bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
@@ -184,14 +181,14 @@ mod tests {
     }
 
     #[test]
-    fn wrong_public_key_fails_node_binding() {
+    fn wrong_public_key_fails_signature() {
         let identity = Ed25519KeyPair::from_secret_bytes(&[13; 32]).unwrap();
         let other = Ed25519KeyPair::from_secret_bytes(&[14; 32]).unwrap();
         let mut token = sign_referral_invite_v1(claims(&identity), &identity).unwrap();
         token.inviter_ed25519_public_key = other.public_key().0;
         assert_eq!(
             verify_referral_invite_v1(&token, CREATED + 1_000),
-            Err(ReferralInviteError::InviterBindingMismatch)
+            Err(ReferralInviteError::InvalidSignature)
         );
     }
 
@@ -208,7 +205,7 @@ mod tests {
         token.inviter_ed25519_public_key.truncate(31);
         assert_eq!(
             verify_referral_invite_v1(&token, CREATED + 1_000),
-            Err(ReferralInviteError::InviterBindingMismatch)
+            Err(ReferralInviteError::InvalidSignature)
         );
     }
 
@@ -244,12 +241,11 @@ mod tests {
     }
 
     #[test]
-    fn declared_inviter_must_match_signing_identity() {
+    fn stable_legacy_routing_id_can_be_signed_by_sidecar() {
         let identity = Ed25519KeyPair::from_secret_bytes(&[17; 32]).unwrap();
-        let other = Ed25519KeyPair::from_secret_bytes(&[18; 32]).unwrap();
-        assert_eq!(
-            sign_referral_invite_v1(claims(&other), &identity),
-            Err(ReferralInviteError::InviterBindingMismatch)
-        );
+        let mut legacy_claims = claims(&identity);
+        legacy_claims.inviter_node_id = "pk_0123456789abcdef0123456789abcdef".to_string();
+        let token = sign_referral_invite_v1(legacy_claims, &identity).unwrap();
+        assert!(verify_referral_invite_v1(&token, CREATED + 1_000).is_ok());
     }
 }

@@ -929,6 +929,10 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
    - [ ] Slice 3C: explicit dual-signed key rotation/recovery (не входит в S3B PASS).
 3. **R1 — signed direct token:** versioned canonical payload, parser/expiry/revoke/replay tests;
    официальный HTTPS App Link и pending token через install/onboarding.
+   - [ ] Slice 1 source: identity-bound binary envelope
+     `[v1,binding_len,binding,nonce,created,expires,signature]`; stable legacy routing ID is checked
+     against the verified S3B sidecar binding instead of incorrectly deriving it from the new key.
+     Source and negative tests added; Android Rust compile gate pending.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
 5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
 6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.

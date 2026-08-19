@@ -147,8 +147,9 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 ### S1 — completed foundation
 
 - Canonical direct-referral claims.
-- Real Ed25519 sign/verify and node/public-key binding.
-- Nonce/time/lifetime bounds and negative tests.
+- Real Ed25519 sign/verify, nonce/time/lifetime bounds and negative tests.
+- R1 correction after sidecar migration: stable legacy routing ID is not derived from the new key;
+  identity binding is enforced by the verified S3B envelope.
 - No engine/UniFFI/UI wiring.
 
 ### S2 — key lifecycle model (source slice 1 implemented, compile pending)

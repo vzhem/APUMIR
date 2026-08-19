@@ -42,6 +42,14 @@ pub struct SignedIdentityBindingV1 {
     pub signature: Vec<u8>,
 }
 
+/// Canonical R1 wire envelope. The self-signed migration binding ties the
+/// stable legacy routing ID to the Ed25519 key that signs the invite claims.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityBoundReferralInviteV1 {
+    pub identity_binding: SignedIdentityBindingV1,
+    pub signed_invite: SignedReferralInviteV1,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SigningIdentityError {
     #[error("unsupported signing identity format {0}")]
@@ -60,6 +68,10 @@ pub enum SigningIdentityError {
     MalformedBinding,
     #[error("identity binding signature is invalid")]
     InvalidBindingSignature,
+    #[error("referral invite does not match its identity binding")]
+    ReferralBindingMismatch,
+    #[error("malformed identity-bound referral token")]
+    MalformedReferralToken,
 }
 
 impl InstalledSigningIdentity {
@@ -110,6 +122,9 @@ impl InstalledSigningIdentity {
         &self,
         claims: ReferralInviteClaimsV1,
     ) -> Result<SignedReferralInviteV1, SigningIdentityError> {
+        if claims.inviter_node_id != self.legacy_routing_node_id {
+            return Err(SigningIdentityError::ReferralBindingMismatch);
+        }
         Ok(sign_referral_invite_v1(claims, &self.key_pair)?)
     }
 
@@ -211,6 +226,112 @@ impl SignedIdentityBindingV1 {
     }
 }
 
+impl IdentityBoundReferralInviteV1 {
+    pub fn create(
+        identity: &InstalledSigningIdentity,
+        identity_binding: SignedIdentityBindingV1,
+        nonce: [u8; crate::crypto::referral::REFERRAL_NONCE_BYTES],
+        created_at_ms: i64,
+        expires_at_ms: i64,
+    ) -> Result<Self, SigningIdentityError> {
+        identity_binding.verify()?;
+        if identity_binding.legacy_routing_node_id != identity.legacy_routing_node_id()
+            || identity_binding.signing_public_key != identity.public_key()
+            || identity_binding.created_at_ms > created_at_ms
+        {
+            return Err(SigningIdentityError::ReferralBindingMismatch);
+        }
+        let claims = ReferralInviteClaimsV1 {
+            inviter_node_id: identity.legacy_routing_node_id().to_string(),
+            nonce,
+            created_at_ms,
+            expires_at_ms,
+        };
+        let signed_invite = identity.sign_referral(claims)?;
+        Ok(Self {
+            identity_binding,
+            signed_invite,
+        })
+    }
+
+    /// Exact token layout:
+    /// `[v1][binding_len:u16][binding][nonce16][created:i64][expires:i64][signature64]`.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, SigningIdentityError> {
+        self.verify(self.signed_invite.claims.created_at_ms)?;
+        let binding = self.identity_binding.to_bytes()?;
+        let binding_len = u16::try_from(binding.len())
+            .map_err(|_| SigningIdentityError::MalformedReferralToken)?;
+        let mut output = Vec::with_capacity(1 + 2 + binding.len() + 16 + 8 + 8 + 64);
+        output.push(IDENTITY_SIGNING_FORMAT_V1);
+        output.extend_from_slice(&binding_len.to_be_bytes());
+        output.extend_from_slice(&binding);
+        output.extend_from_slice(&self.signed_invite.claims.nonce);
+        output.extend_from_slice(&self.signed_invite.claims.created_at_ms.to_be_bytes());
+        output.extend_from_slice(&self.signed_invite.claims.expires_at_ms.to_be_bytes());
+        output.extend_from_slice(&self.signed_invite.signature);
+        Ok(output)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SigningIdentityError> {
+        const TAIL_BYTES: usize = 16 + 8 + 8 + 64;
+        if bytes.len() < 1 + 2 + TAIL_BYTES || bytes[0] != IDENTITY_SIGNING_FORMAT_V1 {
+            return Err(SigningIdentityError::MalformedReferralToken);
+        }
+        let binding_len = u16::from_be_bytes([bytes[1], bytes[2]]) as usize;
+        let binding_end = 3usize
+            .checked_add(binding_len)
+            .ok_or(SigningIdentityError::MalformedReferralToken)?;
+        if binding_len == 0 || bytes.len() != binding_end + TAIL_BYTES {
+            return Err(SigningIdentityError::MalformedReferralToken);
+        }
+        let identity_binding = SignedIdentityBindingV1::from_bytes(&bytes[3..binding_end])?;
+        let nonce_end = binding_end + 16;
+        let created_end = nonce_end + 8;
+        let expires_end = created_end + 8;
+        let nonce = bytes[binding_end..nonce_end]
+            .try_into()
+            .map_err(|_| SigningIdentityError::MalformedReferralToken)?;
+        let created_at_ms = i64::from_be_bytes(
+            bytes[nonce_end..created_end]
+                .try_into()
+                .map_err(|_| SigningIdentityError::MalformedReferralToken)?,
+        );
+        let expires_at_ms = i64::from_be_bytes(
+            bytes[created_end..expires_end]
+                .try_into()
+                .map_err(|_| SigningIdentityError::MalformedReferralToken)?,
+        );
+        let signed_invite = SignedReferralInviteV1 {
+            claims: ReferralInviteClaimsV1 {
+                inviter_node_id: identity_binding.legacy_routing_node_id.clone(),
+                nonce,
+                created_at_ms,
+                expires_at_ms,
+            },
+            inviter_ed25519_public_key: identity_binding.signing_public_key.clone(),
+            signature: bytes[expires_end..].to_vec(),
+        };
+        Ok(Self {
+            identity_binding,
+            signed_invite,
+        })
+    }
+
+    pub fn verify(&self, now_ms: i64) -> Result<(), SigningIdentityError> {
+        self.identity_binding.verify()?;
+        if self.signed_invite.claims.inviter_node_id
+            != self.identity_binding.legacy_routing_node_id
+            || self.signed_invite.inviter_ed25519_public_key
+                != self.identity_binding.signing_public_key
+            || self.identity_binding.created_at_ms > self.signed_invite.claims.created_at_ms
+        {
+            return Err(SigningIdentityError::ReferralBindingMismatch);
+        }
+        crate::crypto::referral::verify_referral_invite_v1(&self.signed_invite, now_ms)?;
+        Ok(())
+    }
+}
+
 fn validate_binding_shape(binding: &SignedIdentityBindingV1) -> Result<(), SigningIdentityError> {
     if !is_legacy_routing_node_id(&binding.legacy_routing_node_id)
         || binding.signing_public_key.len() != ED25519_PUBLIC_KEY_BYTES
@@ -305,8 +426,6 @@ fn is_legacy_routing_node_id(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::referral::inviter_node_id;
-
     fn legacy() -> String {
         "pk_0123456789abcdef0123456789abcdef".to_string()
     }
@@ -349,7 +468,7 @@ mod tests {
     fn installed_identity_signs_bound_referral_claims() {
         let identity = InstalledSigningIdentity::from_seed(1, legacy(), &[11; 32]).unwrap();
         let claims = ReferralInviteClaimsV1 {
-            inviter_node_id: inviter_node_id(identity.public_key()),
+            inviter_node_id: identity.legacy_routing_node_id().to_string(),
             nonce: [0x42; 16],
             created_at_ms: 1_800_000_000_000,
             expires_at_ms: 1_800_086_400_000,
@@ -405,6 +524,56 @@ mod tests {
         assert!(verify_identity_binding(&bytes));
         assert!(!identity_binding_matches_installed(&bytes));
         clear_signing_identity();
+    }
+
+    #[test]
+    fn identity_bound_referral_wire_round_trip_and_tamper_rejection() {
+        let identity = InstalledSigningIdentity::from_seed(1, legacy(), &[31; 32]).unwrap();
+        let binding = identity.create_binding(1_800_000_000_000).unwrap();
+        let token = IdentityBoundReferralInviteV1::create(
+            &identity,
+            binding,
+            [0x5a; 16],
+            1_800_000_001_000,
+            1_800_086_401_000,
+        )
+        .unwrap();
+        let bytes = token.to_bytes().unwrap();
+        let decoded = IdentityBoundReferralInviteV1::from_bytes(&bytes).unwrap();
+        decoded.verify(1_800_000_002_000).unwrap();
+        assert_eq!(decoded, token);
+        assert_eq!(decoded.signed_invite.claims.inviter_node_id, legacy());
+
+        let mut tampered = bytes.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert!(IdentityBoundReferralInviteV1::from_bytes(&tampered)
+            .unwrap()
+            .verify(1_800_000_002_000)
+            .is_err());
+        assert!(IdentityBoundReferralInviteV1::from_bytes(&[bytes, vec![0]].concat()).is_err());
+    }
+
+    #[test]
+    fn referral_binding_must_match_installed_sidecar() {
+        let identity = InstalledSigningIdentity::from_seed(1, legacy(), &[32; 32]).unwrap();
+        let foreign = InstalledSigningIdentity::from_seed(
+            1,
+            "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            &[33; 32],
+        )
+        .unwrap();
+        let foreign_binding = foreign.create_binding(1_800_000_000_000).unwrap();
+        assert_eq!(
+            IdentityBoundReferralInviteV1::create(
+                &identity,
+                foreign_binding,
+                [1; 16],
+                1_800_000_001_000,
+                1_800_086_401_000,
+            ),
+            Err(SigningIdentityError::ReferralBindingMismatch)
+        );
     }
 
     #[test]

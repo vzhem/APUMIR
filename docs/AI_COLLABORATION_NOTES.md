@@ -2763,6 +2763,13 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   profile/node preserved `True/True`, Stas binding unchanged; uninstall/data clear/force-stop
   `False/False`. Это закрывает create-once persistence + local match + cross-device verification;
   dual-signed rotation вынесен в отдельный S3C и PASS не приписывается ему.
+- **2026-08-19 (доп.215) — R1 identity-bound wire source начат:** исправлено важное различие
+  migration-модели: referral теперь использует стабильный legacy routing `node_id`, а не требует
+  ошибочного `node_id == SHA-256(sidecar public key)`. Добавлен bounded binary envelope
+  `[v1,binding_len,binding,nonce16,created_i64,expires_i64,signature64]`: сначала проверяется
+  self-signed S3B binding, затем exact legacy-ID/public-key/timestamp binding и Ed25519 claims.
+  Добавлены roundtrip, foreign-binding, signature tamper/trailing-byte tests. Host Rust toolchain в
+  Arena sandbox отсутствует; production Android Rust compile gate ещё обязателен.
 
 ---
 
