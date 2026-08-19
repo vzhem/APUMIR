@@ -934,6 +934,9 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
      against the verified S3B sidecar binding instead of incorrectly deriving it from the new key.
      Production Android Rust + debug APK compile PASS; source negative tests are present, while host
      runtime execution remains blocked by the missing MSVC linker.
+   - [ ] Slice 2: narrow UniFFI API creates a random-nonce token only from the installed sidecar and
+     persisted matching binding; verifier returns an inviter routing ID only after full binding,
+     signature and time-window verification. Source added; native/binding/APK gate pending.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
 5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
 6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.

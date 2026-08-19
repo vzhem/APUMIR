@@ -3029,3 +3029,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `B3949CC6…9FE96`; Rust release compile и Gradle assembleDebug завершились успешно. Показанный
   `NativeCommandError` был ожидаемым отображением native stderr под Windows PowerShell и не являлся
   failure: exit code=0, итоговый outcome=PASS. Host tests/ADB/phones `False/False/False`.
+- **2026-08-19 (доп.219) — R1 UniFFI source:** добавлен узкий security API create/verify/extract.
+  Create использует OS CSPRNG nonce и только installed sidecar + переданный persisted binding;
+  extract возвращает legacy routing ID только после полной проверки binding/signature/time. Private
+  seed/public diagnostics не расширены. Добавлен native+bindgen+APK gate; runtime URL/UI ещё не wired.
