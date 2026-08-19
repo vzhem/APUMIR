@@ -55,6 +55,7 @@ pub mod keystore;
 pub mod ratchet;
 pub mod referral;
 pub mod session;
+pub mod signing_identity;
 
 // ═══════════════════════════════════════════════════════════════════
 // РЕЭКСПОРТЫ (единая точка доступа ко всей криптографии)

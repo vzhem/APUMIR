@@ -304,6 +304,52 @@ pub fn install_relay_at_rest_key(
     })
 }
 
+/// R0.5/S3: install a real Ed25519 signing sidecar before engine start.
+/// Invalid material never replaces a previously installed identity.
+pub fn install_identity_signing_seed(
+    format_version: u8,
+    legacy_routing_node_id: String,
+    mut seed: Vec<u8>,
+) -> Result<(), CoreError> {
+    let result = crypto::signing_identity::install_signing_identity(
+        format_version,
+        legacy_routing_node_id,
+        &seed,
+    )
+    .map(|_| ())
+    .map_err(|error| CoreError::CryptoError {
+        detail: error.to_string(),
+    });
+    seed.fill(0);
+    result
+}
+
+pub fn clear_identity_signing_seed() {
+    crypto::signing_identity::clear_signing_identity();
+}
+
+pub fn identity_signing_mode() -> String {
+    crypto::signing_identity::signing_identity_mode().to_string()
+}
+
+pub fn identity_signing_public_key_hex() -> String {
+    crypto::signing_identity::installed_signing_identity()
+        .map(|identity| {
+            identity
+                .public_key()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn identity_signing_key_id() -> String {
+    crypto::signing_identity::installed_signing_identity()
+        .map(|identity| identity.key_id().to_string())
+        .unwrap_or_default()
+}
+
 /// M8-C slice 3: убрать at-rest ключ (будущий logout/wipe; действует на
 /// следующий запуск движка — работающий движок держит свой снимок).
 pub fn clear_relay_at_rest_key() {

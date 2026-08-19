@@ -170,12 +170,16 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 - Next: Rust install-before-engine registry + public diagnostics, still without app startup wiring.
 
 
-### S3 — legacy migration
+### S3 — legacy migration (Rust registry/API seam source started)
 
-- Read-only inventory of legacy prefs on test phones.
-- Generate sidecar without changing `node_id`.
-- Persist and verify self-signed binding.
-- Restart/update/data-preservation tests.
+- Added strict `InstalledSigningIdentity`: format v1, legacy routing `pk_` validation, real
+  `Ed25519KeyPair`, public key/key ID and redacted Debug.
+- Install validates fully before replacing the global snapshot; invalid seed/format/routing ID leaves
+  previous identity intact. `Arc` snapshots survive registry clear for future engine ownership.
+- Versioned UniFFI seam added: install seed, clear, mode, public key hex and key ID. Seed input is
+  wiped in Rust; private bytes are never returned. Current Android startup still does not call it.
+- Pending: regenerate bindings/compile, Kotlin install-before-start call, self-signed TOFU binding,
+  restart/update/data-preservation tests without changing `node_id`.
 
 ### S4 — engine ownership and diagnostics
 

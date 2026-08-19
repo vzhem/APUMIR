@@ -20,6 +20,15 @@ namespace p2p_core {
     void clear_relay_at_rest_key();
     // key_id установленного ключа или -1 (диагностика; материал не раскрывается).
     i64 relay_at_rest_key_id();
+
+    // R0.5/S3 signing sidecar seam. Seed is accepted only as 32 bytes and
+    // never returned. Current app startup does not call this API yet.
+    [Throws=CoreError]
+    void install_identity_signing_seed(u8 format_version, string legacy_routing_node_id, bytes seed);
+    void clear_identity_signing_seed();
+    string identity_signing_mode();
+    string identity_signing_public_key_hex();
+    string identity_signing_key_id();
 };
 
 [Error]

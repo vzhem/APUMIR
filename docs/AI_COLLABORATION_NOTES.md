@@ -2722,8 +2722,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   оставил empty XML; wrapped seed отсутствовал. Test cleanup исправлен на `deleteSharedPreferences`.
   Recovery state `93060511…4F4C8`: Stas profile SHA unchanged `66F65581…9C4245`, identity/marker
   preserved, test package removed, wrapped seed false, v11.16.24 PID 17574, no clear/force-stop.
-  **S2 закрыт.** Следующий slice — Rust install-before-engine signing registry/diagnostics без app
-  startup wiring.
+  **S2 закрыт.** S3 source начат: Rust `InstalledSigningIdentity` v1 хранит real keypair + stable
+  legacy routing ID + public/key-id; strict lower-hex pk_32/64 validation, redacted Debug, validate-
+  before-replace global Arc registry/snapshot/clear. UniFFI seam install/clear/mode/public-key/key-id;
+  incoming seed Vec wiped, private bytes не возвращаются. Android startup пока не вызывает API,
+  node_id/profiles не меняются. 5 Rust tests source; binding regen/compile pending.
 
 ---
 

@@ -143,6 +143,8 @@ impl Ed25519KeyPair {
         secret_bytes.copy_from_slice(bytes);
 
         let signing_key = SigningKey::from_bytes(&secret_bytes);
+        // `SigningKey` owns its copy; wipe the temporary stack buffer.
+        secret_bytes.fill(0);
         Ok(Ed25519KeyPair { signing_key })
     }
 
