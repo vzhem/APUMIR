@@ -3056,3 +3056,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   каждом чтении; invalid/expired state удаляется. Backup/device transfer уже глобально запрещены.
   Raw deep link/token/full node и registry error text больше не логируются. Добавлен HTTPS intent
   filter, но autoVerify не считается действующим до domain ownership + `assetlinks.json`.
+- **2026-08-19 (доп.225) — pending runtime JVM/APK compile PASS:** state `F2AE21DF…05C8C`,
+  debug APK 29,430,973 B `FCED83B9…E5D15`; parser tests повторно PASS, instrumentation/ADB/phones
+  `False/False/False`.
+- **2026-08-19 (доп.226) — isolated pending instrumentation source:** test namespace
+  `apu_pending_referral_test_instrumented_v1` создаёт real signed token через installed sidecar,
+  проверяет persist/load, signature tamper auto-clear и expiry auto-clear, затем удаляет только test
+  prefs. Production pending prefs/profile/seed/binding не изменяются. Build/device gate pending.
