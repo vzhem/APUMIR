@@ -3048,3 +3048,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Kotlin boundary, который возвращает inviter только после Rust verify+extract. Parser сам по себе
   никогда не даёт attribution. Добавлены negative tests. `apumir.app` требует подтверждения
   владения и `assetlinks.json` до объявления Android Verified App Link; JVM/Gradle gate pending.
+- **2026-08-19 (доп.223) — R1 HTTPS codec JVM/APK gate PASS:** state `ADCB4F26…D0DDB`,
+  debug APK 29,458,899 B `7B3A2FE5…C4EA0`; strict parser test class executed, Gradle PASS,
+  JVM tests/ADB/phones `True/False/False`.
+- **2026-08-19 (доп.224) — pending referral runtime source:** verified signed referral обрабатывается
+  до legacy contact-only parser, сохраняется device-local через commit и повторно Rust-verified при
+  каждом чтении; invalid/expired state удаляется. Backup/device transfer уже глобально запрещены.
+  Raw deep link/token/full node и registry error text больше не логируются. Добавлен HTTPS intent
+  filter, но autoVerify не считается действующим до domain ownership + `assetlinks.json`.

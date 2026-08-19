@@ -938,10 +938,13 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
      persisted matching binding; verifier returns an inviter routing ID only after full binding,
      signature and time-window verification. Native/binding/APK PASS; normalized generated binding
      accepted as commit `95270bc`, while `.so` remained uncommitted.
-   - [ ] Slice 3: strict official HTTPS token codec (`https://apumir.app/i?r=…`) and Kotlin security
-     boundary that attributes only after Rust verification. Source + parser negative tests added;
-     JVM/Gradle gate pending. Domain ownership/`assetlinks.json` remains a deployment gate before the
-     link may be called an Android Verified App Link.
+   - [x] Slice 3: strict official HTTPS token codec (`https://apumir.app/i?r=…`) and Kotlin security
+     boundary that attributes only after Rust verification. Parser negative JVM tests + APK PASS.
+     Domain ownership/`assetlinks.json` remains a deployment gate before the link may be called an
+     Android Verified App Link.
+   - [ ] Slice 4: verified token persistence across onboarding, re-verification on every read, signed
+     referral handling before legacy contact-only links, and redacted deep-link logs. Runtime source
+     added; compile/instrumentation gate pending.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
 5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
 6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.
