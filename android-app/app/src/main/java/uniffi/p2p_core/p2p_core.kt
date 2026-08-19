@@ -792,6 +792,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -875,10 +881,14 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_p2p_core_fn_func_create_engine_with_keys(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Pointer
+    fun uniffi_p2p_core_fn_func_create_identity_signing_binding(`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_get_protocol_version(uniffi_out_err: UniffiRustCallStatus,
     ): Byte
     fun uniffi_p2p_core_fn_func_get_version(uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_identity_signing_binding_matches_installed(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
     fun uniffi_p2p_core_fn_func_identity_signing_key_id(uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_identity_signing_mode(uniffi_out_err: UniffiRustCallStatus,
@@ -893,6 +903,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_relay_at_rest_key_id(uniffi_out_err: UniffiRustCallStatus,
     ): Long
+    fun uniffi_p2p_core_fn_func_verify_identity_signing_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
     fun ffi_p2p_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun ffi_p2p_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -1015,9 +1027,13 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_create_engine_with_keys(
     ): Short
+    fun uniffi_p2p_core_checksum_func_create_identity_signing_binding(
+    ): Short
     fun uniffi_p2p_core_checksum_func_get_protocol_version(
     ): Short
     fun uniffi_p2p_core_checksum_func_get_version(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_identity_signing_binding_matches_installed(
     ): Short
     fun uniffi_p2p_core_checksum_func_identity_signing_key_id(
     ): Short
@@ -1032,6 +1048,8 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_checksum_func_install_relay_at_rest_key(
     ): Short
     fun uniffi_p2p_core_checksum_func_relay_at_rest_key_id(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_verify_identity_signing_binding(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_add_contact(
     ): Short
@@ -1115,10 +1133,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_create_engine_with_keys() != 25507.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_create_identity_signing_binding() != 23948.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_get_protocol_version() != 24163.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_get_version() != 32282.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_identity_signing_binding_matches_installed() != 36250.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_identity_signing_key_id() != 24405.toShort()) {
@@ -1140,6 +1164,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_relay_at_rest_key_id() != 38408.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_verify_identity_signing_binding() != 4896.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_add_contact() != 32965.toShort()) {
@@ -2678,6 +2705,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     )
     }
 
+
+    @Throws(CoreException::class) fun `createIdentitySigningBinding`(`createdAtMs`: kotlin.Long): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_identity_signing_binding(
+        FfiConverterLong.lower(`createdAtMs`),_status)
+}
+    )
+    }
+
  fun `getProtocolVersion`(): kotlin.UByte {
             return FfiConverterUByte.lift(
     uniffiRustCall() { _status ->
@@ -2692,6 +2729,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_get_version(
         _status)
+}
+    )
+    }
+
+ fun `identitySigningBindingMatchesInstalled`(`binding`: kotlin.ByteArray): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_identity_signing_binding_matches_installed(
+        FfiConverterByteArray.lower(`binding`),_status)
 }
     )
     }
@@ -2756,6 +2802,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_relay_at_rest_key_id(
         _status)
+}
+    )
+    }
+
+ fun `verifyIdentitySigningBinding`(`binding`: kotlin.ByteArray): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verify_identity_signing_binding(
+        FfiConverterByteArray.lower(`binding`),_status)
 }
     )
     }
