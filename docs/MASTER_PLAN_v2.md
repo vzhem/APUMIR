@@ -924,7 +924,9 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
      Android Keystore roundtrip/tamper/missing-key/zeroization and profile-preservation PASS.
    - [x] Slice 3: Rust signing registry, UniFFI diagnostics and Kotlin install-before-engine;
      one-phone profile/node preservation + stable sidecar restart PASS, private bytes never return.
-   - [ ] Slice 3B: canonical self-signed TOFU binding, persistent verification and dual-signed rotation.
+   - [x] Slice 3B: canonical self-signed TOFU binding, create-once persistence, local matching and
+     Anna↔Stas cross-device valid/foreign/tamper gate PASS without identity reset.
+   - [ ] Slice 3C: explicit dual-signed key rotation/recovery (не входит в S3B PASS).
 3. **R1 — signed direct token:** versioned canonical payload, parser/expiry/revoke/replay tests;
    официальный HTTPS App Link и pending token через install/onboarding.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.

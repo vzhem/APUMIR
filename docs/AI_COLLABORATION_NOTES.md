@@ -2757,6 +2757,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   not persisted. Первый persistence build precheck дважды
   безопасно остановился до Gradle/evidence: harness ожидал binding dirty, но `f751474` уже tracked;
   исправлено на exact one dirty native file. One-phone restart/tamper gate pending.
+- **2026-08-19 (доп.214) — S3B cross-device TOFU gate PASS, этап закрыт:** Anna
+  `AUYF6R5923006121` обновлена in-place v11.16.23→v11.16.28, Stas `11567254BK001192` сохранил
+  прежний binding. State `349D523C…DFE2F`: foreign valid/local/tamper `True/False/Rejected`, Anna
+  profile/node preserved `True/True`, Stas binding unchanged; uninstall/data clear/force-stop
+  `False/False`. Это закрывает create-once persistence + local match + cross-device verification;
+  dual-signed rotation вынесен в отдельный S3C и PASS не приписывается ему.
 
 ---
 

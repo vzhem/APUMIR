@@ -194,14 +194,14 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
   instrumentation and startup diagnostics PASS. No uninstall/data clear/force-stop.
 - One-phone S3B PASS on Stas v11.16.28: state `2E6BD9D3…413AA4`; profile/node/seed/binding
   stable, instrumentation and SIGKILL restart PASS, no clear/force-stop.
-- Cross-device instrumentation source added: Anna receives only Stas binding bytes, verifies real
-  signature, confirms it does not match Anna's installed sidecar, flips one signature byte and must
-  reject both verify/match. Binding is bounded and never persisted on Anna.
-- Pending: build cross-device test APK, identity-preserving Anna update and two-phone acceptance.
-  creates binding once after sidecar install, verifies signature + installed legacy/public/key-id,
-  stores Base64 beside wrapped seed and refuses malformed/mismatched existing binding without
-  overwrite. Diagnostics expose only SHA-256 binding ID. Startup instrumentation verifies stable
-  double install, persisted signature/match and unchanged legacy node ID. Compile/phone gate pending.
+- Cross-device instrumentation: Anna receives only Stas binding bytes, verifies the real signature,
+  confirms it does not match Anna's installed sidecar, flips one signature byte and rejects it.
+  Binding is bounded and never persisted on Anna.
+- Two-phone S3B PASS on Anna + Stas: state `349D523C…DFE2F`; foreign valid/local/tamper
+  `True/False/Rejected`, Anna profile/node preserved `True/True`, Stas binding unchanged. Anna was
+  updated in place from v11.16.23 to v11.16.28; no uninstall, data clear or force-stop.
+- S3B self-signed TOFU creation, persistence, local matching and cross-device verification is closed.
+  Dual-signed key rotation remains a separate pre-rotation slice; it is not implied by this PASS.
 
 ### S4 — engine ownership and diagnostics
 
