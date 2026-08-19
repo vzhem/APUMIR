@@ -3033,3 +3033,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Create использует OS CSPRNG nonce и только installed sidecar + переданный persisted binding;
   extract возвращает legacy routing ID только после полной проверки binding/signature/time. Private
   seed/public diagnostics не расширены. Добавлен native+bindgen+APK gate; runtime URL/UI ещё не wired.
+- **2026-08-19 (доп.220) — R1 verified-token UniFFI build PASS:** state
+  `F21D66C5…9B811`, native `836B009E…B391A`, normalized generated Kotlin binding
+  `B1232420…1F9AA`, debug APK 29,414,505 B `96DA15A9…87721`. Три ожидаемых UniFFI markers
+  присутствуют; Gradle PASS. `NativeCommandError`/отсутствующий ktlint — не failure, native exit=0 и
+  binding отдельно нормализован. Persistence/ADB/phones `False/False/False`. Generated binding ещё
+  должен пройти exact-hash acceptance и отдельный commit; `.so` не коммитить.
