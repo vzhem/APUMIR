@@ -2679,8 +2679,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `sign_referral_invite_v1` использует настоящий `Ed25519KeyPair`; verify проверяет node↔pubkey,
   clock skew/expiry/lifetime/nonce и 64-byte signature. 7 tests: deterministic/domain, real roundtrip,
   modified claim, wrong key/binding, malformed key/signature, time/nonce bounds, wrong signer.
-  Private key не сериализуется/не логируется. Slice намеренно не подключён к prototype engine:
-  следующий шаг — identity format/lifecycle migration audit, затем Windows Rust compile gate.
+  Private key не сериализуется/не логируется. Slice намеренно не подключён к prototype engine.
+  Windows Android Rust release compile PASS (`Finished release`, errors=0), но `.so` закономерно
+  unchanged: linker удалил неэкспортируемый foundation module; parent gate state `243DFB68…9482C`
+  честно INCOMPLETE до Gradle. Добавлен recovery: не повторяет release build, выполняет Android
+  `cargo ndk check --tests` для typecheck всех 7 `#[cfg(test)]` tests, затем Gradle debug; unchanged
+  native теперь explicit expected. Следующий product шаг после PASS — identity lifecycle audit.
 
 ---
 
