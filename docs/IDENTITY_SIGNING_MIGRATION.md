@@ -192,8 +192,10 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 - One-phone migration PASS on Stas v11.16.26: state `28CDCE95…D7FD4B`; profile and legacy
   `node_id` hashes unchanged, sidecar wrapped blob stable across own-UID SIGKILL/restart,
   instrumentation and startup diagnostics PASS. No uninstall/data clear/force-stop.
-- **S3 registry/install-before-engine gate closed.** Next: persist and verify the self-signed TOFU
-  binding (`legacy_routing_node_id ↔ signing_public_key`) before enabling signed invite output.
+- **S3 registry/install-before-engine gate closed.** S3B Rust source started: canonical
+  domain-separated `apu-identity-binding-v1`, exact binary framing, self-sign/verify, strict parser,
+  installed legacy/public/key-id match and UniFFI create/verify/match APIs. Truncation/trailing/
+  tamper and registry mismatch tests added. Binding persistence in Kotlin awaits compile/bindgen.
 
 ### S4 — engine ownership and diagnostics
 

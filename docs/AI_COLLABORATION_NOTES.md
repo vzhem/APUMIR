@@ -2743,6 +2743,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   TOFU binding до signed invite output. Пользователь также заметил, что update notification мог
   перестать появляться; regression в MASTER_PLAN Phase 0.5, проверить отдельно на published N-1
   release (debug v11.16.24+ не является валидным кейсом).
+- **2026-08-19 (доп.213) — S3B TOFU binding Rust source:** canonical domain
+  `apu-identity-binding-v1`, exact `[version,len,legacy,public32,created_i64,signature64]`, real
+  self-sign/verify, strict no trailing/truncation/tamper parser, installed legacy/public/key-id match.
+  UniFFI create/verify/matches APIs; 3 new binding tests (+ existing registry tests). Kotlin persist
+  wiring не начат до Rust compile/bindgen; referral output всё ещё disabled.
 
 ---
 

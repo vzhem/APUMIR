@@ -10,6 +10,10 @@ use crate::crypto::referral::{
 
 pub const IDENTITY_SIGNING_FORMAT_V1: u8 = 1;
 pub const IDENTITY_SIGNING_SEED_BYTES: usize = 32;
+const IDENTITY_BINDING_DOMAIN_V1: &[u8] = b"apu-identity-binding-v1\0";
+const ED25519_PUBLIC_KEY_BYTES: usize = 32;
+const ED25519_SIGNATURE_BYTES: usize = 64;
+const MAX_LEGACY_ROUTING_ID_BYTES: usize = 67;
 
 pub struct InstalledSigningIdentity {
     format_version: u8,
@@ -30,6 +34,14 @@ impl std::fmt::Debug for InstalledSigningIdentity {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedIdentityBindingV1 {
+    pub legacy_routing_node_id: String,
+    pub signing_public_key: Vec<u8>,
+    pub created_at_ms: i64,
+    pub signature: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SigningIdentityError {
     #[error("unsupported signing identity format {0}")]
@@ -42,6 +54,12 @@ pub enum SigningIdentityError {
     InvalidSeed,
     #[error("referral signing failed: {0}")]
     Referral(#[from] ReferralInviteError),
+    #[error("invalid identity binding timestamp")]
+    InvalidBindingTimestamp,
+    #[error("malformed identity binding")]
+    MalformedBinding,
+    #[error("identity binding signature is invalid")]
+    InvalidBindingSignature,
 }
 
 impl InstalledSigningIdentity {
@@ -94,6 +112,113 @@ impl InstalledSigningIdentity {
     ) -> Result<SignedReferralInviteV1, SigningIdentityError> {
         Ok(sign_referral_invite_v1(claims, &self.key_pair)?)
     }
+
+    pub fn create_binding(
+        &self,
+        created_at_ms: i64,
+    ) -> Result<SignedIdentityBindingV1, SigningIdentityError> {
+        if created_at_ms < 0 {
+            return Err(SigningIdentityError::InvalidBindingTimestamp);
+        }
+        let mut binding = SignedIdentityBindingV1 {
+            legacy_routing_node_id: self.legacy_routing_node_id.clone(),
+            signing_public_key: self.public_key.clone(),
+            created_at_ms,
+            signature: Vec::new(),
+        };
+        binding.signature = self.key_pair.sign(&binding.canonical_bytes()?);
+        Ok(binding)
+    }
+}
+
+impl SignedIdentityBindingV1 {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SigningIdentityError> {
+        validate_binding_shape(self)?;
+        let legacy = self.legacy_routing_node_id.as_bytes();
+        let mut output = Vec::with_capacity(
+            IDENTITY_BINDING_DOMAIN_V1.len() + 1 + 2 + legacy.len() + 32 + 8,
+        );
+        output.extend_from_slice(IDENTITY_BINDING_DOMAIN_V1);
+        output.push(IDENTITY_SIGNING_FORMAT_V1);
+        output.extend_from_slice(&(legacy.len() as u16).to_be_bytes());
+        output.extend_from_slice(legacy);
+        output.extend_from_slice(&self.signing_public_key);
+        output.extend_from_slice(&self.created_at_ms.to_be_bytes());
+        Ok(output)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, SigningIdentityError> {
+        validate_binding_shape(self)?;
+        if self.signature.len() != ED25519_SIGNATURE_BYTES {
+            return Err(SigningIdentityError::MalformedBinding);
+        }
+        let legacy = self.legacy_routing_node_id.as_bytes();
+        let mut output = Vec::with_capacity(1 + 2 + legacy.len() + 32 + 8 + 64);
+        output.push(IDENTITY_SIGNING_FORMAT_V1);
+        output.extend_from_slice(&(legacy.len() as u16).to_be_bytes());
+        output.extend_from_slice(legacy);
+        output.extend_from_slice(&self.signing_public_key);
+        output.extend_from_slice(&self.created_at_ms.to_be_bytes());
+        output.extend_from_slice(&self.signature);
+        Ok(output)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SigningIdentityError> {
+        if bytes.len() < 1 + 2 + 32 + 8 + 64 || bytes[0] != IDENTITY_SIGNING_FORMAT_V1 {
+            return Err(SigningIdentityError::MalformedBinding);
+        }
+        let legacy_len = u16::from_be_bytes([bytes[1], bytes[2]]) as usize;
+        if legacy_len == 0 || legacy_len > MAX_LEGACY_ROUTING_ID_BYTES {
+            return Err(SigningIdentityError::MalformedBinding);
+        }
+        let expected = 1 + 2 + legacy_len + 32 + 8 + 64;
+        if bytes.len() != expected {
+            return Err(SigningIdentityError::MalformedBinding);
+        }
+        let legacy_end = 3 + legacy_len;
+        let public_end = legacy_end + ED25519_PUBLIC_KEY_BYTES;
+        let time_end = public_end + 8;
+        let legacy_routing_node_id = std::str::from_utf8(&bytes[3..legacy_end])
+            .map_err(|_| SigningIdentityError::MalformedBinding)?
+            .to_string();
+        let created_at_ms = i64::from_be_bytes(
+            bytes[public_end..time_end]
+                .try_into()
+                .map_err(|_| SigningIdentityError::MalformedBinding)?,
+        );
+        let binding = Self {
+            legacy_routing_node_id,
+            signing_public_key: bytes[legacy_end..public_end].to_vec(),
+            created_at_ms,
+            signature: bytes[time_end..].to_vec(),
+        };
+        validate_binding_shape(&binding)?;
+        Ok(binding)
+    }
+
+    pub fn verify(&self) -> Result<(), SigningIdentityError> {
+        validate_binding_shape(self)?;
+        Ed25519KeyPair::verify(
+            &self.signing_public_key,
+            &self.canonical_bytes()?,
+            &self.signature,
+        )
+        .map_err(|_| SigningIdentityError::InvalidBindingSignature)
+    }
+
+    pub fn key_id(&self) -> String {
+        crate::crypto::keys::NodeId::from_ed25519_pubkey(&self.signing_public_key).to_hex()
+    }
+}
+
+fn validate_binding_shape(binding: &SignedIdentityBindingV1) -> Result<(), SigningIdentityError> {
+    if !is_legacy_routing_node_id(&binding.legacy_routing_node_id)
+        || binding.signing_public_key.len() != ED25519_PUBLIC_KEY_BYTES
+        || binding.created_at_ms < 0
+    {
+        return Err(SigningIdentityError::MalformedBinding);
+    }
+    Ok(())
 }
 
 fn registry() -> &'static RwLock<Option<Arc<InstalledSigningIdentity>>> {
@@ -139,6 +264,32 @@ pub fn signing_identity_mode() -> &'static str {
     } else {
         "legacy-only"
     }
+}
+
+pub fn create_installed_identity_binding(
+    created_at_ms: i64,
+) -> Result<Vec<u8>, SigningIdentityError> {
+    let identity = installed_signing_identity().ok_or(SigningIdentityError::MalformedBinding)?;
+    identity.create_binding(created_at_ms)?.to_bytes()
+}
+
+pub fn verify_identity_binding(bytes: &[u8]) -> bool {
+    SignedIdentityBindingV1::from_bytes(bytes)
+        .and_then(|binding| binding.verify())
+        .is_ok()
+}
+
+pub fn identity_binding_matches_installed(bytes: &[u8]) -> bool {
+    let Some(identity) = installed_signing_identity() else {
+        return false;
+    };
+    let Ok(binding) = SignedIdentityBindingV1::from_bytes(bytes) else {
+        return false;
+    };
+    binding.verify().is_ok()
+        && binding.legacy_routing_node_id == identity.legacy_routing_node_id()
+        && binding.signing_public_key == identity.public_key()
+        && binding.key_id() == identity.key_id()
 }
 
 fn is_legacy_routing_node_id(value: &str) -> bool {
@@ -206,6 +357,54 @@ mod tests {
         let token = identity.sign_referral(claims).unwrap();
         assert_eq!(token.inviter_ed25519_public_key, identity.public_key());
         assert_eq!(token.signature.len(), 64);
+    }
+
+    #[test]
+    fn binding_round_trip_is_canonical_and_self_signed() {
+        let identity = InstalledSigningIdentity::from_seed(1, legacy(), &[21; 32]).unwrap();
+        let binding = identity.create_binding(1_800_000_000_000).unwrap();
+        binding.verify().unwrap();
+        let bytes = binding.to_bytes().unwrap();
+        let decoded = SignedIdentityBindingV1::from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, binding);
+        assert_eq!(decoded.key_id(), identity.key_id());
+    }
+
+    #[test]
+    fn tamper_truncation_and_trailing_bytes_are_rejected() {
+        let identity = InstalledSigningIdentity::from_seed(1, legacy(), &[22; 32]).unwrap();
+        let bytes = identity.create_binding(1_800_000_000_000).unwrap().to_bytes().unwrap();
+        for length in 0..bytes.len() {
+            assert!(SignedIdentityBindingV1::from_bytes(&bytes[..length]).is_err());
+        }
+        assert!(SignedIdentityBindingV1::from_bytes(&[bytes.clone(), vec![0]].concat()).is_err());
+        let mut tampered = bytes;
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert_eq!(
+            SignedIdentityBindingV1::from_bytes(&tampered)
+                .unwrap()
+                .verify(),
+            Err(SigningIdentityError::InvalidBindingSignature)
+        );
+    }
+
+    #[test]
+    fn installed_binding_match_is_strict() {
+        clear_signing_identity();
+        let identity = install_signing_identity(1, legacy(), &[23; 32]).unwrap();
+        let bytes = identity.create_binding(1_800_000_000_000).unwrap().to_bytes().unwrap();
+        assert!(verify_identity_binding(&bytes));
+        assert!(identity_binding_matches_installed(&bytes));
+        install_signing_identity(
+            1,
+            "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            &[24; 32],
+        )
+        .unwrap();
+        assert!(verify_identity_binding(&bytes));
+        assert!(!identity_binding_matches_installed(&bytes));
+        clear_signing_identity();
     }
 
     #[test]

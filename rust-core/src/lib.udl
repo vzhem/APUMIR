@@ -29,6 +29,10 @@ namespace p2p_core {
     string identity_signing_mode();
     string identity_signing_public_key_hex();
     string identity_signing_key_id();
+    [Throws=CoreError]
+    bytes create_identity_signing_binding(i64 created_at_ms);
+    boolean verify_identity_signing_binding(bytes binding);
+    boolean identity_signing_binding_matches_installed(bytes binding);
 };
 
 [Error]
