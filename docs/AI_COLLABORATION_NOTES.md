@@ -2654,6 +2654,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   76 evidence items, APK hash exact, bundle verify+restore rehearsal PASS, previous retained;
   backup-state `73633F88…965F5F`, manifest `6AC2CEBD…9C17B5`, E: NTFS Healthy/OK clean.
   Release+backup milestone завершён; эти каталоги/manifest/state не удалять и не перезаписывать.
+- **2026-08-19 (доп.209) — идея direct referral growth/status добавлена в roadmap, code не менялся:**
+  пользователь хочет персональную реферальную ссылку и награды на порогах
+  `1/3/10/20/30/50/100/200/300/500/700/1000`. В `MASTER_PLAN_v2` добавлена Фаза 2.5.2A:
+  signed opaque direct token в Invite Kit, qualification только после identity+контакт+handshake+
+  DELIVERED (не за install), D7 confirmation high tiers, exactly-once signed receipts, local
+  encrypted count/optional blinded registry, offline sync, token rotate/revoke и anti-replay.
+  Статусы от «Первый связной» до «Создатель сети», косметические/opt-in награды без transport/
+  security/pay-to-win преимуществ. Только direct referrals, без multi-level/денег/contact scraping;
+  privacy, anti-fraud, accessibility, boundary tests и pilot 50–100 — обязательные gates.
 
 ---
 

@@ -363,7 +363,13 @@ Invite должен содержать:
 - `recommended_apk_version`;
 - `apk_download_urls`;
 - `bootstrap_hints`;
+- опциональный `referral_token` — подписанный/opaque токен прямого приглашения без списка контактов;
 - подпись invite владельцем ключа.
+
+`referral_token` не равен `node_id` и не должен превращаться в постоянный публичный идентификатор
+для слежения. Минимальные поля: версия, inviter binding, случайный nonce, created/expiry, scope
+`direct_friend`, подпись. Link можно отозвать/перевыпустить; обычный invite продолжает работать без
+referral attribution.
 
 Пример логической структуры:
 
@@ -784,6 +790,134 @@ InviteFriendScreen
   конкретной беседы/сообщества, а не ради абстрактной установки приложения.
 - [ ] Локализация launch flow минимум для выбранных первых рынков; landing/share text автоматически
   использует язык получателя, а не технические англоязычные сообщения.
+
+## Фаза 2.5.2A — реферальные ссылки, статусы и награды за активных друзей
+
+**Идея пользователя (2026-08-19), обработанная в product/security plan:** у каждого пользователя
+есть простая персональная ссылка `Пригласить друга`. Первый реально активированный друг сразу даёт
+первый статус; дальнейшие прямые приглашения открывают ступени 3, 10, 20, 30, 50, 100, 200, 300,
+500, 700 и 1 000. Система должна поощрять полезное общение и рост живой сети, а не spam, fake
+installs или финансовую пирамиду.
+
+### Пользовательский сценарий
+
+1. Владелец нажимает `Пригласить друга` и выбирает share/QR/copy/offline-файл.
+2. Друг открывает HTTPS App Link. Если APU нет — видит официальный signed download; pending invite
+   переживает установку и onboarding.
+3. После создания identity APU открывает профиль пригласившего и предлагает добавить его.
+4. Referral засчитывается не за клик/скачивание, а после первого успешного encrypted handshake и
+   хотя бы одного `DELIVERED` сообщения между этой парой.
+5. При первом qualified друге статус `Первый связной` показывается сразу; progress screen объясняет
+   следующую ступень без навязчивых popup и без блокировки функций.
+6. Для ступеней 10+ referral окончательно подтверждается после D7 activity либо эквивалентного
+   anti-fraud gate; до этого UI может показывать `ожидает подтверждения`.
+
+Формат ссылки (логически, конкретный домен определяется Invite Kit):
+
+```text
+https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
+```
+
+Внутри приложения и offline QR/file используется тот же signed referral token. Параметр `r` нельзя
+доверять без проверки подписи, expiry, scope и binding к inviter identity.
+
+### Лестница статусов
+
+Названия рабочие и проверяются UX-тестом/локализацией до code freeze. Порог означает количество
+**уникальных qualified direct friends**, а не installs и не друзей друзей.
+
+| Друзей | Статус | Базовая награда без pay-to-win |
+|---:|---|---|
+| 1 | **Первый связной** | первый badge + экран прогресса |
+| 3 | **Круг друзей** | новая share-card/вариант оформления ссылки |
+| 10 | **Проводник** | бронзовая рамка профиля |
+| 20 | **Организатор** | дополнительный accent/theme |
+| 30 | **Навигатор** | серебряный badge/рамка |
+| 50 | **Амбассадор** | заметный badge + добровольный early-access channel |
+| 100 | **Строитель сообщества** | золотая рамка и памятная карточка достижения |
+| 200 | **Хранитель сети** | специальная тема профиля |
+| 300 | **Маяк APU** | редкий badge; анимация только если не вредит battery/accessibility |
+| 500 | **Лидер сообщества** | opt-in упоминание в публичной благодарности/ambassador shortlist |
+| 700 | **Легенда APU** | эксклюзивная косметическая рамка |
+| 1 000 | **Создатель сети** | высшая памятная награда и opt-in certificate/card |
+
+Правила наград:
+
+- [ ] Каждая ступень обязательно даёт понятный статус; набор косметики можно выпускать постепенно.
+- [ ] Никаких преимуществ в доставке, relay priority, шифровании, лимитах сообщений, privacy,
+  moderation appeals или доступе к базовым функциям: безопасность и качество одинаковы для всех.
+- [ ] Никаких автоматических денежных обещаний, токенов, multi-level/downline и процентов с друзей.
+  Если когда-либо появится коммерческая ambassador-программа — отдельные legal/anti-fraud rules.
+- [ ] Пользователь может скрыть badge/count, но не теряет награды; публичная таблица лидеров только
+  отдельным opt-in и без node ID/social graph.
+- [ ] Accessibility: статус не кодируется только цветом; анимацию можно отключить.
+
+### Что считается qualified referral
+
+- [ ] Invite token валиден, подписан, не истёк и привязан к прямому inviter.
+- [ ] Invitee создал новую identity и явно добавил пригласившего; один invitee может зачесть только
+  одного inviter, до qualification выбор можно отменить, после — изменение только через support/
+  fraud resolution.
+- [ ] Между парой есть успешный verified handshake и минимум одно delivered сообщение; содержимое
+  сообщения и точный social graph никогда не отправляются в analytics.
+- [ ] Self-referral, повторная установка, data clear, клон одной identity, один и тот же signed
+  invite receipt и известные emulator/device-farm patterns не увеличивают счётчик.
+- [ ] Для high tiers считать подтверждённых D7 active friends; удалённый/заблокированный контакт не
+  обязан мгновенно уменьшать честно заработанный статус, но fraud-revocation возможен с audit trail.
+- [ ] На MVP только прямые referrals. Друзья друзей влияют на mesh/network benefit, но не на личный
+  счётчик — это предотвращает пирамидальную механику.
+
+### Privacy-preserving архитектура
+
+- [ ] Inviter создаёт random nonce/token и подписывает identity key; invitee после qualification
+  возвращает signed referral receipt. Receipt содержит version, token hash, inviter binding,
+  invitee pseudonymous binding, qualified timestamp и signature — без contacts/messages/IP.
+- [ ] Счётчик и receipts хранятся локально encrypted по умолчанию. Для публично проверяемого badge
+  можно opt-in отправлять blinded/hashed receipts в project registry с rate limits и retention.
+- [ ] Registry не получает address book и не должен уметь восстановить полный social graph. Для
+  aggregate funnel — rotating campaign/installation IDs, k-anonymity/threshold reporting и явное
+  analytics consent; без permanent cross-app tracking.
+- [ ] Multi-device recovery статуса — encrypted export/backup или signed receipt sync; server не
+  становится единственной точкой истины. Offline invite должен засчитаться после следующего общего
+  online окна.
+- [ ] Token rotate/revoke, expiry и replay cache bounded; malformed/oversized token отклоняется до
+  crypto/DB-heavy работы. Один receipt idempotent, merge — set/CRDT по receipt hash.
+
+### Abuse, UX и операционные ограничения
+
+- [ ] Rate limit создания/проверки links и qualification receipts; anomaly flags для резких волн,
+  но без автоматического наказания честного пользователя только за популярность.
+- [ ] Share UI запрещает contact scraping, auto-DM и отправку без явного выбора пользователя.
+- [ ] Status screen показывает `засчитано / ожидает / отклонено` и безопасную причину без раскрытия
+  anti-fraud секретов; есть appeal/export журнала своих receipts.
+- [ ] Referral link ведёт только на официальный allowlist download route и показывает signer/hash;
+  никакого APK от inviter или подмены update channel без проверки подписи.
+- [ ] Удаление аккаунта/локальных данных удаляет локальные referral receipts; server-side opt-in
+  данные подчиняются privacy retention/delete policy.
+
+### Этапы реализации
+
+1. **R0 — UX/spec:** названия, progress screen, link copy/share, privacy text, threat model.
+2. **R1 — signed direct token:** parser/expiry/revoke/replay tests; pending token через install.
+3. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
+4. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
+5. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.
+6. **R5 — controlled experiment:** 50–100 users; spam complaints, activation, D7 quality и fraud.
+   Высшие tiers/публичные badges открывать только после честных метрик и security review.
+
+### Acceptance gate
+
+- [ ] Clean phone открывает referral link → официальный install → возвращается к inviter → первый
+  delivered chat; inviter получает уровень 1 без повторного ручного ввода ссылки.
+- [ ] Пороги `1/3/10/20/30/50/100/200/300/500/700/1000` проверены boundary tests; событие/restart/
+  multi-broker duplicate не удваивает счётчик.
+- [ ] Offline QR/file qualification синхронизируется позже; один и тот же receipt после process
+  death/reboot остаётся exactly-once.
+- [ ] Self/reinstall/replay/expired/forged token не засчитываются; 1 000 synthetic users тестируются
+  только локально, без нагрузки на public infrastructure.
+- [ ] В packet/log/analytics audit нет contacts, message content, private keys или полного social
+  graph; отказ registry не ломает обычные invite/contact/chat.
+- [ ] Награда не меняет transport/security priority и не блокирует функции непригласившим.
 
 ## Фаза 2.5.3 — Каналы быстрого и законного распространения
 
@@ -1461,6 +1595,9 @@ APU имеет signed launch-ready build, красивый и понятный o
 - [ ] Закрыть invite/install, offline delivery, background/update/data/security и Groups MVP gates.
 - [ ] Закрыть scale-safe routing/capacity simulation: public wildcard prototype не идёт в 10k wave.
 - [ ] Выпустить signed Launch Readiness manifest, landing/share kit, support/status и rollback.
+- [ ] Запустить direct referral MVP без pay-to-win: signed link/token, qualified friend после
+  handshake+DELIVERED, exactly-once receipt, progress/status 1/3/10; остальные пороги до 1 000 —
+  после privacy/anti-fraud pilot.
 - [ ] Провести founding pilot 50–100 → closed beta 300–1 000 → open beta 1 000–5 000.
 - [ ] Только по метрикам качества открыть 10 000–50 000+ growth wave.
 - [ ] После запуска продолжить topics/channels/media/calls/desktop по feedback, не задерживая весь
