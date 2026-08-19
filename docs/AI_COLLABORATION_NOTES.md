@@ -3063,3 +3063,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `apu_pending_referral_test_instrumented_v1` создаёт real signed token через installed sidecar,
   проверяет persist/load, signature tamper auto-clear и expiry auto-clear, затем удаляет только test
   prefs. Production pending prefs/profile/seed/binding не изменяются. Build/device gate pending.
+- **2026-08-19 (доп.227) — pending androidTest build PASS:** state `42F74B58…B1731`, app APK
+  29,444,062 B `902137B2…6480C`, test APK 967,832 B `E825E00E…908C5`; ADB/phones
+  `False/False`. Next — data-preserving isolated test on Stas only, with production profile/node/
+  signing/pending snapshots and no data clear/force-stop.

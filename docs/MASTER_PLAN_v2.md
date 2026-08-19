@@ -945,7 +945,8 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
    - [ ] Slice 4: verified token persistence across onboarding, re-verification on every read, signed
      referral handling before legacy contact-only links, and redacted deep-link logs. Runtime JVM/APK
      compile PASS; isolated Android instrumentation source covers persist/load/tamper/expiry without
-     touching production pending state. Test APK/device gate pending.
+     touching production pending state. App/test APK build PASS; data-preserving Stas device gate
+     pending.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
 5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
 6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.
