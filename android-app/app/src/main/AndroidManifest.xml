@@ -57,6 +57,17 @@
                       android:pathPrefix="/p2p_messenger_relay_bot" />
             </intent-filter>
             
+            <!-- Signed referral HTTPS link. autoVerify becomes authoritative only after
+                 apumir.app publishes the matching /.well-known/assetlinks.json. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https"
+                      android:host="apumir.app"
+                      android:pathPrefix="/i" />
+            </intent-filter>
+
             <!-- HTTP схема (fallback) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

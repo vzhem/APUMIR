@@ -34,7 +34,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.Alignment
+import com.vladimir.messenger.data.referral.PendingReferralStore
 import com.vladimir.messenger.util.InviteLinkParser
+import com.vladimir.messenger.util.VerifiedReferralInviteLink
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -77,43 +79,55 @@ class MainActivity : ComponentActivity() {
         val rawUri = uri.toString()
         if (rawUri == lastHandledInviteUri) return
 
-        Log.i("MainActivity", "Deep link received: $rawUri")
+        val verifiedReferral = VerifiedReferralInviteLink.verify(rawUri)
+        if (verifiedReferral != null) {
+            val pending = PendingReferralStore.saveVerified(applicationContext, verifiedReferral.token)
+            if (pending == null) {
+                Log.w("MainActivity", "Verified referral could not be persisted")
+                return
+            }
+            lastHandledInviteUri = rawUri
+            Log.i("MainActivity", "Verified referral link accepted")
+            resolveInviteContact(pending.inviterNodeId, null, null)
+            return
+        }
 
         val invite = InviteLinkParser.parse(rawUri)
         if (invite == null) {
-            Log.w("MainActivity", "Unsupported invite link: $rawUri")
+            Log.w("MainActivity", "Unsupported or invalid invite link")
             return
         }
 
         lastHandledInviteUri = rawUri
-        val fallbackName = invite.displayName ?: "Contact ${invite.nodeId.takeLast(6)}"
-        pendingContactInfo = Triple(
-            invite.nodeId,
-            invite.publicKey ?: invite.nodeId,
-            fallbackName
-        )
+        Log.i("MainActivity", "Legacy contact-only invite accepted")
+        resolveInviteContact(invite.nodeId, invite.publicKey, invite.displayName)
+    }
 
-        // Best effort enrichment: if the sender has registered in the Cloudflare
-        // registry, replace the generic fallback name with the advertised profile name.
+    private fun resolveInviteContact(nodeId: String, publicKey: String?, displayName: String?) {
+        val fallbackName = displayName ?: "Contact ${nodeId.takeLast(6)}"
+        pendingContactInfo = Triple(nodeId, publicKey ?: nodeId, fallbackName)
+
+        // Best effort enrichment: registry data can improve display only. It cannot
+        // create or upgrade referral attribution, which remains tied to the signed token.
         lifecycleScope.launch {
             try {
                 val entryPoint = EntryPointAccessors.fromApplication(
                     applicationContext,
                     MainActivityEntryPoint::class.java
                 )
-                val nodeInfo = entryPoint.botApi().lookupNode(invite.nodeId)
+                val nodeInfo = entryPoint.botApi().lookupNode(nodeId)
                 if (nodeInfo != null) {
-                    Log.i("MainActivity", "Invite registry lookup OK: ${nodeInfo.displayName}")
+                    Log.i("MainActivity", "Invite registry lookup OK")
                     pendingContactInfo = Triple(
                         nodeInfo.nodeId,
-                        nodeInfo.publicKey.ifBlank { invite.publicKey ?: nodeInfo.nodeId },
+                        nodeInfo.publicKey.ifBlank { publicKey ?: nodeInfo.nodeId },
                         nodeInfo.displayName.ifBlank { fallbackName }
                     )
                 } else {
-                    Log.i("MainActivity", "Invite registry lookup returned no data for ${invite.nodeId.take(16)}")
+                    Log.i("MainActivity", "Invite registry lookup returned no data")
                 }
             } catch (e: Exception) {
-                Log.w("MainActivity", "Invite registry lookup failed: ${e.message}")
+                Log.w("MainActivity", "Invite registry lookup failed: ${e.javaClass.simpleName}")
             }
         }
     }

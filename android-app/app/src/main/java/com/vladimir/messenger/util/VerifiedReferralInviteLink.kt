@@ -13,11 +13,17 @@ object VerifiedReferralInviteLink {
 
     fun verify(raw: String?, nowMs: Long = System.currentTimeMillis()): Verified? {
         val parsed = ReferralInviteLink.parse(raw) ?: return null
+        return verifyToken(parsed.token, nowMs)?.copy(original = parsed.original)
+    }
+
+    fun verifyToken(token: ByteArray, nowMs: Long = System.currentTimeMillis()): Verified? {
+        if (token.isEmpty() || token.size > ReferralInviteLink.MAX_TOKEN_BYTES) return null
+        val ownedToken = token.copyOf()
         return try {
-            if (!verifyReferralInviteToken(parsed.token, nowMs)) return null
-            val inviterNodeId = verifiedReferralInviterNodeId(parsed.token, nowMs)
+            if (!verifyReferralInviteToken(ownedToken, nowMs)) return null
+            val inviterNodeId = verifiedReferralInviterNodeId(ownedToken, nowMs)
             if (!isCanonicalLegacyNodeId(inviterNodeId)) return null
-            Verified(inviterNodeId, parsed.token.copyOf(), parsed.original)
+            Verified(inviterNodeId, ownedToken, original = "")
         } catch (_: Exception) {
             null
         }
