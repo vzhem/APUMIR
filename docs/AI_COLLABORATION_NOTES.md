@@ -2725,8 +2725,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   **S2 закрыт.** S3 source начат: Rust `InstalledSigningIdentity` v1 хранит real keypair + stable
   legacy routing ID + public/key-id; strict lower-hex pk_32/64 validation, redacted Debug, validate-
   before-replace global Arc registry/snapshot/clear. UniFFI seam install/clear/mode/public-key/key-id;
-  incoming seed Vec wiped, private bytes не возвращаются. Android startup пока не вызывает API,
-  node_id/profiles не меняются. 5 Rust tests source; binding regen/compile pending.
+  incoming seed Vec wiped, private bytes не возвращаются. Rust/bindgen/Gradle PASS state
+  `7BE02D31…37E34B`: native `73FC4D6D…7AE97B`, binding `80C5AF87…47E629`, APK
+  `2577AD31…6FF6C7`; generated binding commit `fc4199e`, `.so` not commit.
+  Startup wiring source: service и bounded worker устанавливают sidecar до engine; onboarding —
+  сразу после legacy node generation. Mode/public/key-id SHA invariant checked; failure честно
+  legacy-only, node_id unchanged. Pre-wiring instrumented test помечен `@Ignore`, потому что default
+  alias теперь production state; rerun без isolated namespace запрещён. Compile/one-phone migration
+  pending.
 
 ---
 

@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,10 @@ class RelayWakeWorker(
         val relayDbPath = File(applicationContext.filesDir, RELAY_DB_NAME).absolutePath
 
         try {
+            val signing = IdentitySigningKeyStore.installIntoCore(
+                applicationContext,
+                publicKey.orEmpty(),
+            )
             val keyInstalled = RelayAtRestMasterKey.installIntoCore(applicationContext)
             val wake = RustBridge.runBoundedRelayWake(
                 displayName = displayName,
@@ -46,7 +51,8 @@ class RelayWakeWorker(
             )
             Log.i(
                 TAG,
-                "M8 wake complete: key=$keyInstalled owned=${wake.engineStartedByWorker} " +
+                "M8 wake complete: signing=${signing?.mode ?: "legacy-only"} " +
+                    "key=$keyInstalled owned=${wake.engineStartedByWorker} " +
                     "gossip=${wake.gossipTriggered} custody=${wake.custodyMode} " +
                     "quarantined=${wake.quarantineCount} windowMs=$ACTIVE_WINDOW_MS"
             )

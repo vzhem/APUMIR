@@ -19,6 +19,7 @@ import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import com.vladimir.messenger.service.NotificationHelper
 import com.vladimir.messenger.service.BotApi
@@ -126,6 +127,23 @@ class CoreServerService : Service() {
         Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
 
         serviceScope.launch {
+            // R0.5/S3: legacy routing ID остаётся неизменным; реальный Ed25519
+            // signing sidecar устанавливается до engine start и пока используется
+            // только diagnostics/future signed features.
+            val legacyRoutingId = existingPubKey
+                ?: prefs.getString("node_id", null)
+                .orEmpty()
+            val signing = if (prefs.getBoolean("identity_created", false)) {
+                IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+            } else {
+                null
+            }
+            Log.i(
+                TAG,
+                "Identity signing mode: ${signing?.mode ?: "legacy-only"}, " +
+                    "keyId=${signing?.keyId?.take(12) ?: "none"}"
+            )
+
             // M8-C slice 3: Android Keystore мост. Устанавливаем at-rest ключ
             // СТРОГО ДО старта движка. Недоступность ключа = честный RAM-only
             // degrade (durable custody не заявляется, файл не создаётся).

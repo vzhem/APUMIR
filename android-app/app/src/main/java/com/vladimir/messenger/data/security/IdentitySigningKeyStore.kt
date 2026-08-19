@@ -4,8 +4,14 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.SecureRandom
+import uniffi.p2p_core.identitySigningKeyId
+import uniffi.p2p_core.identitySigningMode
+import uniffi.p2p_core.identitySigningPublicKeyHex
+import uniffi.p2p_core.installIdentitySigningSeed
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -19,6 +25,8 @@ import javax.crypto.spec.GCMParameterSpec
  * exposes plaintext bytes, and it zeroes the same array in `finally`.
  */
 object IdentitySigningKeyStore {
+    private const val TAG = "IdentitySigningKeyStore"
+    private const val FORMAT_VERSION = 1
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val WRAP_ALIAS = "apu_identity_signing_wrap_v1"
     private const val PREFS_NAME = "apu_identity_signing"
@@ -37,6 +45,47 @@ object IdentitySigningKeyStore {
         message: String,
         cause: Throwable? = null,
     ) : Exception(message, cause)
+
+    data class InstallDiagnostics(
+        val mode: String,
+        val keyId: String,
+        val publicKeyHex: String,
+    )
+
+    /**
+     * Install the device-bound sidecar into Rust before engine startup.
+     * Returns null on honest degrade; normal messaging remains legacy-compatible.
+     */
+    @Synchronized
+    fun installIntoCore(context: Context, legacyRoutingNodeId: String): InstallDiagnostics? {
+        if (!legacyRoutingNodeId.matches(Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$"))) {
+            Log.w(TAG, "Signing sidecar disabled: invalid legacy routing ID")
+            return null
+        }
+        return try {
+            withSeed(context) { seed ->
+                installIdentitySigningSeed(
+                    FORMAT_VERSION.toUByte(),
+                    legacyRoutingNodeId,
+                    seed,
+                )
+            }
+            val mode = identitySigningMode()
+            val publicKey = identitySigningPublicKeyHex()
+            val keyId = identitySigningKeyId()
+            val expectedKeyId = MessageDigest.getInstance("SHA-256")
+                .digest(publicKey.hexToBytes())
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+            check(mode == "legacy+ed25519-sidecar-v1") { "unexpected signing mode" }
+            check(publicKey.length == 64) { "unexpected signing public key length" }
+            check(keyId.length == 64 && keyId == expectedKeyId) { "signing key ID mismatch" }
+            Log.i(TAG, "Signing sidecar installed (mode=$mode, keyId=${keyId.take(12)}…)")
+            InstallDiagnostics(mode, keyId, publicKey)
+        } catch (error: Exception) {
+            Log.e(TAG, "Signing sidecar unavailable; signed features remain disabled", error)
+            null
+        }
+    }
 
     /**
      * Load or create exactly one 32-byte seed and use it for one bounded call.
@@ -136,6 +185,13 @@ object IdentitySigningKeyStore {
             throw SigningSeedUnavailableException("unexpected identity signing seed length")
         }
         return seed
+    }
+
+    private fun String.hexToBytes(): ByteArray {
+        require(length % 2 == 0 && all { it.isDigit() || it in 'a'..'f' })
+        return ByteArray(length / 2) { index ->
+            substring(index * 2, index * 2 + 2).toInt(16).toByte()
+        }
     }
 
     private fun existingWrapKey(): SecretKey? {

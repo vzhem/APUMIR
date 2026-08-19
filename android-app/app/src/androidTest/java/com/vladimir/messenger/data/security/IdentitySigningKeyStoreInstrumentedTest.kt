@@ -12,10 +12,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
+@Ignore("Accepted pre-wiring; default alias is now production state. Use an isolated namespace for future reruns.")
 class IdentitySigningKeyStoreInstrumentedTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 

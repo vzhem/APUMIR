@@ -178,8 +178,16 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
   previous identity intact. `Arc` snapshots survive registry clear for future engine ownership.
 - Versioned UniFFI seam added: install seed, clear, mode, public key hex and key ID. Seed input is
   wiped in Rust; private bytes are never returned. Current Android startup still does not call it.
-- Pending: regenerate bindings/compile, Kotlin install-before-start call, self-signed TOFU binding,
-  restart/update/data-preservation tests without changing `node_id`.
+- Rust/UniFFI build PASS: native `73FC4D6D…7AE97B`, generated binding `80C5AF87…47E629`,
+  debug APK `2577AD31…6FF6C7`, state `7BE02D31…37E34B`.
+- Kotlin startup wiring source added: existing profiles install sidecar before service/worker engine;
+  new onboarding installs immediately after legacy node generation. Honest failure remains
+  `legacy-only`; routing `node_id` is never changed. Diagnostics verify mode, public key length and
+  `key_id == SHA-256(public_key)`; borrowed seed is zeroed.
+- Accepted pre-wiring instrumentation test is now `@Ignore`: its default alias became production
+  state and must never be deleted by a routine rerun. Future tests require isolated namespace.
+- Pending: compile startup wiring, one-phone update/data-preservation/stable key restart gate, then
+  self-signed TOFU binding.
 
 ### S4 — engine ownership and diagnostics
 
