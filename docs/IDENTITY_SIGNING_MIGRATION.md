@@ -192,10 +192,12 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 - One-phone migration PASS on Stas v11.16.26: state `28CDCE95…D7FD4B`; profile and legacy
   `node_id` hashes unchanged, sidecar wrapped blob stable across own-UID SIGKILL/restart,
   instrumentation and startup diagnostics PASS. No uninstall/data clear/force-stop.
-- **S3 registry/install-before-engine gate closed.** S3B Rust source started: canonical
-  domain-separated `apu-identity-binding-v1`, exact binary framing, self-sign/verify, strict parser,
-  installed legacy/public/key-id match and UniFFI create/verify/match APIs. Truncation/trailing/
-  tamper and registry mismatch tests added. Binding persistence in Kotlin awaits compile/bindgen.
+- **S3 registry/install-before-engine gate closed.** S3B Rust build PASS state
+  `834FDAF8…1A7F14`: canonical binding APIs/native/binding/Gradle. Kotlin persistence source now
+  creates binding once after sidecar install, verifies signature + installed legacy/public/key-id,
+  stores Base64 beside wrapped seed and refuses malformed/mismatched existing binding without
+  overwrite. Diagnostics expose only SHA-256 binding ID. Startup instrumentation verifies stable
+  double install, persisted signature/match and unchanged legacy node ID. Compile/phone gate pending.
 
 ### S4 — engine ownership and diagnostics
 

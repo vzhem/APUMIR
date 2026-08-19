@@ -2746,8 +2746,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 - **2026-08-19 (доп.213) — S3B TOFU binding Rust source:** canonical domain
   `apu-identity-binding-v1`, exact `[version,len,legacy,public32,created_i64,signature64]`, real
   self-sign/verify, strict no trailing/truncation/tamper parser, installed legacy/public/key-id match.
-  UniFFI create/verify/matches APIs; 3 new binding tests (+ existing registry tests). Kotlin persist
-  wiring не начат до Rust compile/bindgen; referral output всё ещё disabled.
+  UniFFI create/verify/matches APIs; Rust/direct-bindgen/Gradle PASS state `834FDAF8…1A7F14`, native
+  `3A0B876A…DE2172`, binding `A4A718A5…6AAE7A`, APK `8BB7DFC7…41935B`; generated binding commit
+  `f751474`, `.so` not commit. Kotlin persistence source: create-once Base64 binding beside seed,
+  verify signature+installed match every startup, malformed/mismatch never overwritten, diagnostics
+  only binding SHA. Startup instrumentation extended; compile/one-phone restart/tamper gate pending.
 
 ---
 

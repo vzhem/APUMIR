@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.security
 
 import android.content.Context
+import android.util.Base64
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.security.MessageDigest
@@ -9,6 +10,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import uniffi.p2p_core.identitySigningBindingMatchesInstalled
+import uniffi.p2p_core.verifyIdentitySigningBinding
 
 @RunWith(AndroidJUnit4::class)
 class IdentitySigningStartupInstrumentedTest {
@@ -30,6 +33,19 @@ class IdentitySigningStartupInstrumentedTest {
         assertTrue(first.keyId.matches(Regex("^[0-9a-f]{64}$")))
         assertEquals(first.publicKeyHex, second.publicKeyHex)
         assertEquals(first.keyId, second.keyId)
+        assertEquals(first.bindingSha256, second.bindingSha256)
+
+        val encodedBinding = context
+            .getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE)
+            .getString("identity_binding_v1", null)
+        assertNotNull(encodedBinding)
+        val binding = Base64.decode(encodedBinding, Base64.NO_WRAP)
+        assertTrue(verifyIdentitySigningBinding(binding))
+        assertTrue(identitySigningBindingMatchesInstalled(binding))
+        val expectedBindingHash = MessageDigest.getInstance("SHA-256")
+            .digest(binding)
+            .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+        assertEquals(expectedBindingHash, first.bindingSha256)
 
         val expectedKeyId = MessageDigest.getInstance("SHA-256")
             .digest(first.publicKeyHex.hexToBytes())

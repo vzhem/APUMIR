@@ -8,10 +8,13 @@ import android.util.Log
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
+import uniffi.p2p_core.createIdentitySigningBinding
+import uniffi.p2p_core.identitySigningBindingMatchesInstalled
 import uniffi.p2p_core.identitySigningKeyId
 import uniffi.p2p_core.identitySigningMode
 import uniffi.p2p_core.identitySigningPublicKeyHex
 import uniffi.p2p_core.installIdentitySigningSeed
+import uniffi.p2p_core.verifyIdentitySigningBinding
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -31,8 +34,10 @@ object IdentitySigningKeyStore {
     private const val WRAP_ALIAS = "apu_identity_signing_wrap_v1"
     private const val PREFS_NAME = "apu_identity_signing"
     private const val PREF_WRAPPED_SEED = "wrapped_seed_v1"
+    private const val PREF_IDENTITY_BINDING = "identity_binding_v1"
     private const val GCM_TAG_BITS = 128
     private const val MAX_ENCODED_ENVELOPE_CHARS = 128
+    private const val MAX_ENCODED_BINDING_CHARS = 512
     private val AAD = "apu-identity-signing-seed-v1".toByteArray(Charsets.US_ASCII)
 
     enum class Mode {
@@ -50,6 +55,7 @@ object IdentitySigningKeyStore {
         val mode: String,
         val keyId: String,
         val publicKeyHex: String,
+        val bindingSha256: String,
     )
 
     /**
@@ -79,8 +85,21 @@ object IdentitySigningKeyStore {
             check(mode == "legacy+ed25519-sidecar-v1") { "unexpected signing mode" }
             check(publicKey.length == 64) { "unexpected signing public key length" }
             check(keyId.length == 64 && keyId == expectedKeyId) { "signing key ID mismatch" }
-            Log.i(TAG, "Signing sidecar installed (mode=$mode, keyId=${keyId.take(12)}…)")
-            InstallDiagnostics(mode, keyId, publicKey)
+
+            val binding = loadOrCreateBinding(context.applicationContext)
+            check(verifyIdentitySigningBinding(binding)) { "identity binding signature invalid" }
+            check(identitySigningBindingMatchesInstalled(binding)) {
+                "identity binding does not match installed sidecar"
+            }
+            val bindingHash = MessageDigest.getInstance("SHA-256")
+                .digest(binding)
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+            Log.i(
+                TAG,
+                "Signing sidecar installed (mode=$mode, keyId=${keyId.take(12)}…, " +
+                    "binding=${bindingHash.take(12)}…)"
+            )
+            InstallDiagnostics(mode, keyId, publicKey, bindingHash)
         } catch (error: Exception) {
             Log.e(TAG, "Signing sidecar unavailable; signed features remain disabled", error)
             null
@@ -116,6 +135,31 @@ object IdentitySigningKeyStore {
         }
         seed.fill(0)
         return Mode.READY
+    }
+
+    private fun loadOrCreateBinding(context: Context): ByteArray {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val existing = prefs.getString(PREF_IDENTITY_BINDING, null)
+        if (existing != null) {
+            require(existing.length <= MAX_ENCODED_BINDING_CHARS) {
+                "identity signing binding is unbounded"
+            }
+            return Base64.decode(existing, Base64.NO_WRAP)
+        }
+
+        val binding = createIdentitySigningBinding(System.currentTimeMillis())
+        check(binding.isNotEmpty()) { "Rust returned empty identity binding" }
+        check(verifyIdentitySigningBinding(binding)) { "new identity binding signature invalid" }
+        check(identitySigningBindingMatchesInstalled(binding)) {
+            "new identity binding does not match installed sidecar"
+        }
+        val encoded = Base64.encodeToString(binding, Base64.NO_WRAP)
+        check(encoded.length <= MAX_ENCODED_BINDING_CHARS)
+        val persisted = prefs.edit().putString(PREF_IDENTITY_BINDING, encoded).commit()
+        if (!persisted) {
+            throw SigningSeedUnavailableException("cannot persist identity signing binding")
+        }
+        return binding
     }
 
     private fun loadOrCreate(context: Context): ByteArray {
