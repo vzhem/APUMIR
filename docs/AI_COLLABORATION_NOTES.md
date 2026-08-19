@@ -3015,3 +3015,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 7. Активные `%TEMP%` states/logs, APK/native и hash-linked evidence не удалять. После закрытия gate
    сделать bounded inventory/cleanup; milestone-backup предлагать только после действительно крупной
    проверенной APK/этапа, не после docs-only или промежуточного Rust compile.
+- **2026-08-19 (доп.216) — в конец roadmap добавлено устойчивое финансирование:** только после
+  launch-ready/privacy/security gates сначала отдельное ненавязчивое меню добровольной поддержки
+  разработки и инфраструктуры без ограничения функций для не-доноров. Самым последним пунктом
+  добавлены privacy-first рекламные места вне private chats, поиск рекламодателей и формальный
+  advertiser onboarding (verification/moderation/contract/pilot/kill switch). Запрещены message/
+  contact/social-graph targeting, скрытая реклама, pay-to-win referrals и передача identity/IP.
+- **2026-08-19 (доп.217) — первый R1 build gate безопасно не стартовал:** после успешного pull
+  PowerShell StrictMode остановил script на scalar `.Count` до Rust/Gradle/ADB/phone changes.
+  Исходный gate не повторять; добавлен recovery script с новым TEMP prefix и принудительным array.
