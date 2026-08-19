@@ -2689,6 +2689,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   на C: нет `link.exe` (`error: linker link.exe not found`). Production Android release compile
   остаётся PASS; test blocks ещё не typechecked/executed. Перед identity migration нужен новый
   MSVC Build Tools workload на C: (не D:) и guarded resume; не маскировать environment failure.
+  Winget и direct signed Microsoft bootstrapper оба timeout/TLS fail до download; установка не
+  началась. Arena GitHub App также не имеет `workflows` permission, поэтому новый CI workflow нельзя
+  безопасно push-нуть. Выбран bounded обход без ослабления теста: feature-gated Android executable
+  `referral-selftest` (не входит в normal build) исполняет те же 7 real Ed25519 scenarios на одном
+  debug-телефоне; binary после capture удаляется. Local Build Tools остаются отдельным maintenance.
 
 ---
 
