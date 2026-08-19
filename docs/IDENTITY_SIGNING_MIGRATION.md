@@ -158,10 +158,14 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
   random 32-byte seed, synchronous persistence and bounded `withSeed` zeroization.
 - Existing-but-unreadable wrapped state returns `UNAVAILABLE`/exception and is never silently
   overwritten or rotated; read-only `mode()` never creates bytes or keys.
-- Five JVM framing tests: exact layout/roundtrip, invalid lengths, all truncations+trailing bytes,
-  unknown version and no aliasing.
+- Five JVM framing tests PASS (state `E6AEDB6C…4BD825`): exact layout/roundtrip, invalid lengths,
+  all truncations+trailing bytes, unknown version and no aliasing.
+- Android instrumented test source added (compile/runtime pending): real Keystore roundtrip and seed
+  stability, borrowed-array zeroization, ciphertext tamper rejection without overwrite, restored
+  blob with missing alias rejected without silent rotation; dedicated sidecar prefs/alias cleaned in
+  before/after and no profile/chat/relay data touched.
 - No Rust/engine/UniFFI caller yet; production does not create a signing seed in this slice.
-- Next: Android Keystore instrumented roundtrip/tamper/uninstall semantics, then install-before-engine.
+- Next: compile/run isolated Android Keystore test, then install-before-engine model.
 
 
 ### S3 — legacy migration

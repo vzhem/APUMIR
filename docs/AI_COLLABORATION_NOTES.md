@@ -2714,8 +2714,11 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Ed25519 seed, commit-before-return и `withSeed` zeroization. Existing blob без usable Keystore key
   = `UNAVAILABLE`/exception, без silent overwrite/rotation; `mode()` read-only. Добавлены 5 JVM
   framing tests (layout, lengths, every truncation/trailing, version, aliasing). Нет вызова из app/
-  Rust/engine: текущая версия не создаёт seed и не меняет profiles. Следующий gate — Kotlin unit+
-  Gradle compile, затем отдельный Android Keystore instrumented slice.
+  Rust/engine: текущая версия не создаёт seed и не меняет profiles. Kotlin gate PASS state
+  `E6AEDB6C…4BD825`, 5 JVM tests + Gradle, APK `BC703942…67570D`, Keystore/ADB/phones=false.
+  Добавлен instrumented source: real Android Keystore stable roundtrip, lambda-array zeroization,
+  tamper rejection/no overwrite и restored blob missing-alias/no rotation; test cleanup касается
+  только нового unused alias/prefs, не profile/chat/relay. Compile/runtime pending.
 
 ---
 
