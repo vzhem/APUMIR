@@ -3,6 +3,8 @@
 
 use std::sync::{Arc, OnceLock, RwLock};
 
+use rand::{rngs::OsRng, RngCore};
+
 use crate::crypto::keys::Ed25519KeyPair;
 use crate::crypto::referral::{
     sign_referral_invite_v1, ReferralInviteClaimsV1, ReferralInviteError, SignedReferralInviteV1,
@@ -413,6 +415,41 @@ pub fn identity_binding_matches_installed(bytes: &[u8]) -> bool {
         && binding.key_id() == identity.key_id()
 }
 
+pub fn create_installed_referral_token(
+    identity_binding: &[u8],
+    created_at_ms: i64,
+    expires_at_ms: i64,
+) -> Result<Vec<u8>, SigningIdentityError> {
+    let identity = installed_signing_identity().ok_or(SigningIdentityError::MalformedReferralToken)?;
+    let binding = SignedIdentityBindingV1::from_bytes(identity_binding)?;
+    let mut nonce = [0u8; crate::crypto::referral::REFERRAL_NONCE_BYTES];
+    let mut rng = OsRng;
+    rng.fill_bytes(&mut nonce);
+    IdentityBoundReferralInviteV1::create(
+        &identity,
+        binding,
+        nonce,
+        created_at_ms,
+        expires_at_ms,
+    )?
+    .to_bytes()
+}
+
+pub fn verify_identity_bound_referral_token(bytes: &[u8], now_ms: i64) -> bool {
+    IdentityBoundReferralInviteV1::from_bytes(bytes)
+        .and_then(|token| token.verify(now_ms))
+        .is_ok()
+}
+
+pub fn verified_referral_inviter_node_id(
+    bytes: &[u8],
+    now_ms: i64,
+) -> Result<String, SigningIdentityError> {
+    let token = IdentityBoundReferralInviteV1::from_bytes(bytes)?;
+    token.verify(now_ms)?;
+    Ok(token.signed_invite.claims.inviter_node_id)
+}
+
 fn is_legacy_routing_node_id(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix("pk_") else {
         return false;
@@ -574,6 +611,39 @@ mod tests {
             ),
             Err(SigningIdentityError::ReferralBindingMismatch)
         );
+    }
+
+    #[test]
+    fn installed_registry_creates_and_extracts_verified_referral_token() {
+        clear_signing_identity();
+        let identity = install_signing_identity(1, legacy(), &[34; 32]).unwrap();
+        let binding = identity
+            .create_binding(1_800_000_000_000)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        let bytes = create_installed_referral_token(
+            &binding,
+            1_800_000_001_000,
+            1_800_086_401_000,
+        )
+        .unwrap();
+        assert!(verify_identity_bound_referral_token(
+            &bytes,
+            1_800_000_002_000
+        ));
+        assert_eq!(
+            verified_referral_inviter_node_id(&bytes, 1_800_000_002_000).unwrap(),
+            legacy()
+        );
+        let mut tampered = bytes;
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert!(!verify_identity_bound_referral_token(
+            &tampered,
+            1_800_000_002_000
+        ));
+        clear_signing_identity();
     }
 
     #[test]

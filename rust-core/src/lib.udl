@@ -33,6 +33,13 @@ namespace p2p_core {
     bytes create_identity_signing_binding(i64 created_at_ms);
     boolean verify_identity_signing_binding(bytes binding);
     boolean identity_signing_binding_matches_installed(bytes binding);
+
+    // R1: signed direct-referral token bound to the persisted S3B identity binding.
+    [Throws=CoreError]
+    bytes create_referral_invite_token(bytes identity_binding, i64 created_at_ms, i64 expires_at_ms);
+    boolean verify_referral_invite_token(bytes token, i64 now_ms);
+    [Throws=CoreError]
+    string verified_referral_inviter_node_id(bytes token, i64 now_ms);
 };
 
 [Error]

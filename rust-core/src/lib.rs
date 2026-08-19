@@ -366,6 +366,36 @@ pub fn identity_signing_binding_matches_installed(binding: Vec<u8>) -> bool {
     crypto::signing_identity::identity_binding_matches_installed(&binding)
 }
 
+pub fn create_referral_invite_token(
+    identity_binding: Vec<u8>,
+    created_at_ms: i64,
+    expires_at_ms: i64,
+) -> Result<Vec<u8>, CoreError> {
+    crypto::signing_identity::create_installed_referral_token(
+        &identity_binding,
+        created_at_ms,
+        expires_at_ms,
+    )
+    .map_err(|error| CoreError::CryptoError {
+        detail: error.to_string(),
+    })
+}
+
+pub fn verify_referral_invite_token(token: Vec<u8>, now_ms: i64) -> bool {
+    crypto::signing_identity::verify_identity_bound_referral_token(&token, now_ms)
+}
+
+pub fn verified_referral_inviter_node_id(
+    token: Vec<u8>,
+    now_ms: i64,
+) -> Result<String, CoreError> {
+    crypto::signing_identity::verified_referral_inviter_node_id(&token, now_ms).map_err(|error| {
+        CoreError::CryptoError {
+            detail: error.to_string(),
+        }
+    })
+}
+
 /// M8-C slice 3: убрать at-rest ключ (будущий logout/wipe; действует на
 /// следующий запуск движка — работающий движок держит свой снимок).
 pub fn clear_relay_at_rest_key() {
