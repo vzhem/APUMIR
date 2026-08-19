@@ -2716,9 +2716,14 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   framing tests (layout, lengths, every truncation/trailing, version, aliasing). Нет вызова из app/
   Rust/engine: текущая версия не создаёт seed и не меняет profiles. Kotlin gate PASS state
   `E6AEDB6C…4BD825`, 5 JVM tests + Gradle, APK `BC703942…67570D`, Keystore/ADB/phones=false.
-  Добавлен instrumented source: real Android Keystore stable roundtrip, lambda-array zeroization,
-  tamper rejection/no overwrite и restored blob missing-alias/no rotation; test cleanup касается
-  только нового unused alias/prefs, не profile/chat/relay. Compile/runtime pending.
+  Android test APK build PASS state `0172D6E5…8F2A8`; instrumented test on Stas PASS (`OK (1)`,
+  log `BFA8FF7E…4FFC21`): stable real Keystore roundtrip, lambda-array zeroization, tamper/no overwrite,
+  missing alias/no rotation. Harness ожидал физическое отсутствие prefs после `clear`, но Android
+  оставил empty XML; wrapped seed отсутствовал. Test cleanup исправлен на `deleteSharedPreferences`.
+  Recovery state `93060511…4F4C8`: Stas profile SHA unchanged `66F65581…9C4245`, identity/marker
+  preserved, test package removed, wrapped seed false, v11.16.24 PID 17574, no clear/force-stop.
+  **S2 закрыт.** Следующий slice — Rust install-before-engine signing registry/diagnostics без app
+  startup wiring.
 
 ---
 

@@ -916,8 +916,8 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
    Authoritative migration design: `docs/IDENTITY_SIGNING_MIGRATION.md`.
    - [x] Slice 1: pure canonical/domain-separated referral claims + real `Ed25519KeyPair` sign/verify,
      node binding, nonce/time/lifetime bounds и negative tests; без engine/UniFFI/URL wiring.
-   - [ ] Slice 2: identity audit завершён; device-bound Kotlin seed envelope/Keystore source
-     реализован без engine wiring, compile/instrumented Android gate pending.
+   - [x] Slice 2: identity audit + device-bound Kotlin seed envelope/Keystore storage; JVM tests,
+     Android Keystore roundtrip/tamper/missing-key/zeroization and profile-preservation PASS.
    - [ ] Slice 3: engine owns real identity; versioned UniFFI sign/verify без выдачи private bytes.
 3. **R1 — signed direct token:** versioned canonical payload, parser/expiry/revoke/replay tests;
    официальный HTTPS App Link и pending token через install/onboarding.

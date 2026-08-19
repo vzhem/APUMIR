@@ -73,7 +73,7 @@ class IdentitySigningKeyStoreInstrumentedTest {
     }
 
     private fun cleanup() {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
+        context.deleteSharedPreferences(PREFS_NAME)
         val keyStore = keyStore()
         if (keyStore.containsAlias(WRAP_ALIAS)) keyStore.deleteEntry(WRAP_ALIAS)
     }

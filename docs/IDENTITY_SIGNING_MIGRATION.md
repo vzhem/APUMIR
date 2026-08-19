@@ -160,12 +160,14 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
   overwritten or rotated; read-only `mode()` never creates bytes or keys.
 - Five JVM framing tests PASS (state `E6AEDB6C…4BD825`): exact layout/roundtrip, invalid lengths,
   all truncations+trailing bytes, unknown version and no aliasing.
-- Android instrumented test source added (compile/runtime pending): real Keystore roundtrip and seed
-  stability, borrowed-array zeroization, ciphertext tamper rejection without overwrite, restored
-  blob with missing alias rejected without silent rotation; dedicated sidecar prefs/alias cleaned in
-  before/after and no profile/chat/relay data touched.
+- Android Keystore instrumented acceptance PASS on Stas v11.16.24: real wrap/unwrap stability,
+  borrowed-array zeroization, tamper rejection/no overwrite, missing alias/no silent rotation.
+  Instrumentation log SHA `BFA8FF7E…4FFC21`; recovery state `93060511…4F4C8`.
+- Existing Stas profile prefs SHA stayed `66F65581…9C4245`, identity/device marker preserved; test
+  package removed, wrapped seed absent after cleanup, APU relaunched. No data clear/force-stop.
+- Test cleanup now uses `deleteSharedPreferences`, avoiding an empty leftover XML file.
 - No Rust/engine/UniFFI caller yet; production does not create a signing seed in this slice.
-- Next: compile/run isolated Android Keystore test, then install-before-engine model.
+- Next: Rust install-before-engine registry + public diagnostics, still without app startup wiring.
 
 
 ### S3 — legacy migration
