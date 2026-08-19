@@ -189,8 +189,11 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 - Read-only startup instrumentation source added: existing identity/marker required, sidecar mode
   READY, two Rust installs yield identical public key/key ID, SHA-256 invariant holds and legacy
   `node_id` remains byte-for-byte unchanged. It never deletes/reset sidecar or app data.
-- Pending: compile startup wiring/test APK, one-phone update/data-preservation/stable key restart
-  gate, then self-signed TOFU binding.
+- One-phone migration PASS on Stas v11.16.26: state `28CDCE95…D7FD4B`; profile and legacy
+  `node_id` hashes unchanged, sidecar wrapped blob stable across own-UID SIGKILL/restart,
+  instrumentation and startup diagnostics PASS. No uninstall/data clear/force-stop.
+- **S3 registry/install-before-engine gate closed.** Next: persist and verify the self-signed TOFU
+  binding (`legacy_routing_node_id ↔ signing_public_key`) before enabling signed invite output.
 
 ### S4 — engine ownership and diagnostics
 

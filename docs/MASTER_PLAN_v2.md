@@ -257,6 +257,10 @@ logo и согласованный современный интерфейс в 
 - [ ] Android upgrade сохраняет user data/identity/keys через настоящие migrations; destructive
   migration и uninstall запрещены. Downgrade, если он небезопасен для новой схемы, блокируется
   явно и документируется.
+- [ ] UpdateChecker regression: установленная старая stable-версия получает уведомление о новом
+  GitHub Latest, корректно сравнивает `versionCode/versionName`, показывает release notes/download,
+  не молчит из-за draft/prerelease/cache/network error и не предлагает update debug-сборке с более
+  высоким внутренним versionCode. Проверять на реальном опубликованном N-1 APK.
 
 Критерий: во время постепенного обновления поддерживаемые разные версии остаются в одной сети и
 доставляют сообщения/receipts без дублей и потери cleanup; несовместимость определяется явно и
@@ -918,8 +922,9 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
      node binding, nonce/time/lifetime bounds и negative tests; без engine/UniFFI/URL wiring.
    - [x] Slice 2: identity audit + device-bound Kotlin seed envelope/Keystore storage; JVM tests,
      Android Keystore roundtrip/tamper/missing-key/zeroization and profile-preservation PASS.
-   - [ ] Slice 3: Rust signing registry + versioned UniFFI diagnostics source ready; binding regen/
-     compile and Kotlin install-before-engine/TOFU migration still pending; private bytes never return.
+   - [x] Slice 3: Rust signing registry, UniFFI diagnostics and Kotlin install-before-engine;
+     one-phone profile/node preservation + stable sidecar restart PASS, private bytes never return.
+   - [ ] Slice 3B: canonical self-signed TOFU binding, persistent verification and dual-signed rotation.
 3. **R1 — signed direct token:** versioned canonical payload, parser/expiry/revoke/replay tests;
    официальный HTTPS App Link и pending token через install/onboarding.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.

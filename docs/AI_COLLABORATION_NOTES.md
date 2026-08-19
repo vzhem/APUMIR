@@ -2737,9 +2737,12 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   phones=false. Read-only startup instrumentation: READY sidecar, stable double install,
   public/key-id SHA invariant и unchanged legacy node_id. Добавлен one-phone Stas gate: replace
   update v11.16.24→v11.16.26, exact profile/node hashes, sidecar blob stability через SIGKILL,
-  instrumentation/logs; no uninstall/data clear/force-stop. Пользователь также заметил, что update
-  notification мог перестать появляться; regression добавлен в MASTER_PLAN Phase 0.5, проверить
-  отдельно на опубликованном N-1 release (debug v11.16.24+ не является валидным кейсом).
+  instrumentation/logs; no uninstall/data clear/force-stop. Stas migration PASS state
+  `28CDCE95…D7FD4B`: v11.16.26, profile/node/sidecar stable, instrumentation+SIGKILL restart PASS,
+  no clear/force-stop. **S3 install-before-engine закрыт.** Next S3B — canonical persisted self-signed
+  TOFU binding до signed invite output. Пользователь также заметил, что update notification мог
+  перестать появляться; regression в MASTER_PLAN Phase 0.5, проверить отдельно на published N-1
+  release (debug v11.16.24+ не является валидным кейсом).
 
 ---
 
