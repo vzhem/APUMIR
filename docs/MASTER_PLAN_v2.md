@@ -895,14 +895,30 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
 - [ ] Удаление аккаунта/локальных данных удаляет локальные referral receipts; server-side opt-in
   данные подчиняются privacy retention/delete policy.
 
+### Текущий code audit и обязательный crypto blocker
+
+- Текущий `InviteLinkParser` понимает custom `p2pmessenger://`, Rust legacy `p2pm://` и Telegram,
+  но ещё не понимает официальный APU HTTPS App Link и не сохраняет pending invite через установку.
+- `ShareProfileScreen` заставляет отдельно пересылать contact link, Telegram fallback и APK URL;
+  copy/share flow нужно объединить в одну понятную APU-карточку.
+- **Hard blocker:** текущий `ffi::CryptoManager.sign/verify` — prototype (`sig_` + hash данных), а
+  verify фактически не связывает подпись с public key. Его нельзя использовать для referral token,
+  статуса или security claims. До R1 нужно интегрировать реальный Ed25519 `NodeIdentity`/Keystore
+  lifecycle, migration и cross-version tests. Legacy unsigned links можно продолжать принимать для
+  добавления контакта, но они никогда не дают referral reward.
+
 ### Этапы реализации
 
-1. **R0 — UX/spec:** названия, progress screen, link copy/share, privacy text, threat model.
-2. **R1 — signed direct token:** parser/expiry/revoke/replay tests; pending token через install.
-3. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
-4. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
-5. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.
-6. **R5 — controlled experiment:** 50–100 users; spam complaints, activation, D7 quality и fraud.
+1. **R0 — UX/spec + existing-flow audit:** названия, progress screen, единая share-card, privacy text,
+   threat model и compatibility policy для legacy links.
+2. **R0.5 — real identity signing foundation:** Ed25519 sign/verify, durable device-bound private key,
+   public-key↔node-id binding, migration/rotation/recovery и запрет placeholder signature в referral.
+3. **R1 — signed direct token:** versioned canonical payload, parser/expiry/revoke/replay tests;
+   официальный HTTPS App Link и pending token через install/onboarding.
+4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
+5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
+6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.
+7. **R5 — controlled experiment:** 50–100 users; spam complaints, activation, D7 quality и fraud.
    Высшие tiers/публичные badges открывать только после честных метрик и security review.
 
 ### Acceptance gate

@@ -2663,6 +2663,15 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   Статусы от «Первый связной» до «Создатель сети», косметические/opt-in награды без transport/
   security/pay-to-win преимуществ. Только direct referrals, без multi-level/денег/contact scraping;
   privacy, anti-fraud, accessibility, boundary tests и pilot 50–100 — обязательные gates.
+- **2026-08-19 (доп.210) — следующий serious direction объединяет Invite Kit и referrals; crypto
+  сначала:** пользователь подтвердил публичный release APK на четвёртом телефоне Vladimir и не
+  хочет тратить день на мелкие post-release checks/старые версии. Existing-flow audit: parser уже
+  поддерживает custom/legacy/Telegram, но нет official HTTPS App Link/pending invite; share UI
+  отправляет три раздельные ссылки и ещё использует APUMIR text. Критический blocker: текущий
+  `ffi::CryptoManager.sign/verify` — prototype `sig_+hash`, verify не связывает public key; его
+  запрещено использовать для referral/security claims. В roadmap добавлен R0.5 real Ed25519
+  identity signing + device-bound lifecycle/migration до signed referral R1. Legacy unsigned invite
+  остаётся contact-only и никогда не даёт reward.
 
 ---
 
