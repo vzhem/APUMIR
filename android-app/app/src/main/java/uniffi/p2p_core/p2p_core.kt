@@ -782,6 +782,16 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -855,6 +865,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_method_p2pcorehandle_trigger_gossip_discovery(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
     ): Byte
+    fun uniffi_p2p_core_fn_func_clear_identity_signing_seed(uniffi_out_err: UniffiRustCallStatus,
+    ): Unit
     fun uniffi_p2p_core_fn_func_clear_relay_at_rest_key(uniffi_out_err: UniffiRustCallStatus,
     ): Unit
     fun uniffi_p2p_core_fn_func_create_engine(`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -867,8 +879,16 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_p2p_core_fn_func_get_version(uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_identity_signing_key_id(uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_identity_signing_mode(uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_identity_signing_public_key_hex(uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_initialize_core(uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_install_identity_signing_seed(`formatVersion`: Byte,`legacyRoutingNodeId`: RustBuffer.ByValue,`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Unit
     fun uniffi_p2p_core_fn_func_install_relay_at_rest_key(`keyId`: Short,`keyMaterial`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Unit
     fun uniffi_p2p_core_fn_func_relay_at_rest_key_id(uniffi_out_err: UniffiRustCallStatus,
@@ -985,6 +1005,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): Unit
+    fun uniffi_p2p_core_checksum_func_clear_identity_signing_seed(
+    ): Short
     fun uniffi_p2p_core_checksum_func_clear_relay_at_rest_key(
     ): Short
     fun uniffi_p2p_core_checksum_func_create_engine(
@@ -997,7 +1019,15 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_get_version(
     ): Short
+    fun uniffi_p2p_core_checksum_func_identity_signing_key_id(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_identity_signing_mode(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_identity_signing_public_key_hex(
+    ): Short
     fun uniffi_p2p_core_checksum_func_initialize_core(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_install_identity_signing_seed(
     ): Short
     fun uniffi_p2p_core_checksum_func_install_relay_at_rest_key(
     ): Short
@@ -1070,6 +1100,9 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_p2p_core_checksum_func_clear_identity_signing_seed() != 3916.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_clear_relay_at_rest_key() != 53814.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1088,7 +1121,19 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_get_version() != 32282.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_identity_signing_key_id() != 24405.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_identity_signing_mode() != 26160.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_identity_signing_public_key_hex() != 4742.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_initialize_core() != 10548.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_install_identity_signing_seed() != 51412.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_install_relay_at_rest_key() != 24777.toShort()) {
@@ -2590,7 +2635,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
             FfiConverterTypeMessageFfi.write(it, buf)
         }
     }
-} fun `clearRelayAtRestKey`()
+} fun `clearIdentitySigningSeed`()
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_clear_identity_signing_seed(
+        _status)
+}
+
+
+ fun `clearRelayAtRestKey`()
         =
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_clear_relay_at_rest_key(
@@ -2643,6 +2696,33 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     )
     }
 
+ fun `identitySigningKeyId`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_identity_signing_key_id(
+        _status)
+}
+    )
+    }
+
+ fun `identitySigningMode`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_identity_signing_mode(
+        _status)
+}
+    )
+    }
+
+ fun `identitySigningPublicKeyHex`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_identity_signing_public_key_hex(
+        _status)
+}
+    )
+    }
+
 
     @Throws(CoreException::class) fun `initializeCore`(): kotlin.String {
             return FfiConverterString.lift(
@@ -2652,6 +2732,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
+
+
+    @Throws(CoreException::class) fun `installIdentitySigningSeed`(`formatVersion`: kotlin.UByte, `legacyRoutingNodeId`: kotlin.String, `seed`: kotlin.ByteArray)
+        =
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_install_identity_signing_seed(
+        FfiConverterUByte.lower(`formatVersion`),FfiConverterString.lower(`legacyRoutingNodeId`),FfiConverterByteArray.lower(`seed`),_status)
+}
+
 
 
     @Throws(CoreException::class) fun `installRelayAtRestKey`(`keyId`: kotlin.UShort, `keyMaterial`: kotlin.ByteArray)
