@@ -3039,3 +3039,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   присутствуют; Gradle PASS. `NativeCommandError`/отсутствующий ktlint — не failure, native exit=0 и
   binding отдельно нормализован. Persistence/ADB/phones `False/False/False`. Generated binding ещё
   должен пройти exact-hash acceptance и отдельный commit; `.so` не коммитить.
+- **2026-08-19 (доп.221) — generated R1 UniFFI binding acceptance recovery PASS:** Windows local
+  commit `95270bc` содержит ровно normalized binding `B1232420…1F9AA` и успешно отправлен как
+  remote tip fixed branch через explicit `HEAD:refs/heads/arena/01a0149e-apumir`; force push/ADB/
+  phones `False/False/False`. Native `836B009E…B391A` остался единственным uncommitted artifact.
+- **2026-08-19 (доп.222) — R1 HTTPS token codec source:** добавлен bounded unpadded Base64URL codec
+  для `https://apumir.app/i?r=…`, strict scheme/host/port/userinfo/path/fragment/duplicate checks и
+  Kotlin boundary, который возвращает inviter только после Rust verify+extract. Parser сам по себе
+  никогда не даёт attribution. Добавлены negative tests. `apumir.app` требует подтверждения
+  владения и `assetlinks.json` до объявления Android Verified App Link; JVM/Gradle gate pending.

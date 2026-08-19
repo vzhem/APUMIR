@@ -934,10 +934,14 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
      against the verified S3B sidecar binding instead of incorrectly deriving it from the new key.
      Production Android Rust + debug APK compile PASS; source negative tests are present, while host
      runtime execution remains blocked by the missing MSVC linker.
-   - [ ] Slice 2: narrow UniFFI API creates a random-nonce token only from the installed sidecar and
+   - [x] Slice 2: narrow UniFFI API creates a random-nonce token only from the installed sidecar and
      persisted matching binding; verifier returns an inviter routing ID only after full binding,
-     signature and time-window verification. Native, generated Kotlin binding and APK build PASS;
-     generated binding acceptance commit pending.
+     signature and time-window verification. Native/binding/APK PASS; normalized generated binding
+     accepted as commit `95270bc`, while `.so` remained uncommitted.
+   - [ ] Slice 3: strict official HTTPS token codec (`https://apumir.app/i?r=…`) and Kotlin security
+     boundary that attributes only after Rust verification. Source + parser negative tests added;
+     JVM/Gradle gate pending. Domain ownership/`assetlinks.json` remains a deployment gate before the
+     link may be called an Android Verified App Link.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
 5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
 6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.
