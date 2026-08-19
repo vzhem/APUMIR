@@ -230,4 +230,11 @@ Atomicity rule: do not set “signing enabled” until wrapped blob, derived pub
 
 ## 9. Tooling status
 
-Production Android Rust compilation of referral S1 passed. Runtime/unit test execution is temporarily blocked on the Windows host because the failed D: disk contained MSVC `link.exe`; Microsoft CDN and WSL installation were unavailable. Several bounded attempts stopped before app/phone changes. The test matrix remains pending until one supported environment is available (MSVC on C:, existing Linux runner, or a build environment with working host linker). This tooling issue must not be hidden by weakening crypto assertions.
+Production Android Rust compilation of referral S1 and the R1 identity-bound wire envelope passed.
+R1 recovery state `B6D20F8C…48B06`, native `D0B63A23…5212D`, debug APK
+`B3949CC6…9FE96`; no ADB or phone changes. Runtime/unit test execution is temporarily blocked on the
+Windows host because the failed D: disk contained MSVC `link.exe`; Microsoft CDN and WSL installation
+were unavailable. Several bounded attempts stopped before app/phone changes. The test matrix remains
+pending until one supported environment is available (MSVC on C:, existing Linux runner, or a build
+environment with working host linker). This tooling issue must not be hidden by weakening crypto
+assertions.

@@ -3024,3 +3024,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 - **2026-08-19 (доп.217) — первый R1 build gate безопасно не стартовал:** после успешного pull
   PowerShell StrictMode остановил script на scalar `.Count` до Rust/Gradle/ADB/phone changes.
   Исходный gate не повторять; добавлен recovery script с новым TEMP prefix и принудительным array.
+- **2026-08-19 (доп.218) — R1 identity-bound wire production compile PASS:** recovery state
+  `B6D20F8C…48B06`, arm64 native `D0B63A23…5212D`, debug APK 29,398,117 B
+  `B3949CC6…9FE96`; Rust release compile и Gradle assembleDebug завершились успешно. Показанный
+  `NativeCommandError` был ожидаемым отображением native stderr под Windows PowerShell и не являлся
+  failure: exit code=0, итоговый outcome=PASS. Host tests/ADB/phones `False/False/False`.
