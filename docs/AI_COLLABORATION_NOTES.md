@@ -2750,7 +2750,9 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   `3A0B876A…DE2172`, binding `A4A718A5…6AAE7A`, APK `8BB7DFC7…41935B`; generated binding commit
   `f751474`, `.so` not commit. Kotlin persistence source: create-once Base64 binding beside seed,
   verify signature+installed match every startup, malformed/mismatch never overwritten, diagnostics
-  only binding SHA. Startup instrumentation extended; compile/one-phone restart/tamper gate pending.
+  only binding SHA. Startup instrumentation extended. Первый persistence build precheck дважды
+  безопасно остановился до Gradle/evidence: harness ожидал binding dirty, но `f751474` уже tracked;
+  исправлено на exact one dirty native file. One-phone restart/tamper gate pending.
 
 ---
 
