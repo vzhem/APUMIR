@@ -2697,7 +2697,10 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
   change и остановился до adb (`link.exe` missing); app/data не менялись. Добавлен standalone tool
   crate без build.rs/UniFFI/unrelated native deps, который path-компилирует **exact production**
   `keys.rs` + `referral.rs` и использует общий release target cache; Android v2 gate строит/запускает
-  его на Стасе и удаляет binary. Local Build Tools остаются отдельным maintenance.
+  его на Стасе и удаляет binary. V2 state `47213A1C…61BA8` остановился до build/adb: cargo-ndk
+  запускает metadata из current directory и не увидел nested manifest. Исправлен gate: Push-Location
+  в standalone tool dir, общий target cache; v3 требует exact immutable v2 state. Local Build Tools
+  остаются отдельным maintenance.
 
 ---
 
