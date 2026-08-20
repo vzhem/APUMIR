@@ -142,10 +142,12 @@ class ChatDetailViewModel @Inject constructor(
         if (_uiState.value.isPreparingFile) return
         viewModelScope.launch {
             _uiState.update { it.copy(isPreparingFile = true) }
+            var targetRecipientId: String? = null
             try {
                 val chat = chatRepository.getChatById(chatId)
                     ?: error("Чат недоступен")
                 val recipientId = chat.contactId
+                targetRecipientId = recipientId
                 check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
                 val messageId = UUID.randomUUID().toString()
                 val prepared = filePreparation.prepare(
@@ -174,7 +176,7 @@ class ChatDetailViewModel @Inject constructor(
                 if (message.contains("binding is not pinned")) {
                     // First contact between these phones for files: push our signed HELLO so the
                     // recipient can pin us and reply; durable transport delivers it when online.
-                    fileTransferRouter.requestExchangeBinding(recipientId)
+                    targetRecipientId?.let { fileTransferRouter.requestExchangeBinding(it) }
                     _uiState.update {
                         it.copy(error = "Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.")
                     }
