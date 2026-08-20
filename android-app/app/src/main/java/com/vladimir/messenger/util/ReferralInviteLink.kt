@@ -12,6 +12,9 @@ import java.util.Base64
  */
 object ReferralInviteLink {
     const val OFFICIAL_HOST = "apumir.app"
+    // Keep public sharing on legacy contact links until DNS/HTTPS landing and assetlinks.json
+    // ownership are deployed and verified. Token generation/verification can still be tested.
+    const val DEPLOYMENT_ENABLED = false
     const val TOKEN_PARAMETER = "r"
     const val MAX_TOKEN_BYTES = 512
     private const val MAX_LINK_CHARS = 1_024

@@ -9,12 +9,14 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
 import uniffi.p2p_core.createIdentitySigningBinding
+import uniffi.p2p_core.createReferralInviteToken
 import uniffi.p2p_core.identitySigningBindingMatchesInstalled
 import uniffi.p2p_core.identitySigningKeyId
 import uniffi.p2p_core.identitySigningMode
 import uniffi.p2p_core.identitySigningPublicKeyHex
 import uniffi.p2p_core.installIdentitySigningSeed
 import uniffi.p2p_core.verifyIdentitySigningBinding
+import uniffi.p2p_core.verifyReferralInviteToken
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -38,6 +40,8 @@ object IdentitySigningKeyStore {
     private const val GCM_TAG_BITS = 128
     private const val MAX_ENCODED_ENVELOPE_CHARS = 128
     private const val MAX_ENCODED_BINDING_CHARS = 512
+    private const val DEFAULT_REFERRAL_LIFETIME_MS = 7L * 24 * 60 * 60 * 1_000
+    private const val MAX_REFERRAL_TOKEN_BYTES = 512
     private val AAD = "apu-identity-signing-seed-v1".toByteArray(Charsets.US_ASCII)
 
     enum class Mode {
@@ -106,6 +110,29 @@ object IdentitySigningKeyStore {
         }
     }
 
+    /** Creates a short-lived public referral token without returning private material. */
+    @Synchronized
+    fun createSignedReferralToken(
+        context: Context,
+        nowMs: Long = System.currentTimeMillis(),
+        lifetimeMs: Long = DEFAULT_REFERRAL_LIFETIME_MS,
+    ): ByteArray? {
+        if (nowMs < 0 || lifetimeMs <= 0 || lifetimeMs > DEFAULT_REFERRAL_LIFETIME_MS) return null
+        return try {
+            val binding = loadExistingVerifiedBinding(context.applicationContext) ?: return null
+            val expiresAt = Math.addExact(nowMs, lifetimeMs)
+            val token = createReferralInviteToken(binding, nowMs, expiresAt)
+            check(token.isNotEmpty() && token.size <= MAX_REFERRAL_TOKEN_BYTES) {
+                "unexpected referral token size"
+            }
+            check(verifyReferralInviteToken(token, nowMs)) { "new referral token verification failed" }
+            token
+        } catch (error: Exception) {
+            Log.w(TAG, "Signed referral unavailable: ${error.javaClass.simpleName}")
+            null
+        }
+    }
+
     /**
      * Load or create exactly one 32-byte seed and use it for one bounded call.
      * Existing-but-unreadable state is never overwritten or silently rotated.
@@ -135,6 +162,21 @@ object IdentitySigningKeyStore {
         }
         seed.fill(0)
         return Mode.READY
+    }
+
+    private fun loadExistingVerifiedBinding(context: Context): ByteArray? {
+        val encoded = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PREF_IDENTITY_BINDING, null) ?: return null
+        require(encoded.length <= MAX_ENCODED_BINDING_CHARS) {
+            "identity signing binding is unbounded"
+        }
+        val binding = Base64.decode(encoded, Base64.NO_WRAP)
+        check(binding.isNotEmpty()) { "identity signing binding is empty" }
+        check(verifyIdentitySigningBinding(binding)) { "identity binding signature invalid" }
+        check(identitySigningBindingMatchesInstalled(binding)) {
+            "identity binding does not match installed sidecar"
+        }
+        return binding
     }
 
     private fun loadOrCreateBinding(context: Context): ByteArray {
