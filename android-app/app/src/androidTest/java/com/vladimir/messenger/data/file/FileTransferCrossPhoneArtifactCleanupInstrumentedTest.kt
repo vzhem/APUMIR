@@ -21,7 +21,7 @@ class FileTransferCrossPhoneArtifactCleanupInstrumentedTest {
         val expectedSender = InstrumentationRegistry.getArguments().getString("expected_sender")
             ?: error("Missing expected sender")
         val room = Room.databaseBuilder(context, AppDatabase::class.java, "messenger_database")
-            .addMigrations(AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .build()
         try {
             val db = room.openHelper.writableDatabase

@@ -19,7 +19,7 @@ class FileTransferProductionMigrationInstrumentedTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test
-    fun existingDatabaseMigratesToSixWithoutChangingLegacyRows() {
+    fun existingDatabaseMigratesToSevenWithoutChangingLegacyRows() {
         assertTrue(context.getDatabasePath("messenger_database").isFile)
         val v5 = openAtVersion(5)
         val before = legacyState(v5.writableDatabase)
@@ -28,13 +28,14 @@ class FileTransferProductionMigrationInstrumentedTest {
 
         // Room owns the upgrade so it validates schema and updates room_master_table identity hash.
         val room = Room.databaseBuilder(context, AppDatabase::class.java, "messenger_database")
-            .addMigrations(AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .build()
         val db = room.openHelper.writableDatabase
-        assertEquals(6, db.version)
+        assertEquals(7, db.version)
         assertEquals(before, legacyState(db))
         assertEquals(0, scalarInt(db, "SELECT COUNT(*) FROM file_transfers"))
         assertEquals(0, scalarInt(db, "SELECT COUNT(*) FROM file_transfer_chunks"))
+        assertEquals(0, scalarInt(db, "SELECT COUNT(*) FROM file_exchange_peers"))
         room.close()
     }
 

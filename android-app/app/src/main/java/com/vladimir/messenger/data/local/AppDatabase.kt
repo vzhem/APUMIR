@@ -7,12 +7,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import com.vladimir.messenger.data.local.entity.FileExchangePeerEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
 
@@ -24,8 +26,9 @@ import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
         ContactEntity::class,
         FileTransferEntity::class,
         FileTransferChunkEntity::class,
+        FileExchangePeerEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +37,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun mtProtoProxyDao(): MtProtoProxyDao
     abstract fun contactDao(): ContactDao
     abstract fun fileTransferDao(): FileTransferDao
+    abstract fun fileExchangePeerDao(): FileExchangePeerDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -83,6 +87,25 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_file_transfers_state` ON `file_transfers` (`state`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_file_transfers_expiresAtMs` ON `file_transfers` (`expiresAtMs`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_file_transfer_chunks_transferId` ON `file_transfer_chunks` (`transferId`)")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `file_exchange_peers` (
+                        `nodeId` TEXT NOT NULL,
+                        `bindingBase64` TEXT NOT NULL,
+                        `bindingSha256` TEXT NOT NULL,
+                        `x25519PublicHex` TEXT NOT NULL,
+                        `trustState` TEXT NOT NULL,
+                        `firstSeenAtMs` INTEGER NOT NULL,
+                        `updatedAtMs` INTEGER NOT NULL,
+                        PRIMARY KEY(`nodeId`)
+                    )
+                    """.trimIndent()
+                )
             }
         }
     }

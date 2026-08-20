@@ -6,6 +6,7 @@ import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -25,7 +26,7 @@ object AppModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
         return Room.databaseBuilder(context, AppDatabase::class.java, "messenger_database")
-            .addMigrations(AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .fallbackToDestructiveMigration()
             .build()
     }
@@ -44,6 +45,9 @@ object AppModule {
 
     @Provides @Singleton
     fun provideFileTransferDao(db: AppDatabase): FileTransferDao = db.fileTransferDao()
+
+    @Provides @Singleton
+    fun provideFileExchangePeerDao(db: AppDatabase): FileExchangePeerDao = db.fileExchangePeerDao()
 
     @Provides @Singleton
     fun provideChatRepository(chatDao: ChatDao, messageDao: MessageDao): ChatRepository =

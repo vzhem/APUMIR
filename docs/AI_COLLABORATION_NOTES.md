@@ -3434,3 +3434,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   requires existing signed binding node+X25519 public equality, never overwriting malformed/mismatched
   state. Secret is callback-bounded and wiped. CoreServerService initializes after Ed sidecar and logs
   hashes/status only. Compile/instrumentation pending; no phone install before full candidate.
+- **2026-08-20 (доп.303) — contact file-exchange TOFU pinning source:** additive Room v6→v7 table
+  stores only public signed binding/base64+SHA/X25519 public/trust timestamps. `FileExchangePeerStore`
+  verifies nested signature/node before first insert, treats exact repeat idempotently and rejects any
+  different key for same legacy node (including insert races) until future explicit QR/recovery flow.
+  Binding reads reverify signature/node/hash. App migration chain and current tests updated to v7;
+  historical one-time Stas v6 identity recovery is @Ignore to prevent rerun. Compile/migration gates
+  pending; no phone install before full candidate.

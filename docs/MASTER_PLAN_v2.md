@@ -1731,7 +1731,7 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > started: a separate static X25519 public key is signed by the installed Ed25519 sidecar and nested
 > verified legacy identity binding; strict wire/tamper/foreign-binding tests are included. Native/generated binding/APK PASS and binding
 > accepted as `2c252ce`. Device-bound static secret store + startup binding verification source added;
-> compile/instrumentation pending.
+> compile/instrumentation pending. Additive v6→v7 public peer-binding pin table and strict TOFU store source added; migration/compile pending.
 
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.
