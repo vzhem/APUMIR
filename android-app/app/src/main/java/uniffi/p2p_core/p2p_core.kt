@@ -822,6 +822,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -907,6 +911,8 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_p2p_core_fn_func_create_file_exchange_binding(`identityBinding`: RustBuffer.ByValue,`x25519Secret`: RustBuffer.ByValue,`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_create_file_key_envelope(`senderExchangeBinding`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`senderX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_file_transfer_manifest(`senderNodeId`: RustBuffer.ByValue,`recipientNodeId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,`mediaType`: RustBuffer.ByValue,`fileSize`: Long,`fileSha256`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_identity_signing_binding(`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -941,6 +947,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_install_relay_at_rest_key(`keyId`: Short,`keyMaterial`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Unit
+    fun uniffi_p2p_core_fn_func_open_file_key_envelope(`envelope`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`recipientX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_parse_file_transfer_manifest(`manifestBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_relay_at_rest_key_id(uniffi_out_err: UniffiRustCallStatus,
@@ -1077,6 +1085,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_create_file_exchange_binding(
     ): Short
+    fun uniffi_p2p_core_checksum_func_create_file_key_envelope(
+    ): Short
     fun uniffi_p2p_core_checksum_func_create_file_transfer_manifest(
     ): Short
     fun uniffi_p2p_core_checksum_func_create_identity_signing_binding(
@@ -1110,6 +1120,8 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_checksum_func_install_identity_signing_seed(
     ): Short
     fun uniffi_p2p_core_checksum_func_install_relay_at_rest_key(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_open_file_key_envelope(
     ): Short
     fun uniffi_p2p_core_checksum_func_parse_file_transfer_manifest(
     ): Short
@@ -1208,6 +1220,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_create_file_exchange_binding() != 49568.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_create_file_key_envelope() != 48329.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_create_file_transfer_manifest() != 37053.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1257,6 +1272,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_install_relay_at_rest_key() != 24777.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_open_file_key_envelope() != 19849.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_parse_file_transfer_manifest() != 39361.toShort()) {
@@ -2919,6 +2937,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     }
 
 
+    @Throws(CoreException::class) fun `createFileKeyEnvelope`(`senderExchangeBinding`: kotlin.ByteArray, `recipientExchangeBinding`: kotlin.ByteArray, `senderX25519Secret`: kotlin.ByteArray, `manifest`: kotlin.ByteArray, `fileKey`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_file_key_envelope(
+        FfiConverterByteArray.lower(`senderExchangeBinding`),FfiConverterByteArray.lower(`recipientExchangeBinding`),FfiConverterByteArray.lower(`senderX25519Secret`),FfiConverterByteArray.lower(`manifest`),FfiConverterByteArray.lower(`fileKey`),_status)
+}
+    )
+    }
+
+
     @Throws(CoreException::class) fun `createFileTransferManifest`(`senderNodeId`: kotlin.String, `recipientNodeId`: kotlin.String, `displayName`: kotlin.String, `mediaType`: kotlin.String, `fileSize`: kotlin.ULong, `fileSha256`: kotlin.ByteArray, `createdAtMs`: kotlin.Long, `expiresAtMs`: kotlin.Long): FileTransferManifestFfi {
             return FfiConverterTypeFileTransferManifestFfi.lift(
     uniffiRustCallWithError(CoreException) { _status ->
@@ -3078,6 +3106,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
         FfiConverterUShort.lower(`keyId`),FfiConverterByteArray.lower(`keyMaterial`),_status)
 }
 
+
+
+    @Throws(CoreException::class) fun `openFileKeyEnvelope`(`envelope`: kotlin.ByteArray, `recipientExchangeBinding`: kotlin.ByteArray, `recipientX25519Secret`: kotlin.ByteArray, `manifest`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_open_file_key_envelope(
+        FfiConverterByteArray.lower(`envelope`),FfiConverterByteArray.lower(`recipientExchangeBinding`),FfiConverterByteArray.lower(`recipientX25519Secret`),FfiConverterByteArray.lower(`manifest`),_status)
+}
+    )
+    }
 
 
     @Throws(CoreException::class) fun `parseFileTransferManifest`(`manifestBytes`: kotlin.ByteArray): FileTransferManifestFfi {
