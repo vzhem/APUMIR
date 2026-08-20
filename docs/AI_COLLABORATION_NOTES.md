@@ -3260,3 +3260,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Keystore alias; asserts PREPARED monotonic DB/chunk state, manifest parse, decrypt exact source,
   scoped DB/files/key/root/source cleanup. Production DB/store/key and transport untouched. Test APK/
   device gate pending.
+- **2026-08-19 (доп.268) — outgoing preparation integration build PASS:** state
+  `1F0740B4…5A437`, app APK 29,496,509 B `33CFC806…2B52`, test APK 993,315 B
+  `E39EDF97…84032`; production preparation/key/store/transport/ADB/phones false. Next Stas
+  v11.16.39→v11.16.41 isolated two-chunk preparation execution with exact cleanup/state preservation.
