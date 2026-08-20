@@ -814,6 +814,14 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -897,6 +905,8 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_p2p_core_fn_func_create_engine_with_keys(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Pointer
+    fun uniffi_p2p_core_fn_func_create_file_exchange_binding(`identityBinding`: RustBuffer.ByValue,`x25519Secret`: RustBuffer.ByValue,`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_file_transfer_manifest(`senderNodeId`: RustBuffer.ByValue,`recipientNodeId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,`mediaType`: RustBuffer.ByValue,`fileSize`: Long,`fileSha256`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_identity_signing_binding(`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -906,6 +916,10 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_fn_func_decrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Int,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_encrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Int,`plaintext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_file_exchange_binding_node_id(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_file_exchange_binding_public_key(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_file_transfer_crypto_self_test(uniffi_out_err: UniffiRustCallStatus,
     ): Byte
@@ -933,6 +947,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_verify_file_exchange_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
     fun uniffi_p2p_core_fn_func_verify_identity_signing_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Byte
     fun uniffi_p2p_core_fn_func_verify_referral_invite_token(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus,
@@ -1059,6 +1075,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_create_engine_with_keys(
     ): Short
+    fun uniffi_p2p_core_checksum_func_create_file_exchange_binding(
+    ): Short
     fun uniffi_p2p_core_checksum_func_create_file_transfer_manifest(
     ): Short
     fun uniffi_p2p_core_checksum_func_create_identity_signing_binding(
@@ -1068,6 +1086,10 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_checksum_func_decrypt_file_transfer_chunk(
     ): Short
     fun uniffi_p2p_core_checksum_func_encrypt_file_transfer_chunk(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_file_exchange_binding_node_id(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_file_exchange_binding_public_key(
     ): Short
     fun uniffi_p2p_core_checksum_func_file_transfer_crypto_self_test(
     ): Short
@@ -1094,6 +1116,8 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_checksum_func_relay_at_rest_key_id(
     ): Short
     fun uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_verify_file_exchange_binding(
     ): Short
     fun uniffi_p2p_core_checksum_func_verify_identity_signing_binding(
     ): Short
@@ -1181,6 +1205,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_create_engine_with_keys() != 25507.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_create_file_exchange_binding() != 49568.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_create_file_transfer_manifest() != 37053.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1194,6 +1221,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_encrypt_file_transfer_chunk() != 13261.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_file_exchange_binding_node_id() != 3094.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_file_exchange_binding_public_key() != 56859.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_file_transfer_crypto_self_test() != 52550.toShort()) {
@@ -1233,6 +1266,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id() != 59487.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_verify_file_exchange_binding() != 27377.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_verify_identity_signing_binding() != 4896.toShort()) {
@@ -2873,6 +2909,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     }
 
 
+    @Throws(CoreException::class) fun `createFileExchangeBinding`(`identityBinding`: kotlin.ByteArray, `x25519Secret`: kotlin.ByteArray, `createdAtMs`: kotlin.Long): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_file_exchange_binding(
+        FfiConverterByteArray.lower(`identityBinding`),FfiConverterByteArray.lower(`x25519Secret`),FfiConverterLong.lower(`createdAtMs`),_status)
+}
+    )
+    }
+
+
     @Throws(CoreException::class) fun `createFileTransferManifest`(`senderNodeId`: kotlin.String, `recipientNodeId`: kotlin.String, `displayName`: kotlin.String, `mediaType`: kotlin.String, `fileSize`: kotlin.ULong, `fileSha256`: kotlin.ByteArray, `createdAtMs`: kotlin.Long, `expiresAtMs`: kotlin.Long): FileTransferManifestFfi {
             return FfiConverterTypeFileTransferManifestFfi.lift(
     uniffiRustCallWithError(CoreException) { _status ->
@@ -2918,6 +2964,26 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_encrypt_file_transfer_chunk(
         FfiConverterByteArray.lower(`manifestBytes`),FfiConverterByteArray.lower(`fileKey`),FfiConverterUInt.lower(`chunkIndex`),FfiConverterByteArray.lower(`plaintext`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `fileExchangeBindingNodeId`(`binding`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_file_exchange_binding_node_id(
+        FfiConverterByteArray.lower(`binding`),_status)
+}
+    )
+    }
+
+
+    @Throws(CoreException::class) fun `fileExchangeBindingPublicKey`(`binding`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_file_exchange_binding_public_key(
+        FfiConverterByteArray.lower(`binding`),_status)
 }
     )
     }
@@ -3038,6 +3104,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(
         FfiConverterByteArray.lower(`token`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+
+ fun `verifyFileExchangeBinding`(`binding`: kotlin.ByteArray): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verify_file_exchange_binding(
+        FfiConverterByteArray.lower(`binding`),_status)
 }
     )
     }
