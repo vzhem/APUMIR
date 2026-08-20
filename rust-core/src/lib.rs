@@ -396,6 +396,52 @@ pub fn verified_referral_inviter_node_id(
     })
 }
 
+/// F0 on-device acceptance diagnostic. It exercises the production manifest
+/// validation and XChaCha20-Poly1305 chunk path without accepting or returning
+/// user/key material. Functional file APIs come only with the streaming owner.
+pub fn file_transfer_crypto_self_test() -> bool {
+    use crypto::file_transfer::{
+        decrypt_file_chunk_v1, encrypt_file_chunk_v1, expected_chunk_count,
+        FileTransferManifestV1, DEFAULT_FILE_CHUNK_BYTES,
+    };
+
+    let file_size = u64::from(DEFAULT_FILE_CHUNK_BYTES) * 2;
+    let manifest = FileTransferManifestV1 {
+        transfer_id: [0x61; 16],
+        sender_node_id: "pk_0123456789abcdef0123456789abcdef".to_string(),
+        recipient_node_id: "pk_fedcba9876543210fedcba9876543210".to_string(),
+        display_name: "diagnostic.bin".to_string(),
+        media_type: "application/octet-stream".to_string(),
+        file_size,
+        chunk_size: DEFAULT_FILE_CHUNK_BYTES,
+        chunk_count: expected_chunk_count(file_size, DEFAULT_FILE_CHUNK_BYTES),
+        file_sha256: [0x62; 32],
+        created_at_ms: 1_800_000_000_000,
+        expires_at_ms: 1_800_086_400_000,
+    };
+    let key = [0x63; 32];
+    let plaintext = vec![0x64; DEFAULT_FILE_CHUNK_BYTES as usize];
+    let Ok(ciphertext) = encrypt_file_chunk_v1(&manifest, &key, 0, &plaintext) else {
+        return false;
+    };
+    if decrypt_file_chunk_v1(&manifest, &key, 0, &ciphertext).ok().as_deref()
+        != Some(plaintext.as_slice())
+    {
+        return false;
+    }
+    let mut tampered = ciphertext.clone();
+    tampered[0] ^= 1;
+    if decrypt_file_chunk_v1(&manifest, &key, 0, &tampered).is_ok() {
+        return false;
+    }
+    if decrypt_file_chunk_v1(&manifest, &key, 1, &ciphertext).is_ok() {
+        return false;
+    }
+    let mut changed_manifest = manifest;
+    changed_manifest.display_name = "changed.bin".to_string();
+    decrypt_file_chunk_v1(&changed_manifest, &key, 0, &ciphertext).is_err()
+}
+
 /// M8-C slice 3: убрать at-rest ключ (будущий logout/wipe; действует на
 /// следующий запуск движка — работающий движок держит свой снимок).
 pub fn clear_relay_at_rest_key() {

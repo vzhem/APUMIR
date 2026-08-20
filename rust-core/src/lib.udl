@@ -40,6 +40,9 @@ namespace p2p_core {
     boolean verify_referral_invite_token(bytes token, i64 now_ms);
     [Throws=CoreError]
     string verified_referral_inviter_node_id(bytes token, i64 now_ms);
+
+    // Secure File Transfer F0 runtime diagnostic. No key or file material leaves Rust.
+    boolean file_transfer_crypto_self_test();
 };
 
 [Error]

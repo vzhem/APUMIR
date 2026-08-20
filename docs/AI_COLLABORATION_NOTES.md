@@ -3117,3 +3117,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   полностью удалил его из final native. Wrapper ошибочно требовал hash change и остановился до
   Gradle; ADB/phones false. Recovery-02 не повторяет Rust, hash-links prior state/log, принимает
   unchanged native как ожидаемый и выполняет только Gradle APK build с новыми evidence names.
+- **2026-08-19 (доп.238) — File F0 production+Gradle recovery PASS:** state `9D227908…86C7B`,
+  APK 29,430,973 B `F806DCDE…E0624`; prior Rust release compile hash-linked, native unchanged after
+  LTO expected. Host tests/transport/ADB/phones false.
+- **2026-08-19 (доп.239) — File F0 Android runtime seam source:** добавлен no-input/no-output-secret
+  UniFFI diagnostic, который внутри production Rust выполняет 128 KiB XChaCha chunk roundtrip и
+  rejects tamper/wrong index/changed manifest. Android instrumentation вызывает только boolean seam;
+  пользовательские bytes/keys не принимает и не возвращает. Functional streaming API ещё не wired;
+  native/bindgen/app+test APK build pending.
