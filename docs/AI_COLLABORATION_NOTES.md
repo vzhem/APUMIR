@@ -3393,3 +3393,6 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Screen reads central qualified count (including debug-only lab override), highlights current rank and
   lists every threshold, unlocked media/group/proxy/channel capability and per-file rank limit, with
   explicit basic text/receive/join access and technical-limit disclaimer. Build gate pending.
+- **2026-08-20 (доп.294) — rank benefits UI JVM/APK PASS:** state `FE36024E…7B668`, app APK
+  29,529,277 B `BE7357E1…E95BF9`; file transport/ADB/phones false. Settings route now compiles and uses
+  the same central entitlement table as media/group/proxy/channel gates.
