@@ -3332,3 +3332,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `17A17636…DAFB5`, app APK unchanged `33CFC806…2B52`, test APK 1,005,936 B
   `026F7B2A…AB275`; Rust network/production network/ADB/phones false. Gate uses fresh ports
   Anna:37779→host:47779→Stas:39001, length-prefix ≤256KiB, exact ACK, and always removes mappings.
+- **2026-08-20 (доп.281) — bounded GitHub retry runner:** пользователь подтвердил, что browser GitHub
+  работает, но git HTTPS эпизодически получает connect timeout. Добавлен generic verified runner:
+  максимум 5 pull attempts с delays 5/15/30/60s, retry только для сетевых/TLS ошибок, немедленный
+  stop для auth/non-FF/worktree ошибок, `gc.auto=0` против старых pack unlink prompts, затем exact
+  HEAD+blob verification до gate. Бесконечных retries нет; phone gate не стартует без pull PASS.
