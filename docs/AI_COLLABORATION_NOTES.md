@@ -3284,3 +3284,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   v11.16.28 (first corrected Room v5→v6 migration), Stas receiver v11.16.41; random run/key never
   printed/persisted, receiver starts first, real addressed MQTT carries encrypted 4096-byte file and
   generated PNG, then exact state/test cleanup and both apps relaunch.
+- **2026-08-19 (доп.272) — first F2 Anna→Stas network gate timeout:** state
+  `6D8BDC49…7E2E`, Anna corrected DB migration PASS log `7CC3D781…E31D2`, sender PASS log
+  `30C4A216…F1089`; receiver emitted only test-start then timed out, combined log absent. Anna app
+  update/migration occurred; DB delete/data clear/force-stop false. Root cause hypothesis from code:
+  Stas app was not replace-installed because already v11.16.41, so its foreground service could drain
+  Rust events before instrumentation and persist up to four APUFILETEST1 packets as chat rows.
+- **2026-08-19 (доп.273) — F2 recovery source:** receiver writes/deletes ready marker and waits 180s;
+  sender repeats offer/chunk twice. Exact cleanup test selects only synthetic prefix+ID-pattern rows,
+  requires expected Anna sender, deletes at most four, repairs affected chat lastMessage/time/unread
+  from remaining messages, and asserts no synthetic content. Recovery will replace-install both apps
+  to stop competing engines, skip already-PASS Anna migration, wait for ready+subscription, use new
+  run/key/evidence and preserve production roots/identity. Test APK/recovery gate pending.

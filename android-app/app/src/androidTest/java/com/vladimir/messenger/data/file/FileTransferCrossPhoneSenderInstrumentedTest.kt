@@ -74,22 +74,24 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
         assertEquals(1u, manifest.chunkCount)
         val ciphertext = encryptFileTransferChunk(manifest.manifestBytes, key, 0u, plaintext)
         try {
-            publish(
-                recipient,
-                sender,
-                "offer-$kind-$runId",
-                runId,
-                "$PREFIX|offer|$runId|$kind|${encode(manifest.manifestBytes)}",
-            )
-            Thread.sleep(1_500)
-            publish(
-                recipient,
-                sender,
-                "chunk-$kind-$runId",
-                runId,
-                "$PREFIX|chunk|$runId|$kind|0|${encode(ciphertext)}",
-            )
-            Thread.sleep(1_500)
+            repeat(2) { attempt ->
+                publish(
+                    recipient,
+                    sender,
+                    "offer-$kind-$attempt-$runId",
+                    runId,
+                    "$PREFIX|offer|$runId|$kind|${encode(manifest.manifestBytes)}",
+                )
+                Thread.sleep(1_500)
+                publish(
+                    recipient,
+                    sender,
+                    "chunk-$kind-$attempt-$runId",
+                    runId,
+                    "$PREFIX|chunk|$runId|$kind|0|${encode(ciphertext)}",
+                )
+                Thread.sleep(1_500)
+            }
         } finally {
             ciphertext.fill(0)
         }

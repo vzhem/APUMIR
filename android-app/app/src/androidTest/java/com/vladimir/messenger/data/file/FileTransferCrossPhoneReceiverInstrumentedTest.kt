@@ -31,7 +31,9 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
         val key = decode(arguments.getString("file_test_key") ?: error("Missing test key"))
         require(runId.matches(Regex("^[0-9a-f]{16}$")) && key.size == 32)
         val root = File(context.noBackupFilesDir, "file-cross-phone-receiver-test-v1")
+        val ready = File(context.noBackupFilesDir, "file-cross-phone-receiver-ready-v1")
         root.deleteRecursively()
+        ready.delete()
         val store = FileTransferChunkStore(root, maxStoreBytes = 2L * 1024 * 1024)
         val manifests = mutableMapOf<String, FileTransferManifestFfi>()
         val received = mutableMapOf<String, ByteArray>()
@@ -44,7 +46,8 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
             val displayName = prefs.getString("display_name", "Receiver") ?: "Receiver"
             assertTrue(RustBridge.initialize(displayName, publicKey, privateKey, null))
             val receiver = RustBridge.nodeId() ?: error("Receiver engine has no node ID")
-            val deadline = System.currentTimeMillis() + 120_000
+            ready.writeText("ready")
+            val deadline = System.currentTimeMillis() + 180_000
             while (System.currentTimeMillis() < deadline && received.size < 2) {
                 RustBridge.drainEvents().forEach { event ->
                     if (event.eventType != "message_received" || event.senderId != expectedSender) {
@@ -96,7 +99,9 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
             key.fill(0)
             received.values.forEach { it.fill(0) }
             root.deleteRecursively()
+            ready.delete()
             assertTrue(!root.exists())
+            assertTrue(!ready.exists())
         }
     }
 
