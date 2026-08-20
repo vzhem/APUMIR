@@ -1729,7 +1729,8 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > fragmentation/reassembly layer for encrypted offers/chunks, followed by authenticated key exchange,
 > direct QUIC/relay ownership and real chat picker/progress UI. Authenticated exchange source has now
 > started: a separate static X25519 public key is signed by the installed Ed25519 sidecar and nested
-> verified legacy identity binding; strict wire/tamper/foreign-binding tests are included.
+> verified legacy identity binding; strict wire/tamper/foreign-binding tests are included. Native,
+> generated binding and APK build PASS; binding acceptance pending.
 
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.

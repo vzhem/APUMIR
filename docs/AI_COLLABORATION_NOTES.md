@@ -3422,3 +3422,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Cabinet, not a demo: rank-10 create gate, join without rank, owner/admin/mod/member roles, requests,
   permissions/ban/mute/invites/audit, topic lifecycle/unread/mute, epoch key rotation and three-phone
   durable offline/admin acceptance. Added to nearest roadmap after file-transfer release.
+- **2026-08-20 (доп.300) — signed X25519 file-exchange binding build PASS:** state
+  `88673823…F7A6E`, native `81384E50…AD790`, generated binding `8C0BB329…D9304`, APK
+  29,545,661 B `5B570E4A…39A42`; secret store/transport/ADB/phones false. Next binding-only acceptance;
+  `.so` remains uncommitted.
