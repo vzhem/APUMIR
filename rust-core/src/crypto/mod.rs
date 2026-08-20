@@ -47,6 +47,7 @@
 //! ```
 
 pub mod cipher;
+pub mod file_transfer;
 pub mod handshake;
 pub mod identity;
 pub mod kdf;

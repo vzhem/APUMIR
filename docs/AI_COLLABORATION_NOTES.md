@@ -3090,3 +3090,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   context. `DEPLOYMENT_ENABLED=false` оставлен намеренно: до реального DNS/HTTPS landing и
   `assetlinks.json` пользователю продолжает выдаваться legacy contact-only link, чтобы не публиковать
   неработающий домен и не обещать referral attribution. Build gate pending.
+- **2026-08-19 (доп.233) — outgoing referral share JVM/APK PASS:** state `9E359300…1767`,
+  debug APK 29,430,977 B `FDD3F87E…9DED`; public deployment/ADB/phones `False/False/False`.
+  Пользователь сообщил приватный candidate web endpoint; по его просьбе endpoint не внесён в repo,
+  логи или публичные материалы. Deployment switch остаётся OFF до отдельной ownership/TLS/landing/
+  assetlinks проверки.
+- **2026-08-19 (доп.234) — Secure File Transfer F0 source начат:** authoritative design
+  `docs/SECURE_FILE_TRANSFER.md`; добавлен pure Rust bounded manifest/chunk crypto foundation:
+  10 MiB max, 16–256 KiB power-of-two chunks (default 128 KiB), canonical sender/recipient/name/MIME/
+  geometry/hash/TTL binding и XChaCha20-Poly1305 chunk AEAD с deterministic transfer-ID/index nonce.
+  Source tests покрывают boundaries, retry determinism, tamper/wrong key/index/manifest и malicious
+  metadata. Transport/Room/UI/UniFFI пока не wired; Android production compile gate pending.
