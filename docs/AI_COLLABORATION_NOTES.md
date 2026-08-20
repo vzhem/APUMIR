@@ -3396,3 +3396,13 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
 - **2026-08-20 (доп.294) — rank benefits UI JVM/APK PASS:** state `FE36024E…7B668`, app APK
   29,529,277 B `BE7357E1…E95BF9`; file transport/ADB/phones false. Settings route now compiles and uses
   the same central entitlement table as media/group/proxy/channel gates.
+- **2026-08-20 (доп.295) — max debug rank connected phones PASS:** state `3BDF368C…73EE`;
+  connected known test phones received debug override 1000/ALL, production referral receipts/count
+  unchanged, no app uninstall/DB delete/data clear/force-stop. This authorizes future file/group/proxy/
+  channel acceptance on the lab phones without fabricating qualified receipts.
+- **2026-08-20 (доп.296) — owner approved production three-phone file plan and waits for ready APK:**
+  Anna/Zhenya/Stas are available. Stop installing intermediate file APKs. Next phone installation only
+  after authenticated recipient key exchange, production offer/chunk/ACK owner, durable encrypted
+  third-phone chunk custody with multi-day TTL/restart resume, cleanup/exactly-once, and chat picker/
+  progress are all wired and offline-built. Acceptance includes sender/recipient/relay independently
+  offline for days and all-three-offline retention (no delivery claim while every node is offline).
