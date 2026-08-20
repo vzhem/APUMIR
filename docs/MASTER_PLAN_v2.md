@@ -1659,7 +1659,8 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > normalized generated binding accepted as commit `2477417`. Isolated Android functional test now covers
 > create/parse/encrypt/store/read/decrypt/idempotent retry/tamper/truncation/cleanup with transient key;
 > test APK/device gate pending. File key remains transient-only until a device-bound transfer key vault
-> and E2E key envelope are wired.
+> and E2E key envelope are wired. Functional Android test APK build PASS; data-preserving Stas execution
+> pending.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.

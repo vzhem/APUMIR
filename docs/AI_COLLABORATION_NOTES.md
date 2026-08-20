@@ -3214,3 +3214,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   ciphertext store/read/decrypt/idempotent retry/tamper+truncation reject/scoped cleanup. Uses existing
   local node ID but no message/contact contents, transport, production DB/store or persistent key;
   key/plaintext arrays wiped in finally. Test APK/device gate pending.
+- **2026-08-19 (доп.259) — functional file Android test APK build PASS:** output pasted twice but is
+  one identical evidence state `3981EC29…58198`; app APK unchanged `2EC36B50…3930B`, test APK
+  983,160 B `125AED71…57DF8`; persistent key/production store/transport/ADB/phones false. Next
+  data-preserving Stas v11.16.35→v11.16.38 isolated runtime gate.
