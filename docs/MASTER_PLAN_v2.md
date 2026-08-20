@@ -1632,7 +1632,8 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > Canonical manifest + chunk AEAD source готов; production Rust + APK compile PASS. Host tests всё ещё
 > заблокированы отсутствующим MSVC `link.exe`. Bounded no-input/no-secret Android runtime diagnostic,
 > native, generated binding, app APK и test APK build PASS; normalized binding accepted as commit
-> `e36d1ba`; data-preserving device execution pending.
+> `e36d1ba`; data-preserving Stas runtime roundtrip/tamper/index/manifest gate PASS. Host test
+> execution remains pending only because the current PC lacks MSVC `link.exe`.
 
 - [ ] Versioned signed attachment manifest: `transfer_id`, message/chat binding, sender/recipient,
   безопасное display name, declared MIME/size, chunk size/count, whole-file hash, timestamps/TTL.
@@ -1644,6 +1645,10 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
   доверия к внешнему path/MIME/имени.
 
 ### F1 — core transfer и локальное хранение
+
+> Additive Room v5→v6 transfer/chunk schema, bounded progress DAO and isolated migration/cascade test
+> source added. Existing chats/messages are not rewritten; compile/test APK and data-preserving phone
+> migration gates are pending.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.

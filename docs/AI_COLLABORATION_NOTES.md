@@ -3134,3 +3134,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   only normalized binding `A6973996…25E7` and was pushed by explicit HEAD→fixed remote ref. Native
   `1D6478B2…4B23` remains local/uncommitted; transport/ADB/phones false. Next isolated data-preserving
   runtime diagnostic on Stas v11.16.31→v11.16.34.
+- **2026-08-19 (доп.242) — File F0 Stas Android runtime PASS:** state `79DE5FAB…0B3F1`;
+  roundtrip/tamper/wrong-index/changed-manifest all PASS, profile/node/signing/production pending
+  preserved, test package removed, app relaunched, no data clear/force-stop. Stas data-preserving
+  update v11.16.31→v11.16.34. F0 on-device crypto gate закрыт; host tests ждут новый MSVC linker.
+- **2026-08-19 (доп.243) — File F1 durable schema source:** AppDatabase v5→v6 получает additive
+  `file_transfers` + `file_transfer_chunks` с FK cascade, bounded metadata/progress DAO и без keys,
+  plaintext или filesystem paths в Room. Explicit migration добавлена перед существующим fallback;
+  isolated androidTest создаёт v5 sentinel, мигрирует, проверяет preservation/new tables/FK cascade и
+  удаляет только test DB. Compile/test APK и real profile-preserving migration gates pending.
