@@ -3204,3 +3204,13 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `D56BECDE…043CB`, native `95D96A41…B5D80`, normalized binding `FA074353…C4493`, app APK
   29,480,125 B `2EC36B50…3930B`; key vault/transport/ADB/phones false. ktlint/NativeCommandError are
   non-failures, Rust/Gradle exit 0. Next exact-hash binding-only acceptance; `.so` never commit.
+- **2026-08-19 (доп.257) — functional file crypto binding acceptance PASS despite locked stale pack:**
+  Git pull/repack could not unlink one old pack because another Windows process held it; answering no
+  allowed safe continuation. Binding-only commit `2477417` pushed to fixed branch, binding
+  `FA074353…C4493`, native `95D96A41…B5D80` remains uncommitted. Object data not lost; do not run
+  cleanup/gc while lock owner unknown.
+- **2026-08-19 (доп.258) — isolated functional Android file pipeline test source:** test-only
+  noBackup directory + transient SecureRandom key exercises create/strict parse/encrypt/bounded atomic
+  ciphertext store/read/decrypt/idempotent retry/tamper+truncation reject/scoped cleanup. Uses existing
+  local node ID but no message/contact contents, transport, production DB/store or persistent key;
+  key/plaintext arrays wiped in finally. Test APK/device gate pending.

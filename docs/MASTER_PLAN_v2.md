@@ -1656,8 +1656,10 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > provider metadata, enforces 10 MiB/exact declared size and computes SHA-256 with a fixed 64 KiB
 > buffer; JVM/APK tests PASS. F1 functional Rust seam source now adds strict canonical manifest decode,
 > random transfer ID and bounded per-chunk encrypt/decrypt APIs; native/binding/APK build PASS,
-> normalized generated binding acceptance pending. File key remains transient-only until a
-> device-bound transfer key vault and E2E key envelope are wired.
+> normalized generated binding accepted as commit `2477417`. Isolated Android functional test now covers
+> create/parse/encrypt/store/read/decrypt/idempotent retry/tamper/truncation/cleanup with transient key;
+> test APK/device gate pending. File key remains transient-only until a device-bound transfer key vault
+> and E2E key envelope are wired.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.
