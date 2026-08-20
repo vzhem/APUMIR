@@ -3125,3 +3125,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   rejects tamper/wrong index/changed manifest. Android instrumentation вызывает только boolean seam;
   пользовательские bytes/keys не принимает и не возвращает. Functional streaming API ещё не wired;
   native/bindgen/app+test APK build pending.
+- **2026-08-19 (доп.240) — File F0 Android runtime build PASS:** state `8D556A99…95F2`, native
+  `1D6478B2…4B23`, normalized generated binding `A6973996…25E7`, app APK 29,430,973 B
+  `3888C58D…0245`, test APK 967,890 B `C7637E4C…0D5D`; transport/ADB/phones false. Отсутствующий
+  ktlint и PowerShell NativeCommandError не failures: Rust/Gradle exit 0. Next exact-hash generated
+  binding acceptance; `.so` never commit.

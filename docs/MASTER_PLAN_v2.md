@@ -1630,8 +1630,9 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 ### F0 — формат и threat model
 
 > Canonical manifest + chunk AEAD source готов; production Rust + APK compile PASS. Host tests всё ещё
-> заблокированы отсутствующим MSVC `link.exe`. Добавлен bounded no-input/no-secret Android runtime
-> diagnostic и instrumentation source; native/binding/test-APK gate pending.
+> заблокированы отсутствующим MSVC `link.exe`. Bounded no-input/no-secret Android runtime diagnostic,
+> native, generated binding, app APK и test APK build PASS; binding acceptance/device execution
+> pending.
 
 - [ ] Versioned signed attachment manifest: `transfer_id`, message/chat binding, sender/recipient,
   безопасное display name, declared MIME/size, chunk size/count, whole-file hash, timestamps/TTL.
