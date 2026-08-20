@@ -3386,3 +3386,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   then Windows PowerShell parser rejected interpolated `$Role:` before executing any script statement.
   No ADB/app/data/evidence changes. Original script must not repeat; recovery-01 uses `${Role}:`, new
   TEMP state/log names and same exact offline build artifacts.
+- **2026-08-20 (доп.292) — connected test phones max-rank gate PASS:** state `3BDF368C…73EE`;
+  connected known test phones set debug override 1000/ALL, production receipts/count unchanged, no
+  app uninstall/DB delete/data clear/force-stop. Output pasted twice but evidence identical.
+- **2026-08-20 (доп.293) — rank information UI source:** Settings gets `Ранги и возможности` route.
+  Screen reads central qualified count (including debug-only lab override), highlights current rank and
+  lists every threshold, unlocked media/group/proxy/channel capability and per-file rank limit, with
+  explicit basic text/receive/join access and technical-limit disclaimer. Build gate pending.

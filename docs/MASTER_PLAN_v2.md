@@ -871,6 +871,8 @@ resume, quota и transport acceptance. MIME неизвестного типа с
 игнорируется release-сборками. Source/app/test APK build PASS. Подключённые известные тестовые телефоны
 можно переводить в ранг `Создатель сети` для проверки всех функций; неизвестный serial останавливает
 весь gate до изменений. Override не создаёт referral receipts и не попадает в production-счётчик.
+Connected-known-phone gate PASS; в Settings добавляется экран с текущим рангом и полной таблицей
+media/group/proxy/channel unlocks, чтобы правила были видны пользователю, а не только в документации.
 
 Правила наград:
 

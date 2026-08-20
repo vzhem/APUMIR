@@ -48,6 +48,7 @@ fun SettingsScreen(
     onBackClick: () -> Unit,
     onShareProfileClick: () -> Unit = {},
     onMtProxyClick: () -> Unit = {},
+    onRankBenefitsClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -88,6 +89,16 @@ fun SettingsScreen(
                         Icon(Icons.Default.Share, contentDescription = null)
                     },
                     modifier = Modifier.clickable { onShareProfileClick() }
+                )
+                HorizontalDivider()
+            }
+
+            item {
+                ListItem(
+                    headlineContent = { Text("Ранги и возможности") },
+                    supportingContent = { Text("Что открывается за подтверждённые приглашения") },
+                    leadingContent = { Icon(Icons.Default.EmojiEvents, contentDescription = null) },
+                    modifier = Modifier.clickable { onRankBenefitsClick() }
                 )
                 HorizontalDivider()
             }

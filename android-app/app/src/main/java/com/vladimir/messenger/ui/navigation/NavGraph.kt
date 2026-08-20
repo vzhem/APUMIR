@@ -1,4 +1,4 @@
-﻿package com.vladimir.messenger.ui.navigation
+package com.vladimir.messenger.ui.navigation
 
 // =============================================================================
 // NAVGRAPH.KT вЂ” РќР°РІРёРіР°С†РёРѕРЅРЅС‹Р№ РіСЂР°С„ РїСЂРёР»РѕР¶РµРЅРёСЏ
@@ -36,6 +36,7 @@ import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
 import com.vladimir.messenger.ui.screens.contacts.RenameContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
+import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
 import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
@@ -74,6 +75,8 @@ sealed class Screen(val route: String) {
 
     // MTProto прокси
     data object MtProxy : Screen("mtproxy")
+
+    data object RankBenefits : Screen("rank_benefits")
 
     // Поделиться профилем
     data object ShareProfile : Screen("share_profile")
@@ -253,8 +256,13 @@ fun MessengerNavGraph(
             SettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
-                onMtProxyClick = { navController.navigate(Screen.MtProxy.route) }
+                onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
+                onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) }
             )
+        }
+
+        composable(route = Screen.RankBenefits.route) {
+            RankBenefitsScreen(onBackClick = { navController.popBackStack() })
         }
 
         // ------------------------------------------------------------------
