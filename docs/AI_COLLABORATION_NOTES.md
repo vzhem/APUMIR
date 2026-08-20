@@ -3452,3 +3452,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   native `1096A43A…B259`, generated binding `734B1F69…D56DC`, APK 29,578,429 B
   `6F23AF5F…EB0CE`; contact pinning source ready, transport/ADB/phones false. Binding-only acceptance
   next; native remains uncommitted.
+- **2026-08-20 (доп.306) — outgoing preparation now owns authenticated key envelope:** production
+  constructor requires `FileExchangePeerStore`; preparation refuses recipient without pinned binding,
+  reads local signed exchange binding, borrows device X25519 secret + per-transfer key only in nested
+  wiping callbacks, creates Rust authenticated envelope, and atomically stores bounded key-envelope.v1
+  beside manifest/chunks before PREPARED. Isolated historical preparation test keeps exchange disabled;
+  production path cannot. Chunk store adds exact idempotent/conflict tests. Build gate pending.

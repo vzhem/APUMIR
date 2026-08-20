@@ -51,6 +51,30 @@ class FileTransferChunkStore(
     }
 
     @Synchronized
+    fun storeKeyEnvelope(transferId: String, envelope: ByteArray): Boolean {
+        validateTransferId(transferId)
+        require(envelope.size in MIN_KEY_ENVELOPE_BYTES..MAX_KEY_ENVELOPE_BYTES)
+        val target = checkedChild(transferDirectory(transferId, create = true), KEY_ENVELOPE_FILE)
+        if (target.exists()) {
+            val existing = readExactBounded(target, MIN_KEY_ENVELOPE_BYTES, MAX_KEY_ENVELOPE_BYTES)
+            val same = MessageDigest.isEqual(existing, envelope)
+            existing.fill(0)
+            check(same) { "Transfer already contains a different key envelope" }
+            return false
+        }
+        atomicWrite(target, envelope)
+        return true
+    }
+
+    @Synchronized
+    fun readKeyEnvelope(transferId: String): ByteArray? {
+        validateTransferId(transferId)
+        val target = checkedChild(transferDirectory(transferId, create = false), KEY_ENVELOPE_FILE)
+        if (!target.exists()) return null
+        return readExactBounded(target, MIN_KEY_ENVELOPE_BYTES, MAX_KEY_ENVELOPE_BYTES)
+    }
+
+    @Synchronized
     fun storeEncryptedChunk(
         transferId: String,
         chunkIndex: Int,
@@ -209,6 +233,8 @@ class FileTransferChunkStore(
         const val DEFAULT_STORE_QUOTA_BYTES = 64L * 1024 * 1024
         const val MIN_MANIFEST_BYTES = 64
         const val MAX_MANIFEST_BYTES = 2 * 1024
+        const val MIN_KEY_ENVELOPE_BYTES = 200
+        const val MAX_KEY_ENVELOPE_BYTES = 2 * 1024
         const val MIN_STORE_QUOTA_BYTES = 1024L
         const val MAX_STORE_QUOTA_BYTES = 256L * 1024 * 1024
         const val MAX_PLAINTEXT_CHUNK_BYTES = 256 * 1024
@@ -217,6 +243,7 @@ class FileTransferChunkStore(
         const val MAX_CIPHERTEXT_BYTES = MAX_PLAINTEXT_CHUNK_BYTES + AEAD_TAG_BYTES
         const val MAX_CHUNKS_PER_TRANSFER = 640
         private const val MANIFEST_FILE = "manifest.v1"
+        private const val KEY_ENVELOPE_FILE = "key-envelope.v1"
         private val TRANSFER_ID = Regex("^[0-9a-f]{32}$")
         private val CHUNK_FILE = Regex("^[0-9]{8}\\.chunk$")
 

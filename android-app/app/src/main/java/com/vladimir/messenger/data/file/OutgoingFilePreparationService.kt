@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uniffi.p2p_core.FileTransferManifestFfi
 import uniffi.p2p_core.createFileTransferManifest
+import uniffi.p2p_core.createFileKeyEnvelope
 import uniffi.p2p_core.encryptFileTransferChunk
 
 /** Prepares encrypted durable chunks locally. It does not publish or claim delivery. */
@@ -21,16 +22,19 @@ class OutgoingFilePreparationService private constructor(
     private val transferDao: FileTransferDao,
     private val store: FileTransferChunkStore,
     private val keyAccess: KeyAccess,
+    private val exchangeAccess: ExchangeAccess?,
 ) {
     @Inject
     constructor(
         @ApplicationContext context: Context,
         transferDao: FileTransferDao,
+        peerStore: FileExchangePeerStore,
     ) : this(
         context.applicationContext,
         transferDao,
         FileTransferChunkStore.forApplication(context.applicationContext),
         ProductionKeyAccess(context.applicationContext),
+        ProductionExchangeAccess(context.applicationContext, peerStore),
     )
 
     internal constructor(
@@ -39,13 +43,33 @@ class OutgoingFilePreparationService private constructor(
         store: FileTransferChunkStore,
         keyAccess: KeyAccess,
         isolatedTest: Boolean,
-    ) : this(context.applicationContext, transferDao, store, keyAccess) {
+    ) : this(context.applicationContext, transferDao, store, keyAccess, null) {
         require(isolatedTest) { "Custom file preparation dependencies are test-only" }
     }
 
     internal interface KeyAccess {
         fun create(transferId: String)
         fun <T> withExisting(transferId: String, operation: (ByteArray) -> T): T
+    }
+
+    internal interface ExchangeAccess {
+        fun ownBinding(): ByteArray
+        suspend fun recipientBinding(nodeId: String): ByteArray
+        fun <T> withSecret(operation: (ByteArray) -> T): T
+    }
+
+    private class ProductionExchangeAccess(
+        private val context: Context,
+        private val peerStore: FileExchangePeerStore,
+    ) : ExchangeAccess {
+        override fun ownBinding(): ByteArray =
+            FileExchangeKeyStore.publicBinding(context) ?: error("Local file exchange binding unavailable")
+
+        override suspend fun recipientBinding(nodeId: String): ByteArray =
+            peerStore.bindingFor(nodeId) ?: error("Recipient file exchange binding is not pinned")
+
+        override fun <T> withSecret(operation: (ByteArray) -> T): T =
+            FileExchangeKeyStore.withExistingSecret(context, operation)
     }
 
     private class ProductionKeyAccess(private val context: Context) : KeyAccess {
@@ -106,6 +130,28 @@ class OutgoingFilePreparationService private constructor(
                 "New transfer unexpectedly reused a manifest"
             }
             keyAccess.create(manifest.transferIdHex)
+            exchangeAccess?.let { exchange ->
+                val ownBinding = exchange.ownBinding()
+                val recipientBinding = exchange.recipientBinding(recipientNodeId)
+                val keyEnvelope = exchange.withSecret { exchangeSecret ->
+                    keyAccess.withExisting(manifest.transferIdHex) { fileKey ->
+                        createFileKeyEnvelope(
+                            ownBinding,
+                            recipientBinding,
+                            exchangeSecret,
+                            manifest.manifestBytes,
+                            fileKey,
+                        )
+                    }
+                }
+                try {
+                    check(store.storeKeyEnvelope(manifest.transferIdHex, keyEnvelope))
+                } finally {
+                    keyEnvelope.fill(0)
+                    ownBinding.fill(0)
+                    recipientBinding.fill(0)
+                }
+            }
             stageChunks(source, manifest, inspected.sha256, store)
             PreparedTransfer(
                 transferId = manifest.transferIdHex,

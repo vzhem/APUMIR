@@ -58,6 +58,17 @@ class FileTransferChunkStoreTest {
     }
 
     @Test
+    fun keyEnvelopeIsAtomicIdempotentAndConflictProtected() {
+        val store = FileTransferChunkStore(root)
+        val envelope = ByteArray(256) { (it % 251).toByte() }
+        assertTrue(store.storeKeyEnvelope(transferId, envelope))
+        assertFalse(store.storeKeyEnvelope(transferId, envelope.copyOf()))
+        assertArrayEquals(envelope, store.readKeyEnvelope(transferId))
+        val changed = envelope.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
+        expectFailure { store.storeKeyEnvelope(transferId, changed) }
+    }
+
+    @Test
     fun sameIndexWithDifferentCiphertextIsRejectedWithoutOverwrite() {
         val store = FileTransferChunkStore(root)
         val first = ByteArray(32) { 1 }
