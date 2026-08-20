@@ -3235,3 +3235,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   phones false. Output pasted twice but evidence identical. Before phone gate test strengthened to assert
   isolated root and Android Keystore alias are both absent after finally cleanup; test-only rebuild
   required, original build remains valid compile evidence but not final cleanup acceptance.
+- **2026-08-19 (доп.263) — F1 key-vault explicit-cleanup test build PASS:** state
+  `81DF0CB9…32BB4`, app APK unchanged `E4F885B1…4756`, rebuilt test APK 987,530 B
+  `722C2113…1F4D4`; production key/ADB/phones false. Next Stas v11.16.38→v11.16.39 isolated
+  Android Keystore gate, with exact test alias/root cleanup and production root/state preservation.
