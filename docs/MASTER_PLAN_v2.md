@@ -1655,8 +1655,9 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > no-backup encrypted chunk store JVM/APK gate PASS. Streaming SAF source inspector now sanitizes
 > provider metadata, enforces 10 MiB/exact declared size and computes SHA-256 with a fixed 64 KiB
 > buffer; JVM/APK tests PASS. F1 functional Rust seam source now adds strict canonical manifest decode,
-> random transfer ID and bounded per-chunk encrypt/decrypt APIs; native/binding/APK gate pending. File
-> key remains transient-only until a device-bound transfer key vault and E2E key envelope are wired.
+> random transfer ID and bounded per-chunk encrypt/decrypt APIs; native/binding/APK build PASS,
+> normalized generated binding acceptance pending. File key remains transient-only until a
+> device-bound transfer key vault and E2E key envelope are wired.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.

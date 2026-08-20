@@ -3200,3 +3200,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   bounded one-chunk ByteArrays; borrowed key and encryption plaintext copies are wiped in Rust.
   File key generation/persistence/export deliberately not exposed: caller key must remain transient
   until Android Keystore transfer vault + E2E key envelope exist. Native/bindgen/APK gate pending.
+- **2026-08-19 (доп.256) — F1 functional crypto API build PASS after two safe GitHub stops:** state
+  `D56BECDE…043CB`, native `95D96A41…B5D80`, normalized binding `FA074353…C4493`, app APK
+  29,480,125 B `2EC36B50…3930B`; key vault/transport/ADB/phones false. ktlint/NativeCommandError are
+  non-failures, Rust/Gradle exit 0. Next exact-hash binding-only acceptance; `.so` never commit.
