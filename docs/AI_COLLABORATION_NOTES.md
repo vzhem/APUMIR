@@ -3448,3 +3448,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   signature. Recipient requires its exact installed identity+exchange secret; wrong recipient,
   manifest, secret, signature or tamper fail. UniFFI create/open wipe supplied secret/file-key copies.
   Compile/runtime gates pending; no phone installation.
+- **2026-08-20 (доп.305) — authenticated file-key envelope build PASS:** state `31ED6BB0…EAAC9`,
+  native `1096A43A…B259`, generated binding `734B1F69…D56DC`, APK 29,578,429 B
+  `6F23AF5F…EB0CE`; contact pinning source ready, transport/ADB/phones false. Binding-only acceptance
+  next; native remains uncommitted.
