@@ -3218,3 +3218,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   one identical evidence state `3981EC29…58198`; app APK unchanged `2EC36B50…3930B`, test APK
   983,160 B `125AED71…57DF8`; persistent key/production store/transport/ADB/phones false. Next
   data-preserving Stas v11.16.35→v11.16.38 isolated runtime gate.
+- **2026-08-19 (доп.260) — F1 functional pipeline Stas PASS:** state `B9717734…40999`;
+  manifest/create/parse, encrypt→atomic store→read→decrypt, idempotent retry and tamper/truncation
+  rejection PASS. Test store/package removed; profile/node/signing/pending/DB preserved. Stas
+  data-preserving v11.16.35→v11.16.38; no persistent key, production store, transport, DB delete,
+  data clear or force-stop.
+- **2026-08-19 (доп.261) — F1 device-bound transfer key vault source:** exact 61-byte v1 envelope
+  `[version,IV12,ciphertext32+GCMtag16]`, non-exportable Android Keystore AES-256-GCM alias,
+  transfer-ID-bound AAD, AtomicFile+fsync under noBackup transfer directory. Existing unreadable/
+  tampered key is never overwritten; import is create-once or constant-time same-key idempotent;
+  mismatch rejected. Plain key only exists in bounded callback and is wiped. JVM framing tests and
+  isolated alias/root instrumentation cover stability, zeroization, import conflict, tamper/no
+  overwrite and cleanup. No production key is created; build gates pending.
