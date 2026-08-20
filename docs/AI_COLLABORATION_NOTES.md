@@ -3183,3 +3183,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   ciphertext retry and reject-different overwrite. Read is exact bounded, traversal/symlink rejected,
   delete is scoped/idempotent. JVM tests cover defensive copy, retry/conflict, quota/partial, bounds,
   traversal/index and cleanup. No plaintext/key/path enters Room; build gate pending.
+- **2026-08-19 (доп.252) — F1 chunk store JVM/APK gate PASS:** state `A233D405…821E`, app APK
+  29,447,357 B `FDFD1B09…A910`; defensive store tests PASS, transport/ADB/phones false.
+- **2026-08-19 (доп.253) — F1 SAF streaming source inspection:** pure bounded inspector sanitizes
+  provider filename (control/separators, UTF-8 ≤255), normalizes/falls back MIME, rejects declared or
+  measured >10 MiB and size changes, computes SHA-256 with one 64 KiB buffer then wipes it. Android
+  adapter accepts only content:// and never logs/persists URI/path. JVM tests cover known/empty hash,
+  metadata sanitization, Unicode boundary, MIME fallback, mismatch/oversize and read request ceiling.
+  Picker UI, persistable permission and encryption pipeline not wired; build gate pending.
