@@ -6,6 +6,8 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.vladimir.messenger.data.repository.MtProxyRepository
+import com.vladimir.messenger.data.file.FileTransferRankPolicy
+import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.service.MtProxyHealthChecker
 import com.vladimir.messenger.service.TelegramChannelScraper
 import dagger.assisted.Assisted
@@ -38,7 +40,12 @@ class ProxyCollectorWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
-        Log.i(TAG, "ProxyCollectorWorker started")
+        val qualified = ReferralRankStore.qualifiedDirectCount(applicationContext)
+        if (!FileTransferRankPolicy.canUseAutomaticProxy(qualified)) {
+            Log.i(TAG, "Automatic proxy collection skipped: rank 20 required")
+            return Result.success()
+        }
+        Log.i(TAG, "Rank-entitled ProxyCollectorWorker started")
 
         return try {
             // 1. Собрать прокси

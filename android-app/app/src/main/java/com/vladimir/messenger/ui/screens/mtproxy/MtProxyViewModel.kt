@@ -1,13 +1,17 @@
 package com.vladimir.messenger.ui.screens.mtproxy
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.repository.MtProxyRepository
+import com.vladimir.messenger.data.file.FileTransferRankPolicy
+import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.service.MtProxyHealthChecker
 import com.vladimir.messenger.service.TelegramChannelScraper
 import com.vladimir.messenger.domain.model.MtProtoProxy
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -22,6 +26,7 @@ data class MtProxyUiState(
 
 @HiltViewModel
 class MtProxyViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val repo: MtProxyRepository,
     private val healthChecker: MtProxyHealthChecker,
     private val scraper: TelegramChannelScraper,
@@ -139,6 +144,10 @@ class MtProxyViewModel @Inject constructor(
     }
 
     fun checkAllAndPickBest() {
+        if (!automaticProxyEntitled()) {
+            _uiState.update { it.copy(message = "Автовыбор прокси открывается с ранга Организатор (20 друзей)") }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isChecking = true) }
             val best = healthChecker.checkAllAndPickBest()
@@ -153,6 +162,10 @@ class MtProxyViewModel @Inject constructor(
 
 
     fun collectNow() {
+        if (!automaticProxyEntitled()) {
+            _uiState.update { it.copy(message = "Автосбор прокси открывается с ранга Организатор (20 друзей)") }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isCollecting = true, message = "Собираем прокси...") }
             try {
@@ -181,6 +194,11 @@ class MtProxyViewModel @Inject constructor(
             }
         }
     }
+
+    private fun automaticProxyEntitled(): Boolean =
+        FileTransferRankPolicy.canUseAutomaticProxy(
+            ReferralRankStore.qualifiedDirectCount(context)
+        )
 
     fun clearMessage() {
         _uiState.update { it.copy(message = null) }

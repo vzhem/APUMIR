@@ -4,6 +4,8 @@ import android.app.Application
 import android.util.Log
 import java.util.concurrent.TimeUnit
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
+import com.vladimir.messenger.data.file.FileTransferRankPolicy
+import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.worker.ProxyCollectorWorker
 import com.vladimir.messenger.worker.RelayWakeWorker
 import androidx.work.WorkManager
@@ -26,24 +28,29 @@ class MessengerApplication : Application() {
         createNotificationChannels()
         scheduleBoundedRelayWake()
 
-        // Schedule proxy collector (every 6 hours)
+        // Automatic collection is an Organizer (20 qualified referrals) entitlement.
         try {
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build()
-
-            val collectRequest = PeriodicWorkRequestBuilder<ProxyCollectorWorker>(6, TimeUnit.HOURS)
-                .setConstraints(constraints)
-                .build()
-
-            WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-                ProxyCollectorWorker.WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
-                collectRequest
-            )
-            Log.i("MessengerApp", "Proxy collector scheduled (every 6 hours)")
+            val qualified = ReferralRankStore.qualifiedDirectCount(applicationContext)
+            val workManager = WorkManager.getInstance(applicationContext)
+            if (FileTransferRankPolicy.canUseAutomaticProxy(qualified)) {
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+                val collectRequest = PeriodicWorkRequestBuilder<ProxyCollectorWorker>(6, TimeUnit.HOURS)
+                    .setConstraints(constraints)
+                    .build()
+                workManager.enqueueUniquePeriodicWork(
+                    ProxyCollectorWorker.WORK_NAME,
+                    ExistingPeriodicWorkPolicy.KEEP,
+                    collectRequest
+                )
+                Log.i("MessengerApp", "Rank-entitled proxy collector scheduled")
+            } else {
+                workManager.cancelUniqueWork(ProxyCollectorWorker.WORK_NAME)
+                Log.i("MessengerApp", "Automatic proxy collector locked below rank 20")
+            }
         } catch (e: Exception) {
-            Log.e("MessengerApp", "Failed to schedule proxy collector", e)
+            Log.e("MessengerApp", "Failed to apply proxy collector entitlement", e)
         }
     }
 

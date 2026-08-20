@@ -28,6 +28,7 @@ class TelegramRelay(
     private val myNodeId: String,
     private val scope: CoroutineScope,
     private val proxyRepo: MtProxyRepository,
+    private val automaticProxyAllowed: () -> Boolean,
 ) {
     companion object {
         private const val TAG = "TelegramRelay"
@@ -71,6 +72,12 @@ class TelegramRelay(
      * Обновить активный прокси если он изменился.
      */
     private suspend fun refreshProxyIfNeeded() {
+        if (!automaticProxyAllowed()) {
+            currentProxy = null
+            currentProxyId = null
+            Authenticator.setDefault(null)
+            return
+        }
         val active = proxyRepo.getActive()
         if (active == null || !active.isSocksOrHttp()) {
             if (currentProxy != null) {

@@ -76,6 +76,17 @@ class FileTransferRankPolicyTest {
     }
 
     @Test
+    fun automaticProxyCollectionAndUseUnlockAtTwenty() {
+        assertTrue(!FileTransferRankPolicy.canUseAutomaticProxy(19))
+        assertTrue(FileTransferRankPolicy.canUseAutomaticProxy(20))
+        assertTrue(FileTransferRankPolicy.canUseAutomaticProxy(1_000))
+        assertTrue("Автосбор и автоматический выбор прокси" !in
+            FileTransferRankPolicy.entitlement(19).unlockedFeatureSummary())
+        assertTrue("Автосбор и автоматический выбор прокси" in
+            FileTransferRankPolicy.entitlement(20).unlockedFeatureSummary())
+    }
+
+    @Test
     fun freshInstallKeepsBasicCommunicationAndJoining() {
         assertTrue(FileTransferRankPolicy.canSendTextAtAnyRank())
         assertTrue(FileTransferRankPolicy.canJoinGroupsAtAnyRank())

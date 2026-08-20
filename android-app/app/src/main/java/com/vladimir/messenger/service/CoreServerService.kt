@@ -19,6 +19,8 @@ import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
+import com.vladimir.messenger.data.file.FileTransferRankPolicy
+import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import com.vladimir.messenger.service.NotificationHelper
@@ -166,7 +168,12 @@ class CoreServerService : Service() {
                     botToken = tgToken,
                     myNodeId = nodeId ?: "",
                     scope = serviceScope,
-                    proxyRepo = mtProxyRepository
+                    proxyRepo = mtProxyRepository,
+                    automaticProxyAllowed = {
+                        FileTransferRankPolicy.canUseAutomaticProxy(
+                            ReferralRankStore.qualifiedDirectCount(applicationContext)
+                        )
+                    }
                 )
                 telegramRelay?.onMessageReceived = { senderId: String, payload: String ->
                     Log.i(TAG, "TG relay message from $senderId")

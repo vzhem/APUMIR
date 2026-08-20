@@ -3366,3 +3366,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   tests cover 9/10 and 29/30 boundaries plus base access. Future enforcement must exist in UI and
   domain/repository/API, not only disabled buttons. Outbound media table remains 1 photo, 3 files,
   10 video with growing per-file rank limits.
+- **2026-08-20 (доп.288) — automatic proxy entitlement + test-phone max rank:** technical choice
+  threshold 20 (`Организатор`). Application schedules/cancels periodic collector by rank; worker
+  rechecks every run; TelegramRelay refuses active proxy and clears Authenticator below rank; UI bulk
+  collect/autopick also gates. Manual proxy diagnostics remain available. Added debug-only separate
+  rank override store, ignored in release, and instrumentation setter; count 1000 unlocks all current
+  media/group/proxy/channel policy without creating receipts. User authorized setting max test rank on
+  all PC-connected test phones; unknown serials must be identified before mutation.
