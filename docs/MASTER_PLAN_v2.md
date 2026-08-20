@@ -1646,9 +1646,10 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 
 ### F1 — core transfer и локальное хранение
 
-> Additive Room v5→v6 transfer/chunk schema, bounded progress DAO and isolated migration/cascade test
-> source added. Existing chats/messages are not rewritten; compile/test APK and data-preserving phone
-> migration gates are pending.
+> Additive Room v5→v6 transfer/chunk schema, bounded progress DAO and isolated migration/cascade
+> app/test APK build PASS. Existing chats/messages are not rewritten. A second instrumentation source
+> hashes legacy row IDs before/after real production migration and opens generated Room v6 schema;
+> rebuilt test APK and data-preserving phone migration gates are pending.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.

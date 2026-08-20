@@ -3143,3 +3143,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   plaintext или filesystem paths в Room. Explicit migration добавлена перед существующим fallback;
   isolated androidTest создаёт v5 sentinel, мигрирует, проверяет preservation/new tables/FK cascade и
   удаляет только test DB. Compile/test APK и real profile-preserving migration gates pending.
+- **2026-08-19 (доп.244) — File F1 schema build PASS после transient GitHub stop:** первый pull
+  безопасно остановился до script. Повторный gate state `C1126464…D532F`, app APK 29,447,357 B
+  `616E5CDC…E5E7`, test APK 971,810 B `099BE931…70B7`; ADB/phones false.
+- **2026-08-19 (доп.245) — real production v5→v6 migration acceptance source:** instrumentation
+  требует существующую `messenger_database` v5, внутри одной SQLite upgrade transaction hashes only
+  legacy row IDs/counts before/after, применяет additive migration, затем открывает DB generated Room
+  v6 validator и требует пустые new transfer tables. Message/contact contents не читаются/логируются;
+  DB не удаляется. Rebuilt test APK и Stas data-preserving gate pending.
