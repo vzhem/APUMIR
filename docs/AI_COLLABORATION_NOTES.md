@@ -3230,3 +3230,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   mismatch rejected. Plain key only exists in bounded callback and is wiped. JVM framing tests and
   isolated alias/root instrumentation cover stability, zeroization, import conflict, tamper/no
   overwrite and cleanup. No production key is created; build gates pending.
+- **2026-08-19 (доп.262) — F1 key vault JVM/app/test build PASS:** state `CF489FDC…C8D7`, app APK
+  29,496,509 B `E4F885B1…4756`, test APK 987,405 B `3580B819…61B6`; production key/transport/ADB/
+  phones false. Output pasted twice but evidence identical. Before phone gate test strengthened to assert
+  isolated root and Android Keystore alias are both absent after finally cleanup; test-only rebuild
+  required, original build remains valid compile evidence but not final cleanup acceptance.

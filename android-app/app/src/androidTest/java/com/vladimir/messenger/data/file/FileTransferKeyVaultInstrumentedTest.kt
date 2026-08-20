@@ -60,14 +60,18 @@ class FileTransferKeyVaultInstrumentedTest {
             assertEquals(tamperedHash, sha256(keyFile.readBytes()))
         } finally {
             cleanup()
+            assertFalse(root.exists())
+            assertFalse(keyStore().containsAlias(alias))
         }
     }
 
     private fun cleanup() {
         root.deleteRecursively()
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val store = keyStore()
         if (store.containsAlias(alias)) store.deleteEntry(alias)
     }
+
+    private fun keyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
         .digest(bytes)
