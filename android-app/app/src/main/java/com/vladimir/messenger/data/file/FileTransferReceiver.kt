@@ -209,11 +209,21 @@ class FileTransferReceiver(
         val buffered = bufferedChunks.getOrPut(transferIdHex) { HashMap() }
         val existing = buffered.put(chunkIndex, ciphertext)
         if (existing != null) existing.fill(0)
-        while (bufferedChunks.values.sumOf { it.value.size } > MAX_BUFFERED_CHUNK_BYTES) {
+        while (bufferedChunkBytes() > MAX_BUFFERED_CHUNK_BYTES) {
             val oldestTransfer = bufferedChunks.keys.firstOrNull() ?: break
             bufferedChunks.remove(oldestTransfer)?.values?.forEach { it.fill(0) }
             Log.w(TAG, "Dropped pre-offer chunk buffer for $oldestTransfer")
         }
+    }
+
+    private fun bufferedChunkBytes(): Long {
+        var total = 0L
+        for (chunks in bufferedChunks.values) {
+            for (ciphertext in chunks.values) {
+                total = Math.addExact(total, ciphertext.size.toLong())
+            }
+        }
+        return total
     }
 
     private suspend fun ingestChunkCiphertext(
@@ -287,13 +297,12 @@ class FileTransferReceiver(
         if (fresh.state == "COMPLETE") return
         val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return
         val digest = MessageDigest.getInstance("SHA-256")
-        var writer: ReceivedFileStore.Writer? = null
+        val writer = receivedStore.openWriter(
+            transferIdHex,
+            manifest.displayName,
+            manifest.fileSize.toLong(),
+        )
         try {
-            writer = receivedStore.openWriter(
-                transferIdHex,
-                manifest.displayName,
-                manifest.fileSize.toLong(),
-            )
             keyVault.withExistingKey(transferIdHex) { fileKey ->
                 for (chunkIndex in 0 until manifest.chunkCount.toInt()) {
                     val ciphertext = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
@@ -315,7 +324,6 @@ class FileTransferReceiver(
                 throw IllegalStateException("Whole-file SHA-256 mismatch")
             }
             writer.commit()
-            writer = null
             advance(fresh, newState = "COMPLETE")
             Log.i(TAG, "File transfer COMPLETE: $transferIdHex (${manifest.displayName})")
             notifier.onFileReceived(
@@ -329,7 +337,8 @@ class FileTransferReceiver(
             )
             sendFileAck(transferIdHex, manifest.chunkCount.toInt())
         } catch (error: Exception) {
-            writer?.abort()
+            // abort() is a no-op after a successful commit (Writer guards its finished state).
+            writer.abort()
             runCatching { receivedStore.deleteTransfer(transferIdHex) }
             advance(fresh, newState = "FAILED", errorCode = "VERIFY_FAILED")
             Log.w(TAG, "File verification failed for $transferIdHex: ${error.message}")

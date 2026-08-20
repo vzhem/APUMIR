@@ -157,7 +157,7 @@ class FileTransferSender(
     private suspend fun advance(
         transfer: FileTransferEntity,
         newState: String,
-        errorCode: String?,
+        errorCode: String? = null,
     ) {
         val updated = transferDao.advanceProgress(
             transferId = transfer.transferId,
