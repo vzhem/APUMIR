@@ -1679,6 +1679,11 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 
 ### F2 — transport и UI
 
+> First controlled cross-phone online harness source is intentionally test-only: a random key is
+> passed out-of-band by the local gate, while real manifest and encrypted file/photo packets traverse
+> existing addressed MQTT between Anna and Stas. This proves bytes/network routing but is not the
+> production E2E key exchange or user UI. Test APK/two-phone gate pending.
+
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.
 - [ ] Получатель явно нажимает «Скачать/Сохранить»; executable/APK не открываются автоматически.

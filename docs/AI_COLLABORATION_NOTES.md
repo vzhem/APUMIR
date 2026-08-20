@@ -3270,3 +3270,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   production DB preserved, no production preparation/key/store/transport, DB delete/data clear/
   force-stop. Stas v11.16.39→v11.16.41. Последняя повторная команда остановилась на GitHub до script
   и ничего не меняла. Gate закрыт и больше не повторяется.
+- **2026-08-19 (доп.270) — controlled real two-phone file/photo network harness source:** receiver
+  instrumentation owns its Rust MQTT engine, accepts only exact sender+random run ID, strict-parses
+  manifests, atomic-stores/decrypts and verifies SHA; validates deterministic 4096-byte file and a
+  generated 96×96 PNG. Sender creates real manifests/XChaCha ciphertext and publishes addressed
+  offer/chunk packets. Gate supplies a random 32-byte test key out-of-band and never persists it:
+  therefore this proves actual cross-phone bytes/routing, NOT production E2E key exchange/UI.
+  App services must remain stopped during instrumentation so ciphertext is never shown as chat text.
+  Test APK and Anna↔Stas online gate pending; Anna requires corrected Room v5→v6 migration first.
