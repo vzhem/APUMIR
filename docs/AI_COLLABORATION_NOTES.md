@@ -3167,3 +3167,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   hashes legacy ID sets/counts, temporarily re-arms user_version=5, then idempotent `IF NOT EXISTS`
   Migration runs through Room, performs full generated schema validation and writes exact v6 hash;
   legacy state/new-table emptiness rechecked. No direct hash overwrite and no DB deletion.
+- **2026-08-19 (доп.249) — File F1 identity recovery test APK build PASS:** state
+  `0395F146…349E2`, app APK unchanged `616E5CDC…E5E7`, test APK 978,516 B
+  `CF36DE70…C196`; ADB/phones false. Recovery phone gate performs no app install: exact stale
+  v6/old-hash/empty-table precondition, legacy/profile/signing/pending preservation, Room-owned
+  idempotent migration+schema/hash repair, test-package cleanup and stable app relaunch.

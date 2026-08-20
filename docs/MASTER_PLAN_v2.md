@@ -1651,7 +1651,8 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > hashes legacy row IDs before/after real production migration and opens generated Room v6 schema;
 > rebuilt test APK PASS. First Stas harness applied additive SQL outside Room, preserving legacy rows but
 > leaving DB v6 with old v5 `room_master_table` identity; app data was not deleted. One-time recovery
-> source re-arms idempotent 5→6 and lets Room own validation/hash update; rebuild/device recovery pending.
+> source re-arms idempotent 5→6 and lets Room own validation/hash update; recovery test APK build PASS,
+> Stas device recovery pending.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.
