@@ -49,6 +49,21 @@ pub struct ChatFfi {
 }
 
 /// РЎРѕР±С‹С‚РёРµ РґР»СЏ Kotlin
+pub struct FileTransferManifestFfi {
+    pub manifest_bytes: Vec<u8>,
+    pub transfer_id_hex: String,
+    pub sender_node_id: String,
+    pub recipient_node_id: String,
+    pub display_name: String,
+    pub media_type: String,
+    pub file_size: u64,
+    pub chunk_size: u32,
+    pub chunk_count: u32,
+    pub file_sha256_hex: String,
+    pub created_at_ms: i64,
+    pub expires_at_ms: i64,
+}
+
 pub struct CoreEventFfi {
     pub event_type: String,
     pub node_id: Option<String>,
@@ -442,6 +457,139 @@ pub fn file_transfer_crypto_self_test() -> bool {
     decrypt_file_chunk_v1(&changed_manifest, &key, 0, &ciphertext).is_err()
 }
 
+pub fn create_file_transfer_manifest(
+    sender_node_id: String,
+    recipient_node_id: String,
+    display_name: String,
+    media_type: String,
+    file_size: u64,
+    file_sha256: Vec<u8>,
+    created_at_ms: i64,
+    expires_at_ms: i64,
+) -> Result<FileTransferManifestFfi, CoreError> {
+    use crypto::file_transfer::{
+        expected_chunk_count, FileTransferManifestV1, DEFAULT_FILE_CHUNK_BYTES, FILE_HASH_BYTES,
+        FILE_TRANSFER_ID_BYTES,
+    };
+    use rand::{rngs::OsRng, RngCore};
+
+    if file_sha256.len() != FILE_HASH_BYTES {
+        return Err(CoreError::CryptoError {
+            detail: "file SHA-256 must be exactly 32 bytes".to_string(),
+        });
+    }
+    let mut transfer_id = [0u8; FILE_TRANSFER_ID_BYTES];
+    let mut rng = OsRng;
+    while transfer_id.iter().all(|byte| *byte == 0) {
+        rng.fill_bytes(&mut transfer_id);
+    }
+    let manifest = FileTransferManifestV1 {
+        transfer_id,
+        sender_node_id,
+        recipient_node_id,
+        display_name,
+        media_type,
+        file_size,
+        chunk_size: DEFAULT_FILE_CHUNK_BYTES,
+        chunk_count: expected_chunk_count(file_size, DEFAULT_FILE_CHUNK_BYTES),
+        file_sha256: file_sha256
+            .try_into()
+            .map_err(|_| CoreError::CryptoError {
+                detail: "file SHA-256 must be exactly 32 bytes".to_string(),
+            })?,
+        created_at_ms,
+        expires_at_ms,
+    };
+    file_manifest_to_ffi(manifest)
+}
+
+pub fn parse_file_transfer_manifest(
+    manifest_bytes: Vec<u8>,
+) -> Result<FileTransferManifestFfi, CoreError> {
+    let manifest = crypto::file_transfer::FileTransferManifestV1::from_canonical_bytes(
+        &manifest_bytes,
+    )
+    .map_err(file_transfer_error)?;
+    file_manifest_to_ffi(manifest)
+}
+
+pub fn encrypt_file_transfer_chunk(
+    manifest_bytes: Vec<u8>,
+    mut file_key: Vec<u8>,
+    chunk_index: u32,
+    mut plaintext: Vec<u8>,
+) -> Result<Vec<u8>, CoreError> {
+    let result = crypto::file_transfer::FileTransferManifestV1::from_canonical_bytes(&manifest_bytes)
+        .map_err(file_transfer_error)
+        .and_then(|manifest| {
+            crypto::file_transfer::encrypt_file_chunk_v1(
+                &manifest,
+                &file_key,
+                chunk_index,
+                &plaintext,
+            )
+            .map_err(file_transfer_error)
+        });
+    file_key.fill(0);
+    plaintext.fill(0);
+    result
+}
+
+pub fn decrypt_file_transfer_chunk(
+    manifest_bytes: Vec<u8>,
+    mut file_key: Vec<u8>,
+    chunk_index: u32,
+    ciphertext: Vec<u8>,
+) -> Result<Vec<u8>, CoreError> {
+    let result = crypto::file_transfer::FileTransferManifestV1::from_canonical_bytes(&manifest_bytes)
+        .map_err(file_transfer_error)
+        .and_then(|manifest| {
+            crypto::file_transfer::decrypt_file_chunk_v1(
+                &manifest,
+                &file_key,
+                chunk_index,
+                &ciphertext,
+            )
+            .map_err(file_transfer_error)
+        });
+    file_key.fill(0);
+    result
+}
+
+fn file_manifest_to_ffi(
+    manifest: crypto::file_transfer::FileTransferManifestV1,
+) -> Result<FileTransferManifestFfi, CoreError> {
+    let manifest_bytes = manifest.canonical_bytes().map_err(file_transfer_error)?;
+    Ok(FileTransferManifestFfi {
+        manifest_bytes,
+        transfer_id_hex: manifest
+            .transfer_id
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        sender_node_id: manifest.sender_node_id,
+        recipient_node_id: manifest.recipient_node_id,
+        display_name: manifest.display_name,
+        media_type: manifest.media_type,
+        file_size: manifest.file_size,
+        chunk_size: manifest.chunk_size,
+        chunk_count: manifest.chunk_count,
+        file_sha256_hex: manifest
+            .file_sha256
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        created_at_ms: manifest.created_at_ms,
+        expires_at_ms: manifest.expires_at_ms,
+    })
+}
+
+fn file_transfer_error(error: crypto::file_transfer::FileTransferError) -> CoreError {
+    CoreError::CryptoError {
+        detail: error.to_string(),
+    }
+}
+
 /// M8-C slice 3: убрать at-rest ключ (будущий logout/wipe; действует на
 /// следующий запуск движка — работающий движок держит свой снимок).
 pub fn clear_relay_at_rest_key() {
@@ -573,6 +721,36 @@ pub enum CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_transfer_functional_ffi_round_trip() {
+        let manifest = create_file_transfer_manifest(
+            "pk_0123456789abcdef0123456789abcdef".to_string(),
+            "pk_fedcba9876543210fedcba9876543210".to_string(),
+            "small.bin".to_string(),
+            "application/octet-stream".to_string(),
+            5,
+            vec![0x11; 32],
+            1_800_000_000_000,
+            1_800_086_400_000,
+        )
+        .unwrap();
+        let parsed = parse_file_transfer_manifest(manifest.manifest_bytes.clone()).unwrap();
+        assert_eq!(parsed.transfer_id_hex, manifest.transfer_id_hex);
+        assert_eq!(parsed.file_size, 5);
+        let key = vec![0x22; 32];
+        let ciphertext = encrypt_file_transfer_chunk(
+            manifest.manifest_bytes.clone(),
+            key.clone(),
+            0,
+            b"hello".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            decrypt_file_transfer_chunk(manifest.manifest_bytes, key, 0, ciphertext).unwrap(),
+            b"hello"
+        );
+    }
 
     #[test]
     fn test_get_version() {

@@ -3191,3 +3191,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   adapter accepts only content:// and never logs/persists URI/path. JVM tests cover known/empty hash,
   metadata sanitization, Unicode boundary, MIME fallback, mismatch/oversize and read request ceiling.
   Picker UI, persistable permission and encryption pipeline not wired; build gate pending.
+- **2026-08-19 (доп.254) — F1 SAF inspector JVM/APK PASS:** state `913EEA7C…3A071`, app APK
+  29,463,741 B `843B046A…02D28`; inspector+chunk-store regression tests PASS, picker/transport/ADB/
+  phones false.
+- **2026-08-19 (доп.255) — F1 functional Rust crypto seam source:** canonical manifest strict decoder
+  rejects every truncation/trailing bytes; create API uses OS CSPRNG 16-byte transfer ID and binds
+  sender/recipient/sanitized metadata/size/hash/TTL. Parse/encrypt/decrypt UniFFI APIs operate on
+  bounded one-chunk ByteArrays; borrowed key and encryption plaintext copies are wiped in Rust.
+  File key generation/persistence/export deliberately not exposed: caller key must remain transient
+  until Android Keystore transfer vault + E2E key envelope exist. Native/bindgen/APK gate pending.

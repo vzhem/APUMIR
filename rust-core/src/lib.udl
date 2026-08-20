@@ -43,6 +43,26 @@ namespace p2p_core {
 
     // Secure File Transfer F0 runtime diagnostic. No key or file material leaves Rust.
     boolean file_transfer_crypto_self_test();
+
+    // F1 bounded functional crypto seam. File keys are borrowed for one call and wiped in Rust;
+    // callers must keep them transient until the device-bound transfer key vault is wired.
+    [Throws=CoreError]
+    FileTransferManifestFfi create_file_transfer_manifest(
+        string sender_node_id,
+        string recipient_node_id,
+        string display_name,
+        string media_type,
+        u64 file_size,
+        bytes file_sha256,
+        i64 created_at_ms,
+        i64 expires_at_ms
+    );
+    [Throws=CoreError]
+    FileTransferManifestFfi parse_file_transfer_manifest(bytes manifest_bytes);
+    [Throws=CoreError]
+    bytes encrypt_file_transfer_chunk(bytes manifest_bytes, bytes file_key, u32 chunk_index, bytes plaintext);
+    [Throws=CoreError]
+    bytes decrypt_file_transfer_chunk(bytes manifest_bytes, bytes file_key, u32 chunk_index, bytes ciphertext);
 };
 
 [Error]
@@ -60,6 +80,21 @@ enum MessageStatusFfi {
     "Delivered",
     "Read",
     "Failed"
+};
+
+dictionary FileTransferManifestFfi {
+    bytes manifest_bytes;
+    string transfer_id_hex;
+    string sender_node_id;
+    string recipient_node_id;
+    string display_name;
+    string media_type;
+    u64 file_size;
+    u32 chunk_size;
+    u32 chunk_count;
+    string file_sha256_hex;
+    i64 created_at_ms;
+    i64 expires_at_ms;
 };
 
 dictionary MessageFfi {

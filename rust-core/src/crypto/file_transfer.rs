@@ -51,6 +51,8 @@ pub enum FileTransferError {
     InvalidGeometry,
     #[error("invalid transfer time window")]
     InvalidTimeWindow,
+    #[error("malformed canonical file manifest")]
+    MalformedManifest,
     #[error("file key must be exactly 32 bytes")]
     InvalidKey,
     #[error("chunk index is outside the manifest")]
@@ -132,6 +134,50 @@ impl FileTransferManifestV1 {
         output.extend_from_slice(&self.created_at_ms.to_be_bytes());
         output.extend_from_slice(&self.expires_at_ms.to_be_bytes());
         Ok(output)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, FileTransferError> {
+        let mut cursor = ManifestCursor::new(bytes);
+        if cursor.take(MANIFEST_DOMAIN_V1.len())? != MANIFEST_DOMAIN_V1
+            || cursor.u8()? != FILE_TRANSFER_VERSION_V1
+        {
+            return Err(FileTransferError::MalformedManifest);
+        }
+        let transfer_id = cursor
+            .take(FILE_TRANSFER_ID_BYTES)?
+            .try_into()
+            .map_err(|_| FileTransferError::MalformedManifest)?;
+        let sender_node_id = cursor.string()?;
+        let recipient_node_id = cursor.string()?;
+        let display_name = cursor.string()?;
+        let media_type = cursor.string()?;
+        let file_size = cursor.u64()?;
+        let chunk_size = cursor.u32()?;
+        let chunk_count = cursor.u32()?;
+        let file_sha256 = cursor
+            .take(FILE_HASH_BYTES)?
+            .try_into()
+            .map_err(|_| FileTransferError::MalformedManifest)?;
+        let created_at_ms = cursor.i64()?;
+        let expires_at_ms = cursor.i64()?;
+        if !cursor.is_finished() {
+            return Err(FileTransferError::MalformedManifest);
+        }
+        let manifest = Self {
+            transfer_id,
+            sender_node_id,
+            recipient_node_id,
+            display_name,
+            media_type,
+            file_size,
+            chunk_size,
+            chunk_count,
+            file_sha256,
+            created_at_ms,
+            expires_at_ms,
+        };
+        manifest.validate()?;
+        Ok(manifest)
     }
 
     pub fn manifest_sha256(&self) -> Result<[u8; 32], FileTransferError> {
@@ -232,6 +278,80 @@ fn append_bounded(output: &mut Vec<u8>, value: &[u8]) -> Result<(), FileTransfer
     Ok(())
 }
 
+struct ManifestCursor<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> ManifestCursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn take(&mut self, count: usize) -> Result<&'a [u8], FileTransferError> {
+        let end = self
+            .offset
+            .checked_add(count)
+            .ok_or(FileTransferError::MalformedManifest)?;
+        let value = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or(FileTransferError::MalformedManifest)?;
+        self.offset = end;
+        Ok(value)
+    }
+
+    fn u8(&mut self) -> Result<u8, FileTransferError> {
+        self.take(1)?
+            .first()
+            .copied()
+            .ok_or(FileTransferError::MalformedManifest)
+    }
+
+    fn u16(&mut self) -> Result<u16, FileTransferError> {
+        Ok(u16::from_be_bytes(
+            self.take(2)?
+                .try_into()
+                .map_err(|_| FileTransferError::MalformedManifest)?,
+        ))
+    }
+
+    fn u32(&mut self) -> Result<u32, FileTransferError> {
+        Ok(u32::from_be_bytes(
+            self.take(4)?
+                .try_into()
+                .map_err(|_| FileTransferError::MalformedManifest)?,
+        ))
+    }
+
+    fn u64(&mut self) -> Result<u64, FileTransferError> {
+        Ok(u64::from_be_bytes(
+            self.take(8)?
+                .try_into()
+                .map_err(|_| FileTransferError::MalformedManifest)?,
+        ))
+    }
+
+    fn i64(&mut self) -> Result<i64, FileTransferError> {
+        Ok(i64::from_be_bytes(
+            self.take(8)?
+                .try_into()
+                .map_err(|_| FileTransferError::MalformedManifest)?,
+        ))
+    }
+
+    fn string(&mut self) -> Result<String, FileTransferError> {
+        let length = usize::from(self.u16()?);
+        std::str::from_utf8(self.take(length)?)
+            .map(str::to_owned)
+            .map_err(|_| FileTransferError::MalformedManifest)
+    }
+
+    fn is_finished(&self) -> bool {
+        self.offset == self.bytes.len()
+    }
+}
+
 fn is_legacy_node_id(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix("pk_") else {
         return false;
@@ -293,6 +413,20 @@ mod tests {
         assert_eq!(first, value.canonical_bytes().unwrap());
         assert!(first.starts_with(MANIFEST_DOMAIN_V1));
         assert_eq!(first[MANIFEST_DOMAIN_V1.len()], FILE_TRANSFER_VERSION_V1);
+    }
+
+    #[test]
+    fn canonical_manifest_wire_round_trip_rejects_truncation_and_trailing_bytes() {
+        let value = manifest(DEFAULT_FILE_CHUNK_BYTES as u64 + 1);
+        let bytes = value.canonical_bytes().unwrap();
+        assert_eq!(
+            FileTransferManifestV1::from_canonical_bytes(&bytes).unwrap(),
+            value
+        );
+        for length in 0..bytes.len() {
+            assert!(FileTransferManifestV1::from_canonical_bytes(&bytes[..length]).is_err());
+        }
+        assert!(FileTransferManifestV1::from_canonical_bytes(&[bytes, vec![0]].concat()).is_err());
     }
 
     #[test]
