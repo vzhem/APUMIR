@@ -13,38 +13,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Data-preserving acceptance for an untouched existing v5 application database. */
+/** One-time recovery for the acceptance harness that migrated outside Room and left its old hash. */
 @RunWith(AndroidJUnit4::class)
-class FileTransferProductionMigrationInstrumentedTest {
+class FileTransferMigrationIdentityRecoveryInstrumentedTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
 
     @Test
-    fun existingDatabaseMigratesToSixWithoutChangingLegacyRows() {
-        assertTrue(context.getDatabasePath("messenger_database").isFile)
-        val v5 = openAtVersion(5)
-        val before = legacyState(v5.writableDatabase)
-        assertEquals(5, v5.writableDatabase.version)
-        v5.close()
+    fun staleRoomIdentityIsRepairedByIdempotentRoomOwnedMigration() {
+        val raw = openAtVersionSix()
+        val stale = raw.writableDatabase
+        assertEquals(6, stale.version)
+        assertEquals(OLD_V5_IDENTITY, identityHash(stale))
+        val before = legacyState(stale)
+        assertEquals(0, scalarInt(stale, "SELECT COUNT(*) FROM file_transfers"))
+        assertEquals(0, scalarInt(stale, "SELECT COUNT(*) FROM file_transfer_chunks"))
 
-        // Room owns the upgrade so it validates schema and updates room_master_table identity hash.
+        // Re-arm the additive idempotent migration. Room, not this test, will own the upgrade,
+        // perform full schema validation and atomically write the generated v6 identity hash.
+        stale.execSQL("PRAGMA user_version = 5")
+        assertEquals(5, stale.version)
+        raw.close()
+
         val room = Room.databaseBuilder(context, AppDatabase::class.java, "messenger_database")
             .addMigrations(AppDatabase.MIGRATION_5_6)
             .build()
-        val db = room.openHelper.writableDatabase
-        assertEquals(6, db.version)
-        assertEquals(before, legacyState(db))
-        assertEquals(0, scalarInt(db, "SELECT COUNT(*) FROM file_transfers"))
-        assertEquals(0, scalarInt(db, "SELECT COUNT(*) FROM file_transfer_chunks"))
+        val repaired = room.openHelper.writableDatabase
+        assertEquals(6, repaired.version)
+        assertEquals(EXPECTED_V6_IDENTITY, identityHash(repaired))
+        assertEquals(before, legacyState(repaired))
+        assertEquals(0, scalarInt(repaired, "SELECT COUNT(*) FROM file_transfers"))
+        assertEquals(0, scalarInt(repaired, "SELECT COUNT(*) FROM file_transfer_chunks"))
         room.close()
     }
 
-    private fun openAtVersion(version: Int): SupportSQLiteOpenHelper =
+    private fun openAtVersionSix(): SupportSQLiteOpenHelper =
         FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name("messenger_database")
-                .callback(object : SupportSQLiteOpenHelper.Callback(version) {
+                .callback(object : SupportSQLiteOpenHelper.Callback(6) {
                     override fun onCreate(db: SupportSQLiteDatabase) {
-                        throw AssertionError("Production migration gate requires an existing database")
+                        throw AssertionError("Recovery requires the existing production database")
                     }
 
                     override fun onUpgrade(
@@ -52,11 +60,17 @@ class FileTransferProductionMigrationInstrumentedTest {
                         oldVersion: Int,
                         newVersion: Int,
                     ) {
-                        throw AssertionError("Read-only preflight must not migrate")
+                        throw AssertionError("Recovery preflight must see exact stale v6 state")
                     }
                 })
                 .build()
         )
+
+    private fun identityHash(db: SupportSQLiteDatabase): String =
+        db.query("SELECT identity_hash FROM room_master_table WHERE id = 42").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            cursor.getString(0)
+        }
 
     private fun legacyState(db: SupportSQLiteDatabase): LegacyState = LegacyState(
         chats = tableState(db, "chats"),
@@ -96,4 +110,9 @@ class FileTransferProductionMigrationInstrumentedTest {
     )
 
     private data class TableState(val count: Int, val idSetSha256: String)
+
+    companion object {
+        private const val OLD_V5_IDENTITY = "451378b646892da8c31c499c2f93fff5"
+        private const val EXPECTED_V6_IDENTITY = "1600df8ca0acdcfc6be40910e2e5eee0"
+    }
 }

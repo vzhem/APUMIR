@@ -3155,3 +3155,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `F79BB5ED…CB6DC`; app APK unchanged `616E5CDC…E5E7`, rebuilt test APK 976,465 B
   `759CACD7…C6C7D`; ADB/phones false. Next Stas v11.16.34 production DB exact v5→v6 migration,
   legacy ID-set/count preservation + generated Room schema validation, no DB delete/data clear/force-stop.
+- **2026-08-19 (доп.247) — File F1 first Stas migration harness failed after additive SQL:** local
+  state `05927DDB…0CAE`, log `9D6A2EAC…51AC`. Legacy ID/count before-after assertion and additive
+  migration completed, then generated Room open rejected stale identity: expected v6
+  `1600df8c…eee0`, found old v5 `451378b6…fff5`. Cause: test invoked Migration directly through raw
+  SQLite helper, which advanced user_version but bypassed RoomOpenHelper identity update. App was
+  installed v11.16.35; test package likely remains. No DB delete/data clear/force-stop. Gate must not
+  repeat; later GitHub retries stopped before script.
+- **2026-08-19 (доп.248) — migration identity recovery source:** normal untouched-v5 test corrected
+  so Room owns upgrade. One-time Stas recovery requires exact stale v6+old hash+empty new tables,
+  hashes legacy ID sets/counts, temporarily re-arms user_version=5, then idempotent `IF NOT EXISTS`
+  Migration runs through Room, performs full generated schema validation and writes exact v6 hash;
+  legacy state/new-table emptiness rechecked. No direct hash overwrite and no DB deletion.
