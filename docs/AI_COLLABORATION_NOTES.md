@@ -3111,3 +3111,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Не переносить phone serial/topology, private endpoints, node/message/referral IDs, local paths,
   evidence/state/log details, branch/recovery mechanics или secrets. Exact будущий public text всегда
   отдельно показать владельцу перед публикацией. Policy: `docs/RELEASE_PUBLICATION_POLICY.md`.
+- **2026-08-19 (доп.237) — File F0 production Rust compile PASS, wrapper expectation corrected:**
+  recovery-01 state `AD01EB9E…D68FB`; Rust завершил release compile и скопировал `.so`, но hash
+  остался `836B009E…B391A`. Это ожидаемо: новый pure module пока не reachable из UniFFI/engine и LTO
+  полностью удалил его из final native. Wrapper ошибочно требовал hash change и остановился до
+  Gradle; ADB/phones false. Recovery-02 не повторяет Rust, hash-links prior state/log, принимает
+  unchanged native как ожидаемый и выполняет только Gradle APK build с новыми evidence names.
