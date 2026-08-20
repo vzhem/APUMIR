@@ -3348,3 +3348,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   strict-decodes and rejects corruption/truncation/trailing/missing/duplicate/mixed fragments. This is
   transport integrity/framing, not key authentication. JVM boundary/negative tests added; build gate
   pending. Next authenticated transfer-key envelope then production transport/UI.
+- **2026-08-20 (доп.284) — production packet codec JVM/APK PASS:** state `B40A10D7…65FDB`, app APK
+  29,512,893 B `4C15B772…330EA`; key exchange/transport/UI/ADB/phones false.
+- **2026-08-20 (доп.285) — user explicitly changed referral rewards to outbound-media entitlements:**
+  central `FileTransferRankPolicy` maps qualified direct thresholds 1/3/10/.../1000 to photo/file/
+  video unlocks and per-file 5MiB→4GiB rank ceilings. Effective limit is always min(rank, technical);
+  current F1 stays 10MiB. Unknown MIME is generic file. Receiving/download, text, crypto, priority,
+  privacy and already accepted transfers are never rank-gated. Outgoing preparation now requires an
+  explicit qualified count. Boundary/category/technical-cap tests added. This supersedes earlier
+  cosmetics-only/no-feature-blocking text only for outbound media, and carries spam/growth UX risk.

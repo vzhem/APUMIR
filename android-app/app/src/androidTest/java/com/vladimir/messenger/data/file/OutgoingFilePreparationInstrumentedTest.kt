@@ -70,6 +70,7 @@ class OutgoingFilePreparationInstrumentedTest {
                 messageId = "file-message-test-v1",
                 chatId = "file-chat-test-v1",
                 recipientNodeId = recipient,
+                qualifiedDirectReferrals = 10,
                 nowMs = 1_800_000_000_000,
             )
             assertEquals(2, prepared.chunkCount)

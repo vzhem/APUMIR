@@ -74,6 +74,7 @@ class OutgoingFilePreparationService private constructor(
         messageId: String,
         chatId: String,
         recipientNodeId: String,
+        qualifiedDirectReferrals: Int,
         nowMs: Long = System.currentTimeMillis(),
     ): PreparedTransfer = withContext(Dispatchers.IO) {
         require(messageId.isNotBlank() && chatId.isNotBlank()) { "Missing file message binding" }
@@ -81,6 +82,12 @@ class OutgoingFilePreparationService private constructor(
             .getString("node_id", null)
             ?: throw IllegalStateException("Local identity is unavailable")
         val inspected = AndroidFileSelection.inspect(context.contentResolver, source)
+        FileTransferRankPolicy.requireCanSend(
+            qualifiedDirectReferrals = qualifiedDirectReferrals,
+            mediaType = inspected.mediaType,
+            sizeBytes = inspected.sizeBytes,
+            technicalLimitBytes = FileTransferSourceInspector.MAX_FILE_BYTES,
+        )
         val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
         val manifest = createFileTransferManifest(
             senderNodeId,
