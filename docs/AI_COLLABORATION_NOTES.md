@@ -3151,3 +3151,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   legacy row IDs/counts before/after, применяет additive migration, затем открывает DB generated Room
   v6 validator и требует пустые new transfer tables. Message/contact contents не читаются/логируются;
   DB не удаляется. Rebuilt test APK и Stas data-preserving gate pending.
+- **2026-08-19 (доп.246) — File F1 production migration test APK build PASS:** state
+  `F79BB5ED…CB6DC`; app APK unchanged `616E5CDC…E5E7`, rebuilt test APK 976,465 B
+  `759CACD7…C6C7D`; ADB/phones false. Next Stas v11.16.34 production DB exact v5→v6 migration,
+  legacy ID-set/count preservation + generated Room schema validation, no DB delete/data clear/force-stop.
