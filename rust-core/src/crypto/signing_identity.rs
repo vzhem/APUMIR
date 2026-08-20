@@ -136,6 +136,10 @@ impl InstalledSigningIdentity {
         &self.key_id
     }
 
+    pub(crate) fn sign_security_payload(&self, payload: &[u8]) -> Vec<u8> {
+        self.key_pair.sign(payload)
+    }
+
     pub fn sign_referral(
         &self,
         claims: ReferralInviteClaimsV1,

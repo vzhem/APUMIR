@@ -3441,3 +3441,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Binding reads reverify signature/node/hash. App migration chain and current tests updated to v7;
   historical one-time Stas v6 identity recovery is @Ignore to prevent rerun. Compile/migration gates
   pending; no phone install before full candidate.
+- **2026-08-20 (доп.304) — authenticated per-transfer file-key envelope source:** X25519 static-static
+  DH between signed/pinned exchange bindings, HKDF-SHA256 bound to manifest hash and ordered sender/
+  recipient legacy IDs, random XChaCha nonce and 32-byte file-key AEAD. Wire carries sender signed
+  exchange binding, recipient-binding hash, manifest hash, nonce/ciphertext and sender Ed25519
+  signature. Recipient requires its exact installed identity+exchange secret; wrong recipient,
+  manifest, secret, signature or tamper fail. UniFFI create/open wipe supplied secret/file-key copies.
+  Compile/runtime gates pending; no phone installation.

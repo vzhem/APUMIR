@@ -52,6 +52,10 @@ namespace p2p_core {
     string file_exchange_binding_node_id(bytes binding);
     [Throws=CoreError]
     bytes file_exchange_binding_public_key(bytes binding);
+    [Throws=CoreError]
+    bytes create_file_key_envelope(bytes sender_exchange_binding, bytes recipient_exchange_binding, bytes sender_x25519_secret, bytes manifest, bytes file_key);
+    [Throws=CoreError]
+    bytes open_file_key_envelope(bytes envelope, bytes recipient_exchange_binding, bytes recipient_x25519_secret, bytes manifest);
 
     // F1 bounded functional crypto seam. File keys are borrowed for one call and wiped in Rust;
     // callers must keep them transient until the device-bound transfer key vault is wired.

@@ -451,6 +451,43 @@ pub fn file_exchange_binding_public_key(binding: Vec<u8>) -> Result<Vec<u8>, Cor
     })
 }
 
+pub fn create_file_key_envelope(
+    sender_exchange_binding: Vec<u8>,
+    recipient_exchange_binding: Vec<u8>,
+    mut sender_x25519_secret: Vec<u8>,
+    manifest: Vec<u8>,
+    mut file_key: Vec<u8>,
+) -> Result<Vec<u8>, CoreError> {
+    let result = crypto::file_key_envelope::create_file_key_envelope(
+        &sender_exchange_binding,
+        &recipient_exchange_binding,
+        &sender_x25519_secret,
+        &manifest,
+        &file_key,
+    )
+    .map_err(|error| CoreError::CryptoError { detail: error.to_string() });
+    sender_x25519_secret.fill(0);
+    file_key.fill(0);
+    result
+}
+
+pub fn open_file_key_envelope(
+    envelope: Vec<u8>,
+    recipient_exchange_binding: Vec<u8>,
+    mut recipient_x25519_secret: Vec<u8>,
+    manifest: Vec<u8>,
+) -> Result<Vec<u8>, CoreError> {
+    let result = crypto::file_key_envelope::open_file_key_envelope(
+        &envelope,
+        &recipient_exchange_binding,
+        &recipient_x25519_secret,
+        &manifest,
+    )
+    .map_err(|error| CoreError::CryptoError { detail: error.to_string() });
+    recipient_x25519_secret.fill(0);
+    result
+}
+
 pub fn file_transfer_crypto_self_test() -> bool {
     use crypto::file_transfer::{
         decrypt_file_chunk_v1, encrypt_file_chunk_v1, expected_chunk_count,
