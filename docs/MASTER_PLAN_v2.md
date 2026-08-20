@@ -1689,7 +1689,7 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > receiver-ready marker and retries packets. Public MQTT still delivered no receiver events and shutdown
 > blocked. Recovery-02 switches only the controlled harness to an explicit ADB-tunneled direct TCP
 > path (Anna localhost → PC tunnel → Stas:7778), retaining real cross-device encrypted bytes while
-> avoiding public-broker uncertainty. Test APK/two-phone gate pending.
+> avoiding public-broker uncertainty. Test APK build PASS; Anna↔Stas ADB-tunnel gate pending.
 
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.
