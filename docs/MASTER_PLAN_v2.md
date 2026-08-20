@@ -1750,16 +1750,25 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 Расширенная Фаза 5.3 остаётся authoritative backlog для фото, видео, voice, previews, больших файлов,
 cache manager и media UX, но её базовый encrypted chunk transport теперь реализуется здесь раньше.
 
-## v11.17.0 — Groups MVP
+## Следующая полная задача после file-transfer release — Groups + Topics + Admin Cabinet
 
-Цель: первые группы в приложении.
+Цель: не урезанный group demo, а законченная первая версия групп с темами и управлением.
+Начинается только после проверенного file-transfer релиза.
 
-- [ ] Group data model.
+- [ ] Group data model и signed group identity/versioned membership state.
 - [ ] Create group UI + domain/repository entitlement gate: минимум 10 qualified direct referrals.
-- [ ] Add members.
-- [ ] Group chat screen.
-- [ ] Fan-out delivery каждому участнику.
-- [ ] Group messages на 3 телефонах.
+- [ ] Вступление по invite без ранга; request/approve/reject при закрытой группе.
+- [ ] Роли `owner/admin/moderator/member`, передача ownership и запрет группы без owner.
+- [ ] Add/remove/ban/unban/mute members; bounded signed admin actions и локальный audit log.
+- [ ] Admin cabinet: список участников/заявок/ролей/банов, permissions, slow mode, invite revoke,
+  pinned rules, group info/avatar, storage/relay diagnostics и безопасное удаление группы.
+- [ ] Topics: create/rename/close/reopen/delete/pin topic, topic permissions и default General topic.
+- [ ] Group/topic chat UI, unread/mute per topic, reply/forward/search и administrative system events.
+- [ ] Encrypted fan-out/epoch key rotation при membership change; removed member не получает новые epoch.
+- [ ] Durable online/offline delivery через третьи телефоны, dedup/ACK/cleanup/process-death resume.
+- [ ] Трёхтелефонные acceptance: owner/admin/member, offline member, role change, ban, topic lifecycle,
+  duplicate/reordered admin actions, restart и multi-day offline delivery.
+
 
 ## v11.18.0 — Delivery diagnostics, channel transparency and data cleanup
 

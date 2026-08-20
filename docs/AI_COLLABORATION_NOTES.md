@@ -3413,3 +3413,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   UniFFI create/verify/extract node/public APIs added; supplied X25519 secret copy is wiped in Rust.
   This is public-key binding only; Android device-bound static secret storage, contact pinning and
   per-transfer key envelope are next and no APK is sent to phones until full path is wired.
+- **2026-08-20 (доп.298) — owner authorizes final file-transfer install/test/release sequence:** finish
+  authenticated exchange, production transport, third-phone durable multi-day custody, UI/resume;
+  then install one candidate on Anna/Zhenya/Stas, close acceptance and publish a short redacted release.
+  This is explicit release authorization for that completed candidate, not permission to publish an
+  intermediate build. Exact public notes/checksum still undergo final redaction review.
+- **2026-08-20 (доп.299) — next major task fixed after file release:** full Groups + Topics + Admin
+  Cabinet, not a demo: rank-10 create gate, join without rank, owner/admin/mod/member roles, requests,
+  permissions/ban/mute/invites/audit, topic lifecycle/unread/mute, epoch key rotation and three-phone
+  durable offline/admin acceptance. Added to nearest roadmap after file-transfer release.
