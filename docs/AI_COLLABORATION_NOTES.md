@@ -3337,3 +3337,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   максимум 5 pull attempts с delays 5/15/30/60s, retry только для сетевых/TLS ошибок, немедленный
   stop для auth/non-FF/worktree ошибок, `gc.auto=0` против старых pack unlink prompts, затем exact
   HEAD+blob verification до gate. Бесконечных retries нет; phone gate не стартует без pull PASS.
+- **2026-08-20 (доп.282) — raw-socket tunnel also failed; tunnel experiments stopped:** state
+  `B8F94FE0…7CAED`, cleanup PASS `E91A18C6…C373F`; sender connected but timed out reading ACK,
+  receiver only test-start/root result absent. No production transfer and no DB delete/data clear/
+  force-stop. User explicitly directed to finish actual arbitrary file/photo/video code instead of
+  more harness work. No further MQTT/ADB-tunnel recovery attempts.
+- **2026-08-20 (доп.283) — production F2 packet layer source:** versioned binary codec fragments
+  encrypted offer/chunk payloads into ≤24KiB frames (max 16, reassembled max 256KiB+AEAD tag), binds
+  type/transfer ID/item/fragment geometry/length and domain-separated SHA-256 truncation digest,
+  strict-decodes and rejects corruption/truncation/trailing/missing/duplicate/mixed fragments. This is
+  transport integrity/framing, not key authentication. JVM boundary/negative tests added; build gate
+  pending. Next authenticated transfer-key envelope then production transport/UI.

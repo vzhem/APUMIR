@@ -1691,8 +1691,11 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > path (Anna localhost → PC tunnel → Stas:7778), retaining real cross-device encrypted bytes while
 > avoiding public-broker uncertainty. Engine-based tunnel then hung before sender because receiver
 > initialization/listener never became ready. Recovery-03 uses a test-only length-prefixed Java
-> ServerSocket/Socket over the same ADB tunnel, with no Rust network engine. Test APK build PASS;
-> two-phone raw-socket gate pending.
+> ServerSocket/Socket over the same ADB tunnel, with no Rust network engine. Sender reached the tunnel
+> but timed out waiting for ACK; this confirms test plumbing is not a product transport. Per user
+> direction, further tunnel retries stop here. Production work resumes with a versioned bounded packet
+> fragmentation/reassembly layer for encrypted offers/chunks, followed by authenticated key exchange,
+> direct QUIC/relay ownership and real chat picker/progress UI.
 
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.
