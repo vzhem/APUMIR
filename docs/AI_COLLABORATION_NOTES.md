@@ -3328,3 +3328,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Socket frames and exact 3-byte ACK through ADB reverse/forward. Rust remains responsible for real
   manifest/XChaCha crypto only. No MQTT, RustBridge engine start/stop or production TCP parser in this
   controlled transport proof. Test APK and new evidence/gate pending.
+- **2026-08-19 (доп.280) — F2 raw-socket tunnel test APK build PASS:** state
+  `17A17636…DAFB5`, app APK unchanged `33CFC806…2B52`, test APK 1,005,936 B
+  `026F7B2A…AB275`; Rust network/production network/ADB/phones false. Gate uses fresh ports
+  Anna:37779→host:47779→Stas:39001, length-prefix ≤256KiB, exact ACK, and always removes mappings.
