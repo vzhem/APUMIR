@@ -9,7 +9,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.vladimir.messenger.data.RustBridge
 import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.security.MessageDigest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,15 +41,19 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
             val publicKey = prefs.getString("existing_public_key", null)
                 ?: prefs.getString("node_id", null)
                 ?: error("Missing sender identity")
-            val privateKey = prefs.getString("existing_private_key", null) ?: publicKey
-            val displayName = prefs.getString("display_name", "Sender") ?: "Sender"
-            assertTrue(RustBridge.initialize(displayName, publicKey, privateKey, null))
-            val sender = RustBridge.nodeId() ?: error("Sender engine has no node ID")
-            Thread.sleep(12_000)
+            val sender = if (tcpPort != null) {
+                publicKey
+            } else {
+                val privateKey = prefs.getString("existing_private_key", null) ?: publicKey
+                val displayName = prefs.getString("display_name", "Sender") ?: "Sender"
+                assertTrue(RustBridge.initialize(displayName, publicKey, privateKey, null))
+                Thread.sleep(12_000)
+                RustBridge.nodeId() ?: error("Sender engine has no node ID")
+            }
             sendOne(runId, "file", "cross-phone-test.bin", "application/octet-stream", fileBytes, sender, recipient, key, tcpPort)
             sendOne(runId, "photo", "cross-phone-photo.png", "image/png", photoBytes, sender, recipient, key, tcpPort)
         } finally {
-            RustBridge.shutdown()
+            if (tcpPort == null) RustBridge.shutdown()
             key.fill(0)
             fileBytes.fill(0)
             photoBytes.fill(0)
@@ -111,8 +119,20 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
         tcpPort: Int?,
     ) {
         if (tcpPort != null) {
-            val payload = "$sender|$messageId|file-test-$runId|$text"
-            assertTrue(RustBridge.sendViaTcp("127.0.0.1", tcpPort, payload))
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            require(bytes.size in 1..256 * 1024)
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress("127.0.0.1", tcpPort), 15_000)
+                socket.soTimeout = 15_000
+                val output = DataOutputStream(socket.getOutputStream())
+                output.writeInt(bytes.size)
+                output.write(bytes)
+                output.flush()
+                val ack = ByteArray(3)
+                java.io.DataInputStream(socket.getInputStream()).readFully(ack)
+                assertArrayEquals(byteArrayOf(0x41, 0x43, 0x4b), ack)
+            }
+            bytes.fill(0)
         } else {
             val payload = "$sender|$messageId|file-test-$runId|$recipient|$text"
             assertTrue(RustBridge.sendMessageMqtt(recipient, payload))

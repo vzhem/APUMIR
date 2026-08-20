@@ -3318,3 +3318,13 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   ADB/phones false. Phone gate maps Anna device localhost:37778 via host:47778 to Stas:7778,
   replace-installs both to terminate stale engines, cleans exact old synthetic/test artifacts, then
   removes forward/reverse mappings in success and finally paths.
+- **2026-08-19 (доп.278) — F2 engine-based ADB tunnel hung before sender:** user interrupted after
+  ~10m. State `6EA472D0…8CD2`, cleanup PASS `4D91F0DF…9520F`, sender absent, receiver only test-start
+  `05C4950A…214A`. Phone read-only diagnostic showed Anna no process, Stas target process present,
+  ready marker PRESENT/root ABSENT. Thus hang occurred in receiver RustBridge.initialize/listener
+  path before sender; no encrypted transfer, DB delete/data clear/force-stop false. Gate must not repeat.
+- **2026-08-19 (доп.279) — F2 recovery-03 removes network engine from harness:** receiver binds a
+  test-only Java ServerSocket on device localhost, then writes ready; sender uses length-prefixed Java
+  Socket frames and exact 3-byte ACK through ADB reverse/forward. Rust remains responsible for real
+  manifest/XChaCha crypto only. No MQTT, RustBridge engine start/stop or production TCP parser in this
+  controlled transport proof. Test APK and new evidence/gate pending.
