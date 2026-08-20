@@ -3101,3 +3101,13 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   geometry/hash/TTL binding и XChaCha20-Poly1305 chunk AEAD с deterministic transfer-ID/index nonce.
   Source tests покрывают boundaries, retry determinism, tamper/wrong key/index/manifest и malicious
   metadata. Transport/Room/UI/UniFFI пока не wired; Android production compile gate pending.
+- **2026-08-19 (доп.235) — File Transfer F0 first gate safely stopped at known host linker blocker:**
+  Android `cargo ndk check --tests` needs Windows host proc-macro/build-script linker and failed because
+  `link.exe` is absent. State `059A13A9…5AFBA`; native/APK not produced, transport/ADB/phones false.
+  Gate не повторять. Recovery-01 с новым evidence prefix выполняет только production Android Rust +
+  Gradle; source tests не объявлять executed до нового ПК с MSVC linker.
+- **2026-08-19 (доп.236) — public release text policy по прямому решению пользователя:** GitHub
+  Release description должен быть коротким (главная польза + 3–6 пунктов) и пройти redaction.
+  Не переносить phone serial/topology, private endpoints, node/message/referral IDs, local paths,
+  evidence/state/log details, branch/recovery mechanics или secrets. Exact будущий public text всегда
+  отдельно показать владельцу перед публикацией. Policy: `docs/RELEASE_PUBLICATION_POLICY.md`.

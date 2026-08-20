@@ -985,7 +985,8 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
 - [ ] Product directories, тематические СМИ, creators и open-source communities подключать после
   стабильной pilot wave. Никаких купленных ботов, массового unsolicited DM, contact scraping,
   fake reviews, скрытых installs или вводящей в заблуждение рекламы.
-- [ ] Public roadmap и регулярные release notes показывают, что исправлено и что ещё ограничено;
+- [ ] Public roadmap и короткие release notes показывают только главную пользовательскую пользу и
+  существенные ограничения; обязательный redaction checklist: [`RELEASE_PUBLICATION_POLICY.md`](RELEASE_PUBLICATION_POLICY.md).
   пользователи могут голосовать за следующие функции без раскрытия переписки.
 
 ## Фаза 2.5.4 — Волны роста до тысяч и десятков тысяч
@@ -1627,6 +1628,10 @@ APU имеет signed launch-ready build, красивый и понятный o
 Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 
 ### F0 — формат и threat model
+
+> Canonical manifest + chunk AEAD source готов. Android `check --tests` остановлен отсутствующим
+> host MSVC `link.exe` до production build; recovery выполняет production compile отдельно, а runtime
+> unit tests остаются обязательными после покупки/настройки нового ПК.
 
 - [ ] Versioned signed attachment manifest: `transfer_id`, message/chat binding, sender/recipient,
   безопасное display name, declared MIME/size, chunk size/count, whole-file hash, timestamps/TTL.
