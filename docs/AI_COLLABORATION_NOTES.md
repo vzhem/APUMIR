@@ -3251,3 +3251,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   exact size+SHA protects mutable providers; failure removes scoped files+DB when cleanup succeeds,
   process death intentionally leaves resumable PREPARING state. Empty files supported. No publish,
   key export, URI/path persistence or UI enable yet. Chunk store gains bounded manifest.v1 tests.
+- **2026-08-19 (доп.266) — outgoing preparation owner JVM/APK build PASS:** state
+  `3201C860…A7F38`, app APK 29,496,509 B `4BD7B538…8B740`; chunk/source/key-envelope regressions PASS,
+  production preparation/UI/transport/ADB/phones false.
+- **2026-08-19 (доп.267) — isolated outgoing preparation integration source:** owner accepts injected
+  test store/key access while Hilt production constructor remains fixed. Android test uses FileProvider
+  content://, 200,000-byte deterministic source (2 chunks), in-memory Room, isolated noBackup root and
+  Keystore alias; asserts PREPARED monotonic DB/chunk state, manifest parse, decrypt exact source,
+  scoped DB/files/key/root/source cleanup. Production DB/store/key and transport untouched. Test APK/
+  device gate pending.

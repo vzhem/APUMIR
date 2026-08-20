@@ -16,10 +16,49 @@ import uniffi.p2p_core.createFileTransferManifest
 import uniffi.p2p_core.encryptFileTransferChunk
 
 /** Prepares encrypted durable chunks locally. It does not publish or claim delivery. */
-class OutgoingFilePreparationService @Inject constructor(
+class OutgoingFilePreparationService private constructor(
     @ApplicationContext private val context: Context,
     private val transferDao: FileTransferDao,
+    private val store: FileTransferChunkStore,
+    private val keyAccess: KeyAccess,
 ) {
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        transferDao: FileTransferDao,
+    ) : this(
+        context.applicationContext,
+        transferDao,
+        FileTransferChunkStore.forApplication(context.applicationContext),
+        ProductionKeyAccess(context.applicationContext),
+    )
+
+    internal constructor(
+        context: Context,
+        transferDao: FileTransferDao,
+        store: FileTransferChunkStore,
+        keyAccess: KeyAccess,
+        isolatedTest: Boolean,
+    ) : this(context.applicationContext, transferDao, store, keyAccess) {
+        require(isolatedTest) { "Custom file preparation dependencies are test-only" }
+    }
+
+    internal interface KeyAccess {
+        fun create(transferId: String)
+        fun <T> withExisting(transferId: String, operation: (ByteArray) -> T): T
+    }
+
+    private class ProductionKeyAccess(private val context: Context) : KeyAccess {
+        override fun create(transferId: String) {
+            FileTransferKeyVault.withOrCreateKey(context, transferId) { key ->
+                check(key.size == FileTransferKeyEnvelope.KEY_BYTES)
+            }
+        }
+
+        override fun <T> withExisting(transferId: String, operation: (ByteArray) -> T): T =
+            FileTransferKeyVault.withExistingKey(context, transferId, operation)
+    }
+
     data class PreparedTransfer(
         val transferId: String,
         val messageId: String,
@@ -55,14 +94,11 @@ class OutgoingFilePreparationService @Inject constructor(
         )
         val entity = manifest.toEntity(messageId, chatId, recipientNodeId, nowMs)
         check(transferDao.insertNewTransfer(entity)) { "Transfer ID collision" }
-        val store = FileTransferChunkStore.forApplication(context)
         try {
             check(store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)) {
                 "New transfer unexpectedly reused a manifest"
             }
-            FileTransferKeyVault.withOrCreateKey(context, manifest.transferIdHex) { key ->
-                check(key.size == FileTransferKeyEnvelope.KEY_BYTES)
-            }
+            keyAccess.create(manifest.transferIdHex)
             stageChunks(source, manifest, inspected.sha256, store)
             PreparedTransfer(
                 transferId = manifest.transferIdHex,
@@ -102,10 +138,7 @@ class OutgoingFilePreparationService @Inject constructor(
                 try {
                     readExactly(stream, plaintext)
                     digest.update(plaintext)
-                    val ciphertext = FileTransferKeyVault.withExistingKey(
-                        context,
-                        manifest.transferIdHex,
-                    ) { key ->
+                    val ciphertext = keyAccess.withExisting(manifest.transferIdHex) { key ->
                         encryptFileTransferChunk(
                             manifest.manifestBytes,
                             key,

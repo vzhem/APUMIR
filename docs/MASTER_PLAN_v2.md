@@ -1665,7 +1665,9 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > Stas Keystore execution PASS with test alias/root cleanup and production state preserved. Outgoing local
 > preparation owner source now connects SAF inspection → canonical manifest → wrapped transfer key →
 > streaming chunk encryption → atomic no-backup store → monotonic Room progress, without publishing;
-> build/integration tests pending.
+> JVM/APK build PASS. Dependencies are now isolatable and an Android integration test stages a
+> two-chunk content:// file through in-memory Room + test vault/store, decrypts exact bytes and cleans
+> all test state; test APK/device gate pending.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.
