@@ -66,8 +66,37 @@ class FileTransferRankPolicyTest {
     }
 
     @Test
-    fun receivingAndSecurityAreNeverRankGated() {
+    fun groupAndChannelCreationUnlockAtTenAndThirty() {
+        assertTrue(!FileTransferRankPolicy.canCreateGroup(9))
+        assertTrue(FileTransferRankPolicy.canCreateGroup(10))
+        assertTrue(FileTransferRankPolicy.canCreateGroup(1_000))
+        assertTrue(!FileTransferRankPolicy.canCreateChannel(29))
+        assertTrue(FileTransferRankPolicy.canCreateChannel(30))
+        assertTrue(FileTransferRankPolicy.canCreateChannel(1_000))
+    }
+
+    @Test
+    fun freshInstallKeepsBasicCommunicationAndJoining() {
+        assertTrue(FileTransferRankPolicy.canSendTextAtAnyRank())
+        assertTrue(FileTransferRankPolicy.canJoinGroupsAtAnyRank())
+        assertTrue(FileTransferRankPolicy.canJoinChannelsAtAnyRank())
         assertTrue(FileTransferRankPolicy.canReceiveAtAnyRank())
+        val base = FileTransferRankPolicy.entitlement(0).unlockedFeatureSummary()
+        assertTrue("Текстовые сообщения" in base)
+        assertTrue("Вступление в группы и каналы" in base)
+        assertTrue("Получение файлов, фото и видео" in base)
+        assertTrue("Создание групп" !in base)
+        assertTrue("Создание каналов" !in base)
+    }
+
+    @Test
+    fun rankSummariesDescribeCommunityUnlocks() {
+        val conductor = FileTransferRankPolicy.entitlement(10).unlockedFeatureSummary()
+        assertTrue("Создание групп" in conductor)
+        assertTrue("Создание каналов" !in conductor)
+        val navigator = FileTransferRankPolicy.entitlement(30).unlockedFeatureSummary()
+        assertTrue("Создание групп" in navigator)
+        assertTrue("Создание каналов" in navigator)
     }
 
     private fun canSend(referrals: Int, mediaType: String, bytes: Long) {

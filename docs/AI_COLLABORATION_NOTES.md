@@ -3357,3 +3357,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   privacy and already accepted transfers are never rank-gated. Outgoing preparation now requires an
   explicit qualified count. Boundary/category/technical-cap tests added. This supersedes earlier
   cosmetics-only/no-feature-blocking text only for outbound media, and carries spam/growth UX risk.
+- **2026-08-20 (доп.286) — outbound media rank policy JVM/APK PASS:** state `72718C87…04047`, app APK
+  29,512,893 B `9297117F…1D114`; referral runtime/UI/transport/ADB/phones false.
+- **2026-08-20 (доп.287) — community creation rank rules added by user:** fresh install/no rank keeps
+  text, contacts/basic settings, receiving/downloading media and joining existing groups/channels.
+  Group creation requires 10 qualified direct referrals (`Проводник`); channel creation requires 30
+  (`Навигатор`). Central entitlement exposes create-group/channel and user-facing unlock summary;
+  tests cover 9/10 and 29/30 boundaries plus base access. Future enforcement must exist in UI and
+  domain/repository/API, not only disabled buttons. Outbound media table remains 1 photo, 3 files,
+  10 video with growing per-file rank limits.

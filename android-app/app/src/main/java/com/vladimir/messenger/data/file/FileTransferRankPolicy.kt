@@ -13,8 +13,22 @@ object FileTransferRankPolicy {
         val allowedCategories: Set<Category>,
         val rankMaxBytes: Long,
     ) {
+        val canCreateGroup: Boolean get() = minimumQualifiedReferrals >= 10
+        val canCreateChannel: Boolean get() = minimumQualifiedReferrals >= 30
+
         fun effectiveMaxBytes(technicalLimitBytes: Long): Long =
             minOf(rankMaxBytes, technicalLimitBytes)
+
+        fun unlockedFeatureSummary(): List<String> = buildList {
+            add("Текстовые сообщения")
+            add("Вступление в группы и каналы")
+            add("Получение файлов, фото и видео")
+            if (Category.PHOTO in allowedCategories) add("Отправка фото")
+            if (Category.FILE in allowedCategories) add("Отправка файлов")
+            if (Category.VIDEO in allowedCategories) add("Отправка видео")
+            if (canCreateGroup) add("Создание групп")
+            if (canCreateChannel) add("Создание каналов")
+        }
     }
 
     private fun mib(value: Long): Long = value * 1024 * 1024
@@ -64,6 +78,17 @@ object FileTransferRankPolicy {
         }
         return entitlement
     }
+
+    fun canCreateGroup(qualifiedDirectReferrals: Int): Boolean =
+        entitlement(qualifiedDirectReferrals).canCreateGroup
+
+    fun canCreateChannel(qualifiedDirectReferrals: Int): Boolean =
+        entitlement(qualifiedDirectReferrals).canCreateChannel
+
+    /** Basic communication and joining communities remain available immediately after install. */
+    fun canSendTextAtAnyRank(): Boolean = true
+    fun canJoinGroupsAtAnyRank(): Boolean = true
+    fun canJoinChannelsAtAnyRank(): Boolean = true
 
     /** Incoming media cannot be held hostage by sender/recipient rank changes. */
     fun canReceiveAtAnyRank(): Boolean = true
