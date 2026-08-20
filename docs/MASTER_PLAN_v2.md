@@ -868,8 +868,9 @@ resume, quota и transport acceptance. MIME неизвестного типа с
 
 Для лабораторных debug APK разрешён отдельный test-only override до 1 000 qualified referrals.
 Он хранится в отдельном debug preference, выставляется только instrumentation через ADB и полностью
-игнорируется release-сборками. Подключённые тестовые телефоны можно переводить в ранг `Создатель сети`
-для проверки всех функций; это не создаёт referral receipts и не попадает в production-счётчик.
+игнорируется release-сборками. Source/app/test APK build PASS. Подключённые известные тестовые телефоны
+можно переводить в ранг `Создатель сети` для проверки всех функций; неизвестный serial останавливает
+весь gate до изменений. Override не создаёт referral receipts и не попадает в production-счётчик.
 
 Правила наград:
 

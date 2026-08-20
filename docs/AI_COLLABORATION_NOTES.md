@@ -3373,3 +3373,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   rank override store, ignored in release, and instrumentation setter; count 1000 unlocks all current
   media/group/proxy/channel policy without creating receipts. User authorized setting max test rank on
   all PC-connected test phones; unknown serials must be identified before mutation.
+- **2026-08-20 (доп.289) — proxy rank + debug override build PASS:** state `7A13F9E3…C7A5B`, app APK
+  29,512,893 B `6368E84B…10DD`, test APK 1,005,936 B `883BD01F…B522`; threshold/max 20/1000,
+  production count/ADB/phones false. Output pasted repeatedly but evidence identical.
+- **2026-08-20 (доп.290) — max-rank connected test-phone gate:** exact allowlist Anna/Zhenya/Stas;
+  any unknown serial aborts before mutation. Gate replace-updates debug app, conditionally Room-migrates
+  old v11.16.23/28 DB via corrected test, sets separate debug override=1000, removes test package,
+  preserves profile/node/pending/real referral prefs and launches stable app. Existing signing state is
+  preserved by app logic; old phones may create their normal sidecar on launch. No fake receipts,
+  production count, app uninstall, DB delete, data clear or force-stop.
