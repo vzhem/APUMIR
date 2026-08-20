@@ -946,6 +946,10 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
      referral handling before legacy contact-only links, and redacted deep-link logs. Runtime/JVM/APK,
      isolated persist/load/tamper/expiry instrumentation and data-preserving Stas phone gate PASS;
      production profile/node/signing/pending state preserved, no data clear/force-stop.
+   - [ ] Slice 5: outgoing share flow creates a seven-day random-nonce signed token only from the
+     installed sidecar + verified persisted binding, with legacy contact-only fallback. Source added;
+     build gate pending. Public switch remains deliberately OFF until `apumir.app` DNS/HTTPS landing
+     and `assetlinks.json` ownership are deployed and verified.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
 5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
 6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.

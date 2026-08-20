@@ -3084,3 +3084,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   обязательными Windows/Android SDK 35/JDK21/MSVC linker/Rust/cargo-ndk/GitHub/backup components и
   initial inventory. Рекомендуемый баланс: x86-64 CPU 12–16 cores, 64 GiB RAM, TLC NVMe 2 TB,
   второй/внешний backup SSD и UPS; Windows-on-ARM и рабочий build на HDD не рекомендуются.
+- **2026-08-19 (доп.232) — outgoing signed share source без преждевременного public enable:**
+  `IdentitySigningKeyStore` создаёт bounded seven-day token только из installed sidecar + verified
+  persisted binding и сразу self-verifies; ShareProfile готов формировать HTTPS Base64URL link в IO
+  context. `DEPLOYMENT_ENABLED=false` оставлен намеренно: до реального DNS/HTTPS landing и
+  `assetlinks.json` пользователю продолжает выдаваться legacy contact-only link, чтобы не публиковать
+  неработающий домен и не обещать referral attribution. Build gate pending.
