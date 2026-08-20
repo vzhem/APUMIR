@@ -3382,3 +3382,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   preserves profile/node/pending/real referral prefs and launches stable app. Existing signing state is
   preserved by app logic; old phones may create their normal sidecar on launch. No fake receipts,
   production count, app uninstall, DB delete, data clear or force-stop.
+- **2026-08-20 (доп.291) — first max-rank phone gate parser-safe stop:** verified runner pulled script,
+  then Windows PowerShell parser rejected interpolated `$Role:` before executing any script statement.
+  No ADB/app/data/evidence changes. Original script must not repeat; recovery-01 uses `${Role}:`, new
+  TEMP state/log names and same exact offline build artifacts.
