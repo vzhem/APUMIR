@@ -3406,3 +3406,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   third-phone chunk custody with multi-day TTL/restart resume, cleanup/exactly-once, and chat picker/
   progress are all wired and offline-built. Acceptance includes sender/recipient/relay independently
   offline for days and all-three-offline retention (no delivery claim while every node is offline).
+- **2026-08-20 (доп.297) — production authenticated file exchange source started:** added strict
+  signed `apu-file-exchange-binding-v1`: nested verified identity binding + separate static X25519
+  public key + timestamp + Ed25519 signature. Creation requires installed sidecar and exact local
+  identity match; foreign binding rejected. Wire parser rejects all truncation/trailing/tamper.
+  UniFFI create/verify/extract node/public APIs added; supplied X25519 secret copy is wiped in Rust.
+  This is public-key binding only; Android device-bound static secret storage, contact pinning and
+  per-transfer key envelope are next and no APK is sent to phones until full path is wired.

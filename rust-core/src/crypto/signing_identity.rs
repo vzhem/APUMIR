@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use rand::{rngs::OsRng, RngCore};
 
-use crate::crypto::keys::Ed25519KeyPair;
+use crate::crypto::keys::{Ed25519KeyPair, X25519KeyPair};
 use crate::crypto::referral::{
     sign_referral_invite_v1, ReferralInviteClaimsV1, ReferralInviteError, SignedReferralInviteV1,
 };
@@ -13,6 +13,7 @@ use crate::crypto::referral::{
 pub const IDENTITY_SIGNING_FORMAT_V1: u8 = 1;
 pub const IDENTITY_SIGNING_SEED_BYTES: usize = 32;
 const IDENTITY_BINDING_DOMAIN_V1: &[u8] = b"apu-identity-binding-v1\0";
+const FILE_EXCHANGE_BINDING_DOMAIN_V1: &[u8] = b"apu-file-exchange-binding-v1\0";
 const ED25519_PUBLIC_KEY_BYTES: usize = 32;
 const ED25519_SIGNATURE_BYTES: usize = 64;
 const MAX_LEGACY_ROUTING_ID_BYTES: usize = 67;
@@ -52,6 +53,15 @@ pub struct IdentityBoundReferralInviteV1 {
     pub signed_invite: SignedReferralInviteV1,
 }
 
+/// Signed static X25519 public key used only to wrap per-transfer file keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedFileExchangeBindingV1 {
+    pub identity_binding: SignedIdentityBindingV1,
+    pub x25519_public_key: Vec<u8>,
+    pub created_at_ms: i64,
+    pub signature: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SigningIdentityError {
     #[error("unsupported signing identity format {0}")]
@@ -74,6 +84,12 @@ pub enum SigningIdentityError {
     ReferralBindingMismatch,
     #[error("malformed identity-bound referral token")]
     MalformedReferralToken,
+    #[error("malformed file exchange binding")]
+    MalformedFileExchangeBinding,
+    #[error("file exchange binding does not match installed identity")]
+    FileExchangeBindingMismatch,
+    #[error("file exchange binding signature is invalid")]
+    InvalidFileExchangeSignature,
 }
 
 impl InstalledSigningIdentity {
@@ -140,6 +156,31 @@ impl InstalledSigningIdentity {
         let mut binding = SignedIdentityBindingV1 {
             legacy_routing_node_id: self.legacy_routing_node_id.clone(),
             signing_public_key: self.public_key.clone(),
+            created_at_ms,
+            signature: Vec::new(),
+        };
+        binding.signature = self.key_pair.sign(&binding.canonical_bytes()?);
+        Ok(binding)
+    }
+
+    pub fn create_file_exchange_binding(
+        &self,
+        identity_binding: SignedIdentityBindingV1,
+        x25519_secret: &[u8],
+        created_at_ms: i64,
+    ) -> Result<SignedFileExchangeBindingV1, SigningIdentityError> {
+        identity_binding.verify()?;
+        if identity_binding.legacy_routing_node_id != self.legacy_routing_node_id()
+            || identity_binding.signing_public_key != self.public_key()
+            || created_at_ms < identity_binding.created_at_ms
+        {
+            return Err(SigningIdentityError::FileExchangeBindingMismatch);
+        }
+        let exchange = X25519KeyPair::from_secret_bytes(x25519_secret)
+            .map_err(|_| SigningIdentityError::MalformedFileExchangeBinding)?;
+        let mut binding = SignedFileExchangeBindingV1 {
+            identity_binding,
+            x25519_public_key: exchange.public_key().0,
             created_at_ms,
             signature: Vec::new(),
         };
@@ -225,6 +266,91 @@ impl SignedIdentityBindingV1 {
 
     pub fn key_id(&self) -> String {
         crate::crypto::keys::NodeId::from_ed25519_pubkey(&self.signing_public_key).to_hex()
+    }
+}
+
+impl SignedFileExchangeBindingV1 {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SigningIdentityError> {
+        self.identity_binding.verify()?;
+        if self.x25519_public_key.len() != 32
+            || self.x25519_public_key.iter().all(|byte| *byte == 0)
+            || self.created_at_ms < self.identity_binding.created_at_ms
+        {
+            return Err(SigningIdentityError::MalformedFileExchangeBinding);
+        }
+        let identity = self.identity_binding.to_bytes()?;
+        let identity_len = u16::try_from(identity.len())
+            .map_err(|_| SigningIdentityError::MalformedFileExchangeBinding)?;
+        let mut output = Vec::with_capacity(
+            FILE_EXCHANGE_BINDING_DOMAIN_V1.len() + 1 + 2 + identity.len() + 32 + 8,
+        );
+        output.extend_from_slice(FILE_EXCHANGE_BINDING_DOMAIN_V1);
+        output.push(IDENTITY_SIGNING_FORMAT_V1);
+        output.extend_from_slice(&identity_len.to_be_bytes());
+        output.extend_from_slice(&identity);
+        output.extend_from_slice(&self.x25519_public_key);
+        output.extend_from_slice(&self.created_at_ms.to_be_bytes());
+        Ok(output)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>, SigningIdentityError> {
+        self.canonical_bytes()?;
+        if self.signature.len() != ED25519_SIGNATURE_BYTES {
+            return Err(SigningIdentityError::MalformedFileExchangeBinding);
+        }
+        let identity = self.identity_binding.to_bytes()?;
+        let mut output = Vec::with_capacity(1 + 2 + identity.len() + 32 + 8 + 64);
+        output.push(IDENTITY_SIGNING_FORMAT_V1);
+        output.extend_from_slice(&(identity.len() as u16).to_be_bytes());
+        output.extend_from_slice(&identity);
+        output.extend_from_slice(&self.x25519_public_key);
+        output.extend_from_slice(&self.created_at_ms.to_be_bytes());
+        output.extend_from_slice(&self.signature);
+        Ok(output)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, SigningIdentityError> {
+        const TAIL: usize = 32 + 8 + 64;
+        if bytes.len() < 1 + 2 + TAIL || bytes[0] != IDENTITY_SIGNING_FORMAT_V1 {
+            return Err(SigningIdentityError::MalformedFileExchangeBinding);
+        }
+        let identity_len = u16::from_be_bytes([bytes[1], bytes[2]]) as usize;
+        let identity_end = 3usize
+            .checked_add(identity_len)
+            .ok_or(SigningIdentityError::MalformedFileExchangeBinding)?;
+        if identity_len == 0 || bytes.len() != identity_end + TAIL {
+            return Err(SigningIdentityError::MalformedFileExchangeBinding);
+        }
+        let identity_binding = SignedIdentityBindingV1::from_bytes(&bytes[3..identity_end])?;
+        let public_end = identity_end + 32;
+        let time_end = public_end + 8;
+        let created_at_ms = i64::from_be_bytes(
+            bytes[public_end..time_end]
+                .try_into()
+                .map_err(|_| SigningIdentityError::MalformedFileExchangeBinding)?,
+        );
+        let binding = Self {
+            identity_binding,
+            x25519_public_key: bytes[identity_end..public_end].to_vec(),
+            created_at_ms,
+            signature: bytes[time_end..].to_vec(),
+        };
+        binding.canonical_bytes()?;
+        Ok(binding)
+    }
+
+    pub fn verify(&self) -> Result<(), SigningIdentityError> {
+        self.identity_binding.verify()?;
+        Ed25519KeyPair::verify(
+            &self.identity_binding.signing_public_key,
+            &self.canonical_bytes()?,
+            &self.signature,
+        )
+        .map_err(|_| SigningIdentityError::InvalidFileExchangeSignature)
+    }
+
+    pub fn legacy_routing_node_id(&self) -> &str {
+        &self.identity_binding.legacy_routing_node_id
     }
 }
 
@@ -396,6 +522,37 @@ pub fn create_installed_identity_binding(
     identity.create_binding(created_at_ms)?.to_bytes()
 }
 
+pub fn create_installed_file_exchange_binding(
+    identity_binding: &[u8],
+    x25519_secret: &[u8],
+    created_at_ms: i64,
+) -> Result<Vec<u8>, SigningIdentityError> {
+    let identity = installed_signing_identity()
+        .ok_or(SigningIdentityError::FileExchangeBindingMismatch)?;
+    let identity_binding = SignedIdentityBindingV1::from_bytes(identity_binding)?;
+    identity
+        .create_file_exchange_binding(identity_binding, x25519_secret, created_at_ms)?
+        .to_bytes()
+}
+
+pub fn verify_file_exchange_binding(bytes: &[u8]) -> bool {
+    SignedFileExchangeBindingV1::from_bytes(bytes)
+        .and_then(|binding| binding.verify())
+        .is_ok()
+}
+
+pub fn file_exchange_binding_node_id(bytes: &[u8]) -> Result<String, SigningIdentityError> {
+    let binding = SignedFileExchangeBindingV1::from_bytes(bytes)?;
+    binding.verify()?;
+    Ok(binding.legacy_routing_node_id().to_string())
+}
+
+pub fn file_exchange_binding_public_key(bytes: &[u8]) -> Result<Vec<u8>, SigningIdentityError> {
+    let binding = SignedFileExchangeBindingV1::from_bytes(bytes)?;
+    binding.verify()?;
+    Ok(binding.x25519_public_key)
+}
+
 pub fn verify_identity_binding(bytes: &[u8]) -> bool {
     SignedIdentityBindingV1::from_bytes(bytes)
         .and_then(|binding| binding.verify())
@@ -561,6 +718,51 @@ mod tests {
         assert!(verify_identity_binding(&bytes));
         assert!(!identity_binding_matches_installed(&bytes));
         clear_signing_identity();
+    }
+
+    #[test]
+    fn file_exchange_binding_is_signed_bound_and_strict() {
+        let identity = InstalledSigningIdentity::from_seed(1, legacy(), &[40; 32]).unwrap();
+        let identity_binding = identity.create_binding(1_800_000_000_000).unwrap();
+        let exchange = identity
+            .create_file_exchange_binding(identity_binding, &[41; 32], 1_800_000_001_000)
+            .unwrap();
+        exchange.verify().unwrap();
+        assert_eq!(exchange.x25519_public_key.len(), 32);
+        let bytes = exchange.to_bytes().unwrap();
+        let decoded = SignedFileExchangeBindingV1::from_bytes(&bytes).unwrap();
+        assert_eq!(decoded, exchange);
+        assert_eq!(decoded.legacy_routing_node_id(), legacy());
+        for length in 0..bytes.len() {
+            assert!(SignedFileExchangeBindingV1::from_bytes(&bytes[..length]).is_err());
+        }
+        assert!(SignedFileExchangeBindingV1::from_bytes(&[bytes.clone(), vec![0]].concat()).is_err());
+        let mut tampered = bytes;
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert!(SignedFileExchangeBindingV1::from_bytes(&tampered)
+            .unwrap()
+            .verify()
+            .is_err());
+    }
+
+    #[test]
+    fn foreign_identity_binding_cannot_be_signed_as_local_exchange() {
+        let local = InstalledSigningIdentity::from_seed(1, legacy(), &[42; 32]).unwrap();
+        let foreign = InstalledSigningIdentity::from_seed(
+            1,
+            "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            &[43; 32],
+        )
+        .unwrap();
+        assert_eq!(
+            local.create_file_exchange_binding(
+                foreign.create_binding(1_800_000_000_000).unwrap(),
+                &[44; 32],
+                1_800_000_001_000,
+            ),
+            Err(SigningIdentityError::FileExchangeBindingMismatch)
+        );
     }
 
     #[test]

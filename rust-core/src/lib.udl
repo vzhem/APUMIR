@@ -44,6 +44,15 @@ namespace p2p_core {
     // Secure File Transfer F0 runtime diagnostic. No key or file material leaves Rust.
     boolean file_transfer_crypto_self_test();
 
+    // F2 signed static X25519 public binding for authenticated per-transfer key wrapping.
+    [Throws=CoreError]
+    bytes create_file_exchange_binding(bytes identity_binding, bytes x25519_secret, i64 created_at_ms);
+    boolean verify_file_exchange_binding(bytes binding);
+    [Throws=CoreError]
+    string file_exchange_binding_node_id(bytes binding);
+    [Throws=CoreError]
+    bytes file_exchange_binding_public_key(bytes binding);
+
     // F1 bounded functional crypto seam. File keys are borrowed for one call and wiped in Rust;
     // callers must keep them transient until the device-bound transfer key vault is wired.
     [Throws=CoreError]

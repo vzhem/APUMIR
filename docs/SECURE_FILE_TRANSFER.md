@@ -14,6 +14,8 @@ event, or byte array. A relay may carry only bounded encrypted manifests/chunks 
 - File bytes are untrusted until final AEAD, exact size and whole-file SHA-256 checks pass.
 - Android Storage Access Framework is the only picker/export boundary; no broad storage permission.
 - Sender creates a random 32-byte file key and random 16-byte transfer ID.
+- Each device has a separate device-bound static X25519 file-exchange key. Its public key is signed by
+  the real Ed25519 sidecar and carries the verified legacy identity binding; it is not the routing key.
 - Manifest is bound to sender, recipient, transfer ID, metadata, size/chunk geometry, whole hash and TTL.
 - Every chunk uses XChaCha20-Poly1305 and authenticated canonical manifest + chunk index as AAD.
 - The file key/manifest delivery must be protected by the established E2E session. Relay/MQTT never
@@ -21,6 +23,11 @@ event, or byte array. A relay may carry only bounded encrypted manifests/chunks 
 - Deterministic nonce per `(random transfer ID, chunk index)` makes retries byte-stable; a transfer ID
   must never be reused with the same key for another file.
 - A downloaded file becomes visible to the user only after atomic final verification.
+
+The recipient file-exchange binding must be pinned to the contact before wrapping a file key. Signed
+referral contacts can pin it from the authenticated invite/contact exchange; legacy contacts require
+an explicit TOFU/QR confirmation. A self-signed first binding is not misrepresented as proof that the
+old legacy ID was historically cryptographic.
 
 This MVP does not claim antivirus scanning or safety of file contents. APK/executable content is never
 auto-opened; MIME and filename are display hints, not authority.

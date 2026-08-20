@@ -414,6 +414,43 @@ pub fn verified_referral_inviter_node_id(
 /// F0 on-device acceptance diagnostic. It exercises the production manifest
 /// validation and XChaCha20-Poly1305 chunk path without accepting or returning
 /// user/key material. Functional file APIs come only with the streaming owner.
+pub fn create_file_exchange_binding(
+    identity_binding: Vec<u8>,
+    mut x25519_secret: Vec<u8>,
+    created_at_ms: i64,
+) -> Result<Vec<u8>, CoreError> {
+    let result = crypto::signing_identity::create_installed_file_exchange_binding(
+        &identity_binding,
+        &x25519_secret,
+        created_at_ms,
+    )
+    .map_err(|error| CoreError::CryptoError {
+        detail: error.to_string(),
+    });
+    x25519_secret.fill(0);
+    result
+}
+
+pub fn verify_file_exchange_binding(binding: Vec<u8>) -> bool {
+    crypto::signing_identity::verify_file_exchange_binding(&binding)
+}
+
+pub fn file_exchange_binding_node_id(binding: Vec<u8>) -> Result<String, CoreError> {
+    crypto::signing_identity::file_exchange_binding_node_id(&binding).map_err(|error| {
+        CoreError::CryptoError {
+            detail: error.to_string(),
+        }
+    })
+}
+
+pub fn file_exchange_binding_public_key(binding: Vec<u8>) -> Result<Vec<u8>, CoreError> {
+    crypto::signing_identity::file_exchange_binding_public_key(&binding).map_err(|error| {
+        CoreError::CryptoError {
+            detail: error.to_string(),
+        }
+    })
+}
+
 pub fn file_transfer_crypto_self_test() -> bool {
     use crypto::file_transfer::{
         decrypt_file_chunk_v1, encrypt_file_chunk_v1, expected_chunk_count,
