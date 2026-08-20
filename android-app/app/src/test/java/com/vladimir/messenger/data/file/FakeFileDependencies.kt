@@ -87,9 +87,12 @@ class RecordingPinner : FileExchangePinner {
     val pinnedBindings = mutableListOf<ByteArray>()
     var rejectNext = false
 
-    override suspend fun pinFirstSeen(binding: ByteArray, nowMs: Long) {
+    override suspend fun pinFirstSeen(binding: ByteArray, nowMs: Long): Boolean {
         if (rejectNext) throw IllegalStateException("key changed")
+        val existing = pinnedBindings.firstOrNull { it.contentEquals(binding) }
+        if (existing != null) return false
         pinnedBindings.add(binding.copyOf())
+        return true
     }
 }
 

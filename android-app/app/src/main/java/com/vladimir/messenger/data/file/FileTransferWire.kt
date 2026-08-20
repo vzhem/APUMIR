@@ -60,6 +60,36 @@ object FileTransferWire {
         return "file-$transferIdHex".also(::requireValidMessageId)
     }
 
+    // ── File-HELLO: signed exchange-binding handshake (breaks the first-file deadlock) ──
+
+    const val HELLO_PREFIX = "apu-file-hello1|"
+    const val MAX_HELLO_BINDING_BYTES = 512
+
+    fun isHelloText(text: String): Boolean =
+        text.length <= 4 * 1024 && text.startsWith(HELLO_PREFIX)
+
+    fun encodeHelloBinding(binding: ByteArray): String {
+        require(binding.size in 1..MAX_HELLO_BINDING_BYTES) { "Invalid hello binding size" }
+        return HELLO_PREFIX + Base64.getEncoder().encodeToString(binding)
+    }
+
+    fun decodeHelloBinding(text: String): ByteArray {
+        require(isHelloText(text)) { "Not a file hello message" }
+        val binding = Base64.getDecoder().decode(text.removePrefix(HELLO_PREFIX))
+        require(binding.size in 1..MAX_HELLO_BINDING_BYTES) { "Decoded hello binding out of bounds" }
+        return binding
+    }
+
+    /** Deterministic per-direction pair ID so relay dedup keeps repeated handshakes cheap. */
+    fun helloMessageId(myNodeId: String, recipientNodeId: String): String {
+        require(myNodeId.isNotEmpty() && recipientNodeId.isNotEmpty())
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest((myNodeId + "|" + recipientNodeId).toByteArray(Charsets.US_ASCII))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            .take(32)
+        return "fh$digest".also(::requireValidMessageId)
+    }
+
     fun transferIdHexFromPacket(packet: FileTransferPacketCodec.Packet): String =
         packet.transferId.joinToString("") { "%02x".format(it.toInt() and 0xff) }
 

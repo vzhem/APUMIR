@@ -32,6 +32,10 @@ class ChatRepository @Inject constructor(
     fun observeChats(): Flow<List<Chat>> =
         chatDao.observeAllChats().map { it.map { e -> e.toDomain() } }
 
+    /** Contact IDs of every chat; used by the file HELLO sweep to bootstrap missing pins. */
+    suspend fun getAllContactIds(): List<String> =
+        chatDao.getAllChats().map { it.contactId }.filter { it.isNotBlank() }.distinct()
+
     fun observeMessages(chatId: String): Flow<List<Message>> =
         messageDao.observeMessages(chatId).map { it.map { e -> e.toDomain() } }
 

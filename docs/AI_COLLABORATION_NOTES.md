@@ -3490,3 +3490,39 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   (sender cyclic re-push covers loss); (4) received-file SAF export/open button not yet
   (files live in app-private `file_received/v1`); (5) sender does not delete local chunks on
   COMPLETE (waits TTL cleanup slice). No Windows compile gate, no phones, no release yet.
+- **2026-08-20 (доп.308) — NEW PC environment + F3 Windows compile gate PASS (после 3 итераций):**
+  разработка переехала на новый ПК: канонический клон теперь **`C:\APU-M8`** (старый
+  `C:\APUMIR-arena-test` не существует; clone в `C:\Users\User` — старый dirty, не трогать).
+  Гэтчи новой машины, все закрыты: (1) системный `JAVA_HOME` указывал на несуществующий
+  `D:\Android Studio\jbr` — навсегда исправлен на `C:\Program Files\Android\Android Studio\jbr`
+  (User-level SetEnvironmentVariable); SDK — `%LOCALAPPDATA%\Android\Sdk`, local.properties с
+  forward-slash `sdk.dir`. (2) Клон был single-branch — `git config remote.origin.fetch
+  "+refs/heads/*:refs/remotes/origin/*"` + повторный fetch; локальный оверлей `.so` убран в
+  stash до checkout. (3) GitHub 443 периодически отказывает — лечится повторами pull/fetch
+  (известно и раньше). Gate-история F3 на 45d27db (ветка `arena/01a02092-apumir`): первый
+  прогон — 3 ошибки компиляции K2 (неоднозначный sumOf с неразрешимым селектором, smart cast на
+  var в замыкании, отсутствие default у errorCode) — фикс `2371bcc`; второй — 13 падений JVM
+  от `android.util.Log` ("Method not mocked") + виртуальное время теста троттлинга уходило за
+  expiry фикстуры — фикс `08d6389` (`unitTests.isReturnDefaultValues = true` + expiry 1ч);
+  третий — 5 падений из-за тестового фикстура (байты transferId ≠ его hex-форма, чанки
+  навсегда оседали в pre-offer буфере; один тест проходил «по ошибке») — фикс `45d27db`.
+  Итог: **`testDebugUnitTest` 88/88 PASS, `assembleDebug` BUILD SUCCESSFUL** (main-код для APK
+  не менялся после первого зелёного assembleDebug — дальше правились только тесты и
+  testOptions). Rust/.so не пересобирались и не needed: свежий arm64 `.so` (6,935,552 B)
+  закоммичен в `3eaae63` вместе с актуальными bindings; lib.udl не менялся. Телефоны не
+  трогали; релиз не делали.
+- **2026-08-20 (доп.309) — File-HELLO handshake закрывает deadlock «первого файла»:** обнаружено
+  при подготовке телефонного acceptance: sender требует закреплённый X25519-binding получателя
+  (доп.306), а пиннинг существовал ТОЛЬКО из входящего file-offer (доп.303) → два телефона,
+  никогда не обменивавшиеся файлами, не могли отправить первый файл друг другу. Новый срез:
+  крошечное durable-сообщение `apu-file-hello1|<base64 подписанного binding>` (≤512B,
+  детерминированный per-pair-per-direction msg id `fh<sha256-32>`, throttle 60 c на контакта).
+  Приём: строгая проверка подписи и совпадения node с отправителем → TOFU-пин (смена ключа
+  по-прежнему отвергается) → при ПЕРВОМ пине авто-ответ своим HELLO (обе стороны оказываются
+  закреплены). Рассылка: pump-цикл (20 c) автоматически шлёт HELLO всем unpinned pk_-контактам
+  (durable → доехав при появлении получателя); UI при ошибке «binding is not pinned» сам
+  отправляет HELLO и показывает человекочитаемое сообщение.HELLO никогда не попадает в чат
+  (перехватывается до сохранения), relay-cleanup через штатный delivery-ACK. JVM-тесты:
+  wire round-trip/oversize, детерминизм ID, PINNED_NEW→PINNED_ALREADY, mismatch sender reject,
+  changed-key reject, not-hello, маршрутизация до chat-text. Build gate нового среза —
+  следующий прогон на Windows вместе с release-кандидатом для телефонов.

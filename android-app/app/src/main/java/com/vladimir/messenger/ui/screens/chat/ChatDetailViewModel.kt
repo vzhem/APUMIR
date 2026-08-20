@@ -170,7 +170,17 @@ class ChatDetailViewModel @Inject constructor(
                 fileTransferRouter.pumpOutgoing()
             } catch (e: Exception) {
                 android.util.Log.w("ChatDetailVM", "File prepare failed", e)
-                _uiState.update { it.copy(error = "Файл не отправлен: ${e.message}") }
+                val message = e.message.orEmpty()
+                if (message.contains("binding is not pinned")) {
+                    // First contact between these phones for files: push our signed HELLO so the
+                    // recipient can pin us and reply; durable transport delivers it when online.
+                    fileTransferRouter.requestExchangeBinding(recipientId)
+                    _uiState.update {
+                        it.copy(error = "Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.")
+                    }
+                } else {
+                    _uiState.update { it.copy(error = "Файл не отправлен: ${e.message}") }
+                }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }

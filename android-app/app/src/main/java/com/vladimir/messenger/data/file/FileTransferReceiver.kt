@@ -11,7 +11,8 @@ import uniffi.p2p_core.FileTransferManifestFfi
 
 /** TOFU pin boundary so the receiver stays JVM-testable without the native library. */
 fun interface FileExchangePinner {
-    suspend fun pinFirstSeen(binding: ByteArray, nowMs: Long)
+    /** @return true when this binding was pinned for the first time; throws on key change. */
+    suspend fun pinFirstSeen(binding: ByteArray, nowMs: Long): Boolean
 }
 
 /**
@@ -50,6 +51,10 @@ class FileTransferReceiver(
 
     /** Returns true when the text was a file packet (caller must not store it as chat text). */
     suspend fun onIncomingText(senderId: String, chatId: String, messageId: String, text: String): Boolean {
+        if (FileTransferWire.isHelloText(text)) {
+            onHelloText(senderId, text)
+            return true
+        }
         if (!FileTransferWire.isFilePacketText(text)) return false
         mutex.withLock {
             runCatching {
@@ -61,6 +66,36 @@ class FileTransferReceiver(
             }
         }
         return true
+    }
+
+    enum class HelloResult { NOT_HELLO, PINNED_NEW, PINNED_ALREADY, REJECTED }
+
+    /**
+     * File-HELLO handshake: a tiny durable message carrying only the sender's signed exchange
+     * binding. Verified against the message sender, TOFU-pinned, and the caller auto-replies
+     * with its own HELLO on a first-time pin so both sides end up pinned. Breaks the
+     * first-file deadlock without weakening the pin (a changed key still throws and rejects).
+     */
+    suspend fun onHelloText(senderId: String, text: String): HelloResult {
+        if (!FileTransferWire.isHelloText(text)) return HelloResult.NOT_HELLO
+        mutex.withLock {
+            try {
+                val binding = FileTransferWire.decodeHelloBinding(text)
+                if (!crypto.verifyBinding(binding) || crypto.bindingNodeId(binding) != senderId) {
+                    Log.w(TAG, "File HELLO from $senderId failed verification; dropped")
+                    return HelloResult.REJECTED
+                }
+                val newlyPinned = pinner.pinFirstSeen(binding, nowMs())
+                Log.i(
+                    TAG,
+                    "File HELLO from $senderId: ${if (newlyPinned) "pinned (new)" else "already pinned"}",
+                )
+                return if (newlyPinned) HelloResult.PINNED_NEW else HelloResult.PINNED_ALREADY
+            } catch (error: Exception) {
+                Log.w(TAG, "File HELLO from $senderId rejected: ${error.message}")
+                return HelloResult.REJECTED
+            }
+        }
     }
 
     private suspend fun collectFragment(
