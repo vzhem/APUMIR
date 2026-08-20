@@ -1,5 +1,16 @@
 # Secure File Transfer MVP
 
+## Status 2026-08-20 (evening) — F3 transport source complete, build gate pending
+
+Sender owner, receiver ingest, deterministic packet IDs and chat picker/progress UI are wired
+(source-only; see доп.307 in `AI_COLLABORATION_NOTES.md`). Transports order below is now:
+direct QUIC first, then the phone-owned encrypted M8 relay custody (bounded window of ≤120
+in-flight chunk-fragment messages per recipient, 7-day TTL, per-chunk file-ACKs, restart
+resume). Honest deviation from §2 (to fix next): the OFFER item carries the canonical manifest
+integrity-protected but NOT encrypted, so relay nodes can see filename/size/media type; chunk
+plaintext, chunk keys and the per-transfer key envelope remain protected. A Rust offer-AEAD
+slice is queued to close this.
+
 ## 1. Scope and ordering
 
 This is the nearest product milestone after the current signed-referral R1 slice. The first release is

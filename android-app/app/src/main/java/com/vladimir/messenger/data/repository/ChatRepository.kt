@@ -232,6 +232,36 @@ class ChatRepository @Inject constructor(
         return chatDao.getChatById(chatId)?.toDomain()
     }
 
+    /**
+     * Local-only outgoing file placeholder: it never rides the text transport (the file packets
+     * are the transport); the row exists so the chat shows the transfer and its delivery state.
+     */
+    suspend fun insertLocalFileMessage(
+        chatId: String,
+        recipientId: String,
+        messageId: String,
+        content: String,
+        timestamp: Long,
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = "self",
+            content = content,
+            timestamp = timestamp,
+            isFromMe = true,
+            status = MessageStatus.QUEUED_OFFLINE.name,
+            channel = MessageChannel.STORE_FORWARD.name,
+            recipientId = recipientId,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, content, timestamp)
+        }
+        return inserted != -1L
+    }
+
     suspend fun getChatByContactId(contactId: String): Chat? {
         return chatDao.getChatByContactId(contactId)?.toDomain()
     }

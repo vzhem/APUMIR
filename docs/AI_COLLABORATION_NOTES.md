@@ -3458,3 +3458,35 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   wiping callbacks, creates Rust authenticated envelope, and atomically stores bounded key-envelope.v1
   beside manifest/chunks before PREPARED. Isolated historical preparation test keeps exchange disabled;
   production path cannot. Chunk store adds exact idempotent/conflict tests. Build gate pending.
+- **2026-08-20 (доп.307) — F3 production file transport source complete (sender owner + receiver
+  ingest + chat UI, build gate pending):** file packets now ride the EXISTING durable text
+  transport (direct QUIC or encrypted M8 relay custody) as `apu-file1|<base64 packet>` texts,
+  one encoded fragment per message, deterministic delimiter-safe message IDs
+  (`f<tid>o<frag>` / `f<tid>c<chunk>f<frag>` / `f<tid>a<count>`) so mesh dedup makes every
+  re-pump idempotent. New bounded strict components: `FileOfferPdu` (manifest+key envelope+signed
+  sender binding, strict decode), `FileTransferWire` (48KiB wire budget, strict base64),
+  `FileTransferSender` (windowed pump: offer first, then ≤120 in-flight chunk-fragment messages
+  beyond receiver-confirmed contiguous prefix; 120ms pacing; honest states PREPARED→TRANSFERRING→
+  SENT→COMPLETE; restart resume via Room+chunk files; re-pump throttle 2min without ack progress),
+  `FileTransferReceiver` (bounded fragment reassembly 64 items/4MiB, fail-closed offer checks:
+  sender match, MY recipient match, expiry, binding signature, TOFU pin change reject; chunk
+  geometry check; durable encrypted chunk store; deterministic per-chunk file-ACKs back to sender;
+  stream decrypt+whole-file SHA-256 before plaintext becomes visible; VERIFY_FAILED deletes
+  received plaintext), `ReceivedFileStore` (app-private atomic verified output), `FileTransferRouter`
+  (Hilt facade; routes packets BEFORE chat-text save; periodic 20s pump loop + pumps on
+  peer_discovered/network connected; skips when engine not running). Multi-day all-phones-offline
+  custody comes from the M8 durable relay machinery itself (7-day TTL, sender-local durable
+  chunks+Room for restart resume); sender re-push after restart is dedup-idempotent. Chat UI:
+  attach button (SAF OpenDocument) → rank-checked preparation → local placeholder message
+  (`insertLocalFileMessage`, never rides text transport) → immediate pump; `FileTransferBubble`
+  shows honest state/progress; incoming in-progress transfers merged into the chat list.
+  CoreServerService ACKs each file-packet message-id so relay cleanup stays exactly-once.
+  JVM tests added (PDU/wire/sender window+throttle+empty-file/receiver full flow+negative);
+  `kotlinx-coroutines-test` added to test deps. KNOWN GAPS (honest, next slices): (1) OFFER
+  metadata (filename/size/media type) is integrity-protected but NOT confidential to relay
+  nodes — chunk content and file key are; a Rust offer-AEAD slice must fix this; (2) relay
+  per-recipient queue (200) shared with text — window 120 leaves ~80 for text, bursts can
+  enqueue-reject (harmless, retried); (3) receiver pull-based missing-chunk request not yet
+  (sender cyclic re-push covers loss); (4) received-file SAF export/open button not yet
+  (files live in app-private `file_received/v1`); (5) sender does not delete local chunks on
+  COMPLETE (waits TTL cleanup slice). No Windows compile gate, no phones, no release yet.
