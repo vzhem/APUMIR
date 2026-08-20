@@ -42,6 +42,22 @@ class FileTransferChunkStoreTest {
     }
 
     @Test
+    fun manifestIsAtomicIdempotentAndConflictProtected() {
+        val store = FileTransferChunkStore(root)
+        val manifest = ByteArray(128) { it.toByte() }
+        assertTrue(store.storeManifest(transferId, manifest))
+        manifest.fill(0)
+        val stored = store.readManifest(transferId)!!
+        assertFalse(stored.all { it == 0.toByte() })
+        assertFalse(store.storeManifest(transferId, stored))
+        val different = stored.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
+        expectFailure { store.storeManifest(transferId, different) }
+        assertArrayEquals(stored, store.readManifest(transferId))
+        expectFailure { store.storeManifest("f".repeat(32), ByteArray(63)) }
+        expectFailure { store.storeManifest("f".repeat(32), ByteArray(2049)) }
+    }
+
+    @Test
     fun sameIndexWithDifferentCiphertextIsRejectedWithoutOverwrite() {
         val store = FileTransferChunkStore(root)
         val first = ByteArray(32) { 1 }

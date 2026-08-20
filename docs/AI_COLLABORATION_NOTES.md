@@ -3239,3 +3239,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `81DF0CB9…32BB4`, app APK unchanged `E4F885B1…4756`, rebuilt test APK 987,530 B
   `722C2113…1F4D4`; production key/ADB/phones false. Next Stas v11.16.38→v11.16.39 isolated
   Android Keystore gate, with exact test alias/root cleanup and production root/state preservation.
+- **2026-08-19 (доп.264) — F1 key vault Stas PASS despite misleading retry:** first visible command
+  reported GitHub stop, next saw existing evidence because gate had already completed. Read-only local
+  diagnostic confirmed state `37C9DFDB…D19A7`, log `7705DEDA…E01B4`, v11.16.38→v11.16.39;
+  stable/zeroized/import-conflict/tamper PASS, test alias/root/package removed, production state
+  preserved, no production key/store/transport, DB delete/data clear/force-stop.
+- **2026-08-19 (доп.265) — outgoing local file preparation owner source:** source inspector first pass
+  hashes/sanitizes; Rust creates canonical random-ID manifest; Room inserts PREPARING; manifest is
+  atomic/idempotent app-private; device-bound key created; source reopened and read in exact ≤128KiB
+  chunks, each Rust-encrypted, atomic-stored and chunk/progress persisted monotonically. Second-pass
+  exact size+SHA protects mutable providers; failure removes scoped files+DB when cleanup succeeds,
+  process death intentionally leaves resumable PREPARING state. Empty files supported. No publish,
+  key export, URI/path persistence or UI enable yet. Chunk store gains bounded manifest.v1 tests.

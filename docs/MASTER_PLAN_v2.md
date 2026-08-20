@@ -1662,8 +1662,10 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > and E2E key envelope are wired. Functional Android pipeline on Stas PASS with production state
 > preserved. Device-bound transfer key vault source now wraps per-transfer 32-byte keys with a
 > non-exportable Android Keystore AES-GCM key, transfer-ID AAD and atomic no-backup envelope;
-> JVM/app/test APK build PASS; rebuilt test explicitly asserts test root + Keystore alias cleanup.
-> Isolated data-preserving Stas Keystore execution pending.
+> Stas Keystore execution PASS with test alias/root cleanup and production state preserved. Outgoing local
+> preparation owner source now connects SAF inspection → canonical manifest → wrapped transfer key →
+> streaming chunk encryption → atomic no-backup store → monotonic Room progress, without publishing;
+> build/integration tests pending.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.
