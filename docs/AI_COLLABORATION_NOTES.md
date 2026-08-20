@@ -3067,3 +3067,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   29,444,062 B `902137B2…6480C`, test APK 967,832 B `E825E00E…908C5`; ADB/phones
   `False/False`. Next — data-preserving isolated test on Stas only, with production profile/node/
   signing/pending snapshots and no data clear/force-stop.
+- **2026-08-19 (доп.228) — первый Stas pending phone gate безопасно остановлен на read-only gate:**
+  ADB device и versionName v11.16.28 видны, но harness искал отсутствующий на этом Android формат
+  `userId=` в dumpsys. Install/test/state creation/ADB mutation не начинались. Исходный gate не
+  повторять; recovery-01 использует exact `pm list packages -U` UID visibility и новые evidence names.
