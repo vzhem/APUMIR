@@ -3278,3 +3278,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   therefore this proves actual cross-phone bytes/routing, NOT production E2E key exchange/UI.
   App services must remain stopped during instrumentation so ciphertext is never shown as chat text.
   Test APK and Anna↔Stas online gate pending; Anna requires corrected Room v5→v6 migration first.
+- **2026-08-19 (доп.271) — F2 cross-phone harness test APK build PASS:** state
+  `183C801A…07D6D`, app APK unchanged `33CFC806…2B52`, test APK 1,000,060 B
+  `152E66A2…E13B6`; production key exchange/UI/ADB/phones false. Phone gate: Anna sender
+  v11.16.28 (first corrected Room v5→v6 migration), Stas receiver v11.16.41; random run/key never
+  printed/persisted, receiver starts first, real addressed MQTT carries encrypted 4096-byte file and
+  generated PNG, then exact state/test cleanup and both apps relaunch.

@@ -1681,8 +1681,9 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 
 > First controlled cross-phone online harness source is intentionally test-only: a random key is
 > passed out-of-band by the local gate, while real manifest and encrypted file/photo packets traverse
-> existing addressed MQTT between Anna and Stas. This proves bytes/network routing but is not the
-> production E2E key exchange or user UI. Test APK/two-phone gate pending.
+> existing addressed MQTT between Anna and Stas. Test APK build PASS. This proves bytes/network routing
+> but is not the production E2E key exchange or user UI. Two-phone gate pending; Anna first runs the
+> corrected data-preserving Room v5→v6 migration test.
 
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.
