@@ -1686,7 +1686,8 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > corrected data-preserving Room v5→v6 migration test. First gate timed out because Stas foreground
 > service likely drained test events before instrumentation. Migration and sender PASS; recovery source
 > cleans only synthetic harness rows, replace-installs both apps to stop competing services, waits on
-> receiver-ready marker and retries packets. Rebuilt test APK/recovery gate pending.
+> receiver-ready marker and retries packets. Recovery test APK build PASS; Anna↔Stas recovery gate
+> pending.
 
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.

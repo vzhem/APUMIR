@@ -3296,3 +3296,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   from remaining messages, and asserts no synthetic content. Recovery will replace-install both apps
   to stop competing engines, skip already-PASS Anna migration, wait for ready+subscription, use new
   run/key/evidence and preserve production roots/identity. Test APK/recovery gate pending.
+- **2026-08-19 (доп.274) — F2 cross-phone recovery test APK build PASS:** state
+  `8F860AB1…DB137`, app APK unchanged `33CFC806…2B52`, test APK 1,003,889 B
+  `D084BF28…48893`; ADB/phones false. Recovery requires both v11.16.41, replace-installs both to
+  stop services, exact synthetic cleanup on Stas, ready marker+12s subscription wait, repeated packets,
+  new ephemeral run/key/evidence, and final production state/test artifact validation.
