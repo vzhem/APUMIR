@@ -3172,3 +3172,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `CF36DE70…C196`; ADB/phones false. Recovery phone gate performs no app install: exact stale
   v6/old-hash/empty-table precondition, legacy/profile/signing/pending preservation, Room-owned
   idempotent migration+schema/hash repair, test-package cleanup and stable app relaunch.
+- **2026-08-19 (доп.250) — Stas File F1 Room identity recovery PASS:** state
+  `2A1F901E…4E3B1`; stale v6/old hash safely re-armed, Room-owned idempotent migration validated full
+  v6 schema and wrote correct identity. Legacy IDs/counts preserved, new tables empty, profile/node/
+  signing/pending preserved; no app install, DB delete, data clear or force-stop. Test package removed,
+  app relaunched stable. F1 migration incident closed.
+- **2026-08-19 (доп.251) — F1 encrypted chunk file store source:** app-private no-backup
+  `file_transfers/v1/<transfer-id>/chunks` store accepts only bounded ciphertext (16..256KiB+tag),
+  strict 16-byte hex IDs/index cap, global 64 MiB quota, fsync + required atomic move, idempotent same
+  ciphertext retry and reject-different overwrite. Read is exact bounded, traversal/symlink rejected,
+  delete is scoped/idempotent. JVM tests cover defensive copy, retry/conflict, quota/partial, bounds,
+  traversal/index and cleanup. No plaintext/key/path enters Room; build gate pending.
