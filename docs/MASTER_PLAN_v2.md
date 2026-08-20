@@ -1631,8 +1631,8 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 
 > Canonical manifest + chunk AEAD source готов; production Rust + APK compile PASS. Host tests всё ещё
 > заблокированы отсутствующим MSVC `link.exe`. Bounded no-input/no-secret Android runtime diagnostic,
-> native, generated binding, app APK и test APK build PASS; binding acceptance/device execution
-> pending.
+> native, generated binding, app APK и test APK build PASS; normalized binding accepted as commit
+> `e36d1ba`; data-preserving device execution pending.
 
 - [ ] Versioned signed attachment manifest: `transfer_id`, message/chat binding, sender/recipient,
   безопасное display name, declared MIME/size, chunk size/count, whole-file hash, timestamps/TTL.

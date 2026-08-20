@@ -3130,3 +3130,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `3888C58D…0245`, test APK 967,890 B `C7637E4C…0D5D`; transport/ADB/phones false. Отсутствующий
   ktlint и PowerShell NativeCommandError не failures: Rust/Gradle exit 0. Next exact-hash generated
   binding acceptance; `.so` never commit.
+- **2026-08-19 (доп.241) — File F0 generated binding accepted:** Windows commit `e36d1ba` contains
+  only normalized binding `A6973996…25E7` and was pushed by explicit HEAD→fixed remote ref. Native
+  `1D6478B2…4B23` remains local/uncommitted; transport/ADB/phones false. Next isolated data-preserving
+  runtime diagnostic on Stas v11.16.31→v11.16.34.
