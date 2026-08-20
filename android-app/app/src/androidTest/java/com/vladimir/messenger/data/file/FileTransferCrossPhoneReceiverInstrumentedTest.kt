@@ -95,7 +95,8 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
             assertArrayEquals(PNG_SIGNATURE, photo.copyOfRange(0, PNG_SIGNATURE.size))
             assertNotNull(BitmapFactory.decodeByteArray(photo, 0, photo.size))
         } finally {
-            RustBridge.shutdown()
+            // AndroidJUnitRunner owns this isolated process. Calling engine.stop() here can block
+            // behind a stalled public MQTT eventloop; runner teardown terminates the process.
             key.fill(0)
             received.values.forEach { it.fill(0) }
             root.deleteRecursively()

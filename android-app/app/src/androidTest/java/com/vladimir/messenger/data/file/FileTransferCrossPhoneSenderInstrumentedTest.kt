@@ -27,7 +27,9 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
         val runId = arguments.getString("file_run_id") ?: error("Missing run ID")
         val recipient = arguments.getString("recipient_node") ?: error("Missing recipient")
         val key = decode(arguments.getString("file_test_key") ?: error("Missing test key"))
+        val tcpPort = arguments.getString("tcp_port")?.toIntOrNull()
         require(runId.matches(Regex("^[0-9a-f]{16}$")) && key.size == 32)
+        require(tcpPort == null || tcpPort in 1024..65535)
         val fileBytes = ByteArray(4_096) { index -> (index % 239).toByte() }
         val photoBytes = createPhotoPng()
         try {
@@ -40,8 +42,8 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
             assertTrue(RustBridge.initialize(displayName, publicKey, privateKey, null))
             val sender = RustBridge.nodeId() ?: error("Sender engine has no node ID")
             Thread.sleep(12_000)
-            sendOne(runId, "file", "cross-phone-test.bin", "application/octet-stream", fileBytes, sender, recipient, key)
-            sendOne(runId, "photo", "cross-phone-photo.png", "image/png", photoBytes, sender, recipient, key)
+            sendOne(runId, "file", "cross-phone-test.bin", "application/octet-stream", fileBytes, sender, recipient, key, tcpPort)
+            sendOne(runId, "photo", "cross-phone-photo.png", "image/png", photoBytes, sender, recipient, key, tcpPort)
         } finally {
             RustBridge.shutdown()
             key.fill(0)
@@ -59,6 +61,7 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
         sender: String,
         recipient: String,
         key: ByteArray,
+        tcpPort: Int?,
     ) {
         val now = System.currentTimeMillis()
         val manifest = createFileTransferManifest(
@@ -74,13 +77,14 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
         assertEquals(1u, manifest.chunkCount)
         val ciphertext = encryptFileTransferChunk(manifest.manifestBytes, key, 0u, plaintext)
         try {
-            repeat(2) { attempt ->
+            repeat(if (tcpPort == null) 2 else 1) { attempt ->
                 publish(
                     recipient,
                     sender,
                     "offer-$kind-$attempt-$runId",
                     runId,
                     "$PREFIX|offer|$runId|$kind|${encode(manifest.manifestBytes)}",
+                    tcpPort,
                 )
                 Thread.sleep(1_500)
                 publish(
@@ -89,6 +93,7 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
                     "chunk-$kind-$attempt-$runId",
                     runId,
                     "$PREFIX|chunk|$runId|$kind|0|${encode(ciphertext)}",
+                    tcpPort,
                 )
                 Thread.sleep(1_500)
             }
@@ -103,9 +108,15 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
         messageId: String,
         runId: String,
         text: String,
+        tcpPort: Int?,
     ) {
-        val payload = "$sender|$messageId|file-test-$runId|$recipient|$text"
-        assertTrue(RustBridge.sendMessageMqtt(recipient, payload))
+        if (tcpPort != null) {
+            val payload = "$sender|$messageId|file-test-$runId|$text"
+            assertTrue(RustBridge.sendViaTcp("127.0.0.1", tcpPort, payload))
+        } else {
+            val payload = "$sender|$messageId|file-test-$runId|$recipient|$text"
+            assertTrue(RustBridge.sendMessageMqtt(recipient, payload))
+        }
     }
 
     private fun createPhotoPng(): ByteArray {

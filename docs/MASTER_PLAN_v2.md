@@ -1686,8 +1686,10 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > corrected data-preserving Room v5→v6 migration test. First gate timed out because Stas foreground
 > service likely drained test events before instrumentation. Migration and sender PASS; recovery source
 > cleans only synthetic harness rows, replace-installs both apps to stop competing services, waits on
-> receiver-ready marker and retries packets. Recovery test APK build PASS; Anna↔Stas recovery gate
-> pending.
+> receiver-ready marker and retries packets. Public MQTT still delivered no receiver events and shutdown
+> blocked. Recovery-02 switches only the controlled harness to an explicit ADB-tunneled direct TCP
+> path (Anna localhost → PC tunnel → Stas:7778), retaining real cross-device encrypted bytes while
+> avoiding public-broker uncertainty. Test APK/two-phone gate pending.
 
 - [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
 - [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.

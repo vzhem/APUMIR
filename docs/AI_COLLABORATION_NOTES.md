@@ -3301,3 +3301,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `D084BF28…48893`; ADB/phones false. Recovery requires both v11.16.41, replace-installs both to
   stop services, exact synthetic cleanup on Stas, ready marker+12s subscription wait, repeated packets,
   new ephemeral run/key/evidence, and final production state/test artifact validation.
+- **2026-08-19 (доп.275) — F2 recovery-01 also timed out after ready:** state `EA0F77BB…F2114`,
+  cleanup PASS `4CE66DE7…4E33`, sender PASS `EBAEA87A…D1435`, receiver only test-start
+  `05C4950A…214A`; ready marker remained, root absent. Read-only phone diagnostic: both v11.16.41,
+  Anna no process, Stas target process present, no relevant Rust MQTT/ConnAck/subscription lines.
+  Thus no offer reached receiver; receiver then likely blocked in RustBridge.shutdown. No DB delete/
+  data clear/force-stop. Recovery-01 must not repeat.
+- **2026-08-19 (доп.276) — F2 recovery-02 source uses deterministic ADB TCP tunnel:** receiver cleanup
+  now removes ready before teardown and does not synchronously stop a potentially stalled MQTT engine;
+  sender accepts test-only tcp_port and sends normal four-field direct TCP frames. Phone gate will
+  replace-install both apps, map Anna device localhost through PC to Stas engine port 7778, transmit
+  real encrypted file+PNG bytes, then remove forward/reverse mappings. This proves cross-device direct
+  byte transport but remains a controlled ADB tunnel, not production internet routing/key exchange/UI.
