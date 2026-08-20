@@ -3313,3 +3313,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   replace-install both apps, map Anna device localhost through PC to Stas engine port 7778, transmit
   real encrypted file+PNG bytes, then remove forward/reverse mappings. This proves cross-device direct
   byte transport but remains a controlled ADB tunnel, not production internet routing/key exchange/UI.
+- **2026-08-19 (доп.277) — F2 direct-tunnel test APK build PASS:** state `990BEDB6…07FA`, app APK
+  unchanged `33CFC806…2B52`, test APK 1,004,252 B `63C0C3E5…1BEAC`; production network/key exchange/
+  ADB/phones false. Phone gate maps Anna device localhost:37778 via host:47778 to Stas:7778,
+  replace-installs both to terminate stale engines, cleans exact old synthetic/test artifacts, then
+  removes forward/reverse mappings in success and finally paths.
