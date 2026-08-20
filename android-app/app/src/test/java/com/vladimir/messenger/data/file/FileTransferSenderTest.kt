@@ -61,7 +61,8 @@ class FileTransferSenderTest {
         completedChunks = chunkCount,
         transferredBytes = totalBytes,
         createdAtMs = now - 1000,
-        expiresAtMs = now + 60_000,
+        // Long enough that virtual-time jumps in the throttle test never expire the transfer.
+        expiresAtMs = now + 3_600_000,
         updatedAtMs = now - 1000,
     )
 
