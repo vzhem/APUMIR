@@ -14,7 +14,11 @@ import org.junit.Test
 
 class FileTransferReceiverTest {
     private val transferIdHex = "0123456789abcdef0123456789abcdef"
-    private val transferIdBytes = ByteArray(16) { it.toByte() }
+    private val transferIdBytes = ByteArray(16) { index ->
+        // Must be the exact byte form of transferIdHex: the receiver derives the transfer ID
+        // from packet bytes and matches it against the manifest hex in the database.
+        transferIdHex.substring(index * 2, index * 2 + 2).toInt(16).toByte()
+    }
     private val senderId = "pk_" + "ab".repeat(16)
     private val myNodeId = "pk_" + "cd".repeat(16)
     private val chatId = "chat-42"
