@@ -804,6 +804,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -891,6 +893,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_referral_invite_token(`identityBinding`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_file_transfer_crypto_self_test(uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
     fun uniffi_p2p_core_fn_func_get_protocol_version(uniffi_out_err: UniffiRustCallStatus,
     ): Byte
     fun uniffi_p2p_core_fn_func_get_version(uniffi_out_err: UniffiRustCallStatus,
@@ -1043,6 +1047,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_create_referral_invite_token(
     ): Short
+    fun uniffi_p2p_core_checksum_func_file_transfer_crypto_self_test(
+    ): Short
     fun uniffi_p2p_core_checksum_func_get_protocol_version(
     ): Short
     fun uniffi_p2p_core_checksum_func_get_version(
@@ -1155,6 +1161,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_create_referral_invite_token() != 6220.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_file_transfer_crypto_self_test() != 52550.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_get_protocol_version() != 24163.toShort()) {
@@ -2748,6 +2757,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_referral_invite_token(
         FfiConverterByteArray.lower(`identityBinding`),FfiConverterLong.lower(`createdAtMs`),FfiConverterLong.lower(`expiresAtMs`),_status)
+}
+    )
+    }
+
+ fun `fileTransferCryptoSelfTest`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_file_transfer_crypto_self_test(
+        _status)
 }
     )
     }
