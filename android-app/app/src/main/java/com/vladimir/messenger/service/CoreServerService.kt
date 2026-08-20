@@ -20,6 +20,7 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
+import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
@@ -144,6 +145,16 @@ class CoreServerService : Service() {
                 TAG,
                 "Identity signing mode: ${signing?.mode ?: "legacy-only"}, " +
                     "keyId=${signing?.keyId?.take(12) ?: "none"}"
+            )
+            val fileExchange = if (signing != null) {
+                IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
+                    FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                }
+            } else null
+            Log.i(
+                TAG,
+                "File exchange identity: ${if (fileExchange != null) "ready" else "unavailable"}, " +
+                    "key=${fileExchange?.publicKeySha256Prefix ?: "none"}"
             )
 
             // M8-C slice 3: Android Keystore мост. Устанавливаем at-rest ключ

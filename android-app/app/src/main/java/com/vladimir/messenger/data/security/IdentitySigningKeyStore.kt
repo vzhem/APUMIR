@@ -110,6 +110,14 @@ object IdentitySigningKeyStore {
         }
     }
 
+    /** Returns a verified public binding copy only while the matching sidecar is installed. */
+    @Synchronized
+    fun existingVerifiedBinding(context: Context): ByteArray? = try {
+        loadExistingVerifiedBinding(context.applicationContext)?.copyOf()
+    } catch (_: Exception) {
+        null
+    }
+
     /** Creates a short-lived public referral token without returning private material. */
     @Synchronized
     fun createSignedReferralToken(

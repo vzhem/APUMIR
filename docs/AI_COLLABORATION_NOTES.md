@@ -3426,3 +3426,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `88673823…F7A6E`, native `81384E50…AD790`, generated binding `8C0BB329…D9304`, APK
   29,545,661 B `5B570E4A…39A42`; secret store/transport/ADB/phones false. Next binding-only acceptance;
   `.so` remains uncommitted.
+- **2026-08-20 (доп.301) — file-exchange generated binding accepted:** Windows binding-only commit
+  `2c252ce`, binding `8C0BB329…D9304`, native remains local `81384E50…AD790`.
+- **2026-08-20 (доп.302) — device-bound static X25519 exchange store source:** dedicated Android
+  Keystore AES-256-GCM alias wraps one random 32-byte secret in exact v1 envelope/AAD; signed public
+  exchange binding persists separately. Startup recreates a candidate from the unwrapped secret and
+  requires existing signed binding node+X25519 public equality, never overwriting malformed/mismatched
+  state. Secret is callback-bounded and wiped. CoreServerService initializes after Ed sidecar and logs
+  hashes/status only. Compile/instrumentation pending; no phone install before full candidate.
