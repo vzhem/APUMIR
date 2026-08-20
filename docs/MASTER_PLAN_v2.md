@@ -942,11 +942,10 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
      boundary that attributes only after Rust verification. Parser negative JVM tests + APK PASS.
      Domain ownership/`assetlinks.json` remains a deployment gate before the link may be called an
      Android Verified App Link.
-   - [ ] Slice 4: verified token persistence across onboarding, re-verification on every read, signed
-     referral handling before legacy contact-only links, and redacted deep-link logs. Runtime JVM/APK
-     compile PASS; isolated Android instrumentation source covers persist/load/tamper/expiry without
-     touching production pending state. App/test APK build PASS; data-preserving Stas device gate
-     pending.
+   - [x] Slice 4: verified token persistence across onboarding, re-verification on every read, signed
+     referral handling before legacy contact-only links, and redacted deep-link logs. Runtime/JVM/APK,
+     isolated persist/load/tamper/expiry instrumentation and data-preserving Stas phone gate PASS;
+     production profile/node/signing/pending state preserved, no data clear/force-stop.
 4. **R2 — local qualification:** handshake+DELIVERED → idempotent signed receipt → уровни 1/3/10.
 5. **R3 — все ступени и cosmetics:** таблица до 1 000, localization/accessibility, hide controls.
 6. **R4 — optional registry verification:** blinded receipts, abuse/rate limits, recovery/export.
@@ -1612,6 +1611,58 @@ APU имеет signed launch-ready build, красивый и понятный o
 - [ ] QR invite.
 - [ ] Offline invite file.
 
+## Ближайший новый этап после текущего R1 — Secure File Transfer MVP
+
+> По решению пользователя передача файлов поднята из далёкой Фазы 5.3 в ближайший практический
+> roadmap. Порядок: закрыть уже начатый R1 pending-referral gate → сделать минимальную безопасную
+> передачу файлов в личном чате → затем продолжить R2 qualification/status и Groups. Фото/video/
+> voice и расширенный media editor остаются в Фазе 5.3 и переиспользуют готовый file transport.
+
+Цель MVP: выбрать файл через системный Android picker, надёжно и E2E-зашифрованно передать его
+контакту, увидеть progress/result и безопасно сохранить полученный файл без загрузки целиком в RAM.
+
+### F0 — формат и threat model
+
+- [ ] Versioned signed attachment manifest: `transfer_id`, message/chat binding, sender/recipient,
+  безопасное display name, declared MIME/size, chunk size/count, whole-file hash, timestamps/TTL.
+- [ ] Случайный file key; manifest/key и каждый chunk защищены E2E. Relay/MQTT не видит plaintext,
+  исходное имя файла или ключ.
+- [ ] Начальный лимит личного чата: 10 MiB; chunk 64–256 KiB после benchmark. Лимиты повышаются
+  только после memory/disk/network gates. Не класть файл целиком в MQTT message envelope.
+- [ ] SAF (`ACTION_OPEN_DOCUMENT`/`ACTION_CREATE_DOCUMENT`), без broad storage permission и без
+  доверия к внешнему path/MIME/имени.
+
+### F1 — core transfer и локальное хранение
+
+- [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
+  files, не в строках Room и не в Compose state.
+- [ ] Streaming encrypt/hash/read и streaming verify/decrypt/write с фиксированным memory ceiling.
+- [ ] Chunk index/hash, out-of-order сборка, dedup, retry только отсутствующих chunks, pause/cancel.
+- [ ] Atomic finalization: файл становится доступен только после exact size + whole hash + AEAD PASS;
+  partial/corrupt state очищается безопасно после TTL.
+- [ ] Process death/reboot resume и idempotent receipt; duplicate manifest/chunk не создаёт второй файл.
+
+### F2 — transport и UI
+
+- [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
+- [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.
+- [ ] Получатель явно нажимает «Скачать/Сохранить»; executable/APK не открываются автоматически.
+- [ ] Auto-download по умолчанию выключен; позже отдельные лимиты Wi-Fi/mobile/roaming.
+- [ ] File transfer не блокирует текстовые сообщения и не получает повышенный transport priority.
+
+### F3 — обязательные acceptance gates
+
+- [ ] Boundary tests: 0 B, 1 B, chunk−1/chunk/chunk+1, 10 MiB, oversize rejection.
+- [ ] Filename/path traversal, ложный MIME, corrupt/truncated/reordered/duplicate chunks, wrong key/tag,
+  disk full/quota, cancel/restart/process death и sender/recipient mismatch.
+- [ ] Два телефона: online transfer с SHA-256 equality; затем interruption/resume без дубля.
+- [ ] Три телефона: offline custody с малым тестовым файлом, relay не показывает содержимое, receipt
+  очищает chunks exactly-once; текстовая durable delivery остаётся работоспособной.
+- [ ] Packet/log/DB audit: нет plaintext файла, полного local path, file key или содержимого в логах.
+
+Расширенная Фаза 5.3 остаётся authoritative backlog для фото, видео, voice, previews, больших файлов,
+cache manager и media UX, но её базовый encrypted chunk transport теперь реализуется здесь раньше.
+
 ## v11.17.0 — Groups MVP
 
 Цель: первые группы в приложении.
@@ -1634,6 +1685,15 @@ APU имеет signed launch-ready build, красивый и понятный o
 - [ ] Добавить миграцию/утилиту слияния дублей чатов по реальному `contactId` / fingerprint.
 - [ ] При слиянии сохранять историю сообщений и не терять статусы доставки.
 - [ ] Добавить безопасный dry-run режим диагностики дублей перед изменением БД.
+
+## Рабочая станция разработки и восстановление полного toolchain
+
+- [ ] Купить/подготовить новый x86-64 компьютер по [`NEW_DEVELOPMENT_PC.md`](NEW_DEVELOPMENT_PC.md):
+  минимум 32 ГБ RAM + NVMe 1 ТБ, рекомендуется 64 ГБ + NVMe TLC 2 ТБ + отдельный backup SSD.
+- [ ] Обязательно восстановить MSVC `cl.exe`/`link.exe`, Rust MSVC host toolchain, Android SDK 35/NDK,
+  JDK 21, cargo-ndk, Git/GitHub CLI и проверить environment inventory + clean build.
+- [ ] Закрыть host `cargo test` blocker после появления исправного MSVC linker; не ослаблять crypto
+  tests и не использовать production Android compile как вечную замену host runtime tests.
 
 ## Launch-ready APU — публичный запуск и рост 100 → 1 000 → 10 000+
 

@@ -3071,3 +3071,16 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   ADB device и versionName v11.16.28 видны, но harness искал отсутствующий на этом Android формат
   `userId=` в dumpsys. Install/test/state creation/ADB mutation не начинались. Исходный gate не
   повторять; recovery-01 использует exact `pm list packages -U` UID visibility и новые evidence names.
+- **2026-08-19 (доп.229) — pending referral Stas phone recovery PASS:** state
+  `837DC56A…7CB5`; persist/load/tamper/expiry `PASS/PASS/PASS/PASS`, profile/node/signing/production
+  pending preserved `True/True/True/True`, test prefs/package removed, no data clear/force-stop.
+  Stas updated data-preserving v11.16.28→v11.16.31. R1 pending persistence slice закрыт.
+- **2026-08-19 (доп.230) — secure file transfer поднят в ближайший roadmap:** сразу после закрытия
+  текущего R1, до продолжения R2/Groups, запланирован bounded 10 MiB E2E streaming/chunk MVP для
+  личного чата с SAF, manifest/hash/AEAD, resume/dedup/quotas и 2/3-phone acceptance. Большие bytes
+  не помещаются в MQTT text envelope/Room/Compose и не загружаются целиком в RAM.
+- **2026-08-19 (доп.231) — новый development PC/toolchain plan:** добавлен
+  `docs/NEW_DEVELOPMENT_PC.md` с minimum/recommended/practical maximum, desktop/laptop criteria,
+  обязательными Windows/Android SDK 35/JDK21/MSVC linker/Rust/cargo-ndk/GitHub/backup components и
+  initial inventory. Рекомендуемый баланс: x86-64 CPU 12–16 cores, 64 GiB RAM, TLC NVMe 2 TB,
+  второй/внешний backup SSD и UPS; Windows-on-ARM и рабочий build на HDD не рекомендуются.
