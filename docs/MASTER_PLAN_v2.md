@@ -1667,7 +1667,7 @@ Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
 > streaming chunk encryption → atomic no-backup store → monotonic Room progress, without publishing;
 > JVM/APK build PASS. Dependencies are now isolatable and an Android integration test stages a
 > two-chunk content:// file through in-memory Room + test vault/store, decrypts exact bytes and cleans
-> all test state; app/test APK build PASS, data-preserving Stas execution pending.
+> all test state; app/test APK and data-preserving Stas two-chunk execution PASS.
 
 - [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
   files, не в строках Room и не в Compose state.

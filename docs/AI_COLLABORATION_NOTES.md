@@ -3264,3 +3264,9 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `1F0740B4…5A437`, app APK 29,496,509 B `33CFC806…2B52`, test APK 993,315 B
   `E39EDF97…84032`; production preparation/key/store/transport/ADB/phones false. Next Stas
   v11.16.39→v11.16.41 isolated two-chunk preparation execution with exact cleanup/state preservation.
+- **2026-08-19 (доп.269) — outgoing preparation Stas gate уже PASS; поздний повтор не нужен:**
+  canonical evidence из предыдущего успешного запуска: state `651847EC…026B`; two chunks/Room
+  PREPARED/exact decrypt PASS, test DB/files/key/source/package removed, profile/node/signing/pending/
+  production DB preserved, no production preparation/key/store/transport, DB delete/data clear/
+  force-stop. Stas v11.16.39→v11.16.41. Последняя повторная команда остановилась на GitHub до script
+  и ничего не меняла. Gate закрыт и больше не повторяется.
