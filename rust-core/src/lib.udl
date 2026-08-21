@@ -29,6 +29,11 @@ namespace p2p_core {
     string identity_signing_mode();
     string identity_signing_public_key_hex();
     string identity_signing_key_id();
+
+    // Any-network slice: tunnel all MQTT broker connections through the phone's best SOCKS5
+    // proxy (picked by the Kotlin proxy autopilot). Applies on the next broker reconnect.
+    void set_mqtt_socks5_proxy(string host, u16 port, string username, string password);
+    void clear_mqtt_socks5_proxy();
     [Throws=CoreError]
     bytes create_identity_signing_binding(i64 created_at_ms);
     boolean verify_identity_signing_binding(bytes binding);

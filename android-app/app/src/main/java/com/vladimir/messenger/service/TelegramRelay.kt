@@ -29,6 +29,7 @@ class TelegramRelay(
     private val scope: CoroutineScope,
     private val proxyRepo: MtProxyRepository,
     private val automaticProxyAllowed: () -> Boolean,
+    private val autopilot: ProxyAutopilot? = null,
 ) {
     companion object {
         private const val TAG = "TelegramRelay"
@@ -122,6 +123,10 @@ class TelegramRelay(
             Log.w(TAG, "Proxy $id marked as failed")
             currentProxy = null
             currentProxyId = null
+            // Прокси-автопилот: немедленно перепроверить пул, удалить мёртвых и переключиться
+            // на лучшего живого, вместо бесконечных попыток достучаться до того же мёртвого.
+            runCatching { autopilot?.cycle() }
+                .onFailure { Log.w(TAG, "Autopilot cycle after proxy failure: ${it.message}") }
         }
     }
 

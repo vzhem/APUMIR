@@ -169,6 +169,9 @@ fun MessengerNavGraph(
                 onAddContactClick = {
                     navController.navigate(Screen.AddContact.createRoute())
                 },
+                onRankClick = {
+                    navController.navigate(Screen.RankBenefits.route)
+                },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
                 },

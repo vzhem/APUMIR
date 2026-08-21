@@ -18,6 +18,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.ui.components.Avatar
+import com.vladimir.messenger.util.QrCodeGenerator
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,9 +66,29 @@ fun ShareProfileScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
 
-            Avatar(name = uiState.displayName, size = 120)
+            // QR-код профиля сразу на экране: наводишь камеру друга — и контакт добавлен,
+            // без передачи ссылок вручную.
+            val qrBitmap = remember(uiState.shareLink) {
+                QrCodeGenerator.generateQrCode(uiState.shareLink, 512)
+            }
+            if (qrBitmap != null) {
+                Image(
+                    bitmap = qrBitmap.asImageBitmap(),
+                    contentDescription = "QR-код профиля",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .size(240.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        .padding(8.dp),
+                )
+            }
+
+            Avatar(name = uiState.displayName, size = 72)
 
             Text(
                 text = uiState.displayName,
