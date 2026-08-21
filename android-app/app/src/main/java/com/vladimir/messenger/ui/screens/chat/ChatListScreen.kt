@@ -103,29 +103,56 @@ fun ChatListScreen(
                         }
                     },
                     actions = {
+                        // Разгрузка панели: частые действия остаются иконками (поиск, скан QR),
+                        // остальное уходит в меню «⋮». Заголовок + бейдж ранга помещаются целиком.
                         if (!isSearchVisible) {
                             IconButton(onClick = { isSearchVisible = true }) {
                                 Icon(Icons.Default.Search, "Поиск")
                             }
-                            IconButton(onClick = onSettingsClick) {
-                                Icon(Icons.Default.Settings, "Настройки")
+                            IconButton(onClick = onScanQrClick) {
+                                Icon(Icons.Default.QrCodeScanner, "Сканировать QR")
+                            }
+                            Box {
+                                var menuOpen by remember { mutableStateOf(false) }
+                                IconButton(onClick = { menuOpen = true }) {
+                                    Icon(Icons.Default.MoreVert, "Ещё")
+                                }
+                                DropdownMenu(
+                                    expanded = menuOpen,
+                                    onDismissRequest = { menuOpen = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Мой QR-код") },
+                                        onClick = {
+                                            menuOpen = false
+                                            onShowMyQrClick()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Поделиться приглашением") },
+                                        onClick = {
+                                            menuOpen = false
+                                            inviteLink = RustBridge.generateInvite()
+                                            showInviteDialog = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Подключиться по ссылке") },
+                                        onClick = {
+                                            menuOpen = false
+                                            showConnectDialog = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Настройки") },
+                                        onClick = {
+                                            menuOpen = false
+                                            onSettingsClick()
+                                        },
+                                    )
+                                }
                             }
                         }
-                            IconButton(onClick = onShowMyQrClick) {
-                                Icon(Icons.Default.QrCode2, "My QR")
-                            }
-                            IconButton(onClick = onScanQrClick) {
-                                Icon(Icons.Default.QrCodeScanner, "Scan QR")
-                            }
-                            IconButton(onClick = {
-                                inviteLink = RustBridge.generateInvite()
-                                showInviteDialog = true
-                            }) {
-                                Icon(Icons.Default.Share, "My address")
-                            }
-                            IconButton(onClick = { showConnectDialog = true }) {
-                                Icon(Icons.Default.Link, "Connect")
-                            }
                     },
                     scrollBehavior = scrollBehavior,
                 )
