@@ -3458,3 +3458,96 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   wiping callbacks, creates Rust authenticated envelope, and atomically stores bounded key-envelope.v1
   beside manifest/chunks before PREPARED. Isolated historical preparation test keeps exchange disabled;
   production path cannot. Chunk store adds exact idempotent/conflict tests. Build gate pending.
+- **2026-08-20 (доп.307) — F3 production file transport source complete (sender owner + receiver
+  ingest + chat UI, build gate pending):** file packets now ride the EXISTING durable text
+  transport (direct QUIC or encrypted M8 relay custody) as `apu-file1|<base64 packet>` texts,
+  one encoded fragment per message, deterministic delimiter-safe message IDs
+  (`f<tid>o<frag>` / `f<tid>c<chunk>f<frag>` / `f<tid>a<count>`) so mesh dedup makes every
+  re-pump idempotent. New bounded strict components: `FileOfferPdu` (manifest+key envelope+signed
+  sender binding, strict decode), `FileTransferWire` (48KiB wire budget, strict base64),
+  `FileTransferSender` (windowed pump: offer first, then ≤120 in-flight chunk-fragment messages
+  beyond receiver-confirmed contiguous prefix; 120ms pacing; honest states PREPARED→TRANSFERRING→
+  SENT→COMPLETE; restart resume via Room+chunk files; re-pump throttle 2min without ack progress),
+  `FileTransferReceiver` (bounded fragment reassembly 64 items/4MiB, fail-closed offer checks:
+  sender match, MY recipient match, expiry, binding signature, TOFU pin change reject; chunk
+  geometry check; durable encrypted chunk store; deterministic per-chunk file-ACKs back to sender;
+  stream decrypt+whole-file SHA-256 before plaintext becomes visible; VERIFY_FAILED deletes
+  received plaintext), `ReceivedFileStore` (app-private atomic verified output), `FileTransferRouter`
+  (Hilt facade; routes packets BEFORE chat-text save; periodic 20s pump loop + pumps on
+  peer_discovered/network connected; skips when engine not running). Multi-day all-phones-offline
+  custody comes from the M8 durable relay machinery itself (7-day TTL, sender-local durable
+  chunks+Room for restart resume); sender re-push after restart is dedup-idempotent. Chat UI:
+  attach button (SAF OpenDocument) → rank-checked preparation → local placeholder message
+  (`insertLocalFileMessage`, never rides text transport) → immediate pump; `FileTransferBubble`
+  shows honest state/progress; incoming in-progress transfers merged into the chat list.
+  CoreServerService ACKs each file-packet message-id so relay cleanup stays exactly-once.
+  JVM tests added (PDU/wire/sender window+throttle+empty-file/receiver full flow+negative);
+  `kotlinx-coroutines-test` added to test deps. KNOWN GAPS (honest, next slices): (1) OFFER
+  metadata (filename/size/media type) is integrity-protected but NOT confidential to relay
+  nodes — chunk content and file key are; a Rust offer-AEAD slice must fix this; (2) relay
+  per-recipient queue (200) shared with text — window 120 leaves ~80 for text, bursts can
+  enqueue-reject (harmless, retried); (3) receiver pull-based missing-chunk request not yet
+  (sender cyclic re-push covers loss); (4) received-file SAF export/open button not yet
+  (files live in app-private `file_received/v1`); (5) sender does not delete local chunks on
+  COMPLETE (waits TTL cleanup slice). No Windows compile gate, no phones, no release yet.
+- **2026-08-20 (доп.308) — NEW PC environment + F3 Windows compile gate PASS (после 3 итераций):**
+  разработка переехала на новый ПК: канонический клон теперь **`C:\APU-M8`** (старый
+  `C:\APUMIR-arena-test` не существует; clone в `C:\Users\User` — старый dirty, не трогать).
+  Гэтчи новой машины, все закрыты: (1) системный `JAVA_HOME` указывал на несуществующий
+  `D:\Android Studio\jbr` — навсегда исправлен на `C:\Program Files\Android\Android Studio\jbr`
+  (User-level SetEnvironmentVariable); SDK — `%LOCALAPPDATA%\Android\Sdk`, local.properties с
+  forward-slash `sdk.dir`. (2) Клон был single-branch — `git config remote.origin.fetch
+  "+refs/heads/*:refs/remotes/origin/*"` + повторный fetch; локальный оверлей `.so` убран в
+  stash до checkout. (3) GitHub 443 периодически отказывает — лечится повторами pull/fetch
+  (известно и раньше). Gate-история F3 на 45d27db (ветка `arena/01a02092-apumir`): первый
+  прогон — 3 ошибки компиляции K2 (неоднозначный sumOf с неразрешимым селектором, smart cast на
+  var в замыкании, отсутствие default у errorCode) — фикс `2371bcc`; второй — 13 падений JVM
+  от `android.util.Log` ("Method not mocked") + виртуальное время теста троттлинга уходило за
+  expiry фикстуры — фикс `08d6389` (`unitTests.isReturnDefaultValues = true` + expiry 1ч);
+  третий — 5 падений из-за тестового фикстура (байты transferId ≠ его hex-форма, чанки
+  навсегда оседали в pre-offer буфере; один тест проходил «по ошибке») — фикс `45d27db`.
+  Итог: **`testDebugUnitTest` 88/88 PASS, `assembleDebug` BUILD SUCCESSFUL** (main-код для APK
+  не менялся после первого зелёного assembleDebug — дальше правились только тесты и
+  testOptions). Rust/.so не пересобирались и не needed: свежий arm64 `.so` (6,935,552 B)
+  закоммичен в `3eaae63` вместе с актуальными bindings; lib.udl не менялся. Телефоны не
+  трогали; релиз не делали.
+- **2026-08-20 (доп.309) — File-HELLO handshake закрывает deadlock «первого файла»:** обнаружено
+  при подготовке телефонного acceptance: sender требует закреплённый X25519-binding получателя
+  (доп.306), а пиннинг существовал ТОЛЬКО из входящего file-offer (доп.303) → два телефона,
+  никогда не обменивавшиеся файлами, не могли отправить первый файл друг другу. Новый срез:
+  крошечное durable-сообщение `apu-file-hello1|<base64 подписанного binding>` (≤512B,
+  детерминированный per-pair-per-direction msg id `fh<sha256-32>`, throttle 60 c на контакта).
+  Приём: строгая проверка подписи и совпадения node с отправителем → TOFU-пин (смена ключа
+  по-прежнему отвергается) → при ПЕРВОМ пине авто-ответ своим HELLO (обе стороны оказываются
+  закреплены). Рассылка: pump-цикл (20 c) автоматически шлёт HELLO всем unpinned pk_-контактам
+  (durable → доехав при появлении получателя); UI при ошибке «binding is not pinned» сам
+  отправляет HELLO и показывает человекочитаемое сообщение.HELLO никогда не попадает в чат
+  (перехватывается до сохранения), relay-cleanup через штатный delivery-ACK. JVM-тесты:
+  wire round-trip/oversize, детерминизм ID, PINNED_NEW→PINNED_ALREADY, mismatch sender reject,
+  changed-key reject, not-hello, маршрутизация до chat-text. Build gate нового среза —
+  следующий прогон на Windows вместе с release-кандидатом для телефонов.
+- **2026-08-21 (доп.310) — первый телефонный file-acceptance: сеть диктует правила; найдено 3 бага, 2 закрыты сразу:**
+  v11.17.0 (debug-signed, тот же debug-ключ что стоял на телефонах — release-jks несовместим с установленным
+  v11.16.45!) установлена на Анну/Жену/Стаса поверх, данные сохранены. Предыстория-гэтчи: подпись приложения на
+  телефонах = `CN=Android Debug` (`C:\Users\User\.android\debug.keystore`, SHA256 40448024…a186), а НЕ p2p-release.jks
+  (f843…a5f7) → ставим `assembleDebug`; закоммиченный `jniLibs/arm64 .so` СТАРЕ bindings → стартовый
+  UnsatisfiedLinkError на `uniffi_p2p_core_checksum_func_clear_identity_signing_seed` → вылечено пересборкой
+  `build-rust.ps1 -Features mqtt-dual-broker -Arch arm64-v8a` на новой машине (кэш target/ оказался актуальным;
+  строковый поиск символов в .so через ASCII.GetString — НЕ НАДЁЖЕН, рабочая проверка = запуск приложения).
+  Итоги сети дня: провайдер сильно режет канал к broker.hivemq.com:1883 / broker.emqx.io:1883 (с ПК Test-NetConnection
+  идёт с 1-3 попыток; test.mosquitto.org мёртв; в приложении — бесконечные "Connection closed by peer abruptly"/
+  "Network timeout", публикации редко проходят). Мелкие сообщения (текст/заглушки/офферы/ACK) протискиваются,
+  крупные (~33КБ base64 чанк-фрагменты) — НЕТ: у Жени дошли оба оффера (manifest+key-envelope на диске) и ноль
+  чанков; у Анны все пакеты durably retained и re-pump каждые 2 мин — офлайн-очередь работает как задумано.
+  LAN-direct не спасал из-за бага (1): **mDNS publish одноразовый при старте** — Стас (не менял сеть) виден всем
+  с pk, Анна/Женя после смен сетей «исчезли» (соседи видели только чужие записи без node_id). Баг (2): локальная
+  заглушка файла имела статус QUEUED_OFFLINE → FULL SYNC повторной отправкой УШЛА получателю как обычный текст
+  («пришло фото» = текст-заглушка, не файл). Баг (3, открыт): чанк-фрагмент 24KiB велик для изрезанных каналов
+  (нужен меньший фрагмент на broker-пути и/или LAN/прокси приоритет). Фиксы этого среза: mDNS re-publish каждые
+  60 c (unpublish+publish_self в discover-цикле); статус заглушки → `LOCAL_FILE` (вне выборок retry); добавлены
+  Log.i на успешных путях приёмника (offer accepted / chunk stored) — раньше их отсутствие стоило часов
+  диагностики. РЕШЕНИЕ пользователя по следующему приоритету: **прокси-канал (MTProto) для транспорта** —
+  «наши прокси должны использоваться, чтобы не резало и не дёргался канал» (Приоритет 7); плюс в очереди:
+  mDNS-анонсы уже чинятся здесь, LAN-direct приоритет над брокерами, кнопка открыть/сохранить принятый файл,
+  меньшие фрагменты для broker-пути. Windows gate нового среза: build-rust + assembleDebug + 95 JVM-тестов PASS
+  ожидается следующим прогоном; телефоны ждут переустановки.

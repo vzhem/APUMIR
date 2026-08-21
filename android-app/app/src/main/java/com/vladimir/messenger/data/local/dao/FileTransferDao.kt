@@ -17,6 +17,17 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE transferId = :transferId")
     suspend fun getTransfer(transferId: String): FileTransferEntity?
 
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE direction = 'OUTGOING'
+          AND state IN ('PREPARED', 'TRANSFERRING', 'SENT')
+          AND expiresAtMs > :nowMs
+        ORDER BY createdAtMs ASC
+        """
+    )
+    suspend fun getActiveOutgoing(nowMs: Long): List<FileTransferEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTransferIgnore(transfer: FileTransferEntity): Long
 
