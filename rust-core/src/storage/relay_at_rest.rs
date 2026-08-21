@@ -148,7 +148,7 @@ pub enum AtRestError {
 /// неизвестным ключом детерминированно уходили в quarantine.
 ///
 /// Debug намеренно НЕ печатает материал ключа.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct RelayAtRestKey {
     pub key_id: u16,
     pub material: [u8; AT_REST_KEY_BYTES],
@@ -213,6 +213,14 @@ pub trait RelayAtRestKeySource: Send + Sync {
 pub struct MasterSecretKeySource {
     key: RelayAtRestKey,
 }
+
+impl PartialEq for MasterSecretKeySource {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for MasterSecretKeySource {}
 
 impl MasterSecretKeySource {
     pub fn new(key_id: u16, material: [u8; AT_REST_KEY_BYTES]) -> Self {

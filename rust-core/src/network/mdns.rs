@@ -385,7 +385,7 @@ mod tests {
 
         // Пытаемся опубликовать (может не сработать без сети)
         let result = mdns
-            .publish_self("abc123deadbeef", 7777, "TestNode", 1)
+            .publish_self("abc123deadbeef", 7777, "TestNode", 1, None)
             .await;
 
         match result {

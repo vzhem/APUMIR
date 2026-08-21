@@ -3788,3 +3788,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   пользователей). Enter-VsDevShell не принял -VsInstPath (версия DLL другая) — выдан
   пуленепробиваемый обход: импорт окружения vcvars64.bat через cmd в текущую сессию PowerShell
   (PATH/INCLUDE/LIB подтянутся, cc-rs найдёт cl.exe, rustc — link.exe).
+- **2026-08-21 (доп.333) — ПЕРВЫЙ host cargo-прогон на новой машине: MSVC поднят через vcvars-импорт,
+  3 старые тест-ошибки починены:** обход Enter-VsDevShell (не знал -VsInstPath) — импорт окружения
+  `vcvars64.bat` через cmd в сессию PowerShell: cl.exe найден, зависимости (ring/aws-lc/sqlite/quinn/
+  rumqttc) скомпилировались впервые на этой машине. Первый host cargo test вскрыл 3 ошибки в коде,
+  который до этого проверялся только Android-сборкой: (1) mdns-тест не обновили под 5-й аргумент
+  publish_self (public_addr из STUN-фичи) — добавлен None; (2)+(3) assert_eq! на Result<RelayAtRestKey/
+  MasterSecretKeySource, AtRestError> требовал PartialEq — добавлены derive/impl (сравнение полей,
+  Debug по-прежнему redacted, материал не печатается).
