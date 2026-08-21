@@ -204,7 +204,7 @@ Android process death/reboot до handoff может потерять чужое
 5. durable receipt/tombstone cleanup и exactly-once UI delivery;
 6. delayed Anna→Zhenya→relay D→Stas acceptance через несовпадающие online-окна.
 
-## v11.17.1 (2026-08-21, release candidate)
+## v11.17.1 (2026-08-21, ОПУБЛИКОВАН — stable latest)
 
 - Первая публичная версия с передачей файлов (фото/видео/документы) в личных чатах:
   E2E-шифрование (XChaCha20-Poly1305, подписанный конверт ключа, TOFU-пин контакта),
@@ -215,5 +215,5 @@ Android process death/reboot до handoff может потерять чужое
 - CI release-workflow теперь собирает Rust из исходников (NDK 28.2 + cargo-ndk, 3 ABI) —
   устранён класс «stale .so в релизном APK».
 - LOC-дельта к v11.16.16: ~+3900 (Kotlin+Rust+tests+CI; точный подсчёт по тегу).
-- Статус: prerelease; известное ограничение — скорость доставки зависит от доступности
-  внешних MQTT-брокеров (прокси-канал в разработке).
+- Статус: published stable latest (CI run 32473695695, 11m13s; APK 35,285,255 B;
+  checksum asset добавляется владельцем локально).
