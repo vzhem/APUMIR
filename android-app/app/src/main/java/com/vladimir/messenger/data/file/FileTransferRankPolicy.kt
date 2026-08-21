@@ -14,7 +14,8 @@ object FileTransferRankPolicy {
         val rankMaxBytes: Long,
     ) {
         val canCreateGroup: Boolean get() = minimumQualifiedReferrals >= 10
-        val canUseAutomaticProxy: Boolean get() = minimumQualifiedReferrals >= 20
+        val canUseAutomaticProxy: Boolean get() = minimumQualifiedReferrals >= 10
+        val canUseManualProxy: Boolean get() = minimumQualifiedReferrals >= 1
         val canCreateChannel: Boolean get() = minimumQualifiedReferrals >= 30
 
         fun effectiveMaxBytes(technicalLimitBytes: Long): Long =
@@ -28,6 +29,7 @@ object FileTransferRankPolicy {
             if (Category.FILE in allowedCategories) add("Отправка файлов")
             if (Category.VIDEO in allowedCategories) add("Отправка видео")
             if (canCreateGroup) add("Создание групп")
+            if (canUseManualProxy) add("Ручное добавление прокси")
             if (canUseAutomaticProxy) add("Автосбор и автоматический выбор прокси")
             if (canCreateChannel) add("Создание каналов")
         }
@@ -89,6 +91,9 @@ object FileTransferRankPolicy {
 
     fun canUseAutomaticProxy(qualifiedDirectReferrals: Int): Boolean =
         entitlement(qualifiedDirectReferrals).canUseAutomaticProxy
+
+    fun canUseManualProxy(qualifiedDirectReferrals: Int): Boolean =
+        entitlement(qualifiedDirectReferrals).canUseManualProxy
 
     /** Basic communication and joining communities remain available immediately after install. */
     fun canSendTextAtAnyRank(): Boolean = true

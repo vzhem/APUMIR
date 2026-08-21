@@ -92,7 +92,14 @@ class FileTransferSenderTest {
 
     @Test
     fun windowIsBoundedForLargeFragmentsUntilAckAdvances() = runTest {
-        // 256 KiB chunks fragment into 11 wire messages -> window = 120/11 = 10 chunks.
+        // Window derives from the live fragment size: ceil((chunk+tag)/frag) fragments per chunk,
+        // then MAX_INFLIGHT_MESSAGES/fragmentsPerChunk chunks per window.
+        val fragmentsPerChunk = (
+            (256 * 1024 + FileTransferChunkStore.AEAD_TAG_BYTES +
+                FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES - 1) /
+                FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES
+            )
+        val windowChunks = maxOf(1, FileTransferSender.MAX_INFLIGHT_MESSAGES / fragmentsPerChunk)
         dao.insertNewTransfer(entity(chunkCount = 12, chunkSize = 256 * 1024, totalBytes = 12L * 256 * 1024))
         stage(chunkCount = 12, chunkSize = 256 * 1024, lastChunkBytes = 256 * 1024)
 
@@ -100,15 +107,23 @@ class FileTransferSenderTest {
         sender.pumpOnce()
 
         val chunkPackets = transportSends.count { Regex("c\\d+f\\d+$").containsMatchIn(it.first) }
-        assertEquals(10 * 11, chunkPackets)
+        assertEquals(windowChunks * fragmentsPerChunk, chunkPackets)
         assertEquals("TRANSFERRING", dao.getTransfer(transferIdHex)!!.state)
 
-        sender.onReceiverAck(transferIdHex, 10)
+        sender.onReceiverAck(transferIdHex, windowChunks)
         now += 1000
         transportSends.clear()
         sender.pumpOnce()
-        assertEquals(2 * 11, transportSends.count { Regex("c\\d+f\\d+$").containsMatchIn(it.first) })
-        assertEquals("SENT", dao.getTransfer(transferIdHex)!!.state)
+        // Окно сдвинулось ровно на свой размер: снова windowChunks чанков в полёте.
+        assertEquals(windowChunks * fragmentsPerChunk, transportSends.count { Regex("c\\d+f\\d+$").containsMatchIn(it.first) })
+        assertEquals("TRANSFERRING", dao.getTransfer(transferIdHex)!!.state)
+
+        // Подтверждаем весь файл: передача закрывается как COMPLETE.
+        sender.onReceiverAck(transferIdHex, 12)
+        transportSends.clear()
+        sender.pumpOnce()
+        assertEquals(0, transportSends.count { Regex("c\\d+f\\d+$").containsMatchIn(it.first) })
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
     }
 
     @Test

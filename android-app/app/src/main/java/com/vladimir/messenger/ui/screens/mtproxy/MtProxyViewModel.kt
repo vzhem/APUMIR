@@ -48,6 +48,10 @@ class MtProxyViewModel @Inject constructor(
     }
 
     fun addProxy(input: String) {
+        if (!manualProxyEntitled()) {
+            _uiState.update { it.copy(message = "Ручные прокси открываются с ранга Первый связной (1 друг)") }
+            return
+        }
         viewModelScope.launch {
             val id = repo.addFromString(input, source = "MANUAL")
             if (id != null) {
@@ -95,6 +99,10 @@ class MtProxyViewModel @Inject constructor(
     }
 
     fun setActive(id: String) {
+        if (!manualProxyEntitled()) {
+            _uiState.update { it.copy(message = "Ручные прокси открываются с ранга Первый связной (1 друг)") }
+            return
+        }
         viewModelScope.launch {
             repo.setActive(id)
             _uiState.update { it.copy(message = "Прокси выбран как активный") }
@@ -145,7 +153,7 @@ class MtProxyViewModel @Inject constructor(
 
     fun checkAllAndPickBest() {
         if (!automaticProxyEntitled()) {
-            _uiState.update { it.copy(message = "Автовыбор прокси открывается с ранга Организатор (20 друзей)") }
+            _uiState.update { it.copy(message = "Автовыбор прокси открывается с ранга Проводник (10 друзей)") }
             return
         }
         viewModelScope.launch {
@@ -163,7 +171,7 @@ class MtProxyViewModel @Inject constructor(
 
     fun collectNow() {
         if (!automaticProxyEntitled()) {
-            _uiState.update { it.copy(message = "Автосбор прокси открывается с ранга Организатор (20 друзей)") }
+            _uiState.update { it.copy(message = "Автосбор прокси открывается с ранга Проводник (10 друзей)") }
             return
         }
         viewModelScope.launch {
@@ -197,6 +205,11 @@ class MtProxyViewModel @Inject constructor(
 
     private fun automaticProxyEntitled(): Boolean =
         FileTransferRankPolicy.canUseAutomaticProxy(
+            ReferralRankStore.qualifiedDirectCount(context)
+        )
+
+    private fun manualProxyEntitled(): Boolean =
+        FileTransferRankPolicy.canUseManualProxy(
             ReferralRankStore.qualifiedDirectCount(context)
         )
 
