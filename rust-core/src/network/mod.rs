@@ -29,6 +29,7 @@ pub mod quic_client;
 pub mod relay;
 pub mod relay_queue;
 pub mod router;
+pub mod socks5;
 pub mod wire;
 
 // Реэкспорты для удобства

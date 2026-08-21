@@ -3688,3 +3688,23 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   (ChatListViewModel.refreshRankBadge из центральной политики рангов + debug-override для
   тестовых телефонов); тап по чипу открывает существующий экран «Ранги и возможности»
   (что открыто/как расти). Kotlin-only, гейт — следующий прогон.
+- **2026-08-21 (доп.323) — большой срез «любая сеть», часть 1: MQTT через SOCKS5 в Rust-движке:**
+  новый `network/socks5.rs`: минимальный асинхронный SOCKS5-клиент (RFC 1928 + auth RFC 1929,
+  no-auth/username-password, доменный CONNECT, строгий разбор ответа) + глобальная конфигурация
+  (RwLock static). `mqtt_transport::apply_socks5_transport`: если прокси установлен, ОБА брокера
+  (hivemq + emqx) подключаются через `rumqttc::Transport::tcp_with_connect` — SOCKS5-рукопожатие
+  внутри коннектора, дальше rumqttc говорит MQTT по тому же сокету = весь mesh-трафик (текст+файлы)
+  в туннеле. При сбое туннеля конкретная попытка откатывается на прямое соединение (канал не умирает
+  вместе с прокси; автопилот сменит и повторит). FFI: `set_mqtt_socks5_proxy(host,port,user,pass)`
+  (валидация host/port, ошибки CoreError::NetworkError) + `clear_mqtt_socks5_proxy()`; применяется
+  при следующем переподключении брокера (на дёрганом канале — секунды). Kotlin: RustBridge-мосты +
+  ProxyAutopilot.applyBestProxyToEngine — после каждого цикла лучший живой SOCKS5 толкается в движок
+  (HTTP/MTProto-прокси для туннеля непригодны — честно clear). Rust-тесты: wire-форматы greeting/
+  CONNECT/auth, парсер ответов (rep!=0 → ошибка, ATYP-длины), round-trip глобального конфига.
+  РИСК-точка компиляции: сигнатура tcp_with_connect в rumqttc 0.25.1 (клажур возвращает
+  Pin<Box<dyn Future<Output=io::Result<TcpStream>>+Send>> — совместимо и с generic-Fut вариантом);
+  если гейт упадёт — ждать точную сигнатуру из ошибки. ГЕЙТ (нужны владельцем): build-rust →
+  regen-bindings (tools/uniffi-bindgen: cargo run --manifest-path tools/uniffi-bindgen/Cargo.toml
+  -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ../android-app/app/src/main/java)
+  → :app:testDebugUnitTest → :app:assembleDebug. Телефоны: после PASS — install и проверка
+  logcat-маркеров «MQTT: SOCKS5 transport enabled» и стабильности канала на изрезанной сети.

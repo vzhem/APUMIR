@@ -289,6 +289,46 @@ async fn forward_incoming_publish(
     Ok(())
 }
 
+/// «Любая сеть»: если через FFI установлен SOCKS5-прокси, все соединения к брокерам
+/// (основной и вторичный) идут туннелем через него. При неудаче рукопожатия SOCKS5
+/// конкретная попытка честно откатывается на прямое соединение — канал не умирает
+/// вместе с прокси, а автопилот на Kotlin сменит прокси и повторит.
+fn apply_socks5_transport(opts: &mut MqttOptions) {
+    let Some(proxy) = crate::network::socks5::mqtt_socks5_proxy_config() else {
+        return;
+    };
+    tracing::info!(
+        "MQTT: SOCKS5 transport enabled via {}:{} (user={})",
+        proxy.host,
+        proxy.port,
+        !proxy.username.is_empty()
+    );
+    opts.set_transport(rumqttc::Transport::tcp_with_connect(
+        move |broker_host, broker_port| {
+            let proxy = proxy.clone();
+            Box::pin(async move {
+                match crate::network::socks5::connect_through(
+                    &proxy,
+                    broker_host.clone(),
+                    broker_port,
+                )
+                .await
+                {
+                    Ok(stream) => Ok(stream),
+                    Err(error) => {
+                        tracing::warn!(
+                            "MQTT: SOCKS5 tunnel to {} failed ({}), falling back direct",
+                            broker_host,
+                            error
+                        );
+                        tokio::net::TcpStream::connect((broker_host.as_str(), broker_port)).await
+                    }
+                }
+            })
+        },
+    ));
+}
+
 impl MqttTransport {
     pub async fn connect(node_id: &str, display_name: &str) -> Result<Self, String> {
         let shared_state = Arc::new(MqttSharedRuntimeState::new(
@@ -314,6 +354,7 @@ impl MqttTransport {
         let mut opts = MqttOptions::new(&client_id, host, port);
         opts.set_keep_alive(Duration::from_secs(60));
         opts.set_clean_session(true);
+        apply_socks5_transport(&mut opts);
 
         let (client, eventloop) = AsyncClient::new(opts, MQTT_CLIENT_REQUEST_BUFFER);
         let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
@@ -331,6 +372,7 @@ impl MqttTransport {
             );
             secondary_options.set_keep_alive(Duration::from_secs(60));
             secondary_options.set_clean_session(true);
+            apply_socks5_transport(&mut secondary_options);
             let (secondary_client, secondary_eventloop) =
                 AsyncClient::new(secondary_options, MQTT_CLIENT_REQUEST_BUFFER);
             tracing::info!(

@@ -69,6 +69,7 @@ class ProxyAutopilot @Inject constructor(
         } else {
             Log.w(TAG, "No working proxy in this cycle")
         }
+        applyBestProxyToEngine(best)
 
         val summary = CycleSummary(
             collected = collected,
@@ -84,6 +85,30 @@ class ProxyAutopilot @Inject constructor(
                 "best=${summary.bestProxy ?: "none"} (${summary.bestLatencyMs ?: "-"}ms)",
         )
         return summary
+    }
+
+    /**
+     * «Любая сеть»: лучший живой SOCKS5-прокси туннелирует ВЕСЬ MQTT-трафик движка
+     * (обычные и файловые mesh-конверты). HTTP/MTProto-прокси для туннеля не подходят —
+     * при их выборе туннель честно очищается. Применяется при следующем переподключении
+     * брокера; при сбое прокси движок сам откатывается на прямое соединение до смены.
+     */
+    private fun applyBestProxyToEngine(best: MtProxyHealthChecker.CheckResult?) {
+        try {
+            val proxy = best?.proxy
+            if (proxy != null && proxy.type == com.vladimir.messenger.domain.model.ProxyType.SOCKS5) {
+                com.vladimir.messenger.data.RustBridge.setMqttSocks5Proxy(
+                    proxy.host,
+                    proxy.port,
+                    proxy.username,
+                    proxy.password,
+                )
+            } else {
+                com.vladimir.messenger.data.RustBridge.clearMqttSocks5Proxy()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "applyBestProxyToEngine failed: ${'$'}{e.message}")
+        }
     }
 
     companion object {
