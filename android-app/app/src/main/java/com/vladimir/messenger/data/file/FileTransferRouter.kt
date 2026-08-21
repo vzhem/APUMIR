@@ -1,0 +1,170 @@
+package com.vladimir.messenger.data.file
+
+import android.content.Context
+import android.util.Log
+import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.repository.ChatRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Facade the service layer talks to: routes incoming packet/handshake texts (before they are
+ * stored as chat messages) and drives the sender pump. Everything rides the existing durable
+ * Rust transport, so multi-day offline custody and restart resume come from the M8 machinery.
+ *
+ * File-HELLO handshake: contacts without a pinned exchange binding automatically receive a tiny
+ * signed HELLO (durable, deterministic per-pair message ID, throttled); a first-time pin
+ * auto-replies, so two phones that never exchanged files still end up with both directions
+ * pinned and the first real transfer can go through.
+ */
+@Singleton
+class FileTransferRouter @Inject constructor(
+    @ApplicationContext context: Context,
+    transferDao: FileTransferDao,
+    private val peerStore: FileExchangePeerStore,
+    private val chatRepository: ChatRepository,
+) {
+    private val appContext: Context
+    private val sender: FileTransferSender
+    private val receiver: FileTransferReceiver
+    private val transport: PacketTransport
+    private val lastHelloAt = HashMap<String, Long>()
+
+    init {
+        appContext = context.applicationContext
+        val chunkStore = FileTransferChunkStore.forApplication(appContext)
+        val receivedStore = ReceivedFileStore(File(appContext.noBackupFilesDir, "file_received/v1"))
+        val transportLocal: PacketTransport = RustPacketTransport()
+        transport = transportLocal
+        val crypto: FileCryptoGateway = FfiFileCryptoGateway()
+        val identity: LocalExchangeIdentity = AndroidLocalExchangeIdentity(appContext)
+        val keyVault: TransferKeyVaultAccess = AndroidTransferKeyVaultAccess(appContext)
+        val notifier = FileTransferReceiver.FileChatNotifier(
+            { chatId, senderId, messageId, displayName, mediaType, totalBytes, _ ->
+                chatRepository.saveIncomingMessage(
+                    chatId = chatId,
+                    senderId = senderId,
+                    messageId = messageId,
+                    content = formatPlaceholder(displayName, mediaType, totalBytes),
+                    timestamp = System.currentTimeMillis(),
+                    recipientId = RustBridge.nodeId() ?: "",
+                )
+            },
+        )
+        val senderLocal = FileTransferSender(
+            transferDao = transferDao,
+            chunkStore = chunkStore,
+            transport = transportLocal,
+            ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
+            sleeper = { millis -> kotlinx.coroutines.delay(millis) },
+        )
+        sender = senderLocal
+        receiver = FileTransferReceiver(
+            transferDao = transferDao,
+            chunkStore = chunkStore,
+            receivedStore = receivedStore,
+            pinner = { binding, pinnedAtMs ->
+                peerStore.pinFirstSeen(binding, pinnedAtMs).newlyPinned
+            },
+            crypto = crypto,
+            keyVault = keyVault,
+            identity = identity,
+            transport = transportLocal,
+            ackSink = { transferIdHex, contiguousChunks ->
+                senderLocal.onReceiverAck(transferIdHex, contiguousChunks)
+            },
+            notifier = notifier,
+        )
+    }
+
+    /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */
+    suspend fun routeIncoming(senderId: String, chatId: String, messageId: String, text: String): Boolean {
+        if (FileTransferWire.isHelloText(text)) {
+            when (receiver.onHelloText(senderId, text)) {
+                FileTransferReceiver.HelloResult.PINNED_NEW -> {
+                    runCatching { sendHello(senderId, force = true) }
+                        .onFailure { Log.w(TAG, "File HELLO auto-reply failed: ${it.message}") }
+                }
+                else -> Unit
+            }
+            return true
+        }
+        return receiver.onIncomingText(senderId, chatId, messageId, text)
+    }
+
+    /** Drives all resumable outgoing transfers plus contact key handshakes; safe to call periodically. */
+    suspend fun pumpOutgoing(): FileTransferSender.PumpSummary? {
+        if (!RustBridge.isRunning()) {
+            Log.d(TAG, "File pump skipped: engine not running")
+            return null
+        }
+        runCatching { sendHelloHandshakes() }
+            .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
+        return sender.pumpOnce()
+    }
+
+    /** UI escape hatch when preparation reports the recipient binding is not pinned yet. */
+    suspend fun requestExchangeBinding(recipientNodeId: String) {
+        if (!RustBridge.isRunning()) return
+        runCatching { sendHello(recipientNodeId, force = false) }
+            .onFailure { Log.w(TAG, "File HELLO request failed: ${it.message}") }
+    }
+
+    private suspend fun sendHelloHandshakes() {
+        val myBinding = FileExchangeKeyStore.publicBinding(appContext) ?: return
+        val now = System.currentTimeMillis()
+        val contacts = runCatching { chatRepository.getAllContactIds() }.getOrDefault(emptyList())
+        for (contactId in contacts) {
+            if (!contactId.startsWith("pk_")) continue
+            val pinned = runCatching { peerStore.bindingFor(contactId) != null }.getOrDefault(true)
+            if (!pinned) sendHello(contactId, force = false, now = now, binding = myBinding)
+        }
+    }
+
+    private suspend fun sendHello(
+        recipientNodeId: String,
+        force: Boolean,
+        now: Long = System.currentTimeMillis(),
+        binding: ByteArray? = null,
+    ) {
+        if (!recipientNodeId.startsWith("pk_")) return
+        val myNodeId = RustBridge.nodeId() ?: return
+        val myBinding = binding ?: FileExchangeKeyStore.publicBinding(appContext) ?: return
+        if (!force) {
+            val last = lastHelloAt[recipientNodeId] ?: 0L
+            if (now - last < HELLO_MIN_INTERVAL_MS) return
+        }
+        lastHelloAt[recipientNodeId] = now
+        transport.send(
+            FileTransferWire.helloMessageId(myNodeId, recipientNodeId),
+            recipientNodeId,
+            recipientNodeId,
+            FileTransferWire.encodeHelloBinding(myBinding),
+        )
+        Log.i(TAG, "File HELLO sent to ${recipientNodeId.takeLast(8)} (force=$force)")
+    }
+
+    companion object {
+        private const val TAG = "FileTransferRouter"
+        const val HELLO_MIN_INTERVAL_MS = 60_000L
+
+        fun formatPlaceholder(displayName: String, mediaType: String, totalBytes: Long): String {
+            val kind = when {
+                mediaType.startsWith("image/") -> "🖼"
+                mediaType.startsWith("video/") -> "🎬"
+                mediaType.startsWith("audio/") -> "🎵"
+                else -> "📎"
+            }
+            return "$kind $displayName (${formatSize(totalBytes)})"
+        }
+
+        fun formatSize(totalBytes: Long): String = when {
+            totalBytes >= 1024 * 1024 -> "%.1f МБ".format(totalBytes / (1024.0 * 1024.0))
+            totalBytes >= 1024 -> "%.1f КБ".format(totalBytes / 1024.0)
+            else -> "$totalBytes Б"
+        }
+    }
+}
