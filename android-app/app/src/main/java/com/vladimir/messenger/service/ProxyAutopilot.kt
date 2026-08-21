@@ -40,7 +40,17 @@ class ProxyAutopilot @Inject constructor(
     /**
      * @param forceCollect собрать свежие списки даже при полном пуле (шестичасовой обход).
      */
+    /** Пользовательский выключатель из настроек: выключено — туннель снят, циклы не ходят. */
+    fun tunnelEnabledByUser(): Boolean =
+        appContext.getSharedPreferences("p2p_prefs", android.content.Context.MODE_PRIVATE)
+            .getBoolean("proxy_tunnel_enabled", true)
+
     suspend fun cycle(forceCollect: Boolean = false): CycleSummary {
+        if (!tunnelEnabledByUser()) {
+            com.vladimir.messenger.data.RustBridge.clearMqttSocks5Proxy()
+            Log.d(TAG, "Cycle skipped: proxy tunnel disabled by user")
+            return CycleSummary(0, 0, 0, 0, null, null)
+        }
         if (!FileTransferRankPolicy.canUseAutomaticProxy(
                 ReferralRankStore.qualifiedDirectCount(appContext)
             )

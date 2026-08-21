@@ -24,11 +24,13 @@ data class SettingsUiState(
     val connectionMode: String = "Unknown",
     val appVersion: String = "0.1.0",
     val rustCoreVersion: String = "Loading...",
+    val proxyTunnelEnabled: Boolean = true,
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -37,6 +39,25 @@ class SettingsViewModel @Inject constructor(
 
     init {
         loadSettings()
+        _uiState.update { it.copy(proxyTunnelEnabled = proxyTunnelEnabled()) }
+    }
+
+    /** «Любая сеть»: пользовательский выключатель прокси-туннеля (по умолчанию включён). */
+    private fun proxyTunnelEnabled(): Boolean =
+        context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .getBoolean("proxy_tunnel_enabled", true)
+
+    fun onProxyTunnelToggle(enabled: Boolean) {
+        context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("proxy_tunnel_enabled", enabled).apply()
+        _uiState.update { it.copy(proxyTunnelEnabled = enabled) }
+        viewModelScope.launch {
+            if (enabled) {
+                runCatching { proxyAutopilot.cycle() }
+            } else {
+                RustBridge.clearMqttSocks5Proxy()
+            }
+        }
     }
 
     private fun loadSettings() {

@@ -238,6 +238,26 @@ fun SettingsScreen(
             // ----------------------------------------------------------------
             // БЕЗОПАСНОСТЬ
             // ----------------------------------------------------------------
+            // СЕТЬ
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Сеть") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.VpnKey,
+                        title    = "Туннель через прокси",
+                        subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.proxyTunnelEnabled,
+                                onCheckedChange = viewModel::onProxyTunnelToggle,
+                            )
+                        },
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
             item { SettingsSectionTitle("Безопасность") }
             item {
                 SettingsCard {
