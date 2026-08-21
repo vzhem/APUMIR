@@ -92,7 +92,12 @@ class FileTransferRouter @Inject constructor(
             }
             return true
         }
-        return receiver.onIncomingText(senderId, chatId, messageId, text)
+        // File packets carry the SENDER's local chat UUID in the envelope; the recipient must
+        // file the transfer and its completion message under ITS OWN chat with that sender,
+        // otherwise the bubble lands in a nonexistent chat and never renders.
+        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }.getOrNull()
+            ?: chatId
+        return receiver.onIncomingText(senderId, localChatId, messageId, text)
     }
 
     /** Drives all resumable outgoing transfers plus contact key handshakes; safe to call periodically. */
