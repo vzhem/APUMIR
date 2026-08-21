@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.chat
 // =============================================================================
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -75,31 +76,24 @@ fun ChatListScreen(
                                 },
                             )
                         } else {
-                            Column {
+                            // Заголовок + компактный бейдж ранга одной колонкой: AssistChip
+                            // (рамка/отступы/минимальная высота) не влезал в высоту TopAppBar
+                            // и сжимал заголовок до обрезанной последней буквы.
+                            Column(modifier = Modifier.clickable(onClick = onRankClick)) {
                                 Text(
                                     "Сообщения",
                                     fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
                                 )
                                 if (uiState.rankBadge.isNotBlank()) {
                                     // Бейдж ранга на самом видном месте: под заголовком,
                                     // всегда перед глазами; тап — что открыто и как расти дальше.
-                                    AssistChip(
-                                        onClick = onRankClick,
-                                        label = {
-                                            Text(
-                                                uiState.rankBadge,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(
-                                                Icons.Default.MilitaryTech,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        },
-                                        border = null,
+                                    Text(
+                                        uiState.rankBadge,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
                                     )
                                 }
                             }
