@@ -44,6 +44,7 @@ fun ChatListScreen(
     onSettingsClick: () -> Unit,
     onScanQrClick: () -> Unit = {},
     onShowMyQrClick: () -> Unit = {},
+    onRankClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -74,10 +75,34 @@ fun ChatListScreen(
                                 },
                             )
                         } else {
-                            Text(
-                                "Сообщения",
-                                fontWeight = FontWeight.Bold,
-                            )
+                            Column {
+                                Text(
+                                    "Сообщения",
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                if (uiState.rankBadge.isNotBlank()) {
+                                    // Бейдж ранга на самом видном месте: под заголовком,
+                                    // всегда перед глазами; тап — что открыто и как расти дальше.
+                                    AssistChip(
+                                        onClick = onRankClick,
+                                        label = {
+                                            Text(
+                                                uiState.rankBadge,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.MilitaryTech,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        },
+                                        border = null,
+                                    )
+                                }
+                            }
                         }
                     },
                     actions = {
