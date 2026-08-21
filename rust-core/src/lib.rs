@@ -344,22 +344,16 @@ pub fn clear_identity_signing_seed() {
 }
 
 /// «Любая сеть»: направить все MQTT-соединения к брокерам через SOCKS5-прокси
-/// (лучший из пула, выбранный автопилотом). Применяется при следующем
-/// подключении брокера. Некорректные аргументы отвергаются, прежний прокси сохраняется.
-pub fn set_mqtt_socks5_proxy(
-    host: String,
-    port: u16,
-    username: String,
-    password: String,
-) -> Result<(), CoreError> {
+/// (лучший из пула, выбранный автопилотом). Применяется при следующем создании
+/// MQTT-сессии (локальный мост). Некорректные аргументы молча игнорируются —
+/// прежний прокси сохраняется; вызывающая сторона валидирует прокси healthcheck'ом.
+pub fn set_mqtt_socks5_proxy(host: String, port: u16, username: String, password: String) {
     let host_ok = !host.is_empty()
         && host.len() <= 253
         && !host.contains(|c: char| c.is_whitespace())
         && !host.contains('|');
     if !host_ok || port == 0 {
-        return Err(CoreError::NetworkError {
-            detail: "invalid SOCKS5 proxy host/port".to_string(),
-        });
+        return;
     }
     network::socks5::set_mqtt_socks5_proxy_config(network::socks5::Socks5ProxyConfig {
         host,
@@ -367,7 +361,6 @@ pub fn set_mqtt_socks5_proxy(
         username,
         password,
     });
-    Ok(())
 }
 
 /// «Любая сеть»: убрать SOCKS5-прокси — MQTT снова ходит напрямую.

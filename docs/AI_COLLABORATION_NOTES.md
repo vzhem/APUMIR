@@ -3708,3 +3708,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ../android-app/app/src/main/java)
   → :app:testDebugUnitTest → :app:assembleDebug. Телефоны: после PASS — install и проверка
   logcat-маркеров «MQTT: SOCKS5 transport enabled» и стабильности канала на изрезанной сети.
+- **2026-08-21 (доп.324) — фиксы первого гейта SOCKS5-среза:** (1) у rumqttc 0.25.1 НЕТ
+  Transport::tcp_with_connect (E0599) — переписано на ЛОКАЛЬНЫЙ МОСТ: socks5_bridge_endpoint
+  поднимает TcpListener 127.0.0.1:0, MqttOptions указывает на мост, мост качает байты
+  bidirectional-copy через SOCKS5 к реальному брокеру (работает с любой версией rumqttc, один
+  мост на брокер на сессию, ≤10000.accept'ов, сбой туннеля = обычный reconnect). (2) UDL void ≠
+  Rust Result (E0308; в проектном UDL Result-синтаксис не используется) — set_mqtt_socks5_proxy
+  теперь void с молчаливым игнором невалидных аргументов (вызывающий уже проверил прокси
+  healthcheck'ом). (3) bindgen-команда: manifest tools/uniffi-bindgen — ОТ КОРНЯ репо (не из
+  rust-core). Хост cargo test требует MSVC cl.exe (Build Tools не установлены — известный пункт
+  NEW_DEVELOPMENT_PC; socks5-тесты поедут позже после установки MSVC, Android-сборке cl.exe
+  не нужен).
