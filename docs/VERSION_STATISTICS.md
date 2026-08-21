@@ -203,3 +203,17 @@ Android process death/reboot до handoff может потерять чужое
 4. bounded sleep/wake/background relay cycle;
 5. durable receipt/tombstone cleanup и exactly-once UI delivery;
 6. delayed Anna→Zhenya→relay D→Stas acceptance через несовпадающие online-окна.
+
+## v11.17.1 (2026-08-21, release candidate)
+
+- Первая публичная версия с передачей файлов (фото/видео/документы) в личных чатах:
+  E2E-шифрование (XChaCha20-Poly1305, подписанный конверт ключа, TOFU-пин контакта),
+  durable-доставка (TTL 7 дней), окно ≤120 пакетов, чанки 9KiB-фрагментами, прогресс и статусы,
+  «Сохранить в папку» (SAF) + галерея.
+- File-HELLO handshake (автозакрепление ключей), mDNS re-publish 60с (прямой LAN-путь),
+  фикс чат-роутинга входящих, 30с re-pump.
+- CI release-workflow теперь собирает Rust из исходников (NDK 28.2 + cargo-ndk, 3 ABI) —
+  устранён класс «stale .so в релизном APK».
+- LOC-дельта к v11.16.16: ~+3900 (Kotlin+Rust+tests+CI; точный подсчёт по тегу).
+- Статус: prerelease; известное ограничение — скорость доставки зависит от доступности
+  внешних MQTT-брокеров (прокси-канал в разработке).
