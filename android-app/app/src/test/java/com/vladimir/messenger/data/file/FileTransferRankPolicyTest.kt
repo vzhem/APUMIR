@@ -76,14 +76,21 @@ class FileTransferRankPolicyTest {
     }
 
     @Test
-    fun automaticProxyCollectionAndUseUnlockAtTwenty() {
-        assertTrue(!FileTransferRankPolicy.canUseAutomaticProxy(19))
-        assertTrue(FileTransferRankPolicy.canUseAutomaticProxy(20))
+    fun automaticProxyUnlocksAtTenAndManualAtOne() {
+        assertTrue(!FileTransferRankPolicy.canUseAutomaticProxy(9))
+        assertTrue(FileTransferRankPolicy.canUseAutomaticProxy(10))
         assertTrue(FileTransferRankPolicy.canUseAutomaticProxy(1_000))
         assertTrue("Автосбор и автоматический выбор прокси" !in
-            FileTransferRankPolicy.entitlement(19).unlockedFeatureSummary())
+            FileTransferRankPolicy.entitlement(9).unlockedFeatureSummary())
         assertTrue("Автосбор и автоматический выбор прокси" in
-            FileTransferRankPolicy.entitlement(20).unlockedFeatureSummary())
+            FileTransferRankPolicy.entitlement(10).unlockedFeatureSummary())
+        // Ручные прокси — с первого квалифицированного приглашения; свежая установка — нет.
+        assertTrue(!FileTransferRankPolicy.canUseManualProxy(0))
+        assertTrue(FileTransferRankPolicy.canUseManualProxy(1))
+        assertTrue("Ручное добавление прокси" !in
+            FileTransferRankPolicy.entitlement(0).unlockedFeatureSummary())
+        assertTrue("Ручное добавление прокси" in
+            FileTransferRankPolicy.entitlement(1).unlockedFeatureSummary())
     }
 
     @Test

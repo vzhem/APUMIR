@@ -24,11 +24,14 @@ data class SettingsUiState(
     val connectionMode: String = "Unknown",
     val appVersion: String = "0.1.0",
     val rustCoreVersion: String = "Loading...",
+    val proxyTunnelEnabled: Boolean = true,
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot,
+    private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -37,6 +40,43 @@ class SettingsViewModel @Inject constructor(
 
     init {
         loadSettings()
+        _uiState.update { it.copy(proxyTunnelEnabled = proxyTunnelEnabled()) }
+    }
+
+    /** «Любая сеть»: пользовательский выключатель прокси-туннеля (по умолчанию включён). */
+    private fun proxyTunnelEnabled(): Boolean =
+        context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .getBoolean("proxy_tunnel_enabled", true)
+
+    /** «Очистка зависших»: остановить все незавершённые отправки и убрать их очереди. */
+    fun onCancelStalledTransfers() {
+        viewModelScope.launch {
+            val cancelled = runCatching { fileTransferRouter.cancelStalledOutgoing() }.getOrDefault(-1)
+            val message = if (cancelled >= 0) "Остановлено зависших отправок: $cancelled" else "Не удалось выполнить очистку"
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Освободить место: удалить локальные файлы завершённых передач. */
+    fun onPurgeCompletedTransfers() {
+        viewModelScope.launch {
+            val purged = runCatching { fileTransferRouter.purgeCompletedTransfers() }.getOrDefault(-1)
+            val message = if (purged >= 0) "Очищено завершённых передач: $purged" else "Не удалось выполнить очистку"
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun onProxyTunnelToggle(enabled: Boolean) {
+        context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .edit().putBoolean("proxy_tunnel_enabled", enabled).apply()
+        _uiState.update { it.copy(proxyTunnelEnabled = enabled) }
+        viewModelScope.launch {
+            if (enabled) {
+                runCatching { proxyAutopilot.cycle() }
+            } else {
+                RustBridge.clearMqttSocks5Proxy()
+            }
+        }
     }
 
     private fun loadSettings() {

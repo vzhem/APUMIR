@@ -34,6 +34,14 @@ android {
     namespace = "com.vladimir.messenger"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
+    // JVM unit tests exercise transport code that reports through android.util.Log; without
+    // this the JVM stub throws "Method ... not mocked" and green paths turn into failures.
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
+
     defaultConfig {
         applicationId = "com.vladimir.messenger"
         minSdk = libs.versions.minSdk.get().toInt()
@@ -141,6 +149,7 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.14.0@aar")
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

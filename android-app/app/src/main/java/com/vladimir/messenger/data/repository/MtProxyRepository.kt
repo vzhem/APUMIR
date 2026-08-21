@@ -20,6 +20,7 @@ class MtProxyRepository @Inject constructor(
         const val MAX_FAIL_COUNT = 3
         const val MAX_AGE_DAYS = 7
         const val MIN_POOL_SIZE = 10
+        const val IMMEDIATE_PURGE_FAILS = 2
     }
 
     fun observeAll(): Flow<List<MtProtoProxy>> =
@@ -76,6 +77,29 @@ class MtProxyRepository @Inject constructor(
     suspend fun markFailed(id: String) {
         dao.incFailCount(id, System.currentTimeMillis())
         Log.w(TAG, "Proxy marked as failed: $id")
+    }
+
+    /**
+     * Немедленная чистка по решению владельца («нерабочие прокси удалять сразу»):
+     * не-Manual прокси, только что проваливший проверку и набравший ≥ [IMMEDIATE_PURGE_FAILS]
+     * суммарных провалов (healthcheck уже инкрементировал счётчик), удаляется из пула сразу,
+     * не дожидаясь семидневной чистки.
+     */
+    suspend fun purgeFailedNow(failedIds: List<String>): Int {
+        var deleted = 0
+        for (id in failedIds) {
+            val entity = dao.getById(id) ?: continue
+            if (entity.source == "MANUAL") continue
+            if (entity.failCount >= IMMEDIATE_PURGE_FAILS) {
+                dao.delete(id)
+                deleted++
+                Log.i(TAG, "Purged dead proxy immediately: ${entity.host}:${entity.port}")
+            }
+        }
+        if (deleted > 0) {
+            Log.i(TAG, "Immediate purge removed $deleted dead proxies")
+        }
+        return deleted
     }
 
     suspend fun markSuccess(id: String) {

@@ -691,7 +691,24 @@ self.runtime = Some(runtime);
             tracing::info!("mDNS: published self as {} port {}", display_name, port);
         }
 
+        // Bounded re-publish: the one-shot announcement dies when the phone switches
+        // networks (Wi-Fi/hotspot/mobile), leaving it invisible to LAN peers. Refresh the
+        // service so LAN-direct delivery keeps working after network changes.
+        let mut last_publish = std::time::Instant::now();
         loop {
+            if last_publish.elapsed() >= Duration::from_secs(60) {
+                let _ = mdns.unpublish().await;
+                match mdns
+                    .publish_self(&node_id, port, &display_name, 1, public_addr_str.as_deref())
+                    .await
+                {
+                    Ok(()) => {
+                        tracing::info!("mDNS: re-published self as {} port {}", display_name, port)
+                    }
+                    Err(e) => tracing::warn!("mDNS re-publish failed: {}", e),
+                }
+                last_publish = std::time::Instant::now();
+            }
             match mdns.discover(Duration::from_secs(5)).await {
                 Err(e) => tracing::warn!("mDNS discover error: {}", e),
                 Ok(nodes) => {

@@ -17,13 +17,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.ui.components.FileTransferBubble
 import com.vladimir.messenger.ui.components.MessageBubble
 import com.vladimir.messenger.domain.model.Message
+import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
+private data class ChatRow(
+    val key: String,
+    val message: Message?,
+    val transfer: FileTransferEntity?,
+    val orderMs: Long,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,6 +58,24 @@ fun ChatDetailScreen(
     }
 
     val context = LocalContext.current
+
+    // F3: системный выбор файла (SAF) → зашифрованная подготовка → durable отправка
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let(viewModel::onFileSelected)
+    }
+
+    // F3: экспорт принятого файла — системный диалог «куда сохранить»
+    val savePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        viewModel.onSaveTargetPicked(uri)
+    }
+    val pendingSave = uiState.pendingSave
+    LaunchedEffect(pendingSave) {
+        pendingSave?.let { transfer -> savePicker.launch(transfer.displayName) }
+    }
 
     // Прокрутка к последнему сообщению
     LaunchedEffect(uiState.scrollToBottom, uiState.messages.size) {
@@ -116,6 +145,8 @@ fun ChatDetailScreen(
                 onTextChange = viewModel::onInputTextChanged,
                 onSend       = viewModel::onSendMessage,
                 isSending    = uiState.isSending,
+                onAttach     = { filePicker.launch(arrayOf("*/*")) },
+                isPreparingFile = uiState.isPreparingFile,
             )
         },
     ) { paddingValues ->
@@ -162,6 +193,34 @@ fun ChatDetailScreen(
                 }
 
                 else -> {
+                    val transfersByMessageId = remember(uiState.transfers) {
+                        uiState.transfers.associateBy { it.messageId }
+                    }
+                    val chatRows = remember(uiState.messages, uiState.transfers) {
+                        val knownMessageIds = uiState.messages.map { it.id }.toSet()
+                        val rows = uiState.messages.map { message ->
+                            ChatRow(
+                                key = message.id,
+                                message = message,
+                                transfer = transfersByMessageId[message.id],
+                                orderMs = message.timestamp,
+                            )
+                        } + uiState.transfers
+                            .filter {
+                                it.direction == "INCOMING" &&
+                                    it.state != "COMPLETE" &&
+                                    it.messageId !in knownMessageIds
+                            }
+                            .map { transfer ->
+                                ChatRow(
+                                    key = "t-${transfer.transferId}",
+                                    message = null,
+                                    transfer = transfer,
+                                    orderMs = transfer.createdAtMs,
+                                )
+                            }
+                        rows.sortedBy { it.orderMs }
+                    }
                     LazyColumn(
                         state          = listState,
                         modifier       = Modifier.fillMaxSize(),
@@ -169,32 +228,49 @@ fun ChatDetailScreen(
                         reverseLayout  = false,
                     ) {
                         items(
-                            items = uiState.messages,
-                            key   = { it.id },
-                        ) { message ->
-                            MessageBubble(
-                                message = message,
-                                isSelected = activeMessage?.id == message.id,
-                                linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
-                                onTap = {
-                                    if (activeMessage?.id == message.id) {
-                                        // Клик на уже выделенное → показать AlertDialog
-                                        showCopyDialog = message
+                            items = chatRows,
+                            key   = { it.key },
+                        ) { row ->
+                            val transfer = row.transfer
+                            if (transfer != null) {
+                                FileTransferBubble(
+                                    transfer = transfer,
+                                    isFromMe = transfer.direction == "OUTGOING",
+                                    onSaveClick = if (
+                                        transfer.direction == "INCOMING" &&
+                                        transfer.state == "COMPLETE"
+                                    ) {
+                                        { viewModel.requestSaveReceivedFile(transfer) }
                                     } else {
-                                        // Клик на другое сообщение → сбросить и выделить
-                                        activeMessage = message
+                                        null
+                                    },
+                                )
+                            } else {
+                                val message = row.message!!
+                                MessageBubble(
+                                    message = message,
+                                    isSelected = activeMessage?.id == message.id,
+                                    linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                    onTap = {
+                                        if (activeMessage?.id == message.id) {
+                                            // Клик на уже выделенное → показать AlertDialog
+                                            showCopyDialog = message
+                                        } else {
+                                            // Клик на другое сообщение → сбросить и выделить
+                                            activeMessage = message
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (activeMessage?.id == message.id) {
+                                            // Long press на выделенное → показать AlertDialog
+                                            showCopyDialog = message
+                                        } else {
+                                            // Long press → включить выделение
+                                            activeMessage = message
+                                        }
                                     }
-                                },
-                                onLongClick = {
-                                    if (activeMessage?.id == message.id) {
-                                        // Long press на выделенное → показать AlertDialog
-                                        showCopyDialog = message
-                                    } else {
-                                        // Long press → включить выделение
-                                        activeMessage = message
-                                    }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
                 }
@@ -235,6 +311,8 @@ private fun MessageInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     isSending: Boolean,
+    onAttach: () -> Unit = {},
+    isPreparingFile: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -248,6 +326,25 @@ private fun MessageInputBar(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
+            IconButton(
+                onClick = onAttach,
+                enabled = !isPreparingFile && !isSending,
+                modifier = Modifier.size(48.dp),
+            ) {
+                if (isPreparingFile) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.AttachFile,
+                        contentDescription = "Прикрепить файл",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
             TextField(
                 value         = text,
                 onValueChange = onTextChange,

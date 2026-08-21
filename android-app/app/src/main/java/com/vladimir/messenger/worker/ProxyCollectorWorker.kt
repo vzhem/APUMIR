@@ -8,7 +8,6 @@ import androidx.work.WorkerParameters
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.ReferralRankStore
-import com.vladimir.messenger.service.MtProxyHealthChecker
 import com.vladimir.messenger.service.TelegramChannelScraper
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -28,8 +27,8 @@ class ProxyCollectorWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     private val scraper: TelegramChannelScraper,
-    private val healthChecker: MtProxyHealthChecker,
     private val proxyRepo: MtProxyRepository,
+    private val autopilot: com.vladimir.messenger.service.ProxyAutopilot,
 ) : CoroutineWorker(context, params) {
 
     companion object {
@@ -61,12 +60,8 @@ class ProxyCollectorWorker @AssistedInject constructor(
             val excessDeleted = proxyRepo.enforcePoolLimit(POOL_LIMIT)
             Log.i(TAG, "Pool limit: $excessDeleted excess removed")
 
-            // 4. Healthcheck топ-50
-            healthChecker.checkAll()
-
-            // 5. Cleanup мёртвых
-            val dead = proxyRepo.cleanupDead()
-            Log.i(TAG, "Dead cleanup: $dead removed")
+            // 4. Автопилот: healthcheck → мгновенная чистка мёртвых → выбор и подключение лучшего
+            autopilot.cycle(forceCollect = false)
 
             val total = proxyRepo.getAll().size
             Log.i(TAG, "Final pool size: $total proxies")

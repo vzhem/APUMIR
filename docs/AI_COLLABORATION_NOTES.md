@@ -3458,3 +3458,286 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   wiping callbacks, creates Rust authenticated envelope, and atomically stores bounded key-envelope.v1
   beside manifest/chunks before PREPARED. Isolated historical preparation test keeps exchange disabled;
   production path cannot. Chunk store adds exact idempotent/conflict tests. Build gate pending.
+- **2026-08-20 (доп.307) — F3 production file transport source complete (sender owner + receiver
+  ingest + chat UI, build gate pending):** file packets now ride the EXISTING durable text
+  transport (direct QUIC or encrypted M8 relay custody) as `apu-file1|<base64 packet>` texts,
+  one encoded fragment per message, deterministic delimiter-safe message IDs
+  (`f<tid>o<frag>` / `f<tid>c<chunk>f<frag>` / `f<tid>a<count>`) so mesh dedup makes every
+  re-pump idempotent. New bounded strict components: `FileOfferPdu` (manifest+key envelope+signed
+  sender binding, strict decode), `FileTransferWire` (48KiB wire budget, strict base64),
+  `FileTransferSender` (windowed pump: offer first, then ≤120 in-flight chunk-fragment messages
+  beyond receiver-confirmed contiguous prefix; 120ms pacing; honest states PREPARED→TRANSFERRING→
+  SENT→COMPLETE; restart resume via Room+chunk files; re-pump throttle 2min without ack progress),
+  `FileTransferReceiver` (bounded fragment reassembly 64 items/4MiB, fail-closed offer checks:
+  sender match, MY recipient match, expiry, binding signature, TOFU pin change reject; chunk
+  geometry check; durable encrypted chunk store; deterministic per-chunk file-ACKs back to sender;
+  stream decrypt+whole-file SHA-256 before plaintext becomes visible; VERIFY_FAILED deletes
+  received plaintext), `ReceivedFileStore` (app-private atomic verified output), `FileTransferRouter`
+  (Hilt facade; routes packets BEFORE chat-text save; periodic 20s pump loop + pumps on
+  peer_discovered/network connected; skips when engine not running). Multi-day all-phones-offline
+  custody comes from the M8 durable relay machinery itself (7-day TTL, sender-local durable
+  chunks+Room for restart resume); sender re-push after restart is dedup-idempotent. Chat UI:
+  attach button (SAF OpenDocument) → rank-checked preparation → local placeholder message
+  (`insertLocalFileMessage`, never rides text transport) → immediate pump; `FileTransferBubble`
+  shows honest state/progress; incoming in-progress transfers merged into the chat list.
+  CoreServerService ACKs each file-packet message-id so relay cleanup stays exactly-once.
+  JVM tests added (PDU/wire/sender window+throttle+empty-file/receiver full flow+negative);
+  `kotlinx-coroutines-test` added to test deps. KNOWN GAPS (honest, next slices): (1) OFFER
+  metadata (filename/size/media type) is integrity-protected but NOT confidential to relay
+  nodes — chunk content and file key are; a Rust offer-AEAD slice must fix this; (2) relay
+  per-recipient queue (200) shared with text — window 120 leaves ~80 for text, bursts can
+  enqueue-reject (harmless, retried); (3) receiver pull-based missing-chunk request not yet
+  (sender cyclic re-push covers loss); (4) received-file SAF export/open button not yet
+  (files live in app-private `file_received/v1`); (5) sender does not delete local chunks on
+  COMPLETE (waits TTL cleanup slice). No Windows compile gate, no phones, no release yet.
+- **2026-08-20 (доп.308) — NEW PC environment + F3 Windows compile gate PASS (после 3 итераций):**
+  разработка переехала на новый ПК: канонический клон теперь **`C:\APU-M8`** (старый
+  `C:\APUMIR-arena-test` не существует; clone в `C:\Users\User` — старый dirty, не трогать).
+  Гэтчи новой машины, все закрыты: (1) системный `JAVA_HOME` указывал на несуществующий
+  `D:\Android Studio\jbr` — навсегда исправлен на `C:\Program Files\Android\Android Studio\jbr`
+  (User-level SetEnvironmentVariable); SDK — `%LOCALAPPDATA%\Android\Sdk`, local.properties с
+  forward-slash `sdk.dir`. (2) Клон был single-branch — `git config remote.origin.fetch
+  "+refs/heads/*:refs/remotes/origin/*"` + повторный fetch; локальный оверлей `.so` убран в
+  stash до checkout. (3) GitHub 443 периодически отказывает — лечится повторами pull/fetch
+  (известно и раньше). Gate-история F3 на 45d27db (ветка `arena/01a02092-apumir`): первый
+  прогон — 3 ошибки компиляции K2 (неоднозначный sumOf с неразрешимым селектором, smart cast на
+  var в замыкании, отсутствие default у errorCode) — фикс `2371bcc`; второй — 13 падений JVM
+  от `android.util.Log` ("Method not mocked") + виртуальное время теста троттлинга уходило за
+  expiry фикстуры — фикс `08d6389` (`unitTests.isReturnDefaultValues = true` + expiry 1ч);
+  третий — 5 падений из-за тестового фикстура (байты transferId ≠ его hex-форма, чанки
+  навсегда оседали в pre-offer буфере; один тест проходил «по ошибке») — фикс `45d27db`.
+  Итог: **`testDebugUnitTest` 88/88 PASS, `assembleDebug` BUILD SUCCESSFUL** (main-код для APK
+  не менялся после первого зелёного assembleDebug — дальше правились только тесты и
+  testOptions). Rust/.so не пересобирались и не needed: свежий arm64 `.so` (6,935,552 B)
+  закоммичен в `3eaae63` вместе с актуальными bindings; lib.udl не менялся. Телефоны не
+  трогали; релиз не делали.
+- **2026-08-20 (доп.309) — File-HELLO handshake закрывает deadlock «первого файла»:** обнаружено
+  при подготовке телефонного acceptance: sender требует закреплённый X25519-binding получателя
+  (доп.306), а пиннинг существовал ТОЛЬКО из входящего file-offer (доп.303) → два телефона,
+  никогда не обменивавшиеся файлами, не могли отправить первый файл друг другу. Новый срез:
+  крошечное durable-сообщение `apu-file-hello1|<base64 подписанного binding>` (≤512B,
+  детерминированный per-pair-per-direction msg id `fh<sha256-32>`, throttle 60 c на контакта).
+  Приём: строгая проверка подписи и совпадения node с отправителем → TOFU-пин (смена ключа
+  по-прежнему отвергается) → при ПЕРВОМ пине авто-ответ своим HELLO (обе стороны оказываются
+  закреплены). Рассылка: pump-цикл (20 c) автоматически шлёт HELLO всем unpinned pk_-контактам
+  (durable → доехав при появлении получателя); UI при ошибке «binding is not pinned» сам
+  отправляет HELLO и показывает человекочитаемое сообщение.HELLO никогда не попадает в чат
+  (перехватывается до сохранения), relay-cleanup через штатный delivery-ACK. JVM-тесты:
+  wire round-trip/oversize, детерминизм ID, PINNED_NEW→PINNED_ALREADY, mismatch sender reject,
+  changed-key reject, not-hello, маршрутизация до chat-text. Build gate нового среза —
+  следующий прогон на Windows вместе с release-кандидатом для телефонов.
+- **2026-08-21 (доп.310) — первый телефонный file-acceptance: сеть диктует правила; найдено 3 бага, 2 закрыты сразу:**
+  v11.17.0 (debug-signed, тот же debug-ключ что стоял на телефонах — release-jks несовместим с установленным
+  v11.16.45!) установлена на Анну/Жену/Стаса поверх, данные сохранены. Предыстория-гэтчи: подпись приложения на
+  телефонах = `CN=Android Debug` (`C:\Users\User\.android\debug.keystore`, SHA256 40448024…a186), а НЕ p2p-release.jks
+  (f843…a5f7) → ставим `assembleDebug`; закоммиченный `jniLibs/arm64 .so` СТАРЕ bindings → стартовый
+  UnsatisfiedLinkError на `uniffi_p2p_core_checksum_func_clear_identity_signing_seed` → вылечено пересборкой
+  `build-rust.ps1 -Features mqtt-dual-broker -Arch arm64-v8a` на новой машине (кэш target/ оказался актуальным;
+  строковый поиск символов в .so через ASCII.GetString — НЕ НАДЁЖЕН, рабочая проверка = запуск приложения).
+  Итоги сети дня: провайдер сильно режет канал к broker.hivemq.com:1883 / broker.emqx.io:1883 (с ПК Test-NetConnection
+  идёт с 1-3 попыток; test.mosquitto.org мёртв; в приложении — бесконечные "Connection closed by peer abruptly"/
+  "Network timeout", публикации редко проходят). Мелкие сообщения (текст/заглушки/офферы/ACK) протискиваются,
+  крупные (~33КБ base64 чанк-фрагменты) — НЕТ: у Жени дошли оба оффера (manifest+key-envelope на диске) и ноль
+  чанков; у Анны все пакеты durably retained и re-pump каждые 2 мин — офлайн-очередь работает как задумано.
+  LAN-direct не спасал из-за бага (1): **mDNS publish одноразовый при старте** — Стас (не менял сеть) виден всем
+  с pk, Анна/Женя после смен сетей «исчезли» (соседи видели только чужие записи без node_id). Баг (2): локальная
+  заглушка файла имела статус QUEUED_OFFLINE → FULL SYNC повторной отправкой УШЛА получателю как обычный текст
+  («пришло фото» = текст-заглушка, не файл). Баг (3, открыт): чанк-фрагмент 24KiB велик для изрезанных каналов
+  (нужен меньший фрагмент на broker-пути и/или LAN/прокси приоритет). Фиксы этого среза: mDNS re-publish каждые
+  60 c (unpublish+publish_self в discover-цикле); статус заглушки → `LOCAL_FILE` (вне выборок retry); добавлены
+  Log.i на успешных путях приёмника (offer accepted / chunk stored) — раньше их отсутствие стоило часов
+  диагностики. РЕШЕНИЕ пользователя по следующему приоритету: **прокси-канал (MTProto) для транспорта** —
+  «наши прокси должны использоваться, чтобы не резало и не дёргался канал» (Приоритет 7); плюс в очереди:
+  mDNS-анонсы уже чинятся здесь, LAN-direct приоритет над брокерами, кнопка открыть/сохранить принятый файл,
+  меньшие фрагменты для broker-пути. Windows gate нового среза: build-rust + assembleDebug + 95 JVM-тестов PASS
+  ожидается следующим прогоном; телефоны ждут переустановки.
+- **2026-08-21 (доп.311) — acceptance-прогресс + фикс размера фрагментов:** новая сборка (f9b4c57,
+  lastUpdateTime 11:21) на всех трёх телефонах; оффер от Анны **дошёл и принят** Жениной стороной
+  (`File offer accepted: … IMG…jpg, 56726 B, 1 chunks` — новый receiver-лог работает). Подтверждён
+  размерный порог изрезанного канала: все мелкие конверты (текст/HELLO/оффер/ACK) проходят, крупные
+  (~33КБ base64 чанк-фрагмент) — нет. Срез: `MAX_FRAGMENT_PAYLOAD_BYTES` 24KiB → **9KiB**,
+  `MAX_FRAGMENTS` 16 → **32** (32×9KiB ≥ 256KiB+tag reassembly cap; Kotlin-only, без Rust/binding
+  изменений; окно отправителя само пересчитывается ≤120 сообщений). Ожидание: ~12КБ base64
+  сообщения проходят как обычные тексты. Открыто: QUIC LAN-direct всё ещё не наблюдался в паре
+  Анна↔Женя (проверить connect timeout vs mDNS re-publish эффект); прокси-канал (MTProto) —
+  следующий большой срез по решению пользователя.
+- **2026-08-21 (доп.312) — ПЕРВЫЙ ПОЛНЫЙ ФАЙЛОВЫЙ PASS (скрытый багом отображения) + фикс чат-роутинга:**
+  тест А (фото 3КБ, Анна→Женя): у Анны «Доставлено ✓» — т.е. Женин телефон реально принял файл,
+  проверил SHA-256, сохранил и отправил финальный file-ACK; тестовая теория размера подтверждена
+  (мелкие пакеты проходят изрезанный канал). Но Женя «ничего не видел»: входящий transfer и
+  сообщение о завершении записывались в chat_id из конверта отправителя — это ЛОКАЛЬНЫЙ UUID чата
+  Анны, которого на Жене нет → бабл в несуществующем чате. Фикс: router.routeIncoming подставляет
+  локальный чат по senderId (getChatByContactId), fallback — исходный chatId. Пайплайн файлов
+  теперь сквозной: мелкий файл доставлен end-to-end по изрезанному broker-каналу с честными
+  статусами. Осталось: пере-тест 55КБ на 9KiB-фрагментах, LAN-direct QUIC (не наблюдался у пары
+  Анна↔Женя), кнопка открыть/сохранить, прокси-канал MTProto.
+- **2026-08-21 (доп.313) — итог марафона: файловый конвейер доказан, канал — главный тормоз:**
+  ЗАКРЫТО за сегодня: (1) v11.17.0 debug на всех трёх телефонах (та же debug-подпись, данные целы;
+  fresh `.so` собран на новой машине build-rust.ps1); (2) File-HELLO handshake — ключи Анна↔Женя
+  закреплены; (3) **первый полный end-to-end PASS файла**: фото 3КБ Анна→Женя — доставлено,
+  расшифровано, SHA-256 проверен, финальный ACK вернулся, у Анны «Доставлено ✓»; (4) фикс чат-
+  роутинга: входящие файлы больше не прячутся в чужом chat_id (Анна увидела «0/3» с прогресс-баром
+  — UI приёма работает); (5) 9KiB-фрагменты; (6) mDNS re-publish 60с; (7) заглушки не улетают
+  текстом; (8) JVM-гейт 88/88 на новой машине `C:\APU-M8` (JAVA_HOME=Android Studio jbr permanently;
+  clone из single-branch переведён на all-refs). БЛОКЕРЫ/открытое: канал до публичных брокеров
+  нестабилен часами (тексты по 15+ минут не уходят; ПК-проверка: hivemq/emqx коннектятся с 1-3
+  попытки, test.mosquitto мёртв) → фото >3КБ стоят в durable-очередях (0/3 часами) — ничего не
+  теряется, но ждёт окна; LAN-direct QUIC не сработал у пары Анна↔Женя (подозрение на client
+  isolation роутера: mDNS multicast проходит, unicast таймаутится); прокси-срез MTProto (решение
+  пользователя) + спокойные переподключения + запасной брокер — СЛЕДУЮЩИЙ БОЛЬШОЙ СРЕЗ; также
+  в очереди: кнопка открыть/сохранить файл, офлайн-сценарий «все выключены на часы», чистка
+  осиротевших transfer-строк от старых попыток. Все push-гэтчи дня (debug-подпись, устаревший .so
+  в git, stash, single-branch, PSU-моргание GitHub — лечится повторами pull) записаны в доп.308-312.
+- **2026-08-21 (доп.314) — ускорение повторов + кнопка «Сохранить в папку»:** 26КБ-фото доставлено
+  (9KiB-фрагменты работают на реальных размерах; медленно из-за канала). REPUMP_INTERVAL_MS 2мин →
+  **30с** (re-pump дешёв: детерминированные ID + локальный dedup, в сеть без изменений не уходит) —
+  очереди прокачиваются в 4 раза чаще при «окнах» канала. Новый UI-путь экспорта: у завершённого
+  входящего файла кнопка «Сохранить в папку» → SAF CreateDocument (octet-stream, имя файла из
+  манифеста) → потоковое копирование из app-private verified storage в выбранное место
+  (router.exportReceivedFile). ViewModel: pendingSave → лаунчер → копирование с честным
+  результатом в snackbar. Следующий большой срез остаётся «прокси + любая сеть» (решение
+  пользователя, доп.310-313).
+- **2026-08-21 (доп.315) — ФАЙЛОВЫЙ ЭТАП ЗАКРЫТ: полный цикл Женя→Стас PASS; подготовка релиза:**
+  фото 26КБ: доставлено, у Стаса кнопка «Сохранить в папку» → сохранено → **открылось в галерее**;
+  у Жени «Доставлено ✓». Итого за день подтверждены: 3КБ (Анна→Женя) и 26КБ (Женя→Стас) end-to-end,
+  прогресс-бары, честные статусы, durable-очереди (ничего не потеряно за день сетевого хаоса),
+  экспорт в галерею. Висящие Анна↔Женя = старые очереди в ожидании окна канала (не цикл). ВАЖНО
+  для релиза: release-workflow НЕ собирал Rust → взял бы устаревший committed `.so` → публичный APK
+  падал бы при старте; workflow теперь сам ставит NDK 28.2.13676358 + rust-toolchain + cargo-ndk и
+  собирает все три ABI из исходников (`--features mqtt-dual-broker`), release помечен prerelease.
+  Локальный `.so` на телефонах (00:15) БЕЗ mDNS-фикса — при следующем прогоне build-rust на ПК
+  перекомпилируется (ядро менялось). Пользователь дал явное разрешение на публикацию релиза;
+  публичный текст показан владельцу на утверждение (политика RELEASE_PUBLICATION_POLICY): версия
+  **v11.17.1**, prerelease, APK+checksum из CI, текст без внутренних деталей. После релиза:
+  прокси-срез MTProto («любая сеть»), офлайн-сценарий «все выключены на часы», cancel-кнопка
+ transfer, чистка осиротевших transfer-строк.
+- **2026-08-21 (доп.316) — релиз v11.17.1 в процессе: тег поставлен, первый CI-прогон упал на native-шаге:**
+  пользователь утвердил СТАБИЛЬНЫЙ релиз (не prerelease; в приложении UpdateChecker смотрит
+  `releases/latest`, поэтому финальный релиз обязан быть latest non-prerelease — переключим после
+  сборки через gh release edit); из публичного текста убраны «известное ограничение» и упоминания
+  внешних ресурсов. Патч workflow-v1 применён владельцем (c1dfd82, у arena-токета нет workflows-
+  permission — правки workflow только через ПК владельца). Тег v11.17.1 поставлен; CI-прогон
+  32471818680 упал в шаге Build native core (~1мин; логи не отдаются — results-receiver EOF,
+  известная сетка). Диагноз по конструкции: `sdkmanager --install "ndk;…" || true` маскировал сбой
+  + `${{ env.ANDROID_HOME }}` в step-env + перенос строки из v1-скрипта. Патч-v2
+  (`scripts/patch-release-workflow-v2.ps1`): GITHUB_ENV для ANDROID_NDK_HOME, test -x clang
+  (громкий сбой в правильном месте), однострочный cargo ndk. План: владелец применяет v2+push,
+  тег v11.17.1 передвигается на новый коммит (delete+re-tag), CI пересобирает, затем
+  gh release edit --latest --prerelease=false + финальный редактированный текст + checksum asset.
+- **2026-08-21 (доп.317) — РЕЛИЗ v11.17.1 ОПУБЛИКОВАН (stable, latest):** после патча workflow-v2
+  владельцем (6deb532; пуш потребовал явного refspec — «Everything up-to-date» лгал из-за устаревшего
+  remote-tracking) тег v11.17.1 передвинут на 6deb532; CI-прогон 32473695695 собрал Rust из исходников
+  (3 ABI, cargo-ndk, NDK 28.2) + assembleRelease за 11m13s PASS. Release создан автоматически, затем
+  gh release edit: title «APU v11.17.1», утверждённый владельцем публичный текст (без «известных
+  ограничений» и внешних ресурсов по его требованию), **prerelease=false, latest** — API releases/latest
+  отдаёт v11.17.1, UpdateChecker предложит обновление всем. APK asset 35,285,255 B; checksum asset
+  отложен (release-assets CDN недоступен из песочницы — EOF; владелец снимет SHA-256 локально).
+  Продуктовые решения владельца записаны: рукопожатие/доставка через любых третьих онлайн-телефонов
+  (уже так); ГИГАБАЙТНЫЕ файлы — ТОЛЬКО напрямую телефон↔телефон и быстро (следующий большой срез
+  вместе с MTProto-прокси «любая сеть»).
+- **2026-08-21 (доп.318) — Порядок: ПК-диск и репозиторий вычищены:** пользователь удалил (по явному
+  списку, после инвентаризации) 9 старых копий проекта (~2.9 ГБ: APUMIR-arena-test-old, -m8c-gate-old,
+  -v11.16.4-final, -junk-clone, APUMIR, APU-RELEASE-v11.16.23, APU-M8-PC-RECOVERY, APU-TOOLS,
+  APUMIR-transfer), остатки старого клона в профиле C:\Users\User (главная ловушка для новых
+  ИИ-сессий), ~190 apu-* файлов в %TEMP% (сохранён только свежий apu-v11.17.1.apk), битый ярлык
+  «АРХИВ на диске D»; apu-icon-original.zip перенесён в Документы. На диске осталась ЕДИНСТВЕННАЯ
+  рабочая копия **C:\APU-M8** (2.1 ГБ, кэш Rust-target сохранён для быстрых сборок). В репозитории:
+  из корня удалены одноразовые *.py/temp_core.txt/logs/.kotlin (git-история хранит); 137 одноразовых
+  гейт-скриптов перенесены в scripts/archive/, в scripts/ остались только универсальные
+  (check_structure, invoke_verified_gate_with_github_retry, patch-release-workflow-v2,
+  set_max_test_rank*). Обновление с публичного релиза на тестовые телефоны НЕ ставится поверх
+  (debug-подпись vs release-подпись — INSTALL_FAILED_UPDATE_INCOMPATIBLE, ожидаемо); тестовые
+  телефоны обновляются только adb-debug-сборками; миграция тестовых телефонов на release-канал —
+  отдельная задача бэклога.
+- **2026-08-21 (доп.319) — генеральная уборка завершена (финальное состояние машины):** на диске C:
+  от проекта существует ЕДИНСТВЕННАЯ рабочая копия **C:\APU-M8** (~2.1 ГБ, живой кэш Rust-target).
+  Удалено суммарно ~13.5 ГБ: 9 старых клонов-копий (доп.318), остатки клона в профиле, ~190 %TEMP%
+  файлов, flutter-эра C:\src\p2p_messenger (8.2 ГБ; исходники сохранены в
+  Documents\apu-flutter-era-source.zip), 12 мёртвых ярлыков (диск D: отсутствует). Ранний
+  Android-проект AndroidStudioProjects\APU перенесён целиком в Documents\apu-legacy-androidstudio;
+  apu-icon-original.zip — в Documents. Правило для будущих сессий: считать каноном только C:\APU-M8,
+  любые другие APU-папки/ярлыки — чужой мусор, подлежащий инвентаризации и удалению. Рабочий стол
+  содержит только живые ярлыки. Сессия закрыта: файловая передача v11.17.1 опубликована (latest),
+  следующий большой срез — MTProto-прокси «любая сеть» + гигабайтные прямые передачи.
+- **2026-08-21 (доп.320) — срез «Прокси-автопилот» (по решению владельца: автопоиск, автовыбор
+  лучшего, подключение через него, нерабочие удалять СРАЗУ):** новый `ProxyAutopilot`
+  (@Singleton): один цикл = healthcheck топ-50 → МГНОВЕННАЯ чистка (не-Manual прокси с ≥2
+  суммарными провалами после текущей проверки удаляется немедленно — раньше ждал 7 дней;
+  MtProxyRepository.purgeFailedNow + IMMEDIATE_PURGE_FAILS=2) → лучший по latency становится
+  активным (раньше checkAllAndPickBest вообще никто не вызывал). Запуск цикла: (1) при старте
+  CoreServerService после engine-init; (2) ProxyCollectorWorker (6ч, теперь с выбором лучшего);
+  (3) МГНОВЕННО при сбое активного прокси в TelegramRelay (markCurrentProxyFailed → cycle) —
+  вместо вечного долбления в тот же мёртвый. Пул <10 → автоматический докollect при любом цикле.
+  Rank-gate 20 (доп.288) сохранён — вопрос владельцу: открыть автопрокси всем рангам? JVM-тесты:
+  второй промах удаляет, первый прощается, MANUAL неприкосновенен, успех сбрасывает стрик,
+  активный флаг переключается. КЛАРНО: MTProto-прокси (публичные) НЕ МОГУТ туннелировать
+  произвольный TCP (только Telegram) — поэтому текущий потребитель лучшего прокси = TelegramRelay
+  (SOCKS5/HTTP). СЛЕДУЮЩИЙ БОЛЬШОЙ СРЕЗ: MQTT через SOCKS5 в Rust (rumqttc tcp_with_connect) —
+  тогда ВЕСЬ mesh-трафик пойдёт через лучший прокси; это закроет «любая сеть» для сообщений.
+  Windows gate: testDebugUnitTest + assembleDebug ждут следующего прогона.
+- **2026-08-21 (доп.321) — решение владельца по рангам прокси + фикс теста окна:** автоматический
+  прокси (автосбор/автовыбор/автоподключение) теперь открывается с **ранга 10 «Проводник»**
+  (было 20); ручное добавление/выбор прокси — с **ранга 1 «Первый связной»** (новый гейт
+  canUseManualProxy на addProxy/setActive в MtProxyViewModel; свежая установка без приглашений —
+  никаких прокси). Тексты порогов в UI обновлены. Windows-гейт поймал устаревший тест окна
+  отправки (жёстко зашитые 10×11 для 24KiB-фрагментов): переписан на вычисление из живых
+  констант кодека (ceil(chunk+tag/frag), MAX_INFLIGHT/fragmentsPerChunk) + сценарий пошагового
+  продвижения окна и закрытия в COMPLETE.
+- **2026-08-21 (доп.322) — бейдж ранга на главном экране (по запросу владельца «ранг на видном
+  месте»):** под заголовком «Сообщения» всегда виден чип «🎖 <имя ранга> · <число друзей>»
+  (ChatListViewModel.refreshRankBadge из центральной политики рангов + debug-override для
+  тестовых телефонов); тап по чипу открывает существующий экран «Ранги и возможности»
+  (что открыто/как расти). Kotlin-only, гейт — следующий прогон.
+- **2026-08-21 (доп.323) — большой срез «любая сеть», часть 1: MQTT через SOCKS5 в Rust-движке:**
+  новый `network/socks5.rs`: минимальный асинхронный SOCKS5-клиент (RFC 1928 + auth RFC 1929,
+  no-auth/username-password, доменный CONNECT, строгий разбор ответа) + глобальная конфигурация
+  (RwLock static). `mqtt_transport::apply_socks5_transport`: если прокси установлен, ОБА брокера
+  (hivemq + emqx) подключаются через `rumqttc::Transport::tcp_with_connect` — SOCKS5-рукопожатие
+  внутри коннектора, дальше rumqttc говорит MQTT по тому же сокету = весь mesh-трафик (текст+файлы)
+  в туннеле. При сбое туннеля конкретная попытка откатывается на прямое соединение (канал не умирает
+  вместе с прокси; автопилот сменит и повторит). FFI: `set_mqtt_socks5_proxy(host,port,user,pass)`
+  (валидация host/port, ошибки CoreError::NetworkError) + `clear_mqtt_socks5_proxy()`; применяется
+  при следующем переподключении брокера (на дёрганом канале — секунды). Kotlin: RustBridge-мосты +
+  ProxyAutopilot.applyBestProxyToEngine — после каждого цикла лучший живой SOCKS5 толкается в движок
+  (HTTP/MTProto-прокси для туннеля непригодны — честно clear). Rust-тесты: wire-форматы greeting/
+  CONNECT/auth, парсер ответов (rep!=0 → ошибка, ATYP-длины), round-trip глобального конфига.
+  РИСК-точка компиляции: сигнатура tcp_with_connect в rumqttc 0.25.1 (клажур возвращает
+  Pin<Box<dyn Future<Output=io::Result<TcpStream>>+Send>> — совместимо и с generic-Fut вариантом);
+  если гейт упадёт — ждать точную сигнатуру из ошибки. ГЕЙТ (нужны владельцем): build-rust →
+  regen-bindings (tools/uniffi-bindgen: cargo run --manifest-path tools/uniffi-bindgen/Cargo.toml
+  -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ../android-app/app/src/main/java)
+  → :app:testDebugUnitTest → :app:assembleDebug. Телефоны: после PASS — install и проверка
+  logcat-маркеров «MQTT: SOCKS5 transport enabled» и стабильности канала на изрезанной сети.
+- **2026-08-21 (доп.324) — фиксы первого гейта SOCKS5-среза:** (1) у rumqttc 0.25.1 НЕТ
+  Transport::tcp_with_connect (E0599) — переписано на ЛОКАЛЬНЫЙ МОСТ: socks5_bridge_endpoint
+  поднимает TcpListener 127.0.0.1:0, MqttOptions указывает на мост, мост качает байты
+  bidirectional-copy через SOCKS5 к реальному брокеру (работает с любой версией rumqttc, один
+  мост на брокер на сессию, ≤10000.accept'ов, сбой туннеля = обычный reconnect). (2) UDL void ≠
+  Rust Result (E0308; в проектном UDL Result-синтаксис не используется) — set_mqtt_socks5_proxy
+  теперь void с молчаливым игнором невалидных аргументов (вызывающий уже проверил прокси
+  healthcheck'ом). (3) bindgen-команда: manifest tools/uniffi-bindgen — ОТ КОРНЯ репо (не из
+  rust-core). Хост cargo test требует MSVC cl.exe (Build Tools не установлены — известный пункт
+  NEW_DEVELOPMENT_PC; socks5-тесты поедут позже после установки MSVC, Android-сборке cl.exe
+  не нужен).
+- **2026-08-21 (доп.325) — ручной биндинг новых FFI + пользовательский выключатель прокси:** (1)
+  bindgen-инструмент требует MSVC link.exe (Build Tools не установлены; до их установки) — две
+  новые функции вписаны в p2p_core.kt ВРУЧНУЮ точно в стиле генератора (JNA-декларации + void-
+  обёртки uniffiRustCall; без checksum-записей — load-time проверка итерирует только перечисленные,
+  старые не менялись); при первом настоящем bindgen перегенерятся идентично. (2) По решению
+  владельца «можно отключать в настройках»: новая секция «Сеть» в настройках с Switch «Туннель
+  через прокси» (по умолчанию ВКЛ; pref proxy_tunnel_enabled). ProxyAutopilot.cycle первым делом
+  читает выключатель: отключено → clearMqttSocks5Proxy в движке и скип всех циклов; включение →
+  немедленный cycle. Ранг-гейт 10 сохраняется поверх выключателя. ГЕЙТ: .so уже собран (16:15,
+  PASS) — остались :app:testDebugUnitTest + assembleDebug.
+- **2026-08-21 (доп.326) — LAN-передача подтверждена пользователем + повторный ACK + очистка зависших:**
+  Анна ПОЛУЧИЛА ТРИ фото (застрявшие вчерашние передачи доехали по прямому QUIC после оживления
+  mDNS-анонсов) с кнопкой «Сохранить в папку». Найдена причина вечного «отправлено, ждём
+  подтверждение» у Жени: приёмник на ДУБЛИКАТЕ куска молчал — если отправитель потерял финальный
+  ACK (рестарт/обрыв), COMPLETE не приходил никогда. Фикс: дубликат → повторить ACK с текущим
+  contiguous. По запросу владельца «очистка кэша/остановка старых отправок»: настройки → новая
+  секция «Передача файлов»: «Остановить зависшие отправки» (DAO cancelAllOutgoing: PREPARED/
+  TRANSFERRING/SENT → CANCELLED, передатчик их больше не берёт; локальные куски удалены; строки
+  остаются как «Отменено») и «Очистить завершённые» (куски+принятые копии+строги COMPLETE;
+  сохранённые пользователем файлы остаются). JVM-тест: отмена стопает только активные исходящие,
+  COMPLETE/CANCELLED-выборки корректны. Build Tools у владельца: установщик упирается в
+  физически отключённый диск D: — инструкция с --installPath C:\BuildTools.
