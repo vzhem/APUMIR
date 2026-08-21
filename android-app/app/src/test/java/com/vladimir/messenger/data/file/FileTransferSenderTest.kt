@@ -141,6 +141,8 @@ class FileTransferSenderTest {
         dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 64, totalBytes = 128))
         dao.insertNewTransfer(
             entity(chunkCount = 1, chunkSize = 10, totalBytes = 10).copy(
+                transferId = "ffffffffffffffffffffffffffffffff",
+                messageId = "m-incoming",
                 state = "COMPLETE",
                 direction = "INCOMING",
             )

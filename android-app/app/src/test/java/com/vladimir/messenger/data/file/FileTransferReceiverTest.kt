@@ -176,7 +176,9 @@ class FileTransferReceiverTest {
 
         val transfer = dao.getTransfer(transferIdHex)!!
         assertEquals(1, transfer.completedChunks)
-        assertEquals(acksAfterFirst, sentAckContiguous().size)
+        // Дубликат больше не молчит: он повторяет ACK с текущим прогрессом (+1),
+        // чтобы отправитель, потерявший финальный ACK, всё же закрыл передачу.
+        assertEquals(acksAfterFirst + 1, sentAckContiguous().size)
     }
 
     @Test
