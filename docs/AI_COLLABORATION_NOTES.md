@@ -3611,3 +3611,16 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   **v11.17.1**, prerelease, APK+checksum из CI, текст без внутренних деталей. После релиза:
   прокси-срез MTProto («любая сеть»), офлайн-сценарий «все выключены на часы», cancel-кнопка
  transfer, чистка осиротевших transfer-строк.
+- **2026-08-21 (доп.316) — релиз v11.17.1 в процессе: тег поставлен, первый CI-прогон упал на native-шаге:**
+  пользователь утвердил СТАБИЛЬНЫЙ релиз (не prerelease; в приложении UpdateChecker смотрит
+  `releases/latest`, поэтому финальный релиз обязан быть latest non-prerelease — переключим после
+  сборки через gh release edit); из публичного текста убраны «известное ограничение» и упоминания
+  внешних ресурсов. Патч workflow-v1 применён владельцем (c1dfd82, у arena-токета нет workflows-
+  permission — правки workflow только через ПК владельца). Тег v11.17.1 поставлен; CI-прогон
+  32471818680 упал в шаге Build native core (~1мин; логи не отдаются — results-receiver EOF,
+  известная сетка). Диагноз по конструкции: `sdkmanager --install "ndk;…" || true` маскировал сбой
+  + `${{ env.ANDROID_HOME }}` в step-env + перенос строки из v1-скрипта. Патч-v2
+  (`scripts/patch-release-workflow-v2.ps1`): GITHUB_ENV для ANDROID_NDK_HOME, test -x clang
+  (громкий сбой в правильном месте), однострочный cargo ndk. План: владелец применяет v2+push,
+  тег v11.17.1 передвигается на новый коммит (delete+re-tag), CI пересобирает, затем
+  gh release edit --latest --prerelease=false + финальный редактированный текст + checksum asset.
