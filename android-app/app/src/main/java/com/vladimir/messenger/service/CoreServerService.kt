@@ -52,6 +52,7 @@ class CoreServerService : Service() {
     @Inject lateinit var notificationHelper: NotificationHelper
     @Inject lateinit var botApi: BotApi
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
+    @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -174,6 +175,16 @@ class CoreServerService : Service() {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
 
+                // Прокси-автопилот: первичный цикл при старте — проверить пул, убрать мёртвых,
+                // выбрать и подключить лучшего (без принудительного сбора).
+                serviceScope.launch {
+                    try {
+                        proxyAutopilot.cycle()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Proxy autopilot startup cycle: ${e.message}")
+                    }
+                }
+
             // Telegram Bot relay (запасной канал)
             val tgToken = prefs.getString("telegram_bot_token", "") ?: ""
             if (tgToken.isNotBlank()) {
@@ -184,6 +195,7 @@ class CoreServerService : Service() {
                     myNodeId = nodeId ?: "",
                     scope = serviceScope,
                     proxyRepo = mtProxyRepository,
+                    autopilot = proxyAutopilot,
                     automaticProxyAllowed = {
                         FileTransferRankPolicy.canUseAutomaticProxy(
                             ReferralRankStore.qualifiedDirectCount(applicationContext)
