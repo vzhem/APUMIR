@@ -20,6 +20,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.util.QrCodeGenerator
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.asImageBitmap
@@ -62,7 +64,8 @@ fun ShareProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(24.dp),
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -79,7 +82,7 @@ fun ShareProfileScreen(
                     contentDescription = "QR-код профиля",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .size(240.dp)
+                        .size(208.dp)
                         .background(
                             color = MaterialTheme.colorScheme.surface,
                             shape = RoundedCornerShape(16.dp),
@@ -88,7 +91,7 @@ fun ShareProfileScreen(
                 )
             }
 
-            Avatar(name = uiState.displayName, size = 72)
+            Avatar(name = uiState.displayName, size = 64)
 
             Text(
                 text = uiState.displayName,
