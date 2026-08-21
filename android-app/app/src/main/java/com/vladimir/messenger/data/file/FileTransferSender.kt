@@ -188,6 +188,8 @@ class FileTransferSender(
         private const val TAG = "FileTransferSender"
         const val PACKET_GAP_MS = 120L
         const val MAX_INFLIGHT_MESSAGES = 120
-        const val REPUMP_INTERVAL_MS = 2L * 60 * 1000
+        // 30s: re-pumps are cheap (deterministic IDs, local dedup) and lossy channels open
+        // short windows — the 2-minute cadence kept transfers waiting far longer than needed.
+        const val REPUMP_INTERVAL_MS = 30_000L
     }
 }

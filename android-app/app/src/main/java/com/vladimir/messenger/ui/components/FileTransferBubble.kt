@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ fun FileTransferBubble(
     transfer: FileTransferEntity,
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
+    onSaveClick: (() -> Unit)? = null,
 ) {
     val background = if (isFromMe) {
         MaterialTheme.colorScheme.primary
@@ -94,6 +96,17 @@ fun FileTransferBubble(
                         .fillMaxWidth()
                         .padding(top = 6.dp),
                 )
+            }
+            if (transfer.state == "COMPLETE" && transfer.direction == "INCOMING" && onSaveClick != null) {
+                TextButton(
+                    onClick = onSaveClick,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 0.dp,
+                        vertical = 0.dp,
+                    ),
+                ) {
+                    Text("Сохранить в папку", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }

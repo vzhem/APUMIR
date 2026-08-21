@@ -31,12 +31,14 @@ class FileTransferRouter @Inject constructor(
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val transport: PacketTransport
+    private val receivedStore: ReceivedFileStore
     private val lastHelloAt = HashMap<String, Long>()
 
     init {
         appContext = context.applicationContext
         val chunkStore = FileTransferChunkStore.forApplication(appContext)
-        val receivedStore = ReceivedFileStore(File(appContext.noBackupFilesDir, "file_received/v1"))
+        val receivedStoreLocal = ReceivedFileStore(File(appContext.noBackupFilesDir, "file_received/v1"))
+        receivedStore = receivedStoreLocal
         val transportLocal: PacketTransport = RustPacketTransport()
         transport = transportLocal
         val crypto: FileCryptoGateway = FfiFileCryptoGateway()
@@ -65,7 +67,7 @@ class FileTransferRouter @Inject constructor(
         receiver = FileTransferReceiver(
             transferDao = transferDao,
             chunkStore = chunkStore,
-            receivedStore = receivedStore,
+            receivedStore = receivedStoreLocal,
             pinner = { binding, pinnedAtMs ->
                 peerStore.pinFirstSeen(binding, pinnedAtMs).newlyPinned
             },
@@ -116,6 +118,28 @@ class FileTransferRouter @Inject constructor(
         if (!RustBridge.isRunning()) return
         runCatching { sendHello(recipientNodeId, force = false) }
             .onFailure { Log.w(TAG, "File HELLO request failed: ${it.message}") }
+    }
+
+    /** Verified plaintext of a completed incoming transfer (app-private storage), if present. */
+    fun receivedFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
+        if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return null
+        return runCatching { receivedStore.receivedFile(transfer.transferId, transfer.displayName) }
+            .getOrNull()
+    }
+
+    /** Copies a completed incoming transfer's plaintext to the user-chosen SAF destination. */
+    suspend fun exportReceivedFile(
+        transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity,
+        target: android.net.Uri,
+    ): Boolean {
+        val source = receivedFileFor(transfer) ?: return false
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val output = appContext.contentResolver.openOutputStream(target) ?: return@runCatching false
+                output.use { source.inputStream().use { input -> input.copyTo(it) } }
+                true
+            }.getOrDefault(false)
+        }
     }
 
     private suspend fun sendHelloHandshakes() {

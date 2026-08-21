@@ -35,6 +35,7 @@ data class ChatDetailUiState(
     val error: String?          = null,
     val isContactOnline: Boolean = false,
     val scrollToBottom: Boolean = false,
+    val pendingSave: FileTransferEntity? = null,
 )
 
 @HiltViewModel
@@ -191,6 +192,30 @@ class ChatDetailViewModel @Inject constructor(
 
     fun onScrolledToBottom() {
         _uiState.update { it.copy(scrollToBottom = false) }
+    }
+
+    /**
+     * Received-file export: the SAF picker (launched by the screen) returns a user-chosen Uri;
+     * the plaintext is streamed out of the app-private verified storage into it.
+     */
+    fun requestSaveReceivedFile(transfer: FileTransferEntity) {
+        if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return
+        _uiState.update { it.copy(pendingSave = transfer) }
+    }
+
+    fun onSaveTargetPicked(target: android.net.Uri?) {
+        val transfer = _uiState.value.pendingSave
+        _uiState.update { it.copy(pendingSave = null) }
+        if (target == null || transfer == null) return
+        viewModelScope.launch {
+            val ok = runCatching { fileTransferRouter.exportReceivedFile(transfer, target) }
+                .getOrDefault(false)
+            _uiState.update {
+                it.copy(
+                    error = if (ok) "Сохранено: ${transfer.displayName}" else "Не удалось сохранить файл",
+                )
+            }
+        }
     }
 
     fun clearError() {

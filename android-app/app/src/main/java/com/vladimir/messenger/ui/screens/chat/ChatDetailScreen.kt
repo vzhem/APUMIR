@@ -66,6 +66,17 @@ fun ChatDetailScreen(
         uri?.let(viewModel::onFileSelected)
     }
 
+    // F3: экспорт принятого файла — системный диалог «куда сохранить»
+    val savePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        viewModel.onSaveTargetPicked(uri)
+    }
+    val pendingSave = uiState.pendingSave
+    LaunchedEffect(pendingSave) {
+        pendingSave?.let { transfer -> savePicker.launch(transfer.displayName) }
+    }
+
     // Прокрутка к последнему сообщению
     LaunchedEffect(uiState.scrollToBottom, uiState.messages.size) {
         if (uiState.scrollToBottom && uiState.messages.isNotEmpty()) {
@@ -225,6 +236,14 @@ fun ChatDetailScreen(
                                 FileTransferBubble(
                                     transfer = transfer,
                                     isFromMe = transfer.direction == "OUTGOING",
+                                    onSaveClick = if (
+                                        transfer.direction == "INCOMING" &&
+                                        transfer.state == "COMPLETE"
+                                    ) {
+                                        { viewModel.requestSaveReceivedFile(transfer) }
+                                    } else {
+                                        null
+                                    },
                                 )
                             } else {
                                 val message = row.message!!
