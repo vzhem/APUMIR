@@ -301,6 +301,28 @@ object RustBridge {
         "unknown"
     }
 
+    /**
+     * «Любая сеть»: направить все MQTT-соединения движка через SOCKS5-прокси.
+     * Глобальная функция (работает и без engine — применится при следующем подключении).
+     */
+    fun setMqttSocks5Proxy(host: String, port: Int, username: String, password: String): Boolean =
+        try {
+            uniffi.p2p_core.setMqttSocks5Proxy(host, port.toUShort(), username, password)
+            Log.i(TAG, "MQTT SOCKS5 proxy set: $host:$port")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "setMqttSocks5Proxy failed: ${e.message}")
+            false
+        }
+
+    /** «Любая сеть»: MQTT снова напрямую. */
+    fun clearMqttSocks5Proxy() = try {
+        uniffi.p2p_core.clearMqttSocks5Proxy()
+        Log.i(TAG, "MQTT SOCKS5 proxy cleared")
+    } catch (e: Exception) {
+        Log.w(TAG, "clearMqttSocks5Proxy failed: ${e.message}")
+    }
+
     /** M8-C: число relay-записей в карантине (диагностика честной потери custody). */
     fun relayQuarantineCount(): Long = try {
         engine?.relayQuarantineCount()?.toLong() ?: 0L

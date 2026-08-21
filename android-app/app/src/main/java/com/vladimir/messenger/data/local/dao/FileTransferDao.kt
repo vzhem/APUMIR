@@ -17,6 +17,17 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE transferId = :transferId")
     suspend fun getTransfer(transferId: String): FileTransferEntity?
 
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE direction = 'OUTGOING'
+          AND state IN ('PREPARED', 'TRANSFERRING', 'SENT')
+          AND expiresAtMs > :nowMs
+        ORDER BY createdAtMs ASC
+        """
+    )
+    suspend fun getActiveOutgoing(nowMs: Long): List<FileTransferEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTransferIgnore(transfer: FileTransferEntity): Long
 
@@ -61,6 +72,23 @@ interface FileTransferDao {
 
     @Query("DELETE FROM file_transfers WHERE transferId = :transferId")
     suspend fun deleteTransfer(transferId: String): Int
+
+    /** Пользовательская «очистка зависших»: отменяет все незавершённые ИСХОДЯЩИЕ передачи. */
+    @Query(
+        """
+        UPDATE file_transfers
+        SET state = 'CANCELLED', updatedAtMs = :nowMs
+        WHERE direction = 'OUTGOING'
+          AND state IN ('PREPARED', 'TRANSFERRING', 'SENT')
+        """
+    )
+    suspend fun cancelAllOutgoing(nowMs: Long): Int
+
+    @Query("SELECT * FROM file_transfers WHERE state = 'CANCELLED'")
+    suspend fun getCancelled(): List<FileTransferEntity>
+
+    @Query("SELECT * FROM file_transfers WHERE state = 'COMPLETE'")
+    suspend fun getCompleted(): List<FileTransferEntity>
 
     @Transaction
     suspend fun insertNewTransfer(transfer: FileTransferEntity): Boolean =
