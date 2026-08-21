@@ -100,7 +100,7 @@ fun ShareProfileScreen(
             )
 
             Text(
-                text = "Отправьте другу ссылку. Если APUMIR уже установлен — откроется добавление контакта. Если нет — отправьте также ссылку на APK.",
+                text = "Отправьте другу ссылку. Если APU уже установлен — откроется добавление контакта. Если нет — отправьте также ссылку на APK.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -144,7 +144,7 @@ fun ShareProfileScreen(
                     Spacer(Modifier.height(8.dp))
 
                     Text(
-                        "Если APUMIR не установлен:",
+                        "Если APU не установлен:",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -175,7 +175,7 @@ fun ShareProfileScreen(
                 Button(
                     onClick = {
                         val shareText = """
-                            Добавь меня в APUMIR / P2P Messenger.
+                            Добавь меня в APU.
 
                             Если приложение уже установлено, открой ссылку:
                             ${uiState.shareLink}
@@ -183,7 +183,7 @@ fun ShareProfileScreen(
                             Альтернативная ссылка через Telegram:
                             ${uiState.alternativeLink}
 
-                            Если APUMIR не установлен, скачай APK здесь:
+                            Если APU не установлен, скачай APK здесь:
                             ${uiState.installLink}
                         """.trimIndent()
                         val sendIntent = Intent().apply {
@@ -215,7 +215,7 @@ fun ShareProfileScreen(
             Spacer(Modifier.height(16.dp))
 
             Text(
-                "Когда друг откроет ссылку, APUMIR покажет ваш профиль и предложит добавить контакт. Если приложение не установлено, отправьте другу также ссылку на APK или сам APK-файл.",
+                "Когда друг откроет ссылку, APU покажет ваш профиль и предложит добавить контакт. Если приложение не установлено, отправьте другу также ссылку на APK или сам APK-файл.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -3770,3 +3770,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   владелец подтвердил, что v143 «стоял раньше», но cl.exe по-прежнему не находится — нужен
   vswhere-диагноз фактического installationPath (команды у владельца исказились при вставке —
   выданы заново одним блоком).
+- **2026-08-21 (доп.331) — пользовательский ребрендинг APUMIR/P2P Messenger → APU (по решению
+  владельца):** заменены ТОЛЬКО видимые пользователю строки: экран «Поделиться профилем» (все
+  упоминания APUMIR → APU, текст приглашения «Добавь меня в APU»), имя приложения в лаунчере
+  (strings.xml: P2P Messenger → APU), заголовок уведомлений, имя foreground-службы, заголовок
+  онбординга, строка версии в настройках. НЕ тронуты (осознанно, чтобы не сломать функционал):
+  GITHUB_REPO=APUMIR в UpdateChecker (имя репозитория для обновлений), ссылки
+  github.com/vzhem/APUMIR/releases (installLink — реальные URL), package com.vladimir.messenger,
+  mqtt-топики p2pm2/…, client id p2pm_…, technical tags. MSVC найден: компилятор стоит в
+  СТАНДАРТНОЙ папке Program Files (x86)\...\BuildTools (14.44.35207), но vswhere не видит
+  инстанс (регистрация повреждена нашей чисткой хвостов диска D:) — cargo не находит cl.exe;
+  выдан блок Enter-VsDevShell (импорт DevShell.dll + vsinstpath) для прогона cargo test.

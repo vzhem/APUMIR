@@ -307,7 +307,7 @@ fun SettingsScreen(
                     SettingsItem(
                         icon     = Icons.Default.Info,
                         title    = "Версия",
-                        subtitle = "P2P Messenger ${uiState.appVersion}",
+                        subtitle = "APU ${uiState.appVersion}",
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(

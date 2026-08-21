@@ -90,7 +90,7 @@ class MessengerApplication : Application() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "P2P Messenger Service",
+                "Служба APU",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Keeps P2P connection alive"

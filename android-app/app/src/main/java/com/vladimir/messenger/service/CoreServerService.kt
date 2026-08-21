@@ -595,7 +595,7 @@ class CoreServerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, MessengerApplication.CHANNEL_ID)
-            .setContentTitle("P2P Messenger")
+            .setContentTitle("APU")
             .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
