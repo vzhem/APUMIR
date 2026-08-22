@@ -9,7 +9,7 @@ class FileTransferPacketCodecTest {
 
     @Test
     fun encryptedChunkFragmentsRoundTripAcrossBoundary() {
-        for (size in listOf(1, 9 * 1024, 9 * 1024 + 1, 128 * 1024 + 16, 1024 * 1024 + 16, 4 * 1024 * 1024 + 16)) {
+        for (size in listOf(1, 4 * 1024, 4 * 1024 + 1, 128 * 1024 + 16, 1024 * 1024 + 16, 4 * 1024 * 1024 + 16)) {
             val payload = ByteArray(size) { (it % 251).toByte() }
             val fragments = FileTransferPacketCodec.fragment(
                 FileTransferPacketCodec.Type.CHUNK,

@@ -38,7 +38,7 @@ pub const DEFAULT_RELAY_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 pub const MAX_HOPS: u8 = 8;
 
 /// Максимум сообщений на одного получателя (защита от DoS / переполнения).
-pub const MAX_PER_RECIPIENT: usize = 200;
+pub const MAX_PER_RECIPIENT: usize = 500;
 
 /// Максимум сообщений в очереди всего (защита памяти).
 pub const MAX_TOTAL: usize = 10_000;

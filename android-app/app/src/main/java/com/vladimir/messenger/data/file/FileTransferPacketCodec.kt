@@ -11,8 +11,8 @@ object FileTransferPacketCodec {
     // while every small envelope flowed). 32 frames still cover the 256KiB+tag reassembly cap.
     const val VERSION: Byte = 1
     const val TRANSFER_ID_BYTES = 16
-    const val MAX_FRAGMENT_PAYLOAD_BYTES = 9 * 1024
-    const val MAX_FRAGMENTS = 512
+    const val MAX_FRAGMENT_PAYLOAD_BYTES = 4 * 1024
+    const val MAX_FRAGMENTS = 1024
     const val AUTH_DIGEST_BYTES = 16
     private const val HEADER_BYTES = 1 + 1 + TRANSFER_ID_BYTES + 4 + 2 + 2 + 2
     private const val MAX_REASSEMBLED_BYTES = 4 * 1024 * 1024 + 16

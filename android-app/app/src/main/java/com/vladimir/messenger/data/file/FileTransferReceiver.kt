@@ -512,7 +512,7 @@ class FileTransferReceiver(
     companion object {
         private const val TAG = "FileTransferReceiver"
         const val MAX_PENDING_ITEMS = 64
-        const val MAX_PENDING_BYTES = 16L * 1024 * 1024
+        const val MAX_PENDING_BYTES = 32L * 1024 * 1024
         const val MAX_BUFFERED_CHUNK_BYTES = 16L * 1024 * 1024
     }
 }
