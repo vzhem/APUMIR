@@ -26,6 +26,8 @@ class FileTransferSender(
     private val ownBindingProvider: () -> ByteArray?,
     private val sleeper: suspend (Long) -> Unit,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /** Параллельный QUIC-поток: (recipientId, payload) -> true если доставлено напрямую. */
+    val directTransport: ((String, String) -> Boolean)? = null,
 ) {
     data class PumpSummary(
         val transfersPumped: Int,
@@ -155,7 +157,13 @@ class FileTransferSender(
         val fragments = FileTransferPacketCodec.fragment(type, transferId, itemIndex, payload)
         for ((fragmentIndex, encodedFragment) in fragments.withIndex()) {
             val text = FileTransferWire.encodeEncodedPacket(encodedFragment)
-            transport.send(messageIdFor(fragmentIndex), transfer.chatId, transfer.peerNodeId, text)
+            // Параллельный QUIC-поток: сначала пробуем БЕЗ relay queue (быстро, без
+            // блокировки текстовой очереди); если получатель недоступен напрямую —
+            // обычный sendMessage (durable relay, медленно но надёжно).
+            val directOk = directTransport?.invoke(transfer.peerNodeId, text) ?: false
+            if (!directOk) {
+                transport.send(messageIdFor(fragmentIndex), transfer.chatId, transfer.peerNodeId, text)
+            }
             sleeper(PACKET_GAP_MS)
         }
         return fragments.size

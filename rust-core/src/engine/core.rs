@@ -2170,6 +2170,48 @@ self.runtime = Some(runtime);
         true
     }
 
+    /// Параллельный QUIC-поток для файлов: отправка НАПРЯМУЮ получателю по QUIC,
+    /// БЕЗ relay queue (файловые ACKи уже есть на прикладном уровне — message-level
+    /// durability не нужен и только забивает очередь для текстовых сообщений).
+    /// Возвращает true если QUIC-доставка удалась; false = получатель недоступен
+    /// напрямую (вызывающий может использовать fallback через sendMessage).
+    pub fn send_direct_payload(
+        &self,
+        recipient_id: String,
+        payload: String,
+    ) -> bool {
+        if !self.state.is_running() {
+            return false;
+        }
+        let sender_id = match self.node_id() {
+            Some(id) => id,
+            None => return false,
+        };
+        let addr_opt = {
+            let addrs = self.peer_addrs.lock().unwrap();
+            addrs
+                .get(&recipient_id)
+                .copied()
+                .or_else(|| addrs.get(&format!("{}_public", recipient_id)).copied())
+        };
+        let addr = match addr_opt {
+            Some(a) => a,
+            None => return false,
+        };
+        let wire_payload = format!("{}|{}|direct|{}", sender_id, recipient_id, payload);
+        match &self.runtime {
+            Some(rt) => {
+                tracing::debug!(
+                    "FILE STREAM: direct QUIC to {} ({} bytes)",
+                    recipient_id,
+                    wire_payload.len()
+                );
+                rt.block_on(async move { Self::send_via_quic(addr, wire_payload).await })
+            }
+            None => false,
+        }
+    }
+
     pub fn send_message(
         &self,
         message_id: String,

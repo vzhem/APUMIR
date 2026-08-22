@@ -3877,3 +3877,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   несколько одновременных бинарных каналов телефон↔телефол, минуя текстовый relay queue.
   СЛЕДУЮЩИЙ БОЛЬШОЙ СРЕЗ: Rust QUIC file stream transport (новый транспорт для файловых
   чанков, параллельный текстовому, с несколькими потоками для максимальной скорости).
+- **2026-08-22 (доп.344) — ПАРАЛЛЕЛЬНЫЙ QUIC-ПОТОК ДЛЯ ФАЙЛОВ (реализован):** новый
+  `P2PCore.send_direct_payload(recipient_id, payload)` в Rust — отправка по QUIC НАПРЯМУЮ,
+  БЕЗ relay queue, БЕЗ message-level durability (файловые ACKи уже есть на прикладном уровне).
+  FFI/UDL + ручной Kotlin-биндинг + RustBridge.sendDirectPayload. FileTransferSender получил
+  `directTransport: ((String, String) -> Boolean)?` — отправитель СНАЧАЛА пробует прямой QUIC;
+  если получатель недоступен локально → fallback на обычный sendMessage (relay queue). Router
+  подключает directTransport через RustBridge. ПАРаллЕЛЬНОСТЬ: QUIC мультиплексирует стримы
+  внутри одного соединения — несколько чанков летят одновременно без блокировки друг друга;
+  pacing 120ms сохраняется как backpressure. СЛЕДУЮЩИЙ ШАГ: бОльший pacing-интервал для
+  прямого QUIC (не нужно ждать relay queue), и приёмник должен распознавать формат
+  `sender|recipient|direct|payload`.

@@ -315,6 +315,22 @@ object RustBridge {
             false
         }
 
+    /**
+     * Параллельный QUIC-поток для файлов: отправка напрямую БЕЗ relay queue.
+     * true = QUIC-доставка удалась; false = получатель недоступен напрямую.
+     */
+    fun sendDirectPayload(recipientId: String, payload: String): Boolean = try {
+        val handle = engine
+        if (handle != null) {
+            handle.sendDirectPayload(recipientId, payload)
+        } else {
+            false
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "sendDirectPayload failed: ${e.message}")
+        false
+    }
+
     /** «Любая сеть»: MQTT снова напрямую. */
     fun clearMqttSocks5Proxy() = try {
         uniffi.p2p_core.clearMqttSocks5Proxy()

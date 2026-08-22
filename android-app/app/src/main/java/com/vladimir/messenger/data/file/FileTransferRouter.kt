@@ -63,6 +63,13 @@ class FileTransferRouter @Inject constructor(
             transport = transportLocal,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
             sleeper = { millis -> kotlinx.coroutines.delay(millis) },
+            directTransport = { recipientId, payload ->
+                try {
+                    com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
+                } catch (_: Exception) {
+                    false
+                }
+            },
         )
         sender = senderLocal
         receiver = FileTransferReceiver(

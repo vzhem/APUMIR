@@ -949,6 +949,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(`host`: RustBuffer.ByValue,`port`: Short,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Unit
+    fun uniffi_p2p_core_fn_func_send_direct_payload(`recipientId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Boolean
     fun uniffi_p2p_core_fn_func_clear_mqtt_socks5_proxy(uniffi_out_err: UniffiRustCallStatus,
     ): Unit
     fun uniffi_p2p_core_fn_func_open_file_key_envelope(`envelope`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`recipientX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -2900,6 +2902,14 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(
         FfiConverterString.lower(`host`),FfiConverterUShort.lower(`port`),FfiConverterString.lower(`username`),FfiConverterString.lower(`password`),_status)
+}
+
+
+ fun `sendDirectPayload`(`recipientId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_send_direct_payload(
+        FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`payload`),_status)
 }
 
 
