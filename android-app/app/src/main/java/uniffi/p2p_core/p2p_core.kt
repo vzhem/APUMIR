@@ -947,6 +947,10 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_install_relay_at_rest_key(`keyId`: Short,`keyMaterial`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Unit
+    fun uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(`host`: RustBuffer.ByValue,`port`: Short,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Unit
+    fun uniffi_p2p_core_fn_func_clear_mqtt_socks5_proxy(uniffi_out_err: UniffiRustCallStatus,
+    ): Unit
     fun uniffi_p2p_core_fn_func_open_file_key_envelope(`envelope`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`recipientX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_parse_file_transfer_manifest(`manifestBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -2887,6 +2891,22 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
         =
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_clear_identity_signing_seed(
+        _status)
+}
+
+
+ fun `setMqttSocks5Proxy`(`host`: kotlin.String, `port`: kotlin.UShort, `username`: kotlin.String, `password`: kotlin.String)
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(
+        FfiConverterString.lower(`host`),FfiConverterUShort.lower(`port`),FfiConverterString.lower(`username`),FfiConverterString.lower(`password`),_status)
+}
+
+
+ fun `clearMqttSocks5Proxy`()
+        =
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_clear_mqtt_socks5_proxy(
         _status)
 }
 

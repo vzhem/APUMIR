@@ -51,15 +51,20 @@ class CoreServerService : Service() {
     @Inject lateinit var mtProxyRepository: MtProxyRepository
     @Inject lateinit var notificationHelper: NotificationHelper
     @Inject lateinit var botApi: BotApi
+    @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
+    @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var networkMonitor: NetworkMonitor? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private var eventPollingJob: Job? = null
+    private var filePumpJob: Job? = null
     private var lastNotificationText: String = ""
     private val knownPeers = mutableMapOf<String, Long>()  // peerId -> lastSeenMs
     private val PEER_DEDUP_MS = 30000L  // 60 сек дедупликация
+    private val FILE_PUMP_INTERVAL_MS = 20000L
+    private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
 
     override fun onCreate() {
         super.onCreate()
@@ -170,6 +175,16 @@ class CoreServerService : Service() {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
 
+                // Прокси-автопилот: первичный цикл при старте — проверить пул, убрать мёртвых,
+                // выбрать и подключить лучшего (без принудительного сбора).
+                serviceScope.launch {
+                    try {
+                        proxyAutopilot.cycle()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Proxy autopilot startup cycle: ${e.message}")
+                    }
+                }
+
             // Telegram Bot relay (запасной канал)
             val tgToken = prefs.getString("telegram_bot_token", "") ?: ""
             if (tgToken.isNotBlank()) {
@@ -180,6 +195,7 @@ class CoreServerService : Service() {
                     myNodeId = nodeId ?: "",
                     scope = serviceScope,
                     proxyRepo = mtProxyRepository,
+                    autopilot = proxyAutopilot,
                     automaticProxyAllowed = {
                         FileTransferRankPolicy.canUseAutomaticProxy(
                             ReferralRankStore.qualifiedDirectCount(applicationContext)
@@ -325,6 +341,7 @@ class CoreServerService : Service() {
         cloudflareRelay?.stop()
         Log.i(TAG, "CoreServerService destroyed")
         eventPollingJob?.cancel()
+        filePumpJob?.cancel()
         networkMonitor?.stop()
         RustBridge.shutdown()
         try {
@@ -381,6 +398,21 @@ class CoreServerService : Service() {
                 delay(POLL_INTERVAL_MS)
             }
         }
+
+        // F3: periodic sender pump — resumes PREPARED/TRANSFERRING transfers after restart,
+        // advances windows on receiver ACKs and keeps multi-day offline retries alive. The
+        // sender itself throttles re-pumps; file traffic yields via per-packet pacing.
+        filePumpJob = serviceScope.launch {
+            kotlinx.coroutines.delay(INITIAL_FILE_PUMP_DELAY_MS)
+            while (isActive) {
+                try {
+                    fileTransferRouter.pumpOutgoing()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "File pump error: ${ex.message}")
+                }
+                delay(FILE_PUMP_INTERVAL_MS)
+            }
+        }
     }
 
     private suspend fun handleEvent(event: CoreEventFfi) {
@@ -400,6 +432,17 @@ class CoreServerService : Service() {
 
                 Log.i(TAG, "Message from $senderId in chat $chatId: $text")
                 try {
+                    // F3: file packets ride the same durable transport but must never be stored
+                    // as chat text. Relay cleanup still happens through the per-message ACK below.
+                    if (fileTransferRouter.routeIncoming(senderId, chatId, messageId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                            Log.i(TAG, "📤 File packet ACK sent for msgId=$messageId")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "⚠ File packet ACK failed: ${e.message}")
+                        }
+                        return
+                    }
                     // P2P RELAY ФИЛЬТРАЦИЯ:
                     // Сохраняем ТОЛЬКО если контакт уже добавлен (это наш собеседник)
                     // Иначе — это широковещательное сообщение не для нас (ретранслируем, но не сохраняем)
@@ -474,6 +517,11 @@ class CoreServerService : Service() {
                             } catch (e: Exception) {
                                 Log.e(TAG, "Retry failed", e)
                             }
+                            try {
+                                fileTransferRouter.pumpOutgoing()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "File pump after peer discovery failed: ${e.message}")
+                            }
                         }
                     } else {
                         // Контакт НЕ существует — игнорируем
@@ -504,6 +552,13 @@ class CoreServerService : Service() {
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Retry all pending failed", e)
+                    }
+                    serviceScope.launch {
+                        try {
+                            fileTransferRouter.pumpOutgoing()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "File pump after network connect failed: ${e.message}")
+                        }
                     }
                 }
             }
@@ -540,7 +595,7 @@ class CoreServerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, MessengerApplication.CHANNEL_ID)
-            .setContentTitle("P2P Messenger")
+            .setContentTitle("APU")
             .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)

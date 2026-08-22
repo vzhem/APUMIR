@@ -32,6 +32,10 @@ class ChatRepository @Inject constructor(
     fun observeChats(): Flow<List<Chat>> =
         chatDao.observeAllChats().map { it.map { e -> e.toDomain() } }
 
+    /** Contact IDs of every chat; used by the file HELLO sweep to bootstrap missing pins. */
+    suspend fun getAllContactIds(): List<String> =
+        chatDao.getAllChats().map { it.contactId }.filter { it.isNotBlank() }.distinct()
+
     fun observeMessages(chatId: String): Flow<List<Message>> =
         messageDao.observeMessages(chatId).map { it.map { e -> e.toDomain() } }
 
@@ -230,6 +234,38 @@ class ChatRepository @Inject constructor(
 
     suspend fun getChatById(chatId: String): Chat? {
         return chatDao.getChatById(chatId)?.toDomain()
+    }
+
+    /**
+     * Local-only outgoing file placeholder: it never rides the text transport (the file packets
+     * are the transport); the row exists so the chat shows the transfer and its delivery state.
+     * LOCAL_FILE status is outside the retry paths' sets, so FULL SYNC never re-sends it as a
+     * text message; the chat renders the transfer bubble in its place.
+     */
+    suspend fun insertLocalFileMessage(
+        chatId: String,
+        recipientId: String,
+        messageId: String,
+        content: String,
+        timestamp: Long,
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = "self",
+            content = content,
+            timestamp = timestamp,
+            isFromMe = true,
+            status = "LOCAL_FILE",
+            channel = MessageChannel.STORE_FORWARD.name,
+            recipientId = recipientId,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, content, timestamp)
+        }
+        return inserted != -1L
     }
 
     suspend fun getChatByContactId(contactId: String): Chat? {

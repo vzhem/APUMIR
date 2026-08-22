@@ -21,12 +21,14 @@ data class ChatListUiState(
     val networkStatus: NetworkStatus = NetworkStatus.Disconnected,
     val searchQuery: String      = "",
     val filteredChats: List<Chat> = emptyList(),
+    val rankBadge: String        = "",
 )
 
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
     private val getChatsUseCase: GetChatsUseCase,
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
@@ -35,6 +37,18 @@ class ChatListViewModel @Inject constructor(
     init {
         loadChats()
         observeNetworkStatus()
+        refreshRankBadge()
+    }
+
+    /** Видный бейдж ранга на главном экране: имя ранга + число квалифицированных друзей. */
+    private fun refreshRankBadge() {
+        val qualified = com.vladimir.messenger.data.referral.ReferralRankStore
+            .qualifiedDirectCount(appContext)
+        val rank = com.vladimir.messenger.data.file.FileTransferRankPolicy
+            .entitlement(qualified)
+        _uiState.update { state ->
+            state.copy(rankBadge = "🎖 ${rank.rankName}")
+        }
     }
 
     private fun loadChats() {

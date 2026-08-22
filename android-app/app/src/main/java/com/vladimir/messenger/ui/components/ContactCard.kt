@@ -30,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.ui.theme.StatusOnline
 import com.vladimir.messenger.ui.theme.StatusOffline
@@ -41,6 +43,7 @@ fun ContactCard(
     chat: Chat,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onShareClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -77,6 +80,20 @@ fun ContactCard(
         // ------------------------------------------------------------------
         // ТЕКСТОВАЯ ИНФОРМАЦИЯ
         // ------------------------------------------------------------------
+        if (onShareClick != null) {
+            IconButton(
+                onClick = onShareClick,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = "Поделиться контактом",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+
         Column(modifier = Modifier.weight(1f)) {
             // Имя контакта
             Text(

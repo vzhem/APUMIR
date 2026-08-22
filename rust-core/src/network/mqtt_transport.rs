@@ -289,6 +289,61 @@ async fn forward_incoming_publish(
     Ok(())
 }
 
+/// «Любая сеть»: если через FFI установлен SOCKS5-прокси, поднимаем ЛОКАЛЬНЫЙ мост
+/// (127.0.0.1:0): брокерские подключения движка приходят в мост, а мост качает байты
+/// через SOCKS5-туннель к реальному брокеру. Работает с любой версией rumqttc
+/// (кастомного коннектора в 0.25.1 нет), MQTT-протокол не меняется. При сбое туннеля
+/// конкретное подключение падает и rumqttc переподключается заново — автопилот на
+/// Kotlin за это время успевает сменить прокси.
+async fn socks5_bridge_endpoint(target_host: &str, target_port: u16) -> Option<(String, u16)> {
+    let proxy = crate::network::socks5::mqtt_socks5_proxy_config()?;
+    let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            tracing::warn!("MQTT: cannot bind SOCKS5 bridge: {error}");
+            return None;
+        }
+    };
+    let port = listener.local_addr().ok()?.port();
+    tracing::info!(
+        "MQTT: SOCKS5 bridge 127.0.0.1:{port} -> {}:{} via {}:{}",
+        target_host,
+        target_port,
+        proxy.host,
+        proxy.port
+    );
+    let bridge_host = target_host.to_string();
+    tokio::spawn(async move {
+        let mut served: u32 = 0;
+        while served < 10_000 {
+            let (inbound, _) = match listener.accept().await {
+                Ok(pair) => pair,
+                Err(error) => {
+                    tracing::warn!("MQTT: SOCKS5 bridge accept stopped: {error}");
+                    break;
+                }
+            };
+            served += 1;
+            let proxy = proxy.clone();
+            let host = bridge_host.clone();
+            tokio::spawn(async move {
+                match crate::network::socks5::connect_through(&proxy, host.clone(), target_port).await {
+                    Ok(mut upstream) => {
+                        let mut inbound = inbound;
+                        if let Err(error) = tokio::io::copy_bidirectional(&mut inbound, &mut upstream).await {
+                            tracing::debug!("MQTT: SOCKS5 bridge session ended: {error}");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!("MQTT: SOCKS5 tunnel to {host} failed: {error}");
+                    }
+                }
+            });
+        }
+    });
+    Some(("127.0.0.1".to_string(), port))
+}
+
 impl MqttTransport {
     pub async fn connect(node_id: &str, display_name: &str) -> Result<Self, String> {
         let shared_state = Arc::new(MqttSharedRuntimeState::new(
@@ -303,15 +358,23 @@ impl MqttTransport {
         shared_state: Arc<MqttSharedRuntimeState>,
     ) -> Result<Self, String> {
         let client_id = format!("p2pm_{}", &node_id[..16.min(node_id.len())]);
-        let (host, port) = MQTT_BROKERS
+        let (broker_host, broker_port) = MQTT_BROKERS
             .first()
             .copied()
             .ok_or_else(|| "No MQTT brokers configured".to_string())?;
+        let (host, port) = socks5_bridge_endpoint(broker_host, broker_port)
+            .await
+            .unwrap_or((broker_host.to_string(), broker_port));
 
         // Creating AsyncClient only creates a bounded local request channel; real readiness still
         // requires ConnAck followed by a queued wildcard subscription request.
-        tracing::info!("MQTT: initializing primary session {}:{}", host, port);
-        let mut opts = MqttOptions::new(&client_id, host, port);
+        tracing::info!(
+            "MQTT: initializing primary session {}:{}{}",
+            host,
+            port,
+            if host == "127.0.0.1" { " (via SOCKS5 bridge)" } else { "" }
+        );
+        let mut opts = MqttOptions::new(&client_id, &host, port);
         opts.set_keep_alive(Duration::from_secs(60));
         opts.set_clean_session(true);
 
@@ -324,11 +387,17 @@ impl MqttTransport {
         let (secondary_client, secondary_eventloop, secondary_liveness, secondary_ready) = {
             let suffix = &node_id[..16.min(node_id.len())];
             let secondary_client_id = format!("p2pm_emqx_{suffix}");
-            let mut secondary_options = MqttOptions::new(
-                secondary_client_id,
+            let (secondary_host, secondary_port) = socks5_bridge_endpoint(
                 SECONDARY_BROKER_HOST,
                 SECONDARY_BROKER_PORT,
-            );
+            )
+            .await
+            .unwrap_or((
+                SECONDARY_BROKER_HOST.to_string(),
+                SECONDARY_BROKER_PORT,
+            ));
+            let mut secondary_options =
+                MqttOptions::new(secondary_client_id, &secondary_host, secondary_port);
             secondary_options.set_keep_alive(Duration::from_secs(60));
             secondary_options.set_clean_session(true);
             let (secondary_client, secondary_eventloop) =

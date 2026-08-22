@@ -1,5 +1,23 @@
 # Secure File Transfer MVP
 
+## Status 2026-08-20 (late evening) — F3 Windows gate PASS; File-HELLO handshake added
+
+JVM gate 88/88 PASS and assembleDebug PASS on the new PC (see доп.308). The first-file
+key-pin deadlock (pin existed only from an incoming offer) is closed by the File-HELLO
+handshake: a tiny signed durable message, throttled, deterministic per-pair IDs, auto-reply
+on first pin (доп.309). Phone acceptance is the next step.
+
+## Status 2026-08-20 (evening) — F3 transport source complete
+
+Sender owner, receiver ingest, deterministic packet IDs and chat picker/progress UI are wired
+(source-only; see доп.307 in `AI_COLLABORATION_NOTES.md`). Transports order below is now:
+direct QUIC first, then the phone-owned encrypted M8 relay custody (bounded window of ≤120
+in-flight chunk-fragment messages per recipient, 7-day TTL, per-chunk file-ACKs, restart
+resume). Honest deviation from §2 (to fix next): the OFFER item carries the canonical manifest
+integrity-protected but NOT encrypted, so relay nodes can see filename/size/media type; chunk
+plaintext, chunk keys and the per-transfer key envelope remain protected. A Rust offer-AEAD
+slice is queued to close this.
+
 ## 1. Scope and ordering
 
 This is the nearest product milestone after the current signed-referral R1 slice. The first release is
