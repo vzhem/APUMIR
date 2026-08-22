@@ -135,24 +135,20 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 - Все команды для моего компьютера — **Windows PowerShell**.
 - **Каждый блок команд начинается с `Set-Location <путь>`.**
 - Python запускать как **`py -3`**, не `python`.
-- ⚠️ **На машине несколько клонов репозитория** — это путает. Договорились: arena-ветки
-  тестируем в **одном каноническом клоне `C:\APUMIR-arena-test`**. Версионные снапшоты
-  (`C:\APUMIR-v11.16.4-final`, `C:\APUMIR\main-validation-v11.16.3`) — НЕ мутировать.
-  `C:\APUMIR` содержит `release-staging\`, но это НЕ рабочий git-клон.
+- ⚠️ После генеральной уборки существует один канонический рабочий клон: **`C:\APU-M8`**.
+  Старые `C:\APUMIR*`, profile clones, snapshots и ярлыки не искать и не использовать.
 - ⚠️ **Код из Arena-sandbox сам по себе не виден на моей Windows-машине.** Нормальный путь — ИИ
-  коммитит+пушит только текущую session branch, а Windows clone получает её через Git. Для этой
-  сессии branch fixed: `arena/01a000bc-apumir`; не checkout старые branch names из журнала:
+  коммитит+пушит только текущую fixed session branch, а `C:\APU-M8` получает именно её через Git.
+  Имя branch всегда брать из текущего Arena handoff, а не копировать исторический branch из журнала:
   ```powershell
-  Set-Location C:\APUMIR-arena-test
-  git fetch origin arena/01a000bc-apumir
-  git checkout arena/01a000bc-apumir
+  Set-Location C:\APU-M8
+  git status --short --branch
+  # Затем fetch только фактической текущей Arena-ветки из CURRENT OVERRIDE.
   ```
   Если GitHub TCP 443 недоступен или Arena не отдаёт скачиваемый файл, не повторять Download/
   Downloads: использовать authenticated inline gzip/Base64 процедуру из раздела 2.1.
-- Если путь к клону вдруг неизвестен — найди `gradlew.bat`:
-  ```powershell
-  Get-ChildItem -Path C:\ -Filter gradlew.bat -Recurse -ErrorAction SilentlyContinue | Select-Object -First 5 FullName
-  ```
+- Если `C:\APU-M8` отсутствует или не является ожидаемым git checkout, остановиться и сообщить
+  расхождение; не выбирать автоматически найденный старый APU-клон.
 - ⚠️ Чат/терминал иногда превращает точки в пакете (`com.vladimir.messenger.data`) в
   гиперссылку. В командах вида `gradlew --tests "..."` следи, чтобы FQN не исказился —
   лучше скажи мне вставить строку вручную.
@@ -168,7 +164,7 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   проверенного Windows base, gzip-сжать его, закодировать Base64 и встроить payload в here-string.
   Если full overlay велик, сначала разделить его на независимые минимальные части (например Rust,
   затем Kotlin), а не заставлять пользователя вручную копировать исходники.
-- Блок всегда начинается с `Set-Location C:\APUMIR-arena-test`, затем единый atomic
+- Блок всегда начинается с `Set-Location C:\APU-M8`, затем единый atomic
   `& { $ErrorActionPreference = "Stop"; ... }`. До записи/apply он проверяет exact branch/HEAD,
   ожидаемый `git status` и hashes сохраняемых generated/untracked artifacts. В текущем кейсе нельзя
   потерять generated `.so` и untracked original icon; `git clean`, broad stash/pop и hard reset
@@ -209,13 +205,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
   - `11567254BK001192` — Стас
   - `3B665800EES00000` — Женя
   - `AUYF6R5923006121` — Анна
-- Релизные артефакты лежат в `C:\APUMIR\release-staging\`
-  (`P2P-Messenger-vX.Y.Z.apk` + `.sha256` + `-provenance.json`).
-- Текущий опубликованный релиз — **v11.16.5** (tag `v11.16.5` → commit `b83d9b3`; APK
-  `P2P-Messenger-v11.16.5.apk`, SHA-256 `993ae5eb33197f4f998a6db84ef757c16a5a4fdc08beda54d6f9e95c6d12000d`;
-  сборка arm64-v8a; отмечен «Latest»). Предыдущий: v11.16.4 (`991da05…`). ⚠️ Workflow
-  `build-release.yml` сейчас **отключён через UI** (чтобы v11.16.5 не испортился) — правильный
-  фикс с guard pending; пользователь должен запушить его и重新 включить workflow.
+- Не предполагать старый локальный `release-staging`; источник published artifacts — точный GitHub
+  Release и сохранённый milestone manifest/backup, если он есть.
+- Текущий опубликованный релиз — **v11.17.1** (stable/latest; tag target после workflow fix
+  `6deb532`, CI Rust 3 ABI + release APK PASS, asset 35,285,255 B). SHA-256 APK в текущих docs не
+  зафиксирован из-за недоступности release-assets CDN в момент проверки — не подставлять hash
+  старого релиза. Тестовые телефоны debug-signed и public release поверх них не ставится.
 - Известный долг: дублирующие чаты на телефоне Женя от старых версий — будущий cleanup/миграция.
 
 ---
@@ -323,7 +318,34 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 
 ## 6. Текущий фокус работы (resume here — следующая сессия)
 
-> **CURRENT OVERRIDE 2026-08-15:** активная ветка этой сессии — только
+> **CURRENT OVERRIDE 2026-08-22:** текущая Arena-ветка — только
+> `arena/01a0290d-apumir`; не переключаться и не создавать другую. Production baseline
+> `fc157cd` (`fix: route direct file packets to local chats`) уже pushed; phones для него не
+> трогались, JVM/phone gate pending. Published stable = v11.17.1, но release не доказывает новый
+> direct file path. Канонический Windows clone теперь только `C:\APU-M8`.
+>
+> **Продуктовый приоритет:** F4 file delivery с двумя обязательными режимами одновременно:
+> максимально быстрый online direct/transient path в любых доступных сетях и delayed full-file
+> custody через relay-телефоны, если sender/recipient не совпали online. Каждый телефон — сервер.
+> Внешний ресурс разрешён только как realtime conduit для E2E ciphertext без хранения. Relay owner
+> выбирает disk/traffic/network/charging quotas; hard safety и приоритет текста обязательны.
+>
+> **Source truth:** текущий sender НЕ parallel file stream. Он последовательно отправляет 4-KiB
+> Base64 fragments, каждый `send_direct_payload` создаёт новый QUIC endpoint/connection, ждёт FIN
+> и затем 120 ms; direct failure → `WAITING_RECIPIENT`. Generic RelayQueue (64 KiB envelope,
+> 500/recipient) не file store. Manifest всегда 128 KiB, app store cap 640 chunks, поэтому source
+> `4 GiB` не достижим end-to-end (около 80 MiB practical preparation boundary); 4-MiB plaintext +
+> AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
+> гигабайтной/параллельной инфраструктуре без новых доказательств.
+>
+> **F4-A docs/architecture завершён и ждёт owner review:** синхронизированы authoritative override
+> в `SECURE_FILE_TRANSFER.md`, `NEXT_AI_CHAT_BOOTSTRAP.md`, `MASTER_PLAN_v2.md` и эта append-only
+> запись. Production code и телефоны не менялись. После owner review следующий допустимый slice
+> только F4-B1: pure canonical binary frame + capability codec с negative/boundary/downgrade tests,
+> без network wiring. B2 signed control и B3 chunk/Merkle identity идут отдельно. Полный порядок
+> F4-A…F4-H находится в `SECURE_FILE_TRANSFER.md`.
+>
+> **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
 > `arena/01a000bc-apumir`, tip `99ac840`). Не переключаться на старые session branches из
 > исторического журнала ниже и не создавать новую ветку. Sandbox source M3(d) —
@@ -401,9 +423,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > Исторический summary ниже нужен для evidence/запретов, но его старые «следующий шаг» и branch
 > labels не переопределяют CURRENT OVERRIDE.
 
-Канонический клон для сборки/теста: `C:\APUMIR-arena-test` (arm64-v8a). Сборки:
-`build-rust.ps1` (Rust) + gradlew assembleRelease (см. раздел 8.1). Хостовый `cargo test` НЕ
-работает (ring/aws-lc MSVC) — см. раздел 8.
+Канонический клон для сборки/теста теперь только `C:\APU-M8` (arm64-v8a). Старый
+`C:\APUMIR-arena-test` не использовать. Build/test prerequisites перед новым gate проверяются
+заново: исторический MSVC blocker не считать ни автоматически закрытым, ни автоматически
+актуальным без свежего вывода команды.
 
 **Сделано (v11.16.5 — РЕЛИЗ ОПУБЛИКОВАН; M0–M2, M3.1, M3(a/b/b.1/c.1) + M3(c.2/r1/r2/r3)):**
 - D1 (статусы) + D2 (ACK round-trip) — **✓✓ DELIVERED работает** (Rust-фикс `0c992b9`).
@@ -2882,7 +2905,7 @@ M9 группы. Полный план: `docs/MESH_DELIVERY.md`.
 ### 8.1. Эталонная команда сборки тестового release-APK
 
 ```powershell
-Set-Location C:\APUMIR-arena-test\android-app
+Set-Location C:\APU-M8\android-app
 .\gradlew --stop
 $env:GITHUB_REF_NAME = "v11.16.5"
 .\gradlew :app:assembleRelease -x lintVitalAnalyzeRelease -x lintVitalReportRelease
@@ -3920,3 +3943,19 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   в несуществующем чате. Вынесен pure resolver и 4 JVM-теста: direct→local, direct без local→reject,
   sender-local UUID→recipient-local UUID и legacy fallback. Source/static checks PASS; JVM compile/
   runtime и телефонный QUIC gate ещё не запускались. Телефоны не затрагивались.
+- **2026-08-22 (доп.351) — F4 architecture reset после полного read-only аудита:** пользователь
+  справедливо остановил продолжение QUIC-правок до чтения обязательных инструкций/плана. Аудит
+  sender/codec/store/Rust QUIC/relay подтвердил: это sequential 4-KiB Base64 generic-text packets,
+  новый connection на каждый packet и 120-ms pacing, а не persistent parallel binary transport;
+  direct failure лишь ждёт recipient. Дополнительно найден geometry-разрыв: manifest всегда
+  128 KiB, store cap 640 chunks (около 80 MiB), а 4-MiB+AEAD не помещается в 1024 fragments —
+  заявленные 4 GiB сейчас не end-to-end capability. Через явный выбор владельца зафиксировано:
+  external resource = только transient realtime E2E pipe, без storage; нужны одновременно online
+  any-network и delayed full-file phone mesh; relay owner выбирает режим/квоты; сначала architecture
+  and docs. F4-A docs-only синхронизировал верхние override/roadmap в `SECURE_FILE_TRANSFER.md`,
+  `NEXT_AI_CHAT_BOOTSTRAP.md`, `MASTER_PLAN_v2.md` и текущем журнале. Целевая граница: small durable
+  control plane отдельно; persistent binary direct data plane отдельно; отдельная phone-owned
+  FileCustody вместо generic RelayQueue; signed 60/90 presence/path manager; seamless missing-chunk
+  resume и text-first scheduler. Production code/phones/release/tag/PR не затрагивались. Следующее
+  действие — review владельца; только после него F4-B1 canonical frame/capability tests без network
+  wiring; B2 signed control и B3 chunk/Merkle identity идут отдельными slices.

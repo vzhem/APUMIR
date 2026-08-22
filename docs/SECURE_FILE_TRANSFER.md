@@ -1,4 +1,166 @@
-# Secure File Transfer MVP
+# Secure File Delivery — current architecture and historical MVP
+
+## CURRENT OVERRIDE 2026-08-22 — файлы с максимальной доступной скоростью в любой доступной сети
+
+Этот раздел является текущим источником истины для файловой передачи. Старые status-блоки и
+первоначальные лимиты ниже сохранены как история F0–F3, но **не определяют следующий шаг**, если
+противоречат этому override, последним записям `AI_COLLABORATION_NOTES.md` или фактическому коду.
+
+### Подтверждённые владельцем инварианты
+
+1. **Телефон — сервер.** Исходящие файлы и durable relay-custody хранятся на телефонах, а не во
+   внешнем inbox/blob-store.
+2. Внешний ресурс допустим только как **временный realtime-провод** для уже E2E-зашифрованных
+   байтов. Он не хранит файл, chunks или message inbox и не получает file key/plaintext.
+3. Нужны одновременно два режима:
+   - быстрый online: максимально использовать доступный прямой/транзитный канал;
+   - delayed mesh: если отправитель и получатель не совпали online, другие телефоны с разрешённым
+     relay-режимом durable хранят зашифрованные chunks и позже передают их дальше.
+4. Владелец relay-телефона выбирает режим и квоты (`Лёгкий / Средний / Без ограничений` или их
+   будущий эквивалент): место, трафик, Wi-Fi/mobile/roaming, зарядку и thermal policy. Даже режим
+   «Без ограничений» не отключает hard safety, резерв места для самого телефона и приоритет текста.
+5. Текст, receipts, presence и управляющие сообщения всегда выше bulk-файла. Файл не может
+   заполнить общую message RelayQueue или задержать обычный чат.
+6. Если физически нет ни одного разрешённого общего канала и ни одна пара custody-телефонов не
+   пересеклась, передача не может продвигаться. APU честно показывает ожидание, сохраняет bytes и
+   продолжает bounded retry; ложный `SENT/DELIVERED` запрещён.
+
+### Что действительно доказано, а что нет
+
+**Runtime PASS на телефонах:** существующий F3-конвейер передал небольшие фото (3 KiB и 26 KiB),
+получатель проверил/сохранил файл, финальный file-ACK вернулся; экспорт через SAF открыл фото в
+галерее. Durable preparation, manifest/chunk AEAD, device-bound key vault, Room progress и базовые
+restart/idempotence границы имеют отдельные source/build/device gates из журнала.
+
+**Новый direct API:** `send_direct_payload` прошёл Rust/UniFFI/Kotlin compile и был установлен на
+тестовые телефоны, но завершённая файловая передача именно через этот новый путь ещё не имеет
+строгого runtime PASS. Direct chat-scope hardening commit `fc157cd` имеет только source/static PASS;
+JVM compile и phone runtime pending.
+
+**Важно: текущий код ещё НЕ является параллельным файловым транспортом.** Source-аудит показал:
+
+- sender последовательно кодирует каждый fragment как `apu-file1|<Base64>`, вызывает синхронный
+  `sendDirectPayload` и ждёт фиксированные 120 ms;
+- каждый вызов Rust создаёт новый QUIC endpoint и новое соединение, отправляет один generic text
+  frame и закрывается; persistent connection и одновременных streams нет;
+- packet проходит через общий `MessageReceived`/Kotlin polling path, а не через отдельный binary
+  file data plane;
+- production при первом direct-failure переводит transfer в `WAITING_RECIPIENT`; заявленного в
+  комментариях fallback к phone relay для file bytes фактически нет;
+- обычная message RelayQueue ограничена 500 envelopes/recipient и 64 KiB/envelope; использовать её
+  для тысяч file fragments архитектурно нельзя;
+- source создаёт manifest всегда с chunk 128 KiB, хотя объявляет до 4 MiB; app-private store
+  принимает только 640 chunks. Поэтому заявленный 4 GiB technical limit сейчас недостижим:
+  practical preparation boundary при 128 KiB около 80 MiB;
+- 4 MiB plaintext + 16-byte AEAD tag требует 1025 fragments по 4 KiB, но packet cap = 1024;
+- internet presence публикуется, mDNS refresh идёт раз в 60 s, но согласованной signed
+  contact-scoped модели `beacon 60 s / offline after 90 s` и endpoint expiry ещё нет;
+- OFFER manifest metadata (имя/размер/MIME) пока не имеет доказанной confidentiality от relay;
+  strict packet/log/DB privacy audit pending.
+
+Эти пункты — не повод латать очередной коэффициент. Они означают, что file bytes нужно отделить от
+text transport до дальнейшего наращивания размера/скорости.
+
+### Целевая архитектура: control plane отдельно, file data plane отдельно
+
+#### A. Control plane — маленькие durable сообщения
+
+Через существующий совместимый message/mesh путь идут только bounded подписанные команды:
+
+- HELLO/capabilities и signed endpoint candidates;
+- encrypted offer/key envelope без открытого filename/size для relay;
+- transfer inventory: chunk ranges/bitmap/Bloom summary;
+- custody offer/accept/receipt/lease;
+- missing-range request, progress ACK, final receipt, cancel/expiry/cleanup.
+
+Control plane имеет deterministic IDs, durable tombstones и приоритет выше file bytes. Он не несёт
+Base64-копию большого chunk. Его durability находится только на телефонах: при проходе через
+внешний conduit запрещены retained payload, persistent offline session/inbox и server-side retry
+после разрыва; недоступный peer оставляет команду в phone Outbox.
+
+#### B. Direct binary data plane — когда peer достижим сейчас
+
+- Один долгоживущий authenticated QUIC endpoint/connection на peer/path, а не handshake на fragment.
+- Binary frames/streams с `transfer_id`, chunk/range, length и version; no Base64, generic chat text,
+  Room text row или EventBus string для file bytes.
+- Несколько QUIC streams внутри одного соединения. Начальная concurrency остаётся bounded и затем
+  адаптируется по RTT/loss/throughput/backpressure; точное число задаётся benchmark, не догадкой.
+- AEAD/custody chunk geometry выбирается один раз до encryption по размеру файла и negotiated hard
+  bounds; она не меняется при смене пути. Binary wire может дробить chunk на bounded frames, а
+  frame/window/concurrency адаптируются по RTT/loss/throughput. Фиксированные 120 ms не являются
+  регулятором production speed.
+- Получатель durable пишет каждый authenticated encrypted chunk до ACK; после reconnect запрашивает
+  только missing ranges. Смена transport/path не меняет transfer/chunk identity и не создаёт дубль.
+- Text scheduler сохраняет отдельную полосу/приоритет независимо от file throughput.
+
+#### C. Any-network path manager
+
+Единый `TransportManager` выбирает и при необходимости параллельно пробует bounded candidates:
+
+1. LAN/mDNS QUIC;
+2. direct IPv6/ICE-STUN hole punching/QUIC;
+3. TCP/TLS 443, WebSocket/HTTP-compatible encapsulation, если UDP заблокирован;
+4. пользовательский SOCKS5/HTTP CONNECT/VPN или внешний realtime conduit — только transient,
+   E2E bytes, no storage;
+5. live phone relay;
+6. delayed phone custody; рядом без интернета — Wi-Fi Direct/Nearby/Bluetooth в будущих slices.
+
+Presence — signed/contact-scoped: beacon примерно каждые 60 s, peer считается недоступным после
+90 s без подтверждения; local/public candidates имеют expiry и не публикуются без необходимости
+всей глобальной wildcard-сети. Любой ready-status требует реальный handshake/progress, не enqueue.
+
+#### D. Отдельная phone-owned FileCustody
+
+Большие encrypted chunks не попадают в `RelayQueue`. Нужен отдельный bounded disk store:
+
+- relay принимает весь файл или его часть только по своей policy/quota и после reserve-space gate;
+- signed manifest/control содержит ciphertext chunk identities или Merkle root с binding к index,
+  чтобы relay/recipient могли dedup/reject подмену без file key; whole plaintext hash проверяет
+  только конечный recipient;
+- custody receipt подписан relay и связывает точные chunk identities/expiry; он означает, что bytes
+  fsync/atomic сохранены. Origin не удаляет свою копию только из-за transport enqueue;
+- несколько подходящих телефонов могут держать разные/повторные bounded subsets, чтобы один relay
+  не был единственной точкой потери; replication/fairness ограничены глобальными бюджетами;
+- recipient узнаёт holders/inventory и вытягивает только missing chunks; relay не расшифровывает;
+- final signed receipt распространяет cleanup, но потерянный receipt оставляет данные только до TTL;
+- app-private E2E ciphertext и custody metadata дополнительно защищены device-bound at-rest key;
+  process death/reboot/app update восстанавливают custody без продления absolute expiry;
+- friend/direct-contact priority, per-origin/per-recipient/global quota, low-storage/thermal stop и
+  защита от Sybil/chunk flood обязательны до включения strangers relay.
+
+#### E. Честные состояния и совместимость
+
+`PREPARED/OUTBOX` означает только local durability; `CUSTODIED(n)` — подтверждённые copies на
+n телефонах; `TRANSFERRING` — измеренный progress; только signed recipient receipt после exact
+size + chunk AEAD + whole hash даёт `DELIVERED`. Transport enqueue/FIN и relay receipt не дают
+двух галочек. Capability/version negotiation подписана и fail-closed: новый binary protocol нельзя
+отправлять старому text parser; N↔N-1 либо выбирают общий доказанный формат, либо явно показывают
+`upgrade required` и сохраняют Outbox.
+
+### Маленькие implementation slices — обязательный порядок
+
+1. **F4-A — architecture/docs (завершён, ждёт review владельца):** синхронизированы этот документ,
+   MASTER plan, new-chat bootstrap и collaboration notes; зафиксированы source audit/proof levels.
+   Production code/телефоны не менялись.
+2. **F4-B — pure binary protocol boundary:** без network wiring и телефонов, тремя отдельными
+   reviewable slices: B1 canonical frame + capability codec; B2 signed bounded control records;
+   B3 ciphertext chunk/Merkle identity. Каждый slice имеет negative/boundary/replay/downgrade tests.
+3. **F4-C — persistent single-peer QUIC:** один connection, binary offer/chunk/ACK, один stream;
+   доказать resume/missing chunk и отсутствие Base64/message queue. Сначала local host tests.
+4. **F4-D — bounded parallel/adaptive streams:** concurrency/window/backpressure, benchmark на
+   loopback/LAN и сохранение text latency. Никаких обещаний скорости до измерений.
+5. **F4-E — signed presence + path manager:** 60/90 liveness, expiring candidates, LAN +
+   different-network direct/tunnel fallback, honest unavailable state.
+6. **F4-F — FileCustody on phones:** encrypted chunk store, consent modes/quotas, custody receipts,
+   inventory/missing pull, TTL/cleanup/reboot tests; отдельный scheduler ниже текста.
+7. **F4-G — seamless path switch:** direct ↔ transient conduit ↔ live phone relay ↔ delayed custody
+   без смены transfer ID, потери progress или второго файла.
+8. **F4-H — acceptance:** small/large boundaries; fast LAN; slow/lossy link; different NAT/network;
+   UDP blocked/TCP-only; sender/recipient non-overlap through relay phones; all phones offline then
+   resume; process death/reboot; disk quota; mixed N↔N-1; integrity/privacy and normal-text control.
+
+После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
+runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 
 ## Status 2026-08-20 (late evening) — F3 Windows gate PASS; File-HELLO handshake added
 
