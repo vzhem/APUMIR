@@ -169,10 +169,15 @@ class FileTransferSender(
             // Параллельный QUIC-поток: сначала пробуем БЕЗ relay queue (быстро, без
             // блокировки текстовой очереди); если получатель недоступен напрямую —
             // обычный sendMessage (durable relay, медленно но надёжно).
-            val directOk = directTransport?.invoke(transfer.peerNodeId, text) ?: false
-            if (!directOk) {
-                Log.i(TAG, "Recipient not directly reachable — pausing transfer")
-                throw RecipientOfflineException(transfer.transferId)
+            if (directTransport != null) {
+                val directOk = directTransport.invoke(transfer.peerNodeId, text)
+                if (!directOk) {
+                    Log.i(TAG, "Recipient not directly reachable — pausing transfer")
+                    throw RecipientOfflineException(transfer.transferId)
+                }
+            } else {
+                // Direct transport not configured (tests) — use regular path
+                transport.send(messageIdFor(fragmentIndex), transfer.chatId, transfer.peerNodeId, text)
             }
             sleeper(PACKET_GAP_MS)
         }
