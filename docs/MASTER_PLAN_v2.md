@@ -11,9 +11,9 @@ ciphertext; внешнее хранение запрещено. Authoritative д
 [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md). Старые M8, R1, 10-MiB и release-next формулировки
 в исторических разделах не переопределяют этот блок.
 
-Ближайшее действие: review синхронизированной архитектуры владельцем; после него только F4-B1
-canonical binary frame + capability codec, без network wiring. Production code и телефоны не
-менять раньше review.
+Владелец подтвердил F4 architecture. F4-B1 canonical binary frame + capability codec имеет
+source/static PASS; ближайшее действие — focused Rust host compile/test этого изолированного module.
+До PASS не начинать B2, network wiring или телефоны.
 
 ---
 
@@ -1702,11 +1702,13 @@ Authoritative design и доказательные статусы:
 
 ### Обязательный порядок F4
 
-- [x] **F4-A — architecture/docs:** синхронизировать file design, bootstrap, master и collaboration
-  notes; production code/телефоны не менять. После этого нужен owner review.
-- [ ] **F4-B — pure binary protocol boundary, no network wiring:** B1 canonical frame + capability
-  codec; B2 signed bounded control records; B3 ciphertext chunk/Merkle identities. Каждый маленький
-  slice отдельно проходит boundary/negative/replay/downgrade tests.
+- [x] **F4-A — architecture/docs:** file design, bootstrap, master и collaboration notes
+  синхронизированы и подтверждены владельцем; production code/телефоны не менялись.
+- [ ] **F4-B — pure binary protocol boundary, no network wiring:**
+  - [ ] B1 canonical frame + capability codec: source/static PASS, 11 Rust tests добавлены, но не
+    выполнены — в Arena нет cargo/rustc; focused host compile/test pending.
+  - [ ] B2 signed bounded control records — не начинать до B1 PASS.
+  - [ ] B3 ciphertext chunk/Merkle identities — отдельный последующий slice.
 - [ ] **F4-C — persistent single-peer QUIC:** один authenticated connection, один binary stream,
   durable chunk-before-ACK, missing-range resume; no Base64/message queue.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим

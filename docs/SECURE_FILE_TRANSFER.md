@@ -139,7 +139,7 @@ size + chunk AEAD + whole hash даёт `DELIVERED`. Transport enqueue/FIN и re
 
 ### Маленькие implementation slices — обязательный порядок
 
-1. **F4-A — architecture/docs (завершён, ждёт review владельца):** синхронизированы этот документ,
+1. **F4-A — architecture/docs (завершён и подтверждён владельцем):** синхронизированы этот документ,
    MASTER plan, new-chat bootstrap и collaboration notes; зафиксированы source audit/proof levels.
    Production code/телефоны не менялись.
 2. **F4-B — pure binary protocol boundary:** без network wiring и телефонов, тремя отдельными
@@ -158,6 +158,23 @@ size + chunk AEAD + whole hash даёт `DELIVERED`. Transport enqueue/FIN и re
 8. **F4-H — acceptance:** small/large boundaries; fast LAN; slow/lossy link; different NAT/network;
    UDP blocked/TCP-only; sender/recipient non-overlap through relay phones; all phones offline then
    resume; process death/reboot; disk quota; mixed N↔N-1; integrity/privacy and normal-text control.
+
+### Status 2026-08-22 — F4-B1 source/static PASS, compile/runtime pending
+
+Добавлен изолированный `rust-core/src/network/file_wire.rs`, подключённый только как Rust module:
+
+- canonical binary header `APUF | version | type | flags | payload_len`, big-endian;
+- bounded 16-byte capability record и pure negotiation по общим version/features/min limits;
+- binary ciphertext range с transfer ID/chunk index/offset/whole encrypted length, без Base64/text;
+- hard frame ceiling 256 KiB; это memory bound, не chunk size и не обещанная скорость;
+- fail-closed unknown version/type/flags/mandatory feature, exact length/trailing-byte checks;
+- 11 unit-test функций покрывают canonical round-trip, min/max, truncation, oversize/overflow,
+  invalid ranges, downgrade/features и reject legacy `apu-file1` text packet.
+
+Source contract, `git diff --check` и отдельный Rust syntax parser (AST root `Program`) PASS. В
+Arena нет `cargo`/`rustc`, поэтому эти 11 тестов ещё **не выполнялись**, Rust compile/runtime pending.
+Module не вызывается sender/QUIC/FFI, Android и телефоны не изменены. Следующий шаг — только focused
+host test/compile F4-B1; к B2 не переходить до PASS.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

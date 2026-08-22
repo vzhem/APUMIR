@@ -19,6 +19,7 @@ pub mod connection_manager;
 pub mod connection_pool;
 pub mod dht;
 pub mod fallback_chain;
+pub mod file_wire;
 pub mod ice;
 pub mod mdns;
 pub mod message_queue;

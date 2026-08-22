@@ -6,9 +6,9 @@
 ## CURRENT OVERRIDE 2026-08-22 — сначала единая file-архитектура, не старый M8
 
 Этот блок заменяет старые указания ниже при любом противоречии. Не начинай с M8-A/M8-E, нового
-телефонного gate, release или «быстрого увеличения QUIC». Текущий продуктовый приоритет —
-надёжная и максимально быстрая файловая доставка через все доступные сети, но сначала владелец
-должен подтвердить синхронизированную архитектуру.
+телефонного gate, release или «быстрого увеличения QUIC». Владелец подтвердил F4 architecture;
+текущий продуктовый приоритет — надёжная и максимально быстрая файловая доставка через все
+доступные сети, маленькими доказуемыми slices.
 
 ### Сначала прочитать и сверить
 
@@ -48,11 +48,10 @@
 
 ### Текущий порядок работы
 
-`SECURE_FILE_TRANSFER.md` определяет slices F4-A…F4-H. F4-A docs-only синхронизирован без
-production-code и телефонов; текущее действие — review владельца. После подтверждения следующий
-допустимый кодовый slice — **F4-B1: canonical binary frame + capability codec с negative/boundary/
-downgrade tests, без network wiring**. B2 signed control и B3 chunk/Merkle identity идут только
-после отдельной проверки B1. Нельзя перескочить сразу к QUIC concurrency, proxy или phone custody.
+`SECURE_FILE_TRANSFER.md` определяет slices F4-A…F4-H. F4-A подтверждён. F4-B1 canonical binary
+frame + capability codec уже имеет source/static PASS: изолированный Rust module, 11 тестов, no
+network/FFI/Android wiring. В Arena нет cargo/rustc, поэтому текущее действие — focused host
+compile/test B1. До PASS нельзя начинать B2 signed control, QUIC concurrency, proxy или phone custody.
 
 > ## Исторический M8 handoff
 >
@@ -72,15 +71,15 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «Продолжаю с F4 file-архитектуры; production code и телефоны пока не
-трогаю». Затем:
+В первом ответе коротко скажи: «Продолжаю с focused F4-B1 host gate; Android и телефоны не трогаю».
+Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
 2. полностью прочитай актуальные override-блоки и обязательные документы из раздела 2;
-3. проверь фактический file sender/codec/store и Rust QUIC/relay limits;
-4. если F4-A ещё не синхронизирован — меняй только четыре документа из CURRENT OVERRIDE;
-5. если F4-A синхронизирован, дождись review владельца; затем делай только F4-B pure protocol slice;
-6. выполни подходящие локальные/static tests и точно раздели `PASS / pending / not tested`;
+3. проверь изоляцию `network/file_wire.rs` от sender/QUIC/FFI/Android;
+4. выполни только focused B1 host compile/tests из раздела 8;
+5. точно раздели `source/static PASS / compile PASS / runtime PASS / pending`;
+6. при ошибке исправляй только B1, не начинай B2/network wiring;
 7. обычный commit/push текущей Arena branch разрешён; другую branch не создавать и не переключать;
 8. отчитайся: изменённые файлы, что доказано, что ещё не доказано, следующий маленький шаг.
 
@@ -126,7 +125,10 @@ Arena branch, newest committed override и production source. Не подтяг�
   имеют runtime PASS в старом transport scope.
 - `send_direct_payload` и binding compile/install PASS, но завершённой file transfer именно через
   новый direct route не доказано. `fc157cd` имеет source/static PASS; JVM/phone gate pending.
-- F4-A docs/architecture синхронизирован; production code и телефоны не менялись.
+- F4-A docs/architecture синхронизирован и подтверждён владельцем.
+- F4-B1 source/static PASS: `network/file_wire.rs` содержит canonical bounded binary frame,
+  capability negotiation и 11 unit-test функций; module ещё никуда не wired. Host compile/tests
+  pending, потому что Arena environment не содержит cargo/rustc.
 
 #### Backup и публикация
 
@@ -171,22 +173,17 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Следующий coding-step — только после owner review
+### 8. Непосредственный следующий шаг — focused F4-B1 host gate
 
-Если владелец ещё не подтвердил F4 architecture, остановись после read-only сверки. После
-подтверждения начни только **F4-B1**, без network wiring и телефонов:
+1. Сверить, что B1 меняет только `rust-core/src/network/file_wire.rs`, module declaration и docs;
+   sender/QUIC/FFI/Android остаются unwired.
+2. В подготовленном Windows MSVC environment выполнить только:
+   `cargo test network::file_wire::tests --lib` из `C:\APU-M8\rust-core`.
+3. Если compile/test падает, исправлять только B1 codec/tests; не расширять scope.
+4. После PASS повторить source contract/`git diff --check`, записать exact test count и proof level.
+5. Не запускать Android build и не подключать телефоны для pure B1.
 
-1. Pure versioned binary frame envelope с canonical magic/version/type/flags/length и hard bounds.
-2. Bounded file data descriptor: transfer ID, chunk index, offset/length и ciphertext bytes; no
-   Base64, chat ID/text row, implicit allocation или unbounded decode.
-3. Pure capability record для negotiation; unknown mandatory version/type fail-closed и не попадает
-   в UI/queue. Signing/network integration пока seam-only.
-4. Tests: round-trip, canonical determinism, zero/max boundaries, truncation/trailing bytes, unknown
-   version/type, declared-length overflow, oversized frame, invalid chunk/range and downgrade reject.
-5. Не менять `FileTransferSender`, QUIC engine, Android DB/UI, relay limits или phones в B1.
-6. Выполнить только подходящие local/static tests; честно разделить PASS/pending/not run.
-
-Затем отдельными reviewable slices внутри F4-B:
+Только после отдельного B1 PASS/review идут следующие slices F4-B:
 
 - **F4-B2:** signed control records (capability/offer/missing/custody/final receipt) и replay/expiry.
 - **F4-B3:** ciphertext chunk identities или Merkle root с index binding, inventory proof и
@@ -255,8 +252,6 @@ Arena branch, newest committed override и production source. Не подтяг�
 - После каждого шага фиксировать важные решения/ошибки в `AI_COLLABORATION_NOTES.md` и тематическом
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
-- Ближайшая цель — не release и не phone gate, а review архитектуры; после подтверждения — только
-  F4-B1 pure protocol slice.
+- Ближайшая цель — не release и не phone gate, а focused host compile/test уже написанного F4-B1.
 
-Сейчас выполни read-only сверку и дождись подтверждения владельца. После подтверждения начинай
-F4-B1 из раздела 8; телефоны не нужны.
+Сейчас выполни B1 gate из раздела 8. К B2 не переходи без отдельного PASS; телефоны не нужны.

@@ -338,12 +338,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-A docs/architecture завершён и ждёт owner review:** синхронизированы authoritative override
-> в `SECURE_FILE_TRANSFER.md`, `NEXT_AI_CHAT_BOOTSTRAP.md`, `MASTER_PLAN_v2.md` и эта append-only
-> запись. Production code и телефоны не менялись. После owner review следующий допустимый slice
-> только F4-B1: pure canonical binary frame + capability codec с negative/boundary/downgrade tests,
-> без network wiring. B2 signed control и B3 chunk/Merkle identity идут отдельно. Полный порядок
-> F4-A…F4-H находится в `SECURE_FILE_TRANSFER.md`.
+> **F4-A подтверждён; F4-B1 source/static PASS, host tests pending:** новый изолированный
+> `rust-core/src/network/file_wire.rs` задаёт canonical bounded binary frame + capability negotiation,
+> 11 unit-test функций и не wired к sender/QUIC/FFI/Android. Source contract/`git diff --check` PASS;
+> в Arena нет cargo/rustc, поэтому compile/runtime этих тестов ещё не доказаны. Следующий шаг только
+> focused host `cargo test network::file_wire::tests --lib`; B2/network/phones до PASS не начинать.
+> Полный порядок F4-A…F4-H находится в `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
@@ -3959,3 +3959,19 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   resume и text-first scheduler. Production code/phones/release/tag/PR не затрагивались. Следующее
   действие — review владельца; только после него F4-B1 canonical frame/capability tests без network
   wiring; B2 signed control и B3 chunk/Merkle identity идут отдельными slices.
+- **2026-08-22 (доп.352) — владелец подтвердил F4; F4-B1 binary boundary source/static PASS:**
+  добавлен только `network/file_wire.rs` + module declaration. Wire v1: magic `APUF`, 12-byte
+  big-endian header (version/type/zero flags/payload length), fixed bounded capability record,
+  ciphertext chunk ranges по transfer ID/index/offset/full encrypted length и pure negotiation
+  common version/features/min frame+stream limits. Hard payload ceiling 256 KiB — safety bound, не
+  chunk size/throughput promise. Unknown version/type/flags/mandatory feature, noncanonical length,
+  trailing/truncated/oversize frame, invalid transfer/chunk/range и downgrade fail closed; legacy
+  `apu-file1|Base64` не принимается. 11 Rust unit-test функций добавлены; static source contract и
+  `git diff --check` PASS, callsite audit показывает только module declaration — sender/QUIC/FFI/
+  Android не wired. Дополнительный one-off `prettier-plugin-rust` parser вернул AST root `Program`
+  PASS. Tool-гэтч: первый npx с Prettier 3 не нашёл/не принял plugin, а plugin `--debug-check` на
+  Prettier 2 упал stack overflow; безопасный workaround — вызвать совместимый parser key
+  `jinx-rust` напрямую с filepath/options, без форматирования/записи файла. Это syntax parse, НЕ
+  compile. В Arena `cargo`/`rustc` отсутствуют, поэтому compile и фактический test runtime pending;
+  не писать 11/11 PASS. Следующий маленький шаг — Windows focused
+  `cargo test network::file_wire::tests --lib` в `C:\APU-M8\rust-core`; phones/release/PR не нужны.
