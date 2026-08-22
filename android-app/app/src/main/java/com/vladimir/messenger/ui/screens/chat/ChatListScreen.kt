@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.chat
 // =============================================================================
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,6 +46,7 @@ fun ChatListScreen(
     onSettingsClick: () -> Unit,
     onScanQrClick: () -> Unit = {},
     onShowMyQrClick: () -> Unit = {},
+    onRankClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -74,36 +77,82 @@ fun ChatListScreen(
                                 },
                             )
                         } else {
-                            Text(
-                                "Сообщения",
-                                fontWeight = FontWeight.Bold,
-                            )
+                            // Заголовок + компактный бейдж ранга одной колонкой: AssistChip
+                            // (рамка/отступы/минимальная высота) не влезал в высоту TopAppBar
+                            // и сжимал заголовок до обрезанной последней буквы.
+                            Column(modifier = Modifier.clickable(onClick = onRankClick)) {
+                                Text(
+                                    "Сообщения",
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (uiState.rankBadge.isNotBlank()) {
+                                    // Бейдж ранга на самом видном месте: под заголовком,
+                                    // всегда перед глазами; тап — что открыто и как расти дальше.
+                                    Text(
+                                        uiState.rankBadge,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     },
                     actions = {
+                        // Разгрузка панели: частые действия остаются иконками (поиск, скан QR),
+                        // остальное уходит в меню «⋮». Заголовок + бейдж ранга помещаются целиком.
                         if (!isSearchVisible) {
                             IconButton(onClick = { isSearchVisible = true }) {
                                 Icon(Icons.Default.Search, "Поиск")
                             }
-                            IconButton(onClick = onSettingsClick) {
-                                Icon(Icons.Default.Settings, "Настройки")
+                            IconButton(onClick = onScanQrClick) {
+                                Icon(Icons.Default.QrCodeScanner, "Сканировать QR")
+                            }
+                            Box {
+                                var menuOpen by remember { mutableStateOf(false) }
+                                IconButton(onClick = { menuOpen = true }) {
+                                    Icon(Icons.Default.MoreVert, "Ещё")
+                                }
+                                DropdownMenu(
+                                    expanded = menuOpen,
+                                    onDismissRequest = { menuOpen = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Мой QR-код") },
+                                        onClick = {
+                                            menuOpen = false
+                                            onShowMyQrClick()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Поделиться приглашением") },
+                                        onClick = {
+                                            menuOpen = false
+                                            inviteLink = RustBridge.generateInvite()
+                                            showInviteDialog = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Подключиться по ссылке") },
+                                        onClick = {
+                                            menuOpen = false
+                                            showConnectDialog = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Настройки") },
+                                        onClick = {
+                                            menuOpen = false
+                                            onSettingsClick()
+                                        },
+                                    )
+                                }
                             }
                         }
-                            IconButton(onClick = onShowMyQrClick) {
-                                Icon(Icons.Default.QrCode2, "My QR")
-                            }
-                            IconButton(onClick = onScanQrClick) {
-                                Icon(Icons.Default.QrCodeScanner, "Scan QR")
-                            }
-                            IconButton(onClick = {
-                                inviteLink = RustBridge.generateInvite()
-                                showInviteDialog = true
-                            }) {
-                                Icon(Icons.Default.Share, "My address")
-                            }
-                            IconButton(onClick = { showConnectDialog = true }) {
-                                Icon(Icons.Default.Link, "Connect")
-                            }
                     },
                     scrollBehavior = scrollBehavior,
                 )

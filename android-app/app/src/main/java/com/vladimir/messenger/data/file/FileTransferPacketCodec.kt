@@ -6,10 +6,13 @@ import java.security.MessageDigest
 
 /** Versioned bounded transport fragmentation for encrypted file offers/chunks. */
 object FileTransferPacketCodec {
+    // 9 KiB wire frames: lossy/filtered networks pass small MQTT messages and silently stall
+    // large ones (observed on the 2026-08-21 acceptance: ~33KB base64 fragments never arrived
+    // while every small envelope flowed). 32 frames still cover the 256KiB+tag reassembly cap.
     const val VERSION: Byte = 1
     const val TRANSFER_ID_BYTES = 16
-    const val MAX_FRAGMENT_PAYLOAD_BYTES = 24 * 1024
-    const val MAX_FRAGMENTS = 16
+    const val MAX_FRAGMENT_PAYLOAD_BYTES = 9 * 1024
+    const val MAX_FRAGMENTS = 32
     const val AUTH_DIGEST_BYTES = 16
     private const val HEADER_BYTES = 1 + 1 + TRANSFER_ID_BYTES + 4 + 2 + 2 + 2
     private const val MAX_REASSEMBLED_BYTES = 256 * 1024 + 16

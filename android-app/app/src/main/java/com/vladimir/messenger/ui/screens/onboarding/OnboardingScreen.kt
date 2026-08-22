@@ -131,7 +131,7 @@ private fun EnterNameStep(
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text      = "P2P Messenger",
+            text      = "APU",
             style     = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.Bold,
         )

@@ -30,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.ui.theme.StatusOnline
 import com.vladimir.messenger.ui.theme.StatusOffline
@@ -41,6 +43,7 @@ fun ContactCard(
     chat: Chat,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onShareClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier

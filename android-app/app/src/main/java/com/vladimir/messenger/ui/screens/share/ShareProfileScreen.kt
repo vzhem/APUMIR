@@ -18,6 +18,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.ui.components.Avatar
+import com.vladimir.messenger.util.QrCodeGenerator
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,13 +64,34 @@ fun ShareProfileScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(24.dp),
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
 
-            Avatar(name = uiState.displayName, size = 120)
+            // QR-код профиля сразу на экране: наводишь камеру друга — и контакт добавлен,
+            // без передачи ссылок вручную.
+            val qrBitmap = remember(uiState.shareLink) {
+                QrCodeGenerator.generateQrCode(uiState.shareLink, 512)
+            }
+            if (qrBitmap != null) {
+                Image(
+                    bitmap = qrBitmap.asImageBitmap(),
+                    contentDescription = "QR-код профиля",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .size(208.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                        .padding(8.dp),
+                )
+            }
+
+            Avatar(name = uiState.displayName, size = 64)
 
             Text(
                 text = uiState.displayName,
@@ -71,7 +100,7 @@ fun ShareProfileScreen(
             )
 
             Text(
-                text = "Отправьте другу ссылку. Если APUMIR уже установлен — откроется добавление контакта. Если нет — отправьте также ссылку на APK.",
+                text = "Отправьте другу ссылку. Если APU уже установлен — откроется добавление контакта. Если нет — отправьте также ссылку на APK.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -115,7 +144,7 @@ fun ShareProfileScreen(
                     Spacer(Modifier.height(8.dp))
 
                     Text(
-                        "Если APUMIR не установлен:",
+                        "Если APU не установлен:",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -146,7 +175,7 @@ fun ShareProfileScreen(
                 Button(
                     onClick = {
                         val shareText = """
-                            Добавь меня в APUMIR / P2P Messenger.
+                            Добавь меня в APU.
 
                             Если приложение уже установлено, открой ссылку:
                             ${uiState.shareLink}
@@ -154,7 +183,7 @@ fun ShareProfileScreen(
                             Альтернативная ссылка через Telegram:
                             ${uiState.alternativeLink}
 
-                            Если APUMIR не установлен, скачай APK здесь:
+                            Если APU не установлен, скачай APK здесь:
                             ${uiState.installLink}
                         """.trimIndent()
                         val sendIntent = Intent().apply {
@@ -186,7 +215,7 @@ fun ShareProfileScreen(
             Spacer(Modifier.height(16.dp))
 
             Text(
-                "Когда друг откроет ссылку, APUMIR покажет ваш профиль и предложит добавить контакт. Если приложение не установлено, отправьте другу также ссылку на APK или сам APK-файл.",
+                "Когда друг откроет ссылку, APU покажет ваш профиль и предложит добавить контакт. Если приложение не установлено, отправьте другу также ссылку на APK или сам APK-файл.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

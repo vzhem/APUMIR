@@ -7,7 +7,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
+import android.content.Intent
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import com.vladimir.messenger.util.ContactShareLink
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -80,6 +83,7 @@ fun ContactsScreen(
                     key = { it.id }
                 ) { contact ->
                     // ContactCard expects Chat, create a minimal Chat from Contact
+                    val ctx = LocalContext.current
                     ContactCard(
                         chat = Chat(
                             id = contact.id,
@@ -87,7 +91,22 @@ fun ContactsScreen(
                             contactName = contact.displayName,
                             isContactOnline = contact.isOnline,
                         ),
-                        onClick = { onContactClick(contact) }
+                        onClick = { onContactClick(contact) },
+                        onShareClick = {
+                            try {
+                                val link = ContactShareLink.build(contact.id, contact.displayName)
+                                val send = Intent().apply {
+                                    action = Intent.ACTION_SEND
+                                    putExtra(
+                                        Intent.EXTRA_TEXT,
+                                        "Мой контакт ${'$'}{contact.displayName} в APU. Открой ссылку для добавления:\n${'$'}{link}",
+                                    )
+                                    type = "text/plain"
+                                }
+                                ctx.startActivity(Intent.createChooser(send, "Поделиться контактом"))
+                            } catch (_: Exception) {
+                            }
+                        },
                     )
                 }
             }

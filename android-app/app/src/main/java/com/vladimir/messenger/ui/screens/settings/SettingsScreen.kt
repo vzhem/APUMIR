@@ -238,6 +238,48 @@ fun SettingsScreen(
             // ----------------------------------------------------------------
             // БЕЗОПАСНОСТЬ
             // ----------------------------------------------------------------
+            // ПЕРЕДАЧА ФАЙЛОВ
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Передача файлов") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Delete,
+                        title    = "Остановить зависшие отправки",
+                        subtitle = "Отменяет незавершённые отправки и чистит их очереди",
+                        onClick  = viewModel::onCancelStalledTransfers,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon     = Icons.Default.CleaningServices,
+                        title    = "Очистить завершённые",
+                        subtitle = "Освобождает место; сохранённые файлы остаются у вас",
+                        onClick  = viewModel::onPurgeCompletedTransfers,
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // СЕТЬ
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Сеть") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.VpnKey,
+                        title    = "Туннель через прокси",
+                        subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.proxyTunnelEnabled,
+                                onCheckedChange = viewModel::onProxyTunnelToggle,
+                            )
+                        },
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
             item { SettingsSectionTitle("Безопасность") }
             item {
                 SettingsCard {
@@ -265,7 +307,7 @@ fun SettingsScreen(
                     SettingsItem(
                         icon     = Icons.Default.Info,
                         title    = "Версия",
-                        subtitle = "P2P Messenger ${uiState.appVersion}",
+                        subtitle = "APU ${uiState.appVersion}",
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(
