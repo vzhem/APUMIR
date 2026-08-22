@@ -3904,3 +3904,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   msgId/chatId, routes по префиксу apu-file1 в text). Архитектурное решение владельца: любой
   третий телефон = relay-сервер для интернет-передач (уже работает через mesh gossip); прямой
   QUIC = для локальных сетей (та же Wi-Fi).
+- **2026-08-22 (доп.349) — фикс тестов + идея presence-маячка владельца:** 5 тестов FileTransferSender
+  падали потому что directTransport=null вызывал RecipientOfflineException; теперь null → обычный
+  transport (тесты), production всегда передаёт directTransport через Router. Владелец предложил
+  presence-систему: телефон вещает «я онлайн» каждые 60 сек, другие считают его онлайн 90 сек —
+  отличная идея для file-online detection (записано в план; MQTT presence уже частично делает
+  это; нужно добавить local IP в presence payload для QUIC-доставки). «Передача пошла но ничего
+  не передаётся» — вероятно QUIC-получатель не парсит формат sender|UUID|direct|payload (chat_id
+  = «direct» не совпадает с реальным chatId получателя → file router не находит чат).
