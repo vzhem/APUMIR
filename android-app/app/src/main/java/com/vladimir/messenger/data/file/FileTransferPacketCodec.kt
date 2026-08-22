@@ -12,10 +12,10 @@ object FileTransferPacketCodec {
     const val VERSION: Byte = 1
     const val TRANSFER_ID_BYTES = 16
     const val MAX_FRAGMENT_PAYLOAD_BYTES = 9 * 1024
-    const val MAX_FRAGMENTS = 32
+    const val MAX_FRAGMENTS = 512
     const val AUTH_DIGEST_BYTES = 16
     private const val HEADER_BYTES = 1 + 1 + TRANSFER_ID_BYTES + 4 + 2 + 2 + 2
-    private const val MAX_REASSEMBLED_BYTES = 256 * 1024 + 16
+    private const val MAX_REASSEMBLED_BYTES = 4 * 1024 * 1024 + 16
     private val DOMAIN = "apu-file-packet-v1\u0000".toByteArray(Charsets.US_ASCII)
 
     enum class Type(val wire: Byte) {

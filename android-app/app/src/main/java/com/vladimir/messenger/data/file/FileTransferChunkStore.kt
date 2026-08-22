@@ -230,14 +230,14 @@ class FileTransferChunkStore(
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     companion object {
-        const val DEFAULT_STORE_QUOTA_BYTES = 64L * 1024 * 1024
+        const val DEFAULT_STORE_QUOTA_BYTES = 8L * 1024 * 1024 * 1024
         const val MIN_MANIFEST_BYTES = 64
         const val MAX_MANIFEST_BYTES = 2 * 1024
         const val MIN_KEY_ENVELOPE_BYTES = 200
         const val MAX_KEY_ENVELOPE_BYTES = 2 * 1024
         const val MIN_STORE_QUOTA_BYTES = 1024L
-        const val MAX_STORE_QUOTA_BYTES = 256L * 1024 * 1024
-        const val MAX_PLAINTEXT_CHUNK_BYTES = 256 * 1024
+        const val MAX_STORE_QUOTA_BYTES = 8L * 1024 * 1024 * 1024
+        const val MAX_PLAINTEXT_CHUNK_BYTES = 4 * 1024 * 1024
         const val AEAD_TAG_BYTES = 16
         const val MIN_CIPHERTEXT_BYTES = AEAD_TAG_BYTES
         const val MAX_CIPHERTEXT_BYTES = MAX_PLAINTEXT_CHUNK_BYTES + AEAD_TAG_BYTES

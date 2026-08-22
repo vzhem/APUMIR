@@ -108,7 +108,14 @@ class FileTransferSender(
                 FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES - 1) /
                 FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES,
         )
-        val windowChunks = maxOf(1, MAX_INFLIGHT_MESSAGES / fragmentsPerChunk)
+        // Гигабайтные файлы: большие чанки (≥1 МиБ) получают расширенное окно —
+        // данные льются потоком, а не по капле; мелкие остаются консервативными.
+        val inflightBudget = if (transfer.chunkSize >= LARGE_CHUNK_BYTES) {
+            MAX_INFLIGHT_MESSAGES_LARGE
+        } else {
+            MAX_INFLIGHT_MESSAGES
+        }
+        val windowChunks = maxOf(1, inflightBudget / fragmentsPerChunk)
         val windowEnd = minOf(transfer.chunkCount, acked + windowChunks)
         for (chunkIndex in acked until windowEnd) {
             val ciphertext = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
@@ -188,6 +195,8 @@ class FileTransferSender(
         private const val TAG = "FileTransferSender"
         const val PACKET_GAP_MS = 120L
         const val MAX_INFLIGHT_MESSAGES = 120
+        const val MAX_INFLIGHT_MESSAGES_LARGE = 360
+        const val LARGE_CHUNK_BYTES = 1024 * 1024
         // 30s: re-pumps are cheap (deterministic IDs, local dedup) and lossy channels open
         // short windows — the 2-minute cadence kept transfers waiting far longer than needed.
         const val REPUMP_INTERVAL_MS = 30_000L

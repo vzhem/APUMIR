@@ -88,6 +88,21 @@ fun FileTransferBubble(
                 style = MaterialTheme.typography.bodySmall,
                 color = contentColor.copy(alpha = 0.9f),
             )
+            if (transfer.state == "TRANSFERRING" && transfer.transferredBytes > 0) {
+                val elapsedMs = System.currentTimeMillis() - transfer.createdAtMs
+                if (elapsedMs > 1000) {
+                    val bytesPerSec = transfer.transferredBytes * 1000 / elapsedMs
+                    if (bytesPerSec > 0) {
+                        val remaining = transfer.totalBytes - transfer.transferredBytes
+                        val etaSec = remaining / bytesPerSec
+                        Text(
+                            "${formatSpeed(bytesPerSec)} · осталось ~${formatEta(etaSec)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = contentColor.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+            }
             val progress = transferProgress(transfer)
             if (progress != null && transfer.state != "COMPLETE" && transfer.state != "FAILED") {
                 LinearProgressIndicator(
@@ -142,6 +157,18 @@ private fun stateLabel(transfer: FileTransferEntity): String {
         "EXPIRED" -> "Срок истёк"
         else -> transfer.state
     }
+}
+
+private fun formatSpeed(bytesPerSec: Long): String = when {
+    bytesPerSec >= 1024 * 1024 -> "%.1f МБ/с".format(bytesPerSec / (1024.0 * 1024.0))
+    bytesPerSec >= 1024 -> "%.0f КБ/с".format(bytesPerSec / 1024.0)
+    else -> "$bytesPerSec Б/с"
+}
+
+private fun formatEta(seconds: Long): String = when {
+    seconds >= 3600 -> "${seconds / 3600} ч ${seconds % 3600 / 60} мин"
+    seconds >= 60 -> "${seconds / 60} мин ${seconds % 60} с"
+    else -> "$seconds с"
 }
 
 private fun transferProgress(transfer: FileTransferEntity): Float? = when {
