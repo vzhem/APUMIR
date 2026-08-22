@@ -116,6 +116,15 @@ States are monotonic and idempotent: `OFFERED → TRANSFERRING → VERIFYING →
 
 File traffic is lower priority than text/receipts and cannot starve durable messaging.
 
+### Direct QUIC chat-scope rule (2026-08-22)
+
+Direct file frames use the reserved transport scope `direct`; they do not pretend that a sender's
+local chat UUID is valid on the recipient. Before any incoming transfer row is written, Android maps
+the authenticated sender node ID to the recipient phone's existing local chat UUID. If no local chat
+exists, the direct file packet is consumed and dropped rather than persisting a hidden row under the
+sentinel. A non-direct legacy transport scope remains the compatibility fallback. Source/static checks
+and four pure JVM test cases are present; Windows JVM compile and phone runtime remain separate gates.
+
 ## 7. Acceptance gates
 
 - canonical/negative crypto tests and Android production compilation;

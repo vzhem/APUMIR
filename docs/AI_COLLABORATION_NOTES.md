@@ -3912,3 +3912,11 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   это; нужно добавить local IP в presence payload для QUIC-доставки). «Передача пошла но ничего
   не передаётся» — вероятно QUIC-получатель не парсит формат sender|UUID|direct|payload (chat_id
   = «direct» не совпадает с реальным chatId получателя → file router не находит чат).
+- **2026-08-22 (доп.350) — direct file chat routing укреплён после source-аудита:** предыдущая
+  гипотеза была неполной: `FileTransferRouter` уже пытался заменить transport chat scope на локальный
+  chat UUID по sender ID, но при неуспешном lookup пропускал literal `direct` в receiver/Room.
+  Теперь обычный текст отсекается до DB lookup, direct-пакет всегда получает существующий локальный
+  chat ID, а при его отсутствии безопасно consume/drop-ится вместо создания скрытой transfer-строки
+  в несуществующем чате. Вынесен pure resolver и 4 JVM-теста: direct→local, direct без local→reject,
+  sender-local UUID→recipient-local UUID и legacy fallback. Source/static checks PASS; JVM compile/
+  runtime и телефонный QUIC gate ещё не запускались. Телефоны не затрагивались.

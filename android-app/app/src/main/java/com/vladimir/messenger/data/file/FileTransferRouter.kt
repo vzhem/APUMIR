@@ -102,12 +102,23 @@ class FileTransferRouter @Inject constructor(
             }
             return true
         }
-        // File packets carry the SENDER's local chat UUID in the envelope; the recipient must
-        // file the transfer and its completion message under ITS OWN chat with that sender,
-        // otherwise the bubble lands in a nonexistent chat and never renders.
-        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }.getOrNull()
-            ?: chatId
-        return receiver.onIncomingText(senderId, localChatId, messageId, text)
+        if (!FileTransferWire.isFilePacketText(text)) return false
+
+        // Chat UUIDs are device-local. In particular, direct QUIC frames carry the explicit
+        // "direct" transport scope rather than a remote chat UUID. Resolve it to THIS phone's
+        // chat before the receiver writes transfer state; never let the sentinel reach Room.
+        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }
+            .onFailure { Log.w(TAG, "Cannot resolve local chat for incoming file packet: ${it.message}") }
+            .getOrNull()
+        val resolvedChatId = FileTransferChatRouting.resolve(chatId, localChatId)
+        if (resolvedChatId == null) {
+            Log.w(TAG, "Direct file packet dropped: no local chat for sender ${senderId.takeLast(8)}")
+            return true
+        }
+        if (chatId == FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE) {
+            Log.i(TAG, "Direct file packet routed to local chat $resolvedChatId")
+        }
+        return receiver.onIncomingText(senderId, resolvedChatId, messageId, text)
     }
 
     /**
