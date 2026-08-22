@@ -77,7 +77,7 @@ class FileTransferPacketCodecTest {
                 FileTransferPacketCodec.Type.CHUNK,
                 transferId,
                 0,
-                ByteArray(256 * 1024 + 17),
+                ByteArray(4 * 1024 * 1024 + 17),
             )
         }
         expectFailure { FileTransferPacketCodec.decode(byteArrayOf()) }
