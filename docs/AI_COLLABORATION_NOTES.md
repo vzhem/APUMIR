@@ -3892,3 +3892,8 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   P2PCoreHandle:** standalone UDL-функция → метод интерфейса P2PCoreHandle (как send_message);
   standalone Rust-функция → метод на P2PCoreHandle (делегирует в P2PCore через Mutex);
   Kotlin-биндинг перекомпонован как метод объекта (JNA method call с pointer).
+- **2026-08-22 (доп.346) — bindgen ПЕРВЫЙ РАЗ сработал на новой машине; параллельный QUIC-поток
+  скомпилирован:** vcvars64 + tools/uniffi-bindgen → p2p_core.kt регенерирован с sendDirectPayload
+  как методом P2PCoreHandle. Rust .so + Kotlin APK + телефоны — всё обновлено. ПЕРВЫЙ bindgen
+  на этой машине (раньше — ручные биндинги из-за отсутствия MSVC). Тест файловой передачи
+  через параллельный QUIC-поток — следующий шаг владельца.
