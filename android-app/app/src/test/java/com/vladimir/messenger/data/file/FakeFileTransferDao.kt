@@ -90,6 +90,19 @@ class FakeFileTransferDao : FileTransferDao {
         return n
     }
 
+    override suspend fun getWaitingRecipient(): List<FileTransferEntity> =
+        transfers.values.filter { it.direction == "OUTGOING" && it.state == "WAITING_RECIPIENT" }
+
+    override suspend fun resumeAllWaitingRecipient(nowMs: Long): Int {
+        var n = 0
+        transfers.replaceAll { _, e ->
+            if (e.direction == "OUTGOING" && e.state == "WAITING_RECIPIENT") {
+                n++; e.copy(state = "TRANSFERRING", updatedAtMs = nowMs)
+            } else e
+        }
+        return n
+    }
+
     override suspend fun getCancelled(): List<FileTransferEntity> =
         transfers.values.filter { it.state == "CANCELLED" }
 

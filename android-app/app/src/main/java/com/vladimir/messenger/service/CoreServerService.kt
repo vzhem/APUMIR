@@ -519,6 +519,7 @@ class CoreServerService : Service() {
                             }
                             try {
                                 fileTransferRouter.pumpOutgoing()
+                                fileTransferRouter.resumeWaitingForRecipient()
                             } catch (e: Exception) {
                                 Log.w(TAG, "File pump after peer discovery failed: ${e.message}")
                             }

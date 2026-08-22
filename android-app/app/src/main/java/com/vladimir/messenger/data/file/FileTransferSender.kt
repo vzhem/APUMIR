@@ -29,6 +29,9 @@ class FileTransferSender(
     /** Параллельный QUIC-поток: (recipientId, payload) -> true если доставлено напрямую. */
     val directTransport: ((String, String) -> Boolean)? = null,
 ) {
+    /** Получатель офлайн — файл ждёт когда он появится (только прямая доставка). */
+    class RecipientOfflineException(val transferId: String) : Exception("Recipient offline")
+
     data class PumpSummary(
         val transfersPumped: Int,
         val packetsSent: Int,
@@ -74,8 +77,14 @@ class FileTransferSender(
             val result = runCatching { pumpTransfer(transfer) }
             result.getOrNull()?.let { pumped++; packets += it }
             if (result.isFailure) {
-                failures++
-                Log.w(TAG, "File transfer pump failed for ${transfer.transferId}: ${result.exceptionOrNull()?.message}")
+                val error = result.exceptionOrNull()
+                if (error is RecipientOfflineException) {
+                    advance(transfer, newState = "WAITING_RECIPIENT")
+                    Log.i(TAG, "Transfer ${transfer.transferId} waiting for recipient online")
+                } else {
+                    failures++
+                    Log.w(TAG, "File transfer pump failed for ${transfer.transferId}: ${error?.message}")
+                }
             }
         }
         return PumpSummary(pumped, packets, failures)
@@ -162,7 +171,8 @@ class FileTransferSender(
             // обычный sendMessage (durable relay, медленно но надёжно).
             val directOk = directTransport?.invoke(transfer.peerNodeId, text) ?: false
             if (!directOk) {
-                transport.send(messageIdFor(fragmentIndex), transfer.chatId, transfer.peerNodeId, text)
+                Log.i(TAG, "Recipient not directly reachable — pausing transfer")
+                throw RecipientOfflineException(transfer.transferId)
             }
             sleeper(PACKET_GAP_MS)
         }

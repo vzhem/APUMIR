@@ -110,6 +110,17 @@ class FileTransferRouter @Inject constructor(
         return receiver.onIncomingText(senderId, localChatId, messageId, text)
     }
 
+    /**
+     * Получатель появился: возобновить все передачи, которые его ждали.
+     */
+    suspend fun resumeWaitingForRecipient() {
+        val resumed = transferDao.resumeAllWaitingRecipient(System.currentTimeMillis())
+        if (resumed > 0) {
+            Log.i(TAG, "Resumed $resumed file transfer(s) waiting for recipient")
+            pumpOutgoing()
+        }
+    }
+
     /** Drives all resumable outgoing transfers plus contact key handshakes; safe to call periodically. */
     suspend fun pumpOutgoing(): FileTransferSender.PumpSummary? {
         if (!RustBridge.isRunning()) {

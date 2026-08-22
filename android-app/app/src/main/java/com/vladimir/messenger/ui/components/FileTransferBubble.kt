@@ -155,6 +155,7 @@ private fun stateLabel(transfer: FileTransferEntity): String {
         "COMPLETE" -> if (transfer.direction == "OUTGOING") "Доставлено ✓" else "Сохранено ✓"
         "FAILED" -> "Ошибка (${transfer.errorCode ?: "неизвестно"})"
         "EXPIRED" -> "Срок истёк"
+        "WAITING_RECIPIENT" -> "Ждём получателя онлайн"
         else -> transfer.state
     }
 }

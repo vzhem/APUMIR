@@ -84,6 +84,18 @@ interface FileTransferDao {
     )
     suspend fun cancelAllOutgoing(nowMs: Long): Int
 
+    @Query("SELECT * FROM file_transfers WHERE direction = 'OUTGOING' AND state = 'WAITING_RECIPIENT'")
+    suspend fun getWaitingRecipient(): List<FileTransferEntity>
+
+    @Query(
+        """
+        UPDATE file_transfers
+        SET state = 'TRANSFERRING', updatedAtMs = :nowMs
+        WHERE direction = 'OUTGOING' AND state = 'WAITING_RECIPIENT'
+        """
+    )
+    suspend fun resumeAllWaitingRecipient(nowMs: Long): Int
+
     @Query("SELECT * FROM file_transfers WHERE state = 'CANCELLED'")
     suspend fun getCancelled(): List<FileTransferEntity>
 
