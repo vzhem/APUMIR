@@ -115,6 +115,11 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().is_running()
     }
 
+    /// Параллельный QUIC-поток: прямая отправка БЕЗ relay queue.
+    pub fn send_direct_payload(&self, recipient_id: String, payload: String) -> bool {
+        self.inner.lock().unwrap().send_direct_payload(recipient_id, payload)
+    }
+
     pub fn node_id(&self) -> Option<String> {
         self.inner.lock().unwrap().node_id()
     }

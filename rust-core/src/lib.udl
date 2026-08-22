@@ -35,9 +35,6 @@ namespace p2p_core {
     void set_mqtt_socks5_proxy(string host, u16 port, string username, string password);
     void clear_mqtt_socks5_proxy();
 
-    // Parallel QUIC file stream: send directly to the recipient WITHOUT the relay queue.
-    // File-level ACKs exist at the application layer; message-level durability is not needed.
-    boolean send_direct_payload(string recipient_id, string payload);
     [Throws=CoreError]
     bytes create_identity_signing_binding(i64 created_at_ms);
     boolean verify_identity_signing_binding(bytes binding);
@@ -172,6 +169,9 @@ interface P2PCoreHandle {
         string recipient_id,
         string text
     );
+
+    // Parallel QUIC file stream: direct send WITHOUT relay queue (bulk transfer).
+    boolean send_direct_payload(string recipient_id, string payload);
 
     void receive_message(
         string message_id,

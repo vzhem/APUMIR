@@ -949,8 +949,6 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(`host`: RustBuffer.ByValue,`port`: Short,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): Unit
-    fun uniffi_p2p_core_fn_func_send_direct_payload(`recipientId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Boolean
     fun uniffi_p2p_core_fn_func_clear_mqtt_socks5_proxy(uniffi_out_err: UniffiRustCallStatus,
     ): Unit
     fun uniffi_p2p_core_fn_func_open_file_key_envelope(`envelope`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`recipientX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
@@ -1853,6 +1851,13 @@ public interface P2pCoreHandleInterface {
 
     companion object
 }
+
+    fun `sendDirectPayload`(`recipientId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean =
+        uniffiRustCall() { _status ->
+        UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2p_core_handle_send_direct_payload(
+            this.uniffiCloneHandle(),
+            FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`payload`),_status)
+    }
 
 open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
 
@@ -2905,12 +2910,6 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
 
 
- fun `sendDirectPayload`(`recipientId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
-        =
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_send_direct_payload(
-        FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`payload`),_status)
-}
 
 
  fun `clearMqttSocks5Proxy`()

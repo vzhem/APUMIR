@@ -3888,3 +3888,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   pacing 120ms сохраняется как backpressure. СЛЕДУЮЩИЙ ШАГ: бОльший pacing-интервал для
   прямого QUIC (не нужно ждать relay queue), и приёмник должен распознавать формат
   `sender|recipient|direct|payload`.
+- **2026-08-22 (доп.345) — фикс UDL-сборки: send_direct_payload перенесён в interface
+  P2PCoreHandle:** standalone UDL-функция → метод интерфейса P2PCoreHandle (как send_message);
+  standalone Rust-функция → метод на P2PCoreHandle (делегирует в P2PCore через Mutex);
+  Kotlin-биндинг перекомпонован как метод объекта (JNA method call с pointer).
