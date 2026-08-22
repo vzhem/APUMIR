@@ -80,6 +80,20 @@ fun ContactCard(
         // ------------------------------------------------------------------
         // ТЕКСТОВАЯ ИНФОРМАЦИЯ
         // ------------------------------------------------------------------
+        if (onShareClick != null) {
+            IconButton(
+                onClick = onShareClick,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = "Поделиться контактом",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+
         Column(modifier = Modifier.weight(1f)) {
             // Имя контакта
             Text(
