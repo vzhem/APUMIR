@@ -2198,7 +2198,10 @@ self.runtime = Some(runtime);
             Some(a) => a,
             None => return false,
         };
-        let wire_payload = format!("{}|{}|direct|{}", sender_id, recipient_id, payload);
+        // Формат должен совпадать с sendMessage: sender|msgId|chatId|text
+        // Получатель парсит 4 части и routes по text (файловый хендлер смотрит на префикс apu-file1)
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        let wire_payload = format!("{}|{}|direct|{}", sender_id, msg_id, payload);
         match &self.runtime {
             Some(rt) => {
                 tracing::debug!(

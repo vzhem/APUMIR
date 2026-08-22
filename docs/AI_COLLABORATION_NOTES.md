@@ -3897,3 +3897,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   как методом P2PCoreHandle. Rust .so + Kotlin APK + телефоны — всё обновлено. ПЕРВЫЙ bindgen
   на этой машине (раньше — ручные биндинги из-за отсутствия MSVC). Тест файловой передачи
   через параллельный QUIC-поток — следующий шаг владельца.
+- **2026-08-22 (доп.347) — фикс формата прямого QUIC-потока:** send_direct_payload отправлял
+  sender|recipient|direct|payload (4 части), но получатель парсит sender|msgId|chatId|text —
+  recipient_id попадал в msgId, «direct» в chatId, а текст смещался → файловый хендлер не мог
+  разобрать пакет. Формат исправлен: sender|случайный-UUID|direct|payload (получатель игнорирует
+  msgId/chatId, routes по префиксу apu-file1 в text). Архитектурное решение владельца: любой
+  третий телефон = relay-сервер для интернет-передач (уже работает через mesh gossip); прямой
+  QUIC = для локальных сетей (та же Wi-Fi).
