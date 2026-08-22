@@ -34,6 +34,7 @@ import com.vladimir.messenger.ui.screens.onboarding.OnboardingScreen
 import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
+import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
 import com.vladimir.messenger.ui.screens.contacts.RenameContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
 import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
@@ -80,6 +81,9 @@ sealed class Screen(val route: String) {
 
     // Поделиться профилем
     data object ShareProfile : Screen("share_profile")
+
+    // Список контактов
+    data object Contacts : Screen("contacts")
 
     // Переименование контакта
     data object RenameContact : Screen("rename_contact/{contactId}/{currentName}") {
@@ -171,6 +175,9 @@ fun MessengerNavGraph(
                 },
                 onRankClick = {
                     navController.navigate(Screen.RankBenefits.route)
+                },
+                onContactsClick = {
+                    navController.navigate(Screen.Contacts.route)
                 },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
@@ -281,6 +288,21 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         // ПОДЕЛИТЬСЯ ПРОФИЛЕМ
         // ------------------------------------------------------------------
+        composable(route = Screen.Contacts.route) {
+            ContactsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onAddContactClick = { navController.navigate(Screen.AddContact.createRoute()) },
+                onContactClick = { contact ->
+                    navController.navigate(
+                        Screen.ChatDetail.createRoute(
+                            chatId = contact.id,
+                            contactName = contact.displayName,
+                            contactId = contact.id,
+                        )
+                    )
+                },
+            )
+        }
         composable(route = Screen.ShareProfile.route) {
             ShareProfileScreen(
                 onBackClick = { navController.popBackStack() }
