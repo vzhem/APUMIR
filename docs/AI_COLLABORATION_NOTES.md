@@ -338,11 +338,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-C1 source/static PASS; combined Windows gate pending:** exact source `bf4f0c6` добавляет
-> TLS-exporter-bound mutual B2 auth, one persistent ordered QUIC stream, bounded `APUS` + exact B1,
-> durable admission/sink-before-ACK и signed MissingRanges seam. 9 новых tests объявлены; Arena без
-> cargo, поэтому compile/runtime pending. Сейчас только Windows `cargo test network::file_ --lib --
-> --nocapture`, ожидается combined 43/43; no engine/FFI/Android/phones/F4-D. Полный порядок — в
+> **F4-C1 compile-fix pushed; combined Windows re-gate pending:** source `bf4f0c6` добавляет
+> TLS-exporter-bound mutual B2 auth, one ordered QUIC stream и durable-before-ACK. Первый Windows
+> compile на `05fa038` дошёл до `p2p-core`, нашёл E0599 (`ExportKeyingMaterialError` no Display);
+> exact `bedf671` исправляет mapping. Сейчас повторить `cargo test network::file_ --lib --
+> --nocapture`, ожидается 43/43; no engine/FFI/Android/phones/F4-D. Полный порядок — в
 > `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
@@ -4070,3 +4070,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   cargo/rustc: type-check/runtime pending, не завышать proof. Следующий exact Windows command:
   `cargo test network::file_ --lib -- --nocapture`; ожидается 43 passed, 0 failed, 592 filtered.
   Legacy F3/engine/FFI/Android/phones untouched; F4-D не начат; release/tag/PR не делались.
+- **2026-08-23 (доп.359) — первый F4-C1 Windows compile нашёл один E0599; exact fix pushed:**
+  первоначальный helper через `vswhere` вернул null из-за уже известной повреждённой VS registration;
+  это был environment blocker, а вручную напечатанная строка PASS evidence не является. Direct
+  import найденного `vcvars64.bat` успешно дал exact `cl.exe`/`link.exe` 14.44.35207 и cargo собрал
+  ring/aws-lc/sqlite/rustls/quinn, затем дошёл до `p2p-core`. Единственная Rust error:
+  `ExportKeyingMaterialError` Quinn не реализует Display, поэтому `error.to_string()` дал E0599;
+  один прежний warning `multi_broker.rs`. Exact commit
+  `bedf6712de61cb5e28710bd9ee0d909440e12e3b` заменяет conversion на static fail-closed
+  `TlsConfig("QUIC TLS exporter failed")`; protocol/state/tests не менялись. Static diff check PASS;
+  compile/runtime после fix pending. Повторить тот же combined command в уже рабочем MSVC env;
+  ожидается 43/43. Телефоны не подключались, generated files не менялись, F4-D не начат.

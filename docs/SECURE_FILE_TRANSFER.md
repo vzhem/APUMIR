@@ -264,9 +264,13 @@ Read-only audit перед кодом подтвердил, что старый 
   wrong peer/signature/scope, truncation, oversize-before-allocation и negotiated ceiling.
 
 Jinx Rust AST (`Program`, zero `MissingNode`), source contracts и `git diff --check` PASS. Arena не
-имеет cargo/rustc, поэтому compile/runtime **не объявлены**. Следующий единственный gate в
-`C:\APU-M8\rust-core`: `cargo test network::file_ --lib -- --nocapture`; ожидается 43 passed,
-0 failed, 592 filtered. Engine/FFI/Android/F3/phones не wired и не изменены; F4-D не начат.
+имеет cargo/rustc, поэтому первоначально compile/runtime не были объявлены. Первый Windows attempt
+на `05fa038` корректно поднял MSVC через direct `vcvars64.bat` (сломанная регистрация `vswhere`
+известна) и дошёл до crate `p2p-core`, где выявил один C1 type error E0599: Quinn
+`ExportKeyingMaterialError` не реализует `Display`. Exact fix `bedf671` заменяет недопустимый
+`to_string()` на fail-closed static `TlsConfig`; protocol/ tests не менялись. Следующий единственный
+re-gate в `C:\APU-M8\rust-core`: `cargo test network::file_ --lib -- --nocapture`; ожидается
+43 passed, 0 failed, 592 filtered. Engine/FFI/Android/F3/phones не wired; F4-D не начат.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

@@ -15,7 +15,7 @@
 1. этот CURRENT OVERRIDE целиком;
 2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
 3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–358;
+4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–359;
 5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
    если обязательный контекст и фактические limits не проверены.
 
@@ -52,8 +52,9 @@
 все нужные slices. F4-B1 имеет focused Windows PASS 11/11; F4-B2 pure signed control boundary —
 focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab2517` дал 34 passed,
 0 failed, 592 filtered. F4-B закрыт в focused host scope. F4-C1 audit и host-only source/static
-готовы на exact `bf4f0c6`; 9 новых tests ещё не compiled. Текущее действие — combined Windows
-43-test gate. Engine/FFI/Android/phones пока не трогать.
+готовы на exact `bf4f0c6`; первый Windows compile на `05fa038` нашёл C1 E0599 в error mapping,
+исправленный exact `bedf671`. Текущее действие — повтор combined Windows 43-test gate.
+Engine/FFI/Android/phones пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -73,7 +74,7 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «F4-C1 source/static PASS на `bf4f0c6`; начинаю combined Windows
+В первом ответе коротко скажи: «F4-C1 compile-fix `bedf671` готов; повторяю combined Windows
 43-test gate; Android и телефоны не трогаю». Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
@@ -188,11 +189,11 @@ Arena branch, newest committed override и production source. Не подтяг�
 
 ### 8. Непосредственный следующий шаг — combined F4-C1 Windows host gate
 
-Audit и source/static уже завершены на exact `bf4f0c6`. Audit нашёл unauthenticated legacy TLS,
-unsigned text listener, новый endpoint/handshake на каждый send, unwired pool и недолговечный FIN
-вместо durable ACK. C1 не доверяет этому TLS сам по себе: mutual pinned B2 transcript подписывает
-scope из per-connection TLS exporter; один ordered stream несёт bounded `APUS`/exact B1 records,
-а fake durable sink разрешает ACK только после success. Engine/FFI/Android пока unwired.
+Audit и source/static завершены на exact `bf4f0c6`. Первый Windows compile поднял direct
+`vcvars64.bat`, дошёл до `p2p-core` и нашёл один E0599: exporter error не имеет Display; exact
+`bedf671` исправляет только mapping на static fail-closed error. C1 mutual pinned B2 transcript
+подписывает scope из per-connection TLS exporter; один ordered stream несёт bounded `APUS`/exact B1
+records, а fake durable sink разрешает ACK только после success. Engine/FFI/Android пока unwired.
 
 В каноническом Windows clone безопасно fast-forward текущую Arena branch, не изменяя generated
 Kotlin/`.so`. Затем из `C:\APU-M8\rust-core` выполнить:
@@ -268,7 +269,7 @@ truncation, oversize-before-allocation, negotiated limit и no ACK on durable fa
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
 - F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
-- F4-C1 source/static PASS на `bf4f0c6`; ближайшая цель только combined Windows 43/43 gate.
+- F4-C1 source/static `bf4f0c6` + compile-fix `bedf671`; ближайшая цель повтор Windows 43/43 gate.
 - F4-D/engine/FFI/Android/phones не начинать до этого результата.
 
 Сейчас выполни gate из раздела 8. Телефоны не нужны.
