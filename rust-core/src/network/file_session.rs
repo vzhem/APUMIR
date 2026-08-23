@@ -14,7 +14,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use quinn::{ RecvStream, SendStream };
 use rand::{ rngs::OsRng, RngCore };
@@ -49,6 +49,8 @@ pub const FILE_SESSION_VERSION_V1: u8 = 1;
 pub const FILE_SESSION_HEADER_BYTES: usize = 12;
 pub const FILE_SESSION_ACK_BYTES: usize = 16 + 8 + 4 + 4;
 pub const MAX_FILE_SESSION_RECORD_BYTES: usize = FILE_SESSION_HEADER_BYTES + MAX_FILE_FRAME_BYTES;
+pub const MAX_FILE_SESSION_WINDOW_FRAMES: usize = 64;
+pub const MAX_FILE_SESSION_WINDOW_BYTES: usize = 16 * 1024 * 1024;
 
 const FILE_SESSION_SCOPE_DOMAIN_V1: &[u8] = b"apu-file-session-scope-v1\0";
 const FILE_SESSION_FLAGS_V1: u16 = 0;
@@ -80,6 +82,121 @@ impl Default for FileSessionLimits {
             operation_timeout: Duration::from_secs(5),
             durable_write_timeout: Duration::from_secs(30),
         }
+    }
+}
+
+/// Hard-bounded ACK window for the ordered C1 stream. The caller supplies only this bounded slice,
+/// never a whole file. Frames are written first and then acknowledged in canonical order, removing
+/// the old one-frame-per-RTT throughput ceiling while preserving durable-before-ACK semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileSessionWindowLimits {
+    pub max_frames: usize,
+    pub max_wire_bytes: usize,
+}
+
+impl Default for FileSessionWindowLimits {
+    fn default() -> Self {
+        Self {
+            max_frames: 8,
+            max_wire_bytes: 2 * 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileSessionWindowReport {
+    pub frame_count: usize,
+    pub ciphertext_bytes: u64,
+    pub wire_bytes: usize,
+    pub elapsed: Duration,
+}
+
+/// Small AIMD controller driven only by measured ACK-window outcomes. It never exceeds the hard
+/// frame/byte ceilings; failure immediately halves pressure, while sustained full-window success
+/// raises it additively. The smoothed measurements are exposed for later path selection/benchmarks.
+#[derive(Debug, Clone)]
+pub struct AdaptiveFileSessionWindow {
+    limits: FileSessionWindowLimits,
+    max_limits: FileSessionWindowLimits,
+    consecutive_full_successes: u8,
+    smoothed_ack_micros: Option<u64>,
+    smoothed_throughput_bytes_per_sec: Option<u64>,
+}
+
+impl AdaptiveFileSessionWindow {
+    pub fn new(
+        initial_limits: FileSessionWindowLimits,
+        max_limits: FileSessionWindowLimits,
+    ) -> Result<Self, FileSessionError> {
+        validate_window_limits(initial_limits)?;
+        validate_window_limits(max_limits)?;
+        if initial_limits.max_frames > max_limits.max_frames
+            || initial_limits.max_wire_bytes > max_limits.max_wire_bytes
+        {
+            return Err(FileSessionError::InvalidWindowLimits);
+        }
+        Ok(Self {
+            limits: initial_limits,
+            max_limits,
+            consecutive_full_successes: 0,
+            smoothed_ack_micros: None,
+            smoothed_throughput_bytes_per_sec: None,
+        })
+    }
+
+    pub fn limits(&self) -> FileSessionWindowLimits {
+        self.limits
+    }
+
+    pub fn smoothed_ack_time(&self) -> Option<Duration> {
+        self.smoothed_ack_micros.map(Duration::from_micros)
+    }
+
+    pub fn smoothed_throughput_bytes_per_sec(&self) -> Option<u64> {
+        self.smoothed_throughput_bytes_per_sec
+    }
+
+    pub fn observe_success(&mut self, report: &FileSessionWindowReport) {
+        let elapsed_micros = u64::try_from(report.elapsed.as_micros()).unwrap_or(u64::MAX).max(1);
+        self.smoothed_ack_micros = Some(ewma(self.smoothed_ack_micros, elapsed_micros));
+        let throughput = report
+            .ciphertext_bytes
+            .saturating_mul(1_000_000)
+            .checked_div(elapsed_micros)
+            .unwrap_or(u64::MAX);
+        self.smoothed_throughput_bytes_per_sec = Some(ewma(
+            self.smoothed_throughput_bytes_per_sec,
+            throughput,
+        ));
+
+        let filled_frame_window = report.frame_count >= self.limits.max_frames;
+        let filled_byte_window = report.wire_bytes >= self.limits.max_wire_bytes.saturating_mul(3) / 4;
+        if filled_frame_window || filled_byte_window {
+            self.consecutive_full_successes = self.consecutive_full_successes.saturating_add(1);
+        } else {
+            self.consecutive_full_successes = 0;
+        }
+        if self.consecutive_full_successes >= 2 {
+            self.limits.max_frames = self
+                .limits
+                .max_frames
+                .saturating_add(1)
+                .min(self.max_limits.max_frames);
+            self.limits.max_wire_bytes = self
+                .limits
+                .max_wire_bytes
+                .saturating_add(MAX_FILE_FRAME_BYTES)
+                .min(self.max_limits.max_wire_bytes);
+            self.consecutive_full_successes = 0;
+        }
+    }
+
+    pub fn observe_failure(&mut self) {
+        self.limits.max_frames = (self.limits.max_frames / 2).max(1);
+        self.limits.max_wire_bytes = (self.limits.max_wire_bytes / 2)
+            .max(MAX_FILE_SESSION_RECORD_BYTES)
+            .min(self.max_limits.max_wire_bytes);
+        self.consecutive_full_successes = 0;
     }
 }
 
@@ -150,6 +267,12 @@ pub enum FileSessionError {
         size: usize,
         max: usize,
     },
+    #[error("invalid file session ACK-window limits")]
+    InvalidWindowLimits,
+    #[error("file session ACK window has {count} frames (max {max})")]
+    WindowFrameLimit { count: usize, max: usize },
+    #[error("file session ACK window has {size} wire bytes (max {max})")]
+    WindowByteLimit { size: usize, max: usize },
     #[error("file session replay admission rejected the scope")]
     ReplayedSession,
     #[error("file session admission store failed: {0}")] Admission(String),
@@ -307,6 +430,103 @@ impl FileSendSession {
             abort_streams(&mut self.send, &mut self.recv);
         }
         result
+    }
+
+    /// Pipeline one bounded slice of chunk frames before waiting for their ordered durable ACKs.
+    /// All shape/negotiation/window checks complete before the first network write.
+    pub async fn send_chunk_window(
+        &mut self,
+        frames: &[FileFrameV1],
+        window_limits: FileSessionWindowLimits,
+    ) -> Result<FileSessionWindowReport, FileSessionError> {
+        let result = self.send_chunk_window_inner(frames, window_limits).await;
+        if result.is_err() && !matches!(&result, Err(FileSessionError::Closed)) {
+            abort_streams(&mut self.send, &mut self.recv);
+        }
+        result
+    }
+
+    async fn send_chunk_window_inner(
+        &mut self,
+        frames: &[FileFrameV1],
+        window_limits: FileSessionWindowLimits,
+    ) -> Result<FileSessionWindowReport, FileSessionError> {
+        validate_window_limits(window_limits)?;
+        if frames.is_empty() || frames.len() > window_limits.max_frames {
+            return Err(FileSessionError::WindowFrameLimit {
+                count: frames.len(),
+                max: window_limits.max_frames,
+            });
+        }
+
+        let mut expected_acks = Vec::with_capacity(frames.len());
+        let mut wire_bytes = 0usize;
+        let mut ciphertext_bytes = 0u64;
+        for frame in frames {
+            let chunk = match frame {
+                FileFrameV1::ChunkData(chunk) => chunk,
+                FileFrameV1::Capabilities(_) => {
+                    return Err(FileSessionError::ExpectedCapabilities);
+                }
+            };
+            let encoded = frame.encode()?;
+            validate_negotiated_frame_size(&encoded, &self.negotiated)?;
+            let record_bytes = FILE_SESSION_HEADER_BYTES
+                .checked_add(encoded.len())
+                .ok_or(FileSessionError::WindowByteLimit {
+                    size: usize::MAX,
+                    max: window_limits.max_wire_bytes,
+                })?;
+            wire_bytes = wire_bytes
+                .checked_add(record_bytes)
+                .ok_or(FileSessionError::WindowByteLimit {
+                    size: usize::MAX,
+                    max: window_limits.max_wire_bytes,
+                })?;
+            if wire_bytes > window_limits.max_wire_bytes {
+                return Err(FileSessionError::WindowByteLimit {
+                    size: wire_bytes,
+                    max: window_limits.max_wire_bytes,
+                });
+            }
+            ciphertext_bytes = ciphertext_bytes.saturating_add(chunk.ciphertext.len() as u64);
+            expected_acks.push(ChunkAckV1::from_chunk(chunk)?);
+        }
+
+        let started = Instant::now();
+        for frame in frames {
+            let encoded = frame.encode()?;
+            write_record_timeout(
+                &mut self.send,
+                SESSION_RECORD_CHUNK,
+                &encoded,
+                self.limits.operation_timeout,
+            )
+            .await?;
+        }
+        for expected_ack in expected_acks {
+            let response = read_record_timeout(&mut self.recv, self.limits.operation_timeout).await?;
+            if response.record_type == SESSION_RECORD_CLOSE {
+                return Err(FileSessionError::Closed);
+            }
+            if response.record_type != SESSION_RECORD_CHUNK_ACK {
+                return Err(FileSessionError::UnexpectedRecord {
+                    expected: "durable chunk ACK",
+                    got: response.record_type,
+                });
+            }
+            let ack = ChunkAckV1::decode(&response.payload)?;
+            if ack != expected_ack {
+                return Err(FileSessionError::AckMismatch);
+            }
+        }
+
+        Ok(FileSessionWindowReport {
+            frame_count: frames.len(),
+            ciphertext_bytes,
+            wire_bytes,
+            elapsed: started.elapsed(),
+        })
     }
 
     async fn send_chunk_inner(&mut self, frame: &FileFrameV1) -> Result<(), FileSessionError> {
@@ -687,6 +907,23 @@ fn validate_limits(limits: FileSessionLimits) -> Result<(), FileSessionError> {
     Ok(())
 }
 
+fn validate_window_limits(limits: FileSessionWindowLimits) -> Result<(), FileSessionError> {
+    if limits.max_frames == 0
+        || limits.max_frames > MAX_FILE_SESSION_WINDOW_FRAMES
+        || limits.max_wire_bytes < MAX_FILE_SESSION_RECORD_BYTES
+        || limits.max_wire_bytes > MAX_FILE_SESSION_WINDOW_BYTES
+    {
+        return Err(FileSessionError::InvalidWindowLimits);
+    }
+    Ok(())
+}
+
+fn ewma(previous: Option<u64>, sample: u64) -> u64 {
+    previous
+        .map(|value| value.saturating_mul(7).saturating_add(sample) / 8)
+        .unwrap_or(sample)
+}
+
 fn random_nonzero_id() -> [u8; FILE_CONTROL_ID_BYTES] {
     let mut id = [0u8; FILE_CONTROL_ID_BYTES];
     while id.iter().all(|byte| *byte == 0) {
@@ -1056,6 +1293,189 @@ mod tests {
             capabilities(),
             NOW
         ).unwrap()
+    }
+
+    #[test]
+    fn adaptive_window_uses_measured_success_and_halves_on_failure() {
+        let initial = FileSessionWindowLimits {
+            max_frames: 2,
+            max_wire_bytes: 2 * MAX_FILE_SESSION_RECORD_BYTES,
+        };
+        let maximum = FileSessionWindowLimits {
+            max_frames: 8,
+            max_wire_bytes: 8 * MAX_FILE_SESSION_RECORD_BYTES,
+        };
+        let mut controller = AdaptiveFileSessionWindow::new(initial, maximum).unwrap();
+        let report = FileSessionWindowReport {
+            frame_count: 2,
+            ciphertext_bytes: 512 * 1024,
+            wire_bytes: initial.max_wire_bytes,
+            elapsed: Duration::from_millis(100),
+        };
+        controller.observe_success(&report);
+        assert_eq!(controller.limits(), initial);
+        controller.observe_success(&report);
+        assert_eq!(controller.limits().max_frames, 3);
+        assert!(controller.limits().max_wire_bytes > initial.max_wire_bytes);
+        assert!(controller.smoothed_ack_time().is_some());
+        assert!(controller
+            .smoothed_throughput_bytes_per_sec()
+            .unwrap()
+            > 0);
+
+        controller.observe_failure();
+        assert_eq!(controller.limits().max_frames, 1);
+        assert!(controller.limits().max_wire_bytes >= MAX_FILE_SESSION_RECORD_BYTES);
+        assert!(matches!(
+            AdaptiveFileSessionWindow::new(
+                FileSessionWindowLimits {
+                    max_frames: 0,
+                    max_wire_bytes: MAX_FILE_SESSION_RECORD_BYTES,
+                },
+                maximum,
+            ),
+            Err(FileSessionError::InvalidWindowLimits)
+        ));
+    }
+
+    #[tokio::test]
+    async fn bounded_ack_window_pipelines_frames_on_one_authenticated_stream() {
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let persisted_server = persisted.clone();
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(82);
+                let client_identity = identity(81);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut session = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let mut sink = RecordingSink {
+                    events: persisted_server,
+                    fail: false,
+                };
+                for expected in 0..8u64 {
+                    assert_eq!(
+                        session.receive_chunk(&mut sink).await.unwrap().chunk_index,
+                        expected
+                    );
+                }
+                assert!(matches!(
+                    session.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = identity(81);
+        let server_identity = identity(82);
+        let connection = client_endpoint
+            .connect(server_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let mut session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            limits(),
+        )
+        .await
+        .unwrap();
+        let frames = (0..8u64)
+            .map(|index| chunk(index, index as u8))
+            .collect::<Vec<_>>();
+        let report = session
+            .send_chunk_window(&frames, FileSessionWindowLimits::default())
+            .await
+            .unwrap();
+        assert_eq!(report.frame_count, 8);
+        assert_eq!(report.ciphertext_bytes, 8 * 64);
+        assert!(report.wire_bytes > report.ciphertext_bytes as usize);
+        assert!(!report.elapsed.is_zero());
+        session.close().await.unwrap();
+        server_task.await.unwrap();
+        assert_eq!(persisted.lock().unwrap().len(), 8);
+    }
+
+    #[tokio::test]
+    async fn oversized_ack_window_is_rejected_before_first_chunk_write() {
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let persisted_server = persisted.clone();
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(84);
+                let client_identity = identity(83);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut session = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let mut sink = RecordingSink {
+                    events: persisted_server,
+                    fail: false,
+                };
+                assert!(session.receive_chunk(&mut sink).await.is_err());
+            })
+        };
+
+        let client_identity = identity(83);
+        let server_identity = identity(84);
+        let connection = client_endpoint
+            .connect(server_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let mut session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            limits(),
+        )
+        .await
+        .unwrap();
+        let frames = (0..9u64)
+            .map(|index| chunk(index, index as u8))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            session
+                .send_chunk_window(&frames, FileSessionWindowLimits::default())
+                .await,
+            Err(FileSessionError::WindowFrameLimit { count: 9, max: 8 })
+        ));
+        server_task.await.unwrap();
+        assert!(persisted.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

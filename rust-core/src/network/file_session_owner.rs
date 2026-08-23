@@ -22,6 +22,7 @@ use crate::crypto::signing_identity::InstalledSigningIdentity;
 use crate::network::file_control::{SignedFileControlV1, FILE_CONTROL_ID_BYTES};
 use crate::network::file_session::{
     FileSendSession, FileSessionError, FileSessionLimits, FileSessionPeer,
+    FileSessionWindowLimits, FileSessionWindowReport,
 };
 use crate::network::file_wire::{
     FileCapabilitiesV1, FileFrameV1, FileWireError, FEATURE_CHUNK_RANGE_FRAMES,
@@ -252,6 +253,38 @@ impl FileSessionOwner {
             Ok(()) => {
                 slot.touch();
                 Ok(())
+            }
+            Err(error) => {
+                *state = OwnedSessionState::Failed;
+                drop(state);
+                self.remove_slot_if_same(target, &slot).await;
+                Err(FileSessionOwnerError::Session(error))
+            }
+        }
+    }
+
+    /// Send one bounded ACK window without releasing per-peer session ownership between frames.
+    pub async fn send_chunk_window(
+        &self,
+        target: &FileSessionTarget,
+        frames: &[FileFrameV1],
+        window_limits: FileSessionWindowLimits,
+        now_ms: i64,
+    ) -> Result<FileSessionWindowReport, FileSessionOwnerError> {
+        let slot = self.ensure_session(target, now_ms).await?;
+        let mut state = slot.session.lock().await;
+        let result = match &mut *state {
+            OwnedSessionState::Ready(session) => {
+                session.send_chunk_window(frames, window_limits).await
+            }
+            OwnedSessionState::Vacant | OwnedSessionState::Failed => {
+                return Err(FileSessionOwnerError::SessionUnavailable);
+            }
+        };
+        match result {
+            Ok(report) => {
+                slot.touch();
+                Ok(report)
             }
             Err(error) => {
                 *state = OwnedSessionState::Failed;
