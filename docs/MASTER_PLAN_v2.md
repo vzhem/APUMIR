@@ -27,8 +27,10 @@ combined 46/46 PASS. C2a host gate закрыт. C2b source exact `fd5d1f3` до
 bounded single-flight owner. После test-only `471d099` Windows focused 7/7 и combined 53/53 PASS;
 C2b host gate закрыт. F4-D1 exact `0ef7706` hard-bounded ACK window прошёл Windows focused 13/13 и
 combined 56/56. D2 exact `fc20f33` scope-bound parallel streams на одном authenticated connection с
-единым 32-MiB budget прошёл Windows focused 17/17 и combined 61/61. Следующий substantive slice — D3
-fast/slow/loss/text-latency benchmarks. Engine/Android, paths, custody и F4-E…H ещё обязательны.
+единым 32-MiB budget прошёл Windows focused 17/17 и combined 61/61. D3 exact `0032c67` measured
+adaptive scheduler прошёл explicit 3/3 и combined 62/62: debug loopback 59,040,998 B/s, text 678 μs,
+controlled 30-ms RTT/5% loss полностью восстановлен с backoff. Следующий substantive slice — F4-E
+path manager. Engine/Android, physical LAN/NAT, custody и F4-E…H ещё обязательны.
 
 ---
 
@@ -1744,14 +1746,16 @@ Authoritative design и доказательные статусы:
     PASS, три warnings только прежние, generated guard PASS.
   - [x] C2b bounded single-flight persistent owner/reconnect: source `fd5d1f3`, test-only `471d099`;
     Windows focused 7/7 + combined 53/53 PASS, 3 прежних warnings, generated guard PASS.
-- [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
-  RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
+- [x] **F4-D — adaptive parallel streams (controlled host scope):** bounded concurrency/window/
+  backpressure по фактическим RTT/loss/throughput; fast-loopback/slow-loss benchmark и text guard.
   - [x] D1 bounded ACK window exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS; hard
     64-frame/16-MiB caps, measured AIMD, owner delegation, generated guard PASS.
   - [x] D2 connection-level parallel streams exact `fc20f33`: one authenticated QUIC connection/scope,
     monotonic `u64` stream IDs, 32-MiB global preflight budget, durable concurrent receive; Windows
     17/17 session + 61/61 combined PASS, generated guard PASS.
-  - [ ] D3 fast loopback/LAN, slow/lossy-link benchmarks and separate text-latency guard.
+  - [x] D3 exact `0032c67`: explicit 3/3 + combined 62/62; debug loopback 59,040,998 B/s,
+    interactive text 678 μs under bulk, controlled RTT 30 ms/5% loss recovered with 2→1 stream and
+    8→4 frame backoff. Physical LAN/NAT remains F4-H acceptance, not inferred from loopback.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,
   expiring endpoint candidates, LAN + different-network/tunnel selection, honest unavailable.
 - [ ] **F4-F — phone-owned FileCustody:** отдельный encrypted disk store, owner modes/quotas,

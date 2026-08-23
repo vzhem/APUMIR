@@ -384,9 +384,27 @@ F4-D2 connection-level parallel streams реализован и проверен
 Windows exact `fc20f33`: focused file-session `17 passed; 0 failed; 636 filtered out` (compile
 19.33 s, tests 0.32 s), combined `network::file_` `61 passed; 0 failed; 592 filtered out` (compile
 0.34 s, tests 1.36 s). Только три прежних warnings; generated Kotlin/arm64 SHA-256 до/после совпали.
-D2 host gate закрыт. F4-D ещё не закрыт: следующий D3 обязан измерить fast loopback/LAN, slow/lossy
-link и отдельный text-latency guard. Затем F4-E…H; нельзя выдавать host parallel streams за готовую
-пользовательскую функцию.
+D2 host gate закрыт.
+
+F4-D3 adaptive scheduling и controlled host measurements проверены на exact
+`0032c67cac1cdd4bb547bc83be96ff903db945fc` (основной scheduler/priority source `bbaef95`):
+
+- joint controller выбирает bounded window/concurrency по measured durable-ACK throughput и
+  cumulative QUIC RTT/lost-packet/congestion deltas; saturated success probes additively, loss,
+  congestion, RTT/throughput regression или operation failure halves pressure;
+- interactive QUIC message streams имеют priority 20, base file control 10, ciphertext data −10;
+  общий 32-MiB ceiling продолжает ограничивать каждый adaptive plan;
+- debug fast loopback передал 15,728,640 ciphertext bytes за 266 ms (`59,040,998 B/s`), при этом
+  интерактивный text завершился за 678 μs во время 260-ms four-stream bulk/backpressure;
+- controlled UDP proxy добавил 8 ms one-way delay и deterministic 5% packet drop: все 524,288 bytes
+  durable-ACKed за 2,657 ms, measured RTT 30 ms, 34 lost packets/26 congestion events; следующий plan
+  корректно снизился с 2 streams/8 frames до 1 stream/4 frames.
+
+Windows exact `0032c67`: explicit D3 `3 passed; 0 failed` (2.89 s), combined `network::file_`
+`62 passed; 0 failed; 3 ignored; 592 filtered out` (compile 0.32 s, tests 1.30 s). Только три прежних
+warnings; generated Kotlin/arm64 SHA-256 сохранены. F4-D controlled host scope закрыт и следующий
+source slice — F4-E path manager. Физический LAN, разные NAT, UDP-blocked fallback и phone runtime не
+подменяются loopback: они остаются обязательными F4-H gates до релиза.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

@@ -4214,3 +4214,21 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   эти два прежних generated files остались единственными modified paths. D2 host gate закрыт, но
   F4-D и продукт не закрыты: следующий D3 fast-loopback/LAN + controlled slow/loss benchmarks и
   отдельный text-latency guard. Engine/FFI/Android/phones не запускались.
+- **2026-08-23 (доп.371) — F4-D3 measured adaptive scheduler + controlled impairment Windows gate
+  PASS:** source `bbaef957f4adb70b5cfc8910da33f0c4b0cb37cc` добавил joint window/concurrency
+  controller с real Quinn path snapshots (RTT, sent/lost packets, congestion events), owner adaptive
+  seam и stream priorities: interactive message 20, base file control 10, ciphertext −10. Scheduler
+  additive-probe-ит только после saturated durable-ACK successes и halves на loss/congestion,
+  RTT+throughput regression или operation failure; 32-MiB global plan ceiling сохранён. Windows
+  focused: `18 passed; 0 failed; 2 ignored; 636 filtered out` (compile 20.07 s, tests 0.32 s).
+  Explicit D3a 2/2: debug fast loopback 15,728,640 ciphertext bytes/266 ms = `59,040,998 B/s`, RTT
+  331 μs; text priority guard 678 μs во время 260-ms four-stream bulk/backpressure. Exact
+  `0032c67cac1cdd4bb547bc83be96ff903db945fc` добавил bounded test-only UDP impairment proxy с
+  8-ms one-way delay и deterministic 5% packet drop. Standalone slow/loss 1/1 (compile 13.56 s,
+  3.32 s runtime); all D3 3/3 за 2.89 s: 524,288 bytes полностью durable-ACKed за 2,657 ms,
+  throughput 197,275 B/s, measured RTT 30 ms, sent 417/lost 34/congestion 26; next plan backoff
+  2→1 streams и 8→4 frames. Combined `network::file_`: `62 passed; 0 failed; 3 ignored; 592
+  filtered out` (compile 0.32 s, tests 1.30 s). Только три прежних warnings; generated Kotlin/arm64
+  hashes `144B3B…A566`/`2C4B12…3D58` сохранены. Controlled F4-D host scope закрыт, следующий F4-E.
+  Это не физический LAN/NAT/UDP-blocked/phone proof: такие gates остаются в F4-H до релиза; Android,
+  FFI и телефоны не запускались.

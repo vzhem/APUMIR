@@ -58,8 +58,10 @@ legacy pool/engine identity нельзя безопасно подключать
 `0736d9b` прошёл Windows 46/46. C2b source `fd5d1f3` + test-only `471d099` прошёл focused 7/7 и
 combined 53/53; F4-C host gate закрыт. F4-D1 exact `0ef7706` bounded ACK window прошёл Windows
 13/13 focused и 56/56 combined. D2 exact `fc20f33` parallel streams внутри одного authenticated
-connection прошёл Windows 17/17 focused и 61/61 combined. Следующий D3 — fast/slow/loss benchmarks
-и text-latency guard; engine/Android/path/custody и E…H ещё впереди. Телефоны пока не трогать.
+connection прошёл Windows 17/17 focused и 61/61 combined. D3 exact `0032c67` прошёл explicit 3/3 и
+combined 62/62: debug loopback 59,040,998 B/s, text 678 μs, controlled 30-ms RTT/5% loss recovered с
+adaptive backoff. Следующий F4-E path manager; engine/Android/physical LAN/NAT/custody и E…H ещё
+впереди. Телефоны пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -230,9 +232,12 @@ connection живым, открывает scope-bound QUIC data streams без �
 preflight-ит полный batch под единым 32-MiB hard budget и проверяет monotonic `u64` stream ID/scope.
 Windows: 17/17 focused, 61/61 combined, только три прежних warnings, generated guard PASS. Concurrent
 durable persistence, duplicate/scope/budget negatives, repeated batch и signed reconnect resume host
-tests PASS. Теперь D3: fast loopback/LAN, slow/lossy link и отдельный text-latency guard; после D — E
-path manager, F custody, G switching, H acceptance. Engine/FFI/Android/phones не подключать раньше
-host throughput proof; legacy text listener не использовать.
+tests PASS. D3 exact `0032c67` добавил measured joint window/concurrency controller и stream
+priorities. Explicit 3/3: fast debug loopback 15,728,640 B/266 ms (`59,040,998 B/s`), text 678 μs
+при 260-ms bulk, controlled 30-ms RTT/5% loss recovered all 524,288 B и backoff 2→1 streams/8→4
+frames. Combined 62/62, generated guard PASS. Controlled F4-D host scope закрыт. Теперь E path
+manager, F custody, G switching, H physical LAN/NAT/UDP-blocked/phone acceptance. Legacy text listener
+для file bytes не использовать.
 
 ### 9. Порядок после F4-B
 
@@ -303,7 +308,8 @@ host throughput proof; legacy text listener не использовать.
 - C2b source `fd5d1f3` + test-only `471d099`: Windows 7/7 focused, 53/53 combined PASS.
 - F4-D1 exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS.
 - F4-D2 exact `fc20f33`: Windows 17/17 session + 61/61 combined PASS; generated guard PASS.
-- Следующий D3; FFI/Android/phones не начинать до host throughput proof.
+- F4-D3 exact `0032c67`: explicit 3/3 + combined 62/62 PASS; fast/text/slow-loss metrics записаны.
+- Следующий F4-E; FFI/Android/phones не подключать до path/custody source gates.
 
-Сейчас делай D3 из раздела 8: сначала воспроизводимый fast-loopback benchmark и text-latency guard,
-затем controlled slow/loss profile. Телефоны пока не нужны.
+Сейчас делай F4-E из раздела 8: signed expiring presence/path candidates, deterministic selection и
+UDP-blocked fallback seams. Телефоны пока не нужны; physical path acceptance остаётся в F4-H.
