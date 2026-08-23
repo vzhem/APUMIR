@@ -4195,3 +4195,22 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   (compile 0.33 s, tests 1.31 s). Три warnings только прежние. D1 bounded window/AIMD gate закрыт.
   Следующий D2: multiple scope-bound QUIC streams на том же authenticated connection с global byte
   budget; затем D3 benchmarks. Android/phones untouched, F4-D ещё не закрыт.
+- **2026-08-23 (доп.370) — F4-D2 same-connection parallel streams Windows gate 17/17 + 61/61
+  PASS:** exact source `fc20f331ef3dcfabad8749c4c8f262a7bc807e6d` добавил multiple binary data
+  streams на том же exporter-authenticated `QuicConnection` и C1 scope, без TLS/identity handshake
+  на chunk. Data-stream hello несёт exact scope + monotonic `u64` ID; wrong scope, duplicate/replay и
+  negotiated active-count overflow fail-closed. Sender preflight-ит полный batch до первого stream
+  open: per-stream 64 frames/16 MiB и единый global hard ceiling 32 MiB; payload windows исполняются
+  concurrent, receive sink обязан durable persist range до ACK. IDs не переиспользуются внутри scope,
+  owner default concurrency 4 и evicts session после любой parallel-operation failure; reconnect
+  продолжает signed MissingRanges seam. Tests добавили no-allocation budget boundary, same-connection
+  concurrent persistence, second batch IDs, wrong scope, duplicate ID и owner eviction/reconnect.
+  Jinx для трёх changed Rust files: `Program`, `MissingNode=0`; diff check PASS. Canonical
+  `C:\APU-M8` guarded fast-forward `0ef7706→fc20f33`; MSVC focused file-session: `17 passed; 0
+  failed; 636 filtered out` (compile 19.33 s, tests 0.32 s), combined `network::file_`: `61 passed; 0
+  failed; 592 filtered out` (compile 0.34 s, tests 1.36 s). Только три прежних warnings. Generated
+  Kotlin SHA-256 `144B3B31511B7977CE0929F53ED4D60D76A8F69C49660BC751845EAB6508A566` и arm64
+  `.so` `2C4B12ED352DFAA3ACE9AE8FF2CC7EC72B231918E06CFE9BE5C32904EB363D58` совпали до/после;
+  эти два прежних generated files остались единственными modified paths. D2 host gate закрыт, но
+  F4-D и продукт не закрыты: следующий D3 fast-loopback/LAN + controlled slow/loss benchmarks и
+  отдельный text-latency guard. Engine/FFI/Android/phones не запускались.

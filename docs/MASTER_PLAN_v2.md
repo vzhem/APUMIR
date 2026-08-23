@@ -26,8 +26,9 @@ adapter для real `Arc<InstalledSigningIdentity>` без экспорта seed
 combined 46/46 PASS. C2a host gate закрыт. C2b source exact `fd5d1f3` добавил отдельный host-only
 bounded single-flight owner. После test-only `471d099` Windows focused 7/7 и combined 53/53 PASS;
 C2b host gate закрыт. F4-D1 exact `0ef7706` hard-bounded ACK window прошёл Windows focused 13/13 и
-combined 56/56. Следующий substantive slice D2 — connection-level parallel streams с единым byte
-budget; затем D3 benchmarks. Engine/Android, paths, custody и F4-E…H ещё обязательны.
+combined 56/56. D2 exact `fc20f33` scope-bound parallel streams на одном authenticated connection с
+единым 32-MiB budget прошёл Windows focused 17/17 и combined 61/61. Следующий substantive slice — D3
+fast/slow/loss/text-latency benchmarks. Engine/Android, paths, custody и F4-E…H ещё обязательны.
 
 ---
 
@@ -1747,7 +1748,10 @@ Authoritative design и доказательные статусы:
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
   - [x] D1 bounded ACK window exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS; hard
     64-frame/16-MiB caps, measured AIMD, owner delegation, generated guard PASS.
-  - [ ] D2 connection-level parallel streams + global byte budget; D3 fast/slow/loss/text benchmarks.
+  - [x] D2 connection-level parallel streams exact `fc20f33`: one authenticated QUIC connection/scope,
+    monotonic `u64` stream IDs, 32-MiB global preflight budget, durable concurrent receive; Windows
+    17/17 session + 61/61 combined PASS, generated guard PASS.
+  - [ ] D3 fast loopback/LAN, slow/lossy-link benchmarks and separate text-latency guard.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,
   expiring endpoint candidates, LAN + different-network/tunnel selection, honest unavailable.
 - [ ] **F4-F — phone-owned FileCustody:** отдельный encrypted disk store, owner modes/quotas,

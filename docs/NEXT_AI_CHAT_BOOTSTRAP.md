@@ -57,8 +57,9 @@ focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab251
 legacy pool/engine identity нельзя безопасно подключать к C1. Host-only C2a signer seam exact
 `0736d9b` прошёл Windows 46/46. C2b source `fd5d1f3` + test-only `471d099` прошёл focused 7/7 и
 combined 53/53; F4-C host gate закрыт. F4-D1 exact `0ef7706` bounded ACK window прошёл Windows
-13/13 focused и 56/56 combined. Следующий D2 — parallel streams внутри одного authenticated
-connection; benchmarks/engine/Android/path/custody и E…H ещё впереди. Телефоны пока не трогать.
+13/13 focused и 56/56 combined. D2 exact `fc20f33` parallel streams внутри одного authenticated
+connection прошёл Windows 17/17 focused и 61/61 combined. Следующий D3 — fast/slow/loss benchmarks
+и text-latency guard; engine/Android/path/custody и E…H ещё впереди. Телефоны пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -224,12 +225,14 @@ capacity и shutdown. Jinx `Program`/zero MissingNode, static contract и diff c
 7/7, combined `network::file_` 53/53 и 592 filtered; C2b/F4-C host gate закрыт.
 
 D1 exact `0ef770618292ce1f7ba259cc051a1c390bf7ca62` прошёл Windows 13/13 focused и
-56/56 combined. Теперь D2 должен держать base C1 authenticated connection живым, открывать несколько
-scope-bound QUIC data streams без нового TLS/identity handshake на chunk, иметь единый hard byte
-budget поверх per-stream windows и fail-closed stream ID/scope checks. Host tests: one connection,
-реальная concurrent persistence, duplicate/scope/budget negatives и reconnect resume. Затем D3
-fast/slow/loss/text benchmarks; после D — E path manager, F custody, G switching, H acceptance.
-Engine/FFI/Android/phones не подключать раньше host proof; legacy text listener не использовать.
+56/56 combined. D2 exact `fc20f331ef3dcfabad8749c4c8f262a7bc807e6d` держит base C1 authenticated
+connection живым, открывает scope-bound QUIC data streams без нового TLS/identity handshake на chunk,
+preflight-ит полный batch под единым 32-MiB hard budget и проверяет monotonic `u64` stream ID/scope.
+Windows: 17/17 focused, 61/61 combined, только три прежних warnings, generated guard PASS. Concurrent
+durable persistence, duplicate/scope/budget negatives, repeated batch и signed reconnect resume host
+tests PASS. Теперь D3: fast loopback/LAN, slow/lossy link и отдельный text-latency guard; после D — E
+path manager, F custody, G switching, H acceptance. Engine/FFI/Android/phones не подключать раньше
+host throughput proof; legacy text listener не использовать.
 
 ### 9. Порядок после F4-B
 
@@ -299,6 +302,8 @@ Engine/FFI/Android/phones не подключать раньше host proof; leg
 - C2a exact `0736d9b` Windows 46/46 PASS; не повторять без code change.
 - C2b source `fd5d1f3` + test-only `471d099`: Windows 7/7 focused, 53/53 combined PASS.
 - F4-D1 exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS.
-- Следующий D2, затем D3; FFI/Android/phones не начинать до host throughput proof.
+- F4-D2 exact `fc20f33`: Windows 17/17 session + 61/61 combined PASS; generated guard PASS.
+- Следующий D3; FFI/Android/phones не начинать до host throughput proof.
 
-Сейчас делай D2 из раздела 8. Телефоны не нужны.
+Сейчас делай D3 из раздела 8: сначала воспроизводимый fast-loopback benchmark и text-latency guard,
+затем controlled slow/loss profile. Телефоны пока не нужны.

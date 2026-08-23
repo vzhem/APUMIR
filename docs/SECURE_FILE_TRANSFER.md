@@ -366,9 +366,27 @@ Jinx changed files `Program`, `MissingNode=0`; static bounds/no-text-storage и 
 Windows exact `0ef7706`: file-session focused `13 passed; 0 failed; 635 filtered out` (compile
 27.96 s, tests 0.24 s), combined `network::file_` `56 passed; 0 failed; 592 filtered out` (compile
 0.33 s, tests 1.31 s). Три warnings только прежние; generated hashes сохранены. D1 host gate закрыт.
-D1 — реальный throughput progress, но не весь F4-D: D2 connection-level parallel streams и D3
-slow/loss/text-latency benchmarks ещё обязательны. Затем F4-E…H; нельзя выдавать host ACK window за
-готовую пользовательскую функцию.
+D1 — реальный throughput progress, но не весь F4-D.
+
+F4-D2 connection-level parallel streams реализован и проверен на exact
+`fc20f331ef3dcfabad8749c4c8f262a7bc807e6d`:
+
+- дополнительные binary data streams открываются внутри того же exporter-authenticated QUIC
+  connection и обязаны предъявить exact C1 scope до первого chunk; TLS/identity handshake на chunk
+  отсутствует;
+- monotonic `u64` stream IDs, replay/scope mismatch и превышение negotiated active-stream limit
+  fail-closed; production owner по умолчанию договаривается максимум о четырёх streams;
+- per-stream hard window остаётся 64 frames/16 MiB, а полный parallel batch preflight проходит до
+  первого stream open под единым hard ceiling 32 MiB; whole-file RAM и unbounded queue не добавлены;
+- payload windows выполняются concurrent, каждый ciphertext range durable до ACK; после failure owner
+  evicts session, а reconnect/resume остаётся через signed MissingRanges.
+
+Windows exact `fc20f33`: focused file-session `17 passed; 0 failed; 636 filtered out` (compile
+19.33 s, tests 0.32 s), combined `network::file_` `61 passed; 0 failed; 592 filtered out` (compile
+0.34 s, tests 1.36 s). Только три прежних warnings; generated Kotlin/arm64 SHA-256 до/после совпали.
+D2 host gate закрыт. F4-D ещё не закрыт: следующий D3 обязан измерить fast loopback/LAN, slow/lossy
+link и отдельный text-latency guard. Затем F4-E…H; нельзя выдавать host parallel streams за готовую
+пользовательскую функцию.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
