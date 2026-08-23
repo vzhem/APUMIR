@@ -540,7 +540,7 @@ mod tests {
 
     use crate::network::file_control::{
         sign_file_control_with_signer_v1, FileChunkRangePageV1, FileChunkRangeV1,
-        FileControlBodyV1, FileControlClaimsV1,
+        FileControlBodyV1, FileControlClaimsV1, FileControlError,
     };
     use crate::network::file_session::{DurableFileRangeSink, FileReceiveSession, FileSessionAdmission};
     use crate::network::file_wire::FileChunkDataV1;
@@ -775,10 +775,9 @@ mod tests {
                 .await
                 .unwrap();
                 let mut sink = DiscardSink;
-                assert!(matches!(
-                    first.receive_chunk(&mut sink).await,
-                    Err(FileSessionError::Closed)
-                ));
+                // Idle eviction closes the whole owned stream/connection. Depending on QUIC task
+                // scheduling the peer may observe the logical CLOSE record or transport closure.
+                assert!(first.receive_chunk(&mut sink).await.is_err());
 
                 let second_connection = server_endpoint.accept().await.unwrap();
                 let mut second_admission = MemoryAdmission;
@@ -871,12 +870,18 @@ mod tests {
             config(4, Duration::from_secs(60)),
         )
         .unwrap();
-        let wrong_target =
-            FileSessionTarget::new(peer(&wrong_identity), server_address).unwrap();
+        // Keep the actual recipient routing ID so the server can answer, but pin the wrong key on
+        // the client. This isolates the C1 authenticated-key rejection instead of failing earlier on
+        // a recipient-ID mismatch.
+        let mut wrong_peer = peer(&server_identity);
+        wrong_peer.ed25519_public_key = wrong_identity.public_key().try_into().unwrap();
+        let wrong_target = FileSessionTarget::new(wrong_peer, server_address).unwrap();
         let error = owner.session_scope(&wrong_target, NOW).await.unwrap_err();
         assert!(matches!(
             error,
-            FileSessionOwnerError::Session(FileSessionError::Control(_))
+            FileSessionOwnerError::Session(FileSessionError::Control(
+                FileControlError::UnexpectedSigner
+            ))
         ));
         assert_eq!(owner.owned_peer_count().await, 0);
 
