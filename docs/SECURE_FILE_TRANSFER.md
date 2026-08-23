@@ -406,6 +406,18 @@ warnings; generated Kotlin/arm64 SHA-256 сохранены. F4-D controlled hos
 source slice — F4-E path manager. Физический LAN, разные NAT, UDP-blocked fallback и phone runtime не
 подменяются loopback: они остаются обязательными F4-H gates до релиза.
 
+F4-E1 signed contact-scoped path presence проверен на exact
+`103f0410f8c29e6b305b9cc751107f172c85a6d0`: canonical bounded beacon адресован одному pinned
+контакту, подписан real Ed25519 sidecar, имеет monotonic sequence, refresh 60 s/hard expiry 90 s,
+максимум 8 candidates и 256 contacts. Manager детерминированно выбирает LAN QUIC → Internet QUIC →
+direct TCP → TCP tunnel, учитывает доступность UDP/TCP/tunnel, failure cooldown, expiry и возвращает
+честный `Unavailable`; file bytes в beacon отсутствуют. Wrong signer/recipient, replay, tamper,
+truncation/trailing/oversize, duplicate IDs и invalid endpoints fail-closed. Windows focused path 7/7
+(compile 25.01 s, tests 0.06 s), combined `network::file_` 69/69 + 3 explicit D3 ignored (compile
+0.34 s, tests 1.38 s); только три прежних warnings, generated hashes сохранены. E ещё не закрыт:
+нужны typed dispatch в authenticated owner, durable engine persistence/publish и physical fallback
+acceptance; затем F custody.
+
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 

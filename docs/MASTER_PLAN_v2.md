@@ -29,8 +29,9 @@ C2b host gate закрыт. F4-D1 exact `0ef7706` hard-bounded ACK window про
 combined 56/56. D2 exact `fc20f33` scope-bound parallel streams на одном authenticated connection с
 единым 32-MiB budget прошёл Windows focused 17/17 и combined 61/61. D3 exact `0032c67` measured
 adaptive scheduler прошёл explicit 3/3 и combined 62/62: debug loopback 59,040,998 B/s, text 678 μs,
-controlled 30-ms RTT/5% loss полностью восстановлен с backoff. Следующий substantive slice — F4-E
-path manager. Engine/Android, physical LAN/NAT, custody и F4-E…H ещё обязательны.
+controlled 30-ms RTT/5% loss полностью восстановлен с backoff. F4-E1 exact `103f041` signed
+contact-scoped 60/90 path manager прошёл Windows 7/7 и combined 69/69. Следующий E2 typed dispatch/
+engine persistence; Android, physical LAN/NAT, custody и F4-F…H ещё обязательны.
 
 ---
 
@@ -1758,6 +1759,9 @@ Authoritative design и доказательные статусы:
     8→4 frame backoff. Physical LAN/NAT remains F4-H acceptance, not inferred from loopback.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,
   expiring endpoint candidates, LAN + different-network/tunnel selection, honest unavailable.
+  - [x] E1 exact `103f041`: bounded signed beacon/path table, replay/expiry/cooldown/capacity,
+    UDP-blocked direct-TCP/tunnel selection; Windows 7/7 + combined 69/69, generated guard PASS.
+  - [ ] E2 typed authenticated-owner dispatch, durable engine persistence/publish and fallback wiring.
 - [ ] **F4-F — phone-owned FileCustody:** отдельный encrypted disk store, owner modes/quotas,
   custody receipts, inventory/missing pull, bounded replication, TTL/cleanup/reboot/flood defense.
 - [ ] **F4-G — path switching:** direct ↔ transient conduit ↔ live phone relay ↔ delayed custody с

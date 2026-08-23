@@ -60,7 +60,8 @@ combined 53/53; F4-C host gate закрыт. F4-D1 exact `0ef7706` bounded ACK w
 13/13 focused и 56/56 combined. D2 exact `fc20f33` parallel streams внутри одного authenticated
 connection прошёл Windows 17/17 focused и 61/61 combined. D3 exact `0032c67` прошёл explicit 3/3 и
 combined 62/62: debug loopback 59,040,998 B/s, text 678 μs, controlled 30-ms RTT/5% loss recovered с
-adaptive backoff. Следующий F4-E path manager; engine/Android/physical LAN/NAT/custody и E…H ещё
+adaptive backoff. F4-E1 exact `103f041` signed 60/90 path manager прошёл Windows 7/7 и combined
+69/69. Следующий E2 typed dispatch/engine persistence; Android/physical LAN/NAT/custody и F…H ещё
 впереди. Телефоны пока не трогать.
 
 > ## Исторический M8 handoff
@@ -236,8 +237,12 @@ tests PASS. D3 exact `0032c67` добавил measured joint window/concurrency 
 priorities. Explicit 3/3: fast debug loopback 15,728,640 B/266 ms (`59,040,998 B/s`), text 678 μs
 при 260-ms bulk, controlled 30-ms RTT/5% loss recovered all 524,288 B и backoff 2→1 streams/8→4
 frames. Combined 62/62, generated guard PASS. Controlled F4-D host scope закрыт. Теперь E path
-manager, F custody, G switching, H physical LAN/NAT/UDP-blocked/phone acceptance. Legacy text listener
-для file bytes не использовать.
+manager, F custody, G switching, H physical LAN/NAT/UDP-blocked/phone acceptance. E1 exact `103f041`
+добавил contact-scoped signed canonical beacon, 60/90 lifetime, 8-candidate/256-contact caps,
+replay/expiry/failure cooldown и LAN QUIC → Internet QUIC → direct TCP → tunnel selection. Windows
+path 7/7, combined 69/69, generated guard PASS. E2 должен типизированно передавать только QUIC route
+в pinned `FileSessionOwner`, не маскировать TCP/tunnel как QUIC, затем durable engine publish/store.
+Legacy text listener для file bytes не использовать.
 
 ### 9. Порядок после F4-B
 
@@ -309,7 +314,8 @@ manager, F custody, G switching, H physical LAN/NAT/UDP-blocked/phone acceptance
 - F4-D1 exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS.
 - F4-D2 exact `fc20f33`: Windows 17/17 session + 61/61 combined PASS; generated guard PASS.
 - F4-D3 exact `0032c67`: explicit 3/3 + combined 62/62 PASS; fast/text/slow-loss metrics записаны.
-- Следующий F4-E; FFI/Android/phones не подключать до path/custody source gates.
+- F4-E1 exact `103f041`: Windows path 7/7 + combined 69/69 PASS; generated guard PASS.
+- Следующий E2; FFI/Android/phones не подключать до path/custody source gates.
 
-Сейчас делай F4-E из раздела 8: signed expiring presence/path candidates, deterministic selection и
-UDP-blocked fallback seams. Телефоны пока не нужны; physical path acceptance остаётся в F4-H.
+Сейчас делай E2: typed path→authenticated-owner dispatch и durable engine persistence/publish. Затем
+F custody. Телефоны пока не нужны; physical path acceptance остаётся в F4-H.

@@ -4232,3 +4232,21 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   hashes `144B3B…A566`/`2C4B12…3D58` сохранены. Controlled F4-D host scope закрыт, следующий F4-E.
   Это не физический LAN/NAT/UDP-blocked/phone proof: такие gates остаются в F4-H до релиза; Android,
   FFI и телефоны не запускались.
+- **2026-08-23 (доп.372) — F4-E1 signed contact path manager Windows 7/7 + combined 69/69 PASS:**
+  exact `103f0410f8c29e6b305b9cc751107f172c85a6d0` добавил отдельный `file_path.rs`, не
+  переиспользуя legacy unsigned gossip presence/router. Canonical `APUP` beacon адресован одному
+  exact recipient, подписан pinned Ed25519 key/real installed sidecar, имеет positive monotonic
+  sequence, 60-s refresh contract, hard 90-s record/candidate expiry и clock-skew bound. Wire ≤4 KiB,
+  ≤8 candidates/contact, manager ≤256 contacts; только endpoint metadata, file bytes отсутствуют.
+  Candidate kinds: LAN QUIC, Internet QUIC, direct TCP, TCP tunnel. Deterministic selection учитывает
+  UDP/TCP/LAN/tunnel availability, kind+priority+ID, measured failure exponential cooldown ≤60 s,
+  refresh replacement и expiry; при отсутствии пути возвращает explicit `Unavailable`. Seven tests
+  закрывают round-trip/selection, tamper/wrong signer/recipient/replay/expiry, UDP-blocked TCP→tunnel,
+  cooldown/capacity/cleanup, duplicate/bounds/invalid endpoint, every truncation/trailing/oversize и
+  real installed identity adapter. Jinx new file/mod: Program, MissingNode=0; diff check PASS.
+  Canonical Windows focused: `7 passed; 0 failed; 657 filtered out` (compile 25.01 s, tests 0.06 s),
+  combined `network::file_`: `69 passed; 0 failed; 3 ignored; 592 filtered out` (compile 0.34 s,
+  tests 1.38 s). Только три прежних warnings; generated hashes `144B3B…A566`/`2C4B12…3D58` сохранены.
+  E1 host gate закрыт, но E ещё нет: следующий E2 typed path dispatch в pinned authenticated owner,
+  durable engine sequence/candidate persistence и publish; physical fallback остаётся H. Phones/
+  Android/FFI не запускались.
