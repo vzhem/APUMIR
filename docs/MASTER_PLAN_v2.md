@@ -34,7 +34,8 @@ signed 60/90 path manager, durable replay/restart store и typed QUIC/TCP/tunnel
 Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` отдельный opaque ciphertext range store
 прошёл Windows custody 8/8 и combined 79/79; F2a exact `2cc0e36` signed receipt — 4/4 и combined
 83/83. F2b exact `80416bc` atomic receipt/missing pull прошёл custody 11/11 и combined 86/86.
-Следующий F3 replication/production wiring; Android, physical LAN/NAT и F4-G/H ещё обязательны.
+F3a exact `ac0fde9` replication planner прошёл 4/4 + combined 90/90. Следующий F3b production
+engine/FFI/Android/at-rest wiring; physical LAN/NAT и F4-G/H ещё обязательны.
 
 ---
 
@@ -1773,6 +1774,8 @@ Authoritative design и доказательные статусы:
   - [x] F2 durable signed receipt + explicit bounded inventory/missing-range pull: signed codec exact
     `2cc0e36` Windows 4/4; atomic SQLite/pull exact `80416bc` custody 11/11 + combined 86/86.
   - [ ] F3 bounded replication/recovery and production engine/Android/device-bound at-rest wiring.
+    - [x] F3a exact `ac0fde9`: restart-stable signed-receipt planner; Windows 4/4 + combined 90/90.
+    - [ ] F3b production binary engine/FFI/Android/at-rest wiring; legacy text path forbidden.
 - [ ] **F4-G — path switching:** direct ↔ transient conduit ↔ live phone relay ↔ delayed custody с
   одним transfer ID и без сброса verified progress.
 - [ ] **F4-H — acceptance:** boundaries/large file, different NAT, UDP-blocked/TCP-only, slow/lossy,

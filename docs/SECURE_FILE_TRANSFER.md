@@ -447,7 +447,12 @@ ciphertext digest и absolute lease; tamper/truncation/trailing/expiry fail-clos
 PASS. Windows exact source `80416bc`: custody 11/11 (compile 15.96 s, tests 0.07 s), combined 86/86
 + 3 ignored (compile 0.35 s, tests 1.39 s); sign failure rollback, restart-stable exact receipt и
 authenticated exact missing pull подтверждены. F2 host scope закрыт. Весь F и production delivery ещё
-не готовы: bounded replication и engine/FFI/Android/device-bound at-rest wiring остаются F3.
+не готовы: engine/FFI/Android/device-bound at-rest wiring остаётся F3.
+
+F4-F3a exact `ac0fde9` durable multi-custodian planner прошёл Windows 4/4 и combined 90/90 + 3
+ignored: signed receipt inventory переживает restart, планирует только missing replicas, hard-bounds
+каждую page без общего file-size cap и учитывает candidate quota/lease. Это origin-side control layer;
+physical replication transport и production app wiring ещё не доказаны.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

@@ -63,8 +63,9 @@ combined 62/62: debug loopback 59,040,998 B/s, text 678 μs, controlled 30-ms RT
 adaptive backoff. F4-E exact `103f041` + `f7e7562` signed 60/90 path manager, durable restart store
 и typed dispatch прошёл Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` opaque range store
 прошёл Windows custody 8/8/combined 79/79; F2 exact `2cc0e36` + `80416bc` signed atomic receipt/
-missing pull прошёл custody 11/11/combined 86/86. Следующий F3 replication/wiring; Android/engine/
-physical F…H ещё впереди, телефоны пока не трогать.
+missing pull прошёл custody 11/11/combined 86/86. F3a exact `ac0fde9` replication planner прошёл
+4/4/combined 90/90. Следующий F3b production wiring; Android/engine/physical F…H ещё впереди,
+телефоны пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -320,7 +321,8 @@ full `u64` sequence/beacon до manager visibility; restart/replay test PASS. Wi
 - F4-E1/E2 exact `103f041`/`f7e7562`: Windows path 9/9 + combined 71/71 PASS; guard PASS.
 - F4-F1 exact `60407fa`: Windows custody 8/8 + combined 79/79 PASS; guard PASS.
 - F4-F2 exact `2cc0e36`/`80416bc`: Windows custody 11/11 + combined 86/86 PASS.
-- Следующий F3 replication/recovery/production wiring; phones только после source/compile gates.
+- F4-F3a exact `ac0fde9`: Windows replication 4/4 + combined 90/90 PASS.
+- Следующий F3b production wiring; phones только после source/compile gates.
 
-Делай F3 bounded multi-custodian replication, recovery и engine/FFI/Android/device-bound at-rest
-wiring. Legacy Base64/text path не использовать. Physical acceptance остаётся в F4-H.
+Делай F3b engine/FFI/Android/device-bound at-rest wiring. Legacy Base64/text path не использовать,
+не сохранять app 4-GiB/u32 limits. Physical acceptance остаётся в F4-H.

@@ -4312,3 +4312,16 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   прежних warnings; two generated paths unchanged. F2 host scope закрыт. F4-F всё ещё не закрыт:
   следующий F3 bounded multi-custodian replication/recovery + production engine/FFI/Android and
   device-bound at-rest wiring. Physical phone/non-overlap gates остаются H; phones не запускались.
+- **2026-08-23 (доп.377) — F4-F3a durable bounded replication Windows 4/4 + combined 90/90 PASS:**
+  exact tested `ac0fde910f1bd9a413854f8ad45aa24132a24867` добавил origin-side SQLite receipt
+  inventory/planner для нескольких независимых phone custodians. Plan page ≤256 ranges/≤512
+  assignments/≤32 candidates, target ≤5; repeated pages не ограничивают общий `u64` file geometry.
+  Только active self-verifying exact receipts считаются replica; origin/recipient исключаются,
+  candidates deterministic priority→available quota→node, quota расходуется across whole page,
+  advertised lease обязан покрывать requested lease. После restart existing receipt не планируется
+  повторно; wrong origin/recipient, expired/tampered receipt и unsorted range page fail-closed. Receipt
+  DB не содержит ciphertext. Windows focused `4 passed; 0 failed; 681 filtered out` (compile 19.82 s,
+  tests 0.07 s); combined `90 passed; 0 failed; 3 ignored; 592 filtered out` (compile 0.34 s, tests
+  1.34 s). Появился один test-only unused-variable warning поверх трёх прежних; следующий tiny source
+  fix переименовывает helper argument `_recipient` без production effect. F3 ещё не закрыт: planner
+  не подключён к engine/FFI/Android/device at-rest и physical phones не запускались.

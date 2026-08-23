@@ -567,7 +567,7 @@ mod tests {
 
     fn receipt(
         origin: &FileCustodyPeer,
-        recipient: &FileCustodyPeer,
+        _recipient: &FileCustodyPeer,
         custodian: &FileCustodyPeer,
         custodian_identity: &Ed25519KeyPair,
         range: &FileCustodyReplicationRangeV1,
