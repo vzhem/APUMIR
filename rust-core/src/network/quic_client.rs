@@ -180,6 +180,42 @@ impl QuicConnection {
     pub fn is_closed(&self) -> bool {
         self.inner.close_reason().is_some()
     }
+
+    /// Open the one ordered bidirectional stream owned by an F4 file session.
+    pub(crate) async fn open_file_session_stream(
+        &self,
+    ) -> QuicResult<(SendStream, RecvStream)> {
+        self.inner
+            .open_bi()
+            .await
+            .map_err(|error| QuicClientError::StreamOpen(error.to_string()))
+    }
+
+    /// Accept the one ordered bidirectional stream owned by an F4 file session.
+    pub(crate) async fn accept_file_session_stream(
+        &self,
+    ) -> QuicResult<(SendStream, RecvStream)> {
+        self.inner
+            .accept_bi()
+            .await
+            .map_err(|error| QuicClientError::ReceiveFailed(error.to_string()))
+    }
+
+    /// Export a per-connection TLS channel binding for the signed F4 handshake.
+    pub(crate) fn file_session_channel_binding(
+        &self,
+        initiator_record_id: &[u8],
+    ) -> QuicResult<[u8; 32]> {
+        let mut binding = [0u8; 32];
+        self.inner
+            .export_keying_material(
+                &mut binding,
+                b"EXPORTER-APU-FILE-SESSION-v1",
+                initiator_record_id,
+            )
+            .map_err(|error| QuicClientError::TlsConfig(error.to_string()))?;
+        Ok(binding)
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
