@@ -338,12 +338,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-B1/B2 focused Windows PASS; текущий slice F4-B3:** B1 = 11/11 на `4815582`, B2 =
-> 12/12 на `96dbe28`; sender/QUIC/FFI/Android/phones unwired. Владелец разрешил последовательно
-> продолжать все F4 slices и уточнил главный приоритет: быстрые файлы любого объёма через любую сеть.
-> B3 должен добавить ciphertext chunk/Merkle identities и F4 `u64` streaming geometry без arbitrary
-> 4-GiB coupling; legacy F3 path не ломать. Сейчас только pure B3 и focused host gate, телефоны не
-> нужны. Полный порядок F4-A…F4-H — в `SECURE_FILE_TRANSFER.md`.
+> **F4-B3 source/static PASS; combined B1/B2/B3 host pending:** isolated `file_identity.rs`
+> добавляет `u64` geometry, ciphertext identities, streaming Merkle/commitment/proofs; B1/B2 draft
+> index/ranges widened до `u64`. Всего 34 focused tests; production callsites/legacy F3/QUIC/FFI/
+> Android/phones untouched. Прежние B1/B2 exact tips PASS, но новый combined tip ещё не compiled.
+> Сейчас только Windows `cargo test network::file_ --lib -- --nocapture`; к F4-C до PASS не идти.
+> Полный порядок F4-A…F4-H — в `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
@@ -4030,3 +4030,16 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   runtime. Телефоны не подключались. Следующий isolated slice F4-B3: F4 `u64` geometry,
   ciphertext-chunk commitment и streaming Merkle root/proofs; legacy F3 path не ломать, no network/
   FFI/Android wiring. Release/tag/PR не делались.
+- **2026-08-23 (доп.356) — F4-B3 identity/Merkle/uncapped geometry source/static PASS:** добавлен
+  pure `network/file_identity.rs` + module declaration. F4 geometry использует `file_size:u64`,
+  `chunk_count:u64`, exact bounded chunk/final remainder и принимает `u64::MAX` bytes без allocation
+  по file size. Ciphertext identity canonical связывает transfer ID, `u64` index, exact lengths и
+  SHA-256 фактических ciphertext bytes; отдельный domain-separated leaf не позволяет переставить
+  chunk. O(log chunks) frontier строит deterministic Merkle root с odd-node promotion; empty root
+  transfer-bound. Manifest/commitment и proof (≤64 siblings) имеют exact-length canonical codecs;
+  wrong/missing/extra sibling, index, order, digest, root, version и trailing bytes reject. B1 raw
+  chunk index и B2 ranges/count/final count widened `u32→u64`; old drafts никогда не были wired, но
+  это требует combined re-gate. Legacy F3 `crypto/file_transfer.rs`, sender/DB/UI/QUIC/FFI/Android и
+  phones не менялись. 11 B3 tests + прежние 11 B1 + 12 B2 = 34. Syntax AST/source contract,
+  `git diff --check` и callsite isolation PASS; compile/runtime pending. Следующий exact Windows
+  command: `cargo test network::file_ --lib -- --nocapture`; F4-C до 34/34 PASS не начинать.

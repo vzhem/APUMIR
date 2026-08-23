@@ -13,7 +13,7 @@
 use crate::crypto::keys::{
     Ed25519KeyPair, NodeId, ED25519_PUBLIC_KEY_SIZE, SIGNATURE_SIZE,
 };
-use crate::network::file_wire::FileCapabilitiesV1;
+use crate::network::file_wire::{FileCapabilitiesV1, MAX_FILE_CHUNK_COUNT};
 use sha2::{Digest, Sha256};
 
 pub const FILE_CONTROL_MAGIC: [u8; 4] = *b"APUC";
@@ -37,7 +37,7 @@ const MIN_ENCRYPTED_FILE_OFFER_BYTES: usize = 16;
 const MAX_NODE_ID_BYTES: usize = 67;
 const MIN_NODE_ID_BYTES: usize = 35;
 const CAPABILITIES_BODY_BYTES: usize = 16;
-const FINAL_RECEIPT_BODY_BYTES: usize = FILE_CONTROL_HASH_BYTES * 2 + 8 + 4;
+const FINAL_RECEIPT_BODY_BYTES: usize = FILE_CONTROL_HASH_BYTES * 2 + 8 + 8;
 const MIN_SIGNED_PAYLOAD_BYTES: usize = ED25519_PUBLIC_KEY_SIZE + SIGNATURE_SIZE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,8 +60,8 @@ pub enum FileCustodyActionV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileChunkRangeV1 {
-    pub start_chunk: u32,
-    pub end_chunk_exclusive: u32,
+    pub start_chunk: u64,
+    pub end_chunk_exclusive: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,7 +69,7 @@ pub struct FileChunkRangePageV1 {
     pub batch_id: [u8; FILE_CONTROL_ID_BYTES],
     pub page_index: u32,
     pub is_last_page: bool,
-    pub total_chunk_count: u32,
+    pub total_chunk_count: u64,
     pub ranges: Vec<FileChunkRangeV1>,
 }
 
@@ -95,7 +95,7 @@ pub struct FileFinalReceiptV1 {
     pub manifest_commitment: [u8; FILE_CONTROL_HASH_BYTES],
     pub whole_file_sha256: [u8; FILE_CONTROL_HASH_BYTES],
     pub verified_file_size: u64,
-    pub verified_chunk_count: u32,
+    pub verified_chunk_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -573,7 +573,9 @@ fn validate_body(claims: &FileControlClaimsV1) -> Result<(), FileControlError> {
                     reason: "final receipt commitments must not be all zero",
                 });
             }
-            if (receipt.verified_file_size == 0) != (receipt.verified_chunk_count == 0) {
+            if (receipt.verified_file_size == 0) != (receipt.verified_chunk_count == 0)
+                || receipt.verified_chunk_count > MAX_FILE_CHUNK_COUNT
+            {
                 return Err(FileControlError::InvalidBody {
                     reason: "final receipt file size and chunk count disagree",
                 });
@@ -589,9 +591,9 @@ fn validate_range_page(page: &FileChunkRangePageV1) -> Result<(), FileControlErr
             reason: "range batch ID is all zero",
         });
     }
-    if page.total_chunk_count == 0 {
+    if page.total_chunk_count == 0 || page.total_chunk_count > MAX_FILE_CHUNK_COUNT {
         return Err(FileControlError::InvalidBody {
-            reason: "range page total chunk count is zero",
+            reason: "range page total chunk count is outside u64 file geometry",
         });
     }
     if page.ranges.is_empty() || page.ranges.len() > MAX_FILE_CONTROL_RANGES {
@@ -752,7 +754,7 @@ fn decode_claims(
                 manifest_commitment: cursor.array()?,
                 whole_file_sha256: cursor.array()?,
                 verified_file_size: cursor.u64()?,
-                verified_chunk_count: cursor.u32()?,
+                verified_chunk_count: cursor.u64()?,
             })
         }
     };
@@ -785,7 +787,7 @@ fn decode_range_page(
             })
         }
     };
-    let total_chunk_count = cursor.u32()?;
+    let total_chunk_count = cursor.u64()?;
     let range_count = usize::from(cursor.u16()?);
     if range_count == 0 || range_count > MAX_FILE_CONTROL_RANGES {
         return Err(FileControlError::InvalidBody {
@@ -793,7 +795,7 @@ fn decode_range_page(
         });
     }
     let encoded_ranges = range_count
-        .checked_mul(8)
+        .checked_mul(16)
         .ok_or(FileControlError::LengthOverflow)?;
     if encoded_ranges > cursor.remaining() {
         return Err(FileControlError::MalformedPayload);
@@ -801,8 +803,8 @@ fn decode_range_page(
     let mut ranges = Vec::with_capacity(range_count);
     for _ in 0..range_count {
         ranges.push(FileChunkRangeV1 {
-            start_chunk: cursor.u32()?,
-            end_chunk_exclusive: cursor.u32()?,
+            start_chunk: cursor.u64()?,
+            end_chunk_exclusive: cursor.u64()?,
         });
     }
     Ok(FileChunkRangePageV1 {
@@ -1274,18 +1276,18 @@ mod tests {
         let sender = Ed25519KeyPair::from_secret_bytes(&[12; 32]).unwrap();
         let recipient = Ed25519KeyPair::from_secret_bytes(&[13; 32]).unwrap();
         let mut page = range_page();
-        page.total_chunk_count = u32::MAX;
+        page.total_chunk_count = MAX_FILE_CHUNK_COUNT;
         page.ranges = vec![FileChunkRangeV1 {
-            start_chunk: u32::MAX - 1,
-            end_chunk_exclusive: u32::MAX,
+            start_chunk: MAX_FILE_CHUNK_COUNT - 1,
+            end_chunk_exclusive: MAX_FILE_CHUNK_COUNT,
         }];
-        assert!(signed(
+        let record = signed(
             FileControlBodyV1::MissingRanges(page),
             &sender,
-            &recipient
-        )
-        .encode()
-        .is_ok());
+            &recipient,
+        );
+        let bytes = record.encode().unwrap();
+        assert_eq!(SignedFileControlV1::decode(&bytes).unwrap(), record);
 
         let mut adjacent = range_page();
         adjacent.ranges[1].start_chunk = adjacent.ranges[0].end_chunk_exclusive;
@@ -1316,11 +1318,11 @@ mod tests {
         ));
 
         let mut too_many = range_page();
-        too_many.total_chunk_count = (MAX_FILE_CONTROL_RANGES as u32 + 1) * 2;
+        too_many.total_chunk_count = (MAX_FILE_CONTROL_RANGES as u64 + 1) * 2;
         too_many.ranges = (0..=MAX_FILE_CONTROL_RANGES)
             .map(|index| FileChunkRangeV1 {
-                start_chunk: (index as u32) * 2,
-                end_chunk_exclusive: (index as u32) * 2 + 1,
+                start_chunk: (index as u64) * 2,
+                end_chunk_exclusive: (index as u64) * 2 + 1,
             })
             .collect();
         assert!(matches!(
@@ -1455,6 +1457,20 @@ mod tests {
             sign_file_control_v1(
                 claims(
                     FileControlBodyV1::FinalReceipt(invalid),
+                    &sender,
+                    &recipient,
+                ),
+                &sender,
+            ),
+            Err(FileControlError::InvalidBody { .. })
+        ));
+
+        let mut too_many = final_receipt();
+        too_many.verified_chunk_count = MAX_FILE_CHUNK_COUNT + 1;
+        assert!(matches!(
+            sign_file_control_v1(
+                claims(
+                    FileControlBodyV1::FinalReceipt(too_many),
                     &sender,
                     &recipient,
                 ),

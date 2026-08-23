@@ -12,10 +12,10 @@ ciphertext; внешнее хранение запрещено. Authoritative д
 в исторических разделах не переопределяют этот блок.
 
 Владелец подтвердил F4 architecture и разрешил последовательно выполнять все необходимые slices.
-F4-B1 имеет focused Windows PASS 11/11 на exact `4815582`; F4-B2 signed control records — focused
-Windows PASS 12/12 на exact `96dbe28`. Network/Android/phones остаются unwired. Текущий slice B3:
-ciphertext chunk/Merkle identities и bounded streaming manifest/geometry с `u64`, без arbitrary
-4-GiB product cap, но с физическими filesystem/storage/quota limits.
+B1/B2 имели focused Windows PASS на `4815582`/`96dbe28`. F4-B3 source/static PASS: ciphertext
+identity, streaming Merkle и bounded `u64` geometry без arbitrary 4-GiB cap; B1/B2 pre-production
+indices/ranges финализированы как `u64`. Combined 34-test Windows gate pending. Network/Android/
+phones остаются unwired; legacy F3 path не менялся.
 
 ---
 
@@ -1711,8 +1711,8 @@ Authoritative design и доказательные статусы:
     exact `4815582` дал 11 passed, 0 failed, 592 filtered. Full suite/Android/phones не запускались.
   - [x] B2 signed bounded control records: focused Windows `96dbe28`, 12 passed, 0 failed,
     603 filtered; network/Android/phones unwired.
-  - [ ] B3 ciphertext chunk/Merkle identities + uncapped `u64` manifest/geometry без arbitrary 4-GiB
-    product limit — текущий isolated pure slice.
+  - [ ] B3 ciphertext chunk/Merkle identities + `u64` geometry: source/static PASS, 11 new tests;
+    combined B1+B2+B3 34-test Windows gate pending. Legacy F3/network/Android/phones untouched.
 - [ ] **F4-C — persistent single-peer QUIC:** один authenticated connection, один binary stream,
   durable chunk-before-ACK, missing-range resume; no Base64/message queue.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим

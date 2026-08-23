@@ -15,7 +15,7 @@
 1. этот CURRENT OVERRIDE целиком;
 2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
 3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–355;
+4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–356;
 5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
    если обязательный контекст и фактические limits не проверены.
 
@@ -50,9 +50,9 @@
 
 `SECURE_FILE_TRANSFER.md` определяет slices F4-A…F4-H. Владелец разрешил последовательно выполнять
 все нужные slices. F4-B1 имеет focused Windows PASS 11/11; F4-B2 pure signed control boundary —
-focused Windows PASS 12/12 на exact `96dbe28`. Текущее действие — isolated F4-B3: ciphertext chunk/
-Merkle identities и streaming/paged `u64` geometry без arbitrary 4-GiB cap. До B3 host PASS не
-начинать network/Android/phones.
+focused Windows PASS 12/12 на exact `96dbe28`. F4-B3 identity/Merkle/`u64` geometry теперь имеет
+source/static PASS и 11 new tests; B1/B2 pre-production fields тоже widened до `u64`. Текущее
+действие — combined 34-test Windows host gate. До PASS не начинать F4-C/network/Android/phones.
 
 > ## Исторический M8 handoff
 >
@@ -72,14 +72,15 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «Продолжаю с isolated F4-B3; Android и телефоны не трогаю». Затем:
+В первом ответе коротко скажи: «Продолжаю с combined F4-B1/B2/B3 host gate; Android и телефоны не
+трогаю». Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
 2. полностью прочитай актуальные override-блоки и обязательные документы из раздела 2;
-3. сверь B1/B2 exact host PASS и фактическую manifest/chunk geometry;
-4. реализуй только B3 pure identity/geometry boundary из раздела 8;
+3. сверь isolation `file_wire`/`file_control`/`file_identity` от production callsites;
+4. выполни exact combined Windows command из раздела 8;
 5. точно раздели `source/static PASS / focused compile+runtime PASS / pending`;
-6. при ошибке исправляй только B3; не начинай network wiring;
+6. при ошибке исправляй только F4-B pure modules; не начинай F4-C/network wiring;
 7. обычный commit/push текущей Arena branch разрешён; другую branch не создавать и не переключать;
 8. отчитайся: что доказано, что ещё не доказано и какой один slice идёт следующим.
 
@@ -130,6 +131,9 @@ Arena branch, newest committed override и production source. Не подтяг�
   bounded binary frame/capability negotiation; exact `4815582`, 11 passed, 0 failed, 592 filtered.
 - F4-B2 source/static и focused Windows host PASS: exact `96dbe28`, 12 passed, 0 failed,
   603 filtered; module не wired к sender/QUIC/FFI/Android.
+- F4-B3 source/static PASS: `file_identity.rs`, `u64` geometry, ciphertext identities, O(log)
+  streaming Merkle and bounded proofs; 11 new tests. B1/B2 draft indices/ranges widened to `u64`,
+  поэтому combined 34-test compile/runtime ещё pending.
 - Канонический Windows clone после B2 gate находится на `arena/01a0290d-apumir`/`96dbe28`, но сохраняет
   две прежние модификации generated artifacts: UniFFI `p2p_core.kt` и
   `arm64-v8a/libp2p_core.so`. Их нельзя
@@ -178,24 +182,20 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Непосредственный следующий шаг — isolated F4-B3
+### 8. Непосредственный следующий шаг — combined F4-B host gate
 
-B1/B2 focused Windows gates закрыты: 11/11 и 12/12. Реализовать только pure B3, без network/FFI/
-Android/phones:
+B3 source/static готов: isolated `file_identity.rs`, F4 `u64` geometry, actual-ciphertext SHA-256,
+domain-separated leaves, O(log chunks) Merkle accumulator, canonical manifest/commitment и bounded
+proofs. B1/B2 pre-production fields widened до `u64`; всего 34 focused tests (11 + 12 + 11).
 
-1. F4 geometry с `file_size:u64`, `chunk_count:u64`, bounded power-of-two chunk и exact final chunk;
-   zero whole-file allocation, no arbitrary 4-GiB validation cap.
-2. Canonical ciphertext chunk identity: transfer ID + `u64` index + exact plain/cipher lengths +
-   SHA-256 ciphertext; domain-separated leaf hash связывает index и bytes.
-3. O(log chunks) streaming Merkle accumulator с deterministic odd-node rule, exact ordered leaf
-   count и manifest root/commitment.
-4. Canonical bounded single-chunk proof encode/decode/verify; wrong index/order/hash/root/trailing/
-   oversize proof fail closed.
-5. Расширить только pre-production B1/B2 pure fields с `u32` chunk index/ranges на `u64`, если это
-   нужно для geometry; затем повторно прогнать B1+B2+B3 focused tests вместе.
-6. Старый F3 `crypto/file_transfer.rs`, sender/DB/UI/QUIC и generated bindings в B3 не менять.
+На Windows безопасно fast-forward текущую Arena branch, сохранив generated Kotlin/`.so`, затем из
+`C:\APU-M8\rust-core` выполнить:
 
-После source/static PASS нужен отдельный Windows command; телефоны не нужны.
+`cargo test network::file_ --lib -- --nocapture`
+
+Ожидаемый gate: `34 passed; 0 failed`; остальные filtered. При ошибке исправлять только three pure
+F4-B modules. Android build/phones не нужны. Только после combined PASS переходить к F4-C persistent
+single-peer QUIC.
 
 ### 9. Порядок после F4-B
 
@@ -260,8 +260,7 @@ Android/phones:
 - После каждого шага фиксировать важные решения/ошибки в `AI_COLLABORATION_NOTES.md` и тематическом
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
-- F4-B1/B2 уже имеют focused Windows host PASS; не повторять старые commits без причины.
-- Ближайшая цель — isolated F4-B3 source + combined B1/B2/B3 host gate; release, network wiring и
-  phone gate не нужны.
+- F4-B1/B2 historical focused gates PASS; новый combined tip требует B1/B2/B3 re-gate.
+- Ближайшая цель — combined 34-test Windows host gate; release, network wiring и phones не нужны.
 
-Сейчас выполни только B3 из раздела 8. Телефоны не нужны.
+Сейчас выполни combined gate из раздела 8. Телефоны не нужны.

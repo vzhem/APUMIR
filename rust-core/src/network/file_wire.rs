@@ -10,7 +10,7 @@
 //!
 //! A capability payload is fixed at 16 bytes. A chunk payload is:
 //!
-//! `transfer_id[16] | chunk_index:u32 | offset:u32 | encrypted_chunk_len:u32 |
+//! `transfer_id[16] | chunk_index:u64 | offset:u32 | encrypted_chunk_len:u32 |
 //! range_len:u32 | ciphertext_range`.
 //!
 //! The 256-KiB frame ceiling is a memory-safety bound, not a cryptographic chunk size or a promised
@@ -19,8 +19,7 @@
 //! replay-protected control transcript.
 
 use crate::crypto::file_transfer::{
-    FILE_CHUNK_TAG_BYTES, FILE_TRANSFER_ID_BYTES, MAX_FILE_BYTES, MAX_FILE_CHUNK_BYTES,
-    MIN_FILE_CHUNK_BYTES,
+    FILE_CHUNK_TAG_BYTES, FILE_TRANSFER_ID_BYTES, MAX_FILE_CHUNK_BYTES, MIN_FILE_CHUNK_BYTES,
 };
 
 pub const FILE_WIRE_MAGIC: [u8; 4] = *b"APUF";
@@ -40,7 +39,7 @@ const FRAME_TYPE_CAPABILITIES: u8 = 1;
 const FRAME_TYPE_CHUNK_DATA: u8 = 2;
 const CAPABILITIES_PAYLOAD_BYTES: usize = 16;
 const CHUNK_INDEX_OFFSET: usize = FILE_TRANSFER_ID_BYTES;
-const CHUNK_OFFSET_OFFSET: usize = CHUNK_INDEX_OFFSET + 4;
+const CHUNK_OFFSET_OFFSET: usize = CHUNK_INDEX_OFFSET + 8;
 const CHUNK_LENGTH_OFFSET: usize = CHUNK_OFFSET_OFFSET + 4;
 const CHUNK_DATA_LENGTH_OFFSET: usize = CHUNK_LENGTH_OFFSET + 4;
 pub const FILE_CHUNK_DATA_PREFIX_BYTES: usize = CHUNK_DATA_LENGTH_OFFSET + 4;
@@ -49,8 +48,9 @@ pub const MAX_FILE_CHUNK_DATA_BYTES: usize =
     MAX_FILE_FRAME_PAYLOAD_BYTES - FILE_CHUNK_DATA_PREFIX_BYTES;
 const MIN_CIPHERTEXT_CHUNK_BYTES: usize = FILE_CHUNK_TAG_BYTES + 1;
 const MAX_CIPHERTEXT_CHUNK_BYTES: usize = MAX_FILE_CHUNK_BYTES as usize + FILE_CHUNK_TAG_BYTES;
-const MAX_FILE_CHUNK_COUNT: u32 =
-    ((MAX_FILE_BYTES + MIN_FILE_CHUNK_BYTES as u64 - 1) / MIN_FILE_CHUNK_BYTES as u64) as u32;
+/// Maximum chunks required by any `u64` byte length at the minimum chunk size.
+pub const MAX_FILE_CHUNK_COUNT: u64 =
+    1 + ((u64::MAX - 1) / MIN_FILE_CHUNK_BYTES as u64);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileFrameV1 {
@@ -79,7 +79,7 @@ pub struct NegotiatedFileCapabilitiesV1 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileChunkDataV1 {
     pub transfer_id: [u8; FILE_TRANSFER_ID_BYTES],
-    pub chunk_index: u32,
+    pub chunk_index: u64,
     /// Byte offset inside the complete encrypted chunk (ciphertext plus AEAD tag).
     pub chunk_offset: u32,
     /// Exact complete encrypted chunk length, repeated on every range frame.
@@ -363,7 +363,7 @@ fn decode_chunk_data(payload: &[u8]) -> Result<FileFrameV1, FileWireError> {
             frame_type: FRAME_TYPE_CHUNK_DATA,
             actual: payload.len(),
         })?;
-    let chunk_index = read_u32(payload, CHUNK_INDEX_OFFSET)?;
+    let chunk_index = read_u64(payload, CHUNK_INDEX_OFFSET)?;
     let chunk_offset = read_u32(payload, CHUNK_OFFSET_OFFSET)?;
     let ciphertext_chunk_len = read_u32(payload, CHUNK_LENGTH_OFFSET)?;
     let declared_data_len = usize::try_from(read_u32(payload, CHUNK_DATA_LENGTH_OFFSET)?)
@@ -392,7 +392,7 @@ fn decode_chunk_data(payload: &[u8]) -> Result<FileFrameV1, FileWireError> {
 
 fn validate_chunk_parts(
     transfer_id: &[u8; FILE_TRANSFER_ID_BYTES],
-    chunk_index: u32,
+    chunk_index: u64,
     chunk_offset: u32,
     ciphertext_chunk_len: u32,
     data_len: usize,
@@ -445,6 +445,17 @@ fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, FileWireError> {
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, FileWireError> {
     let end = offset.checked_add(4).ok_or(FileWireError::LengthOverflow)?;
     Ok(u32::from_be_bytes(
+        bytes
+            .get(offset..end)
+            .ok_or(FileWireError::LengthOverflow)?
+            .try_into()
+            .map_err(|_| FileWireError::LengthOverflow)?,
+    ))
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> Result<u64, FileWireError> {
+    let end = offset.checked_add(8).ok_or(FileWireError::LengthOverflow)?;
+    Ok(u64::from_be_bytes(
         bytes
             .get(offset..end)
             .ok_or(FileWireError::LengthOverflow)?

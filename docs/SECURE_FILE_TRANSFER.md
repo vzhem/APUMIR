@@ -207,7 +207,30 @@ Windows в `C:\APU-M8\rust-core` для exact `96dbe28207e5023ffac6f56401b20d5a1
 `12 passed; 0 failed; 0 ignored; 603 filtered out` (compile 12.37 s; tests 1.23 s). Три warning —
 прежний код `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`, не B2. Это focused B2 host
 compile/runtime PASS, не full suite/Android/phone test. Generated Kotlin/`.so` сохранили exact hashes;
-телефоны не подключались. Следующий отдельный slice — B3.
+телефоны не подключались.
+
+### Status 2026-08-23 — F4-B3 source/static PASS, combined host gate pending
+
+Добавлен isolated pure `rust-core/src/network/file_identity.rs` и до production wiring окончательно
+расширены только pre-production B1/B2 binary поля chunk/range/count с `u32` до `u64`:
+
+- F4 geometry принимает `file_size:u64`, exact `chunk_count:u64`, bounded 16-KiB…4-MiB chunks и
+  final remainder без whole-file allocation или 4-GiB validation cap;
+- canonical ciphertext identity связывает transfer ID, `u64` index, exact plaintext/ciphertext
+  lengths и SHA-256 фактических ciphertext bytes; leaf hash domain-separated;
+- streaming Merkle accumulator хранит O(log chunks) frontier, требует exact ordered leaf count и
+  deterministic odd-node promotion;
+- manifest/root/commitment и single-chunk proof имеют canonical exact-length codecs; proof максимум
+  64 siblings, missing/extra/wrong-order/index/hash/root fail closed;
+- empty-file root привязан к transfer ID; geometry вплоть до `u64::MAX` bytes проверяется без
+  выделения памяти по размеру файла;
+- legacy F3 `crypto/file_transfer.rs`, sender, DB/UI, QUIC, FFI, Android и phones не изменены.
+
+B1/B2 draft bytes ранее не были wired ни к одному consumer, поэтому их `u64` finalization не ломает
+production/mixed versions, но прежние отдельные host results недостаточны для нового tip. Добавлено
+11 B3 tests; combined B1+B2+B3 теперь 34 test functions. `git diff --check`, source contract,
+isolation audit и Rust syntax parser PASS; compile/runtime pending. Следующий gate на Windows:
+`cargo test network::file_ --lib -- --nocapture`. Только после combined PASS разрешён F4-C.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
