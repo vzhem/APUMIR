@@ -826,6 +826,12 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -838,140 +844,142 @@ internal interface UniffiLib : Library {
                 uniffiCheckApiChecksums(lib)
                 }
         }
-
+        
         // The Cleaner for the whole library
         internal val CLEANER: UniffiCleaner by lazy {
             UniffiCleaner.create()
         }
     }
 
-    fun uniffi_p2p_core_fn_clone_p2pcorehandle(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_clone_p2pcorehandle(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
-    fun uniffi_p2p_core_fn_free_p2pcorehandle(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_free_p2pcorehandle(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_add_contact(`ptr`: Pointer,`userId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_add_contact(`ptr`: Pointer,`userId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_connect_via_invite(`ptr`: Pointer,`link`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_connect_via_invite(`ptr`: Pointer,`link`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_connected_peers(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_connected_peers(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_create_chat(`ptr`: Pointer,`chatId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_create_chat(`ptr`: Pointer,`chatId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_drain_events(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_drain_events(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_generate_invite(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_generate_invite(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_get_chats(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_get_chats(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_get_messages(`ptr`: Pointer,`chatId`: RustBuffer.ByValue,`limit`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_get_messages(`ptr`: Pointer,`chatId`: RustBuffer.ByValue,`limit`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_is_running(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_is_running(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_mark_message_read(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_mark_message_read(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_network_status(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_network_status(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_node_id(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_node_id(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_available(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_available(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_lost(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_lost(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_pending_events(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_pending_events(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_poll_event(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_poll_event(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_public_key(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_public_key(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_receive_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`senderId`: RustBuffer.ByValue,`encryptedText`: RustBuffer.ByValue,`timestamp`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_receive_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`senderId`: RustBuffer.ByValue,`encryptedText`: RustBuffer.ByValue,`timestamp`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_relay_custody_mode(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_relay_custody_mode(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_relay_quarantine_count(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_relay_quarantine_count(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`recipientId`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_send_direct_payload(`ptr`: Pointer,`recipientId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message_mqtt(`ptr`: Pointer,`toNodeId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`recipientId`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_start(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message_mqtt(`ptr`: Pointer,`toNodeId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_stop(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_start(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_stop(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_method_p2pcorehandle_trigger_gossip_discovery(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_trigger_gossip_discovery(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_func_clear_identity_signing_seed(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_clear_identity_signing_seed(uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_func_clear_relay_at_rest_key(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_clear_mqtt_socks5_proxy(uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_func_create_engine(`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_clear_relay_at_rest_key(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_p2p_core_fn_func_create_engine(`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
-    fun uniffi_p2p_core_fn_func_create_engine_durable(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,`relayDbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_create_engine_durable(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,`relayDbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
-    fun uniffi_p2p_core_fn_func_create_engine_with_keys(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_create_engine_with_keys(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
-    fun uniffi_p2p_core_fn_func_create_file_exchange_binding(`identityBinding`: RustBuffer.ByValue,`x25519Secret`: RustBuffer.ByValue,`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_create_file_exchange_binding(`identityBinding`: RustBuffer.ByValue,`x25519Secret`: RustBuffer.ByValue,`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_create_file_key_envelope(`senderExchangeBinding`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`senderX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_create_file_key_envelope(`senderExchangeBinding`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`senderX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_create_file_transfer_manifest(`senderNodeId`: RustBuffer.ByValue,`recipientNodeId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,`mediaType`: RustBuffer.ByValue,`fileSize`: Long,`fileSha256`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_create_file_transfer_manifest(`senderNodeId`: RustBuffer.ByValue,`recipientNodeId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,`mediaType`: RustBuffer.ByValue,`fileSize`: Long,`fileSha256`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_create_identity_signing_binding(`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_create_identity_signing_binding(`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_create_referral_invite_token(`identityBinding`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_create_referral_invite_token(`identityBinding`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_decrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Int,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_decrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Int,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_encrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Int,`plaintext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_encrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Int,`plaintext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_file_exchange_binding_node_id(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_file_exchange_binding_node_id(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_file_exchange_binding_public_key(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_file_exchange_binding_public_key(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_file_transfer_crypto_self_test(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_file_transfer_crypto_self_test(uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_func_get_protocol_version(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_get_protocol_version(uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_func_get_version(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_get_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_identity_signing_binding_matches_installed(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_identity_signing_binding_matches_installed(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
-    fun uniffi_p2p_core_fn_func_identity_signing_key_id(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_identity_signing_key_id(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_identity_signing_mode(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_identity_signing_mode(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_identity_signing_public_key_hex(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_identity_signing_public_key_hex(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_initialize_core(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_initialize_core(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_install_identity_signing_seed(`formatVersion`: Byte,`legacyRoutingNodeId`: RustBuffer.ByValue,`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_install_identity_signing_seed(`formatVersion`: Byte,`legacyRoutingNodeId`: RustBuffer.ByValue,`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_func_install_relay_at_rest_key(`keyId`: Short,`keyMaterial`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_install_relay_at_rest_key(`keyId`: Short,`keyMaterial`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(`host`: RustBuffer.ByValue,`port`: Short,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    fun uniffi_p2p_core_fn_func_clear_mqtt_socks5_proxy(uniffi_out_err: UniffiRustCallStatus,
-    ): Unit
-    fun uniffi_p2p_core_fn_func_open_file_key_envelope(`envelope`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`recipientX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_open_file_key_envelope(`envelope`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`recipientX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_parse_file_transfer_manifest(`manifestBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_parse_file_transfer_manifest(`manifestBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_relay_at_rest_key_id(uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_relay_at_rest_key_id(uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    fun uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun uniffi_p2p_core_fn_func_verify_file_exchange_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun uniffi_p2p_core_fn_func_verify_identity_signing_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun uniffi_p2p_core_fn_func_verify_referral_invite_token(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): Byte
-    fun ffi_p2p_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun ffi_p2p_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
-    ): RustBuffer.ByValue
-    fun ffi_p2p_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(`host`: RustBuffer.ByValue,`port`: Short,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun ffi_p2p_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_verify_file_exchange_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_func_verify_identity_signing_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_func_verify_referral_invite_token(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun ffi_p2p_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun ffi_p2p_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun ffi_p2p_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun ffi_p2p_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_p2p_core_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -979,7 +987,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_u8(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun ffi_p2p_core_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -987,7 +995,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_i8(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun ffi_p2p_core_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -995,7 +1003,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_u16(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Short
     fun ffi_p2p_core_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1003,7 +1011,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_i16(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Short
     fun ffi_p2p_core_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1011,7 +1019,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_u32(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Int
     fun ffi_p2p_core_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1019,7 +1027,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_i32(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Int
     fun ffi_p2p_core_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1027,7 +1035,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_u64(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     fun ffi_p2p_core_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1035,7 +1043,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_i64(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     fun ffi_p2p_core_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1043,7 +1051,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_f32(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Float
     fun ffi_p2p_core_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1051,7 +1059,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_f64(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Double
     fun ffi_p2p_core_rust_future_poll_pointer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1059,7 +1067,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_pointer(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
     fun ffi_p2p_core_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1067,7 +1075,7 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_rust_buffer(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_p2p_core_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
     ): Unit
@@ -1075,9 +1083,11 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_p2p_core_rust_future_free_void(`handle`: Long,
     ): Unit
-    fun ffi_p2p_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+    fun ffi_p2p_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_p2p_core_checksum_func_clear_identity_signing_seed(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_clear_mqtt_socks5_proxy(
     ): Short
     fun uniffi_p2p_core_checksum_func_clear_relay_at_rest_key(
     ): Short
@@ -1131,6 +1141,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_relay_at_rest_key_id(
     ): Short
+    fun uniffi_p2p_core_checksum_func_set_mqtt_socks5_proxy(
+    ): Short
     fun uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id(
     ): Short
     fun uniffi_p2p_core_checksum_func_verify_file_exchange_binding(
@@ -1179,6 +1191,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_relay_quarantine_count(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_direct_payload(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_message(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_message_mqtt(
@@ -1191,7 +1205,7 @@ internal interface UniffiLib : Library {
     ): Short
     fun ffi_p2p_core_uniffi_contract_version(
     ): Int
-
+    
 }
 
 private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
@@ -1207,6 +1221,9 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_clear_identity_signing_seed() != 3916.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_clear_mqtt_socks5_proxy() != 28050.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_clear_relay_at_rest_key() != 53814.toShort()) {
@@ -1287,6 +1304,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_relay_at_rest_key_id() != 38408.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_set_mqtt_socks5_proxy() != 58761.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id() != 59487.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1359,6 +1379,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_relay_quarantine_count() != 52535.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_direct_payload() != 23175.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_message() != 20737.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1414,7 +1437,7 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
         }
     }
 
-/**
+/** 
  * Used to instantiate an interface without an actual pointer, for fakes in tests, mostly.
  *
  * @suppress
@@ -1798,66 +1821,61 @@ private class JavaLangRefCleanable(
     override fun clean() = cleanable.clean()
 }
 public interface P2pCoreHandleInterface {
-
+    
     fun `addContact`(`userId`: kotlin.String, `displayName`: kotlin.String): kotlin.Boolean
-
+    
     fun `connectViaInvite`(`link`: kotlin.String): kotlin.Boolean
-
+    
     fun `connectedPeers`(): kotlin.ULong
-
+    
     fun `createChat`(`chatId`: kotlin.String): kotlin.Boolean
-
+    
     fun `drainEvents`(): List<CoreEventFfi>
-
+    
     fun `generateInvite`(): kotlin.String
-
+    
     fun `getChats`(): List<ChatFfi>
-
+    
     fun `getMessages`(`chatId`: kotlin.String, `limit`: kotlin.ULong): List<MessageFfi>
-
+    
     fun `isRunning`(): kotlin.Boolean
-
+    
     fun `markMessageRead`(`messageId`: kotlin.String): kotlin.Boolean
-
+    
     fun `networkStatus`(): kotlin.String
-
+    
     fun `nodeId`(): kotlin.String?
-
+    
     fun `onNetworkAvailable`()
-
+    
     fun `onNetworkLost`()
-
+    
     fun `pendingEvents`(): kotlin.ULong
-
+    
     fun `pollEvent`(): CoreEventFfi?
-
+    
     fun `publicKey`(): kotlin.String?
-
+    
     fun `receiveMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `senderId`: kotlin.String, `encryptedText`: kotlin.String, `timestamp`: kotlin.Long)
-
+    
     fun `relayCustodyMode`(): kotlin.String
-
+    
     fun `relayQuarantineCount`(): kotlin.ULong
-
+    
+    fun `sendDirectPayload`(`recipientId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
+    
     fun `sendMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean
-
+    
     fun `sendMessageMqtt`(`toNodeId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
-
+    
     fun `start`(): kotlin.Boolean
-
+    
     fun `stop`()
-
+    
     fun `triggerGossipDiscovery`(): kotlin.Boolean
-
+    
     companion object
 }
-
-    fun `sendDirectPayload`(`recipientId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean =
-        uniffiRustCall() { _status ->
-        UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2p_core_handle_send_direct_payload(
-            this.uniffiCloneHandle(),
-            FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`payload`),_status)
-    }
 
 open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
 
@@ -1950,7 +1968,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `connectViaInvite`(`link`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -1962,7 +1980,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `connectedPeers`(): kotlin.ULong {
             return FfiConverterULong.lift(
@@ -1974,7 +1992,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `createChat`(`chatId`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -1986,7 +2004,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `drainEvents`(): List<CoreEventFfi> {
             return FfiConverterSequenceTypeCoreEventFfi.lift(
@@ -1998,7 +2016,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `generateInvite`(): kotlin.String {
             return FfiConverterString.lift(
@@ -2010,7 +2028,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `getChats`(): List<ChatFfi> {
             return FfiConverterSequenceTypeChatFfi.lift(
@@ -2022,7 +2040,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `getMessages`(`chatId`: kotlin.String, `limit`: kotlin.ULong): List<MessageFfi> {
             return FfiConverterSequenceTypeMessageFfi.lift(
@@ -2034,7 +2052,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `isRunning`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2046,7 +2064,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `markMessageRead`(`messageId`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2058,7 +2076,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `networkStatus`(): kotlin.String {
             return FfiConverterString.lift(
@@ -2070,7 +2088,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `nodeId`(): kotlin.String? {
             return FfiConverterOptionalString.lift(
@@ -2082,29 +2100,29 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `onNetworkAvailable`()
-        =
+        = 
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_on_network_available(
         it, _status)
 }
     }
-
-
+    
+    
 
     override fun `onNetworkLost`()
-        =
+        = 
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_on_network_lost(
         it, _status)
 }
     }
-
-
+    
+    
 
     override fun `pendingEvents`(): kotlin.ULong {
             return FfiConverterULong.lift(
@@ -2116,7 +2134,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `pollEvent`(): CoreEventFfi? {
             return FfiConverterOptionalTypeCoreEventFfi.lift(
@@ -2128,7 +2146,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `publicKey`(): kotlin.String? {
             return FfiConverterOptionalString.lift(
@@ -2140,18 +2158,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `receiveMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `senderId`: kotlin.String, `encryptedText`: kotlin.String, `timestamp`: kotlin.Long)
-        =
+        = 
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_receive_message(
         it, FfiConverterString.lower(`messageId`),FfiConverterString.lower(`chatId`),FfiConverterString.lower(`senderId`),FfiConverterString.lower(`encryptedText`),FfiConverterLong.lower(`timestamp`),_status)
 }
     }
-
-
+    
+    
 
     override fun `relayCustodyMode`(): kotlin.String {
             return FfiConverterString.lift(
@@ -2163,7 +2181,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `relayQuarantineCount`(): kotlin.ULong {
             return FfiConverterULong.lift(
@@ -2175,7 +2193,19 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
+    
 
+    override fun `sendDirectPayload`(`recipientId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_send_direct_payload(
+        it, FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`payload`),_status)
+}
+    }
+    )
+    }
+    
 
     override fun `sendMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2187,7 +2217,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `sendMessageMqtt`(`toNodeId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2199,7 +2229,7 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `start`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2211,18 +2241,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
-
+    
 
     override fun `stop`()
-        =
+        = 
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_stop(
         it, _status)
 }
     }
-
-
+    
+    
 
     override fun `triggerGossipDiscovery`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2234,14 +2264,14 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
+    
 
+    
 
-
-
-
-
+    
+    
     companion object
-
+    
 }
 
 /**
@@ -2275,13 +2305,13 @@ public object FfiConverterTypeP2PCoreHandle: FfiConverter<P2pCoreHandle, Pointer
 
 
 data class ChatFfi (
-    var `id`: kotlin.String,
-    var `kind`: kotlin.String,
-    var `title`: kotlin.String?,
-    var `lastMessageAt`: kotlin.Long,
+    var `id`: kotlin.String, 
+    var `kind`: kotlin.String, 
+    var `title`: kotlin.String?, 
+    var `lastMessageAt`: kotlin.Long, 
     var `unreadCount`: kotlin.Long
 ) {
-
+    
     companion object
 }
 
@@ -2319,19 +2349,19 @@ public object FfiConverterTypeChatFfi: FfiConverterRustBuffer<ChatFfi> {
 
 
 data class CoreEventFfi (
-    var `eventType`: kotlin.String,
-    var `nodeId`: kotlin.String?,
-    var `peerId`: kotlin.String?,
-    var `displayName`: kotlin.String?,
-    var `messageId`: kotlin.String?,
-    var `chatId`: kotlin.String?,
-    var `senderId`: kotlin.String?,
-    var `text`: kotlin.String?,
-    var `status`: kotlin.String?,
-    var `timestamp`: kotlin.Long?,
+    var `eventType`: kotlin.String, 
+    var `nodeId`: kotlin.String?, 
+    var `peerId`: kotlin.String?, 
+    var `displayName`: kotlin.String?, 
+    var `messageId`: kotlin.String?, 
+    var `chatId`: kotlin.String?, 
+    var `senderId`: kotlin.String?, 
+    var `text`: kotlin.String?, 
+    var `status`: kotlin.String?, 
+    var `timestamp`: kotlin.Long?, 
     var `isLocal`: kotlin.Boolean?
 ) {
-
+    
     companion object
 }
 
@@ -2387,20 +2417,20 @@ public object FfiConverterTypeCoreEventFfi: FfiConverterRustBuffer<CoreEventFfi>
 
 
 data class FileTransferManifestFfi (
-    var `manifestBytes`: kotlin.ByteArray,
-    var `transferIdHex`: kotlin.String,
-    var `senderNodeId`: kotlin.String,
-    var `recipientNodeId`: kotlin.String,
-    var `displayName`: kotlin.String,
-    var `mediaType`: kotlin.String,
-    var `fileSize`: kotlin.ULong,
-    var `chunkSize`: kotlin.UInt,
-    var `chunkCount`: kotlin.UInt,
-    var `fileSha256Hex`: kotlin.String,
-    var `createdAtMs`: kotlin.Long,
+    var `manifestBytes`: kotlin.ByteArray, 
+    var `transferIdHex`: kotlin.String, 
+    var `senderNodeId`: kotlin.String, 
+    var `recipientNodeId`: kotlin.String, 
+    var `displayName`: kotlin.String, 
+    var `mediaType`: kotlin.String, 
+    var `fileSize`: kotlin.ULong, 
+    var `chunkSize`: kotlin.UInt, 
+    var `chunkCount`: kotlin.UInt, 
+    var `fileSha256Hex`: kotlin.String, 
+    var `createdAtMs`: kotlin.Long, 
     var `expiresAtMs`: kotlin.Long
 ) {
-
+    
     companion object
 }
 
@@ -2459,15 +2489,15 @@ public object FfiConverterTypeFileTransferManifestFfi: FfiConverterRustBuffer<Fi
 
 
 data class MessageFfi (
-    var `id`: kotlin.String,
-    var `chatId`: kotlin.String,
-    var `senderId`: kotlin.String,
-    var `text`: kotlin.String,
-    var `status`: kotlin.String,
-    var `createdAt`: kotlin.Long,
+    var `id`: kotlin.String, 
+    var `chatId`: kotlin.String, 
+    var `senderId`: kotlin.String, 
+    var `text`: kotlin.String, 
+    var `status`: kotlin.String, 
+    var `createdAt`: kotlin.Long, 
     var `isDeleted`: kotlin.Boolean
 ) {
-
+    
     companion object
 }
 
@@ -2513,53 +2543,53 @@ public object FfiConverterTypeMessageFfi: FfiConverterRustBuffer<MessageFfi> {
 
 
 sealed class CoreException: kotlin.Exception() {
-
+    
     class InitException(
-
+        
         val `detail`: kotlin.String
         ) : CoreException() {
         override val message
             get() = "detail=${ `detail` }"
     }
-
+    
     class NetworkException(
-
+        
         val `detail`: kotlin.String
         ) : CoreException() {
         override val message
             get() = "detail=${ `detail` }"
     }
-
+    
     class CryptoException(
-
+        
         val `detail`: kotlin.String
         ) : CoreException() {
         override val message
             get() = "detail=${ `detail` }"
     }
-
+    
     class DatabaseException(
-
+        
         val `detail`: kotlin.String
         ) : CoreException() {
         override val message
             get() = "detail=${ `detail` }"
     }
-
+    
     class Unknown(
-
+        
         val `detail`: kotlin.String
         ) : CoreException() {
         override val message
             get() = "detail=${ `detail` }"
     }
-
+    
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<CoreException> {
         override fun lift(error_buf: RustBuffer.ByValue): CoreException = FfiConverterTypeCoreError.lift(error_buf)
     }
 
-
+    
 }
 
 /**
@@ -2567,7 +2597,7 @@ sealed class CoreException: kotlin.Exception() {
  */
 public object FfiConverterTypeCoreError : FfiConverterRustBuffer<CoreException> {
     override fun read(buf: ByteBuffer): CoreException {
-
+        
 
         return when(buf.getInt()) {
             1 -> CoreException.InitException(
@@ -2655,7 +2685,7 @@ public object FfiConverterTypeCoreError : FfiConverterRustBuffer<CoreException> 
 
 
 enum class MessageStatusFfi {
-
+    
     PENDING,
     SENT,
     DELIVERED,
@@ -2895,39 +2925,29 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
         }
     }
 } fun `clearIdentitySigningSeed`()
-        =
+        = 
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_clear_identity_signing_seed(
         _status)
 }
-
-
- fun `setMqttSocks5Proxy`(`host`: kotlin.String, `port`: kotlin.UShort, `username`: kotlin.String, `password`: kotlin.String)
-        =
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(
-        FfiConverterString.lower(`host`),FfiConverterUShort.lower(`port`),FfiConverterString.lower(`username`),FfiConverterString.lower(`password`),_status)
-}
-
-
-
-
+    
+    
  fun `clearMqttSocks5Proxy`()
-        =
+        = 
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_clear_mqtt_socks5_proxy(
         _status)
 }
-
-
+    
+    
  fun `clearRelayAtRestKey`()
-        =
+        = 
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_clear_relay_at_rest_key(
         _status)
 }
-
-
+    
+    
  fun `createEngine`(`displayName`: kotlin.String): P2pCoreHandle {
             return FfiConverterTypeP2PCoreHandle.lift(
     uniffiRustCall() { _status ->
@@ -2936,7 +2956,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `createEngineDurable`(`displayName`: kotlin.String, `publicKey`: kotlin.String, `privateKey`: kotlin.String, `relayDbPath`: kotlin.String): P2pCoreHandle {
             return FfiConverterTypeP2PCoreHandle.lift(
     uniffiRustCall() { _status ->
@@ -2945,7 +2965,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `createEngineWithKeys`(`displayName`: kotlin.String, `publicKey`: kotlin.String, `privateKey`: kotlin.String): P2pCoreHandle {
             return FfiConverterTypeP2PCoreHandle.lift(
     uniffiRustCall() { _status ->
@@ -2954,7 +2974,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `createFileExchangeBinding`(`identityBinding`: kotlin.ByteArray, `x25519Secret`: kotlin.ByteArray, `createdAtMs`: kotlin.Long): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -2964,7 +2984,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `createFileKeyEnvelope`(`senderExchangeBinding`: kotlin.ByteArray, `recipientExchangeBinding`: kotlin.ByteArray, `senderX25519Secret`: kotlin.ByteArray, `manifest`: kotlin.ByteArray, `fileKey`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -2974,7 +2994,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `createFileTransferManifest`(`senderNodeId`: kotlin.String, `recipientNodeId`: kotlin.String, `displayName`: kotlin.String, `mediaType`: kotlin.String, `fileSize`: kotlin.ULong, `fileSha256`: kotlin.ByteArray, `createdAtMs`: kotlin.Long, `expiresAtMs`: kotlin.Long): FileTransferManifestFfi {
             return FfiConverterTypeFileTransferManifestFfi.lift(
@@ -2984,7 +3004,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `createIdentitySigningBinding`(`createdAtMs`: kotlin.Long): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -2994,7 +3014,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `createReferralInviteToken`(`identityBinding`: kotlin.ByteArray, `createdAtMs`: kotlin.Long, `expiresAtMs`: kotlin.Long): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -3004,7 +3024,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `decryptFileTransferChunk`(`manifestBytes`: kotlin.ByteArray, `fileKey`: kotlin.ByteArray, `chunkIndex`: kotlin.UInt, `ciphertext`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -3014,7 +3034,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `encryptFileTransferChunk`(`manifestBytes`: kotlin.ByteArray, `fileKey`: kotlin.ByteArray, `chunkIndex`: kotlin.UInt, `plaintext`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -3024,7 +3044,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `fileExchangeBindingNodeId`(`binding`: kotlin.ByteArray): kotlin.String {
             return FfiConverterString.lift(
@@ -3034,7 +3054,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `fileExchangeBindingPublicKey`(`binding`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -3044,7 +3064,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `fileTransferCryptoSelfTest`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
@@ -3053,7 +3073,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `getProtocolVersion`(): kotlin.UByte {
             return FfiConverterUByte.lift(
     uniffiRustCall() { _status ->
@@ -3062,7 +3082,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `getVersion`(): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
@@ -3071,7 +3091,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `identitySigningBindingMatchesInstalled`(`binding`: kotlin.ByteArray): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
@@ -3080,7 +3100,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `identitySigningKeyId`(): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
@@ -3089,7 +3109,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `identitySigningMode`(): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
@@ -3098,7 +3118,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `identitySigningPublicKeyHex`(): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
@@ -3107,7 +3127,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `initializeCore`(): kotlin.String {
             return FfiConverterString.lift(
@@ -3117,25 +3137,25 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `installIdentitySigningSeed`(`formatVersion`: kotlin.UByte, `legacyRoutingNodeId`: kotlin.String, `seed`: kotlin.ByteArray)
-        =
+        = 
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_install_identity_signing_seed(
         FfiConverterUByte.lower(`formatVersion`),FfiConverterString.lower(`legacyRoutingNodeId`),FfiConverterByteArray.lower(`seed`),_status)
 }
-
-
+    
+    
 
     @Throws(CoreException::class) fun `installRelayAtRestKey`(`keyId`: kotlin.UShort, `keyMaterial`: kotlin.ByteArray)
-        =
+        = 
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_install_relay_at_rest_key(
         FfiConverterUShort.lower(`keyId`),FfiConverterByteArray.lower(`keyMaterial`),_status)
 }
-
-
+    
+    
 
     @Throws(CoreException::class) fun `openFileKeyEnvelope`(`envelope`: kotlin.ByteArray, `recipientExchangeBinding`: kotlin.ByteArray, `recipientX25519Secret`: kotlin.ByteArray, `manifest`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -3145,7 +3165,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
     @Throws(CoreException::class) fun `parseFileTransferManifest`(`manifestBytes`: kotlin.ByteArray): FileTransferManifestFfi {
             return FfiConverterTypeFileTransferManifestFfi.lift(
@@ -3155,7 +3175,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `relayAtRestKeyId`(): kotlin.Long {
             return FfiConverterLong.lift(
     uniffiRustCall() { _status ->
@@ -3164,7 +3184,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
+ fun `setMqttSocks5Proxy`(`host`: kotlin.String, `port`: kotlin.UShort, `username`: kotlin.String, `password`: kotlin.String)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(
+        FfiConverterString.lower(`host`),FfiConverterUShort.lower(`port`),FfiConverterString.lower(`username`),FfiConverterString.lower(`password`),_status)
+}
+    
+    
 
     @Throws(CoreException::class) fun `verifiedReferralInviterNodeId`(`token`: kotlin.ByteArray, `nowMs`: kotlin.Long): kotlin.String {
             return FfiConverterString.lift(
@@ -3174,7 +3202,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `verifyFileExchangeBinding`(`binding`: kotlin.ByteArray): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
@@ -3183,7 +3211,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `verifyIdentitySigningBinding`(`binding`: kotlin.ByteArray): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
@@ -3192,7 +3220,7 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
  fun `verifyReferralInviteToken`(`token`: kotlin.ByteArray, `nowMs`: kotlin.Long): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     uniffiRustCall() { _status ->
@@ -3201,6 +3229,6 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
-
+    
 
 
