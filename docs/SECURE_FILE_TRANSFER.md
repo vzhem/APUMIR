@@ -184,7 +184,7 @@ Windows в каноническом `C:\APU-M8\rust-core` для exact commit `4
 compile/runtime PASS, но не полный Rust suite, Android build или phone runtime. Module не вызывается
 sender/QUIC/FFI; Android production source и телефоны в B1 не менялись.
 
-### Status 2026-08-23 — F4-B2 source/static PASS, host compile/runtime pending
+### Status 2026-08-23 — F4-B2 focused Windows host gate PASS
 
 Добавлен отдельный pure `rust-core/src/network/file_control.rs`, пока подключённый только module
 declaration:
@@ -201,11 +201,13 @@ declaration:
 - 12 unit-test функций покрывают все типы, canonical round-trip, full truncation/tamper, unknown
   version/type/flags, signature/peer/scope/replay/time failures, offer/range/custody/final boundaries.
 
-`git diff --check`, source contract и отдельный Rust syntax parser (AST root `Program`) PASS. Arena
-по-прежнему не имеет Rust toolchain: попытка временно получить rustup и Debian packages остановилась
-на blocked outbound TLS/HTTP, поэтому compile и фактический runtime этих 12 тестов **pending**. Это
-не network/FFI/Android wiring; телефоны не нужны. Следующий gate — focused Windows
-`cargo test network::file_control::tests --lib` и только после PASS — B3.
+`git diff --check`, source contract и отдельный Rust syntax parser (AST root `Program`) PASS. На
+Windows в `C:\APU-M8\rust-core` для exact `96dbe28207e5023ffac6f56401b20d5a15776c77`
+`cargo test network::file_control::tests --lib -- --nocapture` скомпилировал lib-test target и дал
+`12 passed; 0 failed; 0 ignored; 603 filtered out` (compile 12.37 s; tests 1.23 s). Три warning —
+прежний код `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`, не B2. Это focused B2 host
+compile/runtime PASS, не full suite/Android/phone test. Generated Kotlin/`.so` сохранили exact hashes;
+телефоны не подключались. Следующий отдельный slice — B3.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

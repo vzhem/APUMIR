@@ -15,7 +15,7 @@
 1. этот CURRENT OVERRIDE целиком;
 2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
 3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–354;
+4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–355;
 5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
    если обязательный контекст и фактические limits не проверены.
 
@@ -49,11 +49,10 @@
 ### Текущий порядок работы
 
 `SECURE_FILE_TRANSFER.md` определяет slices F4-A…F4-H. Владелец разрешил последовательно выполнять
-все нужные slices. F4-B1 имеет focused Windows PASS 11/11. F4-B2 pure signed control boundary уже
-имеет source/static PASS: `file_control.rs`, пять signed bounded record types и 12 unit-test функций;
-Arena compile отсутствует. Текущее действие — только focused Windows host gate B2. До PASS не
-начинать B3/network/Android/phones. «Любой объём» означает убрать arbitrary 4-GiB cap в B3 и работать
-streaming/paged до физических `u64`/filesystem/storage/quota limits.
+все нужные slices. F4-B1 имеет focused Windows PASS 11/11; F4-B2 pure signed control boundary —
+focused Windows PASS 12/12 на exact `96dbe28`. Текущее действие — isolated F4-B3: ciphertext chunk/
+Merkle identities и streaming/paged `u64` geometry без arbitrary 4-GiB cap. До B3 host PASS не
+начинать network/Android/phones.
 
 > ## Исторический M8 handoff
 >
@@ -73,15 +72,14 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «Продолжаю с focused F4-B2 host gate; Android и телефоны не
-трогаю». Затем:
+В первом ответе коротко скажи: «Продолжаю с isolated F4-B3; Android и телефоны не трогаю». Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
 2. полностью прочитай актуальные override-блоки и обязательные документы из раздела 2;
-3. сверь изоляцию `network/file_control.rs` от sender/QUIC/FFI/Android;
-4. выполни только exact B2 Windows command из раздела 8;
-5. точно раздели `source/static PASS / focused compile+runtime PASS / full-suite pending`;
-6. при ошибке исправляй только B2; не начинай B3/network wiring;
+3. сверь B1/B2 exact host PASS и фактическую manifest/chunk geometry;
+4. реализуй только B3 pure identity/geometry boundary из раздела 8;
+5. точно раздели `source/static PASS / focused compile+runtime PASS / pending`;
+6. при ошибке исправляй только B3; не начинай network wiring;
 7. обычный commit/push текущей Arena branch разрешён; другую branch не создавать и не переключать;
 8. отчитайся: что доказано, что ещё не доказано и какой один slice идёт следующим.
 
@@ -130,10 +128,9 @@ Arena branch, newest committed override и production source. Не подтяг�
 - F4-A docs/architecture синхронизирован и подтверждён владельцем.
 - F4-B1 source/static и focused Windows host PASS: `network/file_wire.rs` содержит canonical
   bounded binary frame/capability negotiation; exact `4815582`, 11 passed, 0 failed, 592 filtered.
-- F4-B2 source/static PASS: `network/file_control.rs` содержит canonical signed capability/offer/
-  missing/custody/final records, replay/time/scope/key bounds и 12 unit-test функций. Host
-  compile/runtime pending; module не wired к sender/QUIC/FFI/Android.
-- Канонический Windows clone после B1 gate был на `arena/01a0290d-apumir`/`4815582`, но сохраняет
+- F4-B2 source/static и focused Windows host PASS: exact `96dbe28`, 12 passed, 0 failed,
+  603 filtered; module не wired к sender/QUIC/FFI/Android.
+- Канонический Windows clone после B2 gate находится на `arena/01a0290d-apumir`/`96dbe28`, но сохраняет
   две прежние модификации generated artifacts: UniFFI `p2p_core.kt` и
   `arm64-v8a/libp2p_core.so`. Их нельзя
   reset/перезаписывать без отдельной проверки; при B1 gate SHA-256 сохранились без изменений.
@@ -181,22 +178,24 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Непосредственный следующий шаг — focused F4-B2 host gate
+### 8. Непосредственный следующий шаг — isolated F4-B3
 
-B1 уже закрыт: exact `4815582`, `11 passed; 0 failed; 592 filtered`. Не повторять его без причины.
-B2 source/static готов в isolated `network/file_control.rs`: canonical `APUC` envelope, Ed25519,
-expected peer+scope binding, absolute expiry, monotonic replay sequence, encrypted-offer bounds,
-paged ranges, custody roles и final receipt; 12 unit-test функций.
+B1/B2 focused Windows gates закрыты: 11/11 и 12/12. Реализовать только pure B3, без network/FFI/
+Android/phones:
 
-На Windows сначала безопасно fast-forward текущую Arena branch без потери двух generated artifacts,
-затем из `C:\APU-M8\rust-core` выполнить только:
+1. F4 geometry с `file_size:u64`, `chunk_count:u64`, bounded power-of-two chunk и exact final chunk;
+   zero whole-file allocation, no arbitrary 4-GiB validation cap.
+2. Canonical ciphertext chunk identity: transfer ID + `u64` index + exact plain/cipher lengths +
+   SHA-256 ciphertext; domain-separated leaf hash связывает index и bytes.
+3. O(log chunks) streaming Merkle accumulator с deterministic odd-node rule, exact ordered leaf
+   count и manifest root/commitment.
+4. Canonical bounded single-chunk proof encode/decode/verify; wrong index/order/hash/root/trailing/
+   oversize proof fail closed.
+5. Расширить только pre-production B1/B2 pure fields с `u32` chunk index/ranges на `u64`, если это
+   нужно для geometry; затем повторно прогнать B1+B2+B3 focused tests вместе.
+6. Старый F3 `crypto/file_transfer.rs`, sender/DB/UI/QUIC и generated bindings в B3 не менять.
 
-`cargo test network::file_control::tests --lib -- --nocapture`
-
-Ожидаемый gate: 12 B2 tests passed; остальные filtered. Если compile/test падает, исправлять только
-B2 и прислать полный error. Не запускать Android build и не подключать телефоны. После PASS следующий
-отдельный slice — **F4-B3:** ciphertext chunk/Merkle identities и uncapped `u64` manifest/geometry
-без старого arbitrary 4-GiB product limit.
+После source/static PASS нужен отдельный Windows command; телефоны не нужны.
 
 ### 9. Порядок после F4-B
 
@@ -261,8 +260,8 @@ B2 и прислать полный error. Не запускать Android build
 - После каждого шага фиксировать важные решения/ошибки в `AI_COLLABORATION_NOTES.md` и тематическом
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
-- F4-B1 уже имеет focused Windows host PASS; не повторять его и не расширять proof level.
-- Ближайшая цель — focused Windows host gate уже написанного F4-B2; release, network wiring и phone
-  gate не нужны.
+- F4-B1/B2 уже имеют focused Windows host PASS; не повторять старые commits без причины.
+- Ближайшая цель — isolated F4-B3 source + combined B1/B2/B3 host gate; release, network wiring и
+  phone gate не нужны.
 
-Сейчас выполни B2 gate из раздела 8. До PASS не начинать B3; телефоны не нужны.
+Сейчас выполни только B3 из раздела 8. Телефоны не нужны.

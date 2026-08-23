@@ -338,14 +338,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-B1 Windows PASS; F4-B2 source/static PASS, host pending:** `network/file_control.rs`
-> задаёт isolated canonical signed capability/offer/missing/custody/final records, peer+scope/time/
-> replay bounds и 12 unit-test функций; sender/QUIC/FFI/Android unwired. Arena syntax/source gates
-> PASS, Rust compile/runtime pending. Владелец разрешил последовательно продолжать все F4 slices и
-> уточнил главный приоритет: быстрые файлы любого объёма через любую сеть. Поэтому B3 обязан убрать
-> arbitrary 4-GiB coupling через bounded streaming/`u64`; физические filesystem/storage/quota limits
-> остаются. Сейчас только focused B2 Windows gate; телефоны не нужны. Полный порядок F4-A…F4-H — в
-> `SECURE_FILE_TRANSFER.md`.
+> **F4-B1/B2 focused Windows PASS; текущий slice F4-B3:** B1 = 11/11 на `4815582`, B2 =
+> 12/12 на `96dbe28`; sender/QUIC/FFI/Android/phones unwired. Владелец разрешил последовательно
+> продолжать все F4 slices и уточнил главный приоритет: быстрые файлы любого объёма через любую сеть.
+> B3 должен добавить ciphertext chunk/Merkle identities и F4 `u64` streaming geometry без arbitrary
+> 4-GiB coupling; legacy F3 path не ломать. Сейчас только pure B3 и focused host gate, телефоны не
+> нужны. Полный порядок F4-A…F4-H — в `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
@@ -4021,3 +4019,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   safe workaround — не объявлять compile PASS и выполнить focused Windows
   `cargo test network::file_control::tests --lib -- --nocapture`. Телефоны не нужны; B3 до PASS не
   начинать, release/tag/PR не делать.
+- **2026-08-23 (доп.355) — F4-B2 focused Windows host gate 12/12 PASS:** canonical Windows clone
+  безопасно fast-forward с `4815582` на exact `96dbe28207e5023ffac6f56401b20d5a15776c77` после
+  zero-overlap gate и TEMP backup. Generated UniFFI `p2p_core.kt` и arm64 `libp2p_core.so` сохранили
+  прежние SHA-256 `144B3B…A566` и `2C4B12…3D58`. В MSVC environment команда
+  `cargo test network::file_control::tests --lib -- --nocapture` скомпилировала lib-test target и
+  дала `12 passed; 0 failed; 0 ignored; 603 filtered out` (compile 12.37 s; tests 1.23 s). Три warning
+  только прежние unused/dead-code в `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`; B2
+  errors/warnings нет. Proof level: focused B2 host compile/runtime PASS, не full suite/Android/phone
+  runtime. Телефоны не подключались. Следующий isolated slice F4-B3: F4 `u64` geometry,
+  ciphertext-chunk commitment и streaming Merkle root/proofs; legacy F3 path не ломать, no network/
+  FFI/Android wiring. Release/tag/PR не делались.
