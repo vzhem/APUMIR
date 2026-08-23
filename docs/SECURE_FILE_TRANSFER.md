@@ -236,6 +236,38 @@ production/mixed versions. На Windows в `C:\APU-M8\rust-core` для exact
 full suite/Android/phone runtime не запускались. Следующий этап F4-C начинается с отдельного аудита и
 малого persistent single-peer QUIC host slice, не с Android/phones.
 
+### Status 2026-08-23 — F4-C1 QUIC audit + source/static PASS; Windows host gate pending
+
+Read-only audit перед кодом подтвердил, что старый QUIC нельзя считать authenticated file channel:
+
+- TLS server использует `with_no_client_auth`, client — `SkipServerVerification`; комментарий обещает
+  Ed25519/X3DH выше, но фактический listener принимает поле sender из unsigned text payload;
+- каждый `engine/core.rs::send_via_quic` создаёт новый endpoint, handshake и connection; имеющийся
+  `connection_pool` в `P2PCore` не используется ни одним send/accept callsite;
+- old receive boundary выделяет whole message `Vec` до 16 MiB и передаёт UTF-8 в generic EventBus;
+  transport FIN/stopped подтверждает доставку QUIC bytes, но не durable file write.
+
+На exact source commit `bf4f0c6c5bce9a2c531d9da39c2c61ad7b99594d` добавлен host-only C1:
+
+- один ordered bidirectional stream держит много binary records внутри одной QUIC connection;
+- mutual B2 signed capabilities проверяют pinned peer node ID/key; signed scope связан с exact QUIC
+  connection через TLS exporter, поэтому active TLS terminator не может перенести transcript между
+  двумя своими TLS legs;
+- injected admission boundary обязан durable/atomic принять session replay scope до `AUTH_OK`;
+- bounded `APUS` record reader проверяет type/length до allocation и декодирует exact B1 frame;
+- negotiated frame ceiling применяется на send и receive; Base64/chat/EventBus/RelayQueue отсутствуют;
+- chunk ACK связывает transfer/index/offset/range и пишется только после async durable sink success;
+  timeout/failure/invalid frame сбрасывает stream без ACK;
+- signed B2 control record остаётся отдельным resume seam; reconnect test передаёт MissingRanges и
+  затем только отсутствующий binary chunk;
+- 9 tests: many frames/one connection, durable ordering/failure, reconnect/missing range, replay,
+  wrong peer/signature/scope, truncation, oversize-before-allocation и negotiated ceiling.
+
+Jinx Rust AST (`Program`, zero `MissingNode`), source contracts и `git diff --check` PASS. Arena не
+имеет cargo/rustc, поэтому compile/runtime **не объявлены**. Следующий единственный gate в
+`C:\APU-M8\rust-core`: `cargo test network::file_ --lib -- --nocapture`; ожидается 43 passed,
+0 failed, 592 filtered. Engine/FFI/Android/F3/phones не wired и не изменены; F4-D не начат.
+
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 

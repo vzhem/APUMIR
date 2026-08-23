@@ -15,7 +15,7 @@
 1. этот CURRENT OVERRIDE целиком;
 2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
 3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–357;
+4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–358;
 5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
    если обязательный контекст и фактические limits не проверены.
 
@@ -51,8 +51,9 @@
 `SECURE_FILE_TRANSFER.md` определяет slices F4-A…F4-H. Владелец разрешил последовательно выполнять
 все нужные slices. F4-B1 имеет focused Windows PASS 11/11; F4-B2 pure signed control boundary —
 focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab2517` дал 34 passed,
-0 failed, 592 filtered. F4-B закрыт в focused host scope. Текущее действие — read-only аудит
-существующего QUIC и один малый F4-C persistent single-peer host slice. Android/phones пока не нужны.
+0 failed, 592 filtered. F4-B закрыт в focused host scope. F4-C1 audit и host-only source/static
+готовы на exact `bf4f0c6`; 9 новых tests ещё не compiled. Текущее действие — combined Windows
+43-test gate. Engine/FFI/Android/phones пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -72,13 +73,13 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «F4-B combined 34/34 PASS; начинаю read-only F4-C QUIC audit;
-Android и телефоны не трогаю». Затем:
+В первом ответе коротко скажи: «F4-C1 source/static PASS на `bf4f0c6`; начинаю combined Windows
+43-test gate; Android и телефоны не трогаю». Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
 2. полностью прочитай актуальные override-блоки и обязательные документы из раздела 2;
-3. прочитай current QUIC client/accept/engine ownership, framing и auth path до правки;
-4. зафиксируй точный C gap и сделай только первый host-testable persistent slice из раздела 8;
+3. сверяй committed C1 audit и source с actual files, не повторяй реализацию;
+4. выполни только Windows host gate из раздела 8 и исправляй лишь C1 при реальной ошибке;
 5. точно раздели `source/static / host compile/runtime / network runtime / pending`;
 6. не подключай Android/FFI/phones и не начинай concurrency F4-D;
 7. обычный commit/push текущей Arena branch разрешён; другую branch не создавать и не переключать;
@@ -133,7 +134,11 @@ Arena branch, newest committed override и production source. Не подтяг�
   603 filtered; module не wired к sender/QUIC/FFI/Android.
 - F4-B3 + combined F4-B focused Windows PASS: exact `5ab2517`, 34 passed, 0 failed, 592 filtered;
   network/FFI/Android/phones всё ещё unwired.
-- Канонический Windows clone после combined gate находится на `arena/01a0290d-apumir`/`5ab2517`, но сохраняет
+- F4-C1 exact source `bf4f0c6`: read-only audit + TLS-exporter-bound mutual B2 auth, bounded `APUS`
+  records, one persistent ordered QUIC stream, durable-before-ACK sink/admission и signed resume seam;
+  source/static PASS, 9 новых tests compile/runtime pending, no engine/FFI/Android wiring.
+- Канонический Windows clone после последнего выполненного gate находится на
+  `arena/01a0290d-apumir`/`5ab2517`, но сохраняет
   две прежние модификации generated artifacts: UniFFI `p2p_core.kt` и
   `arm64-v8a/libp2p_core.so`. Их нельзя
   reset/перезаписывать без отдельной проверки; при B1 gate SHA-256 сохранились без изменений.
@@ -181,23 +186,23 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Непосредственный следующий шаг — F4-C1 persistent host foundation
+### 8. Непосредственный следующий шаг — combined F4-C1 Windows host gate
 
-Сначала read-only audit `network/quic_client.rs`, `engine/core.rs`, connection ownership, TLS/auth,
-receive framing и tests. Затем сделать только C1:
+Audit и source/static уже завершены на exact `bf4f0c6`. Audit нашёл unauthenticated legacy TLS,
+unsigned text listener, новый endpoint/handshake на каждый send, unwired pool и недолговечный FIN
+вместо durable ACK. C1 не доверяет этому TLS сам по себе: mutual pinned B2 transcript подписывает
+scope из per-connection TLS exporter; один ordered stream несёт bounded `APUS`/exact B1 records,
+а fake durable sink разрешает ACK только после success. Engine/FFI/Android пока unwired.
 
-1. Один reusable peer session/connection owner, не новый Endpoint+handshake на каждый file frame.
-2. Length-prefixed binary record boundary с B2 signed session/capability verification и exact B1
-   frame decode; no Base64/generic chat text.
-3. Один ordered stream в C1; bounded read/write/timeouts и explicit close/error. Parallel streams —
-   только F4-D после benchmark.
-4. Receiver ACK разрешён только после injected durable sink подтвердил ciphertext range; fake sink
-   в host tests должен доказать ACK-after-durable и no ACK on failure.
-5. Loopback host tests: many frames over one connection/session, reconnect/missing-range seam,
-   wrong peer/signature/scope/truncation/oversize/durable failure. Пока no FFI/Android/phones.
+В каноническом Windows clone безопасно fast-forward текущую Arena branch, не изменяя generated
+Kotlin/`.so`. Затем из `C:\APU-M8\rust-core` выполнить:
 
-Если current QUIC TLS фактически unauthenticated, не маскировать это: C1 обязан bind session к
-проверенному B2 Ed25519 control transcript либо остановиться до безопасного design.
+`cargo test network::file_ --lib -- --nocapture`
+
+Ожидаемый combined gate: `43 passed; 0 failed; 0 ignored; 592 filtered out` (34 F4-B + 9 C1).
+Проверяются many frames/one connection, reconnect/MissingRanges, replay, wrong peer/signature/scope,
+truncation, oversize-before-allocation, negotiated limit и no ACK on durable failure. При compile/test
+ошибке исправлять только C1/quic seam и повторить тот же gate. Android build/FFI/phones/F4-D не нужны.
 
 ### 9. Порядок после F4-B
 
@@ -262,7 +267,8 @@ receive framing и tests. Затем сделать только C1:
 - После каждого шага фиксировать важные решения/ошибки в `AI_COLLABORATION_NOTES.md` и тематическом
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
-- F4-B combined 34/34 PASS на `5ab2517`; не повторять без изменения pure protocol.
-- Ближайшая цель — только F4-C1 persistent single-peer host foundation; F4-D/Android/phones позже.
+- F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
+- F4-C1 source/static PASS на `bf4f0c6`; ближайшая цель только combined Windows 43/43 gate.
+- F4-D/engine/FFI/Android/phones не начинать до этого результата.
 
-Сейчас выполни audit и C1 из раздела 8. Телефоны не нужны.
+Сейчас выполни gate из раздела 8. Телефоны не нужны.

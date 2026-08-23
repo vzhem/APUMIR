@@ -338,11 +338,12 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-B combined Windows PASS; текущий этап F4-C1:** exact `5ab2517` дал 34 passed, 0 failed,
-> 592 filtered; generated Kotlin/`.so` сохранены, phones untouched. Pure binary/signature/identity/
-> Merkle boundary закрыт в focused host scope. Сейчас read-only audit existing QUIC auth/ownership/
-> framing, затем только persistent single-peer ordered host foundation с durable-before-ACK fake-sink
-> tests; no FFI/Android/phones/F4-D concurrency. Полный порядок — в `SECURE_FILE_TRANSFER.md`.
+> **F4-C1 source/static PASS; combined Windows gate pending:** exact source `bf4f0c6` добавляет
+> TLS-exporter-bound mutual B2 auth, one persistent ordered QUIC stream, bounded `APUS` + exact B1,
+> durable admission/sink-before-ACK и signed MissingRanges seam. 9 новых tests объявлены; Arena без
+> cargo, поэтому compile/runtime pending. Сейчас только Windows `cargo test network::file_ --lib --
+> --nocapture`, ожидается combined 43/43; no engine/FFI/Android/phones/F4-D. Полный порядок — в
+> `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
@@ -4052,3 +4053,20 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Full suite/Android/phone runtime не запускались; телефоны не подключались. F4-B focused host gate
   закрыт. Следующий шаг F4-C1: сначала read-only QUIC auth/ownership/framing audit, затем smallest
   persistent single-peer ordered host slice с durable-before-ACK fake sink; no Android/phones/F4-D.
+- **2026-08-23 (доп.358) — F4-C1 QUIC audit + source/static PASS, host compile pending:** audit
+  `quic_client.rs`/`engine/core.rs`/pool подтвердил: TLS server `with_no_client_auth`, client skip
+  verify, listener доверяет unsigned sender text; каждый send создаёт endpoint+handshake, объявленный
+  pool не вызывается, receive выделяет whole `Vec` до 16 MiB, transport FIN не доказывает durable
+  file write. На exact `bf4f0c6c5bce9a2c531d9da39c2c61ad7b99594d` добавлен host-only
+  `network/file_session.rs`: mutual pinned B2 capability controls связывают signed scope с
+  per-connection QUIC TLS exporter (active terminator получает разные bytes на двух legs), durable
+  admission сохраняет anti-replay scope до AUTH_OK. Один ordered bidi stream несёт hard-bounded
+  `APUS` records; B1 frame decode exact, negotiated payload cap проверяется до write/sink, no Base64/
+  chat/EventBus/RelayQueue. Range ACK связывает transfer/index/offset/length и отправляется только
+  после async durable sink success; timeout/error/reset дают no ACK. Signed B2 control остаётся resume
+  seam. 9 tests объявлены: 12 frames/one connection, sink ordering/failure, reconnect+MissingRanges,
+  same-connection replay, wrong peer/signature/scope, truncation/oversize-before-allocation и
+  negotiated cap. Jinx AST `Program`/zero MissingNode, static contracts и diff check PASS. Arena без
+  cargo/rustc: type-check/runtime pending, не завышать proof. Следующий exact Windows command:
+  `cargo test network::file_ --lib -- --nocapture`; ожидается 43 passed, 0 failed, 592 filtered.
+  Legacy F3/engine/FFI/Android/phones untouched; F4-D не начат; release/tag/PR не делались.

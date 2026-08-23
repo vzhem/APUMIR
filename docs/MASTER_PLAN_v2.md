@@ -14,8 +14,10 @@ ciphertext; внешнее хранение запрещено. Authoritative д
 Владелец подтвердил F4 architecture и разрешил последовательно выполнять все необходимые slices.
 F4-B pure binary boundary полностью прошёл combined Windows gate на exact `5ab2517`: 34 passed,
 0 failed, 592 filtered. `u64` geometry, signed controls, ciphertext identity и Merkle доказаны в
-focused host scope; network/Android/phones всё ещё unwired. Текущий этап F4-C: сначала read-only QUIC
-audit, затем малый persistent authenticated single-peer host slice; не прыгать сразу к UI/phones.
+focused host scope; network/Android/phones всё ещё unwired. F4-C1 audit + host-only source/static
+готов на exact `bf4f0c6`: TLS-exporter-bound mutual B2 auth, one ordered binary stream и
+durable-before-ACK sink; 9 новых tests объявлены. Следующий gate только combined Windows 43/43;
+engine/FFI/Android/phones и F4-D пока не начинать.
 
 ---
 
@@ -1715,6 +1717,13 @@ Authoritative design и доказательные статусы:
     34 passed, 0 failed, 592 filtered. Legacy F3/network/Android/phones untouched.
 - [ ] **F4-C — persistent single-peer QUIC:** один authenticated connection, один binary stream,
   durable chunk-before-ACK, missing-range resume; no Base64/message queue.
+  - [x] C1 read-only audit: legacy TLS unauthenticated, connection pool unwired, endpoint/handshake
+    per send, generic text/whole-message boundary и transport-FIN не равен durable file ACK.
+  - [x] C1 source/static exact `bf4f0c6`: TLS exporter + mutual pinned B2 capability transcript,
+    bounded `APUS` records, exact B1 decode, one ordered stream, injected durable admission/sink,
+    signed missing-range seam; engine/FFI/Android unwired.
+  - [ ] C1 combined Windows host gate: из `C:\APU-M8\rust-core` выполнить
+    `cargo test network::file_ --lib -- --nocapture`; ожидается 43 passed, 0 failed, 592 filtered.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,
