@@ -338,11 +338,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-C1 focused Windows 9/9 PASS; combined re-gate pending:** source `bf4f0c6`, exporter fix
-> `bedf671`, test-only final-ACK lifecycle fix `ca2edb6`. После earlier combined 41/43 exact
-> `ca2edb6` дал 9 passed, 0 failed, 626 filtered. Сейчас combined `cargo test network::file_ --lib
-> -- --nocapture`, ожидается 43/43; no engine/FFI/Android/phones/F4-D. Полный порядок — в
-> `SECURE_FILE_TRANSFER.md`.
+> **F4-C1 Windows host gate закрыт:** exact code `ca2edb6` дал focused 9/9 и combined 43/43,
+> 592 filtered; три warnings только прежние. TLS-exporter mutual B2 auth, one ordered QUIC stream,
+> durable-before-ACK и resume seam доказаны в host scope. Engine/FFI/Android/phones всё ещё unwired.
+> Следующий только read-only ownership review + smallest host-only F4-C2 owner/reconnect seam; no
+> F4-D concurrency. Полный порядок — в `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
@@ -4092,3 +4092,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `cargo test network::file_session::tests --lib -- --nocapture` дал `9 passed; 0 failed; 0 ignored;
   626 filtered out` (compile 50.56 s; tests 0.20 s). Все C1 positive/negative/resume/replay tests PASS.
   Следующий один gate — combined 43/43 на exact `ca2edb6`; phones/Android/F4-D не трогать.
+- **2026-08-23 (доп.361) — F4-C1 combined Windows host gate 43/43 PASS:** direct child cmd снова
+  поднял exact MSVC `cl.exe`/`link.exe` 14.44.35207; на exact code
+  `ca2edb66a6294e038576d75447f569e2cd7b9869` команда
+  `cargo test network::file_ --lib -- --nocapture` дала `43 passed; 0 failed; 0 ignored;
+  592 filtered out` (compile 1.61 s; tests 1.25 s). Все B1/B2/B3 и 9 C1 positive/negative tests
+  прошли вместе. Три warning только прежние `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`;
+  C1 warnings/errors нет. Generated-files guard прошёл, телефоны не подключались. Proof scope:
+  source/static + focused/combined Windows host compile/runtime PASS; не production engine wiring,
+  Android/FFI/phone runtime и не throughput benchmark. F4-C1 закрыт. Следующий малый slice F4-C2:
+  read-only lifetime/pool/runtime review, затем bounded persistent authenticated owner + reconnect
+  seam в host scope; не использовать legacy unsigned pool и не начинать F4-D parallel streams.

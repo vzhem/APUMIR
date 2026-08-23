@@ -18,8 +18,9 @@ focused host scope; network/Android/phones всё ещё unwired. F4-C1 audit + 
 готов на exact `bf4f0c6`: TLS-exporter-bound mutual B2 auth, one ordered binary stream и
 durable-before-ACK sink. E0599 исправлен `bedf671`; первый combined runtime дал 41/43 и выявил
 слишком ранний drop test server после queued final ACK. Test-only lifecycle fix `ca2edb6` прошёл
-focused Windows 9/9 (626 filtered). Следующий gate — combined 43/43 на exact `ca2edb6`;
-engine/FFI/Android/phones и F4-D пока не начинать.
+focused Windows 9/9, затем combined exact `ca2edb6` дал 43 passed, 0 failed, 592 filtered.
+F4-C1 host gate закрыт; engine/FFI/Android/phones всё ещё unwired, F4-D не начинать. Следующий
+малый F4-C slice — сначала persistent engine ownership/reconnect seam без UI/phone wiring.
 
 ---
 
@@ -1726,8 +1727,10 @@ Authoritative design и доказательные статусы:
     signed missing-range seam; engine/FFI/Android unwired.
   - [x] C1 focused Windows host gate: E0599 исправлен `bedf671`; после combined 41/43 test-only
     final-ACK lifecycle fix `ca2edb6` дал 9 passed, 0 failed, 626 filtered (50.56 s + 0.20 s).
-  - [ ] C1 combined re-gate: на exact `ca2edb6` выполнить
-    `cargo test network::file_ --lib -- --nocapture`; ожидается 43 passed, 0 failed, 592 filtered.
+  - [x] C1 combined Windows gate exact `ca2edb6`: 43 passed, 0 failed, 592 filtered
+    (compile 1.61 s; tests 1.25 s); три warnings только прежние, phones untouched.
+  - [ ] C2 persistent engine owner/reconnect seam: сначала host-only ownership design/tests; не
+    подключать FFI/Android/UI/phones и не добавлять parallel streams F4-D.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,

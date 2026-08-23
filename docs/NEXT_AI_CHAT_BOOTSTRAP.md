@@ -15,7 +15,7 @@
 1. этот CURRENT OVERRIDE целиком;
 2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
 3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–360;
+4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–361;
 5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
    если обязательный контекст и фактические limits не проверены.
 
@@ -52,9 +52,9 @@
 все нужные slices. F4-B1 имеет focused Windows PASS 11/11; F4-B2 pure signed control boundary —
 focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab2517` дал 34 passed,
 0 failed, 592 filtered. F4-B закрыт в focused host scope. F4-C1 audit и host-only source/static
-готовы на exact `bf4f0c6`; E0599 исправлен `bedf671`, test-only final-ACK lifecycle fix `ca2edb6`
-после combined 41/43 прошёл focused Windows 9/9. Текущее действие — combined Windows 43-test
-re-gate на exact `ca2edb6`. Engine/FFI/Android/phones пока не трогать.
+готовы на exact `bf4f0c6`; fixes `bedf671`/`ca2edb6` прошли focused Windows 9/9 и combined exact
+`ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. Следующее действие — read-only ownership
+review и один host-only F4-C2 persistent engine owner/reconnect seam. FFI/Android/phones/F4-D не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -74,8 +74,8 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «F4-C1 focused 9/9 PASS на `ca2edb6`; повторяю combined Windows
-43-test gate; Android и телефоны не трогаю». Затем:
+В первом ответе коротко скажи: «F4-C1 combined 43/43 PASS на `ca2edb6`; начинаю read-only F4-C2
+ownership review; Android и телефоны не трогаю». Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
 2. полностью прочитай актуальные override-блоки и обязательные документы из раздела 2;
@@ -135,11 +135,11 @@ Arena branch, newest committed override и production source. Не подтяг�
   603 filtered; module не wired к sender/QUIC/FFI/Android.
 - F4-B3 + combined F4-B focused Windows PASS: exact `5ab2517`, 34 passed, 0 failed, 592 filtered;
   network/FFI/Android/phones всё ещё unwired.
-- F4-C1 exact source `bf4f0c6`: read-only audit + TLS-exporter-bound mutual B2 auth, bounded `APUS`
-  records, one persistent ordered QUIC stream, durable-before-ACK sink/admission и signed resume seam;
-  source/static PASS, 9 новых tests compile/runtime pending, no engine/FFI/Android wiring.
-- Канонический Windows clone после последнего выполненного gate находится на
-  `arena/01a0290d-apumir`/`5ab2517`, но сохраняет
+- F4-C1 source `bf4f0c6` + fixes `bedf671`/`ca2edb6`: TLS-exporter-bound mutual B2 auth, bounded
+  `APUS`, one ordered QUIC stream, durable-before-ACK/admission и signed resume seam; Windows focused
+  9/9 и combined 43/43 PASS, no engine/FFI/Android wiring.
+- Канонический Windows clone после последнего gate находится на
+  `arena/01a0290d-apumir`/`ca2edb6`, но сохраняет
   две прежние модификации generated artifacts: UniFFI `p2p_core.kt` и
   `arm64-v8a/libp2p_core.so`. Их нельзя
   reset/перезаписывать без отдельной проверки; при B1 gate SHA-256 сохранились без изменений.
@@ -187,23 +187,26 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Непосредственный следующий шаг — combined F4-C1 Windows host gate
+### 8. Непосредственный следующий шаг — F4-C2 persistent owner/reconnect seam
 
-Audit/source `bf4f0c6`, exporter compile-fix `bedf671` и test-only lifecycle fix `ca2edb6` готовы.
-Combined attempt дал 41/43: server test drop мог закрыть connection до доставки queued final ACK.
-После explicit CLOSE/wait focused exact `ca2edb6` дал 9 passed, 0 failed, 626 filtered (compile
-50.56 s; tests 0.20 s). C1 mutual pinned B2 transcript, one ordered stream и durable-before-ACK
-сохранились без production changes. Engine/FFI/Android пока unwired.
+F4-C1 exact `ca2edb6` закрыл focused 9/9 и combined 43/43 host gates. Он доказывает одну session,
+но production engine всё ещё создаёт новый endpoint/connection на каждый old send, listener владеет
+своим недоступным `QuicClient`, а существующий unauthenticated `ConnectionPool` не wired.
 
-В каноническом Windows clone exact `ca2edb6` из `C:\APU-M8\rust-core` выполнить через direct
-`vcvars64.bat` child cmd (новая PowerShell не сохраняет MSVC environment):
+Сначала read-only сверить lifetime/runtime/shutdown и все pool/send/accept callsites. Затем определить
+и сделать только smallest host-testable C2:
 
-`cargo test network::file_ --lib -- --nocapture`
+1. bounded owner одного reusable endpoint и не более одной authenticated C1 sender session на pinned
+   peer/path; concurrent connect должен быть single-flight, не создавать дубли;
+2. closed/failed session удаляется; reconnect создаёт fresh exporter-bound handshake и сохраняет
+   signed MissingRanges seam, но не хранит whole file в RAM;
+3. explicit shutdown/idle eviction и bounded peer count; no generic message pool key без verified
+   Ed25519 identity;
+4. loopback tests на reuse, duplicate-connect race, eviction/reconnect, wrong peer и shutdown;
+5. пока no FFI/Android/UI/phones и no parallel streams/window — это F4-D.
 
-Ожидаемый combined gate: `43 passed; 0 failed; 0 ignored; 592 filtered out` (34 F4-B + 9 C1).
-Проверяются many frames/one connection, reconnect/MissingRanges, replay, wrong peer/signature/scope,
-truncation, oversize-before-allocation, negotiated limit и no ACK on durable failure. При compile/test
-ошибке исправлять только C1/quic seam и повторить тот же gate. Android build/FFI/phones/F4-D не нужны.
+Если безопасный ownership нельзя отделить от текущего engine runtime малым slice, сначала записать
+точный design seam и остановиться, а не подключать C1 к legacy unsigned text listener.
 
 ### 9. Порядок после F4-B
 
@@ -269,7 +272,7 @@ truncation, oversize-before-allocation, negotiated limit и no ACK on durable fa
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
 - F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
-- F4-C1 source `bf4f0c6` + fixes `bedf671`/`ca2edb6`; focused 9/9 PASS, combined 43/43 next.
-- F4-D/engine/FFI/Android/phones не начинать до этого результата.
+- F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
+- Следующий только F4-C2 host owner/reconnect seam; F4-D/FFI/Android/phones не начинать.
 
-Сейчас выполни gate из раздела 8. Телефоны не нужны.
+Сейчас выполни read-only review и C2 из раздела 8. Телефоны не нужны.

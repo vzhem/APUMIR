@@ -272,9 +272,12 @@ Jinx Rust AST (`Program`, zero `MissingNode`), source contracts и `git diff --c
 дал 41/43: два success-path теста теряли последний queued ACK, потому что test server сразу dropping
 all connection handles. Exact test-only fix `ca2edb6` добавил protocol `CLOSE` после final ACK и
 receiver wait; production protocol/state не менялись. Focused Windows gate на exact `ca2edb6` PASS:
-`9 passed; 0 failed; 626 filtered` (compile 50.56 s; tests 0.20 s). Три warning только прежние
-`multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`. Следующий gate — combined 43/43 на том же
-exact code. Engine/FFI/Android/F3/phones не wired; F4-D не начат.
+`9 passed; 0 failed; 626 filtered` (compile 50.56 s; tests 0.20 s). Финальный combined command на том
+же exact code дал `43 passed; 0 failed; 0 ignored; 592 filtered out` (compile 1.61 s; tests 1.25 s).
+Три warning только прежние `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`; generated-file
+guard прошёл, телефоны не подключались. F4-C1 host compile/runtime gate закрыт. Engine/FFI/Android/F3
+всё ещё unwired; F4-D не начат. Следующий F4-C slice сначала должен определить persistent engine
+ownership/reconnect seam без подключения UI/phones.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
