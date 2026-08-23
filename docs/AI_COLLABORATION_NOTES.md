@@ -338,11 +338,10 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-C1 compile-fix pushed; combined Windows re-gate pending:** source `bf4f0c6` добавляет
-> TLS-exporter-bound mutual B2 auth, one ordered QUIC stream и durable-before-ACK. Первый Windows
-> compile на `05fa038` дошёл до `p2p-core`, нашёл E0599 (`ExportKeyingMaterialError` no Display);
-> exact `bedf671` исправляет mapping. Сейчас повторить `cargo test network::file_ --lib --
-> --nocapture`, ожидается 43/43; no engine/FFI/Android/phones/F4-D. Полный порядок — в
+> **F4-C1 focused Windows 9/9 PASS; combined re-gate pending:** source `bf4f0c6`, exporter fix
+> `bedf671`, test-only final-ACK lifecycle fix `ca2edb6`. После earlier combined 41/43 exact
+> `ca2edb6` дал 9 passed, 0 failed, 626 filtered. Сейчас combined `cargo test network::file_ --lib
+> -- --nocapture`, ожидается 43/43; no engine/FFI/Android/phones/F4-D. Полный порядок — в
 > `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
@@ -4081,3 +4080,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `TlsConfig("QUIC TLS exporter failed")`; protocol/state/tests не менялись. Static diff check PASS;
   compile/runtime после fix pending. Повторить тот же combined command в уже рабочем MSVC env;
   ожидается 43/43. Телефоны не подключались, generated files не менялись, F4-D не начат.
+- **2026-08-23 (доп.360) — F4-C1 focused Windows 9/9 PASS после final-ACK test lifecycle fix:**
+  на `412a827` combined target скомпилировался с тремя только прежними warnings, дал 41 passed и
+  два failures: success tests server task сразу drop-ал последние connection handles после queueing
+  final ACK, поэтому client видел `connection lost`. Production receiver/session не показал protocol
+  reject; test не моделировал graceful завершение persistent owner. Exact test-only `ca2edb6` добавил
+  sender `CLOSE` после прочитанного final ACK и receiver wait for CLOSE в обоих success tests; wire,
+  auth, durable ordering и production methods не менялись. Новая PowerShell потеряла parent MSVC env,
+  поэтому один повтор остановился до crate на missing cl.exe и evidence не является. Direct child
+  cmd с exact `vcvars64.bat` затем скомпилировал current crate: 3 прежних warnings; focused command
+  `cargo test network::file_session::tests --lib -- --nocapture` дал `9 passed; 0 failed; 0 ignored;
+  626 filtered out` (compile 50.56 s; tests 0.20 s). Все C1 positive/negative/resume/replay tests PASS.
+  Следующий один gate — combined 43/43 на exact `ca2edb6`; phones/Android/F4-D не трогать.

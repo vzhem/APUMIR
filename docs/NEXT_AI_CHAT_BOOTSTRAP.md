@@ -15,7 +15,7 @@
 1. этот CURRENT OVERRIDE целиком;
 2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
 3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–359;
+4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–360;
 5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
    если обязательный контекст и фактические limits не проверены.
 
@@ -52,9 +52,9 @@
 все нужные slices. F4-B1 имеет focused Windows PASS 11/11; F4-B2 pure signed control boundary —
 focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab2517` дал 34 passed,
 0 failed, 592 filtered. F4-B закрыт в focused host scope. F4-C1 audit и host-only source/static
-готовы на exact `bf4f0c6`; первый Windows compile на `05fa038` нашёл C1 E0599 в error mapping,
-исправленный exact `bedf671`. Текущее действие — повтор combined Windows 43-test gate.
-Engine/FFI/Android/phones пока не трогать.
+готовы на exact `bf4f0c6`; E0599 исправлен `bedf671`, test-only final-ACK lifecycle fix `ca2edb6`
+после combined 41/43 прошёл focused Windows 9/9. Текущее действие — combined Windows 43-test
+re-gate на exact `ca2edb6`. Engine/FFI/Android/phones пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -74,7 +74,7 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «F4-C1 compile-fix `bedf671` готов; повторяю combined Windows
+В первом ответе коротко скажи: «F4-C1 focused 9/9 PASS на `ca2edb6`; повторяю combined Windows
 43-test gate; Android и телефоны не трогаю». Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
@@ -189,14 +189,14 @@ Arena branch, newest committed override и production source. Не подтяг�
 
 ### 8. Непосредственный следующий шаг — combined F4-C1 Windows host gate
 
-Audit и source/static завершены на exact `bf4f0c6`. Первый Windows compile поднял direct
-`vcvars64.bat`, дошёл до `p2p-core` и нашёл один E0599: exporter error не имеет Display; exact
-`bedf671` исправляет только mapping на static fail-closed error. C1 mutual pinned B2 transcript
-подписывает scope из per-connection TLS exporter; один ordered stream несёт bounded `APUS`/exact B1
-records, а fake durable sink разрешает ACK только после success. Engine/FFI/Android пока unwired.
+Audit/source `bf4f0c6`, exporter compile-fix `bedf671` и test-only lifecycle fix `ca2edb6` готовы.
+Combined attempt дал 41/43: server test drop мог закрыть connection до доставки queued final ACK.
+После explicit CLOSE/wait focused exact `ca2edb6` дал 9 passed, 0 failed, 626 filtered (compile
+50.56 s; tests 0.20 s). C1 mutual pinned B2 transcript, one ordered stream и durable-before-ACK
+сохранились без production changes. Engine/FFI/Android пока unwired.
 
-В каноническом Windows clone безопасно fast-forward текущую Arena branch, не изменяя generated
-Kotlin/`.so`. Затем из `C:\APU-M8\rust-core` выполнить:
+В каноническом Windows clone exact `ca2edb6` из `C:\APU-M8\rust-core` выполнить через direct
+`vcvars64.bat` child cmd (новая PowerShell не сохраняет MSVC environment):
 
 `cargo test network::file_ --lib -- --nocapture`
 
@@ -269,7 +269,7 @@ truncation, oversize-before-allocation, negotiated limit и no ACK on durable fa
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
 - F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
-- F4-C1 source/static `bf4f0c6` + compile-fix `bedf671`; ближайшая цель повтор Windows 43/43 gate.
+- F4-C1 source `bf4f0c6` + fixes `bedf671`/`ca2edb6`; focused 9/9 PASS, combined 43/43 next.
 - F4-D/engine/FFI/Android/phones не начинать до этого результата.
 
 Сейчас выполни gate из раздела 8. Телефоны не нужны.

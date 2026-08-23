@@ -16,9 +16,10 @@ F4-B pure binary boundary полностью прошёл combined Windows gate 
 0 failed, 592 filtered. `u64` geometry, signed controls, ciphertext identity и Merkle доказаны в
 focused host scope; network/Android/phones всё ещё unwired. F4-C1 audit + host-only source/static
 готов на exact `bf4f0c6`: TLS-exporter-bound mutual B2 auth, one ordered binary stream и
-durable-before-ACK sink; 9 новых tests объявлены. Первый Windows compile нашёл только C1 E0599
-(`ExportKeyingMaterialError` без Display), exact fix `bedf671` pushed. Следующий gate — повтор той же
-combined команды, ожидается 43/43; engine/FFI/Android/phones и F4-D пока не начинать.
+durable-before-ACK sink. E0599 исправлен `bedf671`; первый combined runtime дал 41/43 и выявил
+слишком ранний drop test server после queued final ACK. Test-only lifecycle fix `ca2edb6` прошёл
+focused Windows 9/9 (626 filtered). Следующий gate — combined 43/43 на exact `ca2edb6`;
+engine/FFI/Android/phones и F4-D пока не начинать.
 
 ---
 
@@ -1723,8 +1724,9 @@ Authoritative design и доказательные статусы:
   - [x] C1 source/static exact `bf4f0c6`: TLS exporter + mutual pinned B2 capability transcript,
     bounded `APUS` records, exact B1 decode, one ordered stream, injected durable admission/sink,
     signed missing-range seam; engine/FFI/Android unwired.
-  - [ ] C1 combined Windows host gate: первый attempt на `05fa038` дошёл до `p2p-core` и нашёл
-    E0599 в exporter error mapping; исправлено exact `bedf671`. Повторить из `C:\APU-M8\rust-core`
+  - [x] C1 focused Windows host gate: E0599 исправлен `bedf671`; после combined 41/43 test-only
+    final-ACK lifecycle fix `ca2edb6` дал 9 passed, 0 failed, 626 filtered (50.56 s + 0.20 s).
+  - [ ] C1 combined re-gate: на exact `ca2edb6` выполнить
     `cargo test network::file_ --lib -- --nocapture`; ожидается 43 passed, 0 failed, 592 filtered.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
