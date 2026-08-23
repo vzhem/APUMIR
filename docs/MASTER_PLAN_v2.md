@@ -23,9 +23,10 @@ F4-C1 host gate закрыт; engine/FFI/Android/phones всё ещё unwired, F
 audit нашёл prerequisite: fake `CryptoManager` нельзя использовать для C1, а real installed Ed25519
 sidecar не реализовывал требуемый signer API. C2a exact `0736d9b` добавил internal public-key/sign
 adapter для real `Arc<InstalledSigningIdentity>` без экспорта seed; Windows filters 2/2 и 1/1,
-combined 46/46 PASS. C2a host gate закрыт. C2b source/static exact `fd5d1f3` добавил отдельный
-host-only bounded single-flight endpoint/session owner и 7 loopback tests; Windows compile/runtime
-pending, engine/FFI/Android/phones всё ещё unwired.
+combined 46/46 PASS. C2a host gate закрыт. C2b source exact `fd5d1f3` добавил отдельный host-only
+bounded single-flight owner. Первый Windows run compiled и дал 5/7; два strict test expectations
+исправлены test-only `471d099` без production changes. Focused rerun/combined pending;
+engine/FFI/Android/phones всё ещё unwired.
 
 ---
 
@@ -1739,9 +1740,9 @@ Authoritative design и доказательные статусы:
   - [x] C2a real signer seam exact `0736d9b`: internal public-key/sign trait для test key и real
     `Arc<InstalledSigningIdentity>`, no seed/fake fallback; Windows 2/2 + 1/1 focused и 46/46 combined
     PASS, три warnings только прежние, generated guard PASS.
-  - [ ] C2b bounded single-flight persistent owner/reconnect: source/static exact `fd5d1f3` PASS,
-    7 loopback tests (reuse/race/idle+fresh scope/MissingRanges/wrong peer+retry/cap/shutdown), Windows
-    focused/combined compile-runtime pending; no FFI/Android/UI/phones и no F4-D.
+  - [ ] C2b bounded single-flight persistent owner/reconnect: source exact `fd5d1f3`; first Windows
+    compile 5/7 exposed only strict fixture/close assertions; test-only `471d099` fixes both, focused
+    7/7 + combined 53/53 rerun pending; no FFI/Android/UI/phones и no F4-D.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,

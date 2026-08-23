@@ -4155,3 +4155,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   capacity и idempotent shutdown. Expected focused 7, combined file 53. Jinx owner/mod: `Program`,
   `MissingNode=0`; static identity/bounds/no-legacy-import contracts и diff check PASS. Arena без
   cargo/rustc, compile/runtime pending. F4-D/engine wiring/FFI/Android/phones не начинались.
+- **2026-08-23 (доп.366) — первый F4-C2b Windows run 5/7; test-only diagnosis/fix:** exact
+  `fd5d1f3` успешно compiled на MSVC 14.44.35207 за 17.90 s; 5 owner tests PASS, 2 FAIL, 638
+  filtered. Reuse, 16-caller single-flight, idle/fresh scope, capacity и shutdown уже зелёные.
+  `wrong_pinned_peer...` fixture подменял одновременно key и legacy recipient ID, поэтому server
+  fail-closed отклонял AUTH до ответа, а test ошибочно требовал только client-side Control error.
+  `reconnect_preserves...` требовал ровно `FileSessionError::Closed`, хотя idle eviction корректно
+  может наблюдаться как transport close; panic завершал server до второго accept, откуда вторичный
+  `ConnectTimeout`. Exact test-only `471d0994885a5bf66139b8775bcefcb67734d8ed` оставляет actual
+  recipient ID и подменяет только pinned key (теперь точно ожидается `UnexpectedSigner`), а eviction
+  принимает любой error close outcome. Production owner/session/protocol не менялись (diff только
+  внутри `#[cfg(test)]`); Jinx/diff check PASS. Generated guard PASS, phones/Android untouched.
+  Повторить focused 7/7, затем combined 53/53; C2b ещё не закрыт.

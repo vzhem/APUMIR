@@ -55,9 +55,9 @@ focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab251
 готовы на exact `bf4f0c6`; fixes `bedf671`/`ca2edb6` прошли focused Windows 9/9 и combined exact
 `ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. F4-C2 read-only ownership review завершён:
 legacy pool/engine identity нельзя безопасно подключать к C1. Host-only C2a signer seam exact
-`0736d9b` прошёл Windows filters 2/2 + 1/1 и combined 46/46; host gate закрыт. C2b source/static
-готов на exact `fd5d1f3`: bounded single-flight owner + 7 tests, Windows compile/runtime pending.
-FFI/Android/phones/F4-D не трогать.
+`0736d9b` прошёл Windows filters 2/2 + 1/1 и combined 46/46; host gate закрыт. C2b exact `fd5d1f3`
+скомпилировался и дал 5/7; два test-only expectation defects исправлены `471d099`, production owner
+не менялся. Сначала focused/combined rerun. FFI/Android/phones/F4-D не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -219,9 +219,12 @@ bounded/idle/failed eviction, fresh reconnect, MissingRanges delegation и expli
 покрывают reuse, 16-caller race, idle fresh scope, signed resume после reconnect, wrong peer + retry,
 capacity и shutdown. Jinx `Program`/zero MissingNode, static contract и diff check PASS.
 
-Сначала Windows exact `fd5d1f3`: focused `network::file_session_owner::tests` ожидает 7/7, combined
-`network::file_` — 53/53 и 592 filtered. После gate отдельно решить минимальное engine ownership
-wiring; не подключать C1 к legacy text listener, no FFI/Android/UI/phones и no F4-D.
+Первый Windows run exact `fd5d1f3` compiled и дал 5/7. Wrong-peer fixture ошибочно менял recipient
+routing ID вместе с key, а idle test требовал только logical CLOSE вместо допустимого transport close;
+его panic блокировал второй accept. Test-only `471d0994885a5bf66139b8775bcefcb67734d8ed`
+исправил fixtures/assertions, production lines не менялись. Повторить focused, ожидается 7/7, затем
+combined `network::file_` 53/53 и 592 filtered. После gate отдельно решить минимальное engine
+ownership wiring; no legacy text listener/FFI/Android/UI/phones/F4-D.
 
 ### 9. Порядок после F4-B
 
@@ -289,7 +292,7 @@ wiring; не подключать C1 к legacy text listener, no FFI/Android/UI/
 - F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
 - F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
 - C2a exact `0736d9b` Windows 46/46 PASS; не повторять без code change.
-- C2b source/static exact `fd5d1f3`; сначала Windows 7/7 focused + 53/53 combined gate.
+- C2b source `fd5d1f3`, test-only fix `471d099`; сначала Windows 7/7 focused + 53/53 combined rerun.
 - F4-D/FFI/Android/phones не начинать.
 
 Сейчас закрой Windows host gate C2b из раздела 8. Телефоны не нужны.

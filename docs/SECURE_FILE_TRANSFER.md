@@ -334,8 +334,16 @@ C2b source/static реализован отдельным host-only модуле
   idempotent shutdown. Expected focused 7, combined F4 53.
 
 Jinx parser: owner/module files `Program`, `MissingNode=0`; static key/bounds/no-legacy-pool contract
-и diff check PASS. Это пока source/static evidence: Windows Rust compile/runtime pending. Engine/FFI/
-Android/UI/phones не подключать и F4-D не начинать до host gate.
+и diff check PASS.
+
+Первый Windows focused run exact `fd5d1f3` успешно скомпилировал crate (17.90 s) и дал 5/7. Оба
+failure оказались test-expectation defects: wrong-peer fixture подменял и routing ID, поэтому server
+корректно закрывал request до signed response вместо ожидаемого client-side `UnexpectedSigner`;
+idle eviction может наблюдаться peer как logical CLOSE или transport close, а строгий assert завершал
+server task до второго accept и давал производный `ConnectTimeout`. Test-only exact `471d099` теперь
+оставляет реальный recipient ID и подменяет только pinned key, а eviction принимает любой error close
+outcome. Production owner/session/protocol не менялись. Static diff/Jinx PASS; Windows rerun 7/7 и
+combined 53/53 pending. Engine/FFI/Android/UI/phones не подключать и F4-D не начинать до host gate.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
