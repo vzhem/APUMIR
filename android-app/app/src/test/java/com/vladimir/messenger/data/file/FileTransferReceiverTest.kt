@@ -4,6 +4,7 @@ import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.test.runTest
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -31,7 +32,7 @@ class FileTransferReceiverTest {
     private lateinit var pinner: RecordingPinner
     private lateinit var vault: FakeTransferKeyVault
     private lateinit var notifier: RecordingNotifier
-    private val acksReceived = mutableListOf<Pair<String, Int>>()
+    private val acksReceived = mutableListOf<Pair<String, Long>>()
     private val transportSends = mutableListOf<String>()
 
     private val plaintext = ByteArray(2500) { (it % 253).toByte() }
@@ -80,7 +81,7 @@ class FileTransferReceiverTest {
         FileTransferPacketCodec.fragment(
             FileTransferPacketCodec.Type.CHUNK,
             transferIdBytes,
-            index,
+            index.toLong(),
             FakeFileCryptoGateway.fakeEncrypt(bytes),
         ).map(FileTransferWire::encodeEncodedPacket)
 
@@ -90,7 +91,7 @@ class FileTransferReceiverTest {
                 FileTransferPacketCodec.Packet(
                     FileTransferPacketCodec.Type.ACK,
                     transferIdBytes,
-                    contiguous,
+                    contiguous.toLong(),
                     0,
                     1,
                     byteArrayOf(1),
@@ -98,7 +99,29 @@ class FileTransferReceiverTest {
             ),
         )
 
-    private fun sentAckContiguous(): List<Int> = transportSends.mapNotNull { text ->
+    private suspend fun insertOutgoingForAck(chunkCount: Long = 3L) {
+        dao.insertNewTransfer(
+            com.vladimir.messenger.data.local.entity.FileTransferEntity(
+                transferId = transferIdHex,
+                messageId = "outgoing-ack-test",
+                chatId = chatId,
+                peerNodeId = senderId,
+                direction = "OUTGOING",
+                displayName = "out.bin",
+                mediaType = "application/octet-stream",
+                totalBytes = 3L,
+                chunkSize = 1,
+                chunkCount = chunkCount,
+                fileSha256 = "00".repeat(32),
+                state = "SENT",
+                createdAtMs = 1L,
+                expiresAtMs = Long.MAX_VALUE,
+                updatedAtMs = 1L,
+            )
+        )
+    }
+
+    private fun sentAckContiguous(): List<Long> = transportSends.mapNotNull { text ->
         runCatching {
             FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(text))
         }.getOrNull()
@@ -135,7 +158,7 @@ class FileTransferReceiverTest {
         assertTrue(dao.getTransfer(transferIdHex)!!.state in setOf("OFFERED", "TRANSFERRING"))
         assertTrue(vault.keys.containsKey(transferIdHex))
         assertEquals(1, pinner.pinnedBindings.size)
-        assertEquals(listOf(0), sentAckContiguous())
+        assertEquals(listOf(0L), sentAckContiguous())
 
         val lengths = listOf(1024, 1024, 452)
         lengths.forEachIndexed { index, length ->
@@ -145,7 +168,7 @@ class FileTransferReceiverTest {
 
         val transfer = dao.getTransfer(transferIdHex)!!
         assertEquals("COMPLETE", transfer.state)
-        assertEquals(3, transfer.completedChunks)
+        assertEquals(3L, transfer.completedChunks)
         assertEquals(plaintext.size.toLong(), transfer.transferredBytes)
 
         val receivedFile = receivedStore.receivedFile(transferIdHex, "photo.png")
@@ -159,10 +182,21 @@ class FileTransferReceiverTest {
     }
 
     @Test
-    fun incomingAckPacketReachesTheSenderSink() = runTest {
+    fun authorizedInRangeAckPacketReachesTheSenderSink() = runTest {
+        insertOutgoingForAck()
         val receiver = receiver()
         assertTrue(receiver.onIncomingText(senderId, chatId, "ack-1", ackText(2)))
-        assertEquals(listOf(transferIdHex to 2), acksReceived)
+        assertEquals(listOf(transferIdHex to 2L), acksReceived)
+    }
+
+    @Test
+    fun foreignOrOutOfRangeAckCannotCompleteOutgoingTransfer() = runTest {
+        insertOutgoingForAck()
+        val receiver = receiver()
+        assertTrue(receiver.onIncomingText("pk_" + "ef".repeat(16), chatId, "ack-foreign", ackText(3)))
+        assertTrue(receiver.onIncomingText(senderId, chatId, "ack-too-high", ackText(4)))
+        assertTrue(acksReceived.isEmpty())
+        assertEquals("SENT", dao.getTransfer(transferIdHex)!!.state)
     }
 
     @Test
@@ -175,7 +209,7 @@ class FileTransferReceiverTest {
         deliver(receiver, chunkTexts(1, chunkOne))
 
         val transfer = dao.getTransfer(transferIdHex)!!
-        assertEquals(1, transfer.completedChunks)
+        assertEquals(1L, transfer.completedChunks)
         // Дубликат больше не молчит: он повторяет ACK с текущим прогрессом (+1),
         // чтобы отправитель, потерявший финальный ACK, всё же закрыл передачу.
         assertEquals(acksAfterFirst + 1, sentAckContiguous().size)
@@ -190,8 +224,12 @@ class FileTransferReceiverTest {
 
         deliver(receiver, offerTexts())
         val transfer = dao.getTransfer(transferIdHex)!!
-        assertEquals(1, transfer.completedChunks)
+        assertEquals(1L, transfer.completedChunks)
         assertTrue(chunkStore.storedChunkIndices(transferIdHex).contains(0))
+        assertArrayEquals(
+            FakeFileCryptoGateway.fakeEncrypt(firstChunk),
+            chunkStore.readEncryptedChunk(transferIdHex, 0L),
+        )
     }
 
     @Test
@@ -223,7 +261,7 @@ class FileTransferReceiverTest {
         deliver(receiver, offerTexts())
         deliver(receiver, chunkTexts(0, ByteArray(500) { 1 }))
         val transfer = dao.getTransfer(transferIdHex)!!
-        assertEquals(0, transfer.completedChunks)
+        assertEquals(0L, transfer.completedChunks)
         assertTrue(chunkStore.storedChunkIndices(transferIdHex).isEmpty())
     }
 

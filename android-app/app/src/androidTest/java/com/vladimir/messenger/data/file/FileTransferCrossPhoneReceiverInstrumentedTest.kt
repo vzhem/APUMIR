@@ -165,17 +165,17 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
                 val manifest = parseFileTransferManifest(decode(fields[4]))
                 assertEquals(expectedSender, manifest.senderNodeId)
                 assertEquals(receiver, manifest.recipientNodeId)
-                assertEquals(1u, manifest.chunkCount)
+                assertEquals(1uL, manifest.chunkCount)
                 manifests[kind] = manifest
                 store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)
             }
             "chunk" -> {
                 require(fields.size == 6)
                 val kind = fields[3]
-                val index = fields[4].toUInt()
+                val index = fields[4].toULong()
                 val manifest = manifests[kind] ?: return
                 val ciphertext = decode(fields[5])
-                store.storeEncryptedChunk(manifest.transferIdHex, index.toInt(), ciphertext)
+                store.storeEncryptedChunk(manifest.transferIdHex, index.toLong(), ciphertext)
                 val plaintext = decryptFileTransferChunk(manifest.manifestBytes, key, index, ciphertext)
                 assertEquals(manifest.fileSha256Hex, sha256(plaintext))
                 received.putIfAbsent(kind, plaintext)

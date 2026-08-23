@@ -85,7 +85,7 @@ interface FileCryptoGateway {
     fun decryptChunk(
         manifestBytes: ByteArray,
         fileKey: ByteArray,
-        chunkIndex: Int,
+        chunkIndex: Long,
         ciphertext: ByteArray,
     ): ByteArray
 }
@@ -108,8 +108,8 @@ class FfiFileCryptoGateway @Inject constructor() : FileCryptoGateway {
     override fun decryptChunk(
         manifestBytes: ByteArray,
         fileKey: ByteArray,
-        chunkIndex: Int,
+        chunkIndex: Long,
         ciphertext: ByteArray,
     ): ByteArray =
-        decryptFileTransferChunk(manifestBytes, fileKey, chunkIndex.toUInt(), ciphertext)
+        decryptFileTransferChunk(manifestBytes, fileKey, chunkIndex.toULong(), ciphertext)
 }

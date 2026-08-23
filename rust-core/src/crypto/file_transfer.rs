@@ -8,6 +8,8 @@ use chacha20poly1305::{
 use sha2::{Digest, Sha256};
 
 pub const FILE_TRANSFER_VERSION_V1: u8 = 1;
+pub const FILE_TRANSFER_VERSION_V2: u8 = 2;
+pub const CURRENT_FILE_TRANSFER_VERSION: u8 = FILE_TRANSFER_VERSION_V2;
 pub const FILE_TRANSFER_ID_BYTES: usize = 16;
 pub const FILE_KEY_BYTES: usize = 32;
 pub const FILE_HASH_BYTES: usize = 32;
@@ -15,7 +17,8 @@ pub const FILE_CHUNK_TAG_BYTES: usize = 16;
 pub const DEFAULT_FILE_CHUNK_BYTES: u32 = 128 * 1024;
 pub const MIN_FILE_CHUNK_BYTES: u32 = 16 * 1024;
 pub const MAX_FILE_CHUNK_BYTES: u32 = 4 * 1024 * 1024;
-pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// Legacy V1 decode limit. New V2 manifests use full `u64` geometry.
+pub const LEGACY_V1_MAX_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const MAX_FILE_NAME_BYTES: usize = 255;
 pub const MAX_MEDIA_TYPE_BYTES: usize = 127;
 pub const MAX_FILE_TRANSFER_LIFETIME_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -24,6 +27,8 @@ const CHUNK_DOMAIN_V1: &[u8] = b"apu-file-chunk-v1\0";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileTransferManifestV1 {
+    /// V1 is decoded for upgrade compatibility; all newly created manifests use V2.
+    pub wire_version: u8,
     pub transfer_id: [u8; FILE_TRANSFER_ID_BYTES],
     pub sender_node_id: String,
     pub recipient_node_id: String,
@@ -31,7 +36,7 @@ pub struct FileTransferManifestV1 {
     pub media_type: String,
     pub file_size: u64,
     pub chunk_size: u32,
-    pub chunk_count: u32,
+    pub chunk_count: u64,
     pub file_sha256: [u8; FILE_HASH_BYTES],
     pub created_at_ms: i64,
     pub expires_at_ms: i64,
@@ -80,7 +85,12 @@ impl FileTransferManifestV1 {
         if !is_media_type(&self.media_type) {
             return Err(FileTransferError::InvalidMediaType);
         }
-        if self.file_size > MAX_FILE_BYTES
+        if !matches!(
+            self.wire_version,
+            FILE_TRANSFER_VERSION_V1 | FILE_TRANSFER_VERSION_V2
+        ) || (self.wire_version == FILE_TRANSFER_VERSION_V1
+            && (self.file_size > LEGACY_V1_MAX_FILE_BYTES
+                || self.chunk_count > u64::from(u32::MAX)))
             || self.chunk_size < MIN_FILE_CHUNK_BYTES
             || self.chunk_size > MAX_FILE_CHUNK_BYTES
             || !self.chunk_size.is_power_of_two()
@@ -115,13 +125,13 @@ impl FileTransferManifestV1 {
                 + media_type.len()
                 + 8
                 + 4
-                + 4
+                + 8
                 + 32
                 + 8
                 + 8,
         );
         output.extend_from_slice(MANIFEST_DOMAIN_V1);
-        output.push(FILE_TRANSFER_VERSION_V1);
+        output.push(self.wire_version);
         output.extend_from_slice(&self.transfer_id);
         append_bounded(&mut output, sender)?;
         append_bounded(&mut output, recipient)?;
@@ -129,7 +139,15 @@ impl FileTransferManifestV1 {
         append_bounded(&mut output, media_type)?;
         output.extend_from_slice(&self.file_size.to_be_bytes());
         output.extend_from_slice(&self.chunk_size.to_be_bytes());
-        output.extend_from_slice(&self.chunk_count.to_be_bytes());
+        if self.wire_version == FILE_TRANSFER_VERSION_V1 {
+            output.extend_from_slice(
+                &u32::try_from(self.chunk_count)
+                    .map_err(|_| FileTransferError::InvalidGeometry)?
+                    .to_be_bytes(),
+            );
+        } else {
+            output.extend_from_slice(&self.chunk_count.to_be_bytes());
+        }
         output.extend_from_slice(&self.file_sha256);
         output.extend_from_slice(&self.created_at_ms.to_be_bytes());
         output.extend_from_slice(&self.expires_at_ms.to_be_bytes());
@@ -138,9 +156,14 @@ impl FileTransferManifestV1 {
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, FileTransferError> {
         let mut cursor = ManifestCursor::new(bytes);
-        if cursor.take(MANIFEST_DOMAIN_V1.len())? != MANIFEST_DOMAIN_V1
-            || cursor.u8()? != FILE_TRANSFER_VERSION_V1
-        {
+        if cursor.take(MANIFEST_DOMAIN_V1.len())? != MANIFEST_DOMAIN_V1 {
+            return Err(FileTransferError::MalformedManifest);
+        }
+        let wire_version = cursor.u8()?;
+        if !matches!(
+            wire_version,
+            FILE_TRANSFER_VERSION_V1 | FILE_TRANSFER_VERSION_V2
+        ) {
             return Err(FileTransferError::MalformedManifest);
         }
         let transfer_id = cursor
@@ -153,7 +176,11 @@ impl FileTransferManifestV1 {
         let media_type = cursor.string()?;
         let file_size = cursor.u64()?;
         let chunk_size = cursor.u32()?;
-        let chunk_count = cursor.u32()?;
+        let chunk_count = if wire_version == FILE_TRANSFER_VERSION_V1 {
+            u64::from(cursor.u32()?)
+        } else {
+            cursor.u64()?
+        };
         let file_sha256 = cursor
             .take(FILE_HASH_BYTES)?
             .try_into()
@@ -164,6 +191,7 @@ impl FileTransferManifestV1 {
             return Err(FileTransferError::MalformedManifest);
         }
         let manifest = Self {
+            wire_version,
             transfer_id,
             sender_node_id,
             recipient_node_id,
@@ -184,27 +212,29 @@ impl FileTransferManifestV1 {
         Ok(Sha256::digest(self.canonical_bytes()?).into())
     }
 
-    pub fn plaintext_len(&self, chunk_index: u32) -> Result<usize, FileTransferError> {
+    pub fn plaintext_len(&self, chunk_index: u64) -> Result<usize, FileTransferError> {
         self.validate()?;
         if chunk_index >= self.chunk_count {
             return Err(FileTransferError::InvalidChunkIndex);
         }
-        let offset = u64::from(chunk_index) * u64::from(self.chunk_size);
+        let offset = chunk_index
+            .checked_mul(u64::from(self.chunk_size))
+            .ok_or(FileTransferError::InvalidGeometry)?;
         Ok((self.file_size - offset).min(u64::from(self.chunk_size)) as usize)
     }
 }
 
-pub fn expected_chunk_count(file_size: u64, chunk_size: u32) -> u32 {
+pub fn expected_chunk_count(file_size: u64, chunk_size: u32) -> u64 {
     if file_size == 0 || chunk_size == 0 {
         return 0;
     }
-    (((file_size - 1) / u64::from(chunk_size)) + 1) as u32
+    ((file_size - 1) / u64::from(chunk_size)) + 1
 }
 
 pub fn encrypt_file_chunk_v1(
     manifest: &FileTransferManifestV1,
     file_key: &[u8],
-    chunk_index: u32,
+    chunk_index: u64,
     plaintext: &[u8],
 ) -> Result<Vec<u8>, FileTransferError> {
     let expected = manifest.plaintext_len(chunk_index)?;
@@ -226,7 +256,7 @@ pub fn encrypt_file_chunk_v1(
 pub fn decrypt_file_chunk_v1(
     manifest: &FileTransferManifestV1,
     file_key: &[u8],
-    chunk_index: u32,
+    chunk_index: u64,
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, FileTransferError> {
     let expected = manifest.plaintext_len(chunk_index)?;
@@ -253,21 +283,29 @@ fn cipher(file_key: &[u8]) -> Result<XChaCha20Poly1305, FileTransferError> {
     XChaCha20Poly1305::new_from_slice(file_key).map_err(|_| FileTransferError::InvalidKey)
 }
 
-fn chunk_nonce(manifest: &FileTransferManifestV1, chunk_index: u32) -> [u8; 24] {
+fn chunk_nonce(manifest: &FileTransferManifestV1, chunk_index: u64) -> [u8; 24] {
     let mut nonce = [0u8; 24];
     nonce[..16].copy_from_slice(&manifest.transfer_id);
-    nonce[16..].copy_from_slice(&u64::from(chunk_index).to_be_bytes());
+    nonce[16..].copy_from_slice(&chunk_index.to_be_bytes());
     nonce
 }
 
 fn chunk_aad(
     manifest: &FileTransferManifestV1,
-    chunk_index: u32,
+    chunk_index: u64,
 ) -> Result<Vec<u8>, FileTransferError> {
-    let mut aad = Vec::with_capacity(CHUNK_DOMAIN_V1.len() + 32 + 4);
+    let mut aad = Vec::with_capacity(CHUNK_DOMAIN_V1.len() + 32 + 8);
     aad.extend_from_slice(CHUNK_DOMAIN_V1);
     aad.extend_from_slice(&manifest.manifest_sha256()?);
-    aad.extend_from_slice(&chunk_index.to_be_bytes());
+    if manifest.wire_version == FILE_TRANSFER_VERSION_V1 {
+        aad.extend_from_slice(
+            &u32::try_from(chunk_index)
+                .map_err(|_| FileTransferError::InvalidChunkIndex)?
+                .to_be_bytes(),
+        );
+    } else {
+        aad.extend_from_slice(&chunk_index.to_be_bytes());
+    }
     Ok(aad)
 }
 
@@ -392,6 +430,7 @@ mod tests {
 
     fn manifest(file_size: u64) -> FileTransferManifestV1 {
         FileTransferManifestV1 {
+            wire_version: CURRENT_FILE_TRANSFER_VERSION,
             transfer_id: [0x41; 16],
             sender_node_id: "pk_0123456789abcdef0123456789abcdef".to_string(),
             recipient_node_id: "pk_fedcba9876543210fedcba9876543210".to_string(),
@@ -412,7 +451,10 @@ mod tests {
         let first = value.canonical_bytes().unwrap();
         assert_eq!(first, value.canonical_bytes().unwrap());
         assert!(first.starts_with(MANIFEST_DOMAIN_V1));
-        assert_eq!(first[MANIFEST_DOMAIN_V1.len()], FILE_TRANSFER_VERSION_V1);
+        assert_eq!(
+            first[MANIFEST_DOMAIN_V1.len()],
+            CURRENT_FILE_TRANSFER_VERSION
+        );
     }
 
     #[test]
@@ -427,6 +469,22 @@ mod tests {
             assert!(FileTransferManifestV1::from_canonical_bytes(&bytes[..length]).is_err());
         }
         assert!(FileTransferManifestV1::from_canonical_bytes(&[bytes, vec![0]].concat()).is_err());
+    }
+
+    #[test]
+    fn legacy_v1_manifest_and_chunk_crypto_remain_decodable() {
+        let mut legacy = manifest(5);
+        legacy.wire_version = FILE_TRANSFER_VERSION_V1;
+        let encoded = legacy.canonical_bytes().unwrap();
+        assert_eq!(encoded[MANIFEST_DOMAIN_V1.len()], FILE_TRANSFER_VERSION_V1);
+        let decoded = FileTransferManifestV1::from_canonical_bytes(&encoded).unwrap();
+        assert_eq!(decoded, legacy);
+        let key = [0x31; 32];
+        let ciphertext = encrypt_file_chunk_v1(&decoded, &key, 0, b"hello").unwrap();
+        assert_eq!(
+            decrypt_file_chunk_v1(&decoded, &key, 0, &ciphertext).unwrap(),
+            b"hello"
+        );
     }
 
     #[test]
@@ -477,7 +535,8 @@ mod tests {
             u64::from(DEFAULT_FILE_CHUNK_BYTES - 1),
             u64::from(DEFAULT_FILE_CHUNK_BYTES),
             u64::from(DEFAULT_FILE_CHUNK_BYTES + 1),
-            MAX_FILE_BYTES,
+            LEGACY_V1_MAX_FILE_BYTES,
+            u64::MAX,
         ] {
             assert!(manifest(size).validate().is_ok());
         }
@@ -493,8 +552,22 @@ mod tests {
             manifest(0).plaintext_len(0),
             Err(FileTransferError::InvalidChunkIndex)
         );
+        let huge = manifest(u64::MAX);
+        assert!(huge.chunk_count > u64::from(u32::MAX));
+        assert!(huge
+            .plaintext_len(u64::from(u32::MAX) + 1)
+            .is_ok());
+        let decoded = FileTransferManifestV1::from_canonical_bytes(
+            &huge.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded.file_size, u64::MAX);
+        assert_eq!(decoded.chunk_count, huge.chunk_count);
+
+        let mut legacy_too_large = huge;
+        legacy_too_large.wire_version = FILE_TRANSFER_VERSION_V1;
         assert_eq!(
-            manifest(MAX_FILE_BYTES + 1).validate(),
+            legacy_too_large.validate(),
             Err(FileTransferError::InvalidGeometry)
         );
     }

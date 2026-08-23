@@ -5,7 +5,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FileTransferRankPolicyTest {
-    private val technicalLimit = 10L * 1024 * 1024
 
     @Test
     fun exactReferralThresholdsSelectExpectedRanks() {
@@ -32,27 +31,21 @@ class FileTransferRankPolicyTest {
     }
 
     @Test
-    fun photoFileAndVideoUnlockAtOneThreeAndTen() {
-        expectFailure { canSend(0, "image/jpeg", 1) }
-        canSend(1, "image/jpeg", 1)
-        expectFailure { canSend(1, "application/pdf", 1) }
-        canSend(3, "application/pdf", 1)
-        expectFailure { canSend(3, "video/mp4", 1) }
-        canSend(10, "video/mp4", 1)
+    fun photoFileAndVideoSendingIsAvailableAtEveryRank() {
+        canSend(0, "image/jpeg", 1)
+        canSend(0, "application/pdf", 1)
+        canSend(0, "video/mp4", 1)
+        canSend(1, "application/pdf", 1)
+        canSend(3, "video/mp4", 1)
     }
 
     @Test
-    fun rankAndTechnicalLimitsAreBothEnforced() {
+    fun rankDoesNotCapFileBytes() {
         val mib = 1024L * 1024
-        canSend(1, "image/png", 5 * mib)
-        expectFailure { canSend(1, "image/png", 5 * mib + 1) }
-        canSend(3, "application/zip", 10 * mib)
-        expectFailure { canSend(3, "application/zip", 10 * mib + 1) }
-        // Rank 10 grants 25 MiB, but current F1 implementation remains technically capped at 10 MiB.
-        canSend(10, "video/mp4", 10 * mib)
-        expectFailure { canSend(10, "video/mp4", 10 * mib + 1) }
-        assertEquals(25 * mib, FileTransferRankPolicy.entitlement(10).rankMaxBytes)
-        assertEquals(10 * mib, FileTransferRankPolicy.entitlement(10).effectiveMaxBytes(10 * mib))
+        canSend(0, "image/png", Long.MAX_VALUE)
+        canSend(1, "application/zip", 10 * mib + 1)
+        canSend(10, "video/mp4", Long.MAX_VALUE)
+        assertEquals("Проводник", FileTransferRankPolicy.entitlement(10).rankName)
     }
 
     @Test
@@ -61,8 +54,8 @@ class FileTransferRankPolicyTest {
             FileTransferRankPolicy.Category.FILE,
             FileTransferRankPolicy.categoryFor("application/octet-stream"),
         )
-        expectFailure { canSend(1, "application/octet-stream", 1) }
-        canSend(3, "application/octet-stream", 1)
+        canSend(0, "application/octet-stream", 1)
+        canSend(1, "application/octet-stream", 1)
     }
 
     @Test
@@ -103,6 +96,9 @@ class FileTransferRankPolicyTest {
         assertTrue("Текстовые сообщения" in base)
         assertTrue("Вступление в группы и каналы" in base)
         assertTrue("Получение файлов, фото и видео" in base)
+        assertTrue("Отправка фото" in base)
+        assertTrue("Отправка файлов" in base)
+        assertTrue("Отправка видео" in base)
         assertTrue("Создание групп" !in base)
         assertTrue("Создание каналов" !in base)
     }
@@ -118,15 +114,7 @@ class FileTransferRankPolicyTest {
     }
 
     private fun canSend(referrals: Int, mediaType: String, bytes: Long) {
-        FileTransferRankPolicy.requireCanSend(referrals, mediaType, bytes, technicalLimit)
+        FileTransferRankPolicy.requireCanSend(referrals, mediaType, bytes)
     }
 
-    private fun expectFailure(block: () -> Unit) {
-        try {
-            block()
-            throw AssertionError("Expected policy rejection")
-        } catch (_: IllegalStateException) {
-            // expected
-        }
-    }
 }

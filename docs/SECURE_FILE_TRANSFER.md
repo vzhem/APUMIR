@@ -27,7 +27,8 @@
 7. **Нет произвольного продуктового лимита размера.** «Любой объём» означает streaming/paging без
    загрузки целого файла в RAM и без старого барьера 4 GiB. Реальный предел задают `u64`, файловая
    система, свободное место и выбранные владельцами квоты; бесконечный файл физически не обещается.
-   До production wiring B3 обязан убрать текущую 4-GiB validation coupling из manifest/B1 geometry.
+   Pure F4-B3 geometry уже использует `u64`; текущая production manifest/Android migration на V2
+   находится в source-review/compile-gate стадии и не считается доказанной до Windows gate.
 
 ### Что действительно доказано, а что нет
 
@@ -43,8 +44,9 @@ JVM compile и phone runtime pending.
 
 **Важно: текущий код ещё НЕ является параллельным файловым транспортом.** Source-аудит показал:
 
-- sender последовательно кодирует каждый fragment как `apu-file1|<Base64>`, вызывает синхронный
-  `sendDirectPayload` и ждёт фиксированные 120 ms;
+- sender всё ещё последовательно кодирует каждый fragment как `apu-file1|<Base64>` и вызывает
+  синхронный `sendDirectPayload`; фиксированная пауза 120 ms в текущем source удалена, но это ещё
+  не заменяет persistent binary streams и не считается speed acceptance;
 - каждый вызов Rust создаёт новый QUIC endpoint и новое соединение, отправляет один generic text
   frame и закрывается; persistent connection и одновременных streams нет;
 - packet проходит через общий `MessageReceived`/Kotlin polling path, а не через отдельный binary
@@ -53,10 +55,10 @@ JVM compile и phone runtime pending.
   комментариях fallback к phone relay для file bytes фактически нет;
 - обычная message RelayQueue ограничена 500 envelopes/recipient и 64 KiB/envelope; использовать её
   для тысяч file fragments архитектурно нельзя;
-- source создаёт manifest всегда с chunk 128 KiB, хотя объявляет до 4 MiB; app-private store
-  принимает только 640 chunks. Поэтому заявленный 4 GiB technical limit сейчас недостижим:
-  practical preparation boundary при 128 KiB около 80 MiB;
-- 4 MiB plaintext + 16-byte AEAD tag требует 1025 fragments по 4 KiB, но packet cap = 1024;
+- текущая непроверенная production migration переводит manifest/Room/store/packet indices на
+  V2 `u64`/`Long`, убирает 640-chunk и 8-GiB staging ceilings и сохраняет V1 decode; до
+  Rust/UniFFI/Android compile+tests это source claim, не доказанная capability;
+- 4 MiB plaintext + 16-byte AEAD tag требует 1025 fragments по 4 KiB, но legacy packet cap = 1024;
 - internet presence публикуется, mDNS refresh идёт раз в 60 s, но согласованной signed
   contact-scoped модели `beacon 60 s / offline after 90 s` и endpoint expiry ещё нет;
 - OFFER manifest metadata (имя/размер/MIME) пока не имеет доказанной confidentiality от relay;

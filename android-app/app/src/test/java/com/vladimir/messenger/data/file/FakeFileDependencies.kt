@@ -13,8 +13,8 @@ class FakeFileCryptoGateway(
     private val chunkSizeBytes: Int,
     private val expiresAt: Long = Long.MAX_VALUE,
 ) : FileCryptoGateway {
-    val chunkCount: Int =
-        ((fileSizeBytes + chunkSizeBytes - 1) / chunkSizeBytes).toInt()
+    val chunkCount: Long =
+        (fileSizeBytes + chunkSizeBytes - 1) / chunkSizeBytes
 
     override fun parseManifest(manifestBytes: ByteArray): FileTransferManifestFfi =
         FileTransferManifestFfi(
@@ -26,7 +26,7 @@ class FakeFileCryptoGateway(
             mediaType = "image/png",
             fileSize = fileSizeBytes.toULong(),
             chunkSize = chunkSizeBytes.toUInt(),
-            chunkCount = chunkCount.toUInt(),
+            chunkCount = chunkCount.toULong(),
             fileSha256Hex = fileSha256Hex,
             createdAtMs = 1L,
             expiresAtMs = expiresAt,
@@ -47,7 +47,7 @@ class FakeFileCryptoGateway(
     override fun decryptChunk(
         manifestBytes: ByteArray,
         fileKey: ByteArray,
-        chunkIndex: Int,
+        chunkIndex: Long,
         ciphertext: ByteArray,
     ): ByteArray = ciphertext.copyOfRange(16, ciphertext.size)
 

@@ -62,7 +62,6 @@ class FileTransferRouter @Inject constructor(
             chunkStore = chunkStore,
             transport = transportLocal,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
-            sleeper = { millis -> kotlinx.coroutines.delay(millis) },
             directTransport = { recipientId, payload ->
                 try {
                     com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
@@ -85,6 +84,9 @@ class FileTransferRouter @Inject constructor(
             transport = transportLocal,
             ackSink = { transferIdHex, contiguousChunks ->
                 senderLocal.onReceiverAck(transferIdHex, contiguousChunks)
+                // ACK progress immediately opens the next bounded window. The periodic job is
+                // only a restart/offline retry safety net, never a throughput throttle.
+                senderLocal.pumpOnce()
             },
             notifier = notifier,
         )

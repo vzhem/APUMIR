@@ -29,7 +29,6 @@ class FileTransferSenderTest {
         chunkStore = chunkStore,
         transport = transport,
         ownBindingProvider = { binding.copyOf() },
-        sleeper = { },
         nowMs = { now },
     )
 
@@ -55,10 +54,10 @@ class FileTransferSenderTest {
         mediaType = "image/png",
         totalBytes = totalBytes,
         chunkSize = chunkSize,
-        chunkCount = chunkCount,
+        chunkCount = chunkCount.toLong(),
         fileSha256 = "ab".repeat(32),
         state = "PREPARED",
-        completedChunks = chunkCount,
+        completedChunks = chunkCount.toLong(),
         transferredBytes = totalBytes,
         createdAtMs = now - 1000,
         // Long enough that virtual-time jumps in the throttle test never expire the transfer.
@@ -71,7 +70,11 @@ class FileTransferSenderTest {
         chunkStore.storeKeyEnvelope(transferIdHex, ByteArray(220))
         for (index in 0 until chunkCount) {
             val length = if (index == chunkCount - 1) lastChunkBytes else chunkSize
-            chunkStore.storeEncryptedChunk(transferIdHex, index, ByteArray(length + 16) { index.toByte() })
+            chunkStore.storeEncryptedChunk(
+                transferIdHex,
+                index.toLong(),
+                ByteArray(length + 16) { index.toByte() },
+            )
         }
     }
 
@@ -134,6 +137,17 @@ class FileTransferSenderTest {
         sender.pumpOnce()
         sender.onReceiverAck(transferIdHex, 1)
         assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    @Test
+    fun outOfRangeAckCannotCompleteOrSkipChunks() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 64, totalBytes = 128))
+        stage(chunkCount = 2, chunkSize = 64, lastChunkBytes = 64)
+        val sender = sender()
+        sender.onReceiverAck(transferIdHex, 3)
+        assertEquals("PREPARED", dao.getTransfer(transferIdHex)!!.state)
+        val summary = sender.pumpOnce()
+        assertTrue(summary.packetsSent > 1)
     }
 
     @Test

@@ -79,9 +79,9 @@ namespace p2p_core {
     [Throws=CoreError]
     FileTransferManifestFfi parse_file_transfer_manifest(bytes manifest_bytes);
     [Throws=CoreError]
-    bytes encrypt_file_transfer_chunk(bytes manifest_bytes, bytes file_key, u32 chunk_index, bytes plaintext);
+    bytes encrypt_file_transfer_chunk(bytes manifest_bytes, bytes file_key, u64 chunk_index, bytes plaintext);
     [Throws=CoreError]
-    bytes decrypt_file_transfer_chunk(bytes manifest_bytes, bytes file_key, u32 chunk_index, bytes ciphertext);
+    bytes decrypt_file_transfer_chunk(bytes manifest_bytes, bytes file_key, u64 chunk_index, bytes ciphertext);
 };
 
 [Error]
@@ -110,7 +110,7 @@ dictionary FileTransferManifestFfi {
     string media_type;
     u64 file_size;
     u32 chunk_size;
-    u32 chunk_count;
+    u64 chunk_count;
     string file_sha256_hex;
     i64 created_at_ms;
     i64 expires_at_ms;

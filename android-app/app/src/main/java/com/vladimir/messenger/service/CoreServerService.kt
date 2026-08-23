@@ -399,9 +399,9 @@ class CoreServerService : Service() {
             }
         }
 
-        // F3: periodic sender pump — resumes PREPARED/TRANSFERRING transfers after restart,
-        // advances windows on receiver ACKs and keeps multi-day offline retries alive. The
-        // sender itself throttles re-pumps; file traffic yields via per-packet pacing.
+        // F3: periodic safety-net pump — resumes PREPARED/TRANSFERRING transfers after restart
+        // and keeps multi-day offline retries alive. Live ACKs open the next bounded window
+        // immediately; this cadence must not throttle an active transfer.
         filePumpJob = serviceScope.launch {
             kotlinx.coroutines.delay(INITIAL_FILE_PUMP_DELAY_MS)
             while (isActive) {
