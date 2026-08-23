@@ -24,9 +24,9 @@ audit нашёл prerequisite: fake `CryptoManager` нельзя использ�
 sidecar не реализовывал требуемый signer API. C2a exact `0736d9b` добавил internal public-key/sign
 adapter для real `Arc<InstalledSigningIdentity>` без экспорта seed; Windows filters 2/2 и 1/1,
 combined 46/46 PASS. C2a host gate закрыт. C2b source exact `fd5d1f3` добавил отдельный host-only
-bounded single-flight owner. Первый Windows run compiled и дал 5/7; два strict test expectations
-исправлены test-only `471d099` без production changes. Focused rerun/combined pending;
-engine/FFI/Android/phones всё ещё unwired.
+bounded single-flight owner. После test-only `471d099` Windows focused 7/7 и combined 53/53 PASS;
+C2b host gate закрыт. Это не готовая пользовательская передача: engine/FFI/Android/path/custody ещё
+unwired. Следующий substantive этап F4-D throughput, затем F4-E…H до end-to-end acceptance.
 
 ---
 
@@ -1740,9 +1740,8 @@ Authoritative design и доказательные статусы:
   - [x] C2a real signer seam exact `0736d9b`: internal public-key/sign trait для test key и real
     `Arc<InstalledSigningIdentity>`, no seed/fake fallback; Windows 2/2 + 1/1 focused и 46/46 combined
     PASS, три warnings только прежние, generated guard PASS.
-  - [ ] C2b bounded single-flight persistent owner/reconnect: source exact `fd5d1f3`; first Windows
-    compile 5/7 exposed only strict fixture/close assertions; test-only `471d099` fixes both, focused
-    7/7 + combined 53/53 rerun pending; no FFI/Android/UI/phones и no F4-D.
+  - [x] C2b bounded single-flight persistent owner/reconnect: source `fd5d1f3`, test-only `471d099`;
+    Windows focused 7/7 + combined 53/53 PASS, 3 прежних warnings, generated guard PASS.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,

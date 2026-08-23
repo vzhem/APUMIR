@@ -4167,3 +4167,13 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   принимает любой error close outcome. Production owner/session/protocol не менялись (diff только
   внутри `#[cfg(test)]`); Jinx/diff check PASS. Generated guard PASS, phones/Android untouched.
   Повторить focused 7/7, затем combined 53/53; C2b ещё не закрыт.
+- **2026-08-23 (доп.367) — F4-C2b Windows gate 7/7 + 53/53 PASS; F4-C host scope closed:**
+  canonical `C:\APU-M8` fast-forward `fd5d1f3→471d0994885a5bf66139b8775bcefcb67734d8ed`
+  сохранил generated Kotlin/arm64 hashes. MSVC 14.44.35207 focused owner: `7 passed; 0 failed;
+  638 filtered out` (compile 9.76 s, tests 0.69 s). Combined `network::file_`: `53 passed; 0 failed;
+  592 filtered out` (compile 0.36 s, tests 1.39 s). Три warnings только прежние; phones/Android не
+  запускались. C2b owner/reuse/single-flight/reconnect/wrong-peer/cap/shutdown доказан в host scope.
+  Важно: это не пользовательская передача файлов — engine/FFI/Android/path/custody unwired. По
+  прямому замечанию владельца больше не размазывать прогресс по декоративным seams: следующий
+  substantive этап F4-D bounded/adaptive throughput с измерениями, затем E path manager, F custody,
+  G switching и H end-to-end acceptance. Нельзя объявлять главную задачу закрытой до F4-H.

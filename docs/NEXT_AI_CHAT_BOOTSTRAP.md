@@ -55,9 +55,9 @@ focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab251
 готовы на exact `bf4f0c6`; fixes `bedf671`/`ca2edb6` прошли focused Windows 9/9 и combined exact
 `ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. F4-C2 read-only ownership review завершён:
 legacy pool/engine identity нельзя безопасно подключать к C1. Host-only C2a signer seam exact
-`0736d9b` прошёл Windows filters 2/2 + 1/1 и combined 46/46; host gate закрыт. C2b exact `fd5d1f3`
-скомпилировался и дал 5/7; два test-only expectation defects исправлены `471d099`, production owner
-не менялся. Сначала focused/combined rerun. FFI/Android/phones/F4-D не трогать.
+`0736d9b` прошёл Windows 46/46. C2b source `fd5d1f3` + test-only `471d099` прошёл focused 7/7 и
+combined 53/53; F4-C host gate закрыт. Это не production delivery: engine/FFI/Android/path/custody
+unwired. Следующий substantive этап — F4-D throughput, затем F4-E…H. Телефоны пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -190,7 +190,7 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Непосредственный следующий шаг — F4-C2b persistent owner/reconnect
+### 8. Непосредственный следующий шаг — F4-D throughput data plane
 
 F4-C1 exact `ca2edb6` закрыл focused 9/9 и combined 43/43 host gates. C2 read-only audit подтвердил:
 production send создаёт endpoint/connection на каждый old send, listener endpoint локален его task,
@@ -219,12 +219,16 @@ bounded/idle/failed eviction, fresh reconnect, MissingRanges delegation и expli
 покрывают reuse, 16-caller race, idle fresh scope, signed resume после reconnect, wrong peer + retry,
 capacity и shutdown. Jinx `Program`/zero MissingNode, static contract и diff check PASS.
 
-Первый Windows run exact `fd5d1f3` compiled и дал 5/7. Wrong-peer fixture ошибочно менял recipient
-routing ID вместе с key, а idle test требовал только logical CLOSE вместо допустимого transport close;
-его panic блокировал второй accept. Test-only `471d0994885a5bf66139b8775bcefcb67734d8ed`
-исправил fixtures/assertions, production lines не менялись. Повторить focused, ожидается 7/7, затем
-combined `network::file_` 53/53 и 592 filtered. После gate отдельно решить минимальное engine
-ownership wiring; no legacy text listener/FFI/Android/UI/phones/F4-D.
+После test-only `471d0994885a5bf66139b8775bcefcb67734d8ed` Windows focused owner дал
+7/7, combined `network::file_` 53/53 и 592 filtered; C2b/F4-C host gate закрыт.
+
+Теперь не делать ещё одну декоративную wrapper-прослойку. F4-D должен дать реальный bounded
+throughput seam: несколько chunk operations in flight без whole-file RAM, hard byte/window limits,
+ACK-driven backpressure, adaptive concurrency по измеряемым RTT/loss/throughput и fair text-latency
+budget. Сначала read-only сверить C1 stream ownership и выбрать минимальный connection-level design,
+затем host loopback fast/slow/loss tests и benchmarks. После D последовательно закрывать E path
+manager, F phone custody, G path switch и H end-to-end acceptance. Engine/FFI/Android/phones не
+подключать раньше доказанного host data plane; legacy text listener не использовать для file bytes.
 
 ### 9. Порядок после F4-B
 
@@ -292,7 +296,7 @@ ownership wiring; no legacy text listener/FFI/Android/UI/phones/F4-D.
 - F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
 - F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
 - C2a exact `0736d9b` Windows 46/46 PASS; не повторять без code change.
-- C2b source `fd5d1f3`, test-only fix `471d099`; сначала Windows 7/7 focused + 53/53 combined rerun.
-- F4-D/FFI/Android/phones не начинать.
+- C2b source `fd5d1f3` + test-only `471d099`: Windows 7/7 focused, 53/53 combined PASS.
+- Следующий F4-D throughput; FFI/Android/phones не начинать до host proof.
 
-Сейчас закрой Windows host gate C2b из раздела 8. Телефоны не нужны.
+Сейчас делай F4-D из раздела 8. Телефоны не нужны.

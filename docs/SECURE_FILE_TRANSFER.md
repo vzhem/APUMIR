@@ -342,8 +342,13 @@ failure оказались test-expectation defects: wrong-peer fixture подм
 idle eviction может наблюдаться peer как logical CLOSE или transport close, а строгий assert завершал
 server task до второго accept и давал производный `ConnectTimeout`. Test-only exact `471d099` теперь
 оставляет реальный recipient ID и подменяет только pinned key, а eviction принимает любой error close
-outcome. Production owner/session/protocol не менялись. Static diff/Jinx PASS; Windows rerun 7/7 и
-combined 53/53 pending. Engine/FFI/Android/UI/phones не подключать и F4-D не начинать до host gate.
+outcome. Production owner/session/protocol не менялись. Static diff/Jinx PASS. Windows rerun exact
+`471d099` закрыл gate: focused owner `7 passed; 0 failed; 638 filtered out` (compile 9.76 s, tests
+0.69 s), combined `network::file_` — `53 passed; 0 failed; 592 filtered out` (compile 0.36 s, tests
+1.39 s). Три warnings только прежние; generated Kotlin/arm64 hashes сохранены, телефоны untouched.
+C2b host gate закрыт. Это ещё не production file delivery: engine/FFI/Android/UI/path manager/custody
+unwired. Следующий substantive этап — F4-D data-plane throughput (bounded window/parallel streams,
+backpressure и benchmarks), затем F4-E…H; нельзя выдавать C2b за готовую пользовательскую функцию.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
