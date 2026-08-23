@@ -159,7 +159,7 @@ size + chunk AEAD + whole hash даёт `DELIVERED`. Transport enqueue/FIN и re
    UDP blocked/TCP-only; sender/recipient non-overlap through relay phones; all phones offline then
    resume; process death/reboot; disk quota; mixed N↔N-1; integrity/privacy and normal-text control.
 
-### Status 2026-08-22 — F4-B1 source/static PASS, compile/runtime pending
+### Status 2026-08-23 — F4-B1 focused Windows host gate PASS
 
 Добавлен изолированный `rust-core/src/network/file_wire.rs`, подключённый только как Rust module:
 
@@ -171,10 +171,14 @@ size + chunk AEAD + whole hash даёт `DELIVERED`. Transport enqueue/FIN и re
 - 11 unit-test функций покрывают canonical round-trip, min/max, truncation, oversize/overflow,
   invalid ranges, downgrade/features и reject legacy `apu-file1` text packet.
 
-Source contract, `git diff --check` и отдельный Rust syntax parser (AST root `Program`) PASS. В
-Arena нет `cargo`/`rustc`, поэтому эти 11 тестов ещё **не выполнялись**, Rust compile/runtime pending.
-Module не вызывается sender/QUIC/FFI, Android и телефоны не изменены. Следующий шаг — только focused
-host test/compile F4-B1; к B2 не переходить до PASS.
+Source contract, `git diff --check` и отдельный Rust syntax parser (AST root `Program`) PASS. На
+Windows в каноническом `C:\APU-M8\rust-core` для exact commit `4815582091bba50c72c7a4a49b9d26de6aa643db`
+команда `cargo test network::file_wire::tests --lib -- --nocapture` скомпилировала lib-test target и
+дала `11 passed; 0 failed; 0 ignored; 592 filtered out`. Три warning относятся к прежнему коду
+`multi_broker.rs`, `engine/core.rs` и `mqtt_transport.rs`, не к F4-B1. Это focused B1 host
+compile/runtime PASS, но не полный Rust suite, Android build или phone runtime. Module не вызывается
+sender/QUIC/FFI; Android production source и телефоны в B1 не менялись. B2 остаётся отдельным slice и
+не начинается автоматически.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

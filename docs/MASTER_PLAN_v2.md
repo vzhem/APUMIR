@@ -12,8 +12,10 @@ ciphertext; внешнее хранение запрещено. Authoritative д
 в исторических разделах не переопределяют этот блок.
 
 Владелец подтвердил F4 architecture. F4-B1 canonical binary frame + capability codec имеет
-source/static PASS; ближайшее действие — focused Rust host compile/test этого изолированного module.
-До PASS не начинать B2, network wiring или телефоны.
+source/static и focused Windows host compile/runtime PASS: 11/11 тестов на exact commit `4815582`.
+Полный Rust suite, Android build и phone runtime этим не доказаны и для pure B1 не требовались.
+Следующий slice не начинать автоматически: B2 signed control records остаётся отдельным шагом;
+network wiring и телефоны по-прежнему вне scope.
 
 ---
 
@@ -1705,9 +1707,9 @@ Authoritative design и доказательные статусы:
 - [x] **F4-A — architecture/docs:** file design, bootstrap, master и collaboration notes
   синхронизированы и подтверждены владельцем; production code/телефоны не менялись.
 - [ ] **F4-B — pure binary protocol boundary, no network wiring:**
-  - [ ] B1 canonical frame + capability codec: source/static PASS, 11 Rust tests добавлены, но не
-    выполнены — в Arena нет cargo/rustc; focused host compile/test pending.
-  - [ ] B2 signed bounded control records — не начинать до B1 PASS.
+  - [x] B1 canonical frame + capability codec: source/static PASS; focused Windows host command на
+    exact `4815582` дал 11 passed, 0 failed, 592 filtered. Full suite/Android/phones не запускались.
+  - [ ] B2 signed bounded control records — отдельный следующий slice, не начинать автоматически.
   - [ ] B3 ciphertext chunk/Merkle identities — отдельный последующий slice.
 - [ ] **F4-C — persistent single-peer QUIC:** один authenticated connection, один binary stream,
   durable chunk-before-ACK, missing-range resume; no Base64/message queue.

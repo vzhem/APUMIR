@@ -338,12 +338,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-A подтверждён; F4-B1 source/static PASS, host tests pending:** новый изолированный
-> `rust-core/src/network/file_wire.rs` задаёт canonical bounded binary frame + capability negotiation,
-> 11 unit-test функций и не wired к sender/QUIC/FFI/Android. Source contract/`git diff --check` PASS;
-> в Arena нет cargo/rustc, поэтому compile/runtime этих тестов ещё не доказаны. Следующий шаг только
-> focused host `cargo test network::file_wire::tests --lib`; B2/network/phones до PASS не начинать.
-> Полный порядок F4-A…F4-H находится в `SECURE_FILE_TRANSFER.md`.
+> **F4-B1 focused Windows host gate PASS:** новый изолированный
+> `rust-core/src/network/file_wire.rs` задаёт canonical bounded binary frame + capability negotiation
+> и не wired к sender/QUIC/FFI/Android. Source/static PASS; на exact `4815582` focused lib-test target
+> скомпилирован: 11 passed, 0 failed, 592 filtered. Это не full suite/Android/phone proof. Windows
+> clone теперь на текущей Arena branch, две прежние generated-модификации Kotlin/`.so` сохранены.
+> B2 — отдельный slice; не начинать автоматически. Полный порядок F4-A…F4-H находится в
+> `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
@@ -3975,3 +3976,26 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   compile. В Arena `cargo`/`rustc` отсутствуют, поэтому compile и фактический test runtime pending;
   не писать 11/11 PASS. Следующий маленький шаг — Windows focused
   `cargo test network::file_wire::tests --lib` в `C:\APU-M8\rust-core`; phones/release/PR не нужны.
+- **2026-08-23 (доп.353) — F4-B1 focused Windows host gate 11/11 PASS:** первый clean-worktree
+  guard корректно остановился: в `C:\APU-M8` были только две прежние generated-модификации,
+  `android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt` (120303 bytes,
+  SHA-256 `144B3B31511B7977CE0929F53ED4D60D76A8F69C49660BC751845EAB6508A566`) и
+  `android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so` (7575584 bytes,
+  SHA-256 `2C4B12ED352DFAA3ACE9AE8FF2CC7EC72B231918E06CFE9BE5C32904EB363D58`). Read-only audit
+  подтвердил zero overlap с девятью incoming paths. Обе копии сохранены в отдельный TEMP backup,
+  Windows clone безопасно переключён со старой `arena/01a02092-apumir`/`bdc69ae` на
+  `arena/01a0290d-apumir` exact `4815582091bba50c72c7a4a49b9d26de6aa643db`; hashes после switch
+  совпали. В MSVC environment команда
+  `cargo test network::file_wire::tests --lib -- --nocapture` скомпилировала `p2p-core` lib-test
+  target и дала `11 passed; 0 failed; 0 ignored; 592 filtered out` (tests 0.01 s; initial compile
+  35.11 s). Три warning — прежние unused/dead-code в `multi_broker.rs`, `engine/core.rs` и
+  `mqtt_transport.rs`; F4-B1 warnings/errors нет. Proof level: focused B1 host compile/runtime PASS,
+  не full Rust suite/Android build/phone runtime. Телефоны не подключались. Arena tool-гэтч на
+  следующем ходе: sandbox re-clone поставил local HEAD на `bdc69ae`, сохранив уже pushed files как
+  dirty/untracked; remote остался на `4815582`. Обычный named fetch создал только `FETCH_HEAD`,
+  поэтому `origin/arena/01a0290d-apumir` сначала не разрешался. Безопасный workaround: explicit
+  refspec в remote-tracking ref, SHA-256/content compare пяти production paths с remote tree (все
+  MATCH), backup реального four-doc diff (`3e3d68f…`), затем `git reset --mixed` на remote tip.
+  Рабочие файлы не перезаписывались; после realign остались только четыре docs. Hard reset/force
+  push/merge не применялись. B2 signed control — отдельный следующий slice и автоматически не
+  начинался; release/tag/PR не делались.

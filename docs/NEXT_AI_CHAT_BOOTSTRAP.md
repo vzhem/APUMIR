@@ -15,7 +15,7 @@
 1. этот CURRENT OVERRIDE целиком;
 2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
 3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–351;
+4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–353;
 5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
    если обязательный контекст и фактические limits не проверены.
 
@@ -49,9 +49,10 @@
 ### Текущий порядок работы
 
 `SECURE_FILE_TRANSFER.md` определяет slices F4-A…F4-H. F4-A подтверждён. F4-B1 canonical binary
-frame + capability codec уже имеет source/static PASS: изолированный Rust module, 11 тестов, no
-network/FFI/Android wiring. В Arena нет cargo/rustc, поэтому текущее действие — focused host
-compile/test B1. До PASS нельзя начинать B2 signed control, QUIC concurrency, proxy или phone custody.
+frame + capability codec имеет source/static и focused Windows host compile/runtime PASS: exact
+commit `4815582`, 11 passed, 0 failed, 592 filtered. Module всё ещё не wired к network/FFI/Android.
+Полный suite/Android/phones не запускались и для B1 не требовались. B2 signed control — отдельный
+slice; не начинать его автоматически без следующего шага владельца.
 
 > ## Исторический M8 handoff
 >
@@ -71,17 +72,16 @@ install, publication/release/tag/PR всегда нужно отдельное �
 
 ### 1. Как начать сейчас
 
-В первом ответе коротко скажи: «Продолжаю с focused F4-B1 host gate; Android и телефоны не трогаю».
-Затем:
+В первом ответе коротко скажи: «F4-B1 прошёл focused Windows gate 11/11; Android и телефоны не
+трогаю». Затем:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
 2. полностью прочитай актуальные override-блоки и обязательные документы из раздела 2;
-3. проверь изоляцию `network/file_wire.rs` от sender/QUIC/FFI/Android;
-4. выполни только focused B1 host compile/tests из раздела 8;
-5. точно раздели `source/static PASS / compile PASS / runtime PASS / pending`;
-6. при ошибке исправляй только B1, не начинай B2/network wiring;
-7. обычный commit/push текущей Arena branch разрешён; другую branch не создавать и не переключать;
-8. отчитайся: изменённые файлы, что доказано, что ещё не доказано, следующий маленький шаг.
+3. сверь exact B1 evidence из раздела 8 и его изоляцию от sender/QUIC/FFI/Android;
+4. точно раздели `source/static PASS / focused compile+runtime PASS / full-suite pending`;
+5. не повторяй B1 и не начинай B2/network wiring без следующего маленького шага владельца;
+6. обычный commit/push текущей Arena branch разрешён; другую branch не создавать и не переключать;
+7. отчитайся: что доказано, что ещё не доказано и какой один slice предлагается следующим.
 
 При расхождении workspace с handoff источником истины являются фактический checkout, текущая fixed
 Arena branch, newest committed override и production source. Не подтягивай старую Arena-ветку по
@@ -126,9 +126,12 @@ Arena branch, newest committed override и production source. Не подтяг�
 - `send_direct_payload` и binding compile/install PASS, но завершённой file transfer именно через
   новый direct route не доказано. `fc157cd` имеет source/static PASS; JVM/phone gate pending.
 - F4-A docs/architecture синхронизирован и подтверждён владельцем.
-- F4-B1 source/static PASS: `network/file_wire.rs` содержит canonical bounded binary frame,
-  capability negotiation и 11 unit-test функций; module ещё никуда не wired. Host compile/tests
-  pending, потому что Arena environment не содержит cargo/rustc.
+- F4-B1 source/static и focused Windows host PASS: `network/file_wire.rs` содержит canonical
+  bounded binary frame/capability negotiation; exact `4815582`, 11 passed, 0 failed, 592 filtered.
+  Module ещё никуда не wired; full Rust suite, Android build и phones не запускались.
+- Канонический Windows clone теперь на `arena/01a0290d-apumir`/`4815582`, но сохраняет две прежние
+  модификации generated artifacts: UniFFI `p2p_core.kt` и `arm64-v8a/libp2p_core.so`. Их нельзя
+  reset/перезаписывать без отдельной проверки; при B1 gate SHA-256 сохранились без изменений.
 
 #### Backup и публикация
 
@@ -173,19 +176,22 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Непосредственный следующий шаг — focused F4-B1 host gate
+### 8. F4-B1 gate закрыт; следующий шаг только отдельно
 
-1. Сверить, что B1 меняет только `rust-core/src/network/file_wire.rs`, module declaration и docs;
-   sender/QUIC/FFI/Android остаются unwired.
-2. В подготовленном Windows MSVC environment выполнить только:
-   `cargo test network::file_wire::tests --lib` из `C:\APU-M8\rust-core`.
-3. Если compile/test падает, исправлять только B1 codec/tests; не расширять scope.
-4. После PASS повторить source contract/`git diff --check`, записать exact test count и proof level.
-5. Не запускать Android build и не подключать телефоны для pure B1.
+Windows MSVC gate выполнен в `C:\APU-M8\rust-core` на exact
+`4815582091bba50c72c7a4a49b9d26de6aa643db` командой
+`cargo test network::file_wire::tests --lib -- --nocapture`:
 
-Только после отдельного B1 PASS/review идут следующие slices F4-B:
+- lib-test target скомпилирован;
+- `11 passed; 0 failed; 0 ignored; 592 filtered out`;
+- три warning находятся в прежних `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`;
+- generated UniFFI Kotlin/`.so` сохранили исходные SHA-256; телефоны не подключались.
 
-- **F4-B2:** signed control records (capability/offer/missing/custody/final receipt) и replay/expiry.
+Это focused B1 compile/runtime PASS, не полный Rust suite, Android compile или phone test. Повторять
+B1 без причины не нужно. Следующие slices остаются отдельными и не начинаются автоматически:
+
+- **F4-B2:** signed bounded control records (capability/offer/missing/custody/final receipt) с
+  canonical signing bytes, replay/expiry/bounds/downgrade tests; без network/Android/phones.
 - **F4-B3:** ciphertext chunk identities или Merkle root с index binding, inventory proof и
   tamper/duplicate/downgrade tests.
 
@@ -252,6 +258,8 @@ Arena branch, newest committed override и production source. Не подтяг�
 - После каждого шага фиксировать важные решения/ошибки в `AI_COLLABORATION_NOTES.md` и тематическом
   документе, а global release stats — в `VERSION_STATISTICS.md`.
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
-- Ближайшая цель — не release и не phone gate, а focused host compile/test уже написанного F4-B1.
+- F4-B1 уже имеет focused Windows host PASS; не повторять его и не расширять proof level.
+- Ближайший возможный coding slice — только F4-B2 pure signed control boundary, после следующего
+  маленького шага владельца; release, network wiring и phone gate не нужны.
 
-Сейчас выполни B1 gate из раздела 8. К B2 не переходи без отдельного PASS; телефоны не нужны.
+Сейчас зафиксируй B1 как закрытый и дождись следующего шага владельца. Телефоны не нужны.
