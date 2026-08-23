@@ -213,7 +213,9 @@ impl QuicConnection {
                 b"EXPORTER-APU-FILE-SESSION-v1",
                 initiator_record_id,
             )
-            .map_err(|error| QuicClientError::TlsConfig(error.to_string()))?;
+            .map_err(|_| {
+                QuicClientError::TlsConfig("QUIC TLS exporter failed".to_string())
+            })?;
         Ok(binding)
     }
 }
