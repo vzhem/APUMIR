@@ -4265,3 +4265,20 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   прежних warnings, generated hashes сохранены. F4-E host data/selection layer закрыт; engine publish
   и physical fallback остаются G/H. Следующий F — отдельный encrypted phone-owned custody store,
   не legacy text RelayQueue. Phones/Android/FFI не запускались.
+- **2026-08-23 (доп.374) — F4-F1 quota-bound opaque custody Windows 8/8 + combined 79/79 PASS:**
+  source `be45fe61b34fc1885d9cac926b53dbf91ce50cc8`, tested fix/exact
+  `60407fa80dcaac51dfa074849e2c97e998d00fd9`. Новый `file_custody.rs` не использует generic
+  RelayQueue/Base64/text: SQLite хранит только canonical bounded B1 ciphertext ranges и digest.
+  Custody default disabled; owner выбирает contacts-only/allow-list/open. Hard global/per-origin byte
+  quotas, active transfers, ranges/transfer и durable per-minute flood limits проверяются в
+  `BEGIN IMMEDIATE`; absolute TTL/expiry cleanup, duplicate/conflict identity, delivery tombstones,
+  bounded inventory/load и digest recheck fail-closed. Restart test реально закрывает/reopens file DB;
+  SQLite max-page test получает typed `DiskFull`, transaction не публикует bytes. Первый Windows run
+  честно FAILED 3/8: пять test fixtures нарушали production minimum TTL/AEAD 17-byte lower bound;
+  production checks не ослаблялись, exact `60407fa` исправил только fixtures. Повтор: custody `8
+  passed; 0 failed; 666 filtered out` (compile 45.15 s, tests 0.02 s); combined `79 passed; 0 failed;
+  3 ignored; 592 filtered out` (compile 0.36 s, tests 1.34 s). Только три прежних warnings; generated
+  Kotlin/arm64 hashes ранее подтверждены `144B3B…A566`/`2C4B12…3D58` и остаются двумя intentional
+  modifications. F4-F не закрыт: следующий F2 durable signed exact-range receipt + explicit missing
+  pull; затем bounded replication/recovery и engine/Android/device-bound at-rest wiring. Phones/FFI/
+  Android не запускались.

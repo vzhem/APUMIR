@@ -61,8 +61,9 @@ combined 53/53; F4-C host gate закрыт. F4-D1 exact `0ef7706` bounded ACK w
 connection прошёл Windows 17/17 focused и 61/61 combined. D3 exact `0032c67` прошёл explicit 3/3 и
 combined 62/62: debug loopback 59,040,998 B/s, text 678 μs, controlled 30-ms RTT/5% loss recovered с
 adaptive backoff. F4-E exact `103f041` + `f7e7562` signed 60/90 path manager, durable restart store
-и typed dispatch прошёл Windows path 9/9 и combined 71/71. Следующий F custody; Android/engine publish/
-physical LAN/NAT и F…H ещё впереди. Телефоны пока не трогать.
+и typed dispatch прошёл Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` opaque range store
+прошёл Windows custody 8/8 и combined 79/79. Следующий F2 signed receipt/missing pull; Android/engine
+publish/physical LAN/NAT и оставшиеся F…H ещё впереди. Телефоны пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -316,7 +317,8 @@ full `u64` sequence/beacon до manager visibility; restart/replay test PASS. Wi
 - F4-D2 exact `fc20f33`: Windows 17/17 session + 61/61 combined PASS; generated guard PASS.
 - F4-D3 exact `0032c67`: explicit 3/3 + combined 62/62 PASS; fast/text/slow-loss metrics записаны.
 - F4-E1/E2 exact `103f041`/`f7e7562`: Windows path 9/9 + combined 71/71 PASS; guard PASS.
-- Следующий F custody; FFI/Android/phones не подключать до custody source gates.
+- F4-F1 exact `60407fa`: Windows custody 8/8 + combined 79/79 PASS; guard PASS.
+- Следующий F2; FFI/Android/phones не подключать до custody source gates.
 
-Сейчас делай F: отдельный opaque encrypted-range custody store, owner policy/quota/TTL/receipts,
-restart/disk-full/flood gates. Телефоны пока не нужны; physical acceptance остаётся в F4-H.
+Сейчас делай F2: durable signed exact-range receipt и explicit bounded inventory/missing pull. Затем F3
+replication/recovery/wiring. Телефоны пока не нужны; physical acceptance остаётся в F4-H.

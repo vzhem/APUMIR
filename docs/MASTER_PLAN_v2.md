@@ -31,8 +31,9 @@ combined 56/56. D2 exact `fc20f33` scope-bound parallel streams на одном 
 adaptive scheduler прошёл explicit 3/3 и combined 62/62: debug loopback 59,040,998 B/s, text 678 μs,
 controlled 30-ms RTT/5% loss полностью восстановлен с backoff. F4-E exact `103f041` + `f7e7562`
 signed 60/90 path manager, durable replay/restart store и typed QUIC/TCP/tunnel dispatch прошёл
-Windows path 9/9 и combined 71/71. Следующий F custody; Android, engine publish, physical LAN/NAT и
-F4-F…H ещё обязательны.
+Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` отдельный opaque ciphertext range store
+прошёл Windows custody 8/8 и combined 79/79. Следующий F2 signed receipt/missing pull; Android,
+engine publish, physical LAN/NAT и оставшиеся F4-F…H ещё обязательны.
 
 ---
 
@@ -1766,6 +1767,10 @@ Authoritative design и доказательные статусы:
     store; Windows 9/9 + combined 71/71. Engine publish/physical transports remain G/H gates.
 - [ ] **F4-F — phone-owned FileCustody:** отдельный encrypted disk store, owner modes/quotas,
   custody receipts, inventory/missing pull, bounded replication, TTL/cleanup/reboot/flood defense.
+  - [x] F1 exact `60407fa`: opaque ciphertext ranges, opt-in policy, quotas/TTL/flood bounds,
+    transactional restart/tombstone/disk-full store; Windows 8/8 + combined 79/79, guard PASS.
+  - [ ] F2 durable signed receipt + explicit bounded inventory/missing-range pull.
+  - [ ] F3 bounded replication/recovery and production engine/Android/device-bound at-rest wiring.
 - [ ] **F4-G — path switching:** direct ↔ transient conduit ↔ live phone relay ↔ delayed custody с
   одним transfer ID и без сброса verified progress.
 - [ ] **F4-H — acceptance:** boundaries/large file, different NAT, UDP-blocked/TCP-only, slow/lossy,

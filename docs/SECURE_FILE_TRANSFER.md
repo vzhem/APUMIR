@@ -428,6 +428,17 @@ path 9/9 (compile 22.62 s, tests 0.06 s), combined 71/71 + 3 ignored D3 (compile
 engine/physical transport wiring проверяется вместе с G/H. Следующий source slice — F encrypted
 phone-owned custody; это ещё не release readiness.
 
+F4-F1 phone-owned opaque range store проверен на exact
+`60407fa80dcaac51dfa074849e2c97e998d00fd9`: отдельная SQLite schema принимает только уже
+E2E-зашифрованные bounded B1 ranges и по умолчанию выключена. Owner modes `contacts-only`/
+allow-list/open, global/per-origin byte quotas, active-transfer/ranges/rate flood limits, absolute TTL,
+transactional expiry cleanup, idempotent identity/conflict detection, tombstones, bounded inventory/
+delivery load и ciphertext digest recheck сохраняются после restart. SQLite-full возвращается как
+отдельный `DiskFull` без публикации bytes. Windows custody 8/8 (compile 45.15 s, tests 0.02 s),
+combined `network::file_` 79/79 + 3 ignored D3 (compile 0.36 s, tests 1.34 s); только три прежних
+warnings, generated hashes сохранены. Это F1, не весь F: durable signed receipt, explicit missing pull,
+bounded replication/engine/Android/device-bound at-rest wiring и physical phone gates ещё обязательны.
+
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 
