@@ -13,6 +13,11 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use sha2::{Digest, Sha256};
 
 use crate::crypto::keys::ED25519_PUBLIC_KEY_SIZE;
+use crate::network::file_control::FileControlSigner;
+use crate::network::file_custody_receipt::{
+    sign_file_custody_receipt_with_signer_v1, FileCustodyReceiptError,
+    SignedFileCustodyReceiptV1, MAX_FILE_CUSTODY_RECEIPT_BYTES,
+};
 use crate::network::file_wire::{FileChunkDataV1, FileFrameV1, FileWireError, MAX_FILE_CHUNK_DATA_BYTES};
 
 pub const FILE_CUSTODY_MAX_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -25,6 +30,7 @@ pub const FILE_CUSTODY_MAX_RANGES_PER_TRANSFER: usize = 1_000_000;
 pub const FILE_CUSTODY_MAX_RANGES_PER_ORIGIN_PER_MINUTE: u32 = 600;
 pub const FILE_CUSTODY_MAX_LOAD_BYTES: usize = 32 * 1024 * 1024;
 pub const FILE_CUSTODY_MAX_LOAD_RANGES: usize = 4_096;
+pub const FILE_CUSTODY_MAX_MISSING_PULL_RANGES: usize = 1_024;
 pub const FILE_CUSTODY_TOMBSTONE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
 const FILE_CUSTODY_DIGEST_DOMAIN: &[u8] = b"apu-file-custody-range-v1\0";
@@ -80,6 +86,26 @@ CREATE TABLE IF NOT EXISTS file_custody_rate (
 
 CREATE TABLE IF NOT EXISTS file_custody_schema_version (version INTEGER PRIMARY KEY);
 INSERT OR IGNORE INTO file_custody_schema_version(version) VALUES (1);
+";
+
+const FILE_CUSTODY_MIGRATION_V2: &str = "
+CREATE TABLE IF NOT EXISTS file_custody_receipts (
+    origin_key         BLOB NOT NULL CHECK(length(origin_key) = 32),
+    recipient_node_id  TEXT NOT NULL,
+    transfer_id        BLOB NOT NULL CHECK(length(transfer_id) = 16),
+    chunk_index_be     BLOB NOT NULL CHECK(length(chunk_index_be) = 8),
+    chunk_offset       INTEGER NOT NULL,
+    encoded_receipt    BLOB NOT NULL CHECK(length(encoded_receipt) <= 512),
+    PRIMARY KEY (
+        origin_key, recipient_node_id, transfer_id, chunk_index_be, chunk_offset
+    ),
+    FOREIGN KEY (
+        origin_key, recipient_node_id, transfer_id, chunk_index_be, chunk_offset
+    ) REFERENCES file_custody_ranges (
+        origin_key, recipient_node_id, transfer_id, chunk_index_be, chunk_offset
+    ) ON DELETE CASCADE
+);
+INSERT OR IGNORE INTO file_custody_schema_version(version) VALUES (2);
 ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +190,28 @@ impl FileCustodyStoreOutcome {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignedFileCustodyStoreOutcome {
+    Stored(SignedFileCustodyReceiptV1),
+    AlreadyStored(SignedFileCustodyReceiptV1),
+}
+
+impl SignedFileCustodyStoreOutcome {
+    pub fn receipt(&self) -> &SignedFileCustodyReceiptV1 {
+        match self {
+            Self::Stored(receipt) | Self::AlreadyStored(receipt) => receipt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileCustodyMissingRangeV1 {
+    pub chunk_index: u64,
+    pub chunk_offset: u32,
+    pub ciphertext_len: u32,
+    pub ciphertext_digest: [u8; 32],
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FileCustodyError {
     #[error("file custody policy is invalid: {0}")]
@@ -192,6 +240,10 @@ pub enum FileCustodyError {
     NotFound,
     #[error("file custody bounded load request is invalid")]
     InvalidLoadLimit,
+    #[error("file custody missing-range pull is invalid: {0}")]
+    InvalidMissingPull(&'static str),
+    #[error("file custody signed receipt failed: {0}")]
+    Receipt(String),
     #[error("file custody SQLite is full")]
     DiskFull,
     #[error("file custody durable store failed: {0}")]
@@ -201,6 +253,12 @@ pub enum FileCustodyError {
 impl From<FileWireError> for FileCustodyError {
     fn from(error: FileWireError) -> Self {
         Self::Wire(error.to_string())
+    }
+}
+
+impl From<FileCustodyReceiptError> for FileCustodyError {
+    fn from(error: FileCustodyReceiptError) -> Self {
+        Self::Receipt(error.to_string())
     }
 }
 
@@ -279,6 +337,9 @@ impl FileCustodyStore {
         connection
             .execute_batch(FILE_CUSTODY_MIGRATION_V1)
             .map_err(map_store_error)?;
+        connection
+            .execute_batch(FILE_CUSTODY_MIGRATION_V2)
+            .map_err(map_store_error)?;
         Ok(Self {
             connection: Mutex::new(connection),
             policy,
@@ -300,8 +361,9 @@ impl FileCustodyStore {
             .map_err(map_store_error)
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub fn store_range(
+    fn store_range(
         &self,
         origin: &FileCustodyPeer,
         origin_is_contact: bool,
@@ -310,6 +372,67 @@ impl FileCustodyStore {
         stored_at_ms: i64,
         expires_at_ms: i64,
     ) -> Result<FileCustodyStoreOutcome, FileCustodyError> {
+        self.store_range_internal(
+            origin,
+            origin_is_contact,
+            recipient_node_id,
+            range,
+            stored_at_ms,
+            expires_at_ms,
+            None,
+        )
+        .map(|(outcome, _)| outcome)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn store_range_with_signed_receipt<S: FileControlSigner>(
+        &self,
+        origin: &FileCustodyPeer,
+        origin_is_contact: bool,
+        recipient_node_id: &str,
+        range: &FileChunkDataV1,
+        stored_at_ms: i64,
+        expires_at_ms: i64,
+        custodian_node_id: &str,
+        signer: &S,
+    ) -> Result<SignedFileCustodyStoreOutcome, FileCustodyError> {
+        let (outcome, signed) = self.store_range_internal(
+            origin,
+            origin_is_contact,
+            recipient_node_id,
+            range,
+            stored_at_ms,
+            expires_at_ms,
+            Some((custodian_node_id, signer)),
+        )?;
+        let signed = signed.ok_or_else(|| {
+            FileCustodyError::Receipt("signed receipt was not committed".into())
+        })?;
+        Ok(match outcome {
+            FileCustodyStoreOutcome::Stored(_) => SignedFileCustodyStoreOutcome::Stored(signed),
+            FileCustodyStoreOutcome::AlreadyStored(_) => {
+                SignedFileCustodyStoreOutcome::AlreadyStored(signed)
+            }
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn store_range_internal(
+        &self,
+        origin: &FileCustodyPeer,
+        origin_is_contact: bool,
+        recipient_node_id: &str,
+        range: &FileChunkDataV1,
+        stored_at_ms: i64,
+        expires_at_ms: i64,
+        receipt_signer: Option<(&str, &dyn FileControlSigner)>,
+    ) -> Result<
+        (
+            FileCustodyStoreOutcome,
+            Option<SignedFileCustodyReceiptV1>,
+        ),
+        FileCustodyError,
+    > {
         validate_request(
             &self.policy,
             origin,
@@ -374,13 +497,21 @@ impl FileCustodyStore {
             {
                 return Err(FileCustodyError::ConflictingRange);
             }
+            let existing_claims = FileCustodyReceiptClaimsV1 {
+                stored_at_ms: existing_stored,
+                expires_at_ms: existing_expiry,
+                ..receipt
+            };
+            let signed = persist_signed_receipt_if_requested(
+                &transaction,
+                origin,
+                &existing_claims,
+                receipt_signer,
+            )?;
             transaction.commit().map_err(map_store_error)?;
-            return Ok(FileCustodyStoreOutcome::AlreadyStored(
-                FileCustodyReceiptClaimsV1 {
-                    stored_at_ms: existing_stored,
-                    expires_at_ms: existing_expiry,
-                    ..receipt
-                },
+            return Ok((
+                FileCustodyStoreOutcome::AlreadyStored(existing_claims),
+                signed,
             ));
         }
 
@@ -418,8 +549,14 @@ impl FileCustodyStore {
             )
             .map_err(map_store_error)?;
         increment_rate(&transaction, origin, stored_at_ms)?;
+        let signed = persist_signed_receipt_if_requested(
+            &transaction,
+            origin,
+            &receipt,
+            receipt_signer,
+        )?;
         transaction.commit().map_err(map_store_error)?;
-        Ok(FileCustodyStoreOutcome::Stored(receipt))
+        Ok((FileCustodyStoreOutcome::Stored(receipt), signed))
     }
 
     pub fn inventory(
@@ -577,6 +714,108 @@ impl FileCustodyStore {
             ) != receipt.ciphertext_digest
             {
                 return Err(FileCustodyError::Store("stored ciphertext digest mismatch".into()));
+            }
+            loaded_bytes = next_bytes;
+            loaded.push(StoredFileCustodyRange {
+                ciphertext_chunk_len: receipt.ciphertext_chunk_len,
+                receipt,
+                ciphertext,
+            });
+        }
+        Ok(loaded)
+    }
+
+    /// Pulls only the exact inventory ranges the authenticated recipient reports as missing.
+    ///
+    /// Callers must construct `authenticated_recipient` from the pinned transport peer, never from
+    /// request payload text. The request is sorted, unique and hard-bounded before the first query.
+    pub fn pull_missing_for_authenticated_recipient(
+        &self,
+        origin: &FileCustodyPeer,
+        authenticated_recipient: &FileCustodyPeer,
+        transfer_id: &[u8; 16],
+        missing: &[FileCustodyMissingRangeV1],
+        now_ms: i64,
+        max_bytes: usize,
+    ) -> Result<Vec<StoredFileCustodyRange>, FileCustodyError> {
+        validate_missing_pull(
+            origin,
+            authenticated_recipient,
+            transfer_id,
+            missing,
+            max_bytes,
+        )?;
+        let connection = self.connection.lock().map_err(|_| store_poisoned())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT ciphertext_chunk_len, ciphertext_len, ciphertext_digest, ciphertext,
+                        stored_at_ms, expires_at_ms
+                 FROM file_custody_ranges
+                 WHERE origin_key = ?1 AND recipient_node_id = ?2 AND transfer_id = ?3
+                   AND chunk_index_be = ?4 AND chunk_offset = ?5 AND ciphertext_len = ?6
+                   AND ciphertext_digest = ?7 AND expires_at_ms > ?8",
+            )
+            .map_err(map_store_error)?;
+        let mut loaded = Vec::with_capacity(missing.len());
+        let mut loaded_bytes = 0usize;
+        for requested in missing {
+            let row = statement
+                .query_row(
+                    params![
+                        origin.ed25519_public_key.as_slice(),
+                        authenticated_recipient.node_id,
+                        transfer_id.as_slice(),
+                        requested.chunk_index.to_be_bytes().as_slice(),
+                        i64::from(requested.chunk_offset),
+                        i64::from(requested.ciphertext_len),
+                        requested.ciphertext_digest.as_slice(),
+                        now_ms,
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Vec<u8>>(2)?,
+                            row.get::<_, Vec<u8>>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(map_store_error)?;
+            let Some((chunk_len, range_len, digest, ciphertext, stored, expiry)) = row else {
+                continue;
+            };
+            let next_bytes = loaded_bytes
+                .checked_add(ciphertext.len())
+                .ok_or(FileCustodyError::InvalidLoadLimit)?;
+            if next_bytes > max_bytes {
+                break;
+            }
+            let chunk_index = requested.chunk_index.to_be_bytes();
+            let receipt = receipt_from_row(
+                origin,
+                &authenticated_recipient.node_id,
+                transfer_id,
+                &chunk_index,
+                i64::from(requested.chunk_offset),
+                chunk_len,
+                range_len,
+                &digest,
+                stored,
+                expiry,
+            )?;
+            if custody_digest_parts(
+                &receipt.range_id,
+                receipt.ciphertext_chunk_len,
+                receipt.ciphertext_len,
+                &ciphertext,
+            ) != receipt.ciphertext_digest
+            {
+                return Err(FileCustodyError::Store(
+                    "stored missing-range ciphertext digest mismatch".into(),
+                ));
             }
             loaded_bytes = next_bytes;
             loaded.push(StoredFileCustodyRange {
@@ -855,6 +1094,76 @@ fn existing_range(
     .transpose()
 }
 
+fn persist_signed_receipt_if_requested(
+    transaction: &Transaction<'_>,
+    origin: &FileCustodyPeer,
+    claims: &FileCustodyReceiptClaimsV1,
+    receipt_signer: Option<(&str, &dyn FileControlSigner)>,
+) -> Result<Option<SignedFileCustodyReceiptV1>, FileCustodyError> {
+    let Some((custodian_node_id, signer)) = receipt_signer else {
+        return Ok(None);
+    };
+    let existing = transaction
+        .query_row(
+            "SELECT encoded_receipt FROM file_custody_receipts
+             WHERE origin_key = ?1 AND recipient_node_id = ?2 AND transfer_id = ?3
+               AND chunk_index_be = ?4 AND chunk_offset = ?5",
+            params![
+                claims.range_id.origin_ed25519_public_key.as_slice(),
+                claims.range_id.recipient_node_id,
+                claims.range_id.transfer_id.as_slice(),
+                claims.range_id.chunk_index.to_be_bytes().as_slice(),
+                i64::from(claims.range_id.chunk_offset),
+            ],
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .optional()
+        .map_err(map_store_error)?;
+    if let Some(encoded) = existing {
+        let signed = SignedFileCustodyReceiptV1::decode(&encoded)?;
+        let expected_key = signer
+            .file_control_public_key()
+            .map_err(|error| FileCustodyError::Receipt(error.to_string()))?;
+        if signed.origin_node_id != origin.node_id
+            || signed.custodian_node_id != custodian_node_id
+            || signed.claims != *claims
+            || signed.custodian_ed25519_public_key != expected_key
+        {
+            return Err(FileCustodyError::Receipt(
+                "durable receipt does not match range or current custodian identity".into(),
+            ));
+        }
+        return Ok(Some(signed));
+    }
+    let signed = sign_file_custody_receipt_with_signer_v1(
+        origin.node_id.clone(),
+        custodian_node_id.to_owned(),
+        claims.clone(),
+        signer,
+    )?;
+    let encoded = signed.encode()?;
+    if encoded.len() > MAX_FILE_CUSTODY_RECEIPT_BYTES {
+        return Err(FileCustodyError::Receipt("receipt exceeds hard bound".into()));
+    }
+    transaction
+        .execute(
+            "INSERT INTO file_custody_receipts
+             (origin_key, recipient_node_id, transfer_id, chunk_index_be, chunk_offset,
+              encoded_receipt)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                claims.range_id.origin_ed25519_public_key.as_slice(),
+                claims.range_id.recipient_node_id,
+                claims.range_id.transfer_id.as_slice(),
+                claims.range_id.chunk_index.to_be_bytes().as_slice(),
+                i64::from(claims.range_id.chunk_offset),
+                encoded,
+            ],
+        )
+        .map_err(map_store_error)?;
+    Ok(Some(signed))
+}
+
 fn tombstone_digest(
     transaction: &Transaction<'_>,
     id: &FileCustodyRangeId,
@@ -949,6 +1258,53 @@ fn custody_digest_parts(
     digest.finalize().into()
 }
 
+fn validate_missing_pull(
+    origin: &FileCustodyPeer,
+    recipient: &FileCustodyPeer,
+    transfer_id: &[u8; 16],
+    missing: &[FileCustodyMissingRangeV1],
+    max_bytes: usize,
+) -> Result<(), FileCustodyError> {
+    if !is_canonical_node_id(&origin.node_id)
+        || !is_canonical_node_id(&recipient.node_id)
+        || origin.node_id == recipient.node_id
+        || transfer_id.iter().all(|byte| *byte == 0)
+    {
+        return Err(FileCustodyError::InvalidMissingPull(
+            "invalid authenticated scope",
+        ));
+    }
+    if missing.is_empty()
+        || missing.len() > FILE_CUSTODY_MAX_MISSING_PULL_RANGES
+        || max_bytes == 0
+        || max_bytes > FILE_CUSTODY_MAX_LOAD_BYTES
+    {
+        return Err(FileCustodyError::InvalidMissingPull(
+            "request exceeds hard bounds",
+        ));
+    }
+    let mut previous = None;
+    for requested in missing {
+        if requested.ciphertext_len == 0
+            || usize::try_from(requested.ciphertext_len)
+                .map(|length| length > MAX_FILE_CHUNK_DATA_BYTES)
+                .unwrap_or(true)
+        {
+            return Err(FileCustodyError::InvalidMissingPull(
+                "invalid requested range length",
+            ));
+        }
+        let identity = (requested.chunk_index, requested.chunk_offset);
+        if previous.map(|value| identity <= value).unwrap_or(false) {
+            return Err(FileCustodyError::InvalidMissingPull(
+                "ranges must be sorted and unique",
+            ));
+        }
+        previous = Some(identity);
+    }
+    Ok(())
+}
+
 fn validate_load_limit(max_ranges: usize, max_bytes: usize) -> Result<(), FileCustodyError> {
     if max_ranges == 0
         || max_ranges > FILE_CUSTODY_MAX_LOAD_RANGES
@@ -1011,6 +1367,8 @@ fn store_poisoned() -> FileCustodyError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::keys::{Ed25519KeyPair, SIGNATURE_SIZE};
+    use crate::network::file_control::FileControlError;
 
     const NOW: i64 = 1_900_000_000_000;
 
@@ -1022,6 +1380,17 @@ mod tests {
         FileCustodyPeer {
             node_id: node(byte),
             ed25519_public_key: [byte; ED25519_PUBLIC_KEY_SIZE],
+        }
+    }
+
+    fn identity(byte: u8) -> Ed25519KeyPair {
+        Ed25519KeyPair::from_secret_bytes(&[byte; 32]).unwrap()
+    }
+
+    fn signed_peer(identity: &Ed25519KeyPair) -> FileCustodyPeer {
+        FileCustodyPeer {
+            node_id: format!("pk_{}", identity.node_id().to_hex()),
+            ed25519_public_key: identity.public_key().0.try_into().unwrap(),
         }
     }
 
@@ -1119,7 +1488,7 @@ mod tests {
         let ciphertext = range(9, 0xa5, 512);
         let first_receipt = {
             let store = FileCustodyStore::open(&path, custody_policy.clone()).unwrap();
-            assert_eq!(store.schema_version().unwrap(), 1);
+            assert_eq!(store.schema_version().unwrap(), 2);
             let first = store
                 .store_range(
                     &peer(1),
@@ -1346,6 +1715,188 @@ mod tests {
             ),
             Err(FileCustodyError::InvalidLoadLimit)
         );
+    }
+
+    #[test]
+    fn signed_receipt_is_committed_atomically_and_restored_after_restart() {
+        let path = std::env::temp_dir().join(format!(
+            "apu-file-custody-signed-{}-{}.sqlite3",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let origin_identity = identity(1);
+        let custodian_identity = identity(2);
+        let recipient_identity = identity(3);
+        let origin = signed_peer(&origin_identity);
+        let custodian = signed_peer(&custodian_identity);
+        let recipient = signed_peer(&recipient_identity);
+        let ciphertext = range(7, 0x77, 128);
+        let first = {
+            let store = FileCustodyStore::open(&path, policy(FileCustodyMode::Open)).unwrap();
+            let outcome = store
+                .store_range_with_signed_receipt(
+                    &origin,
+                    false,
+                    &recipient.node_id,
+                    &ciphertext,
+                    NOW,
+                    NOW + FILE_CUSTODY_MIN_TTL_MS,
+                    &custodian.node_id,
+                    &custodian_identity,
+                )
+                .unwrap();
+            assert!(matches!(outcome, SignedFileCustodyStoreOutcome::Stored(_)));
+            outcome.receipt().clone()
+        };
+        {
+            let restarted = FileCustodyStore::open(&path, policy(FileCustodyMode::Open)).unwrap();
+            let duplicate = restarted
+                .store_range_with_signed_receipt(
+                    &origin,
+                    false,
+                    &recipient.node_id,
+                    &ciphertext,
+                    NOW + 1,
+                    NOW + 1 + FILE_CUSTODY_MIN_TTL_MS,
+                    &custodian.node_id,
+                    &custodian_identity,
+                )
+                .unwrap();
+            assert!(matches!(
+                duplicate,
+                SignedFileCustodyStoreOutcome::AlreadyStored(_)
+            ));
+            assert_eq!(duplicate.receipt(), &first);
+            duplicate
+                .receipt()
+                .verify_active_at(
+                    &custodian.node_id,
+                    &custodian.ed25519_public_key,
+                    &origin.node_id,
+                    &origin.ed25519_public_key,
+                    &recipient.node_id,
+                    NOW + 1,
+                )
+                .unwrap();
+            assert_eq!(restarted.usage_bytes().unwrap(), 128);
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn receipt_signing_failure_rolls_back_ciphertext_admission() {
+        struct InvalidSigner(Ed25519KeyPair);
+
+        impl FileControlSigner for InvalidSigner {
+            fn file_control_public_key(
+                &self,
+            ) -> Result<[u8; ED25519_PUBLIC_KEY_SIZE], FileControlError> {
+                Ok(self.0.public_key().0.try_into().unwrap())
+            }
+
+            fn sign_file_control_payload(
+                &self,
+                _payload: &[u8],
+            ) -> Result<[u8; SIGNATURE_SIZE], FileControlError> {
+                Ok([0; SIGNATURE_SIZE])
+            }
+        }
+
+        let origin_identity = identity(1);
+        let recipient_identity = identity(3);
+        let bad_signer = InvalidSigner(identity(2));
+        let origin = signed_peer(&origin_identity);
+        let recipient = signed_peer(&recipient_identity);
+        let custodian = signed_peer(&bad_signer.0);
+        let store = FileCustodyStore::open_in_memory(policy(FileCustodyMode::Open)).unwrap();
+        assert!(matches!(
+            store.store_range_with_signed_receipt(
+                &origin,
+                false,
+                &recipient.node_id,
+                &range(0, 1, 64),
+                NOW,
+                NOW + FILE_CUSTODY_MIN_TTL_MS,
+                &custodian.node_id,
+                &bad_signer,
+            ),
+            Err(FileCustodyError::Receipt(_))
+        ));
+        assert_eq!(store.usage_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn authenticated_missing_pull_returns_only_requested_exact_ranges() {
+        let origin = peer(1);
+        let recipient = peer(2);
+        let store = FileCustodyStore::open_in_memory(policy(FileCustodyMode::Open)).unwrap();
+        for index in 0..3 {
+            store
+                .store_range(
+                    &origin,
+                    false,
+                    &recipient.node_id,
+                    &range(index, index as u8 + 1, 64),
+                    NOW,
+                    NOW + FILE_CUSTODY_MIN_TTL_MS,
+                )
+                .unwrap();
+        }
+        let inventory = store
+            .inventory(&origin, &recipient.node_id, &[0x44; 16], NOW, 3)
+            .unwrap();
+        let missing = [
+            FileCustodyMissingRangeV1 {
+                chunk_index: inventory[0].range_id.chunk_index,
+                chunk_offset: inventory[0].range_id.chunk_offset,
+                ciphertext_len: inventory[0].ciphertext_len,
+                ciphertext_digest: inventory[0].ciphertext_digest,
+            },
+            FileCustodyMissingRangeV1 {
+                chunk_index: inventory[2].range_id.chunk_index,
+                chunk_offset: inventory[2].range_id.chunk_offset,
+                ciphertext_len: inventory[2].ciphertext_len,
+                ciphertext_digest: inventory[2].ciphertext_digest,
+            },
+        ];
+        let pulled = store
+            .pull_missing_for_authenticated_recipient(
+                &origin,
+                &recipient,
+                &[0x44; 16],
+                &missing,
+                NOW,
+                128,
+            )
+            .unwrap();
+        assert_eq!(pulled.len(), 2);
+        assert_eq!(pulled[0].receipt.range_id.chunk_index, 0);
+        assert_eq!(pulled[1].receipt.range_id.chunk_index, 2);
+        let reversed = [missing[1].clone(), missing[0].clone()];
+        assert!(matches!(
+            store.pull_missing_for_authenticated_recipient(
+                &origin,
+                &recipient,
+                &[0x44; 16],
+                &reversed,
+                NOW,
+                128,
+            ),
+            Err(FileCustodyError::InvalidMissingPull(_))
+        ));
+        assert!(store
+            .pull_missing_for_authenticated_recipient(
+                &origin,
+                &peer(3),
+                &[0x44; 16],
+                &missing,
+                NOW,
+                128,
+            )
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
