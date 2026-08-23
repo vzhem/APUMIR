@@ -4141,3 +4141,17 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   `engine/core.rs`, `mqtt_transport.rs`; C2a warnings/errors нет. C2a host gate закрыт. Android/FFI/
   phones не запускались. Следующий isolated slice — C2b bounded reusable endpoint/authenticated
   session owner с single-flight connect, eviction/reconnect и explicit shutdown; F4-D не начинать.
+- **2026-08-23 (доп.365) — F4-C2b persistent owner source/static PASS:** exact source
+  `fd5d1f3ac2c31e7b52fe123190ee2f560504f89a` добавил isolated host-only
+  `network/file_session_owner.rs`, не меняя legacy pool/engine/FFI/Android. Один owner владеет одним
+  reusable `QuicClient`; map key — exact 32-byte externally pinned Ed25519 key + concrete address.
+  Per-slot async mutex удерживается через QUIC connect и полный exporter-bound C1 auth, поэтому 16
+  concurrent callers не могут создать duplicate authenticated sessions и получают один scope.
+  Hard peer cap 256 + smaller configured cap; idle удаляется только без активного Arc, failed connect/
+  stream удаляется перед retry. Reconnect создаёт fresh scope, а owner делегирует signed
+  MissingRanges control и bounded chunk send без whole-file storage. Atomic explicit shutdown
+  запрещает новую работу, drains map и закрывает endpoint. 7 loopback tests объявлены: reuse,
+  single-flight race, idle/fresh reconnect, signed resume seam, wrong-peer fail-closed + correct retry,
+  capacity и idempotent shutdown. Expected focused 7, combined file 53. Jinx owner/mod: `Program`,
+  `MissingNode=0`; static identity/bounds/no-legacy-import contracts и diff check PASS. Arena без
+  cargo/rustc, compile/runtime pending. F4-D/engine wiring/FFI/Android/phones не начинались.

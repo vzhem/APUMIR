@@ -315,8 +315,27 @@ filter `adapter` дал `2 passed; 0 failed; 636 filtered out` (compile 21.33 s,
 combined `network::file_` — `46 passed; 0 failed; 592 filtered out` (compile 0.31 s, tests 1.29 s).
 Три warnings только прежние `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`. Generated Kotlin
 и arm64 `.so` прошли hash guard и остались единственными прежними modified files Windows-клона.
-Engine/registry/FFI/Android/phones не wired, fake CryptoManager не используется. Следующий isolated
-slice — host-only C2b bounded single-flight owner/reconnect; F4-D не начинать.
+Engine/registry/FFI/Android/phones не wired, fake CryptoManager не используется.
+
+C2b source/static реализован отдельным host-only модулем на exact
+`fd5d1f3ac2c31e7b52fe123190ee2f560504f89a`:
+
+- один owner создаёт ровно один reusable `QuicClient` endpoint; map key — fixed 32-byte pinned
+  Ed25519 public key + concrete `SocketAddr`, не legacy arbitrary bytes/string;
+- один per-peer/path mutex держится через QUIC connect + complete C1 auth, поэтому concurrent callers
+  получают один shared outcome/session без duplicate authenticated connections;
+- peer count имеет hard cap 256 и configured smaller cap; idle entry удаляется только когда не
+  используется, failed connect/stream удаляется до retry, reconnect создаёт fresh QUIC exporter-bound
+  C1 scope;
+- owner делегирует bounded chunk send и signed MissingRanges receive без whole-file RAM; shutdown
+  atomically запрещает новую работу, drains entries и явно закрывает owned endpoint;
+- 7 loopback tests объявлены: reuse endpoint/session, 16-caller single-flight race, idle reconnect с
+  новым scope, signed MissingRanges после reconnect, wrong peer + successful retry, capacity и
+  idempotent shutdown. Expected focused 7, combined F4 53.
+
+Jinx parser: owner/module files `Program`, `MissingNode=0`; static key/bounds/no-legacy-pool contract
+и diff check PASS. Это пока source/static evidence: Windows Rust compile/runtime pending. Engine/FFI/
+Android/UI/phones не подключать и F4-D не начинать до host gate.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

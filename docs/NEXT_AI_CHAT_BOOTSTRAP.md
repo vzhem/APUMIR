@@ -55,8 +55,9 @@ focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab251
 готовы на exact `bf4f0c6`; fixes `bedf671`/`ca2edb6` прошли focused Windows 9/9 и combined exact
 `ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. F4-C2 read-only ownership review завершён:
 legacy pool/engine identity нельзя безопасно подключать к C1. Host-only C2a signer seam exact
-`0736d9b` прошёл Windows filters 2/2 + 1/1 и combined 46/46; host gate закрыт. Следующий isolated
-slice — C2b bounded single-flight persistent owner/reconnect. FFI/Android/phones/F4-D не трогать.
+`0736d9b` прошёл Windows filters 2/2 + 1/1 и combined 46/46; host gate закрыт. C2b source/static
+готов на exact `fd5d1f3`: bounded single-flight owner + 7 tests, Windows compile/runtime pending.
+FFI/Android/phones/F4-D не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -212,11 +213,15 @@ C2a source/static exact `0736d9b62c64f0cc8daeff29dfef82f85377901c` уже сде
 Windows exact `0736d9b`: `adapter` 2/2, `installed_sidecars` 1/1, combined `network::file_` 46/46
 (592 filtered) PASS; три warnings только прежние, generated hash guard PASS. C2a закрыт.
 
-Теперь сделать C2b: bounded reusable endpoint owner, authenticated-session single-flight,
-failed/idle eviction, reconnect с fresh exporter-bound mutual handshake, explicit shutdown и
-loopback reuse/race/reconnect/wrong-peer tests. Identity key — externally pinned Ed25519 peer/path,
-не arbitrary bytes/string. Не подключать C1 к legacy text listener; no FFI/Android/UI/phones и no
-parallel streams/window F4-D.
+C2b source/static exact `fd5d1f3ac2c31e7b52fe123190ee2f560504f89a` уже добавил отдельный
+`file_session_owner.rs`: один endpoint, fixed Ed25519-key + address map, per-slot connect/auth mutex,
+bounded/idle/failed eviction, fresh reconnect, MissingRanges delegation и explicit shutdown. 7 tests
+покрывают reuse, 16-caller race, idle fresh scope, signed resume после reconnect, wrong peer + retry,
+capacity и shutdown. Jinx `Program`/zero MissingNode, static contract и diff check PASS.
+
+Сначала Windows exact `fd5d1f3`: focused `network::file_session_owner::tests` ожидает 7/7, combined
+`network::file_` — 53/53 и 592 filtered. После gate отдельно решить минимальное engine ownership
+wiring; не подключать C1 к legacy text listener, no FFI/Android/UI/phones и no F4-D.
 
 ### 9. Порядок после F4-B
 
@@ -284,6 +289,7 @@ parallel streams/window F4-D.
 - F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
 - F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
 - C2a exact `0736d9b` Windows 46/46 PASS; не повторять без code change.
-- Следующий только F4-C2b host owner/reconnect. F4-D/FFI/Android/phones не начинать.
+- C2b source/static exact `fd5d1f3`; сначала Windows 7/7 focused + 53/53 combined gate.
+- F4-D/FFI/Android/phones не начинать.
 
-Сейчас сделай isolated C2b из раздела 8. Телефоны не нужны.
+Сейчас закрой Windows host gate C2b из раздела 8. Телефоны не нужны.
