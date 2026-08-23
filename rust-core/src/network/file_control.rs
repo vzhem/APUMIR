@@ -10,9 +10,12 @@
 //! external and durable; `last_seen_sequence` must be looked up by `(signer key, scope_id)` and only
 //! advanced after the complete operation is accepted durably.
 
+use std::sync::Arc;
+
 use crate::crypto::keys::{
     Ed25519KeyPair, NodeId, ED25519_PUBLIC_KEY_SIZE, SIGNATURE_SIZE,
 };
+use crate::crypto::signing_identity::InstalledSigningIdentity;
 use crate::network::file_wire::{FileCapabilitiesV1, MAX_FILE_CHUNK_COUNT};
 use sha2::{Digest, Sha256};
 
@@ -127,6 +130,22 @@ pub struct SignedFileControlV1 {
     pub claims: FileControlClaimsV1,
     pub signer_ed25519_public_key: [u8; ED25519_PUBLIC_KEY_SIZE],
     pub signature: [u8; SIGNATURE_SIZE],
+}
+
+/// Crate-internal signing capability for file controls.
+///
+/// This deliberately exposes only the verified public key and one signing operation. It never
+/// returns a private seed/key. The production adapter below uses the already installed device-bound
+/// sidecar; the raw key-pair adapter is retained for host tests and existing pure control callers.
+pub(crate) trait FileControlSigner {
+    fn file_control_public_key(
+        &self,
+    ) -> Result<[u8; ED25519_PUBLIC_KEY_SIZE], FileControlError>;
+
+    fn sign_file_control_payload(
+        &self,
+        payload: &[u8],
+    ) -> Result<[u8; SIGNATURE_SIZE], FileControlError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -435,16 +454,73 @@ impl SignedFileControlV1 {
     }
 }
 
+impl FileControlSigner for Ed25519KeyPair {
+    fn file_control_public_key(
+        &self,
+    ) -> Result<[u8; ED25519_PUBLIC_KEY_SIZE], FileControlError> {
+        self.public_key()
+            .0
+            .try_into()
+            .map_err(|_| FileControlError::InvalidSignerBinding)
+    }
+
+    fn sign_file_control_payload(
+        &self,
+        payload: &[u8],
+    ) -> Result<[u8; SIGNATURE_SIZE], FileControlError> {
+        self.sign(payload)
+            .try_into()
+            .map_err(|_| FileControlError::InvalidSignature)
+    }
+}
+
+impl FileControlSigner for InstalledSigningIdentity {
+    fn file_control_public_key(
+        &self,
+    ) -> Result<[u8; ED25519_PUBLIC_KEY_SIZE], FileControlError> {
+        self.public_key()
+            .try_into()
+            .map_err(|_| FileControlError::InvalidSignerBinding)
+    }
+
+    fn sign_file_control_payload(
+        &self,
+        payload: &[u8],
+    ) -> Result<[u8; SIGNATURE_SIZE], FileControlError> {
+        self.sign_security_payload(payload)
+            .try_into()
+            .map_err(|_| FileControlError::InvalidSignature)
+    }
+}
+
+impl<T: FileControlSigner + ?Sized> FileControlSigner for Arc<T> {
+    fn file_control_public_key(
+        &self,
+    ) -> Result<[u8; ED25519_PUBLIC_KEY_SIZE], FileControlError> {
+        self.as_ref().file_control_public_key()
+    }
+
+    fn sign_file_control_payload(
+        &self,
+        payload: &[u8],
+    ) -> Result<[u8; SIGNATURE_SIZE], FileControlError> {
+        self.as_ref().sign_file_control_payload(payload)
+    }
+}
+
 pub fn sign_file_control_v1(
     claims: FileControlClaimsV1,
     identity: &Ed25519KeyPair,
 ) -> Result<SignedFileControlV1, FileControlError> {
+    sign_file_control_with_signer_v1(claims, identity)
+}
+
+pub(crate) fn sign_file_control_with_signer_v1<S: FileControlSigner + ?Sized>(
+    claims: FileControlClaimsV1,
+    identity: &S,
+) -> Result<SignedFileControlV1, FileControlError> {
     claims.validate()?;
-    let signer_ed25519_public_key: [u8; ED25519_PUBLIC_KEY_SIZE] = identity
-        .public_key()
-        .0
-        .try_into()
-        .map_err(|_| FileControlError::InvalidSignerBinding)?;
+    let signer_ed25519_public_key = identity.file_control_public_key()?;
     validate_modern_signer_binding(&claims.signer_node_id, &signer_ed25519_public_key)?;
     let claims_bytes = claims.canonical_claim_bytes()?;
     let payload = canonical_signing_bytes(
@@ -452,15 +528,15 @@ pub fn sign_file_control_v1(
         &signer_ed25519_public_key,
         &claims_bytes,
     )?;
-    let signature: [u8; SIGNATURE_SIZE] = identity
-        .sign(&payload)
-        .try_into()
-        .map_err(|_| FileControlError::InvalidSignature)?;
-    Ok(SignedFileControlV1 {
+    let signature = identity.sign_file_control_payload(&payload)?;
+    let control = SignedFileControlV1 {
         claims,
         signer_ed25519_public_key,
         signature,
-    })
+    };
+    // Keep even future internal signer adapters fail-closed if they return a mismatched key/signature.
+    control.verify_self_signature()?;
+    Ok(control)
 }
 
 fn canonical_signing_bytes(
@@ -1511,6 +1587,96 @@ mod tests {
             ),
             Err(FileControlError::InvalidBody { .. })
         ));
+    }
+
+    #[test]
+    fn installed_signing_sidecar_adapter_produces_pinned_valid_control() {
+        let installed = Arc::new(
+            InstalledSigningIdentity::from_seed(
+                1,
+                legacy(0x27),
+                &[27; 32],
+            )
+            .unwrap(),
+        );
+        let recipient = Ed25519KeyPair::from_secret_bytes(&[28; 32]).unwrap();
+        let record = sign_file_control_with_signer_v1(
+            FileControlClaimsV1 {
+                record_id: [0x27; FILE_CONTROL_ID_BYTES],
+                scope_id: [0x28; FILE_CONTROL_ID_BYTES],
+                sequence: 1,
+                created_at_ms: NOW,
+                expires_at_ms: NOW + 60_000,
+                signer_node_id: installed.legacy_routing_node_id().to_owned(),
+                recipient_node_id: node(&recipient),
+                body: FileControlBodyV1::Capabilities(capabilities()),
+            },
+            &installed,
+        )
+        .unwrap();
+
+        assert_eq!(
+            record.signer_ed25519_public_key.as_slice(),
+            installed.public_key()
+        );
+        assert_eq!(
+            SignedFileControlV1::decode(&record.encode().unwrap())
+                .unwrap()
+                .verify_at(
+                    installed.legacy_routing_node_id(),
+                    &node(&recipient),
+                    installed.public_key(),
+                    &record.claims.scope_id,
+                    NOW + 1,
+                    None,
+                ),
+            Ok(())
+        );
+        assert!(format!("{installed:?}").contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn inconsistent_internal_signer_adapter_fails_closed() {
+        struct InconsistentSigner {
+            advertised: Ed25519KeyPair,
+            actual: Ed25519KeyPair,
+        }
+
+        impl FileControlSigner for InconsistentSigner {
+            fn file_control_public_key(
+                &self,
+            ) -> Result<[u8; ED25519_PUBLIC_KEY_SIZE], FileControlError> {
+                self.advertised.file_control_public_key()
+            }
+
+            fn sign_file_control_payload(
+                &self,
+                payload: &[u8],
+            ) -> Result<[u8; SIGNATURE_SIZE], FileControlError> {
+                self.actual.sign_file_control_payload(payload)
+            }
+        }
+
+        let signer = InconsistentSigner {
+            advertised: Ed25519KeyPair::from_secret_bytes(&[29; 32]).unwrap(),
+            actual: Ed25519KeyPair::from_secret_bytes(&[30; 32]).unwrap(),
+        };
+        let recipient = Ed25519KeyPair::from_secret_bytes(&[31; 32]).unwrap();
+        let claims = FileControlClaimsV1 {
+            record_id: [0x29; FILE_CONTROL_ID_BYTES],
+            scope_id: [0x30; FILE_CONTROL_ID_BYTES],
+            sequence: 1,
+            created_at_ms: NOW,
+            expires_at_ms: NOW + 60_000,
+            signer_node_id: node(&signer.advertised),
+            recipient_node_id: node(&recipient),
+            body: FileControlBodyV1::Capabilities(capabilities()),
+        };
+
+        assert_eq!(
+            sign_file_control_with_signer_v1(claims, &signer),
+            Err(FileControlError::InvalidSignature)
+        );
     }
 
     #[test]

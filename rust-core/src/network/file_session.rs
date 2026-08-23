@@ -22,10 +22,11 @@ use sha2::{ Digest, Sha256 };
 
 use crate::crypto::keys::{ Ed25519KeyPair, ED25519_PUBLIC_KEY_SIZE };
 use crate::network::file_control::{
-    sign_file_control_v1,
+    sign_file_control_with_signer_v1,
     FileControlBodyV1,
     FileControlClaimsV1,
     FileControlError,
+    FileControlSigner,
     SignedFileControlV1,
     FILE_CONTROL_ID_BYTES,
     MAX_FILE_CAPABILITY_LIFETIME_MS,
@@ -205,6 +206,27 @@ impl FileSendSession {
         now_ms: i64,
         limits: FileSessionLimits
     ) -> Result<Self, FileSessionError> {
+        Self::connect_with_signer(
+            connection,
+            local_node_id,
+            local_identity,
+            peer,
+            local_capabilities,
+            now_ms,
+            limits
+        ).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn connect_with_signer<S: FileControlSigner + ?Sized>(
+        connection: &QuicConnection,
+        local_node_id: &str,
+        local_identity: &S,
+        peer: FileSessionPeer,
+        local_capabilities: FileCapabilitiesV1,
+        now_ms: i64,
+        limits: FileSessionLimits
+    ) -> Result<Self, FileSessionError> {
         validate_limits(limits)?;
         let (mut send, mut recv) = timeout_result(
             limits.operation_timeout,
@@ -378,6 +400,33 @@ impl FileReceiveSession {
         limits: FileSessionLimits,
         admission: &mut A
     ) -> Result<Self, FileSessionError> {
+        Self::accept_with_signer(
+            connection,
+            local_node_id,
+            local_identity,
+            peer,
+            local_capabilities,
+            now_ms,
+            limits,
+            admission
+        ).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn accept_with_signer<A, S>(
+        connection: &QuicConnection,
+        local_node_id: &str,
+        local_identity: &S,
+        peer: FileSessionPeer,
+        local_capabilities: FileCapabilitiesV1,
+        now_ms: i64,
+        limits: FileSessionLimits,
+        admission: &mut A
+    ) -> Result<Self, FileSessionError>
+    where
+        A: FileSessionAdmission,
+        S: FileControlSigner + ?Sized,
+    {
         validate_limits(limits)?;
         let (mut send, mut recv) = timeout_result(
             limits.operation_timeout,
@@ -658,9 +707,9 @@ pub(crate) fn derive_file_session_scope(
     digest[..FILE_CONTROL_ID_BYTES].try_into().expect("fixed SHA-256 prefix")
 }
 
-fn make_capability_control(
+fn make_capability_control<S: FileControlSigner + ?Sized>(
     local_node_id: &str,
-    local_identity: &Ed25519KeyPair,
+    local_identity: &S,
     recipient_node_id: &str,
     record_id: [u8; FILE_CONTROL_ID_BYTES],
     scope_id: [u8; FILE_CONTROL_ID_BYTES],
@@ -673,7 +722,7 @@ fn make_capability_control(
     let lifetime = DEFAULT_AUTH_LIFETIME_MS.min(MAX_FILE_CAPABILITY_LIFETIME_MS);
     let expires_at_ms = now_ms.checked_add(lifetime).ok_or(FileSessionError::InvalidTime)?;
     Ok(
-        sign_file_control_v1(
+        sign_file_control_with_signer_v1(
             FileControlClaimsV1 {
                 record_id,
                 scope_id,
@@ -852,7 +901,9 @@ fn abort_streams(send: &mut SendStream, recv: &mut RecvStream) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::signing_identity::InstalledSigningIdentity;
     use crate::network::file_control::{
+        sign_file_control_v1,
         FileChunkRangePageV1,
         FileChunkRangeV1,
         FileControlClaimsV1,
@@ -935,6 +986,24 @@ mod tests {
         }
     }
 
+    fn installed_identity(secret: u8) -> Arc<InstalledSigningIdentity> {
+        Arc::new(
+            InstalledSigningIdentity::from_seed(
+                1,
+                format!("pk_{}", format!("{secret:02x}").repeat(16)),
+                &[secret; 32],
+            )
+            .unwrap(),
+        )
+    }
+
+    fn installed_peer(identity: &InstalledSigningIdentity) -> FileSessionPeer {
+        FileSessionPeer {
+            node_id: identity.legacy_routing_node_id().to_owned(),
+            ed25519_public_key: identity.public_key().try_into().unwrap(),
+        }
+    }
+
     fn capabilities() -> FileCapabilitiesV1 {
         FileCapabilitiesV1 {
             min_protocol_version: 1,
@@ -987,6 +1056,61 @@ mod tests {
             capabilities(),
             NOW
         ).unwrap()
+    }
+
+    #[tokio::test]
+    async fn installed_sidecars_complete_mutual_c1_authentication() {
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+
+        let server_task = {
+            let server_endpoint = Arc::clone(&server_endpoint);
+            tokio::spawn(async move {
+                let server_identity = installed_identity(42);
+                let client_identity = installed_identity(41);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut session = FileReceiveSession::accept_with_signer(
+                    &connection,
+                    server_identity.legacy_routing_node_id(),
+                    &server_identity,
+                    installed_peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let mut sink = RecordingSink {
+                    events: Arc::new(Mutex::new(Vec::new())),
+                    fail: false,
+                };
+                assert!(matches!(
+                    session.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = installed_identity(41);
+        let server_identity = installed_identity(42);
+        let connection = client_endpoint.connect(server_addr, "p2p-messenger").await.unwrap();
+        let session = FileSendSession::connect_with_signer(
+            &connection,
+            client_identity.legacy_routing_node_id(),
+            &client_identity,
+            installed_peer(&server_identity),
+            capabilities(),
+            NOW,
+            limits(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(session.negotiated_capabilities().max_parallel_streams, 8);
+        session.close().await.unwrap();
+        server_task.await.unwrap();
     }
 
     #[tokio::test]
