@@ -338,12 +338,11 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-B3 source/static PASS; combined B1/B2/B3 host pending:** isolated `file_identity.rs`
-> добавляет `u64` geometry, ciphertext identities, streaming Merkle/commitment/proofs; B1/B2 draft
-> index/ranges widened до `u64`. Всего 34 focused tests; production callsites/legacy F3/QUIC/FFI/
-> Android/phones untouched. Прежние B1/B2 exact tips PASS, но новый combined tip ещё не compiled.
-> Сейчас только Windows `cargo test network::file_ --lib -- --nocapture`; к F4-C до PASS не идти.
-> Полный порядок F4-A…F4-H — в `SECURE_FILE_TRANSFER.md`.
+> **F4-B combined Windows PASS; текущий этап F4-C1:** exact `5ab2517` дал 34 passed, 0 failed,
+> 592 filtered; generated Kotlin/`.so` сохранены, phones untouched. Pure binary/signature/identity/
+> Merkle boundary закрыт в focused host scope. Сейчас read-only audit existing QUIC auth/ownership/
+> framing, затем только persistent single-peer ordered host foundation с durable-before-ACK fake-sink
+> tests; no FFI/Android/phones/F4-D concurrency. Полный порядок — в `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
 > `arena/01a00674-apumir` (новая Arena-сессия; handoff-история подтянута в неё ff-only из
@@ -4043,3 +4042,13 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   phones не менялись. 11 B3 tests + прежние 11 B1 + 12 B2 = 34. Syntax AST/source contract,
   `git diff --check` и callsite isolation PASS; compile/runtime pending. Следующий exact Windows
   command: `cargo test network::file_ --lib -- --nocapture`; F4-C до 34/34 PASS не начинать.
+- **2026-08-23 (доп.357) — F4-B combined Windows host gate 34/34 PASS:** canonical clone safely
+  fast-forward `96dbe28→5ab25178d09793595a44b5f12f7e311ca75651e3`; generated UniFFI Kotlin/arm64
+  `.so` hashes остались `144B3B…A566`/`2C4B12…3D58`. MSVC command
+  `cargo test network::file_ --lib -- --nocapture` compiled current lib-test target и дал
+  `34 passed; 0 failed; 0 ignored; 592 filtered out` (compile 11.09 s; tests 1.33 s). Все B1/B2/B3
+  tests, включая index >u32, u64::MAX geometry, signed/replay controls и Merkle proof/tamper, прошли
+  вместе. Три warning только прежние `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`.
+  Full suite/Android/phone runtime не запускались; телефоны не подключались. F4-B focused host gate
+  закрыт. Следующий шаг F4-C1: сначала read-only QUIC auth/ownership/framing audit, затем smallest
+  persistent single-peer ordered host slice с durable-before-ACK fake sink; no Android/phones/F4-D.

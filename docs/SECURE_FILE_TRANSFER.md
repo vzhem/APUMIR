@@ -209,7 +209,7 @@ Windows в `C:\APU-M8\rust-core` для exact `96dbe28207e5023ffac6f56401b20d5a1
 compile/runtime PASS, не full suite/Android/phone test. Generated Kotlin/`.so` сохранили exact hashes;
 телефоны не подключались.
 
-### Status 2026-08-23 — F4-B3 source/static PASS, combined host gate pending
+### Status 2026-08-23 — F4-B1/B2/B3 combined Windows host gate PASS
 
 Добавлен isolated pure `rust-core/src/network/file_identity.rs` и до production wiring окончательно
 расширены только pre-production B1/B2 binary поля chunk/range/count с `u32` до `u64`:
@@ -227,10 +227,14 @@ compile/runtime PASS, не full suite/Android/phone test. Generated Kotlin/`.so`
 - legacy F3 `crypto/file_transfer.rs`, sender, DB/UI, QUIC, FFI, Android и phones не изменены.
 
 B1/B2 draft bytes ранее не были wired ни к одному consumer, поэтому их `u64` finalization не ломает
-production/mixed versions, но прежние отдельные host results недостаточны для нового tip. Добавлено
-11 B3 tests; combined B1+B2+B3 теперь 34 test functions. `git diff --check`, source contract,
-isolation audit и Rust syntax parser PASS; compile/runtime pending. Следующий gate на Windows:
-`cargo test network::file_ --lib -- --nocapture`. Только после combined PASS разрешён F4-C.
+production/mixed versions. На Windows в `C:\APU-M8\rust-core` для exact
+`5ab25178d09793595a44b5f12f7e311ca75651e3` команда
+`cargo test network::file_ --lib -- --nocapture` скомпилировала combined lib-test target и дала
+`34 passed; 0 failed; 0 ignored; 592 filtered out` (compile 11.09 s; tests 1.33 s). Три warning —
+прежние `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`, не F4-B. Generated Kotlin/`.so`
+сохранили hashes; телефоны не подключались. Source/static + focused host compile/runtime PASS;
+full suite/Android/phone runtime не запускались. Следующий этап F4-C начинается с отдельного аудита и
+малого persistent single-peer QUIC host slice, не с Android/phones.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

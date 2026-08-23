@@ -12,10 +12,10 @@ ciphertext; внешнее хранение запрещено. Authoritative д
 в исторических разделах не переопределяют этот блок.
 
 Владелец подтвердил F4 architecture и разрешил последовательно выполнять все необходимые slices.
-B1/B2 имели focused Windows PASS на `4815582`/`96dbe28`. F4-B3 source/static PASS: ciphertext
-identity, streaming Merkle и bounded `u64` geometry без arbitrary 4-GiB cap; B1/B2 pre-production
-indices/ranges финализированы как `u64`. Combined 34-test Windows gate pending. Network/Android/
-phones остаются unwired; legacy F3 path не менялся.
+F4-B pure binary boundary полностью прошёл combined Windows gate на exact `5ab2517`: 34 passed,
+0 failed, 592 filtered. `u64` geometry, signed controls, ciphertext identity и Merkle доказаны в
+focused host scope; network/Android/phones всё ещё unwired. Текущий этап F4-C: сначала read-only QUIC
+audit, затем малый persistent authenticated single-peer host slice; не прыгать сразу к UI/phones.
 
 ---
 
@@ -1706,13 +1706,13 @@ Authoritative design и доказательные статусы:
 
 - [x] **F4-A — architecture/docs:** file design, bootstrap, master и collaboration notes
   синхронизированы и подтверждены владельцем; production code/телефоны не менялись.
-- [ ] **F4-B — pure binary protocol boundary, no network wiring:**
+- [x] **F4-B — pure binary protocol boundary, no network wiring:**
   - [x] B1 canonical frame + capability codec: source/static PASS; focused Windows host command на
     exact `4815582` дал 11 passed, 0 failed, 592 filtered. Full suite/Android/phones не запускались.
   - [x] B2 signed bounded control records: focused Windows `96dbe28`, 12 passed, 0 failed,
     603 filtered; network/Android/phones unwired.
-  - [ ] B3 ciphertext chunk/Merkle identities + `u64` geometry: source/static PASS, 11 new tests;
-    combined B1+B2+B3 34-test Windows gate pending. Legacy F3/network/Android/phones untouched.
+  - [x] B3 ciphertext chunk/Merkle identities + `u64` geometry: combined exact `5ab2517` gave
+    34 passed, 0 failed, 592 filtered. Legacy F3/network/Android/phones untouched.
 - [ ] **F4-C — persistent single-peer QUIC:** один authenticated connection, один binary stream,
   durable chunk-before-ACK, missing-range resume; no Base64/message queue.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
