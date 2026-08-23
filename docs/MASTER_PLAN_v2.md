@@ -19,8 +19,10 @@ focused host scope; network/Android/phones всё ещё unwired. F4-C1 audit + 
 durable-before-ACK sink. E0599 исправлен `bedf671`; первый combined runtime дал 41/43 и выявил
 слишком ранний drop test server после queued final ACK. Test-only lifecycle fix `ca2edb6` прошёл
 focused Windows 9/9, затем combined exact `ca2edb6` дал 43 passed, 0 failed, 592 filtered.
-F4-C1 host gate закрыт; engine/FFI/Android/phones всё ещё unwired, F4-D не начинать. Следующий
-малый F4-C slice — сначала persistent engine ownership/reconnect seam без UI/phone wiring.
+F4-C1 host gate закрыт; engine/FFI/Android/phones всё ещё unwired, F4-D не начинать. C2 read-only
+audit нашёл prerequisite: fake `CryptoManager` нельзя использовать для C1, а real installed Ed25519
+sidecar не реализует требуемый signer API. Следующий smallest C2a — internal signer abstraction без
+экспорта seed; persistent owner только после её host gate.
 
 ---
 
@@ -1729,8 +1731,12 @@ Authoritative design и доказательные статусы:
     final-ACK lifecycle fix `ca2edb6` дал 9 passed, 0 failed, 626 filtered (50.56 s + 0.20 s).
   - [x] C1 combined Windows gate exact `ca2edb6`: 43 passed, 0 failed, 592 filtered
     (compile 1.61 s; tests 1.25 s); три warnings только прежние, phones untouched.
-  - [ ] C2 persistent engine owner/reconnect seam: сначала host-only ownership design/tests; не
-    подключать FFI/Android/UI/phones и не добавлять parallel streams F4-D.
+  - [x] C2 read-only prerequisite audit: legacy pool допускает duplicate connect race и не
+    authenticated; listener endpoint недоступен owner; fake FFI CryptoManager не является Ed25519.
+  - [ ] C2a real signer seam: internal public-key/sign trait для test `Ed25519KeyPair` и existing
+    `InstalledSigningIdentity`, без seed export/fake fallback; focused host gate.
+  - [ ] C2b bounded single-flight persistent owner/reconnect после C2a; no FFI/Android/UI/phones и
+    no parallel streams F4-D.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,

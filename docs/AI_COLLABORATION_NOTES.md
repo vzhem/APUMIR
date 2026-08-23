@@ -4103,3 +4103,17 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Android/FFI/phone runtime и не throughput benchmark. F4-C1 закрыт. Следующий малый slice F4-C2:
   read-only lifetime/pool/runtime review, затем bounded persistent authenticated owner + reconnect
   seam в host scope; не использовать legacy unsigned pool и не начинать F4-D parallel streams.
+- **2026-08-23 (доп.362) — F4-C2 read-only ownership audit остановил unsafe engine wiring:**
+  `run_quic_listener()` локально владеет bound `QuicClient`, поэтому reusable endpoint недоступен
+  engine owner; old `send_via_quic()` создаёт endpoint/connection на каждый send, а `stop()` делает
+  runtime `shutdown_background()` без file-session cleanup. Unwired legacy `ConnectionPool` keyed
+  произвольным `Vec<u8>`, хранит только unauthenticated `QuicConnection`, отпускает mutex перед
+  connect и поэтому допускает concurrent duplicate connections; C1 auth/session туда добавлять
+  нельзя. Ещё важнее: engine `ffi::CryptoManager` создаёт legacy `pk_`/`sig_` simulation и не
+  является Ed25519. Реальный device-bound key уже безопасно живёт как global
+  `Arc<InstalledSigningIdentity>` и ставится Android до engine startup, но key pair private, а C1
+  API жёстко принимает `&Ed25519KeyPair`. Private seed/key не экспортировать и fake manager не
+  использовать как fallback. Следующий smallest host-only C2a — internal abstraction только для
+  public key + sign operation, adapters для test `Ed25519KeyPair` и existing installed identity,
+  focused success/wrong-identity/fail-closed tests. Bounded single-flight owner/reconnect — C2b после
+  этого gate. На этом шаге code/FFI/Android/phones не менялись; release/tag/PR не делались.

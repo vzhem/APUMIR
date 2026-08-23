@@ -276,8 +276,26 @@ receiver wait; production protocol/state не менялись. Focused Windows 
 же exact code дал `43 passed; 0 failed; 0 ignored; 592 filtered out` (compile 1.61 s; tests 1.25 s).
 Три warning только прежние `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`; generated-file
 guard прошёл, телефоны не подключались. F4-C1 host compile/runtime gate закрыт. Engine/FFI/Android/F3
-всё ещё unwired; F4-D не начат. Следующий F4-C slice сначала должен определить persistent engine
-ownership/reconnect seam без подключения UI/phones.
+всё ещё unwired; F4-D не начат.
+
+### F4-C2 read-only ownership audit — prerequisite signer seam
+
+Audit после C1 остановил прямое engine wiring по двум причинам:
+
+- legacy `ConnectionPool` хранит unauthenticated `QuicConnection` под произвольным `Vec<u8>` key,
+  отпускает mutex до connect (concurrent callers могут создать duplicate connections), не хранит C1
+  session/auth scope и вообще не вызывается `P2PCore`; использовать/«расширить» его для файлов нельзя;
+- listener task локально владеет единственным bound `QuicClient`, send path создаёт другой endpoint
+  на каждый call, а `stop()` делает runtime background shutdown без file-session owner cleanup;
+- `ffi::CryptoManager` генерирует legacy random IDs и имитирует подпись строкой — это не Ed25519 и
+  не может аутентифицировать C1. Реальный device-bound Ed25519 находится в global
+  `InstalledSigningIdentity`, устанавливается Android до engine start и не экспортирует seed, но C1
+  пока принимает concrete `&Ed25519KeyPair`.
+
+Поэтому следующий smallest C2a — internal signer abstraction: только public key + signing operation,
+реализации для `Ed25519KeyPair` tests и уже установленного `InstalledSigningIdentity`, без выдачи
+private seed и без fallback к fake CryptoManager. Только после host gate C2a можно строить bounded
+single-flight session owner. FFI/Android callsites/phones и F4-D concurrency пока не менять.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

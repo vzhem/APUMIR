@@ -53,8 +53,9 @@
 focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab2517` дал 34 passed,
 0 failed, 592 filtered. F4-B закрыт в focused host scope. F4-C1 audit и host-only source/static
 готовы на exact `bf4f0c6`; fixes `bedf671`/`ca2edb6` прошли focused Windows 9/9 и combined exact
-`ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. Следующее действие — read-only ownership
-review и один host-only F4-C2 persistent engine owner/reconnect seam. FFI/Android/phones/F4-D не трогать.
+`ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. F4-C2 read-only ownership review завершён:
+legacy pool/engine identity нельзя безопасно подключать к C1. Следующее действие — host-only C2a
+real-identity signer seam; persistent owner только после его gate. FFI/Android/phones/F4-D не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -187,26 +188,29 @@ Arena branch, newest committed override и production source. Не подтяг�
 Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
 считать реализацией.
 
-### 8. Непосредственный следующий шаг — F4-C2 persistent owner/reconnect seam
+### 8. Непосредственный следующий шаг — F4-C2a real signer seam
 
-F4-C1 exact `ca2edb6` закрыл focused 9/9 и combined 43/43 host gates. Он доказывает одну session,
-но production engine всё ещё создаёт новый endpoint/connection на каждый old send, listener владеет
-своим недоступным `QuicClient`, а существующий unauthenticated `ConnectionPool` не wired.
+F4-C1 exact `ca2edb6` закрыл focused 9/9 и combined 43/43 host gates. C2 read-only audit подтвердил:
+production send создаёт endpoint/connection на каждый old send, listener endpoint локален его task,
+а unwired `ConnectionPool` unauthenticated, keyed произвольными bytes и допускает concurrent duplicate
+connect. Его нельзя расширять как file-session owner.
 
-Сначала read-only сверить lifetime/runtime/shutdown и все pool/send/accept callsites. Затем определить
-и сделать только smallest host-testable C2:
+До owner есть обязательный identity prerequisite. `ffi::CryptoManager` использует fake legacy
+подписи и не является Ed25519. Реальный device-bound `Arc<InstalledSigningIdentity>` устанавливается
+Android до engine start и не экспортирует private seed/key, но C1 принимает concrete
+`&Ed25519KeyPair`.
 
-1. bounded owner одного reusable endpoint и не более одной authenticated C1 sender session на pinned
-   peer/path; concurrent connect должен быть single-flight, не создавать дубли;
-2. closed/failed session удаляется; reconnect создаёт fresh exporter-bound handshake и сохраняет
-   signed MissingRanges seam, но не хранит whole file в RAM;
-3. explicit shutdown/idle eviction и bounded peer count; no generic message pool key без verified
-   Ed25519 identity;
-4. loopback tests на reuse, duplicate-connect race, eviction/reconnect, wrong peer и shutdown;
-5. пока no FFI/Android/UI/phones и no parallel streams/window — это F4-D.
+Следующий smallest host-testable C2a:
 
-Если безопасный ownership нельзя отделить от текущего engine runtime малым slice, сначала записать
-точный design seam и остановиться, а не подключать C1 к legacy unsigned text listener.
+1. internal signer abstraction только для verified public key + sign operation;
+2. implementations для test `Ed25519KeyPair` и existing `InstalledSigningIdentity`, без seed export и
+   без fallback к fake CryptoManager;
+3. focused tests на adapter, C1 success/wrong identity/fail-closed paths;
+4. no FFI/Android/UI/phones и no parallel streams/window F4-D.
+
+После зелёного C2a gate сделать C2b: bounded reusable endpoint owner, authenticated-session
+single-flight, failed/idle eviction, reconnect с fresh exporter-bound mutual handshake, explicit
+shutdown и loopback reuse/race/reconnect/wrong-peer tests. Не подключать C1 к legacy text listener.
 
 ### 9. Порядок после F4-B
 
@@ -273,6 +277,6 @@ F4-C1 exact `ca2edb6` закрыл focused 9/9 и combined 43/43 host gates. О�
 - Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
 - F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
 - F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
-- Следующий только F4-C2 host owner/reconnect seam; F4-D/FFI/Android/phones не начинать.
+- Следующий только F4-C2a real signer seam; затем C2b owner/reconnect. F4-D/FFI/Android/phones не начинать.
 
-Сейчас выполни read-only review и C2 из раздела 8. Телефоны не нужны.
+Сейчас выполни C2a из раздела 8. Телефоны не нужны.
