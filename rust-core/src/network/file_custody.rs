@@ -1142,7 +1142,7 @@ mod tests {
                     &node(2),
                     &ciphertext,
                     NOW + 1,
-                    NOW + FILE_CUSTODY_MIN_TTL_MS,
+                    NOW + 1 + FILE_CUSTODY_MIN_TTL_MS,
                 )
                 .unwrap();
             assert!(matches!(duplicate, FileCustodyStoreOutcome::AlreadyStored(_)));
@@ -1192,7 +1192,7 @@ mod tests {
                 &node(2),
                 &range(1, 1, 64),
                 NOW + 2,
-                NOW + FILE_CUSTODY_MIN_TTL_MS,
+                NOW + 2 + FILE_CUSTODY_MIN_TTL_MS,
             ),
             Err(FileCustodyError::Tombstoned)
         );
@@ -1222,7 +1222,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store.store_range(
-                &peer(1), false, &node(2), &range(2, 1, 1), NOW,
+                &peer(1), false, &node(2), &range(2, 1, 17), NOW,
                 NOW + FILE_CUSTODY_MIN_TTL_MS,
             ),
             Err(FileCustodyError::RateLimitExceeded)
@@ -1252,7 +1252,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store.store_range(
-                &peer(1), false, &node(2), &range(1, 1, 1), NOW,
+                &peer(1), false, &node(2), &range(1, 1, 17), NOW,
                 NOW + FILE_CUSTODY_MIN_TTL_MS,
             ),
             Err(FileCustodyError::OriginQuotaExceeded)
@@ -1330,7 +1330,7 @@ mod tests {
                 .store_range(
                     &peer(1), false, &node(2), &range(index, index as u8, 64),
                     NOW + i64::try_from(index).unwrap(),
-                    NOW + FILE_CUSTODY_MIN_TTL_MS,
+                    NOW + i64::try_from(index).unwrap() + FILE_CUSTODY_MIN_TTL_MS,
                 )
                 .unwrap();
         }
