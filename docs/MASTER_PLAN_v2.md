@@ -32,8 +32,9 @@ adaptive scheduler прошёл explicit 3/3 и combined 62/62: debug loopback 5
 controlled 30-ms RTT/5% loss полностью восстановлен с backoff. F4-E exact `103f041` + `f7e7562`
 signed 60/90 path manager, durable replay/restart store и typed QUIC/TCP/tunnel dispatch прошёл
 Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` отдельный opaque ciphertext range store
-прошёл Windows custody 8/8 и combined 79/79. Следующий F2 signed receipt/missing pull; Android,
-engine publish, physical LAN/NAT и оставшиеся F4-F…H ещё обязательны.
+прошёл Windows custody 8/8 и combined 79/79; F2a exact `2cc0e36` signed receipt — 4/4 и combined
+83/83. F2b atomic receipt/missing pull source `80416bc` pending Windows. Android, engine publish,
+physical LAN/NAT и оставшиеся F4-F…H ещё обязательны.
 
 ---
 
@@ -1769,7 +1770,8 @@ Authoritative design и доказательные статусы:
   custody receipts, inventory/missing pull, bounded replication, TTL/cleanup/reboot/flood defense.
   - [x] F1 exact `60407fa`: opaque ciphertext ranges, opt-in policy, quotas/TTL/flood bounds,
     transactional restart/tombstone/disk-full store; Windows 8/8 + combined 79/79, guard PASS.
-  - [ ] F2 durable signed receipt + explicit bounded inventory/missing-range pull.
+  - [ ] F2 durable signed receipt + explicit bounded inventory/missing-range pull: signed codec exact
+    `2cc0e36` Windows 4/4 + combined 83/83; atomic SQLite/pull exact `80416bc` Windows pending.
   - [ ] F3 bounded replication/recovery and production engine/Android/device-bound at-rest wiring.
 - [ ] **F4-G — path switching:** direct ↔ transient conduit ↔ live phone relay ↔ delayed custody с
   одним transfer ID и без сброса verified progress.

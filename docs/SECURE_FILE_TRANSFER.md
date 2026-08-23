@@ -439,6 +439,13 @@ combined `network::file_` 79/79 + 3 ignored D3 (compile 0.36 s, tests 1.34 s); �
 warnings, generated hashes сохранены. Это F1, не весь F: durable signed receipt, explicit missing pull,
 bounded replication/engine/Android/device-bound at-rest wiring и physical phone gates ещё обязательны.
 
+F4-F2a exact `2cc0e36` canonical signed exact-range receipt прошёл Windows 4/4 и combined 83/83:
+receipt связывает pinned origin/custodian/recipient, transfer ID, полный `u64` chunk index, geometry,
+ciphertext digest и absolute lease; tamper/truncation/trailing/expiry fail-closed, installed signer seed
+не экспортируется. F2b source `80416bc` делает receipt+ciphertext одной SQLite transaction, rollback
+при sign failure, schema-v2 restart restore и explicit sorted/unique authenticated missing pull; static
+PASS, Windows compile pending. Поэтому весь F и production delivery ещё не объявлены готовыми.
+
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 

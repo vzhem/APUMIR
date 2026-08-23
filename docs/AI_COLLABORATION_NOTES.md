@@ -4282,3 +4282,19 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   modifications. F4-F не закрыт: следующий F2 durable signed exact-range receipt + explicit missing
   pull; затем bounded replication/recovery и engine/Android/device-bound at-rest wiring. Phones/FFI/
   Android не запускались.
+- **2026-08-23 (доп.375) — F4-F2a signed exact-range receipt Windows 4/4 + combined 83/83 PASS;
+  F2b source pending compile:** exact tested `2cc0e36948b7d48820ec8f9d5c8367c30c8a296c` добавил
+  canonical `APUR` receipt ≤512 bytes, Ed25519 domain separation и exact binding origin/custodian/
+  recipient + transfer ID + full `u64` chunk index + offset/full-chunk/range lengths + ciphertext
+  digest + absolute lease. Decode проверяет every truncation/trailing/tamper, geometry, modern node/key
+  binding и authenticated pinned peers; installed sidecar подписывает без seed export. Windows
+  receipt `4 passed; 0 failed; 674 filtered out` (compile 12.55 s, tests 0.03 s); combined
+  `83 passed; 0 failed; 3 ignored; 592 filtered out` (compile 0.37 s, tests 1.36 s), только три
+  прежних warnings и две intentional generated modifications. Первый `git fetch` временно не достиг
+  GitHub:443, следующий pull успешно получил exact commit; code gate unaffected. Следующий source
+  `80416bcbbfd0a71894f3263500193a91f4d40181` atomically inserts signed receipt in the same SQLite
+  transaction as ciphertext (sign failure rolls back bytes), migrates schema v2, restores exact
+  receipt after restart and adds sorted/unique ≤1024 exact-range authenticated-recipient missing pull
+  under the existing 32-MiB per-call streaming bound. Unsigned admission теперь test-only. Jinx/diff/
+  no-legacy-text static gates PASS; Windows compile ещё неизвестен, поэтому F2b/F4-F не закрыты.
+  Phones/Android/FFI не запускались.

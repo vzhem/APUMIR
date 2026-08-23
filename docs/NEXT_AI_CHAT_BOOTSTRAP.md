@@ -62,8 +62,9 @@ connection прошёл Windows 17/17 focused и 61/61 combined. D3 exact `0032c
 combined 62/62: debug loopback 59,040,998 B/s, text 678 μs, controlled 30-ms RTT/5% loss recovered с
 adaptive backoff. F4-E exact `103f041` + `f7e7562` signed 60/90 path manager, durable restart store
 и typed dispatch прошёл Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` opaque range store
-прошёл Windows custody 8/8 и combined 79/79. Следующий F2 signed receipt/missing pull; Android/engine
-publish/physical LAN/NAT и оставшиеся F…H ещё впереди. Телефоны пока не трогать.
+прошёл Windows custody 8/8/combined 79/79; F2a exact `2cc0e36` receipt 4/4/combined 83/83. F2b exact
+`80416bc` atomic receipt/missing pull ждёт Windows. Android/engine/physical F…H ещё впереди; телефоны
+пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -318,7 +319,8 @@ full `u64` sequence/beacon до manager visibility; restart/replay test PASS. Wi
 - F4-D3 exact `0032c67`: explicit 3/3 + combined 62/62 PASS; fast/text/slow-loss metrics записаны.
 - F4-E1/E2 exact `103f041`/`f7e7562`: Windows path 9/9 + combined 71/71 PASS; guard PASS.
 - F4-F1 exact `60407fa`: Windows custody 8/8 + combined 79/79 PASS; guard PASS.
-- Следующий F2; FFI/Android/phones не подключать до custody source gates.
+- F4-F2a exact `2cc0e36`: Windows receipt 4/4 + combined 83/83 PASS; F2b `80416bc` pending.
+- Следующий gate F2b; FFI/Android/phones не подключать до custody source gates.
 
-Сейчас делай F2: durable signed exact-range receipt и explicit bounded inventory/missing pull. Затем F3
-replication/recovery/wiring. Телефоны пока не нужны; physical acceptance остаётся в F4-H.
+Сначала проверь F2b atomic receipt/missing pull, затем делай F3 replication/recovery/wiring. Телефоны
+пока не нужны; physical acceptance остаётся в F4-H.
