@@ -60,9 +60,9 @@ combined 53/53; F4-C host gate закрыт. F4-D1 exact `0ef7706` bounded ACK w
 13/13 focused и 56/56 combined. D2 exact `fc20f33` parallel streams внутри одного authenticated
 connection прошёл Windows 17/17 focused и 61/61 combined. D3 exact `0032c67` прошёл explicit 3/3 и
 combined 62/62: debug loopback 59,040,998 B/s, text 678 μs, controlled 30-ms RTT/5% loss recovered с
-adaptive backoff. F4-E1 exact `103f041` signed 60/90 path manager прошёл Windows 7/7 и combined
-69/69. Следующий E2 typed dispatch/engine persistence; Android/physical LAN/NAT/custody и F…H ещё
-впереди. Телефоны пока не трогать.
+adaptive backoff. F4-E exact `103f041` + `f7e7562` signed 60/90 path manager, durable restart store
+и typed dispatch прошёл Windows path 9/9 и combined 71/71. Следующий F custody; Android/engine publish/
+physical LAN/NAT и F…H ещё впереди. Телефоны пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -240,9 +240,10 @@ frames. Combined 62/62, generated guard PASS. Controlled F4-D host scope зак�
 manager, F custody, G switching, H physical LAN/NAT/UDP-blocked/phone acceptance. E1 exact `103f041`
 добавил contact-scoped signed canonical beacon, 60/90 lifetime, 8-candidate/256-contact caps,
 replay/expiry/failure cooldown и LAN QUIC → Internet QUIC → direct TCP → tunnel selection. Windows
-path 7/7, combined 69/69, generated guard PASS. E2 должен типизированно передавать только QUIC route
-в pinned `FileSessionOwner`, не маскировать TCP/tunnel как QUIC, затем durable engine publish/store.
-Legacy text listener для file bytes не использовать.
+path 7/7, combined 69/69, generated guard PASS. E2 exact `f7e7562` типизированно передаёт только QUIC
+route в pinned `FileSessionTarget`, оставляет TCP/tunnel отдельными variants и транзакционно сохраняет
+full `u64` sequence/beacon до manager visibility; restart/replay test PASS. Windows path 9/9, combined
+71/71. Engine publish/physical transport остаётся G/H; legacy text listener для file bytes запрещён.
 
 ### 9. Порядок после F4-B
 
@@ -314,8 +315,8 @@ Legacy text listener для file bytes не использовать.
 - F4-D1 exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS.
 - F4-D2 exact `fc20f33`: Windows 17/17 session + 61/61 combined PASS; generated guard PASS.
 - F4-D3 exact `0032c67`: explicit 3/3 + combined 62/62 PASS; fast/text/slow-loss metrics записаны.
-- F4-E1 exact `103f041`: Windows path 7/7 + combined 69/69 PASS; generated guard PASS.
-- Следующий E2; FFI/Android/phones не подключать до path/custody source gates.
+- F4-E1/E2 exact `103f041`/`f7e7562`: Windows path 9/9 + combined 71/71 PASS; guard PASS.
+- Следующий F custody; FFI/Android/phones не подключать до custody source gates.
 
-Сейчас делай E2: typed path→authenticated-owner dispatch и durable engine persistence/publish. Затем
-F custody. Телефоны пока не нужны; physical path acceptance остаётся в F4-H.
+Сейчас делай F: отдельный opaque encrypted-range custody store, owner policy/quota/TTL/receipts,
+restart/disk-full/flood gates. Телефоны пока не нужны; physical acceptance остаётся в F4-H.

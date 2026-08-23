@@ -418,6 +418,16 @@ truncation/trailing/oversize, duplicate IDs и invalid endpoints fail-closed. Wi
 нужны typed dispatch в authenticated owner, durable engine persistence/publish и physical fallback
 acceptance; затем F custody.
 
+F4-E2 typed dispatch + durable path replay store проверен на exact
+`f7e7562d912ec235a965d08dc7fc853c246f6ee6`: только QUIC candidate может создать pinned
+`FileSessionTarget`; direct TCP/tunnel остаются отдельными typed variants и не могут случайно попасть
+в QUIC owner. SQLite transaction проверяет durable `u64` sequence, stage-ит manager, коммитит signed
+beacon до публикации state, bounded-восстанавливает таблицу после restart и purges expiry. Windows
+path 9/9 (compile 22.62 s, tests 0.06 s), combined 71/71 + 3 ignored D3 (compile 0.35 s, tests 1.34 s),
+только три прежних warnings, generated hashes сохранены. E host data/selection layer закрыт; publish/
+engine/physical transport wiring проверяется вместе с G/H. Следующий source slice — F encrypted
+phone-owned custody; это ещё не release readiness.
+
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 

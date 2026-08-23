@@ -4250,3 +4250,18 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   E1 host gate закрыт, но E ещё нет: следующий E2 typed path dispatch в pinned authenticated owner,
   durable engine sequence/candidate persistence и publish; physical fallback остаётся H. Phones/
   Android/FFI не запускались.
+- **2026-08-23 (доп.373) — F4-E2 typed dispatch + durable restart store Windows 9/9 + combined
+  71/71 PASS:** exact `f7e7562d912ec235a965d08dc7fc853c246f6ee6` ввёл `FilePathDispatch`:
+  только LAN/Internet QUIC строит exact pinned `FileSessionTarget`; direct TCP и TCP tunnel содержат
+  отдельный peer/endpoint variant и type-level не могут попасть в QUIC-only owner. SQLite path store
+  хранит peer key, canonical signed beacon, expiry и sequence как 8-byte big-endian BLOB (полный
+  `u64`, без SQLite-i64 ceiling). `BEGIN IMMEDIATE` читает durable last sequence, verifies record,
+  stage-ит clone manager, пишет row/commit и только затем публикует staged memory state; replay после
+  restart fail-closed. Bounded load rebuild-ит manager только из unexpired self-verifying rows;
+  corruption fails whole load, expiry purge bounded. Two tests добавлены: route type separation с
+  UDP-blocked TCP→tunnel и durable commit/replay/restart restore. Jinx/diff PASS. Windows path:
+  `9 passed; 0 failed; 657 filtered out` (compile 22.62 s, tests 0.06 s); combined `network::file_`:
+  `71 passed; 0 failed; 3 ignored; 592 filtered out` (compile 0.35 s, tests 1.34 s). Только три
+  прежних warnings, generated hashes сохранены. F4-E host data/selection layer закрыт; engine publish
+  и physical fallback остаются G/H. Следующий F — отдельный encrypted phone-owned custody store,
+  не legacy text RelayQueue. Phones/Android/FFI не запускались.
