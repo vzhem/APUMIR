@@ -4298,3 +4298,17 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   under the existing 32-MiB per-call streaming bound. Unsigned admission теперь test-only. Jinx/diff/
   no-legacy-text static gates PASS; Windows compile ещё неизвестен, поэтому F2b/F4-F не закрыты.
   Phones/Android/FFI не запускались.
+- **2026-08-23 (доп.376) — F4-F2b atomic receipt + exact missing pull Windows 11/11 + combined
+  86/86 PASS:** canonical Windows clone fast-forward до documented `95e48b9`, source under test exact
+  `80416bcbbfd0a71894f3263500193a91f4d40181`. Schema v2 receipt row имеет FK/cascade к exact
+  ciphertext-range identity. New admission inserts bytes, durable rate state и canonical signed
+  receipt в одном `BEGIN IMMEDIATE`; bad signer test получает typed receipt error и usage остаётся 0.
+  Duplicate после file-DB close/reopen возвращает byte-identical pinned receipt, не продлевает lease.
+  Explicit missing pull принимает только sorted unique ≤1024 exact `(u64 chunk, offset, len, digest)`
+  selectors от transport-pinned recipient, ≤32 MiB за вызов, silently skips absent/wrong-recipient и
+  digest-rechecks loaded ciphertext. Unsigned store admission compiled only in tests. Windows custody:
+  `11 passed; 0 failed; 670 filtered out` (compile 15.96 s, tests 0.07 s); combined:
+  `86 passed; 0 failed; 3 ignored; 592 filtered out` (compile 0.35 s, tests 1.39 s). Только три
+  прежних warnings; two generated paths unchanged. F2 host scope закрыт. F4-F всё ещё не закрыт:
+  следующий F3 bounded multi-custodian replication/recovery + production engine/FFI/Android and
+  device-bound at-rest wiring. Physical phone/non-overlap gates остаются H; phones не запускались.

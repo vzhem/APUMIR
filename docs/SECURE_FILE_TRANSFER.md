@@ -444,7 +444,10 @@ receipt связывает pinned origin/custodian/recipient, transfer ID, по�
 ciphertext digest и absolute lease; tamper/truncation/trailing/expiry fail-closed, installed signer seed
 не экспортируется. F2b source `80416bc` делает receipt+ciphertext одной SQLite transaction, rollback
 при sign failure, schema-v2 restart restore и explicit sorted/unique authenticated missing pull; static
-PASS, Windows compile pending. Поэтому весь F и production delivery ещё не объявлены готовыми.
+PASS. Windows exact source `80416bc`: custody 11/11 (compile 15.96 s, tests 0.07 s), combined 86/86
++ 3 ignored (compile 0.35 s, tests 1.39 s); sign failure rollback, restart-stable exact receipt и
+authenticated exact missing pull подтверждены. F2 host scope закрыт. Весь F и production delivery ещё
+не готовы: bounded replication и engine/FFI/Android/device-bound at-rest wiring остаются F3.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
