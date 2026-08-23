@@ -21,6 +21,7 @@ pub mod dht;
 pub mod fallback_chain;
 pub mod file_control;
 pub mod file_custody;
+pub mod file_custody_receipt;
 pub mod file_identity;
 pub mod file_path;
 pub mod file_session;
