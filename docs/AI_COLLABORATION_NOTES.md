@@ -4177,3 +4177,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   прямому замечанию владельца больше не размазывать прогресс по декоративным seams: следующий
   substantive этап F4-D bounded/adaptive throughput с измерениями, затем E path manager, F custody,
   G switching и H end-to-end acceptance. Нельзя объявлять главную задачу закрытой до F4-H.
+- **2026-08-23 (доп.368) — F4-D1 bounded adaptive ACK window source/static PASS:** exact source
+  `0ef770618292ce1f7ba259cc051a1c390bf7ca62` меняет реальный C1 data path, а не добавляет ещё один
+  owner wrapper. Sender preflights bounded slice и пишет несколько chunk records до ordered durable
+  ACKs, снимая one-frame-per-RTT limit; receiver durable-before-ACK не ослаблен. Hard caps 64 frames/
+  16 MiB wire, default 8/2 MiB; whole file не принимается. Report измеряет ciphertext/wire bytes и
+  elapsed. AIMD хранит EWMA ACK time/throughput, растёт additively после двух full successes и halves
+  при failure. C2b owner делегирует window operation. 3 tests добавлены: adaptive metrics/backoff,
+  authenticated 8-frame pipeline, oversize reject before first chunk write. Expected session 13,
+  combined file 56. Jinx changed files `Program`, `MissingNode=0`; bounds/no-text-storage/diff checks
+  PASS. Arena compile unavailable, Windows pending. Это только D1: D2 parallel streams и D3
+  fast/slow/loss/text benchmarks обязательны до F4-D close; engine/Android/phones untouched.

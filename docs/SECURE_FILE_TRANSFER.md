@@ -347,8 +347,25 @@ outcome. Production owner/session/protocol не менялись. Static diff/Ji
 0.69 s), combined `network::file_` — `53 passed; 0 failed; 592 filtered out` (compile 0.36 s, tests
 1.39 s). Три warnings только прежние; generated Kotlin/arm64 hashes сохранены, телефоны untouched.
 C2b host gate закрыт. Это ещё не production file delivery: engine/FFI/Android/UI/path manager/custody
-unwired. Следующий substantive этап — F4-D data-plane throughput (bounded window/parallel streams,
-backpressure и benchmarks), затем F4-E…H; нельзя выдавать C2b за готовую пользовательскую функцию.
+unwired.
+
+F4-D1 bounded adaptive ACK window source/static реализован на exact
+`0ef770618292ce1f7ba259cc051a1c390bf7ca62`:
+
+- sender может записать bounded slice chunk records до ожидания ordered durable ACKs, убирая старый
+  предел «один frame на RTT»; receiver durable-before-ACK правило не ослаблено;
+- hard limits: максимум 64 frames и 16 MiB wire bytes, default 8/2 MiB; весь slice полностью
+  shape/negotiation/window-validates до первого write, whole file в RAM не загружается;
+- report измеряет ciphertext/wire bytes и ACK-window elapsed; AIMD controller хранит EWMA ACK time и
+  throughput, после двух заполненных успешных окон растёт additively, при failure немедленно halves;
+- persistent owner делегирует window operation, сохраняя single-flight session ownership;
+- 3 новых tests: controller growth/backoff/metrics, 8-frame authenticated pipeline, oversize reject
+  до первого chunk write. Expected file-session 13, combined F4 56.
+
+Jinx changed files `Program`, `MissingNode=0`; static bounds/no-text-storage и diff checks PASS.
+Windows compile/runtime pending. D1 — реальный throughput progress, но не весь F4-D: connection-level
+parallel streams, slow/loss benchmarks и text-latency budget ещё обязательны. Затем F4-E…H; нельзя
+выдавать host ACK window за готовую пользовательскую функцию.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

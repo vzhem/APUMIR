@@ -56,8 +56,9 @@ focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab251
 `ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. F4-C2 read-only ownership review завершён:
 legacy pool/engine identity нельзя безопасно подключать к C1. Host-only C2a signer seam exact
 `0736d9b` прошёл Windows 46/46. C2b source `fd5d1f3` + test-only `471d099` прошёл focused 7/7 и
-combined 53/53; F4-C host gate закрыт. Это не production delivery: engine/FFI/Android/path/custody
-unwired. Следующий substantive этап — F4-D throughput, затем F4-E…H. Телефоны пока не трогать.
+combined 53/53; F4-C host gate закрыт. F4-D1 source/static exact `0ef7706` добавил bounded ACK
+window + measured AIMD и 3 tests; Windows compile/runtime pending. Parallel streams/benchmarks,
+engine/Android/path/custody и E…H ещё впереди. Телефоны пока не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -222,13 +223,14 @@ capacity и shutdown. Jinx `Program`/zero MissingNode, static contract и diff c
 После test-only `471d0994885a5bf66139b8775bcefcb67734d8ed` Windows focused owner дал
 7/7, combined `network::file_` 53/53 и 592 filtered; C2b/F4-C host gate закрыт.
 
-Теперь не делать ещё одну декоративную wrapper-прослойку. F4-D должен дать реальный bounded
-throughput seam: несколько chunk operations in flight без whole-file RAM, hard byte/window limits,
-ACK-driven backpressure, adaptive concurrency по измеряемым RTT/loss/throughput и fair text-latency
-budget. Сначала read-only сверить C1 stream ownership и выбрать минимальный connection-level design,
-затем host loopback fast/slow/loss tests и benchmarks. После D последовательно закрывать E path
-manager, F phone custody, G path switch и H end-to-end acceptance. Engine/FFI/Android/phones не
-подключать раньше доказанного host data plane; legacy text listener не использовать для file bytes.
+D1 source/static exact `0ef770618292ce1f7ba259cc051a1c390bf7ca62` уже сделал несколько chunk
+operations in flight на ordered C1 stream: hard 64 frames/16 MiB, default 8/2 MiB, preflight до write,
+ACK metrics/AIMD и owner delegation, без whole-file RAM. Добавлены 3 tests; Jinx/static/diff PASS.
+Сначала Windows: `network::file_session::tests` ожидает 13/13, combined `network::file_` — 56/56 и
+592 filtered. Затем D2 connection-level parallel streams и D3 fast/slow/loss/text benchmarks.
+После D последовательно закрывать E path manager, F phone custody, G path switch и H end-to-end
+acceptance. Engine/FFI/Android/phones не подключать раньше доказанного host data plane; legacy text
+listener не использовать для file bytes.
 
 ### 9. Порядок после F4-B
 
@@ -297,6 +299,7 @@ manager, F phone custody, G path switch и H end-to-end acceptance. Engine/FFI/A
 - F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
 - C2a exact `0736d9b` Windows 46/46 PASS; не повторять без code change.
 - C2b source `fd5d1f3` + test-only `471d099`: Windows 7/7 focused, 53/53 combined PASS.
-- Следующий F4-D throughput; FFI/Android/phones не начинать до host proof.
+- F4-D1 source/static exact `0ef7706`; сначала Windows 13/13 session + 56/56 combined.
+- Затем D2/D3; FFI/Android/phones не начинать до host throughput proof.
 
-Сейчас делай F4-D из раздела 8. Телефоны не нужны.
+Сейчас закрой D1 host gate из раздела 8. Телефоны не нужны.
