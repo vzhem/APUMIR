@@ -338,12 +338,13 @@ commit, проверенный APK и `libp2p_core.so`, SHA-256, environment/mil
 > AEAD tag также превышает packet cap 1024 fragments. Не повторять claims доп.343/344 о готовой
 > гигабайтной/параллельной инфраструктуре без новых доказательств.
 >
-> **F4-B1 focused Windows host gate PASS:** новый изолированный
-> `rust-core/src/network/file_wire.rs` задаёт canonical bounded binary frame + capability negotiation
-> и не wired к sender/QUIC/FFI/Android. Source/static PASS; на exact `4815582` focused lib-test target
-> скомпилирован: 11 passed, 0 failed, 592 filtered. Это не full suite/Android/phone proof. Windows
-> clone теперь на текущей Arena branch, две прежние generated-модификации Kotlin/`.so` сохранены.
-> B2 — отдельный slice; не начинать автоматически. Полный порядок F4-A…F4-H находится в
+> **F4-B1 Windows PASS; F4-B2 source/static PASS, host pending:** `network/file_control.rs`
+> задаёт isolated canonical signed capability/offer/missing/custody/final records, peer+scope/time/
+> replay bounds и 12 unit-test функций; sender/QUIC/FFI/Android unwired. Arena syntax/source gates
+> PASS, Rust compile/runtime pending. Владелец разрешил последовательно продолжать все F4 slices и
+> уточнил главный приоритет: быстрые файлы любого объёма через любую сеть. Поэтому B3 обязан убрать
+> arbitrary 4-GiB coupling через bounded streaming/`u64`; физические filesystem/storage/quota limits
+> остаются. Сейчас только focused B2 Windows gate; телефоны не нужны. Полный порядок F4-A…F4-H — в
 > `SECURE_FILE_TRANSFER.md`.
 >
 > **HISTORICAL OVERRIDE 2026-08-15 (не является текущей задачей):** активная ветка той сессии —
@@ -3999,3 +4000,24 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Рабочие файлы не перезаписывались; после realign остались только четыре docs. Hard reset/force
   push/merge не применялись. B2 signed control — отдельный следующий slice и автоматически не
   начинался; release/tag/PR не делались.
+- **2026-08-23 (доп.354) — владелец сделал F4 главным приоритетом; F4-B2 source/static PASS:**
+  владелец разрешил последовательно выполнять все необходимые шаги и просить только готовые Windows
+  команды/phone gates. Уточнено «файлы любого объёма быстро через любую сеть»: это не физическая
+  бесконечность, а отсутствие arbitrary 4-GiB product cap; B3 должен убрать текущую manifest/B1
+  geometry coupling в пользу bounded streaming/paging, `u64`, filesystem/storage/quota limits.
+  Добавлен pure `network/file_control.rs` + module declaration, без sender/QUIC/FFI/Android wiring.
+  Canonical `APUC` v1 (64-KiB hard bound) domain-separated Ed25519-signs пять типов: capability,
+  opaque encrypted offer (≤32 KiB + ciphertext SHA-256), paged missing ranges, custody offer/accept/
+  stored receipt и final receipt. Общие claims связывают record/scope IDs, monotonic sequence,
+  absolute created/expiry, signer/recipient и pinned public key; verifier требует expected current
+  scope и durable last sequence. Range record ≤1024 sorted nonadjacent intervals, но total chunks
+  допускает `u32::MAX`; final bytes = `u64`. Modern IDs обязаны выводиться из key, legacy 32-hex ID
+  принимается только через externally pinned expected key. 12 unit-test функций покрывают все types,
+  canonical/signature/tamper/truncation, unknown mandatory fields, peer/scope/time/replay, max offer,
+  range/custody/final/downgrade negatives. `git diff --check`, static contract и jinx-rust syntax AST
+  `Program` PASS; callsite только module declaration. Compile/runtime pending. Tool-гэтч: Arena
+  по-прежнему без cargo/rustc; официальный rustup download (`sh.rustup.rs`/`static.rust-lang.org`)
+  упал `SSL_ERROR_SYSCALL`, а Debian apt mirrors недоступны по HTTP. Repo files этим не менялись;
+  safe workaround — не объявлять compile PASS и выполнить focused Windows
+  `cargo test network::file_control::tests --lib -- --nocapture`. Телефоны не нужны; B3 до PASS не
+  начинать, release/tag/PR не делать.

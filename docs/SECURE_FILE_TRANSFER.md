@@ -24,6 +24,10 @@
 6. Если физически нет ни одного разрешённого общего канала и ни одна пара custody-телефонов не
    пересеклась, передача не может продвигаться. APU честно показывает ожидание, сохраняет bytes и
    продолжает bounded retry; ложный `SENT/DELIVERED` запрещён.
+7. **Нет произвольного продуктового лимита размера.** «Любой объём» означает streaming/paging без
+   загрузки целого файла в RAM и без старого барьера 4 GiB. Реальный предел задают `u64`, файловая
+   система, свободное место и выбранные владельцами квоты; бесконечный файл физически не обещается.
+   До production wiring B3 обязан убрать текущую 4-GiB validation coupling из manifest/B1 geometry.
 
 ### Что действительно доказано, а что нет
 
@@ -144,7 +148,8 @@ size + chunk AEAD + whole hash даёт `DELIVERED`. Transport enqueue/FIN и re
    Production code/телефоны не менялись.
 2. **F4-B — pure binary protocol boundary:** без network wiring и телефонов, тремя отдельными
    reviewable slices: B1 canonical frame + capability codec; B2 signed bounded control records;
-   B3 ciphertext chunk/Merkle identity. Каждый slice имеет negative/boundary/replay/downgrade tests.
+   B3 ciphertext chunk/Merkle identity плюс uncapped `u64` manifest/geometry без старой 4-GiB
+   coupling. Каждый slice имеет negative/boundary/replay/downgrade tests.
 3. **F4-C — persistent single-peer QUIC:** один connection, binary offer/chunk/ACK, один stream;
    доказать resume/missing chunk и отсутствие Base64/message queue. Сначала local host tests.
 4. **F4-D — bounded parallel/adaptive streams:** concurrency/window/backpressure, benchmark на
@@ -177,8 +182,30 @@ Windows в каноническом `C:\APU-M8\rust-core` для exact commit `4
 дала `11 passed; 0 failed; 0 ignored; 592 filtered out`. Три warning относятся к прежнему коду
 `multi_broker.rs`, `engine/core.rs` и `mqtt_transport.rs`, не к F4-B1. Это focused B1 host
 compile/runtime PASS, но не полный Rust suite, Android build или phone runtime. Module не вызывается
-sender/QUIC/FFI; Android production source и телефоны в B1 не менялись. B2 остаётся отдельным slice и
-не начинается автоматически.
+sender/QUIC/FFI; Android production source и телефоны в B1 не менялись.
+
+### Status 2026-08-23 — F4-B2 source/static PASS, host compile/runtime pending
+
+Добавлен отдельный pure `rust-core/src/network/file_control.rs`, пока подключённый только module
+declaration:
+
+- canonical `APUC` v1 envelope с hard ceiling 64 KiB и Ed25519 domain separation;
+- пять bounded типов: signed capabilities, opaque encrypted offer, paged missing ranges, custody
+  offer/accept/stored receipt и final recipient receipt;
+- signer/recipient, current session-or-transfer scope ID и modern/legacy pinned-key boundary;
+- absolute expiry/clock skew и strictly increasing sequence для durable replay scope;
+- range pages максимум 1024 normalized intervals на record, но `u32::MAX` total chunks и `u64` final
+  byte count — без нового 4-GiB control-plane cap;
+- encrypted offer максимум 32 KiB, подписан вместе с SHA-256 ciphertext digest; filename/size fields
+  в открытом B2 record отсутствуют;
+- 12 unit-test функций покрывают все типы, canonical round-trip, full truncation/tamper, unknown
+  version/type/flags, signature/peer/scope/replay/time failures, offer/range/custody/final boundaries.
+
+`git diff --check`, source contract и отдельный Rust syntax parser (AST root `Program`) PASS. Arena
+по-прежнему не имеет Rust toolchain: попытка временно получить rustup и Debian packages остановилась
+на blocked outbound TLS/HTTP, поэтому compile и фактический runtime этих 12 тестов **pending**. Это
+не network/FFI/Android wiring; телефоны не нужны. Следующий gate — focused Windows
+`cargo test network::file_control::tests --lib` и только после PASS — B3.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.

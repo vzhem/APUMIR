@@ -11,11 +11,12 @@ ciphertext; внешнее хранение запрещено. Authoritative д
 [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md). Старые M8, R1, 10-MiB и release-next формулировки
 в исторических разделах не переопределяют этот блок.
 
-Владелец подтвердил F4 architecture. F4-B1 canonical binary frame + capability codec имеет
-source/static и focused Windows host compile/runtime PASS: 11/11 тестов на exact commit `4815582`.
-Полный Rust suite, Android build и phone runtime этим не доказаны и для pure B1 не требовались.
-Следующий slice не начинать автоматически: B2 signed control records остаётся отдельным шагом;
-network wiring и телефоны по-прежнему вне scope.
+Владелец подтвердил F4 architecture и разрешил последовательно выполнять все необходимые slices.
+F4-B1 имеет source/static и focused Windows host PASS: 11/11 на exact `4815582`. F4-B2 signed
+control records теперь имеет source/static PASS и 12 Rust tests; focused Windows compile/runtime
+pending. Network wiring и телефоны по-прежнему вне B2. Требование «любой объём» убирает arbitrary
+4-GiB product cap: B3 обязан перевести manifest/geometry на bounded streaming с `u64`, сохранив
+физические storage/quota limits.
 
 ---
 
@@ -1709,8 +1710,10 @@ Authoritative design и доказательные статусы:
 - [ ] **F4-B — pure binary protocol boundary, no network wiring:**
   - [x] B1 canonical frame + capability codec: source/static PASS; focused Windows host command на
     exact `4815582` дал 11 passed, 0 failed, 592 filtered. Full suite/Android/phones не запускались.
-  - [ ] B2 signed bounded control records — отдельный следующий slice, не начинать автоматически.
-  - [ ] B3 ciphertext chunk/Merkle identities — отдельный последующий slice.
+  - [ ] B2 signed bounded control records: source/static PASS, 12 Rust tests добавлены; focused
+    Windows `cargo test network::file_control::tests --lib` pending, network/Android/phones unwired.
+  - [ ] B3 ciphertext chunk/Merkle identities + uncapped `u64` manifest/geometry без arbitrary 4-GiB
+    product limit — не начинать до B2 host PASS.
 - [ ] **F4-C — persistent single-peer QUIC:** один authenticated connection, один binary stream,
   durable chunk-before-ACK, missing-range resume; no Base64/message queue.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
