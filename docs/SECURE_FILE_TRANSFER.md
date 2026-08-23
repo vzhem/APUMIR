@@ -297,6 +297,21 @@ Audit после C1 остановил прямое engine wiring по двум 
 private seed и без fallback к fake CryptoManager. Только после host gate C2a можно строить bounded
 single-flight session owner. FFI/Android callsites/phones и F4-D concurrency пока не менять.
 
+C2a source/static реализован на exact `0736d9b62c64f0cc8daeff29dfef82f85377901c`:
+
+- crate-internal `FileControlSigner` возвращает только exact Ed25519 public key и результат одной
+  signing operation; adapters есть для test `Ed25519KeyPair`, real `InstalledSigningIdentity` и
+  existing `Arc<T>`, private seed/key не возвращается;
+- прежний public `sign_file_control_v1` сохранён, а internal signer path после подписи сам проверяет
+  key/signature и fail-closed отклоняет inconsistent adapter;
+- C1 сохранил прежние public Ed25519 `connect`/`accept` wrappers и получил crate-only generic methods
+  для real sidecar. Новый loopback делает mutual exporter-bound C1 auth двумя `Arc` identities;
+- добавлены 2 control tests и 1 session test: ожидаемые focused counts теперь 14 и 10, combined F4
+  count — 46. Jinx parser: оба файла `Program`, `MissingNode=0`; static contract и diff check PASS.
+
+Это только source/static PASS: Windows Rust compile/runtime ещё pending. Engine/registry/FFI/Android/
+phones не wired, fake CryptoManager не используется. До focused host gate C2b owner не начинать.
+
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 

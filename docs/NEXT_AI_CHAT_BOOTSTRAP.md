@@ -54,8 +54,9 @@ focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab251
 0 failed, 592 filtered. F4-B закрыт в focused host scope. F4-C1 audit и host-only source/static
 готовы на exact `bf4f0c6`; fixes `bedf671`/`ca2edb6` прошли focused Windows 9/9 и combined exact
 `ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. F4-C2 read-only ownership review завершён:
-legacy pool/engine identity нельзя безопасно подключать к C1. Следующее действие — host-only C2a
-real-identity signer seam; persistent owner только после его gate. FFI/Android/phones/F4-D не трогать.
+legacy pool/engine identity нельзя безопасно подключать к C1. Host-only C2a signer seam source/static
+готов на exact `0736d9b`: 3 new tests, Windows compile/runtime pending. Сначала закрыть focused C2a
+host gate; persistent owner только затем. FFI/Android/phones/F4-D не трогать.
 
 > ## Исторический M8 handoff
 >
@@ -200,13 +201,17 @@ connect. Его нельзя расширять как file-session owner.
 Android до engine start и не экспортирует private seed/key, но C1 принимает concrete
 `&Ed25519KeyPair`.
 
-Следующий smallest host-testable C2a:
+C2a source/static exact `0736d9b62c64f0cc8daeff29dfef82f85377901c` уже сделал:
 
-1. internal signer abstraction только для verified public key + sign operation;
-2. implementations для test `Ed25519KeyPair` и existing `InstalledSigningIdentity`, без seed export и
-   без fallback к fake CryptoManager;
-3. focused tests на adapter, C1 success/wrong identity/fail-closed paths;
-4. no FFI/Android/UI/phones и no parallel streams/window F4-D.
+1. crate-internal signer abstraction только для exact public key + sign operation;
+2. implementations для test `Ed25519KeyPair`, real `InstalledSigningIdentity` и existing `Arc<T>`,
+   без seed export и без fallback к fake CryptoManager;
+3. обязательную self-verification результата adapter; 2 new control tests + 1 mutual C1 loopback;
+4. Jinx `Program`/zero MissingNode, static contract и diff check PASS. Compile/runtime ещё pending.
+
+Сначала выполнить Windows focused tests exact `0736d9b`: filter `adapter` ожидает 2/2, filter
+`installed_sidecars` ожидает 1/1; затем combined `network::file_` ожидает 46/46. No FFI/Android/UI/
+phones и no parallel streams/window F4-D.
 
 После зелёного C2a gate сделать C2b: bounded reusable endpoint owner, authenticated-session
 single-flight, failed/idle eviction, reconnect с fresh exporter-bound mutual handshake, explicit
@@ -279,4 +284,4 @@ shutdown и loopback reuse/race/reconnect/wrong-peer tests. Не подключ�
 - F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
 - Следующий только F4-C2a real signer seam; затем C2b owner/reconnect. F4-D/FFI/Android/phones не начинать.
 
-Сейчас выполни C2a из раздела 8. Телефоны не нужны.
+Сейчас закрой focused/combined Windows host gate C2a из раздела 8. Телефоны не нужны.

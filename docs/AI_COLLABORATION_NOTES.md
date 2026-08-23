@@ -4117,3 +4117,16 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   public key + sign operation, adapters для test `Ed25519KeyPair` и existing installed identity,
   focused success/wrong-identity/fail-closed tests. Bounded single-flight owner/reconnect — C2b после
   этого gate. На этом шаге code/FFI/Android/phones не менялись; release/tag/PR не делались.
+- **2026-08-23 (доп.363) — F4-C2a real identity signer seam source/static PASS:** exact source
+  `0736d9b62c64f0cc8daeff29dfef82f85377901c` добавил crate-internal `FileControlSigner`, который
+  даёт только exact 32-byte public key и 64-byte sign operation. Реализации есть для test
+  `Ed25519KeyPair`, production `InstalledSigningIdentity` и existing `Arc<T>`; private seed/key не
+  возвращается, fake FFI CryptoManager не импортируется и fallback к нему отсутствует. Старый public
+  Ed25519 control/session API сохранён wrappers; crate-only C1 connect/accept теперь умеют real
+  sidecar. Каждый результат adapter сразу self-verifies, поэтому test inconsistent key/signer
+  fail-closed получает `InvalidSignature`. Добавлены 2 control tests (installed Arc round-trip и
+  inconsistent adapter) + 1 QUIC loopback, где два installed Arc sidecar проходят mutual
+  TLS-exporter-bound C1 auth. Expected counts: control 14, session 10, combined file 46. Static
+  contract/diff check PASS; Jinx parser для обоих changed files: `Program`, `MissingNode=0`. Arena
+  всё ещё без cargo/rustc, поэтому compile/runtime pending и C2b owner пока не начинать. FFI/Android/
+  phones не менялись и не запускались; release/tag/PR не делались.
