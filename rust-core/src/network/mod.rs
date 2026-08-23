@@ -22,6 +22,7 @@ pub mod fallback_chain;
 pub mod file_control;
 pub mod file_identity;
 pub mod file_session;
+pub mod file_session_owner;
 pub mod file_wire;
 pub mod ice;
 pub mod mdns;
