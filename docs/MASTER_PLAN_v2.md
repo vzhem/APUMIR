@@ -21,9 +21,10 @@ durable-before-ACK sink. E0599 исправлен `bedf671`; первый combin
 focused Windows 9/9, затем combined exact `ca2edb6` дал 43 passed, 0 failed, 592 filtered.
 F4-C1 host gate закрыт; engine/FFI/Android/phones всё ещё unwired, F4-D не начинать. C2 read-only
 audit нашёл prerequisite: fake `CryptoManager` нельзя использовать для C1, а real installed Ed25519
-sidecar не реализовывал требуемый signer API. C2a source/static exact `0736d9b` добавил internal
-public-key/sign adapter для real `Arc<InstalledSigningIdentity>` без экспорта seed и 3 tests; Windows
-compile/runtime pending. Persistent owner только после C2a host gate.
+sidecar не реализовывал требуемый signer API. C2a exact `0736d9b` добавил internal public-key/sign
+adapter для real `Arc<InstalledSigningIdentity>` без экспорта seed; Windows filters 2/2 и 1/1,
+combined 46/46 PASS. C2a host gate закрыт. Следующий isolated slice — host-only C2b bounded
+single-flight persistent owner/reconnect.
 
 ---
 
@@ -1734,9 +1735,9 @@ Authoritative design и доказательные статусы:
     (compile 1.61 s; tests 1.25 s); три warnings только прежние, phones untouched.
   - [x] C2 read-only prerequisite audit: legacy pool допускает duplicate connect race и не
     authenticated; listener endpoint недоступен owner; fake FFI CryptoManager не является Ed25519.
-  - [ ] C2a real signer seam: source/static exact `0736d9b` PASS — internal public-key/sign trait для
-    test `Ed25519KeyPair` и real `Arc<InstalledSigningIdentity>`, no seed/fake fallback; 3 new tests,
-    Windows focused compile/runtime ещё pending.
+  - [x] C2a real signer seam exact `0736d9b`: internal public-key/sign trait для test key и real
+    `Arc<InstalledSigningIdentity>`, no seed/fake fallback; Windows 2/2 + 1/1 focused и 46/46 combined
+    PASS, три warnings только прежние, generated guard PASS.
   - [ ] C2b bounded single-flight persistent owner/reconnect после C2a; no FFI/Android/UI/phones и
     no parallel streams F4-D.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим

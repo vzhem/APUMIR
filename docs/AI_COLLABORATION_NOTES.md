@@ -4130,3 +4130,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   contract/diff check PASS; Jinx parser для обоих changed files: `Program`, `MissingNode=0`. Arena
   всё ещё без cargo/rustc, поэтому compile/runtime pending и C2b owner пока не начинать. FFI/Android/
   phones не менялись и не запускались; release/tag/PR не делались.
+- **2026-08-23 (доп.364) — F4-C2a Windows host gate 46/46 PASS:** canonical `C:\APU-M8`
+  guarded fast-forward `ca2edb6→0736d9b62c64f0cc8daeff29dfef82f85377901c`; generated Kotlin и
+  arm64 `.so` hashes совпали до/после и эти два прежних generated files остались единственными
+  modified paths. Direct child cmd импортировал exact `vcvars64.bat`, нашёл MSVC 14.44.35207 и
+  собрал `p2p-core`. Filter `adapter`: `2 passed; 0 failed; 636 filtered out` (compile 21.33 s,
+  tests 0.04 s). Filter `installed_sidecars`: `1 passed; 0 failed; 637 filtered out` (compile 0.34 s,
+  tests 0.11 s). Combined `cargo test network::file_ --lib -- --nocapture`: `46 passed; 0 failed;
+  592 filtered out` (compile 0.31 s, tests 1.29 s). Три warnings только прежние `multi_broker.rs`,
+  `engine/core.rs`, `mqtt_transport.rs`; C2a warnings/errors нет. C2a host gate закрыт. Android/FFI/
+  phones не запускались. Следующий isolated slice — C2b bounded reusable endpoint/authenticated
+  session owner с single-flight connect, eviction/reconnect и explicit shutdown; F4-D не начинать.

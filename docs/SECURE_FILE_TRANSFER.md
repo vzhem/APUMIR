@@ -309,8 +309,14 @@ C2a source/static реализован на exact `0736d9b62c64f0cc8daeff29dfef8
 - добавлены 2 control tests и 1 session test: ожидаемые focused counts теперь 14 и 10, combined F4
   count — 46. Jinx parser: оба файла `Program`, `MissingNode=0`; static contract и diff check PASS.
 
-Это только source/static PASS: Windows Rust compile/runtime ещё pending. Engine/registry/FFI/Android/
-phones не wired, fake CryptoManager не используется. До focused host gate C2b owner не начинать.
+Windows host gate C2a закрыт на exact `0736d9b`: direct child `cmd` поднял MSVC 14.44.35207;
+filter `adapter` дал `2 passed; 0 failed; 636 filtered out` (compile 21.33 s, tests 0.04 s), filter
+`installed_sidecars` — `1 passed; 0 failed; 637 filtered out` (compile 0.34 s, tests 0.11 s), а
+combined `network::file_` — `46 passed; 0 failed; 592 filtered out` (compile 0.31 s, tests 1.29 s).
+Три warnings только прежние `multi_broker.rs`, `engine/core.rs`, `mqtt_transport.rs`. Generated Kotlin
+и arm64 `.so` прошли hash guard и остались единственными прежними modified files Windows-клона.
+Engine/registry/FFI/Android/phones не wired, fake CryptoManager не используется. Следующий isolated
+slice — host-only C2b bounded single-flight owner/reconnect; F4-D не начинать.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
