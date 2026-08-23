@@ -7,11 +7,17 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
+use std::sync::Mutex;
+
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::crypto::keys::{
     Ed25519KeyPair, NodeId, ED25519_PUBLIC_KEY_SIZE, SIGNATURE_SIZE,
 };
 use crate::network::file_control::{FileControlError, FileControlSigner};
+use crate::network::file_session::FileSessionPeer;
+use crate::network::file_session_owner::FileSessionTarget;
 
 pub const FILE_PATH_BEACON_INTERVAL_MS: i64 = 60_000;
 pub const FILE_PATH_BEACON_LIFETIME_MS: i64 = 90_000;
@@ -29,6 +35,20 @@ const FILE_PATH_ID_BYTES: usize = 16;
 const FILE_PATH_DOMAIN_V1: &[u8] = b"apu-file-path-presence-v1\0";
 const MIN_NODE_ID_BYTES: usize = 35;
 const MAX_NODE_ID_BYTES: usize = 67;
+
+const FILE_PATH_STORE_MIGRATION_V1: &str = "
+CREATE TABLE IF NOT EXISTS file_path_beacons (
+    peer_key       BLOB PRIMARY KEY NOT NULL CHECK(length(peer_key) = 32),
+    peer_node_id   TEXT NOT NULL,
+    sequence_be    BLOB NOT NULL CHECK(length(sequence_be) = 8),
+    expires_at_ms  INTEGER NOT NULL,
+    beacon         BLOB NOT NULL CHECK(length(beacon) <= 4096)
+);
+CREATE INDEX IF NOT EXISTS idx_file_path_beacons_expiry
+    ON file_path_beacons(expires_at_ms);
+CREATE TABLE IF NOT EXISTS file_path_schema_version (version INTEGER PRIMARY KEY);
+INSERT OR IGNORE INTO file_path_schema_version(version) VALUES (1);
+";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -98,6 +118,36 @@ pub enum FilePathSelection {
     Unavailable { retry_after_ms: Option<i64> },
 }
 
+/// Typed boundary between path selection and transport owners. Only `AuthenticatedQuic` contains a
+/// `FileSessionTarget`; TCP routes cannot accidentally enter the QUIC-only authenticated owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilePathDispatch {
+    AuthenticatedQuic {
+        candidate_id: [u8; FILE_PATH_ID_BYTES],
+        target: FileSessionTarget,
+    },
+    DirectTcp {
+        candidate_id: [u8; FILE_PATH_ID_BYTES],
+        peer: FileSessionPeer,
+        endpoint: SocketAddr,
+    },
+    TcpTunnel {
+        candidate_id: [u8; FILE_PATH_ID_BYTES],
+        peer: FileSessionPeer,
+        endpoint: SocketAddr,
+    },
+    Unavailable { retry_after_ms: Option<i64> },
+}
+
+impl FilePathDispatch {
+    pub fn authenticated_quic_target(&self) -> Option<&FileSessionTarget> {
+        match self {
+            Self::AuthenticatedQuic { target, .. } => Some(target),
+            Self::DirectTcp { .. } | Self::TcpTunnel { .. } | Self::Unavailable { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FilePathError {
     #[error("file path beacon header is truncated: {actual} bytes")]
@@ -132,6 +182,10 @@ pub enum FilePathError {
     Capacity { max: usize },
     #[error("unknown file path candidate")]
     UnknownCandidate,
+    #[error("selected QUIC path cannot form an authenticated session target: {0}")]
+    InvalidSessionTarget(String),
+    #[error("durable file path store failed: {0}")]
+    Store(String),
 }
 
 #[derive(Debug, Clone)]
@@ -151,10 +205,17 @@ struct ManagedPeerPaths {
 
 /// Bounded contact/path table. Durable replay persistence is supplied by the engine integration;
 /// this in-memory host layer deliberately exposes the accepted sequence through `last_sequence`.
+#[derive(Clone)]
 pub struct FilePathManager {
     local_node_id: String,
     max_contacts: usize,
     peers: HashMap<[u8; ED25519_PUBLIC_KEY_SIZE], ManagedPeerPaths>,
+}
+
+/// Sync-only SQLite replay/expiry store. The transaction commits before the staged manager becomes
+/// visible, so process death cannot leave an accepted in-memory sequence ahead of durable state.
+pub struct FilePathStore {
+    connection: Mutex<Connection>,
 }
 
 impl FilePathKindV1 {
@@ -552,6 +613,43 @@ impl FilePathManager {
         FilePathSelection::Unavailable { retry_after_ms }
     }
 
+    pub fn select_dispatch(
+        &mut self,
+        peer: &FilePathPeer,
+        now_ms: i64,
+        network: FilePathNetworkState,
+    ) -> Result<FilePathDispatch, FilePathError> {
+        let session_peer = FileSessionPeer {
+            node_id: peer.node_id.clone(),
+            ed25519_public_key: peer.ed25519_public_key,
+        };
+        match self.select_path(peer, now_ms, network) {
+            FilePathSelection::Selected(candidate) => match candidate.kind {
+                FilePathKindV1::LanQuic | FilePathKindV1::InternetQuic => {
+                    let target = FileSessionTarget::new(session_peer, candidate.endpoint)
+                        .map_err(|error| FilePathError::InvalidSessionTarget(error.to_string()))?;
+                    Ok(FilePathDispatch::AuthenticatedQuic {
+                        candidate_id: candidate.candidate_id,
+                        target,
+                    })
+                }
+                FilePathKindV1::DirectTcp => Ok(FilePathDispatch::DirectTcp {
+                    candidate_id: candidate.candidate_id,
+                    peer: session_peer,
+                    endpoint: candidate.endpoint,
+                }),
+                FilePathKindV1::TcpTunnel => Ok(FilePathDispatch::TcpTunnel {
+                    candidate_id: candidate.candidate_id,
+                    peer: session_peer,
+                    endpoint: candidate.endpoint,
+                }),
+            },
+            FilePathSelection::Unavailable { retry_after_ms } => {
+                Ok(FilePathDispatch::Unavailable { retry_after_ms })
+            }
+        }
+    }
+
     pub fn report_failure(
         &mut self,
         peer: &FilePathPeer,
@@ -609,6 +707,157 @@ impl FilePathManager {
                     .find(|managed| &managed.candidate.candidate_id == candidate_id)
             })
             .ok_or(FilePathError::UnknownCandidate)
+    }
+}
+
+impl FilePathStore {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, FilePathError> {
+        Self::from_connection(Connection::open(path).map_err(store_error)?)
+    }
+
+    pub fn open_in_memory() -> Result<Self, FilePathError> {
+        Self::from_connection(Connection::open_in_memory().map_err(store_error)?)
+    }
+
+    fn from_connection(connection: Connection) -> Result<Self, FilePathError> {
+        connection
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .map_err(store_error)?;
+        connection
+            .execute_batch(FILE_PATH_STORE_MIGRATION_V1)
+            .map_err(store_error)?;
+        Ok(Self {
+            connection: Mutex::new(connection),
+        })
+    }
+
+    pub fn schema_version(&self) -> Result<i64, FilePathError> {
+        let connection = self.connection.lock().map_err(|_| store_poisoned())?;
+        connection
+            .query_row(
+                "SELECT version FROM file_path_schema_version ORDER BY version DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(store_error)
+    }
+
+    /// Verify against the durable sequence, stage the in-memory update, commit the row, and only
+    /// then publish the staged manager. This is the production replay-admission boundary.
+    pub fn admit_and_install(
+        &self,
+        manager: &mut FilePathManager,
+        beacon: SignedFilePathBeaconV1,
+        peer: &FilePathPeer,
+        now_ms: i64,
+    ) -> Result<(), FilePathError> {
+        let mut connection = self.connection.lock().map_err(|_| store_poisoned())?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(store_error)?;
+        let last_sequence_blob = transaction
+            .query_row(
+                "SELECT sequence_be FROM file_path_beacons WHERE peer_key = ?1",
+                params![peer.ed25519_public_key.as_slice()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(store_error)?;
+        let last_sequence = last_sequence_blob
+            .as_deref()
+            .map(decode_sequence)
+            .transpose()?;
+        beacon.verify_at(peer, &manager.local_node_id, now_ms, last_sequence)?;
+        let mut staged = manager.clone();
+        staged.install_verified_beacon(beacon.clone(), peer, now_ms)?;
+        let wire = beacon.encode()?;
+        transaction
+            .execute(
+                "INSERT OR REPLACE INTO file_path_beacons
+                 (peer_key, peer_node_id, sequence_be, expires_at_ms, beacon)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    peer.ed25519_public_key.as_slice(),
+                    peer.node_id,
+                    beacon.claims.sequence.to_be_bytes().as_slice(),
+                    beacon.claims.expires_at_ms,
+                    wire,
+                ],
+            )
+            .map_err(store_error)?;
+        transaction.commit().map_err(store_error)?;
+        *manager = staged;
+        Ok(())
+    }
+
+    /// Rebuild an empty/stale manager from bounded, unexpired signed rows after process restart.
+    /// Any corrupt row fails the whole load instead of silently authorizing a partial path table.
+    pub fn load_into(
+        &self,
+        manager: &mut FilePathManager,
+        now_ms: i64,
+    ) -> Result<usize, FilePathError> {
+        let connection = self.connection.lock().map_err(|_| store_poisoned())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT peer_key, peer_node_id, beacon FROM file_path_beacons
+                 WHERE expires_at_ms >= ?1
+                 ORDER BY expires_at_ms ASC, peer_key ASC
+                 LIMIT ?2",
+            )
+            .map_err(store_error)?;
+        let rows = statement
+            .query_map(params![now_ms, manager.max_contacts as i64], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                ))
+            })
+            .map_err(store_error)?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row.map_err(store_error)?);
+        }
+        drop(statement);
+        drop(connection);
+
+        let mut staged = FilePathManager::with_capacity(
+            manager.local_node_id.clone(),
+            manager.max_contacts,
+        )?;
+        for (key, node_id, wire) in records {
+            let ed25519_public_key: [u8; ED25519_PUBLIC_KEY_SIZE] = key
+                .try_into()
+                .map_err(|_| FilePathError::Store("invalid persisted peer key length".into()))?;
+            let peer = FilePathPeer {
+                node_id,
+                ed25519_public_key,
+            };
+            let beacon = SignedFilePathBeaconV1::decode(&wire)?;
+            staged.install_verified_beacon(beacon, &peer, now_ms)?;
+        }
+        let count = staged.peer_count();
+        *manager = staged;
+        Ok(count)
+    }
+
+    pub fn purge_expired(&self, now_ms: i64) -> Result<usize, FilePathError> {
+        let connection = self.connection.lock().map_err(|_| store_poisoned())?;
+        connection
+            .execute(
+                "DELETE FROM file_path_beacons WHERE expires_at_ms < ?1",
+                params![now_ms],
+            )
+            .map_err(store_error)
+    }
+
+    pub fn count(&self) -> Result<usize, FilePathError> {
+        let connection = self.connection.lock().map_err(|_| store_poisoned())?;
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM file_path_beacons", [], |row| row.get(0))
+            .map_err(store_error)?;
+        usize::try_from(count).map_err(|_| FilePathError::Store("negative row count".into()))
     }
 }
 
@@ -753,6 +1002,21 @@ fn validate_modern_signer_binding(
         }
     }
     Ok(())
+}
+
+fn decode_sequence(bytes: &[u8]) -> Result<u64, FilePathError> {
+    let sequence: [u8; 8] = bytes
+        .try_into()
+        .map_err(|_| FilePathError::Store("invalid persisted sequence length".into()))?;
+    Ok(u64::from_be_bytes(sequence))
+}
+
+fn store_error(error: rusqlite::Error) -> FilePathError {
+    FilePathError::Store(error.to_string())
+}
+
+fn store_poisoned() -> FilePathError {
+    FilePathError::Store("SQLite mutex poisoned".into())
 }
 
 fn map_signer_error(error: FileControlError) -> FilePathError {
@@ -935,6 +1199,50 @@ mod tests {
     }
 
     #[test]
+    fn typed_dispatch_never_feeds_tcp_or_tunnel_into_quic_owner() {
+        let sender = identity(17);
+        let recipient = identity(18);
+        let sender_peer = peer(&sender);
+        let signed = sign_file_path_beacon_v1(
+            claims(
+                &sender,
+                &recipient,
+                1,
+                vec![
+                    candidate(1, FilePathKindV1::InternetQuic, 4201),
+                    candidate(2, FilePathKindV1::DirectTcp, 4202),
+                    candidate(3, FilePathKindV1::TcpTunnel, 4203),
+                ],
+            ),
+            &sender,
+        )
+        .unwrap();
+        let mut manager = FilePathManager::new(modern_node(&recipient)).unwrap();
+        manager.install_verified_beacon(signed, &sender_peer, NOW).unwrap();
+
+        let quic = manager
+            .select_dispatch(&sender_peer, NOW, FilePathNetworkState::default())
+            .unwrap();
+        let target = quic.authenticated_quic_target().unwrap();
+        assert_eq!(target.peer().ed25519_public_key, sender_peer.ed25519_public_key);
+        assert_eq!(target.remote_address().port(), 4201);
+
+        let udp_blocked = FilePathNetworkState {
+            lan_available: false,
+            udp_available: false,
+            tcp_available: true,
+            tunnel_available: true,
+        };
+        let tcp = manager.select_dispatch(&sender_peer, NOW, udp_blocked).unwrap();
+        assert!(matches!(&tcp, FilePathDispatch::DirectTcp { endpoint, .. } if endpoint.port() == 4202));
+        assert!(tcp.authenticated_quic_target().is_none());
+        manager.report_failure(&sender_peer, &[2; 16], NOW).unwrap();
+        let tunnel = manager.select_dispatch(&sender_peer, NOW, udp_blocked).unwrap();
+        assert!(matches!(&tunnel, FilePathDispatch::TcpTunnel { endpoint, .. } if endpoint.port() == 4203));
+        assert!(tunnel.authenticated_quic_target().is_none());
+    }
+
+    #[test]
     fn cooldown_expiry_cleanup_and_capacity_are_bounded() {
         let sender = identity(8);
         let recipient = identity(9);
@@ -999,6 +1307,50 @@ mod tests {
             .map(|index| candidate(index as u8, FilePathKindV1::InternetQuic, 6100 + index as u16))
             .collect();
         assert!(sign_file_path_beacon_v1(claims(&sender, &recipient, 1, too_many), &sender).is_err());
+    }
+
+    #[test]
+    fn durable_store_admits_before_visibility_and_restores_after_restart() {
+        let sender = identity(19);
+        let recipient = identity(20);
+        let sender_peer = peer(&sender);
+        let local_node = modern_node(&recipient);
+        let first = sign_file_path_beacon_v1(
+            claims(
+                &sender,
+                &recipient,
+                1,
+                vec![candidate(1, FilePathKindV1::InternetQuic, 7201)],
+            ),
+            &sender,
+        )
+        .unwrap();
+        let store = FilePathStore::open_in_memory().unwrap();
+        assert_eq!(store.schema_version().unwrap(), 1);
+        let mut manager = FilePathManager::new(local_node.clone()).unwrap();
+        store
+            .admit_and_install(&mut manager, first.clone(), &sender_peer, NOW)
+            .unwrap();
+        assert_eq!(store.count().unwrap(), 1);
+        assert_eq!(manager.last_sequence(&sender_peer), Some(1));
+        assert_eq!(
+            store.admit_and_install(&mut manager, first, &sender_peer, NOW),
+            Err(FilePathError::ReplayOrOutOfOrder)
+        );
+
+        let mut restarted = FilePathManager::new(local_node).unwrap();
+        assert_eq!(store.load_into(&mut restarted, NOW).unwrap(), 1);
+        assert_eq!(restarted.last_sequence(&sender_peer), Some(1));
+        assert!(matches!(
+            restarted.select_dispatch(&sender_peer, NOW, FilePathNetworkState::default()).unwrap(),
+            FilePathDispatch::AuthenticatedQuic { .. }
+        ));
+        assert_eq!(
+            store.purge_expired(NOW + FILE_PATH_BEACON_LIFETIME_MS + 1).unwrap(),
+            1
+        );
+        assert_eq!(store.load_into(&mut restarted, NOW + FILE_PATH_BEACON_LIFETIME_MS + 1).unwrap(), 0);
+        assert_eq!(restarted.peer_count(), 0);
     }
 
     #[test]
