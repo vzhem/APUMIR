@@ -21,8 +21,9 @@ use crate::crypto::keys::{NodeId, ED25519_PUBLIC_KEY_SIZE};
 use crate::crypto::signing_identity::InstalledSigningIdentity;
 use crate::network::file_control::{SignedFileControlV1, FILE_CONTROL_ID_BYTES};
 use crate::network::file_session::{
-    FileParallelWindowReport, FileSendSession, FileSessionError, FileSessionLimits,
-    FileSessionPeer, FileSessionWindowLimits, FileSessionWindowReport,
+    AdaptiveFileParallelism, FileAdaptiveBatchObservation, FileParallelWindowReport,
+    FileSendSession, FileSessionError, FileSessionLimits, FileSessionPeer,
+    FileSessionWindowLimits, FileSessionWindowReport,
 };
 use crate::network::file_wire::{
     FileCapabilitiesV1, FileFrameV1, FileWireError, FEATURE_CHUNK_RANGE_FRAMES,
@@ -285,6 +286,41 @@ impl FileSessionOwner {
             Ok(report) => {
                 slot.touch();
                 Ok(report)
+            }
+            Err(error) => {
+                *state = OwnedSessionState::Failed;
+                drop(state);
+                self.remove_slot_if_same(target, &slot).await;
+                Err(FileSessionOwnerError::Session(error))
+            }
+        }
+    }
+
+    /// Production adaptive seam: the supplied controller bounds this batch and consumes measured
+    /// path/ACK outcomes. Any transport failure still evicts the authenticated owner session.
+    pub async fn send_adaptive_parallel_windows(
+        &self,
+        target: &FileSessionTarget,
+        controller: &mut AdaptiveFileParallelism,
+        windows: Vec<Vec<FileFrameV1>>,
+        now_ms: i64,
+    ) -> Result<FileAdaptiveBatchObservation, FileSessionOwnerError> {
+        let slot = self.ensure_session(target, now_ms).await?;
+        let mut state = slot.session.lock().await;
+        let result = match &mut *state {
+            OwnedSessionState::Ready(session) => {
+                session
+                    .send_adaptive_parallel_windows(controller, windows)
+                    .await
+            }
+            OwnedSessionState::Vacant | OwnedSessionState::Failed => {
+                return Err(FileSessionOwnerError::SessionUnavailable);
+            }
+        };
+        match result {
+            Ok(observation) => {
+                slot.touch();
+                Ok(observation)
             }
             Err(error) => {
                 *state = OwnedSessionState::Failed;

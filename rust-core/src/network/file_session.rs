@@ -123,6 +123,34 @@ pub struct FileParallelWindowReport {
     pub window: FileSessionWindowReport,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileSessionPathMetrics {
+    pub rtt: Duration,
+    pub sent_packets: u64,
+    pub lost_packets: u64,
+    pub congestion_events: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileAdaptiveBatchPlan {
+    pub stream_count: usize,
+    pub window_limits: FileSessionWindowLimits,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileAdaptiveBatchObservation {
+    pub stream_count: usize,
+    pub frame_count: usize,
+    pub ciphertext_bytes: u64,
+    pub wire_bytes: usize,
+    pub elapsed: Duration,
+    pub throughput_bytes_per_sec: u64,
+    pub rtt: Duration,
+    pub sent_packets: u64,
+    pub lost_packets: u64,
+    pub congestion_events: u64,
+}
+
 /// Small AIMD controller driven only by measured ACK-window outcomes. It never exceeds the hard
 /// frame/byte ceilings; failure immediately halves pressure, while sustained full-window success
 /// raises it additively. The smoothed measurements are exposed for later path selection/benchmarks.
@@ -209,6 +237,162 @@ impl AdaptiveFileSessionWindow {
             .max(MAX_FILE_SESSION_RECORD_BYTES)
             .min(self.max_limits.max_wire_bytes);
         self.consecutive_full_successes = 0;
+    }
+}
+
+/// Joint window/concurrency controller. It probes additively only after saturated successful
+/// batches, and backs off on observed QUIC loss/congestion, material RTT/throughput regression, or
+/// an operation failure. The global 32-MiB ceiling also caps every returned plan.
+#[derive(Debug, Clone)]
+pub struct AdaptiveFileParallelism {
+    window: AdaptiveFileSessionWindow,
+    parallel_streams: usize,
+    max_parallel_streams: usize,
+    consecutive_full_successes: u8,
+    smoothed_throughput_bytes_per_sec: Option<u64>,
+    smoothed_rtt_micros: Option<u64>,
+    probe_baseline_throughput: Option<u64>,
+    probe_baseline_rtt_micros: Option<u64>,
+}
+
+impl AdaptiveFileParallelism {
+    pub fn new(
+        initial_window: FileSessionWindowLimits,
+        max_window: FileSessionWindowLimits,
+        max_parallel_streams: u16,
+    ) -> Result<Self, FileSessionError> {
+        if max_parallel_streams == 0 {
+            return Err(FileSessionError::ParallelStreamLimit { count: 0, max: 0 });
+        }
+        Ok(Self {
+            window: AdaptiveFileSessionWindow::new(initial_window, max_window)?,
+            parallel_streams: 1,
+            max_parallel_streams: usize::from(max_parallel_streams),
+            consecutive_full_successes: 0,
+            smoothed_throughput_bytes_per_sec: None,
+            smoothed_rtt_micros: None,
+            probe_baseline_throughput: None,
+            probe_baseline_rtt_micros: None,
+        })
+    }
+
+    pub fn plan(&self) -> FileAdaptiveBatchPlan {
+        let window_limits = self.window.limits();
+        let budget_streams = (MAX_FILE_PARALLEL_IN_FLIGHT_BYTES
+            / window_limits.max_wire_bytes.max(1))
+            .max(1);
+        FileAdaptiveBatchPlan {
+            stream_count: self
+                .parallel_streams
+                .min(self.max_parallel_streams)
+                .min(budget_streams),
+            window_limits,
+        }
+    }
+
+    pub fn smoothed_throughput_bytes_per_sec(&self) -> Option<u64> {
+        self.smoothed_throughput_bytes_per_sec
+    }
+
+    pub fn smoothed_rtt(&self) -> Option<Duration> {
+        self.smoothed_rtt_micros.map(Duration::from_micros)
+    }
+
+    pub fn observe_success(
+        &mut self,
+        reports: &[FileParallelWindowReport],
+        before: FileSessionPathMetrics,
+        after: FileSessionPathMetrics,
+    ) -> Result<FileAdaptiveBatchObservation, FileSessionError> {
+        if reports.is_empty() {
+            return Err(FileSessionError::ParallelStreamLimit { count: 0, max: 1 });
+        }
+        let plan_before = self.plan();
+        let mut frame_count = 0usize;
+        let mut ciphertext_bytes = 0u64;
+        let mut wire_bytes = 0usize;
+        let mut elapsed = Duration::ZERO;
+        let mut saturated = reports.len() >= plan_before.stream_count;
+        for report in reports {
+            frame_count = frame_count.saturating_add(report.window.frame_count);
+            ciphertext_bytes = ciphertext_bytes.saturating_add(report.window.ciphertext_bytes);
+            wire_bytes = wire_bytes.saturating_add(report.window.wire_bytes);
+            elapsed = elapsed.max(report.window.elapsed);
+            saturated &= report.window.frame_count >= plan_before.window_limits.max_frames
+                || report.window.wire_bytes
+                    >= plan_before.window_limits.max_wire_bytes.saturating_mul(3) / 4;
+            self.window.observe_success(&report.window);
+        }
+        let elapsed_micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX).max(1);
+        let throughput = ciphertext_bytes
+            .saturating_mul(1_000_000)
+            .checked_div(elapsed_micros)
+            .unwrap_or(u64::MAX);
+        let sent_packets = after.sent_packets.saturating_sub(before.sent_packets);
+        let lost_packets = after.lost_packets.saturating_sub(before.lost_packets);
+        let congestion_events = after
+            .congestion_events
+            .saturating_sub(before.congestion_events);
+        let rtt_micros = u64::try_from(after.rtt.as_micros()).unwrap_or(u64::MAX).max(1);
+
+        let prior_throughput = self.smoothed_throughput_bytes_per_sec;
+        let prior_rtt = self.smoothed_rtt_micros;
+        self.smoothed_throughput_bytes_per_sec = Some(ewma(prior_throughput, throughput));
+        self.smoothed_rtt_micros = Some(ewma(prior_rtt, rtt_micros));
+
+        let probe_regressed = self.probe_baseline_throughput.is_some_and(|baseline| {
+            throughput.saturating_mul(100) < baseline.saturating_mul(85)
+        }) || self.probe_baseline_rtt_micros.is_some_and(|baseline| {
+            rtt_micros > baseline.saturating_mul(3) / 2
+        });
+        let measured_regression = prior_throughput.is_some_and(|baseline| {
+            throughput.saturating_mul(100) < baseline.saturating_mul(70)
+        }) && prior_rtt.is_some_and(|baseline| rtt_micros > baseline.saturating_mul(5) / 4);
+
+        if lost_packets > 0 || congestion_events > 0 || probe_regressed || measured_regression {
+            self.back_off();
+        } else {
+            self.probe_baseline_throughput = None;
+            self.probe_baseline_rtt_micros = None;
+            if saturated {
+                self.consecutive_full_successes = self.consecutive_full_successes.saturating_add(1);
+            } else {
+                self.consecutive_full_successes = 0;
+            }
+            if self.consecutive_full_successes >= 2
+                && self.parallel_streams < self.max_parallel_streams
+            {
+                self.probe_baseline_throughput = self.smoothed_throughput_bytes_per_sec;
+                self.probe_baseline_rtt_micros = self.smoothed_rtt_micros;
+                self.parallel_streams = self.parallel_streams.saturating_add(1);
+                self.consecutive_full_successes = 0;
+            }
+        }
+
+        Ok(FileAdaptiveBatchObservation {
+            stream_count: reports.len(),
+            frame_count,
+            ciphertext_bytes,
+            wire_bytes,
+            elapsed,
+            throughput_bytes_per_sec: throughput,
+            rtt: after.rtt,
+            sent_packets,
+            lost_packets,
+            congestion_events,
+        })
+    }
+
+    pub fn observe_failure(&mut self) {
+        self.back_off();
+    }
+
+    fn back_off(&mut self) {
+        self.parallel_streams = (self.parallel_streams / 2).max(1);
+        self.window.observe_failure();
+        self.consecutive_full_successes = 0;
+        self.probe_baseline_throughput = None;
+        self.probe_baseline_rtt_micros = None;
     }
 }
 
@@ -479,6 +663,17 @@ impl FileSendSession {
         &self.negotiated
     }
 
+    pub fn path_metrics(&self) -> FileSessionPathMetrics {
+        let (rtt, sent_packets, lost_packets, congestion_events) =
+            self.connection.file_path_metrics();
+        FileSessionPathMetrics {
+            rtt,
+            sent_packets,
+            lost_packets,
+            congestion_events,
+        }
+    }
+
     /// Send one exact B1 chunk frame and wait for its durable range ACK.
     pub async fn send_chunk(&mut self, frame: &FileFrameV1) -> Result<(), FileSessionError> {
         let result = self.send_chunk_inner(frame).await;
@@ -516,6 +711,34 @@ impl FileSendSession {
             self.limits.operation_timeout,
         )
         .await
+    }
+
+    /// Send one controller-sized batch and feed exact QUIC RTT/loss/congestion deltas plus durable
+    /// ACK throughput back into the next plan. A caller may provide fewer streams only for the final
+    /// batch; providing more than the current plan fails before any stream opens.
+    pub async fn send_adaptive_parallel_windows(
+        &mut self,
+        controller: &mut AdaptiveFileParallelism,
+        windows: Vec<Vec<FileFrameV1>>,
+    ) -> Result<FileAdaptiveBatchObservation, FileSessionError> {
+        let plan = controller.plan();
+        if windows.is_empty() || windows.len() > plan.stream_count {
+            return Err(FileSessionError::ParallelStreamLimit {
+                count: windows.len(),
+                max: plan.stream_count,
+            });
+        }
+        let before = self.path_metrics();
+        match self.send_parallel_windows(windows, plan.window_limits).await {
+            Ok(reports) => {
+                let after = self.path_metrics();
+                controller.observe_success(&reports, before, after)
+            }
+            Err(error) => {
+                controller.observe_failure();
+                Err(error)
+            }
+        }
     }
 
     /// Send independent bounded windows concurrently on streams bound to this exact authenticated
@@ -823,6 +1046,7 @@ impl FileReceiveSession {
             self.connection.accept_file_session_stream(),
         )
         .await??;
+        QuicConnection::prioritize_file_data_stream(&send)?;
         let result = async {
             let record = read_record_timeout(&mut recv, self.limits.operation_timeout).await?;
             if record.record_type != SESSION_RECORD_DATA_STREAM {
@@ -1229,6 +1453,7 @@ async fn open_parallel_send_stream(
         connection.open_file_session_stream(),
     )
     .await??;
+    QuicConnection::prioritize_file_data_stream(&send)?;
     let hello = FileDataStreamHelloV1 {
         scope_id,
         stream_id,
@@ -1687,6 +1912,26 @@ mod tests {
         }
     }
 
+    struct BenchmarkSink {
+        persisted: Arc<AtomicUsize>,
+        delay: Duration,
+    }
+
+    impl DurableFileRangeSink for BenchmarkSink {
+        fn persist_range<'a>(
+            &'a mut self,
+            _range: &'a FileChunkDataV1,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+            Box::pin(async move {
+                if !self.delay.is_zero() {
+                    tokio::time::sleep(self.delay).await;
+                }
+                self.persisted.fetch_add(1, Ordering::AcqRel);
+                Ok(())
+            })
+        }
+    }
+
     fn any_port() -> SocketAddr {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)
     }
@@ -1750,6 +1995,23 @@ mod tests {
             ciphertext_chunk_len: 64,
             ciphertext: vec![byte; 64],
         })
+    }
+
+    fn benchmark_chunk(index: u64, size: usize) -> FileFrameV1 {
+        FileFrameV1::ChunkData(FileChunkDataV1 {
+            transfer_id: [0xd3; 16],
+            chunk_index: index,
+            chunk_offset: 0,
+            ciphertext_chunk_len: u32::try_from(size).unwrap(),
+            ciphertext: vec![index as u8; size],
+        })
+    }
+
+    fn benchmark_limits() -> FileSessionLimits {
+        FileSessionLimits {
+            operation_timeout: Duration::from_secs(30),
+            durable_write_timeout: Duration::from_secs(30),
+        }
     }
 
     fn raw_header(record_type: u8, payload_len: u32) -> [u8; FILE_SESSION_HEADER_BYTES] {
@@ -2130,6 +2392,325 @@ mod tests {
             ),
             Err(FileSessionError::InvalidWindowLimits)
         ));
+    }
+
+    #[test]
+    fn adaptive_parallelism_uses_rtt_loss_throughput_and_global_budget() {
+        let initial = FileSessionWindowLimits {
+            max_frames: 2,
+            max_wire_bytes: 2 * MAX_FILE_SESSION_RECORD_BYTES,
+        };
+        let maximum = FileSessionWindowLimits {
+            max_frames: 8,
+            max_wire_bytes: MAX_FILE_SESSION_WINDOW_BYTES,
+        };
+        let mut controller = AdaptiveFileParallelism::new(initial, maximum, 4).unwrap();
+        assert_eq!(controller.plan().stream_count, 1);
+        let report = FileParallelWindowReport {
+            stream_id: 1,
+            window: FileSessionWindowReport {
+                frame_count: 2,
+                ciphertext_bytes: 512 * 1024,
+                wire_bytes: initial.max_wire_bytes,
+                elapsed: Duration::from_millis(100),
+            },
+        };
+        let before = FileSessionPathMetrics {
+            rtt: Duration::from_millis(20),
+            sent_packets: 100,
+            lost_packets: 0,
+            congestion_events: 0,
+        };
+        let after = FileSessionPathMetrics {
+            rtt: Duration::from_millis(20),
+            sent_packets: 200,
+            lost_packets: 0,
+            congestion_events: 0,
+        };
+        controller.observe_success(&[report], before, after).unwrap();
+        controller.observe_success(&[report], after, FileSessionPathMetrics {
+            sent_packets: 300,
+            ..after
+        }).unwrap();
+        assert_eq!(controller.plan().stream_count, 2);
+        assert!(controller.smoothed_throughput_bytes_per_sec().unwrap() > 0);
+        assert_eq!(controller.smoothed_rtt(), Some(Duration::from_millis(20)));
+
+        let loss_after = FileSessionPathMetrics {
+            rtt: Duration::from_millis(50),
+            sent_packets: 450,
+            lost_packets: 1,
+            congestion_events: 1,
+        };
+        controller.observe_success(&[report, FileParallelWindowReport {
+            stream_id: 2,
+            window: report.window,
+        }], FileSessionPathMetrics {
+            sent_packets: 300,
+            ..after
+        }, loss_after).unwrap();
+        assert_eq!(controller.plan().stream_count, 1);
+        assert!(controller.plan().window_limits.max_frames < maximum.max_frames);
+
+        let mut budget_limited = AdaptiveFileParallelism::new(maximum, maximum, 8).unwrap();
+        budget_limited.parallel_streams = 8;
+        assert_eq!(budget_limited.plan().stream_count, 2);
+        assert!(budget_limited.plan().window_limits.max_wire_bytes
+            <= MAX_FILE_PARALLEL_IN_FLIGHT_BYTES);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "D3 measurement gate; run explicitly with --ignored --nocapture"]
+    async fn d3_fast_loopback_parallel_throughput_benchmark() {
+        const STREAMS: usize = 4;
+        const FRAMES_PER_STREAM: usize = 16;
+        const RANGE_BYTES: usize = 240 * 1024;
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let persisted = Arc::new(AtomicUsize::new(0));
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            let persisted = persisted.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(102);
+                let client_identity = identity(101);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut base = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    benchmark_limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let mut tasks = tokio::task::JoinSet::new();
+                for _ in 0..STREAMS {
+                    let mut stream = base.accept_parallel_stream().await.unwrap();
+                    let persisted = persisted.clone();
+                    tasks.spawn(async move {
+                        let mut sink = BenchmarkSink {
+                            persisted,
+                            delay: Duration::ZERO,
+                        };
+                        for _ in 0..FRAMES_PER_STREAM {
+                            stream.receive_chunk(&mut sink).await.unwrap();
+                        }
+                        assert!(matches!(
+                            stream.receive_chunk(&mut sink).await,
+                            Err(FileSessionError::Closed)
+                        ));
+                    });
+                }
+                while let Some(result) = tasks.join_next().await {
+                    result.unwrap();
+                }
+                let mut sink = BenchmarkSink {
+                    persisted,
+                    delay: Duration::ZERO,
+                };
+                assert!(matches!(
+                    base.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = identity(101);
+        let server_identity = identity(102);
+        let connection = client_endpoint
+            .connect(server_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let mut session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            benchmark_limits(),
+        )
+        .await
+        .unwrap();
+        let windows = (0..STREAMS)
+            .map(|stream| {
+                (0..FRAMES_PER_STREAM)
+                    .map(|offset| {
+                        benchmark_chunk(
+                            u64::try_from(stream * FRAMES_PER_STREAM + offset).unwrap(),
+                            RANGE_BYTES,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let window_limits = FileSessionWindowLimits {
+            max_frames: FRAMES_PER_STREAM,
+            max_wire_bytes: 4 * 1024 * 1024,
+        };
+        let started = Instant::now();
+        let reports = session
+            .send_parallel_windows(windows, window_limits)
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        let ciphertext_bytes = reports
+            .iter()
+            .map(|report| report.window.ciphertext_bytes)
+            .sum::<u64>();
+        let bytes_per_second = ciphertext_bytes
+            .saturating_mul(1_000_000)
+            .checked_div(u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX).max(1))
+            .unwrap_or(u64::MAX);
+        let path = session.path_metrics();
+        eprintln!(
+            "D3 fast loopback: bytes={ciphertext_bytes} elapsed_ms={} throughput_Bps={bytes_per_second} rtt_us={} lost={} congestion={}",
+            elapsed.as_millis(),
+            path.rtt.as_micros(),
+            path.lost_packets,
+            path.congestion_events,
+        );
+        assert_eq!(reports.len(), STREAMS);
+        assert!(bytes_per_second > 0);
+        session.close().await.unwrap();
+        server_task.await.unwrap();
+        assert_eq!(persisted.load(Ordering::Acquire), STREAMS * FRAMES_PER_STREAM);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "D3 latency gate; run explicitly with --ignored --nocapture"]
+    async fn d3_interactive_text_latency_guard_during_parallel_file_backpressure() {
+        const STREAMS: usize = 4;
+        const FRAMES_PER_STREAM: usize = 8;
+        const RANGE_BYTES: usize = 64 * 1024;
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(104);
+                let client_identity = identity(103);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut base = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    benchmark_limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let interactive_connection = connection.clone();
+                let interactive_task = tokio::spawn(async move {
+                    interactive_connection.receive_message().await.unwrap()
+                });
+                let mut tasks = tokio::task::JoinSet::new();
+                for _ in 0..STREAMS {
+                    let mut stream = base.accept_parallel_stream().await.unwrap();
+                    tasks.spawn(async move {
+                        let mut sink = BenchmarkSink {
+                            persisted: Arc::new(AtomicUsize::new(0)),
+                            delay: Duration::from_millis(25),
+                        };
+                        for _ in 0..FRAMES_PER_STREAM {
+                            stream.receive_chunk(&mut sink).await.unwrap();
+                        }
+                        assert!(matches!(
+                            stream.receive_chunk(&mut sink).await,
+                            Err(FileSessionError::Closed)
+                        ));
+                    });
+                }
+                while let Some(result) = tasks.join_next().await {
+                    result.unwrap();
+                }
+                assert_eq!(interactive_task.await.unwrap(), b"priority-text".to_vec());
+                let mut sink = BenchmarkSink {
+                    persisted: Arc::new(AtomicUsize::new(0)),
+                    delay: Duration::ZERO,
+                };
+                assert!(matches!(
+                    base.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = identity(103);
+        let server_identity = identity(104);
+        let connection = client_endpoint
+            .connect(server_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let mut session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            benchmark_limits(),
+        )
+        .await
+        .unwrap();
+        let interactive_connection = session.connection.clone();
+        let windows = (0..STREAMS)
+            .map(|stream| {
+                (0..FRAMES_PER_STREAM)
+                    .map(|offset| {
+                        benchmark_chunk(
+                            u64::try_from(stream * FRAMES_PER_STREAM + offset).unwrap(),
+                            RANGE_BYTES,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let bulk_started = Instant::now();
+        let bulk_task = tokio::spawn(async move {
+            let reports = session
+                .send_parallel_windows(
+                    windows,
+                    FileSessionWindowLimits {
+                        max_frames: FRAMES_PER_STREAM,
+                        max_wire_bytes: 1024 * 1024,
+                    },
+                )
+                .await
+                .unwrap();
+            let elapsed = bulk_started.elapsed();
+            session.close().await.unwrap();
+            (reports, elapsed)
+        });
+        tokio::task::yield_now().await;
+        let text_started = Instant::now();
+        interactive_connection
+            .send_message(b"priority-text")
+            .await
+            .unwrap();
+        let text_elapsed = text_started.elapsed();
+        let (reports, bulk_elapsed) = bulk_task.await.unwrap();
+        eprintln!(
+            "D3 text guard: text_us={} bulk_ms={} streams={}",
+            text_elapsed.as_micros(),
+            bulk_elapsed.as_millis(),
+            reports.len(),
+        );
+        assert_eq!(reports.len(), STREAMS);
+        assert!(text_elapsed < bulk_elapsed);
+        assert!(text_elapsed < Duration::from_millis(250));
+        server_task.await.unwrap();
     }
 
     #[tokio::test]
