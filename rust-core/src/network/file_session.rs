@@ -1023,6 +1023,10 @@ mod tests {
                     let received = session.receive_chunk(&mut sink).await.unwrap();
                     assert_eq!(received.chunk_index, expected);
                 }
+                assert!(matches!(
+                    session.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
             })
         };
 
@@ -1042,6 +1046,7 @@ mod tests {
             session.send_chunk(&chunk(index, index as u8)).await.unwrap();
             assert_eq!(persisted.lock().unwrap().len(), index as usize + 1);
         }
+        session.close().await.unwrap();
         server_task.await.unwrap();
         assert_eq!(persisted.lock().unwrap().len(), 12);
     }
@@ -1165,6 +1170,10 @@ mod tests {
                 ).unwrap();
                 second.send_control(&missing).await.unwrap();
                 assert_eq!(second.receive_chunk(&mut sink).await.unwrap().chunk_index, 1);
+                assert!(matches!(
+                    second.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
             })
         };
 
@@ -1201,6 +1210,7 @@ mod tests {
             FileControlBodyV1::MissingRanges(_)
         ));
         second.send_chunk(&chunk(1, 2)).await.unwrap();
+        second.close().await.unwrap();
         server_task.await.unwrap();
     }
 
