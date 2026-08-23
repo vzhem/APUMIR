@@ -4188,3 +4188,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   combined file 56. Jinx changed files `Program`, `MissingNode=0`; bounds/no-text-storage/diff checks
   PASS. Arena compile unavailable, Windows pending. Это только D1: D2 parallel streams и D3
   fast/slow/loss/text benchmarks обязательны до F4-D close; engine/Android/phones untouched.
+- **2026-08-23 (доп.369) — F4-D1 Windows host gate 13/13 + 56/56 PASS:** canonical Windows clone
+  guarded fast-forward `471d099→0ef770618292ce1f7ba259cc051a1c390bf7ca62`, generated Kotlin/arm64
+  hashes preserved. MSVC 14.44.35207 focused file-session: `13 passed; 0 failed; 635 filtered out`
+  (compile 27.96 s, tests 0.24 s). Combined `network::file_`: `56 passed; 0 failed; 592 filtered out`
+  (compile 0.33 s, tests 1.31 s). Три warnings только прежние. D1 bounded window/AIMD gate закрыт.
+  Следующий D2: multiple scope-bound QUIC streams на том же authenticated connection с global byte
+  budget; затем D3 benchmarks. Android/phones untouched, F4-D ещё не закрыт.

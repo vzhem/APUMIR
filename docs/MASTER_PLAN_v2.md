@@ -25,9 +25,9 @@ sidecar не реализовывал требуемый signer API. C2a exact `
 adapter для real `Arc<InstalledSigningIdentity>` без экспорта seed; Windows filters 2/2 и 1/1,
 combined 46/46 PASS. C2a host gate закрыт. C2b source exact `fd5d1f3` добавил отдельный host-only
 bounded single-flight owner. После test-only `471d099` Windows focused 7/7 и combined 53/53 PASS;
-C2b host gate закрыт. F4-D1 source/static exact `0ef7706` добавил hard-bounded 64-frame/16-MiB ACK
-window, measured AIMD и 3 tests; Windows compile/runtime pending. Это не готовая пользовательская
-передача: parallel streams/benchmarks, engine/Android, paths, custody и F4-E…H ещё обязательны.
+C2b host gate закрыт. F4-D1 exact `0ef7706` hard-bounded ACK window прошёл Windows focused 13/13 и
+combined 56/56. Следующий substantive slice D2 — connection-level parallel streams с единым byte
+budget; затем D3 benchmarks. Engine/Android, paths, custody и F4-E…H ещё обязательны.
 
 ---
 
@@ -1745,9 +1745,9 @@ Authoritative design и доказательные статусы:
     Windows focused 7/7 + combined 53/53 PASS, 3 прежних warnings, generated guard PASS.
 - [ ] **F4-D — adaptive parallel streams:** bounded concurrency/window/backpressure по фактическим
   RTT/loss/throughput; fast-LAN/slow-link benchmark и text-latency guard.
-  - [ ] D1 bounded ACK window source/static exact `0ef7706`: 64-frame/16-MiB hard caps, default 8/2
-    MiB, measured AIMD, owner delegation, 3 tests; Windows 13 session/56 combined pending.
-  - [ ] D2 connection-level parallel streams + fair scheduler; D3 fast/slow/loss/text benchmarks.
+  - [x] D1 bounded ACK window exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS; hard
+    64-frame/16-MiB caps, measured AIMD, owner delegation, generated guard PASS.
+  - [ ] D2 connection-level parallel streams + global byte budget; D3 fast/slow/loss/text benchmarks.
 - [ ] **F4-E — signed presence/path manager:** contact-scoped beacon 60 s, offline/expiry 90 s,
   expiring endpoint candidates, LAN + different-network/tunnel selection, honest unavailable.
 - [ ] **F4-F — phone-owned FileCustody:** отдельный encrypted disk store, owner modes/quotas,

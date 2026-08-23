@@ -363,9 +363,12 @@ F4-D1 bounded adaptive ACK window source/static реализован на exact
   до первого chunk write. Expected file-session 13, combined F4 56.
 
 Jinx changed files `Program`, `MissingNode=0`; static bounds/no-text-storage и diff checks PASS.
-Windows compile/runtime pending. D1 — реальный throughput progress, но не весь F4-D: connection-level
-parallel streams, slow/loss benchmarks и text-latency budget ещё обязательны. Затем F4-E…H; нельзя
-выдавать host ACK window за готовую пользовательскую функцию.
+Windows exact `0ef7706`: file-session focused `13 passed; 0 failed; 635 filtered out` (compile
+27.96 s, tests 0.24 s), combined `network::file_` `56 passed; 0 failed; 592 filtered out` (compile
+0.33 s, tests 1.31 s). Три warnings только прежние; generated hashes сохранены. D1 host gate закрыт.
+D1 — реальный throughput progress, но не весь F4-D: D2 connection-level parallel streams и D3
+slow/loss/text-latency benchmarks ещё обязательны. Затем F4-E…H; нельзя выдавать host ACK window за
+готовую пользовательскую функцию.
 
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
