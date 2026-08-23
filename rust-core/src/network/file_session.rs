@@ -1838,8 +1838,10 @@ mod tests {
     use crate::network::QuicClient;
     use std::collections::HashSet;
     use std::net::{ IpAddr, Ipv4Addr, SocketAddr };
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{ Arc, Mutex };
+
+    use tokio::net::UdpSocket;
 
     const NOW: i64 = 1_900_000_000_000;
 
@@ -1934,6 +1936,63 @@ mod tests {
 
     fn any_port() -> SocketAddr {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)
+    }
+
+    async fn start_udp_impairment_proxy(
+        server_address: SocketAddr,
+        one_way_delay: Duration,
+        drop_every: u64,
+    ) -> (
+        SocketAddr,
+        Arc<AtomicBool>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let socket = Arc::new(UdpSocket::bind(any_port()).await.unwrap());
+        let proxy_address = socket.local_addr().unwrap();
+        let enabled = Arc::new(AtomicBool::new(false));
+        let enabled_task = enabled.clone();
+        let task = tokio::spawn(async move {
+            let sequence = AtomicU64::new(0);
+            let in_flight = Arc::new(tokio::sync::Semaphore::new(4096));
+            let mut client_address = None;
+            let mut buffer = vec![0u8; 65_535];
+            loop {
+                let (size, source) = match socket.recv_from(&mut buffer).await {
+                    Ok(received) => received,
+                    Err(_) => return,
+                };
+                let destination = if source == server_address {
+                    match client_address {
+                        Some(address) => address,
+                        None => continue,
+                    }
+                } else {
+                    client_address = Some(source);
+                    server_address
+                };
+                let impaired = enabled_task.load(Ordering::Acquire);
+                let packet_number = sequence.fetch_add(1, Ordering::AcqRel) + 1;
+                if impaired && drop_every > 0 && packet_number % drop_every == 0 {
+                    continue;
+                }
+                if !impaired || one_way_delay.is_zero() {
+                    let _ = socket.send_to(&buffer[..size], destination).await;
+                    continue;
+                }
+                let permit = match in_flight.clone().try_acquire_owned() {
+                    Ok(permit) => permit,
+                    Err(_) => continue,
+                };
+                let packet = buffer[..size].to_vec();
+                let socket = socket.clone();
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    tokio::time::sleep(one_way_delay).await;
+                    let _ = socket.send_to(&packet, destination).await;
+                });
+            }
+        });
+        (proxy_address, enabled, task)
     }
 
     fn identity(secret: u8) -> Ed25519KeyPair {
@@ -2581,6 +2640,144 @@ mod tests {
         session.close().await.unwrap();
         server_task.await.unwrap();
         assert_eq!(persisted.load(Ordering::Acquire), STREAMS * FRAMES_PER_STREAM);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "D3 controlled impairment gate; run explicitly with --ignored --nocapture"]
+    async fn d3_slow_lossy_link_recovers_and_adaptive_controller_backs_off() {
+        const STREAMS: usize = 2;
+        const FRAMES_PER_STREAM: usize = 8;
+        const RANGE_BYTES: usize = 32 * 1024;
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let (proxy_addr, impairment_enabled, proxy_task) = start_udp_impairment_proxy(
+            server_addr,
+            Duration::from_millis(8),
+            20,
+        )
+        .await;
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let persisted = Arc::new(AtomicUsize::new(0));
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            let persisted = persisted.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(106);
+                let client_identity = identity(105);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut base = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    benchmark_limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let mut tasks = tokio::task::JoinSet::new();
+                for _ in 0..STREAMS {
+                    let mut stream = base.accept_parallel_stream().await.unwrap();
+                    let persisted = persisted.clone();
+                    tasks.spawn(async move {
+                        let mut sink = BenchmarkSink {
+                            persisted,
+                            delay: Duration::from_millis(5),
+                        };
+                        for _ in 0..FRAMES_PER_STREAM {
+                            stream.receive_chunk(&mut sink).await.unwrap();
+                        }
+                        assert!(matches!(
+                            stream.receive_chunk(&mut sink).await,
+                            Err(FileSessionError::Closed)
+                        ));
+                    });
+                }
+                while let Some(result) = tasks.join_next().await {
+                    result.unwrap();
+                }
+                let mut sink = BenchmarkSink {
+                    persisted,
+                    delay: Duration::ZERO,
+                };
+                assert!(matches!(
+                    base.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = identity(105);
+        let server_identity = identity(106);
+        let connection = client_endpoint
+            .connect(proxy_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let mut session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            benchmark_limits(),
+        )
+        .await
+        .unwrap();
+        let adaptive_window = FileSessionWindowLimits {
+            max_frames: FRAMES_PER_STREAM,
+            max_wire_bytes: 512 * 1024,
+        };
+        let mut controller = AdaptiveFileParallelism::new(
+            adaptive_window,
+            adaptive_window,
+            4,
+        )
+        .unwrap();
+        controller.parallel_streams = STREAMS;
+        let windows = (0..STREAMS)
+            .map(|stream| {
+                (0..FRAMES_PER_STREAM)
+                    .map(|offset| {
+                        benchmark_chunk(
+                            u64::try_from(stream * FRAMES_PER_STREAM + offset).unwrap(),
+                            RANGE_BYTES,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        impairment_enabled.store(true, Ordering::Release);
+        let observation = session
+            .send_adaptive_parallel_windows(&mut controller, windows)
+            .await
+            .unwrap();
+        eprintln!(
+            "D3 slow/loss: bytes={} elapsed_ms={} throughput_Bps={} rtt_ms={} sent={} lost={} congestion={} next_streams={} next_frames={}",
+            observation.ciphertext_bytes,
+            observation.elapsed.as_millis(),
+            observation.throughput_bytes_per_sec,
+            observation.rtt.as_millis(),
+            observation.sent_packets,
+            observation.lost_packets,
+            observation.congestion_events,
+            controller.plan().stream_count,
+            controller.plan().window_limits.max_frames,
+        );
+        assert_eq!(observation.stream_count, STREAMS);
+        assert!(observation.throughput_bytes_per_sec > 0);
+        assert!(observation.rtt >= Duration::from_millis(5));
+        assert!(observation.lost_packets > 0 || observation.congestion_events > 0);
+        assert_eq!(controller.plan().stream_count, 1);
+        assert!(controller.plan().window_limits.max_frames < FRAMES_PER_STREAM);
+        session.close().await.unwrap();
+        server_task.await.unwrap();
+        assert_eq!(persisted.load(Ordering::Acquire), STREAMS * FRAMES_PER_STREAM);
+        proxy_task.abort();
+        let _ = proxy_task.await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
