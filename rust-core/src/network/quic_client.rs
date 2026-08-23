@@ -61,6 +61,7 @@ pub type QuicResult<T> = Result<T, QuicClientError>;
 ///
 /// Держит внутри `quinn::Connection`, предоставляет удобные методы
 /// для отправки/приёма сообщений через bidirectional streams.
+#[derive(Clone)]
 pub struct QuicConnection {
     inner: Connection,
     remote_addr: SocketAddr,

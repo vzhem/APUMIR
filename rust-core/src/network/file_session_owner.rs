@@ -21,8 +21,8 @@ use crate::crypto::keys::{NodeId, ED25519_PUBLIC_KEY_SIZE};
 use crate::crypto::signing_identity::InstalledSigningIdentity;
 use crate::network::file_control::{SignedFileControlV1, FILE_CONTROL_ID_BYTES};
 use crate::network::file_session::{
-    FileSendSession, FileSessionError, FileSessionLimits, FileSessionPeer,
-    FileSessionWindowLimits, FileSessionWindowReport,
+    FileParallelWindowReport, FileSendSession, FileSessionError, FileSessionLimits,
+    FileSessionPeer, FileSessionWindowLimits, FileSessionWindowReport,
 };
 use crate::network::file_wire::{
     FileCapabilitiesV1, FileFrameV1, FileWireError, FEATURE_CHUNK_RANGE_FRAMES,
@@ -53,7 +53,7 @@ impl Default for FileSessionOwnerConfig {
             capabilities: FileCapabilitiesV1 {
                 min_protocol_version: 1,
                 max_protocol_version: 1,
-                max_parallel_streams: 1,
+                max_parallel_streams: 4,
                 mandatory_features: REQUIRED_FILE_FEATURES_V1,
                 optional_features: FEATURE_CHUNK_RANGE_FRAMES,
                 max_frame_payload_bytes: MAX_FILE_FRAME_PAYLOAD_BYTES as u32,
@@ -285,6 +285,39 @@ impl FileSessionOwner {
             Ok(report) => {
                 slot.touch();
                 Ok(report)
+            }
+            Err(error) => {
+                *state = OwnedSessionState::Failed;
+                drop(state);
+                self.remove_slot_if_same(target, &slot).await;
+                Err(FileSessionOwnerError::Session(error))
+            }
+        }
+    }
+
+    /// Run bounded windows concurrently on independent data streams of the one authenticated
+    /// connection. Any stream failure evicts the session so MissingRanges can resume on fresh auth.
+    pub async fn send_parallel_windows(
+        &self,
+        target: &FileSessionTarget,
+        windows: Vec<Vec<FileFrameV1>>,
+        window_limits: FileSessionWindowLimits,
+        now_ms: i64,
+    ) -> Result<Vec<FileParallelWindowReport>, FileSessionOwnerError> {
+        let slot = self.ensure_session(target, now_ms).await?;
+        let mut state = slot.session.lock().await;
+        let result = match &mut *state {
+            OwnedSessionState::Ready(session) => {
+                session.send_parallel_windows(windows, window_limits).await
+            }
+            OwnedSessionState::Vacant | OwnedSessionState::Failed => {
+                return Err(FileSessionOwnerError::SessionUnavailable);
+            }
+        };
+        match result {
+            Ok(reports) => {
+                slot.touch();
+                Ok(reports)
             }
             Err(error) => {
                 *state = OwnedSessionState::Failed;
@@ -924,6 +957,33 @@ mod tests {
             .session_scope(&correct_target, NOW + 1)
             .await
             .unwrap();
+        assert!(scope.iter().any(|byte| *byte != 0));
+        assert_eq!(accepted.load(Ordering::Acquire), 2);
+
+        owner.shutdown().await;
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn parallel_operation_failure_evicts_session_before_reconnect() {
+        let (owner, target, accepted, server_task) =
+            setup(4, Duration::from_secs(60), 2);
+        assert!(matches!(
+            owner
+                .send_parallel_windows(
+                    &target,
+                    Vec::new(),
+                    FileSessionWindowLimits::default(),
+                    NOW,
+                )
+                .await,
+            Err(FileSessionOwnerError::Session(
+                FileSessionError::ParallelStreamLimit { count: 0, .. }
+            ))
+        ));
+        assert_eq!(owner.owned_peer_count().await, 0);
+
+        let scope = owner.session_scope(&target, NOW + 1).await.unwrap();
         assert!(scope.iter().any(|byte| *byte != 0));
         assert_eq!(accepted.load(Ordering::Acquire), 2);
 

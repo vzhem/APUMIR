@@ -10,10 +10,12 @@
 //! signed B2 controls are length-delimited on that stream without Base64 or whole-file buffering.
 //! A chunk ACK is emitted only after an injected durable sink returns success. Production sinks must
 //! not return success until ciphertext bytes and their resume metadata survive process/device loss.
-//! Parallel streams, Android/FFI wiring and the legacy F3 path are outside this host-only slice.
+//! D2 adds bounded scope-bound data streams on the same authenticated QUIC connection. Android/FFI
+//! wiring and the legacy F3 path remain outside this host-only layer.
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use quinn::{ RecvStream, SendStream };
@@ -51,6 +53,7 @@ pub const FILE_SESSION_ACK_BYTES: usize = 16 + 8 + 4 + 4;
 pub const MAX_FILE_SESSION_RECORD_BYTES: usize = FILE_SESSION_HEADER_BYTES + MAX_FILE_FRAME_BYTES;
 pub const MAX_FILE_SESSION_WINDOW_FRAMES: usize = 64;
 pub const MAX_FILE_SESSION_WINDOW_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_FILE_PARALLEL_IN_FLIGHT_BYTES: usize = 32 * 1024 * 1024;
 
 const FILE_SESSION_SCOPE_DOMAIN_V1: &[u8] = b"apu-file-session-scope-v1\0";
 const FILE_SESSION_FLAGS_V1: u16 = 0;
@@ -60,6 +63,9 @@ const SESSION_RECORD_CHUNK: u8 = 3;
 const SESSION_RECORD_CHUNK_ACK: u8 = 4;
 const SESSION_RECORD_CONTROL: u8 = 5;
 const SESSION_RECORD_CLOSE: u8 = 6;
+const SESSION_RECORD_DATA_STREAM: u8 = 7;
+const SESSION_RECORD_DATA_STREAM_OK: u8 = 8;
+const FILE_DATA_STREAM_HELLO_BYTES: usize = FILE_CONTROL_ID_BYTES + 8;
 const SESSION_ABORT_CODE: u32 = 0x4150;
 const DEFAULT_AUTH_LIFETIME_MS: i64 = 60_000;
 
@@ -109,6 +115,12 @@ pub struct FileSessionWindowReport {
     pub ciphertext_bytes: u64,
     pub wire_bytes: usize,
     pub elapsed: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileParallelWindowReport {
+    pub stream_id: u64,
+    pub window: FileSessionWindowReport,
 }
 
 /// Small AIMD controller driven only by measured ACK-window outcomes. It never exceeds the hard
@@ -273,6 +285,16 @@ pub enum FileSessionError {
     WindowFrameLimit { count: usize, max: usize },
     #[error("file session ACK window has {size} wire bytes (max {max})")]
     WindowByteLimit { size: usize, max: usize },
+    #[error("parallel file stream count {count} is outside the negotiated limit {max}")]
+    ParallelStreamLimit { count: usize, max: usize },
+    #[error("parallel file windows have {size} bytes in flight (max {max})")]
+    ParallelByteLimit { size: usize, max: usize },
+    #[error("parallel file stream is not bound to the authenticated session scope")]
+    ParallelScopeMismatch,
+    #[error("parallel file stream ID {0} is invalid or replayed")]
+    InvalidParallelStreamId(u64),
+    #[error("parallel file stream task failed: {0}")]
+    ParallelTask(String),
     #[error("file session replay admission rejected the scope")]
     ReplayedSession,
     #[error("file session admission store failed: {0}")] Admission(String),
@@ -298,23 +320,55 @@ struct SessionRecord {
     payload: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileDataStreamHelloV1 {
+    scope_id: [u8; FILE_CONTROL_ID_BYTES],
+    stream_id: u64,
+}
+
+#[derive(Default)]
+struct AcceptedDataStreamState {
+    highest_stream_id: u64,
+    active_count: usize,
+}
+
+pub struct FileParallelSendStream {
+    stream_id: u64,
+    send: SendStream,
+    recv: RecvStream,
+    limits: FileSessionLimits,
+}
+
+pub struct FileParallelReceiveStream {
+    stream_id: u64,
+    send: SendStream,
+    recv: RecvStream,
+    negotiated: NegotiatedFileCapabilitiesV1,
+    data_stream_state: Arc<StdMutex<AcceptedDataStreamState>>,
+    limits: FileSessionLimits,
+}
+
 /// Initiator side of one authenticated, ordered QUIC file session.
 pub struct FileSendSession {
+    connection: QuicConnection,
     send: SendStream,
     recv: RecvStream,
     local_node_id: String,
     peer: FileSessionPeer,
     scope_id: [u8; FILE_CONTROL_ID_BYTES],
     negotiated: NegotiatedFileCapabilitiesV1,
+    next_data_stream_id: u64,
     limits: FileSessionLimits,
 }
 
 /// Receiver side of one authenticated, ordered QUIC file session.
 pub struct FileReceiveSession {
+    connection: QuicConnection,
     send: SendStream,
     recv: RecvStream,
     scope_id: [u8; FILE_CONTROL_ID_BYTES],
     negotiated: NegotiatedFileCapabilitiesV1,
+    data_stream_state: Arc<StdMutex<AcceptedDataStreamState>>,
     limits: FileSessionLimits,
 }
 
@@ -400,12 +454,14 @@ impl FileSendSession {
         match result {
             Ok((scope_id, negotiated)) =>
                 Ok(Self {
+                    connection: connection.clone(),
                     send,
                     recv,
                     local_node_id: local_node_id.to_owned(),
                     peer,
                     scope_id,
                     negotiated,
+                    next_data_stream_id: 1,
                     limits,
                 }),
             Err(error) => {
@@ -451,82 +507,104 @@ impl FileSendSession {
         frames: &[FileFrameV1],
         window_limits: FileSessionWindowLimits,
     ) -> Result<FileSessionWindowReport, FileSessionError> {
-        validate_window_limits(window_limits)?;
-        if frames.is_empty() || frames.len() > window_limits.max_frames {
-            return Err(FileSessionError::WindowFrameLimit {
-                count: frames.len(),
-                max: window_limits.max_frames,
+        let prepared = preflight_chunk_window(frames, window_limits, &self.negotiated)?;
+        send_prepared_chunk_window(
+            &mut self.send,
+            &mut self.recv,
+            frames,
+            prepared,
+            self.limits.operation_timeout,
+        )
+        .await
+    }
+
+    /// Send independent bounded windows concurrently on streams bound to this exact authenticated
+    /// QUIC connection/scope. The complete batch is preflighted against one global byte budget before
+    /// any data stream opens.
+    pub async fn send_parallel_windows(
+        &mut self,
+        windows: Vec<Vec<FileFrameV1>>,
+        window_limits: FileSessionWindowLimits,
+    ) -> Result<Vec<FileParallelWindowReport>, FileSessionError> {
+        let negotiated_streams = usize::from(self.negotiated.max_parallel_streams);
+        if windows.is_empty() || windows.len() > negotiated_streams {
+            return Err(FileSessionError::ParallelStreamLimit {
+                count: windows.len(),
+                max: negotiated_streams,
             });
         }
 
-        let mut expected_acks = Vec::with_capacity(frames.len());
-        let mut wire_bytes = 0usize;
-        let mut ciphertext_bytes = 0u64;
-        for frame in frames {
-            let chunk = match frame {
-                FileFrameV1::ChunkData(chunk) => chunk,
-                FileFrameV1::Capabilities(_) => {
-                    return Err(FileSessionError::ExpectedCapabilities);
-                }
-            };
-            let encoded = frame.encode()?;
-            validate_negotiated_frame_size(&encoded, &self.negotiated)?;
-            let record_bytes = FILE_SESSION_HEADER_BYTES
-                .checked_add(encoded.len())
-                .ok_or(FileSessionError::WindowByteLimit {
-                    size: usize::MAX,
-                    max: window_limits.max_wire_bytes,
-                })?;
-            wire_bytes = wire_bytes
-                .checked_add(record_bytes)
-                .ok_or(FileSessionError::WindowByteLimit {
-                    size: usize::MAX,
-                    max: window_limits.max_wire_bytes,
-                })?;
-            if wire_bytes > window_limits.max_wire_bytes {
-                return Err(FileSessionError::WindowByteLimit {
-                    size: wire_bytes,
-                    max: window_limits.max_wire_bytes,
-                });
-            }
-            ciphertext_bytes = ciphertext_bytes.saturating_add(chunk.ciphertext.len() as u64);
-            expected_acks.push(ChunkAckV1::from_chunk(chunk)?);
+        let stream_count = u64::try_from(windows.len())
+            .map_err(|_| FileSessionError::InvalidParallelStreamId(u64::MAX))?;
+        let next_data_stream_id = self
+            .next_data_stream_id
+            .checked_add(stream_count)
+            .ok_or(FileSessionError::InvalidParallelStreamId(u64::MAX))?;
+        let mut stream_id = self.next_data_stream_id;
+        let mut prepared = Vec::with_capacity(windows.len());
+        for frames in windows {
+            let window = preflight_chunk_window(frames.as_slice(), window_limits, &self.negotiated)?;
+            prepared.push((stream_id, frames, window));
+            stream_id = stream_id
+                .checked_add(1)
+                .ok_or(FileSessionError::InvalidParallelStreamId(u64::MAX))?;
         }
+        validate_parallel_byte_budget(
+            prepared.iter().map(|(_, _, window)| window.wire_bytes),
+        )?;
 
-        let started = Instant::now();
-        for frame in frames {
-            let encoded = frame.encode()?;
-            write_record_timeout(
-                &mut self.send,
-                SESSION_RECORD_CHUNK,
-                &encoded,
-                self.limits.operation_timeout,
+        // IDs are burned before any open attempt so a partial failure can never replay one already
+        // admitted by the receiver. Opens are handshaken in ID order; payload windows run concurrently.
+        self.next_data_stream_id = next_data_stream_id;
+        let mut opened = Vec::with_capacity(prepared.len());
+        for (stream_id, frames, prepared_window) in prepared {
+            let stream = open_parallel_send_stream(
+                &self.connection,
+                self.scope_id,
+                stream_id,
+                self.limits,
             )
             .await?;
-        }
-        for expected_ack in expected_acks {
-            let response = read_record_timeout(&mut self.recv, self.limits.operation_timeout).await?;
-            if response.record_type == SESSION_RECORD_CLOSE {
-                return Err(FileSessionError::Closed);
-            }
-            if response.record_type != SESSION_RECORD_CHUNK_ACK {
-                return Err(FileSessionError::UnexpectedRecord {
-                    expected: "durable chunk ACK",
-                    got: response.record_type,
-                });
-            }
-            let ack = ChunkAckV1::decode(&response.payload)?;
-            if ack != expected_ack {
-                return Err(FileSessionError::AckMismatch);
-            }
+            opened.push((stream_id, stream, frames, prepared_window));
         }
 
-        Ok(FileSessionWindowReport {
-            frame_count: frames.len(),
-            ciphertext_bytes,
-            wire_bytes,
-            elapsed: started.elapsed(),
-        })
+        let mut tasks = tokio::task::JoinSet::new();
+        for (stream_id, mut stream, frames, prepared_window) in opened {
+            tasks.spawn(async move {
+                let window = send_prepared_chunk_window(
+                    &mut stream.send,
+                    &mut stream.recv,
+                    frames.as_slice(),
+                    prepared_window,
+                    stream.limits.operation_timeout,
+                )
+                .await?;
+                stream.close().await?;
+                Ok::<FileParallelWindowReport, FileSessionError>(FileParallelWindowReport {
+                    stream_id,
+                    window,
+                })
+            });
+        }
+
+        let mut reports = Vec::new();
+        let mut first_error = None;
+        while let Some(joined) = tasks.join_next().await {
+            match joined {
+                Ok(Ok(report)) => reports.push(report),
+                Ok(Err(error)) if first_error.is_none() => first_error = Some(error),
+                Ok(Err(_)) => {}
+                Err(error) if first_error.is_none() => {
+                    first_error = Some(FileSessionError::ParallelTask(error.to_string()));
+                }
+                Err(_) => {}
+            }
+        }
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        reports.sort_by_key(|report| report.stream_id);
+        Ok(reports)
     }
 
     async fn send_chunk_inner(&mut self, frame: &FileFrameV1) -> Result<(), FileSessionError> {
@@ -710,10 +788,12 @@ impl FileReceiveSession {
         match result {
             Ok((scope_id, negotiated)) =>
                 Ok(Self {
+                    connection: connection.clone(),
                     send,
                     recv,
                     scope_id,
                     negotiated,
+                    data_stream_state: Arc::new(StdMutex::new(AcceptedDataStreamState::default())),
                     limits,
                 }),
             Err(error) => {
@@ -729,6 +809,81 @@ impl FileReceiveSession {
 
     pub fn negotiated_capabilities(&self) -> &NegotiatedFileCapabilitiesV1 {
         &self.negotiated
+    }
+
+    /// Accept one additional data stream on the already authenticated QUIC connection. The stream
+    /// hello must carry this exact C1 scope and a strictly increasing `u64` ID before any chunk is
+    /// decoded; active streams are capped by the negotiated concurrency limit.
+    pub async fn accept_parallel_stream(
+        &self,
+    ) -> Result<FileParallelReceiveStream, FileSessionError> {
+        let (mut send, mut recv) = timeout_result(
+            self.limits.operation_timeout,
+            "accept parallel data stream",
+            self.connection.accept_file_session_stream(),
+        )
+        .await??;
+        let result = async {
+            let record = read_record_timeout(&mut recv, self.limits.operation_timeout).await?;
+            if record.record_type != SESSION_RECORD_DATA_STREAM {
+                return Err(FileSessionError::UnexpectedRecord {
+                    expected: "authenticated parallel data stream",
+                    got: record.record_type,
+                });
+            }
+            let hello = FileDataStreamHelloV1::decode(&record.payload)?;
+            if hello.scope_id != self.scope_id {
+                return Err(FileSessionError::ParallelScopeMismatch);
+            }
+            if hello.stream_id == 0 {
+                return Err(FileSessionError::InvalidParallelStreamId(hello.stream_id));
+            }
+            {
+                let mut state = self
+                    .data_stream_state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if hello.stream_id <= state.highest_stream_id
+                    || state.active_count >= usize::from(self.negotiated.max_parallel_streams)
+                {
+                    return Err(FileSessionError::InvalidParallelStreamId(hello.stream_id));
+                }
+                state.highest_stream_id = hello.stream_id;
+                state.active_count += 1;
+            }
+            if let Err(error) = write_record_timeout(
+                &mut send,
+                SESSION_RECORD_DATA_STREAM_OK,
+                &hello.encode(),
+                self.limits.operation_timeout,
+            )
+            .await
+            {
+                let mut state = self
+                    .data_stream_state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state.active_count = state.active_count.saturating_sub(1);
+                return Err(error);
+            }
+            Ok(hello.stream_id)
+        }
+        .await;
+
+        match result {
+            Ok(stream_id) => Ok(FileParallelReceiveStream {
+                stream_id,
+                send,
+                recv,
+                negotiated: self.negotiated.clone(),
+                data_stream_state: self.data_stream_state.clone(),
+                limits: self.limits,
+            }),
+            Err(error) => {
+                abort_streams(&mut send, &mut recv);
+                Err(error)
+            }
+        }
     }
 
     /// Decode one exact B1 range, await durable persistence, and only then emit its ACK.
@@ -810,6 +965,306 @@ impl FileReceiveSession {
             reason: error.to_string(),
         })?;
         Ok(())
+    }
+}
+
+impl FileParallelSendStream {
+    pub fn stream_id(&self) -> u64 {
+        self.stream_id
+    }
+
+    pub async fn close(mut self) -> Result<(), FileSessionError> {
+        write_record_timeout(
+            &mut self.send,
+            SESSION_RECORD_CLOSE,
+            &[],
+            self.limits.operation_timeout,
+        )
+        .await?;
+        self.send.finish().map_err(|error| FileSessionError::Io {
+            operation: "finish parallel data stream",
+            reason: error.to_string(),
+        })?;
+        timeout_result(
+            self.limits.operation_timeout,
+            "confirm parallel data stream close",
+            self.send.stopped(),
+        )
+        .await?
+        .map_err(|error| FileSessionError::Io {
+            operation: "confirm parallel data stream close",
+            reason: error.to_string(),
+        })?;
+        Ok(())
+    }
+}
+
+impl FileParallelReceiveStream {
+    pub fn stream_id(&self) -> u64 {
+        self.stream_id
+    }
+
+    pub async fn receive_chunk<S: DurableFileRangeSink>(
+        &mut self,
+        sink: &mut S,
+    ) -> Result<FileChunkDataV1, FileSessionError> {
+        let record = read_record_timeout(&mut self.recv, self.limits.operation_timeout).await?;
+        if record.record_type == SESSION_RECORD_CLOSE {
+            return Err(FileSessionError::Closed);
+        }
+        if record.record_type != SESSION_RECORD_CHUNK {
+            return Err(FileSessionError::UnexpectedRecord {
+                expected: "parallel binary chunk frame",
+                got: record.record_type,
+            });
+        }
+        validate_negotiated_frame_size(&record.payload, &self.negotiated)?;
+        let chunk = match FileFrameV1::decode(&record.payload)? {
+            FileFrameV1::ChunkData(chunk) => chunk,
+            FileFrameV1::Capabilities(_) => {
+                return Err(FileSessionError::ExpectedCapabilities);
+            }
+        };
+        let ack = ChunkAckV1::from_chunk(&chunk)?;
+        let persisted = tokio::time::timeout(
+            self.limits.durable_write_timeout,
+            sink.persist_range(&chunk),
+        )
+        .await
+        .map_err(|_| FileSessionError::Timeout {
+            operation: "parallel durable ciphertext write",
+        })?;
+        if let Err(reason) = persisted {
+            abort_streams(&mut self.send, &mut self.recv);
+            return Err(FileSessionError::DurableSink(reason));
+        }
+        write_record_timeout(
+            &mut self.send,
+            SESSION_RECORD_CHUNK_ACK,
+            &ack.encode(),
+            self.limits.operation_timeout,
+        )
+        .await?;
+        Ok(chunk)
+    }
+}
+
+impl Drop for FileParallelReceiveStream {
+    fn drop(&mut self) {
+        let mut state = self
+            .data_stream_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.active_count = state.active_count.saturating_sub(1);
+    }
+}
+
+impl FileDataStreamHelloV1 {
+    fn encode(&self) -> [u8; FILE_DATA_STREAM_HELLO_BYTES] {
+        let mut bytes = [0u8; FILE_DATA_STREAM_HELLO_BYTES];
+        bytes[..FILE_CONTROL_ID_BYTES].copy_from_slice(&self.scope_id);
+        bytes[FILE_CONTROL_ID_BYTES..].copy_from_slice(&self.stream_id.to_be_bytes());
+        bytes
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self, FileSessionError> {
+        if bytes.len() != FILE_DATA_STREAM_HELLO_BYTES {
+            return Err(FileSessionError::InvalidRecordLength {
+                record_type: SESSION_RECORD_DATA_STREAM,
+                actual: bytes.len(),
+            });
+        }
+        Ok(Self {
+            scope_id: bytes[..FILE_CONTROL_ID_BYTES]
+                .try_into()
+                .map_err(|_| FileSessionError::InvalidRecordLength {
+                    record_type: SESSION_RECORD_DATA_STREAM,
+                    actual: bytes.len(),
+                })?,
+            stream_id: u64::from_be_bytes(
+                bytes[FILE_CONTROL_ID_BYTES..]
+                    .try_into()
+                    .map_err(|_| FileSessionError::InvalidRecordLength {
+                        record_type: SESSION_RECORD_DATA_STREAM,
+                        actual: bytes.len(),
+                    })?,
+            ),
+        })
+    }
+}
+
+struct PreparedChunkWindow {
+    expected_acks: Vec<ChunkAckV1>,
+    ciphertext_bytes: u64,
+    wire_bytes: usize,
+}
+
+fn validate_parallel_byte_budget<I>(window_wire_bytes: I) -> Result<usize, FileSessionError>
+where
+    I: IntoIterator<Item = usize>,
+{
+    let mut total = 0usize;
+    for size in window_wire_bytes {
+        total = total
+            .checked_add(size)
+            .ok_or(FileSessionError::ParallelByteLimit {
+                size: usize::MAX,
+                max: MAX_FILE_PARALLEL_IN_FLIGHT_BYTES,
+            })?;
+        if total > MAX_FILE_PARALLEL_IN_FLIGHT_BYTES {
+            return Err(FileSessionError::ParallelByteLimit {
+                size: total,
+                max: MAX_FILE_PARALLEL_IN_FLIGHT_BYTES,
+            });
+        }
+    }
+    Ok(total)
+}
+
+fn preflight_chunk_window(
+    frames: &[FileFrameV1],
+    window_limits: FileSessionWindowLimits,
+    negotiated: &NegotiatedFileCapabilitiesV1,
+) -> Result<PreparedChunkWindow, FileSessionError> {
+    validate_window_limits(window_limits)?;
+    if frames.is_empty() || frames.len() > window_limits.max_frames {
+        return Err(FileSessionError::WindowFrameLimit {
+            count: frames.len(),
+            max: window_limits.max_frames,
+        });
+    }
+
+    let mut expected_acks = Vec::with_capacity(frames.len());
+    let mut wire_bytes = 0usize;
+    let mut ciphertext_bytes = 0u64;
+    for frame in frames {
+        let chunk = match frame {
+            FileFrameV1::ChunkData(chunk) => chunk,
+            FileFrameV1::Capabilities(_) => {
+                return Err(FileSessionError::ExpectedCapabilities);
+            }
+        };
+        let encoded = frame.encode()?;
+        validate_negotiated_frame_size(&encoded, negotiated)?;
+        let record_bytes = FILE_SESSION_HEADER_BYTES
+            .checked_add(encoded.len())
+            .ok_or(FileSessionError::WindowByteLimit {
+                size: usize::MAX,
+                max: window_limits.max_wire_bytes,
+            })?;
+        wire_bytes = wire_bytes
+            .checked_add(record_bytes)
+            .ok_or(FileSessionError::WindowByteLimit {
+                size: usize::MAX,
+                max: window_limits.max_wire_bytes,
+            })?;
+        if wire_bytes > window_limits.max_wire_bytes {
+            return Err(FileSessionError::WindowByteLimit {
+                size: wire_bytes,
+                max: window_limits.max_wire_bytes,
+            });
+        }
+        ciphertext_bytes = ciphertext_bytes.saturating_add(chunk.ciphertext.len() as u64);
+        expected_acks.push(ChunkAckV1::from_chunk(chunk)?);
+    }
+    Ok(PreparedChunkWindow {
+        expected_acks,
+        ciphertext_bytes,
+        wire_bytes,
+    })
+}
+
+async fn send_prepared_chunk_window(
+    send: &mut SendStream,
+    recv: &mut RecvStream,
+    frames: &[FileFrameV1],
+    prepared: PreparedChunkWindow,
+    operation_timeout: Duration,
+) -> Result<FileSessionWindowReport, FileSessionError> {
+    let started = Instant::now();
+    for frame in frames {
+        write_record_timeout(
+            send,
+            SESSION_RECORD_CHUNK,
+            &frame.encode()?,
+            operation_timeout,
+        )
+        .await?;
+    }
+    for expected_ack in prepared.expected_acks {
+        let response = read_record_timeout(recv, operation_timeout).await?;
+        if response.record_type == SESSION_RECORD_CLOSE {
+            return Err(FileSessionError::Closed);
+        }
+        if response.record_type != SESSION_RECORD_CHUNK_ACK {
+            return Err(FileSessionError::UnexpectedRecord {
+                expected: "durable chunk ACK",
+                got: response.record_type,
+            });
+        }
+        if ChunkAckV1::decode(&response.payload)? != expected_ack {
+            return Err(FileSessionError::AckMismatch);
+        }
+    }
+    Ok(FileSessionWindowReport {
+        frame_count: frames.len(),
+        ciphertext_bytes: prepared.ciphertext_bytes,
+        wire_bytes: prepared.wire_bytes,
+        elapsed: started.elapsed(),
+    })
+}
+
+async fn open_parallel_send_stream(
+    connection: &QuicConnection,
+    scope_id: [u8; FILE_CONTROL_ID_BYTES],
+    stream_id: u64,
+    limits: FileSessionLimits,
+) -> Result<FileParallelSendStream, FileSessionError> {
+    if stream_id == 0 {
+        return Err(FileSessionError::InvalidParallelStreamId(stream_id));
+    }
+    let (mut send, mut recv) = timeout_result(
+        limits.operation_timeout,
+        "open parallel data stream",
+        connection.open_file_session_stream(),
+    )
+    .await??;
+    let hello = FileDataStreamHelloV1 {
+        scope_id,
+        stream_id,
+    };
+    let result = async {
+        write_record_timeout(
+            &mut send,
+            SESSION_RECORD_DATA_STREAM,
+            &hello.encode(),
+            limits.operation_timeout,
+        )
+        .await?;
+        let response = read_record_timeout(&mut recv, limits.operation_timeout).await?;
+        if response.record_type != SESSION_RECORD_DATA_STREAM_OK {
+            return Err(FileSessionError::UnexpectedRecord {
+                expected: "parallel data stream response",
+                got: response.record_type,
+            });
+        }
+        if FileDataStreamHelloV1::decode(&response.payload)? != hello {
+            return Err(FileSessionError::ParallelScopeMismatch);
+        }
+        Ok(())
+    }
+    .await;
+    match result {
+        Ok(()) => Ok(FileParallelSendStream {
+            stream_id,
+            send,
+            recv,
+            limits,
+        }),
+        Err(error) => {
+            abort_streams(&mut send, &mut recv);
+            Err(error)
+        }
     }
 }
 
@@ -1107,6 +1562,9 @@ fn validate_record_length(record_type: u8, payload_len: usize) -> Result<(), Fil
         }
         SESSION_RECORD_CHUNK => MAX_FILE_FRAME_BYTES,
         SESSION_RECORD_CHUNK_ACK => FILE_SESSION_ACK_BYTES,
+        SESSION_RECORD_DATA_STREAM | SESSION_RECORD_DATA_STREAM_OK => {
+            FILE_DATA_STREAM_HELLO_BYTES
+        }
         SESSION_RECORD_CLOSE => 0,
         got => {
             return Err(FileSessionError::UnsupportedRecordType { got });
@@ -1120,6 +1578,8 @@ fn validate_record_length(record_type: u8, payload_len: usize) -> Result<(), Fil
     }
     if
         (record_type == SESSION_RECORD_CHUNK_ACK && payload_len != FILE_SESSION_ACK_BYTES) ||
+        (matches!(record_type, SESSION_RECORD_DATA_STREAM | SESSION_RECORD_DATA_STREAM_OK)
+            && payload_len != FILE_DATA_STREAM_HELLO_BYTES) ||
         (record_type == SESSION_RECORD_CLOSE && payload_len != 0)
     {
         return Err(FileSessionError::InvalidRecordLength {
@@ -1153,6 +1613,7 @@ mod tests {
     use crate::network::QuicClient;
     use std::collections::HashSet;
     use std::net::{ IpAddr, Ipv4Addr, SocketAddr };
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{ Arc, Mutex };
 
     const NOW: i64 = 1_900_000_000_000;
@@ -1200,6 +1661,28 @@ mod tests {
                 } else {
                     Ok(())
                 }
+            })
+        }
+    }
+
+    struct ConcurrentSink {
+        events: Arc<Mutex<Vec<u64>>>,
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    impl DurableFileRangeSink for ConcurrentSink {
+        fn persist_range<'a>(
+            &'a mut self,
+            range: &'a FileChunkDataV1,
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+            Box::pin(async move {
+                let active = self.active.fetch_add(1, Ordering::AcqRel) + 1;
+                self.max_active.fetch_max(active, Ordering::AcqRel);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                self.events.lock().unwrap().push(range.chunk_index);
+                self.active.fetch_sub(1, Ordering::AcqRel);
+                Ok(())
             })
         }
     }
@@ -1293,6 +1776,317 @@ mod tests {
             capabilities(),
             NOW
         ).unwrap()
+    }
+
+    #[test]
+    fn parallel_global_byte_budget_is_hard_bounded_without_allocation() {
+        assert_eq!(
+            validate_parallel_byte_budget([
+                MAX_FILE_PARALLEL_IN_FLIGHT_BYTES / 2,
+                MAX_FILE_PARALLEL_IN_FLIGHT_BYTES / 2,
+            ])
+            .unwrap(),
+            MAX_FILE_PARALLEL_IN_FLIGHT_BYTES
+        );
+        assert!(matches!(
+            validate_parallel_byte_budget([
+                MAX_FILE_PARALLEL_IN_FLIGHT_BYTES,
+                1,
+            ]),
+            Err(FileSessionError::ParallelByteLimit {
+                max: MAX_FILE_PARALLEL_IN_FLIGHT_BYTES,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn parallel_streams_share_one_authenticated_connection_and_persist_concurrently() {
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            let events = events.clone();
+            let active = active.clone();
+            let max_active = max_active.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(92);
+                let client_identity = identity(91);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut base = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let mut tasks = tokio::task::JoinSet::new();
+                for _ in 0..4 {
+                    let mut stream = base.accept_parallel_stream().await.unwrap();
+                    let events = events.clone();
+                    let active = active.clone();
+                    let max_active = max_active.clone();
+                    tasks.spawn(async move {
+                        let mut sink = ConcurrentSink {
+                            events,
+                            active,
+                            max_active,
+                        };
+                        for _ in 0..4 {
+                            stream.receive_chunk(&mut sink).await.unwrap();
+                        }
+                        assert!(matches!(
+                            stream.receive_chunk(&mut sink).await,
+                            Err(FileSessionError::Closed)
+                        ));
+                    });
+                }
+                while let Some(result) = tasks.join_next().await {
+                    result.unwrap();
+                }
+                let mut resumed = base.accept_parallel_stream().await.unwrap();
+                assert_eq!(resumed.stream_id(), 5);
+                let mut resumed_sink = ConcurrentSink {
+                    events,
+                    active,
+                    max_active,
+                };
+                assert_eq!(
+                    resumed.receive_chunk(&mut resumed_sink).await.unwrap().chunk_index,
+                    16
+                );
+                assert!(matches!(
+                    resumed.receive_chunk(&mut resumed_sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+                drop(resumed);
+                let mut sink = RecordingSink {
+                    events: Arc::new(Mutex::new(Vec::new())),
+                    fail: false,
+                };
+                assert!(matches!(
+                    base.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = identity(91);
+        let server_identity = identity(92);
+        let connection = client_endpoint
+            .connect(server_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let mut session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            limits(),
+        )
+        .await
+        .unwrap();
+        let windows = (0..4u64)
+            .map(|stream| {
+                (0..4u64)
+                    .map(|offset| {
+                        let index = stream * 4 + offset;
+                        chunk(index, index as u8)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let reports = session
+            .send_parallel_windows(windows, FileSessionWindowLimits::default())
+            .await
+            .unwrap();
+        assert_eq!(reports.len(), 4);
+        assert_eq!(reports.iter().map(|report| report.window.frame_count).sum::<usize>(), 16);
+        assert!(reports
+            .iter()
+            .enumerate()
+            .all(|(index, report)| report.stream_id == (index + 1) as u64));
+        let resumed = session
+            .send_parallel_windows(
+                vec![vec![chunk(16, 16)]],
+                FileSessionWindowLimits::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resumed[0].stream_id, 5);
+        session.close().await.unwrap();
+        server_task.await.unwrap();
+
+        let mut persisted = events.lock().unwrap().clone();
+        persisted.sort_unstable();
+        assert_eq!(persisted, (0..17u64).collect::<Vec<_>>());
+        assert!(max_active.load(Ordering::Acquire) >= 2);
+    }
+
+    #[tokio::test]
+    async fn parallel_stream_with_wrong_scope_is_rejected_before_data() {
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(96);
+                let client_identity = identity(95);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut base = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                assert!(matches!(
+                    base.accept_parallel_stream().await,
+                    Err(FileSessionError::ParallelScopeMismatch)
+                ));
+                let mut sink = RecordingSink {
+                    events: Arc::new(Mutex::new(Vec::new())),
+                    fail: false,
+                };
+                assert!(matches!(
+                    base.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = identity(95);
+        let server_identity = identity(96);
+        let connection = client_endpoint
+            .connect(server_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            limits(),
+        )
+        .await
+        .unwrap();
+        let mut wrong_scope = session.scope_id();
+        wrong_scope[0] ^= 0xff;
+        assert!(open_parallel_send_stream(
+            &session.connection,
+            wrong_scope,
+            1,
+            limits(),
+        )
+        .await
+        .is_err());
+        session.close().await.unwrap();
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn duplicate_parallel_stream_id_is_rejected_on_same_authenticated_scope() {
+        let server_endpoint = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server_endpoint.local_address();
+        let client_endpoint = QuicClient::new(any_port()).unwrap();
+        let server_task = {
+            let server_endpoint = server_endpoint.clone();
+            tokio::spawn(async move {
+                let server_identity = identity(94);
+                let client_identity = identity(93);
+                let connection = server_endpoint.accept().await.unwrap();
+                let mut admission = MemoryAdmission::new();
+                let mut base = FileReceiveSession::accept(
+                    &connection,
+                    &node(&server_identity),
+                    &server_identity,
+                    peer(&client_identity),
+                    capabilities(),
+                    NOW,
+                    limits(),
+                    &mut admission,
+                )
+                .await
+                .unwrap();
+                let mut first = base.accept_parallel_stream().await.unwrap();
+                assert_eq!(first.stream_id(), 1);
+                assert!(matches!(
+                    base.accept_parallel_stream().await,
+                    Err(FileSessionError::InvalidParallelStreamId(1))
+                ));
+                let mut sink = RecordingSink {
+                    events: Arc::new(Mutex::new(Vec::new())),
+                    fail: false,
+                };
+                assert!(matches!(
+                    first.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+                drop(first);
+                assert!(matches!(
+                    base.receive_chunk(&mut sink).await,
+                    Err(FileSessionError::Closed)
+                ));
+            })
+        };
+
+        let client_identity = identity(93);
+        let server_identity = identity(94);
+        let connection = client_endpoint
+            .connect(server_addr, "p2p-messenger")
+            .await
+            .unwrap();
+        let session = FileSendSession::connect(
+            &connection,
+            &node(&client_identity),
+            &client_identity,
+            peer(&server_identity),
+            capabilities(),
+            NOW,
+            limits(),
+        )
+        .await
+        .unwrap();
+        let first = open_parallel_send_stream(
+            &session.connection,
+            session.scope_id(),
+            1,
+            limits(),
+        )
+        .await
+        .unwrap();
+        assert!(open_parallel_send_stream(
+            &session.connection,
+            session.scope_id(),
+            1,
+            limits(),
+        )
+        .await
+        .is_err());
+        first.close().await.unwrap();
+        session.close().await.unwrap();
+        server_task.await.unwrap();
     }
 
     #[test]
