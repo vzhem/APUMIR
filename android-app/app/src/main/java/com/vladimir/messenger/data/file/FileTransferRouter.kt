@@ -44,10 +44,10 @@ class FileTransferRouter @Inject constructor(
         val transportLocal: PacketTransport = RustPacketTransport()
         val lan = LanDirectChannel.get()
         lan.myNodeId = RustBridge.nodeId() ?: ""
+        lan.onDiagnostic = { message -> Log.i(TAG, message) }
         lan.incomingRoute = { senderId, chatId, messageId, text ->
             routeIncoming(senderId, chatId, messageId, text)
         }
-        lan.startServer()
         lanChannel = lan
         val switchingTransport: PacketTransport = SwitchingPacketTransport(transportLocal, lan)
         transport = switchingTransport
@@ -99,6 +99,9 @@ class FileTransferRouter @Inject constructor(
             },
             notifier = notifier,
         )
+        // LAN server starts only after sender/receiver exist: an early incoming
+        // frame must never hit a half-constructed router.
+        lan.startServer()
     }
 
     /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */
@@ -147,7 +150,12 @@ class FileTransferRouter @Inject constructor(
             return
         }
         if (text != lanChannel.buildRequestText()) return
-        val offer = lanChannel.buildOfferText() ?: return
+        val offer = lanChannel.buildOfferText()
+        if (offer == null) {
+            Log.w(TAG, "LAN request from $senderId but no local Wi-Fi endpoint found")
+            return
+        }
+        Log.i(TAG, "LAN request from $senderId, replying with offer $offer")
         runCatching {
             transport.send(
                 "lan-" + System.nanoTime(),

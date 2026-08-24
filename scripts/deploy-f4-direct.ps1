@@ -15,8 +15,27 @@ $Package = 'com.vladimir.messenger'
 
 if ($CollectLogs) {
     foreach ($S in @($StasSerial, $AnyaSerial)) {
-        Write-Output "===== $S ====="
-        & $Adb -s $S logcat -d -v time | Select-String -Pattern 'FileTransfer|APULAN|lan-direct|Direct file|Exception|FATAL' | Select-Object -Last 40
+        Write-Output "===== $S logcat (FileTransferRouter / CoreServerService) ====="
+        & $Adb -s $S logcat -d -v time -s FileTransferRouter CoreServerService | Select-Object -Last 80
+        Write-Output "===== $S listening TCP (hex ports, st=0A means LISTEN) ====="
+        & $Adb -s $S shell cat /proc/net/tcp6
+        & $Adb -s $S shell cat /proc/net/tcp
+    }
+    Write-Output '===== PHONE-TO-PHONE PING (client-isolation test) ====='
+    $StasIp = $null
+    $AnyaIp = $null
+    $IpA = ((& $Adb -s $StasSerial shell ip -f inet addr show wlan0) -join ' ')
+    $IpB = ((& $Adb -s $AnyaSerial shell ip -f inet addr show wlan0) -join ' ')
+    if ($IpA -match 'inet\s+(\d+\.\d+\.\d+\.\d+)/') { $StasIp = $Matches[1] }
+    if ($IpB -match 'inet\s+(\d+\.\d+\.\d+\.\d+)/') { $AnyaIp = $Matches[1] }
+    Write-Output "Stas IP: $StasIp ; Anya IP: $AnyaIp"
+    if ($StasIp -and $AnyaIp) {
+        Write-Output '--- ping from Anya (MTN) to Stas (TECNO) ---'
+        & $Adb -s $AnyaSerial shell ping -c 3 -W 2 $StasIp
+        Write-Output '--- ping from Stas (TECNO) to Anya (MTN) ---'
+        & $Adb -s $StasSerial shell ping -c 3 -W 2 $AnyaIp
+    } else {
+        Write-Output 'WARN: could not read both phone IPs, ping skipped'
     }
     exit 0
 }

@@ -59,6 +59,14 @@ class LanDirectChannel internal constructor() {
     @Volatile
     var incomingRoute: (suspend (senderId: String, chatId: String, messageId: String, text: String) -> Boolean)? = null
 
+    /** Optional diagnostic sink; the router wires it to logcat. Keeps this class pure Kotlin. */
+    @Volatile
+    var onDiagnostic: ((message: String) -> Unit)? = null
+
+    internal fun diag(message: String) {
+        onDiagnostic?.invoke(message)
+    }
+
     // ── Server side (receiving phone) ────────────────────────────────
 
     /** Idempotent. Binds all interfaces on an ephemeral port. Safe without Wi-Fi. */
@@ -68,6 +76,7 @@ class LanDirectChannel internal constructor() {
         val local = ServerSocket(0, 8)
         server = local
         serverPort = local.localPort
+        diag("lan-server started on port $serverPort, wifi-endpoint=${lanEndpoint()?.hostAddress ?: "none"}")
         executor.execute { acceptLoop(local) }
     }
 
@@ -80,6 +89,7 @@ class LanDirectChannel internal constructor() {
             } catch (e: IOException) {
                 break
             }
+            diag("lan-accept from ${socket.inetAddress?.hostAddress}")
             executor.execute { serveConnection(socket) }
         }
     }
@@ -95,6 +105,8 @@ class LanDirectChannel internal constructor() {
                 val senderId = fields[1]
                 require(senderId.startsWith("pk_") && senderId.length >= 10) { "bad lan sender id" }
                 val route = incomingRoute ?: return
+                diag("lan-handshake ok from $senderId")
+                var frames = 0
                 while (true) {
                     val chatLength = input.readInt()
                     require(chatLength in 1..512) { "bad lan chat length" }
@@ -106,11 +118,14 @@ class LanDirectChannel internal constructor() {
                     // Bridge from the blocking socket reader thread into the
                     // suspend routing pipeline (this is a dedicated IO thread).
                     runBlocking { route(senderId, chatId, messageId, text) }
+                    frames++
+                    if (frames == 1 || frames % 512 == 0) diag("lan-frames from $senderId: $frames")
                 }
             }
         } catch (e: Exception) {
             // Connection closed, idle timeout or malformed frame: drop it. The
             // durable mesh path is unaffected; the sender falls back to MQTT.
+            diag("lan-connection dropped: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
 
@@ -143,6 +158,7 @@ class LanDirectChannel internal constructor() {
             }
             true
         } catch (e: IOException) {
+            diag("lan-send failed: ${e.javaClass.simpleName}: ${e.message}")
             dropChannel(recipientNodeId)
             false
         }
@@ -152,6 +168,7 @@ class LanDirectChannel internal constructor() {
     suspend fun openChannel(recipientNodeId: String, host: String, port: Int): Boolean = withContext(Dispatchers.IO) {
         if (hasChannel(recipientNodeId)) return@withContext true
         val socket = Socket()
+        diag("lan-connecting to $host:$port")
         val connected = try {
             socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
             socket.soTimeout = 0
@@ -160,9 +177,11 @@ class LanDirectChannel internal constructor() {
             output.flush()
             true
         } catch (e: IOException) {
+            diag("lan-connect to $host:$port failed: ${e.javaClass.simpleName}: ${e.message}")
             false
         }
         if (connected) {
+            diag("lan-channel open to $recipientNodeId at $host:$port")
             channels[recipientNodeId] = socket
             true
         } else {
@@ -196,6 +215,7 @@ class LanDirectChannel internal constructor() {
 
     /** Sender side: an offer arrived from the mesh. Wakes awaitChannel(). */
     fun onOfferReceived(senderNodeId: String, endpoint: InetSocketAddress) {
+        diag("lan-offer received from $senderNodeId: ${endpoint.hostString}:${endpoint.port}")
         offeredEndpoints[senderNodeId] = endpoint
         awaitingOffer[senderNodeId]?.complete(true)
     }
@@ -221,16 +241,19 @@ class LanDirectChannel internal constructor() {
                 cached
             } else {
                 if (!signalSender(buildRequestText())) {
+                    diag("lan-seek $recipientNodeId: signal send failed, falling back to mesh")
                     lastEstablishFailure[recipientNodeId] = nowMs
                     return false
                 }
                 val offered = withTimeoutOrNull(SEEK_ENDPOINT_TIMEOUT_MS) { deferred.await() }
                 if (offered != true) {
+                    diag("lan-seek $recipientNodeId: no offer within ${SEEK_ENDPOINT_TIMEOUT_MS}ms, falling back to mesh")
                     lastEstablishFailure[recipientNodeId] = nowMs
                     return false
                 }
                 val received = offeredEndpoints[recipientNodeId]
                 if (received == null) {
+                    diag("lan-seek $recipientNodeId: offer vanished")
                     lastEstablishFailure[recipientNodeId] = nowMs
                     return false
                 }
@@ -238,11 +261,13 @@ class LanDirectChannel internal constructor() {
             }
             val host = endpoint.address?.hostAddress ?: endpoint.hostString
             if (host == null) {
+                diag("lan-seek $recipientNodeId: endpoint has no host")
                 lastEstablishFailure[recipientNodeId] = nowMs
                 return false
             }
             val connected = openChannel(recipientNodeId, host, endpoint.port)
             if (!connected) {
+                diag("lan-seek $recipientNodeId: connect failed, falling back to mesh")
                 lastEstablishFailure[recipientNodeId] = nowMs
                 offeredEndpoints.remove(recipientNodeId)
             }

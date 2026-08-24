@@ -4420,3 +4420,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   используется address?.hostAddress ?: hostString; (3) тест: parseOfferText-эндпоинт проверяется
   через hostString. Деплой-скрипт прервался на unit-tests, телефоны не трогались; перезапуск
   теми же тремя командами.
+
+- 2026-08-24 (первый живой прогон F4 в приложении): деплой удался (сборка, установка обоих APK,
+  файлы 64 МБ/1 ГиБ в Download Стаса, оба телефона в 192.168.0.x). Ручная отправка 64 МБ:
+  передача пошла, но по mesh (999 Б/с, 1/512) - LAN-канал не установился, фолбэк сработал.
+  Гипотезы: изоляция клиентов на роутере либо тихий отказ lanEndpoint/сигналинга. Добавлена
+  диагностика: lan-diag-* логи во всех точках канала (server start/accept/handshake/frames,
+  seek/no-offer/connect-fail, send-fail, offer), onDiagnostic -> Log.i(TAG) в роутере,
+  startServer перенесён после конструирования receiver. -CollectLogs расширен: точные теги,
+  /proc/net/tcp(6) LISTEN-порты, ping телефон-телефон (тест изоляции клиентов).
