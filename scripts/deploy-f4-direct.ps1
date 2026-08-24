@@ -8,7 +8,7 @@ $RepoRoot = 'C:\APU-M8'
 $AndroidRoot = Join-Path $RepoRoot 'android-app'
 $Gradlew = Join-Path $AndroidRoot 'gradlew.bat'
 $Adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
-$ExpectedNewHead = '60b20afc37a4a772a07188acfd96a78d233cc54c'
+$RequiredCommit = '60b20afc37a4a772a07188acfd96a78d233cc54c'
 $StasSerial = '11567254BK001192'
 $AnyaSerial = 'AUYF6R5923006121'
 $Package = 'com.vladimir.messenger'
@@ -27,10 +27,12 @@ if (-not (Test-Path -LiteralPath $Adb)) { throw "adb not found: $Adb" }
 if (-not (Test-Path -LiteralPath $Gradlew)) { throw "gradlew not found: $Gradlew" }
 
 Set-Location -LiteralPath $RepoRoot
-$Head = (git rev-parse HEAD) | Select-Object -First 1
-if ($Head -ne $ExpectedNewHead) {
-    throw "Wrong HEAD: $Head (expected $ExpectedNewHead). Run first: git -c http.version=HTTP/1.1 pull --ff-only origin arena/01a0290d-apumir"
+git merge-base --is-ancestor $RequiredCommit HEAD
+if ($LASTEXITCODE -ne 0) {
+    throw "Repo HEAD does not contain commit $RequiredCommit. Run first: git -c http.version=HTTP/1.1 pull --ff-only origin arena/01a0290d-apumir"
 }
+$Head = (git rev-parse HEAD) | Select-Object -First 1
+Write-Output "Repo HEAD: $Head"
 $Dirty = @(git status --porcelain=v1 --untracked-files=no)
 if ($Dirty.Count -ne 0) { throw "Worktree is dirty: $($Dirty -join '; ')" }
 
