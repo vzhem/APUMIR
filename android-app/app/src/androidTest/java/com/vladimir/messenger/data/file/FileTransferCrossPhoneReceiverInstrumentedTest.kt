@@ -133,7 +133,9 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
         manifests: MutableMap<String, FileTransferManifestFfi>,
         received: MutableMap<String, ByteArray>,
     ) {
-        val deadline = System.currentTimeMillis() + 180_000
+        // Публичные MQTT-брокеры бывают очень медленными: реальный прогон
+        // 2026-08-24 показал отправку через ~17 минут. Окно приёма 15 минут.
+        val deadline = System.currentTimeMillis() + 900_000
         while (System.currentTimeMillis() < deadline && received.size < 2) {
             RustBridge.drainEvents().forEach { event ->
                 if (event.eventType == "message_received" && event.senderId == expectedSender) {
