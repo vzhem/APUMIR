@@ -4413,3 +4413,10 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Режимы: без параметров = полный деплой (unit-тесты -> сборки -> установка обоих APK на оба
   телефона -> push apu-demo-64mb.bin и apu-demo-1gb.bin в Download Стаса -> Wi-Fi/подсеть чек ->
   запуск приложений), -CollectLogs = logcat-коллектор с обоих телефонов.
+
+- 2026-08-24 (фиксы компиляции LanDirectChannel): (1) suspend-лямбда incomingRoute вызывалась из
+  блокирующего потокa чтения сокета -> обёртка runBlocking (выделенный IO-поток, безопасно);
+  (2) у InetSocketAddress нет свойства hostAddress (только у InetAddress) -> в awaitChannel
+  используется address?.hostAddress ?: hostString; (3) тест: parseOfferText-эндпоинт проверяется
+  через hostString. Деплой-скрипт прервался на unit-tests, телефоны не трогались; перезапуск
+  теми же тремя командами.

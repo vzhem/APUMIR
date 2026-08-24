@@ -77,7 +77,7 @@ class LanDirectChannelTest {
         assertEquals("APULAN1|req", lan.buildRequestText())
 
         val endpoint = lan.parseOfferText("APULAN1|offer|192.168.1.5|41234")
-        assertEquals("192.168.1.5", endpoint?.hostAddress)
+        assertEquals("192.168.1.5", endpoint?.hostString)
         assertEquals(41234, endpoint?.port)
 
         assertEquals(null, lan.parseOfferText("APULAN1|offer|not-an-ip|70000"))

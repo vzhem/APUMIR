@@ -10,6 +10,7 @@ import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -102,7 +103,9 @@ class LanDirectChannel internal constructor() {
                     require(msgLength in 1..512) { "bad lan message length" }
                     val messageId = ByteArray(msgLength).also { input.readFully(it) }.toString(Charsets.UTF_8)
                     val text = readTextFrame(input)
-                    route(senderId, chatId, messageId, text)
+                    // Bridge from the blocking socket reader thread into the
+                    // suspend routing pipeline (this is a dedicated IO thread).
+                    runBlocking { route(senderId, chatId, messageId, text) }
                 }
             }
         } catch (e: Exception) {
@@ -233,7 +236,12 @@ class LanDirectChannel internal constructor() {
                 }
                 received
             }
-            val connected = openChannel(recipientNodeId, endpoint.hostAddress, endpoint.port)
+            val host = endpoint.address?.hostAddress ?: endpoint.hostString
+            if (host == null) {
+                lastEstablishFailure[recipientNodeId] = nowMs
+                return false
+            }
+            val connected = openChannel(recipientNodeId, host, endpoint.port)
             if (!connected) {
                 lastEstablishFailure[recipientNodeId] = nowMs
                 offeredEndpoints.remove(recipientNodeId)
