@@ -31,6 +31,7 @@ class FileTransferRouter @Inject constructor(
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val transport: PacketTransport
+    private lateinit var lanChannel: LanDirectChannel
     private lateinit var chunkStore: FileTransferChunkStore
     private val receivedStore: ReceivedFileStore
     private val lastHelloAt = HashMap<String, Long>()
@@ -41,7 +42,15 @@ class FileTransferRouter @Inject constructor(
         val receivedStoreLocal = ReceivedFileStore(File(appContext.noBackupFilesDir, "file_received/v1"))
         receivedStore = receivedStoreLocal
         val transportLocal: PacketTransport = RustPacketTransport()
-        transport = transportLocal
+        val lan = LanDirectChannel.get()
+        lan.myNodeId = RustBridge.nodeId() ?: ""
+        lan.incomingRoute = { senderId, chatId, messageId, text ->
+            routeIncoming(senderId, chatId, messageId, text)
+        }
+        lan.startServer()
+        lanChannel = lan
+        val switchingTransport: PacketTransport = SwitchingPacketTransport(transportLocal, lan)
+        transport = switchingTransport
         val crypto: FileCryptoGateway = FfiFileCryptoGateway()
         val identity: LocalExchangeIdentity = AndroidLocalExchangeIdentity(appContext)
         val keyVault: TransferKeyVaultAccess = AndroidTransferKeyVaultAccess(appContext)
@@ -60,7 +69,7 @@ class FileTransferRouter @Inject constructor(
         val senderLocal = FileTransferSender(
             transferDao = transferDao,
             chunkStore = chunkStore,
-            transport = transportLocal,
+            transport = switchingTransport,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
             directTransport = { recipientId, payload ->
                 try {
@@ -81,7 +90,7 @@ class FileTransferRouter @Inject constructor(
             crypto = crypto,
             keyVault = keyVault,
             identity = identity,
-            transport = transportLocal,
+            transport = switchingTransport,
             ackSink = { transferIdHex, contiguousChunks ->
                 senderLocal.onReceiverAck(transferIdHex, contiguousChunks)
                 // ACK progress immediately opens the next bounded window. The periodic job is
@@ -94,6 +103,10 @@ class FileTransferRouter @Inject constructor(
 
     /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */
     suspend fun routeIncoming(senderId: String, chatId: String, messageId: String, text: String): Boolean {
+        if (LanDirectChannel.isLanSignalText(text)) {
+            handleLanSignal(senderId, text)
+            return true
+        }
         if (FileTransferWire.isHelloText(text)) {
             when (receiver.onHelloText(senderId, text)) {
                 FileTransferReceiver.HelloResult.PINNED_NEW -> {
@@ -121,6 +134,28 @@ class FileTransferRouter @Inject constructor(
             Log.i(TAG, "Direct file packet routed to local chat $resolvedChatId")
         }
         return receiver.onIncomingText(senderId, resolvedChatId, messageId, text)
+    }
+
+    /**
+     * F4-F v1 LAN signalling over the mesh: "APULAN1|req" is answered with
+     * "APULAN1|offer|<lan-ip>|<port>" so the peer can open a direct socket.
+     */
+    private suspend fun handleLanSignal(senderId: String, text: String) {
+        val endpoint = lanChannel.parseOfferText(text)
+        if (endpoint != null) {
+            lanChannel.onOfferReceived(senderId, endpoint)
+            return
+        }
+        if (text != lanChannel.buildRequestText()) return
+        val offer = lanChannel.buildOfferText() ?: return
+        runCatching {
+            transport.send(
+                "lan-" + System.nanoTime(),
+                FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
+                senderId,
+                offer,
+            )
+        }.onFailure { Log.w(TAG, "LAN offer reply failed: ${it.message}") }
     }
 
     /**

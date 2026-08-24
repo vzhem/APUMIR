@@ -4384,3 +4384,16 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   FileTransferLanThroughputReceiverInstrumentedTest (bind 0.0.0.0:server_port, bounded
   memory, поток на диск + SHA-256 всего файла, вердикт "OK bytes=.. mbps=.." отправителю).
   Интернет/брокеры не нужны: телефоны в одной Wi-Fi сети, получатель = сервер.
+
+- 2026-08-24 (F4-F v1, прямой канал в приложении): пользователь требует приёмку реальным
+  документом в чате (не виртуальным тестом) -> начато встраивание прямой LAN-передачи в
+  приложение. Новое: LanDirectChannel (чистый Kotlin, phone-as-server: ServerSocket 0.0.0.0,
+  бинарные length-prefixed кадры, handshake APULANHS1|nodeId, mesh-сигналинг APULAN1|req ->
+  APULAN1|offer|ip|port, TTL на повторные попытки, фолбэк на mesh при любой ошибке) и
+  SwitchingPacketTransport (пакеты идут в сокет, если канал открыт; иначе попытка установить,
+  иначе MQTT как раньше). FileTransferRouter: lan-сервер стартует в init, входящие кадры
+  идут в тот же routeIncoming (аутентификация остаётся в receiver: pinned bindings + AEAD),
+  sender/receiver переведены на switching-транспорт, LAN-сигналы поглощаются роутером и
+  не попадают в чат. UI не менялся: реальное вложение из чата идёт через этот транспорт.
+  Также зафиксирован фикс ошибки компиляции LAN-харнеса (File(File) -> usableSpace, a79e6f2).
+  Далее: JVM-тесты канала, Windows compile gate, прогон на телефонах реальным документом.
