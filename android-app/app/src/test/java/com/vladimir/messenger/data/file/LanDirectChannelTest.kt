@@ -88,7 +88,7 @@ class LanDirectChannelTest {
     @Test
     fun channelIsUsedWhenOpenAndSignalGoesToMesh() = runBlocking {
         val server = LanDirectChannel()
-        server.myNodeId = "pk_receiver"
+        server.myNodeId = "pk_receiver_local_2"
         val received = mutableListOf<String>()
         val gate = CompletableDeferred<Unit>()
         server.incomingRoute = { _, _, _, text ->
@@ -99,8 +99,8 @@ class LanDirectChannelTest {
         server.startServer()
 
         val client = LanDirectChannel()
-        client.myNodeId = "pk_sender"
-        assertTrue(client.openChannel("pk_receiver", "127.0.0.1", server.listenPort))
+        client.myNodeId = "pk_sender_local_2"
+        assertTrue(client.openChannel("pk_receiver_local_2", "127.0.0.1", server.listenPort))
 
         val meshPayloads = mutableListOf<String>()
         val mesh = PacketTransport { _, _, _, text ->
@@ -110,13 +110,13 @@ class LanDirectChannelTest {
         val switching = SwitchingPacketTransport(mesh, client)
 
         // Data packet: channel is open -> must ride the socket, not the mesh.
-        assertTrue(switching.send("msg-1", "chat-1", "pk_receiver", "APUFILETEST1|chunk|via-lan"))
+        assertTrue(switching.send("msg-1", "chat-1", "pk_receiver_local_2", "APUFILETEST1|chunk|via-lan"))
         withTimeout(5_000) { gate.await() }
         assertEquals(listOf("APUFILETEST1|chunk|via-lan"), received)
         assertTrue(meshPayloads.isEmpty())
 
         // LAN signal texts always ride the mesh, even with an open channel.
-        assertTrue(switching.send("lan-1", "chat-1", "pk_receiver", "APULAN1|req"))
+        assertTrue(switching.send("lan-1", "chat-1", "pk_receiver_local_2", "APULAN1|req"))
         assertEquals(listOf("APULAN1|req"), meshPayloads)
 
         client.closeAll()
