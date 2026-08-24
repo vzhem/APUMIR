@@ -30,7 +30,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * bindings for offers, AEAD per chunk bound to the manifest). A raw socket can
  * only deliver ciphertext that will fail those checks for a wrong sender.
  */
-class LanDirectChannel private constructor() {
+class LanDirectChannel internal constructor() {
 
     private val executor = Executors.newCachedThreadPool { runnable ->
         Thread(runnable, "lan-direct-channel").apply { isDaemon = true }
@@ -199,7 +199,8 @@ class LanDirectChannel private constructor() {
 
     /**
      * Sender side: ask for an endpoint (signalSender delivers the request over
-     * the mesh) and wait for the offer + connect. Retries are rate-limited.
+     * the mesh) and wait for the offer + connect. EVERY failure path records a
+     * TTL stamp so bulk packets never stall on repeated establish attempts.
      */
     suspend fun awaitChannel(
         recipientNodeId: String,
@@ -212,16 +213,27 @@ class LanDirectChannel private constructor() {
         val deferred = CompletableDeferred<Boolean>()
         awaitingOffer[recipientNodeId] = deferred
         try {
-            val endpoint = offeredEndpoints[recipientNodeId]
-            val connected = if (endpoint != null) {
-                openChannel(recipientNodeId, endpoint.hostAddress, endpoint.port)
+            val cached = offeredEndpoints[recipientNodeId]
+            val endpoint = if (cached != null) {
+                cached
             } else {
-                if (!signalSender(buildRequestText())) return false
+                if (!signalSender(buildRequestText())) {
+                    lastEstablishFailure[recipientNodeId] = nowMs
+                    return false
+                }
                 val offered = withTimeoutOrNull(SEEK_ENDPOINT_TIMEOUT_MS) { deferred.await() }
-                if (!offered) return false
-                val received = offeredEndpoints[recipientNodeId] ?: return false
-                openChannel(recipientNodeId, received.hostAddress, received.port)
+                if (offered != true) {
+                    lastEstablishFailure[recipientNodeId] = nowMs
+                    return false
+                }
+                val received = offeredEndpoints[recipientNodeId]
+                if (received == null) {
+                    lastEstablishFailure[recipientNodeId] = nowMs
+                    return false
+                }
+                received
             }
+            val connected = openChannel(recipientNodeId, endpoint.hostAddress, endpoint.port)
             if (!connected) {
                 lastEstablishFailure[recipientNodeId] = nowMs
                 offeredEndpoints.remove(recipientNodeId)
