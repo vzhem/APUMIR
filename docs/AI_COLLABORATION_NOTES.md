@@ -4349,3 +4349,18 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   FileTransferSenderTest.kt:116 передавал Int-переменную `windowChunks` в Long-параметр
   `onReceiverAck` (числовые литералы в остальных вызовах Kotlin приводит сам). Фикс:
   `windowChunks.toLong()`; instrumented-вызовы проверены, там уже ULong/toULong.
+
+- 2026-08-24 (закрытие F4 u64 host gate): полный хостовый компиляционный гейт u64-геометрии
+  ПРОЙДЕН впервые от начала до конца. Цепочка: source `b1d6ea3` (тест-фиксы + u64-миграция
+  `5b0bf30`) -> generated `36e4796` (UniFFI Kotlin binding, только UInt->ULong, 12/12 строк).
+  Факты: Rust `cargo test --lib` = `681 passed; 0 failed; 5 ignored` (evidence
+  `apu-f4-u64-gate-104b4a6-3`); bindgen ULong chunkCount x1 / chunkIndex x2 / UInt 0;
+  binding SHA256 `594835886003AF4B51B1FBB8F0E1F9E4D917D2B1424D7715BB917621237BC91C`;
+  arm64 `libp2p_core.so` SHA256 `5115E65120884676BE152D093C649D5F1C28284FB14A867AAF1312B492E755E4`;
+  Gradle `:app:testDebugUnitTest --tests com.vladimir.messenger.data.file.*` SUCCESSFUL (34 s),
+  `:app:assembleDebug` + `:app:assembleDebugAndroidTest` SUCCESSFUL (58 s); debug APK
+  `app-debug.apk` 29 725 873 bytes (evidence `apu-f4-u64-gate-b1d6ea3`). Приложение больше не
+  ставит собственных лимитов на размер файла (V2 wire, u64 chunk count/index; V1 остаётся
+  читаемым с прежним 4-GiB пределом). Это хостовый гейт: он НЕ является приёмкой передачи
+  файлов. До релиза остаются: подключение custody к engine/FFI/Android (F3b/F4-F) и
+  физическая приёмка на реальных телефонах (F4-H) — телефоны не подключались, ADB не used.
