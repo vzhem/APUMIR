@@ -70,11 +70,22 @@ class LanDirectChannelTest {
     @Test
     fun lanSignalTextsAreParsedStrictly() {
         assertTrue(LanDirectChannel.isLanSignalText("APULAN1|req"))
+        assertTrue(LanDirectChannel.isLanSignalText("APULAN1|req|192.168.0.5|41000"))
         assertTrue(LanDirectChannel.isLanSignalText("APULAN1|offer|192.168.1.5|41234"))
         assertFalse(LanDirectChannel.isLanSignalText("APUFILETEST1|chunk"))
 
         val lan = LanDirectChannel()
+        // Without a running server the request stays in the legacy short form.
         assertEquals("APULAN1|req", lan.buildRequestText())
+        assertTrue(lan.isRequestText("APULAN1|req"))
+        assertTrue(lan.isRequestText("APULAN1|req|192.168.1.5|41234"))
+        assertFalse(lan.isRequestText("APULAN1|offer|192.168.1.5|41234"))
+
+        val reqEndpoint = lan.parseRequestEndpoint("APULAN1|req|192.168.1.5|41234")
+        assertEquals("192.168.1.5", reqEndpoint?.hostString)
+        assertEquals(41234, reqEndpoint?.port)
+        assertEquals(null, lan.parseRequestEndpoint("APULAN1|req|192.168.1.5"))
+        assertEquals(null, lan.parseRequestEndpoint("APULAN1|offer|192.168.1.5|41234"))
 
         val endpoint = lan.parseOfferText("APULAN1|offer|192.168.1.5|41234")
         assertEquals("192.168.1.5", endpoint?.hostString)
@@ -83,6 +94,28 @@ class LanDirectChannelTest {
         assertEquals(null, lan.parseOfferText("APULAN1|offer|not-an-ip|70000"))
         assertEquals(null, lan.parseOfferText("APULAN1|offer|192.168.1.5"))
         assertEquals(null, lan.parseOfferText("APUFILETEST1|chunk"))
+    }
+
+    @Test
+    fun signalFrameIsDeliveredStraightToPeerServer() = runBlocking {
+        val peer = LanDirectChannel()
+        peer.myNodeId = "pk_peer_local_333"
+        val got = CompletableDeferred<String>()
+        peer.incomingRoute = { _, _, _, text ->
+            got.complete(text)
+            true
+        }
+        peer.startServer()
+
+        val offering = LanDirectChannel()
+        offering.myNodeId = "pk_offering_local_3"
+        assertTrue(
+            offering.sendSignalFrame("127.0.0.1", peer.listenPort, "direct", "APULAN1|offer|192.168.0.119|41234"),
+        )
+        assertEquals("APULAN1|offer|192.168.0.119|41234", withTimeout(5_000) { got.await() })
+
+        offering.closeAll()
+        peer.closeAll()
     }
 
     @Test

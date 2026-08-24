@@ -76,7 +76,23 @@ class LanDirectChannel internal constructor() {
         val local = ServerSocket(0, 8)
         server = local
         serverPort = local.localPort
-        diag("lan-server started on port $serverPort, wifi-endpoint=${lanEndpoint()?.hostAddress ?: "none"}")
+        val ifaceSummary = StringBuilder()
+        try {
+            val nets = NetworkInterface.getNetworkInterfaces()
+            while (nets != null && nets.hasMoreElements()) {
+                val network = nets.nextElement() ?: continue
+                val addresses = network.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val address = addresses.nextElement() ?: continue
+                    if (!address.isLoopbackAddress && address is java.net.Inet4Address) {
+                        if (ifaceSummary.isNotEmpty()) ifaceSummary.append(' ')
+                        ifaceSummary.append(network.name).append('=').append(address.hostAddress)
+                    }
+                }
+            }
+        } catch (ignored: Exception) {
+        }
+        diag("lan-server started on port $serverPort, wifi-endpoint=${lanEndpoint()?.hostAddress ?: "none"}, ifaces=[$ifaceSummary]")
         executor.execute { acceptLoop(local) }
     }
 
@@ -195,9 +211,54 @@ class LanDirectChannel internal constructor() {
         try { socket.close() } catch (ignored: IOException) { }
     }
 
+    /**
+     * One-shot delivery of a short signal frame (e.g. an offer) straight to
+     * the peer's LAN server, bypassing the mesh entirely. Used when a request
+     * carried the requester's endpoint.
+     */
+    suspend fun sendSignalFrame(host: String, port: Int, chatId: String, text: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            Socket().use { socket ->
+                socket.tcpNoDelay = true
+                socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+                socket.soTimeout = CONNECT_TIMEOUT_MS
+                val output = DataOutputStream(socket.getOutputStream())
+                writeTextFrame(output, "$HANDSHAKE_PREFIX|$myNodeId")
+                writeChunk(output, chatId.toByteArray(Charsets.UTF_8))
+                writeChunk(output, ("lan-signal-" + System.nanoTime()).toByteArray(Charsets.UTF_8))
+                writeTextFrame(output, text)
+                output.flush()
+                true
+            }
+        } catch (e: IOException) {
+            diag("lan-signal-frame to $host:$port failed: ${e.javaClass.simpleName}: ${e.message}")
+            false
+        }
+    }
+
     // ── Mesh signalling (APULAN1 texts ride the ordinary mesh path) ──
 
-    fun buildRequestText(): String = "$SIGNAL_PREFIX|req"
+    fun buildRequestText(): String {
+        val port = serverPort
+        val endpoint = lanEndpoint()
+        if (port in 1024..65535 && endpoint != null) {
+            return "$SIGNAL_PREFIX|req|${endpoint.hostAddress}|$port"
+        }
+        return "$SIGNAL_PREFIX|req"
+    }
+
+    fun isRequestText(text: String): Boolean =
+        text == "$SIGNAL_PREFIX|req" || text.startsWith("$SIGNAL_PREFIX|req|")
+
+    /** Endpoint carried inside "APULAN1|req|<ip>|<port>" so the receiver can answer via socket. */
+    fun parseRequestEndpoint(text: String): InetSocketAddress? {
+        val fields = text.split('|')
+        if (fields.size != 4 || fields[0] != SIGNAL_PREFIX || fields[1] != "req") return null
+        val host = fields[2]
+        val port = fields[3].toIntOrNull() ?: return null
+        if (host.isBlank() || port !in 1024..65535) return null
+        return InetSocketAddress(host, port)
+    }
 
     fun parseOfferText(text: String): InetSocketAddress? {
         val fields = text.split('|')
@@ -334,7 +395,7 @@ class LanDirectChannel internal constructor() {
         private const val MAX_FRAME_BYTES = 4 * 1024 * 1024
         private const val CONNECT_TIMEOUT_MS = 5_000
         private const val SEEK_ENDPOINT_TIMEOUT_MS = 5_000L
-        private const val ESTABLISH_RETRY_TTL_MS = 60_000L
+        private const val ESTABLISH_RETRY_TTL_MS = 15_000L
         private const val IDLE_READ_TIMEOUT_MS = 15 * 60 * 1000
 
         fun isLanSignalText(text: String): Boolean = text.startsWith("$SIGNAL_PREFIX|")
@@ -363,6 +424,9 @@ class SwitchingPacketTransport(
     private val lan: LanDirectChannel,
 ) : PacketTransport {
 
+    private val lanFrames = java.util.concurrent.atomic.AtomicLong(0)
+    private val meshFrames = java.util.concurrent.atomic.AtomicLong(0)
+
     override suspend fun send(
         messageId: String,
         chatId: String,
@@ -373,13 +437,27 @@ class SwitchingPacketTransport(
             return mesh.send(messageId, chatId, recipientNodeId, text)
         }
         if (lan.hasChannel(recipientNodeId)) {
-            if (lan.sendPacket(recipientNodeId, chatId, messageId, text)) return true
+            if (lan.sendPacket(recipientNodeId, chatId, messageId, text)) {
+                val sent = lanFrames.incrementAndGet()
+                if (sent == 1L || sent % 128L == 0L) {
+                    lan.diag("lan-path via=lan lanFrames=$sent meshFrames=${meshFrames.get()}")
+                }
+                return true
+            }
         } else {
             val established = lan.awaitChannel(
                 recipientNodeId,
                 System.currentTimeMillis(),
             ) { requestText -> mesh.send(messageId, chatId, recipientNodeId, requestText) }
-            if (established && lan.sendPacket(recipientNodeId, chatId, messageId, text)) return true
+            if (established && lan.sendPacket(recipientNodeId, chatId, messageId, text)) {
+                val sent = lanFrames.incrementAndGet()
+                lan.diag("lan-path via=lan lanFrames=$sent meshFrames=${meshFrames.get()}")
+                return true
+            }
+        }
+        val sent = meshFrames.incrementAndGet()
+        if (sent == 1L || sent % 256L == 0L) {
+            lan.diag("lan-path via=mesh lanFrames=${lanFrames.get()} meshFrames=$sent")
         }
         return mesh.send(messageId, chatId, recipientNodeId, text)
     }

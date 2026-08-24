@@ -149,7 +149,7 @@ class FileTransferRouter @Inject constructor(
             lanChannel.onOfferReceived(senderId, endpoint)
             return
         }
-        if (text != lanChannel.buildRequestText()) return
+        if (!lanChannel.isRequestText(text)) return
         val offer = lanChannel.buildOfferText()
         if (offer == null) {
             Log.w(TAG, "LAN request from $senderId but no local Wi-Fi endpoint found")
@@ -164,6 +164,20 @@ class FileTransferRouter @Inject constructor(
                 offer,
             )
         }.onFailure { Log.w(TAG, "LAN offer reply failed: ${it.message}") }
+        // The request carried the requester's own LAN endpoint: deliver the
+        // offer straight to the sender's socket as well, so channel setup does
+        // not depend on the (slow, chunk-flooded) mesh in either direction.
+        val requester = lanChannel.parseRequestEndpoint(text)
+        if (requester != null) {
+            val host = requester.address?.hostAddress ?: requester.hostString
+            if (host != null) {
+                runCatching {
+                    lanChannel.sendSignalFrame(host, requester.port, FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE, offer)
+                }.onSuccess { delivered ->
+                    Log.i(TAG, "LAN offer socket delivery to $host:${requester.port} ok=$delivered")
+                }
+            }
+        }
     }
 
     /**
