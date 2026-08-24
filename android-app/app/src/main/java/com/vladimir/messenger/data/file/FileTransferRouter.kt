@@ -102,6 +102,7 @@ class FileTransferRouter @Inject constructor(
         // LAN server starts only after sender/receiver exist: an early incoming
         // frame must never hit a half-constructed router.
         lan.startServer()
+        Log.i(TAG, "router init complete: lan build=2026-08-25-B, lan port=${lan.listenPort}, node=${lan.myNodeId}")
     }
 
     /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */

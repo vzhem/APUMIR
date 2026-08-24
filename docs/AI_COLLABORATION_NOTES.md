@@ -4438,3 +4438,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Стас->Аня подтверждён чанками); TTL неудач 60 c -> 15 c; startServer логирует все
   IPv4-интерфейсы; SwitchingPacketTransport логирует статистику путей (lan-path via=...).
   Новые тесты: формат req, прямая доставка сигнального кадра на сервер пира.
+
+- 2026-08-25 (вскрытие противоречия): по /proc/net/tcp6 на обоих телефонах uid приложения
+  слушает [::]:ephemeral (Стас 46195, Аня 36769) - НО это может быть и libp2p TCP-листенер
+  Rust, не наш ServerSocket. Ping работает, чанки идут с chat=direct (V2-транспорт), однако
+  на Стасе-отправителе нет НИ ОДНОЙ lan-* строки - противоречие: seek должен логироваться при
+  каждом пакете. Добавлен жёсткий маркер версии в init роутера (Log.i "router init complete:
+  lan build=2026-08-25-B, lan port=...") и CollectLogs показывает dumpsys versionName/
+  lastUpdateTime, ps процессов и ПОЛНЫЙ буфер lan-* событий по любым тегам (не только тег
+  FileTransferRouter) - снимет вопрос "какой код исполняется".

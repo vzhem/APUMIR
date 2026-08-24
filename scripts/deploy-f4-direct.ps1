@@ -15,12 +15,16 @@ $Package = 'com.vladimir.messenger'
 
 if ($CollectLogs) {
     foreach ($S in @($StasSerial, $AnyaSerial)) {
-        Write-Output "===== $S logcat FileTransferRouter (LAN path) ====="
-        & $Adb -s $S logcat -d -v time -s FileTransferRouter | Select-Object -Last 70
+        Write-Output "===== $S package version ====="
+        & $Adb -s $S shell dumpsys package com.vladimir.messenger | Select-String -Pattern 'versionName|lastUpdateTime|firstInstallTime'
+        Write-Output "===== $S app processes ====="
+        & $Adb -s $S shell ps -A | Select-String 'vladimir'
+        Write-Output "===== $S LAN channel events (full buffer, any tag) ====="
+        & $Adb -s $S logcat -d -v time | Select-String -Pattern 'lan-server|lan-seek|lan-connect|lan-path|lan-offer|lan-accept|lan-signal|lan-handshake|lan-frames|router init|LAN request' | Select-Object -Last 60
+        Write-Output "===== $S logcat FileTransferRouter (tail) ====="
+        & $Adb -s $S logcat -d -v time -s FileTransferRouter | Select-Object -Last 15
         Write-Output "===== $S logcat CoreServerService (tail) ====="
-        & $Adb -s $S logcat -d -v time -s CoreServerService | Select-Object -Last 20
-        Write-Output "===== $S listening TCP (hex ports, st=0A means LISTEN) ====="
-        & $Adb -s $S shell cat /proc/net/tcp6 | Select-String ':0000 0A'
+        & $Adb -s $S logcat -d -v time -s CoreServerService | Select-Object -Last 10
     }
     Write-Output '===== PHONE-TO-PHONE PING (client-isolation test) ====='
     $StasIp = $null
