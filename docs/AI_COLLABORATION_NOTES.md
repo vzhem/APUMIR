@@ -4372,3 +4372,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   окно приёма меньше фактической задержки брокеров. Фикс тестового кода (не продакшн):
   окно receiver 180 c -> 900 c. Фаза 1 (установка, идентичности pk_40d2…/pk_dee6…,
   on-device криптотесты OK x4) зафиксирована в `apu-f4-accept-phase1-2`.
+
+- 2026-08-24 (LAN direct transfer proof, шаг 1): пользователь подтвердил требования к приёмке:
+  скорость (>=10 Мбит/с) и большой файл (>=1 ГиБ) при прямой передаче телефон-телефон;
+  публичный MQTT-путь этим требованиям не удовлетворяет by design (сигнальный канал).
+  Пользователь одобрил план: сначала тест-доказательство по Wi-Fi, потом встраивание в
+  приложение (F4-F). Добавлены instrumented-тесты прямой LAN-передачи (только тестовый код):
+  FileTransferLanThroughputSenderInstrumentedTest (генерирует детерминированный поток
+  file_bytes, сид от абсолютного offset - геометрия не влияет на поток; u64 wire manifest,
+  AEAD chunk-by-chunk, один TCP-сокет, кадры [u64 index][u32 len][ciphertext]) и
+  FileTransferLanThroughputReceiverInstrumentedTest (bind 0.0.0.0:server_port, bounded
+  memory, поток на диск + SHA-256 всего файла, вердикт "OK bytes=.. mbps=.." отправителю).
+  Интернет/брокеры не нужны: телефоны в одной Wi-Fi сети, получатель = сервер.
