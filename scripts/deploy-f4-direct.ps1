@@ -15,11 +15,12 @@ $Package = 'com.vladimir.messenger'
 
 if ($CollectLogs) {
     foreach ($S in @($StasSerial, $AnyaSerial)) {
-        Write-Output "===== $S logcat (FileTransferRouter / CoreServerService) ====="
-        & $Adb -s $S logcat -d -v time -s FileTransferRouter CoreServerService | Select-Object -Last 80
+        Write-Output "===== $S logcat FileTransferRouter (LAN path) ====="
+        & $Adb -s $S logcat -d -v time -s FileTransferRouter | Select-Object -Last 70
+        Write-Output "===== $S logcat CoreServerService (tail) ====="
+        & $Adb -s $S logcat -d -v time -s CoreServerService | Select-Object -Last 20
         Write-Output "===== $S listening TCP (hex ports, st=0A means LISTEN) ====="
-        & $Adb -s $S shell cat /proc/net/tcp6
-        & $Adb -s $S shell cat /proc/net/tcp
+        & $Adb -s $S shell cat /proc/net/tcp6 | Select-String ':0000 0A'
     }
     Write-Output '===== PHONE-TO-PHONE PING (client-isolation test) ====='
     $StasIp = $null
