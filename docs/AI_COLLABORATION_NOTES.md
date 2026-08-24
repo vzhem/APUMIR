@@ -4325,3 +4325,17 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   1.34 s). Появился один test-only unused-variable warning поверх трёх прежних; следующий tiny source
   fix переименовывает helper argument `_recipient` без production effect. F3 ещё не закрыт: planner
   не подключён к engine/FFI/Android/device at-rest и physical phones не запускались.
+
+- 2026-08-24: первый полный host-прогон `cargo test --lib` на Windows (evidence
+  `apu-f4-u64-5b0bf30-recovery5-full`, исходник `615ce2c`) дал `678 passed; 3 failed;
+  5 ignored`. Все три падения пришли из `bdc69ae` (соседняя сессия), не из u64-миграции
+  `5b0bf30`: (1) `relay_store::test_load_unexpired_drops_expired_and_bounds` создавал
+  запись `d` с `expires_at_ms(500) < created_at_ms(1000)` и справедливо ловил
+  `ExpiresBeforeCreated`; теперь `d` создаётся в `now=400`, валидно сохраняется в
+  `now=400` и истекает к загрузке в `now=1000`. (2)+(3) гонка на глобальном реестре
+  signing identity между параллельными lib-тестами разных модулей давала
+  `MalformedReferralToken` (`installed_signing_identity()` -> None между install и
+  create) и `SenderMismatch`; добавлен test-only `signing_identity_registry_guard()`,
+  сериализованы все 5 registry-тестов (4 в `signing_identity`, 1 в `file_key_envelope`).
+  Focused u64 file-transfer крипто-тесты по-прежнему `7 passed` (recovery4). После
+  фикса полный набор ожидаемо `681 passed; 5 ignored`.
