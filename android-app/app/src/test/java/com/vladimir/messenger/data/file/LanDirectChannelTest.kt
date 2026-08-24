@@ -16,7 +16,7 @@ class LanDirectChannelTest {
     @Test
     fun directChannelDeliversFramesToIncomingRoute() = runBlocking {
         val server = LanDirectChannel()
-        server.myNodeId = "pk_receiver"
+        server.myNodeId = "pk_receiver_local_1"
         val received = CompletableDeferred<List<String>>()
         server.incomingRoute = { senderId, chatId, messageId, text ->
             received.complete(listOf(senderId, chatId, messageId, text))
@@ -26,20 +26,20 @@ class LanDirectChannelTest {
         assertTrue(server.listenPort in 1024..65535)
 
         val client = LanDirectChannel()
-        client.myNodeId = "pk_sender"
-        assertTrue(client.openChannel("pk_receiver", "127.0.0.1", server.listenPort))
-        assertTrue(client.hasChannel("pk_receiver"))
-        assertTrue(client.sendPacket("pk_receiver", "chat-1", "msg-1", "APUFILETEST1|chunk|body"))
+        client.myNodeId = "pk_sender_local_1"
+        assertTrue(client.openChannel("pk_receiver_local_1", "127.0.0.1", server.listenPort))
+        assertTrue(client.hasChannel("pk_receiver_local_1"))
+        assertTrue(client.sendPacket("pk_receiver_local_1", "chat-1", "msg-1", "APUFILETEST1|chunk|body"))
 
         val frame = withTimeout(5_000) { received.await() }
-        assertEquals("pk_sender", frame[0])
+        assertEquals("pk_sender_local_1", frame[0])
         assertEquals("chat-1", frame[1])
         assertEquals("msg-1", frame[2])
         assertEquals("APUFILETEST1|chunk|body", frame[3])
 
         client.closeAll()
         server.closeAll()
-        assertFalse(client.hasChannel("pk_receiver"))
+        assertFalse(client.hasChannel("pk_receiver_local_1"))
     }
 
     @Test
