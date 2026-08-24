@@ -113,7 +113,7 @@ class FileTransferSenderTest {
         assertEquals(windowChunks * fragmentsPerChunk, chunkPackets)
         assertEquals("TRANSFERRING", dao.getTransfer(transferIdHex)!!.state)
 
-        sender.onReceiverAck(transferIdHex, windowChunks)
+        sender.onReceiverAck(transferIdHex, windowChunks.toLong())
         now += 1000
         transportSends.clear()
         sender.pumpOnce()

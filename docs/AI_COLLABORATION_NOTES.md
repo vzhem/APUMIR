@@ -4339,3 +4339,13 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   сериализованы все 5 registry-тестов (4 в `signing_identity`, 1 в `file_key_envelope`).
   Focused u64 file-transfer крипто-тесты по-прежнему `7 passed` (recovery4). После
   фикса полный набор ожидаемо `681 passed; 5 ignored`.
+
+- 2026-08-24 (продолжение гейта): evidence `apu-f4-u64-gate-104b4a6-3`: полный Rust
+  `681 passed; 0 failed; 5 ignored`; UniFFI Kotlin bindgen прошёл (ULong chunkCount x1,
+  ULong chunkIndex x2, UInt остаток 0; binding SHA256
+  594835886003AF4B51B1FBB8F0E1F9E4D917D2B1424D7715BB917621237BC91C; ktlint-предупреждение
+  о форматировании — косметика, генератор без ktlint на хосте); `compileDebugKotlin`
+  основного кода с новым binding зелёный. Единственная ошибка компиляции unit-тестов —
+  FileTransferSenderTest.kt:116 передавал Int-переменную `windowChunks` в Long-параметр
+  `onReceiverAck` (числовые литералы в остальных вызовах Kotlin приводит сам). Фикс:
+  `windowChunks.toLong()`; instrumented-вызовы проверены, там уже ULong/toULong.
