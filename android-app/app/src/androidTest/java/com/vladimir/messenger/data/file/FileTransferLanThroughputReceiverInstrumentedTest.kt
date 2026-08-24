@@ -47,7 +47,7 @@ class FileTransferLanThroughputReceiverInstrumentedTest {
             ?: error("Missing receiver identity")
 
         val targetDir = context.noBackupFilesDir
-        if (File(targetDir).usableSpace < expectedBytes + 64L * 1024 * 1024) {
+        if (targetDir.usableSpace < expectedBytes + 64L * 1024 * 1024) {
             error("Not enough free space for $expectedBytes bytes")
         }
         val outFile = File(targetDir, "lan-throughput-$runId.bin")
