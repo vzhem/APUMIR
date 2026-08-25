@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.runBlocking
 
 /**
  * Facade the service layer talks to: routes incoming packet/handshake texts (before they are
@@ -72,10 +73,32 @@ class FileTransferRouter @Inject constructor(
             transport = switchingTransport,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
             directTransport = { recipientId, payload ->
-                try {
-                    com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
-                } catch (_: Exception) {
-                    false
+                // F4-F: LAN direct channel first (phone-to-phone TCP over shared
+                // Wi-Fi). Falls back to the QUIC direct path when LAN is not
+                // available. Mesh signalling is used to find the endpoint, and
+                // when the mesh itself is dead a /24 subnet discovery scan runs.
+                val lanOk = runBlocking {
+                    val scope = FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE
+                    val quick = lan.hasChannel(recipientId) &&
+                        lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
+                    if (quick) {
+                        true
+                    } else {
+                        val viaSignal = lan.awaitChannel(recipientId, System.currentTimeMillis()) { requestText ->
+                            transportLocal.send("lan-seek-" + System.nanoTime(), scope, recipientId, requestText)
+                        }
+                        val established = viaSignal || lan.discoverPeer(recipientId)
+                        established && lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
+                    }
+                }
+                if (lanOk) {
+                    true
+                } else {
+                    try {
+                        com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
+                    } catch (_: Exception) {
+                        false
+                    }
                 }
             },
         )

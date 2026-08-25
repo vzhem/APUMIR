@@ -4447,3 +4447,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   lan build=2026-08-25-B, lan port=...") и CollectLogs показывает dumpsys versionName/
   lastUpdateTime, ps процессов и ПОЛНЫЙ буфер lan-* событий по любым тегам (не только тег
   FileTransferRouter) - снимет вопрос "какой код исполняется".
+
+- 2026-08-25 (корень найден + решение): телеметрия показала - APK свежий (lastUpdateTime=
+  18:03), роутер жив, но sendItem шлёт чанки ЧЕРЕЗ directTransport (Rust QUIC
+  sendDirectPayload), а при неудаче кидает RecipientOfflineException -> WAITING_RECIPIENT;
+  SwitchingPacketTransport в этом пути НЕ участвовал. Публичный MQTT-брокер лежит (у Ани
+  queued_offline) - QUIC не встал, mesh-сигналинг мёртв, передача стоит. Решение:
+  directTransport теперь = LAN-канал первым (sendPacket -> awaitChannel(mesh-req) ->
+  discoverPeer) и только затем QUIC-фолбэк. Добавлен автономный discovery без mesh:
+  фиксированный порт 42108 (fallback ephemeral), iam-кадр идентификации сервера сразу после
+  handshake (APULAN1|iam|<node>), openChannel сверяет идентичность пира, discoverPeer
+  сканирует свою /24 (24 параллельных коннекта, 300 мс connect timeout, 1.5 с iam timeout)
+  и оставляет открытый канал при совпадении node id. tcpNoDelay на каналах. Логи lan-discover.

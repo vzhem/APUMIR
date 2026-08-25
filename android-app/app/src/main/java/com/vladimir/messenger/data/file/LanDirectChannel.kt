@@ -10,7 +10,14 @@ import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -73,7 +80,14 @@ class LanDirectChannel internal constructor() {
     @Synchronized
     fun startServer() {
         if (server != null) return
-        val local = ServerSocket(0, 8)
+        val local = try {
+            val fixed = ServerSocket(LAN_DISCOVERY_PORT, 8)
+            diag("lan-server bound to fixed discovery port $LAN_DISCOVERY_PORT")
+            fixed
+        } catch (e: IOException) {
+            diag("lan-server fixed port $LAN_DISCOVERY_PORT busy, using ephemeral: ${e.message}")
+            ServerSocket(0, 8)
+        }
         server = local
         serverPort = local.localPort
         val ifaceSummary = StringBuilder()
@@ -121,6 +135,11 @@ class LanDirectChannel internal constructor() {
                 val senderId = fields[1]
                 require(senderId.startsWith("pk_") && senderId.length >= 10) { "bad lan sender id" }
                 val route = incomingRoute ?: return
+                // Identify ourselves so the connecting peer can verify it
+                // reached the intended recipient (and subnet discovery works).
+                val output = DataOutputStream(client.getOutputStream())
+                writeTextFrame(output, "$SIGNAL_PREFIX|iam|$myNodeId")
+                output.flush()
                 diag("lan-handshake ok from $senderId")
                 var frames = 0
                 while (true) {
@@ -180,19 +199,26 @@ class LanDirectChannel internal constructor() {
         }
     }
 
-    /** Connects to the announced endpoint and performs the handshake. */
+    /** Connects to the announced endpoint, performs the handshake and verifies the peer identity. */
     suspend fun openChannel(recipientNodeId: String, host: String, port: Int): Boolean = withContext(Dispatchers.IO) {
         if (hasChannel(recipientNodeId)) return@withContext true
         val socket = Socket()
-        diag("lan-connecting to $host:$port")
+        diag("lan-connecting to $host:$port for $recipientNodeId")
         val connected = try {
+            socket.tcpNoDelay = true
             socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
-            socket.soTimeout = 0
+            socket.soTimeout = IAM_REPLY_TIMEOUT_MS
             val output = DataOutputStream(socket.getOutputStream())
             writeTextFrame(output, "$HANDSHAKE_PREFIX|$myNodeId")
             output.flush()
+            val input = DataInputStream(socket.getInputStream())
+            val iam = readTextFrame(input)
+            val fields = iam.split('|')
+            require(fields.size == 3 && fields[0] == SIGNAL_PREFIX && fields[1] == "iam") { "bad lan identity reply" }
+            require(fields[2] == recipientNodeId) { "lan peer mismatch: connected to ${fields[2]}" }
+            socket.soTimeout = 0
             true
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             diag("lan-connect to $host:$port failed: ${e.javaClass.simpleName}: ${e.message}")
             false
         }
@@ -204,6 +230,75 @@ class LanDirectChannel internal constructor() {
             try { socket.close() } catch (ignored: IOException) { }
             false
         }
+    }
+
+    /**
+     * Mesh-independent peer discovery: scan the local /24 on the fixed LAN
+     * port, verify each responder's identity frame and keep the connection
+     * when it matches [recipientNodeId]. Used when mesh signalling is dead
+     * (broker offline) but both phones share a Wi-Fi network.
+     */
+    suspend fun discoverPeer(recipientNodeId: String): Boolean = withContext(Dispatchers.IO) {
+        if (serverPort != LAN_DISCOVERY_PORT) {
+            diag("lan-discover skipped: server not on fixed port (port=$serverPort)")
+            return@withContext false
+        }
+        val self = lanEndpoint()
+        val selfHost = self?.hostAddress
+        if (selfHost.isNullOrBlank()) {
+            diag("lan-discover skipped: no local Wi-Fi endpoint")
+            return@withContext false
+        }
+        val prefix = selfHost.substringBeforeLast('.')
+        diag("lan-discover scanning $prefix.1-254:$LAN_DISCOVERY_PORT for $recipientNodeId")
+        val semaphore = Semaphore(24)
+        try {
+            coroutineScope {
+                for (hostIndex in 1..254) {
+                    launch {
+                        semaphore.withPermit {
+                            val host = "$prefix.$hostIndex"
+                            if (host == selfHost) return@withPermit
+                            var socket: Socket? = null
+                            try {
+                                socket = Socket()
+                                socket.tcpNoDelay = true
+                                socket.connect(InetSocketAddress(host, LAN_DISCOVERY_PORT), DISCOVERY_CONNECT_TIMEOUT_MS)
+                                socket.soTimeout = IAM_REPLY_TIMEOUT_MS
+                                val output = DataOutputStream(socket.getOutputStream())
+                                writeTextFrame(output, "$HANDSHAKE_PREFIX|$myNodeId")
+                                output.flush()
+                                val input = DataInputStream(socket.getInputStream())
+                                val iam = readTextFrame(input)
+                                val fields = iam.split('|')
+                                if (fields.size == 3 && fields[0] == SIGNAL_PREFIX && fields[1] == "iam") {
+                                    if (fields[2] == recipientNodeId) {
+                                        socket.soTimeout = 0
+                                        if (channels.putIfAbsent(recipientNodeId, socket) == null) {
+                                            diag("lan-discover FOUND $recipientNodeId at $host:$LAN_DISCOVERY_PORT")
+                                            socket = null // ownership transferred to the channel map
+                                        } else {
+                                            diag("lan-discover duplicate channel for $recipientNodeId ignored")
+                                        }
+                                    } else {
+                                        diag("lan-discover peer ${fields[2]} at $host skipped")
+                                    }
+                                }
+                            } catch (expected: Exception) {
+                                // Refused/timeout: the normal case while scanning.
+                            } finally {
+                                try { socket?.close() } catch (ignored: IOException) { }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            diag("lan-discover scan failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+        val found = hasChannel(recipientNodeId)
+        diag("lan-discover result for $recipientNodeId: $found")
+        found
     }
 
     fun dropChannel(recipientNodeId: String) {
@@ -394,6 +489,10 @@ class LanDirectChannel internal constructor() {
         private const val HANDSHAKE_PREFIX = "APULANHS1"
         private const val MAX_FRAME_BYTES = 4 * 1024 * 1024
         private const val CONNECT_TIMEOUT_MS = 5_000
+        private const val IAM_REPLY_TIMEOUT_MS = 1_500
+        private const val DISCOVERY_CONNECT_TIMEOUT_MS = 300
+        /** Fixed port enables mesh-independent subnet discovery. */
+        const val LAN_DISCOVERY_PORT = 42108
         private const val SEEK_ENDPOINT_TIMEOUT_MS = 5_000L
         private const val ESTABLISH_RETRY_TTL_MS = 15_000L
         private const val IDLE_READ_TIMEOUT_MS = 15 * 60 * 1000
