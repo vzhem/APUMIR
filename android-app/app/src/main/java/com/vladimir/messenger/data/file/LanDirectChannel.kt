@@ -122,6 +122,17 @@ class LanDirectChannel internal constructor() {
     }
 
     private fun serveConnection(socket: Socket) {
+        // Pipeline: the socket reader only parses frames and hands them to a
+        // single-threaded executor, so slow per-frame routing (Room lookups,
+        // chunk store writes) does not stall the TCP receive window. Order is
+        // preserved by the single thread; the bounded queue plus
+        // CallerRunsPolicy caps memory and applies back-pressure to the reader.
+        val handler = java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 30L, java.util.concurrent.TimeUnit.SECONDS,
+            java.util.concurrent.ArrayBlockingQueue<Runnable>(1024),
+        ) { r -> Thread(r, "lan-frame-router").also { it.isDaemon = true } }
+        handler.rejectedExecutionHandler =
+            java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
         try {
             socket.use { client ->
                 client.soTimeout = IDLE_READ_TIMEOUT_MS
@@ -149,7 +160,7 @@ class LanDirectChannel internal constructor() {
                     val text = readTextFrame(input)
                     // Bridge from the blocking socket reader thread into the
                     // suspend routing pipeline (this is a dedicated IO thread).
-                    runBlocking { route(senderId, chatId, messageId, text) }
+                    handler.execute { runBlocking { route(senderId, chatId, messageId, text) } }
                     frames++
                     if (frames == 1 || frames % 512 == 0) diag("lan-frames from $senderId: $frames")
                 }
@@ -158,6 +169,8 @@ class LanDirectChannel internal constructor() {
             // Connection closed, idle timeout or malformed frame: drop it. The
             // durable mesh path is unaffected; the sender falls back to MQTT.
             diag("lan-connection dropped: ${e.javaClass.simpleName}: ${e.message}")
+        } finally {
+            handler.shutdown()
         }
     }
 

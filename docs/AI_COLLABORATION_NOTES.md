@@ -4481,3 +4481,16 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   pk_6db08 (relay queue 500 переполнена) - потом добавить throttling. Следующие шаги:
   (1) подтверждение появления файла у Ани (приёмка), (2) скорость до >=10 Мбит/с:
   батчинг мелких кадров в один flush + пересмотр окна inflight (120 чанков x 4 КиБ).
+
+- 2026-08-25 (прогон 8, collector 20:15): подтверждено завершение 64 МБ Стас->Аня - у
+  Стаса больше нет "Resumed waiting for recipient"; цикл "handshake ok -> EOF" на Стасе
+  каждые 30 с = Анины lan-discover сканы /24 для мёртвой ноды pk_6db08 (relay queue 500
+  full), discovery корректно отвечает "peer pk_40d2... skipped". УЗКОЕ МЕСТО СКОРОСТИ
+  найдено: serveConnection обрабатывал кадр синхронно в потоке чтения (route = Room
+  lookup + chunk write ~7 мс) -> TCP receive window закрыт -> 140 кадров/с (~4.5 Мбит/с).
+  Фикс: пайплайн - reader только парсит кадры, обработка в single-thread executor с
+  ArrayBlockingQueue(1024) + CallerRunsPolicy (порядок сохранён, память ограничена,
+  back-pressure на reader). Фрагмент-лимит 4К пока НЕ трогаем (33КБ фрагменты терялись
+  живым MQTT-путём, комментарий 2026-08-21); LAN-aware размер кадра - следующий шаг,
+  если замер < 10 Мбит/с. Тест directChannelDeliversFrames уже асинхронный (await 5 c) -
+  совместим.
