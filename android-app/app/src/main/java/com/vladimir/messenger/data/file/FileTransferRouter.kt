@@ -44,7 +44,7 @@ class FileTransferRouter @Inject constructor(
         receivedStore = receivedStoreLocal
         val transportLocal: PacketTransport = RustPacketTransport()
         val lan = LanDirectChannel.get()
-        lan.myNodeId = RustBridge.nodeId() ?: ""
+        syncLanIdentity()
         lan.onDiagnostic = { message -> Log.i(TAG, message) }
         lan.incomingRoute = { senderId, chatId, messageId, text ->
             routeIncoming(senderId, chatId, messageId, text)
@@ -77,6 +77,12 @@ class FileTransferRouter @Inject constructor(
                 // Wi-Fi). Falls back to the QUIC direct path when LAN is not
                 // available. Mesh signalling is used to find the endpoint, and
                 // when the mesh itself is dead a /24 subnet discovery scan runs.
+                // The router singleton is created before the Rust engine is up,
+                // so the LAN identity is re-synced here on every use (during
+                // startup RustBridge.nodeId() is null and the old one-shot
+                // assignment left myNodeId empty — servers then rejected every
+                // handshake with "bad lan sender id").
+                syncLanIdentity()
                 val lanOk = runBlocking {
                     val scope = FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE
                     val quick = lan.hasChannel(recipientId) &&
@@ -167,7 +173,24 @@ class FileTransferRouter @Inject constructor(
      * F4-F v1 LAN signalling over the mesh: "APULAN1|req" is answered with
      * "APULAN1|offer|<lan-ip>|<port>" so the peer can open a direct socket.
      */
+    /**
+     * Refreshes the LAN channel identity from the live Rust engine. The router
+     * singleton is constructed early in process start, when the engine may not
+     * have a node id yet; calling this before every LAN use keeps the identity
+     * correct without restarting the LAN server.
+     */
+    private fun syncLanIdentity() {
+        val nodeId = RustBridge.nodeId() ?: return
+        val lan = LanDirectChannel.get()
+        if (nodeId.startsWith("pk_") && lan.myNodeId != nodeId) {
+            val previous = lan.myNodeId
+            lan.myNodeId = nodeId
+            Log.i(TAG, "lan identity synced: ${nodeId.take(16)} (was ${if (previous.isBlank()) "blank" else previous.take(16)})")
+        }
+    }
+
     private suspend fun handleLanSignal(senderId: String, text: String) {
+        syncLanIdentity()
         val endpoint = lanChannel.parseOfferText(text)
         if (endpoint != null) {
             lanChannel.onOfferReceived(senderId, endpoint)

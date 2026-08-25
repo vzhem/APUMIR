@@ -4459,3 +4459,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   handshake (APULAN1|iam|<node>), openChannel сверяет идентичность пира, discoverPeer
   сканирует свою /24 (24 параллельных коннекта, 300 мс connect timeout, 1.5 с iam timeout)
   и оставляет открытый канал при совпадении node id. tcpNoDelay на каналах. Логи lan-discover.
+
+- 2026-08-25 (прогон 6, деплой 490d410, evidence apu-f4-deploy-192430): ПРОРЫВ -
+  брокер жив, lan-seek дошёл до Ани (receipt+DELIVERY_ACK), Аня ответила offer
+  192.168.0.117:42108, TCP-коннекты телефон<->телефон устанавливаются, discovery-скан
+  /24 находит порт. Оставшаяся поломка: серверы обоих телефонов отвергали входной
+  handshake "bad lan sender id", клиент получал EOF. Причина: роутер-синглтон создаётся
+  раньше готовности Rust-движка, RustBridge.nodeId() тогда null -> lan.myNodeId = "" ->
+  handshake "APULANHS1|" невалиден. Фикс: syncLanIdentity() вызывается перед каждым
+  использованием LAN (init, directTransport-лямбда, handleLanSignal), берёт живой nodeId
+  из движка и обновляет поле; лог "lan identity synced". Сторона получателя тоже
+  покрывается (handleLanSignal) - её iam/offer будут с правильным id.
