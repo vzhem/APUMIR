@@ -4470,3 +4470,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   использованием LAN (init, directTransport-лямбда, handleLanSignal), берёт живой nodeId
   из движка и обновляет поле; лог "lan identity synced". Сторона получателя тоже
   покрывается (handleLanSignal) - её iam/offer будут с правильным id.
+
+- 2026-08-25 (прогон 7, деплой 0e096f9, evidence apu-f4-deploy-200414): ПЕРЕДАЧА
+  ЗАРАБОТАЛА. syncLanIdentity подтвердил диагноз: handshake стал "lan-handshake ok"
+  (было "bad lan sender id"). Резюмившийся 64 МБ transfer Стас->Аня пошёл напрямую по
+  LAN: Аня приняла 14848 кадров (chunk 4 КиБ) и растёт, lan-path via=lan lanFrames=512
+  meshFrames=0, "Direct file packet routed to local chat". Замер по дельте логов:
+  6144 кадра / 43.7 c = ~4.5 Мбит/с чистых (140 кадров/с x 4 КиБ); UI в начале показывал
+  ~160 кбит/с из-за переустановок канала. Шум: Аня спамит lan-seek для мёртвой ноды
+  pk_6db08 (relay queue 500 переполнена) - потом добавить throttling. Следующие шаги:
+  (1) подтверждение появления файла у Ани (приёмка), (2) скорость до >=10 Мбит/с:
+  батчинг мелких кадров в один flush + пересмотр окна inflight (120 чанков x 4 КиБ).
