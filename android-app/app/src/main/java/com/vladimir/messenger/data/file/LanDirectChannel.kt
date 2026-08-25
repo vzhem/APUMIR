@@ -333,6 +333,15 @@ class LanDirectChannel internal constructor() {
                 writeChunk(output, ("lan-signal-" + System.nanoTime()).toByteArray(Charsets.UTF_8))
                 writeTextFrame(output, text)
                 output.flush()
+                // Read the server identity reply before closing. Closing with
+                // unread inbound data turns this into a TCP RST that can also
+                // discard our just-written frame in the peer's receive buffer
+                // (observed as flaky one-shot signal loss). Reading the iam
+                // frame yields a clean FIN and confirms the server is alive.
+                val input = DataInputStream(socket.getInputStream())
+                val iam = readTextFrame(input)
+                val iamFields = iam.split('|')
+                require(iamFields.size == 3 && iamFields[0] == SIGNAL_PREFIX && iamFields[1] == "iam") { "bad lan identity reply" }
                 true
             }
         } catch (e: IOException) {
