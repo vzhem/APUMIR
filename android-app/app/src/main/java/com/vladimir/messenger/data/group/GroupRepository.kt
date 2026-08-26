@@ -1,0 +1,888 @@
+package com.vladimir.messenger.data.group
+
+import android.util.Log
+import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.entity.GroupEntity
+import com.vladimir.messenger.data.local.entity.GroupInviteEntity
+import com.vladimir.messenger.data.local.entity.GroupJoinRequestEntity
+import com.vladimir.messenger.data.local.entity.GroupMemberEntity
+import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
+import com.vladimir.messenger.data.local.entity.GroupTopicEntity
+import com.vladimir.messenger.data.local.entity.MessageEntity
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import java.time.Instant
+import java.time.ZoneOffset
+import java.util.UUID
+
+/**
+ * Вся логика раздела «Группы»: создание, темы, заявки, приглашения, права,
+ * закрепы и статистика.
+ *
+ * Транспорт намеренно вынесен в [GroupDelivery], а идентификация и имя — во
+ * внедрённые лямбды, поэтому класс проверяется обычными JVM-тестами без
+ * Android и без ядра.
+ */
+class GroupRepository(
+    private val groupDao: GroupDao,
+    private val messageDao: MessageDao,
+    private val delivery: GroupDelivery,
+    private val myNodeId: () -> String?,
+    private val myDisplayName: () -> String,
+    /** Порог ранга: создание групп доступно с ранга «Проводник» и выше. */
+    private val canCreateGroups: () -> Boolean,
+    private val idFactory: () -> String = { UUID.randomUUID().toString() },
+    private val clock: () -> Long = { System.currentTimeMillis() },
+) {
+
+    /**
+     * Создание группы. Возвращает ошибку, если ранг не даёт права создавать
+     * группы, — правило из MASTER_PLAN и FileTransferRankPolicy.canCreateGroup.
+     */
+    suspend fun createGroup(
+        title: String,
+        about: String,
+        isPublic: Boolean,
+        topicsEnabled: Boolean,
+    ): Result<GroupSummary> {
+        if (!canCreateGroups()) {
+            return Result.failure(
+                IllegalStateException("Создание групп доступно с ранга «Проводник»")
+            )
+        }
+        val me = myNodeId()
+            ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Название группы не может быть пустым"))
+        }
+        if (cleanTitle.length > MAX_TITLE_CHARS) {
+            return Result.failure(IllegalArgumentException("Название длиннее $MAX_TITLE_CHARS символов"))
+        }
+
+        val now = clock()
+        val groupId = idFactory()
+        val slug = GroupInviteLinks.newSlug()
+        val myName = myDisplayName()
+
+        groupDao.insertGroup(
+            GroupEntity(
+                id = groupId,
+                title = cleanTitle,
+                about = about.trim().take(MAX_ABOUT_CHARS),
+                ownerId = me,
+                ownerName = myName,
+                isPublic = isPublic,
+                topicsEnabled = topicsEnabled,
+                createdAtMs = now,
+                memberCount = 1,
+                inviteSlug = slug,
+                memberPermissions = GroupPermissions.Member.DEFAULT,
+            )
+        )
+        groupDao.insertMember(
+            GroupMemberEntity(
+                groupId = groupId,
+                nodeId = me,
+                displayName = myName,
+                role = GroupRole.OWNER,
+                joinedAtMs = now,
+                permissions = GroupPermissions.Admin.ALL,
+            )
+        )
+        groupDao.insertInvite(
+            GroupInviteEntity(
+                slug = slug,
+                groupId = groupId,
+                createdBy = me,
+                createdAtMs = now,
+                // В частной группе даже по ссылке нужно одобрение администратора.
+                requestApproval = !isPublic,
+            )
+        )
+        if (topicsEnabled) {
+            groupDao.insertTopic(
+                GroupTopicEntity(
+                    id = idFactory(),
+                    groupId = groupId,
+                    name = GENERAL_TOPIC_NAME,
+                    ownerId = me,
+                    ownerName = myName,
+                    createdAtMs = now,
+                    isGeneral = true,
+                )
+            )
+        }
+
+        Log.i(TAG, "group created id=$groupId public=$isPublic topics=$topicsEnabled")
+        return runCatching { requireSummary(groupId) }
+    }
+
+    // ── Список групп ──────────────────────────────────────────────────────────
+
+    fun observeGroups(): Flow<List<GroupSummary>> =
+        groupDao.observeGroups().map { list -> list.map { toSummary(it) } }
+
+    fun observeGroup(groupId: String): Flow<GroupSummary?> =
+        groupDao.observeGroup(groupId).map { it?.let { g -> toSummary(g) } }
+
+    suspend fun summary(groupId: String): GroupSummary? =
+        groupDao.getGroupById(groupId)?.let { toSummary(it) }
+
+    private suspend fun requireSummary(groupId: String): GroupSummary =
+        toSummary(groupDao.getGroupById(groupId) ?: error("group $groupId vanished"))
+
+    private suspend fun toSummary(g: GroupEntity): GroupSummary {
+        val me = myNodeId().orEmpty()
+        val mine = groupDao.getMember(g.id, me)
+        return GroupSummary(
+            id = g.id,
+            title = g.title,
+            about = g.about,
+            ownerId = g.ownerId,
+            isPublic = g.isPublic,
+            topicsEnabled = g.topicsEnabled,
+            memberCount = g.memberCount,
+            unreadCount = g.unreadCount,
+            lastMessagePreview = g.lastMessagePreview,
+            lastMessageAtMs = g.lastMessageAtMs,
+            myRole = mine?.role ?: GroupRole.MEMBER,
+            pendingRequests = if (GroupRole.isAdminOrOwner(mine?.role ?: "")) {
+                groupDao.countPendingRequests(g.id)
+            } else {
+                0
+            },
+        )
+    }
+
+    // ── Темы ──────────────────────────────────────────────────────────────────
+
+    fun observeTopics(groupId: String): Flow<List<TopicSummary>> =
+        groupDao.observeTopics(groupId).map { list -> list.map { toTopicSummary(it) } }
+
+    private fun toTopicSummary(t: GroupTopicEntity) = TopicSummary(
+        id = t.id,
+        groupId = t.groupId,
+        name = t.name,
+        iconEmoji = t.iconEmoji,
+        messageCount = t.messageCount,
+        unreadCount = t.unreadCount,
+        lastMessagePreview = t.lastMessagePreview,
+        lastMessageAtMs = t.lastMessageAtMs,
+        isClosed = t.isClosed,
+        isGeneral = t.isGeneral,
+    )
+
+    /**
+     * Новая тема. Создавать могут владелец и администраторы с правом
+     * MANAGE_TOPICS. Счётчик сообщений темы начинается с нуля.
+     */
+    suspend fun createTopic(
+        groupId: String,
+        name: String,
+        iconEmoji: String = "",
+    ): Result<TopicSummary> {
+        val clean = name.trim()
+        if (clean.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Название темы не может быть пустым"))
+        }
+        if (clean.length > MAX_TOPIC_CHARS) {
+            return Result.failure(IllegalArgumentException("Название темы длиннее $MAX_TOPIC_CHARS символов"))
+        }
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canManageTopics(member.role, member.permissions)) {
+            return Result.failure(SecurityException("Нет права управлять темами"))
+        }
+
+        val now = clock()
+        val topicId = idFactory()
+        groupDao.insertTopic(
+            GroupTopicEntity(
+                id = topicId,
+                groupId = groupId,
+                name = clean,
+                ownerId = me,
+                ownerName = member.displayName,
+                iconEmoji = iconEmoji,
+                createdAtMs = now,
+            )
+        )
+        broadcast(groupId, GroupWire.buildTopicCreated(groupId, topicId, clean), excludeSelf = true)
+        return runCatching { toTopicSummary(groupDao.getTopicById(topicId) ?: error("topic vanished")) }
+    }
+
+    suspend fun renameTopic(topicId: String, name: String): Result<Unit> = withTopicAdminRight(topicId) {
+        val clean = name.trim()
+        if (clean.isEmpty()) {
+            return@withTopicAdminRight Result.failure(IllegalArgumentException("Пустое название"))
+        }
+        groupDao.renameTopic(topicId, clean.take(MAX_TOPIC_CHARS))
+        Result.success(Unit)
+    }
+
+    suspend fun setTopicClosed(topicId: String, closed: Boolean): Result<Unit> =
+        withTopicAdminRight(topicId) {
+            groupDao.updateTopicClosed(topicId, closed)
+            Result.success(Unit)
+        }
+
+    /** Общая обёртка: действие над темой требует права MANAGE_TOPICS. */
+    private suspend fun withTopicAdminRight(
+        topicId: String,
+        block: suspend () -> Result<Unit>,
+    ): Result<Unit> {
+        val topic = groupDao.getTopicById(topicId)
+            ?: return Result.failure(IllegalStateException("Тема не найдена"))
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(topic.groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canManageTopics(member.role, member.permissions)) {
+            return Result.failure(SecurityException("Нет права управлять темами"))
+        }
+        return block()
+    }
+
+    // ── Отправка сообщения ────────────────────────────────────────────────────
+
+    suspend fun sendMessage(groupId: String, topicId: String, text: String): Result<String> {
+        val body = text.trim()
+        if (body.isEmpty()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
+        if (body.length > MAX_MESSAGE_CHARS) {
+            return Result.failure(IllegalArgumentException("Сообщение длиннее $MAX_MESSAGE_CHARS символов"))
+        }
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+
+        val isAdmin = GroupRole.isAdminOrOwner(member.role)
+        if (!isAdmin && !GroupPermissions.has(effectiveMemberMask(group), GroupPermissions.Member.SEND_MESSAGES)) {
+            return Result.failure(SecurityException("Отправка сообщений в этой группе запрещена"))
+        }
+
+        val topic = resolveTopic(group, topicId)
+            ?: return Result.failure(IllegalStateException("Тема не найдена"))
+        if (topic.isClosed && !isAdmin) {
+            return Result.failure(SecurityException("Тема закрыта для новых сообщений"))
+        }
+
+        val now = clock()
+        val messageId = idFactory()
+        messageDao.insertMessage(
+            MessageEntity(
+                id = messageId,
+                chatId = groupId,
+                senderId = me,
+                content = body,
+                timestamp = now,
+                status = "SENT",
+                isFromMe = true,
+                channel = "GROUP",
+                recipientId = "",
+                topicId = topic.id,
+            )
+        )
+        registerOutgoing(groupId, topic, body, me, now)
+
+        val report = broadcast(
+            groupId,
+            GroupWire.buildMessage(groupId, topic.id, body),
+            excludeSelf = true,
+        )
+        Log.i(
+            TAG,
+            "group message id=$messageId group=$groupId topic=${topic.id} " +
+                "fanout=${report.delivered}/${report.attempted} via=${delivery.name}",
+        )
+        return Result.success(messageId)
+    }
+
+    /** Тема по умолчанию: если тем нет или id пустой — пишем в General. */
+    private suspend fun resolveTopic(group: GroupEntity, topicId: String): GroupTopicEntity? {
+        if (!group.topicsEnabled) {
+            return groupDao.getGeneralTopic(group.id) ?: groupDao.getTopics(group.id).firstOrNull()
+        }
+        if (topicId.isNotBlank()) return groupDao.getTopicById(topicId)
+        return groupDao.getGeneralTopic(group.id)
+    }
+
+    private suspend fun registerOutgoing(
+        groupId: String,
+        topic: GroupTopicEntity,
+        body: String,
+        senderId: String,
+        now: Long,
+    ) {
+        groupDao.registerTopicMessage(topic.id, preview(body), now)
+        groupDao.updateGroupLastMessage(groupId, preview(body), now)
+        registerStats(groupId, topic.id, senderId, now)
+    }
+
+    // ── Приём групповых событий ───────────────────────────────────────────────
+
+    suspend fun handleIncoming(senderId: String, packet: GroupWire.Packet, messageId: String) {
+        val me = myNodeId().orEmpty()
+        when (packet) {
+            is GroupWire.Packet.Message -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                val member = groupDao.getMember(packet.groupId, me) ?: return
+                if (member.isBanned) return
+                if (messageDao.messageExists(messageId)) return
+                val now = clock()
+                messageDao.insertMessage(
+                    MessageEntity(
+                        id = messageId,
+                        chatId = packet.groupId,
+                        senderId = senderId,
+                        content = packet.text,
+                        timestamp = now,
+                        status = "RECEIVED",
+                        isFromMe = false,
+                        channel = "GROUP",
+                        recipientId = me,
+                        topicId = packet.topicId,
+                    )
+                )
+                val topic = groupDao.getTopicById(packet.topicId)
+                if (topic != null) {
+                    groupDao.registerTopicMessage(topic.id, preview(packet.text), now)
+                    groupDao.incrementTopicUnread(topic.id)
+                }
+                groupDao.updateGroupLastMessage(packet.groupId, preview(packet.text), now)
+                groupDao.incrementGroupUnread(packet.groupId)
+                registerStats(packet.groupId, packet.topicId, senderId, now)
+                Log.i(TAG, "group message in group=${group.id} topic=${packet.topicId} from=$senderId")
+            }
+
+            is GroupWire.Packet.TopicCreated -> {
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                if (groupDao.getTopicById(packet.topicId) != null) return
+                groupDao.insertTopic(
+                    GroupTopicEntity(
+                        id = packet.topicId,
+                        groupId = packet.groupId,
+                        name = packet.name,
+                        ownerId = senderId,
+                        ownerName = groupDao.getMember(packet.groupId, senderId)?.displayName.orEmpty(),
+                        createdAtMs = clock(),
+                    )
+                )
+            }
+
+            is GroupWire.Packet.JoinRequest -> {
+                val mine = groupDao.getMember(packet.groupId, me) ?: return
+                if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
+                val existing = groupDao.getJoinRequest(packet.groupId, senderId)
+                if (existing != null && existing.status == "APPROVED") return
+                groupDao.insertJoinRequest(
+                    GroupJoinRequestEntity(
+                        groupId = packet.groupId,
+                        nodeId = senderId,
+                        displayName = packet.displayName,
+                        note = packet.note,
+                        requestedAtMs = clock(),
+                    )
+                )
+            }
+
+            is GroupWire.Packet.JoinDecision -> {
+                if (packet.nodeId != me) return
+                if (packet.approved) {
+                    val group = groupDao.getGroupById(packet.groupId) ?: return
+                    if (groupDao.getMember(packet.groupId, me) == null) {
+                        groupDao.insertMember(
+                            GroupMemberEntity(
+                                groupId = packet.groupId,
+                                nodeId = me,
+                                displayName = myDisplayName(),
+                                role = GroupRole.MEMBER,
+                                joinedAtMs = clock(),
+                            )
+                        )
+                        groupDao.clearLeft(packet.groupId)
+                        groupDao.refreshMemberCount(packet.groupId)
+                        Log.i(TAG, "join approved into group=${group.id}")
+                    }
+                } else {
+                    groupDao.updateJoinRequestStatus(
+                        packet.groupId, me, "REJECTED", clock(), senderId,
+                    )
+                }
+            }
+
+            is GroupWire.Packet.Pin -> {
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                messageDao.updatePinned(
+                    packet.messageId,
+                    packet.pinned,
+                    if (packet.pinned) clock() else null,
+                    if (packet.pinned) senderId else null,
+                )
+            }
+
+            is GroupWire.Packet.Roster -> {
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val now = clock()
+                packet.entries.forEach { entry ->
+                    val current = groupDao.getMember(packet.groupId, entry.nodeId)
+                    if (current == null) {
+                        groupDao.insertMember(
+                            GroupMemberEntity(
+                                groupId = packet.groupId,
+                                nodeId = entry.nodeId,
+                                displayName = entry.displayName,
+                                role = entry.role,
+                                joinedAtMs = now,
+                            )
+                        )
+                    } else if (current.displayName != entry.displayName || current.role != entry.role) {
+                        groupDao.insertMember(
+                            current.copy(displayName = entry.displayName, role = entry.role)
+                        )
+                    }
+                }
+                groupDao.refreshMemberCount(packet.groupId)
+            }
+        }
+    }
+
+    // ── Закрепы ───────────────────────────────────────────────────────────────
+
+    /**
+     * Закрепить или открепить сообщение. Право есть только у владельца и у
+     * администратора, которому явно выдали PIN_MESSAGES.
+     */
+    suspend fun setPinned(
+        groupId: String,
+        messageId: String,
+        pinned: Boolean,
+    ): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canPinMessages(member.role, member.permissions)) {
+            return Result.failure(SecurityException("Закреплять сообщения могут только администраторы с таким правом"))
+        }
+        val message = messageDao.getMessageById(messageId)
+            ?: return Result.failure(IllegalStateException("Сообщение не найдено"))
+        if (message.chatId != groupId) {
+            return Result.failure(IllegalArgumentException("Сообщение из другой группы"))
+        }
+        messageDao.updatePinned(messageId, pinned, if (pinned) clock() else null, if (pinned) me else null)
+        broadcast(groupId, GroupWire.buildPin(groupId, message.topicId.orEmpty(), messageId, pinned), excludeSelf = true)
+        return Result.success(Unit)
+    }
+
+    fun observePinned(groupId: String): Flow<List<MessageEntity>> =
+        messageDao.observePinnedMessages(groupId)
+
+    // ── Заявки на вступление ──────────────────────────────────────────────────
+
+    fun observeJoinRequests(groupId: String): Flow<List<JoinRequestSummary>> =
+        groupDao.observePendingRequests(groupId).map { list ->
+            list.map { JoinRequestSummary(it.groupId, it.nodeId, it.displayName, it.note, it.requestedAtMs) }
+        }
+
+    /** Шаг 1 для частного вступления: заявка уходит администраторам группы. */
+    suspend fun sendJoinRequest(groupId: String, note: String): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val admins = groupDao.getAdmins(groupId)
+        if (admins.isEmpty()) return Result.failure(IllegalStateException("В группе нет администраторов"))
+        val envelope = GroupWire.buildJoinRequest(groupId, myDisplayName(), note.trim().take(MAX_NOTE_CHARS))
+        delivery.deliver(envelope, admins.map { it.nodeId }.filter { it != me })
+        return Result.success(Unit)
+    }
+
+    suspend fun decideJoinRequest(
+        groupId: String,
+        nodeId: String,
+        approve: Boolean,
+    ): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canInvite(member.role, member.permissions, 0L)) {
+            return Result.failure(SecurityException("Нет права одобрять заявки"))
+        }
+        val request = groupDao.getJoinRequest(groupId, nodeId)
+            ?: return Result.failure(IllegalStateException("Заявка не найдена"))
+        if (request.status != "PENDING") return Result.failure(IllegalStateException("Заявка уже решена"))
+
+        groupDao.updateJoinRequestStatus(
+            groupId, nodeId, if (approve) "APPROVED" else "REJECTED", clock(), me,
+        )
+        if (approve) {
+            groupDao.insertMember(
+                GroupMemberEntity(
+                    groupId = groupId,
+                    nodeId = nodeId,
+                    displayName = request.displayName,
+                    role = GroupRole.MEMBER,
+                    joinedAtMs = clock(),
+                )
+            )
+            groupDao.refreshMemberCount(groupId)
+            publishRoster(groupId)
+        }
+        delivery.deliver(GroupWire.buildJoinDecision(groupId, nodeId, approve), listOf(nodeId))
+        return Result.success(Unit)
+    }
+
+    // ── Ссылки-приглашения и QR ───────────────────────────────────────────────
+
+    fun observeInvites(groupId: String): Flow<List<InviteSummary>> =
+        groupDao.observeInvites(groupId).map { list -> list.map { toInviteSummary(it) } }
+
+    private fun toInviteSummary(i: GroupInviteEntity) = InviteSummary(
+        slug = i.slug,
+        groupId = i.groupId,
+        link = GroupInviteLinks.build(i.slug),
+        createdAtMs = i.createdAtMs,
+        expiresAtMs = i.expiresAtMs,
+        maxUses = i.maxUses,
+        useCount = i.useCount,
+        revoked = i.revoked,
+        requestApproval = i.requestApproval,
+    )
+
+    suspend fun createInvite(
+        groupId: String,
+        expiresAtMs: Long? = null,
+        maxUses: Int = 0,
+        requestApproval: Boolean? = null,
+    ): Result<InviteSummary> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val mask = effectiveMemberMask(group)
+        if (!GroupPermissions.canInvite(member.role, member.permissions, mask)) {
+            return Result.failure(SecurityException("Нет права приглашать участников"))
+        }
+        val slug = GroupInviteLinks.newSlug()
+        val entity = GroupInviteEntity(
+            slug = slug,
+            groupId = groupId,
+            createdBy = me,
+            createdAtMs = clock(),
+            expiresAtMs = expiresAtMs,
+            maxUses = maxUses.coerceAtLeast(0),
+            // По умолчанию частная группа требует одобрения даже по ссылке.
+            requestApproval = requestApproval ?: !group.isPublic,
+        )
+        groupDao.insertInvite(entity)
+        return Result.success(toInviteSummary(entity))
+    }
+
+    suspend fun revokeInvite(groupId: String, slug: String): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (!GroupPermissions.canInvite(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Нет права управлять ссылками"))
+        }
+        groupDao.revokeInvite(slug)
+        return Result.success(Unit)
+    }
+
+    /**
+     * Вступление по ссылке. Публичная группа и ссылка без одобрения — сразу в
+     * участники; иначе создаётся заявка администраторам.
+     */
+    suspend fun joinBySlug(slug: String, note: String = ""): JoinOutcome {
+        val me = myNodeId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
+        val invite = groupDao.getInviteBySlug(slug)
+            ?: return JoinOutcome.Failed("Приглашение не найдено")
+        if (invite.revoked) return JoinOutcome.Failed("Приглашение отозвано")
+        val expired = invite.expiresAtMs != null && invite.expiresAtMs <= clock()
+        if (expired) return JoinOutcome.Failed("Приглашение истекло")
+        if (invite.maxUses > 0 && invite.useCount >= invite.maxUses) {
+            return JoinOutcome.Failed("Лимит вступлений по этой ссылке исчерпан")
+        }
+        val group = groupDao.getGroupById(invite.groupId)
+            ?: return JoinOutcome.Failed("Группа не найдена")
+        if (groupDao.getMember(group.id, me) != null) {
+            return JoinOutcome.Joined(group.id, group.title)
+        }
+
+        return if (invite.requestApproval) {
+            groupDao.insertJoinRequest(
+                GroupJoinRequestEntity(
+                    groupId = group.id,
+                    nodeId = me,
+                    displayName = myDisplayName(),
+                    note = note.trim().take(MAX_NOTE_CHARS),
+                    requestedAtMs = clock(),
+                )
+            )
+            sendJoinRequest(group.id, note)
+            JoinOutcome.RequestSent(group.id, group.title)
+        } else {
+            groupDao.insertMember(
+                GroupMemberEntity(
+                    groupId = group.id,
+                    nodeId = me,
+                    displayName = myDisplayName(),
+                    role = GroupRole.MEMBER,
+                    joinedAtMs = clock(),
+                )
+            )
+            groupDao.registerInviteUse(slug)
+            groupDao.refreshMemberCount(group.id)
+            JoinOutcome.Joined(group.id, group.title)
+        }
+    }
+
+    // ── Участники: поиск, роли, права, баны ───────────────────────────────────
+
+    fun observeMembers(groupId: String): Flow<List<MemberSummary>> =
+        groupDao.observeMembers(groupId).map { list -> list.map { toMemberSummary(it) } }
+
+    private suspend fun toMemberSummary(m: GroupMemberEntity) = MemberSummary(
+        nodeId = m.nodeId,
+        displayName = m.displayName,
+        role = m.role,
+        joinedAtMs = m.joinedAtMs,
+        permissions = m.permissions,
+        customTitle = m.customTitle,
+        isBanned = m.isBanned,
+        isMe = m.nodeId == myNodeId(),
+    )
+
+    /** Поиск участников по имени или идентификатору узла. */
+    suspend fun searchMembers(groupId: String, query: String): List<MemberSummary> {
+        val q = query.trim()
+        val rows = if (q.isEmpty()) groupDao.getMembers(groupId) else groupDao.searchMembers(groupId, q)
+        return rows.map { toMemberSummary(it) }
+    }
+
+    suspend fun setAdminRole(groupId: String, nodeId: String, admin: Boolean): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val actor = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canAddAdmins(actor.role, actor.permissions)) {
+            return Result.failure(SecurityException("Нет права назначать администраторов"))
+        }
+        val target = groupDao.getMember(groupId, nodeId)
+            ?: return Result.failure(IllegalStateException("Участник не найден"))
+        if (target.role == GroupRole.OWNER) {
+            return Result.failure(IllegalArgumentException("Владельца нельзя разжаловать"))
+        }
+        groupDao.updateMemberRole(
+            groupId,
+            nodeId,
+            if (admin) GroupRole.ADMIN else GroupRole.MEMBER,
+            if (admin) GroupPermissions.Admin.DEFAULT else 0L,
+        )
+        publishRoster(groupId)
+        return Result.success(Unit)
+    }
+
+    suspend fun setAdminPermissions(groupId: String, nodeId: String, mask: Long): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val actor = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canAddAdmins(actor.role, actor.permissions)) {
+            return Result.failure(SecurityException("Нет права менять права администраторов"))
+        }
+        val target = groupDao.getMember(groupId, nodeId)
+            ?: return Result.failure(IllegalStateException("Участник не найден"))
+        if (target.role == GroupRole.OWNER) {
+            return Result.failure(IllegalArgumentException("Права владельца не ограничиваются"))
+        }
+        groupDao.updateMemberPermissions(groupId, nodeId, mask and GroupPermissions.Admin.ALL)
+        publishRoster(groupId)
+        return Result.success(Unit)
+    }
+
+    /** Разрешения для участников — общая политика группы. */
+    suspend fun setMemberPermissions(groupId: String, mask: Long): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val actor = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        // Смена разрешений участников — это изменение информации о группе,
+        // поэтому требуется право CHANGE_INFO (владелец имеет его безусловно).
+        if (!GroupPermissions.canChangeInfo(actor.role, actor.permissions, 0L)) {
+            return Result.failure(SecurityException("Нет права менять разрешения группы"))
+        }
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        groupDao.insertGroup(
+            group.copy(memberPermissions = mask and GroupPermissions.Member.ALL)
+        )
+        return Result.success(Unit)
+    }
+
+    suspend fun setMemberBlocked(groupId: String, nodeId: String, banned: Boolean): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val actor = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canBan(actor.role, actor.permissions)) {
+            return Result.failure(SecurityException("Нет права ограничивать участников"))
+        }
+        val target = groupDao.getMember(groupId, nodeId)
+            ?: return Result.failure(IllegalStateException("Участник не найден"))
+        if (target.role == GroupRole.OWNER) {
+            return Result.failure(IllegalArgumentException("Владельца нельзя ограничить"))
+        }
+        if (banned) {
+            groupDao.updateMemberBanned(groupId, nodeId, true)
+        } else {
+            groupDao.deleteMember(groupId, nodeId)
+        }
+        groupDao.refreshMemberCount(groupId)
+        publishRoster(groupId)
+        return Result.success(Unit)
+    }
+
+    // ── Публичная / частная группа ────────────────────────────────────────────
+
+    suspend fun setPublic(groupId: String, isPublic: Boolean): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Нет права менять тип группы"))
+        }
+        groupDao.updateGroupVisibility(groupId, isPublic)
+        return Result.success(Unit)
+    }
+
+    suspend fun updateProfile(groupId: String, title: String, about: String): Result<Unit> {
+        val clean = title.trim()
+        if (clean.isEmpty()) return Result.failure(IllegalArgumentException("Пустое название"))
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Нет права менять информацию о группе"))
+        }
+        groupDao.updateGroupProfile(groupId, clean.take(MAX_TITLE_CHARS), about.trim().take(MAX_ABOUT_CHARS))
+        return Result.success(Unit)
+    }
+
+    suspend fun leaveGroup(groupId: String): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.role == GroupRole.OWNER) {
+            return Result.failure(IllegalArgumentException("Владелец не может выйти из группы без передачи прав"))
+        }
+        groupDao.deleteMember(groupId, me)
+        groupDao.markLeft(groupId)
+        return Result.success(Unit)
+    }
+
+    // ── Статистика для администраторов ────────────────────────────────────────
+
+    suspend fun stats(groupId: String, days: Int = 7): Result<GroupStats> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupRole.isAdminOrOwner(member.role)) {
+            return Result.failure(SecurityException("Статистика доступна только администраторам"))
+        }
+        val fromKey = dayKey(clock() - (days - 1).toLong() * DAY_MS)
+        val members = groupDao.getMembers(groupId)
+        val topics = groupDao.getTopics(groupId)
+        return Result.success(
+            GroupStats(
+                groupId = groupId,
+                memberCount = members.count { !it.isBanned },
+                adminCount = members.count { GroupRole.isAdminOrOwner(it.role) },
+                topicCount = topics.size,
+                pendingRequests = groupDao.countPendingRequests(groupId),
+                totalMessages = groupDao.totalTopicMessages(groupId),
+                last7Days = groupDao.getGroupStats(groupId, days)
+                    .filter { it.dayKey >= fromKey }
+                    .sortedBy { it.dayKey }
+                    .map { GroupStatDay(it.dayKey, it.messageCount, it.senderCount) },
+                perTopic = topics.associate { it.id to it.messageCount },
+            )
+        )
+    }
+
+    /** Суточный срез: сообщения и число разных отправителей. */
+    private suspend fun registerStats(groupId: String, topicId: String, senderId: String, now: Long) {
+        val key = dayKey(now)
+        bumpStat(groupId, topicId, key, senderId)
+        bumpStat(groupId, "", key, senderId)
+    }
+
+    private suspend fun bumpStat(groupId: String, topicId: String, key: String, senderId: String) {
+        val existing = groupDao.getStat(groupId, topicId, key)
+        val senders = LinkedHashSet<String>()
+        if (existing != null) {
+            existing.sendersCsv.split(',').filter { it.isNotBlank() }.forEach { senders.add(it) }
+        }
+        senders.add(senderId)
+        groupDao.insertStat(
+            GroupMessageStatEntity(
+                groupId = groupId,
+                topicId = topicId,
+                dayKey = key,
+                messageCount = (existing?.messageCount ?: 0) + 1,
+                senderCount = senders.size,
+                sendersCsv = senders.joinToString(","),
+            )
+        )
+    }
+
+    // ── Служебное ─────────────────────────────────────────────────────────────
+
+    /**
+     * Маска прав участников. Ноль означает «не задано» (например, группа
+     * создана до появления поля) — тогда применяется набор по умолчанию,
+     * иначе участники потеряли бы возможность писать.
+     */
+    private fun effectiveMemberMask(group: GroupEntity): Long =
+        if (group.memberPermissions == 0L) GroupPermissions.Member.DEFAULT else group.memberPermissions
+
+    private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
+        val me = myNodeId().orEmpty()
+        val recipients = groupDao.getMembers(groupId)
+            .filter { !it.isBanned }
+            .map { it.nodeId }
+            .filter { !excludeSelf || it != me }
+        return delivery.deliver(envelope, recipients)
+    }
+
+    /** После изменения состава рассылаем актуальный список участников. */
+    private suspend fun publishRoster(groupId: String) {
+        val entries = groupDao.getMembers(groupId).map {
+            GroupWire.RosterEntry(it.nodeId, it.displayName, it.role)
+        }
+        broadcast(groupId, GroupWire.buildRoster(groupId, entries), excludeSelf = true)
+    }
+
+    private fun preview(text: String): String =
+        text.replace('\n', ' ').take(PREVIEW_CHARS)
+
+    private fun dayKey(epochMs: Long): String =
+        Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
+
+    companion object {
+        const val GENERAL_TOPIC_NAME = "General"
+        const val MAX_TITLE_CHARS = 128
+        const val MAX_ABOUT_CHARS = 512
+        const val MAX_TOPIC_CHARS = 128
+        const val MAX_MESSAGE_CHARS = 4096
+        const val MAX_NOTE_CHARS = 256
+        private const val PREVIEW_CHARS = 80
+        private const val DAY_MS = 24L * 60 * 60 * 1000
+        private const val TAG = "GroupRepository"
+    }
+}

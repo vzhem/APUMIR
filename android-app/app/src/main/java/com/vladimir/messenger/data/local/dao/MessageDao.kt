@@ -44,4 +44,20 @@ interface MessageDao {
     @Query("SELECT * FROM messages ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<MessageEntity>>
 
+    // ── Группы и темы (v8) ──────────────────────────────────────────────────
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC")
+    fun observeTopicMessages(chatId: String, topicId: String): Flow<List<MessageEntity>>
+
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isPinned = 1 ORDER BY pinnedAtMs DESC")
+    fun observePinnedMessages(chatId: String): Flow<List<MessageEntity>>
+
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isPinned = 1 ORDER BY pinnedAtMs DESC")
+    suspend fun getPinnedMessages(chatId: String): List<MessageEntity>
+
+    @Query("UPDATE messages SET isPinned = :pinned, pinnedAtMs = :atMs, pinnedBy = :by WHERE id = :messageId")
+    suspend fun updatePinned(messageId: String, pinned: Boolean, atMs: Long?, by: String?)
+
+    @Query("SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND topicId = :topicId")
+    suspend fun countTopicMessages(chatId: String, topicId: String): Int
+
 }
