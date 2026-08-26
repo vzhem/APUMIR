@@ -4591,3 +4591,47 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Скрипт: юнит-тесты группы -> compileDebugKotlin -> assembleDebug, каждый шаг
   отдельным вызовом Gradle (не смешивая тесты с assemble в одном --tests).
   Телефоны не подключались, ADB не использовался, деплоя не было.
+- 2026-08-26 (раздел «Группы», шаг 3 — миграция 7 -> 8 под настоящим Room): гейт на
+  382e47f и 72f3f52 зелёный на Windows: 33 JVM-теста групп
+  (GroupPermissionsTest 13, GroupWireTest 11, GroupInviteLinksTest 9), 0 падений,
+  compileDebugKotlin и assembleDebug собрались. Счётчики берём из JUnit XML,
+  потому что exit code 0 у testDebugUnitTest не доказывает, что тесты вообще
+  выполнились (фильтр --tests мог не найти ни одного).
+  Найдено и закрыто два собственных промаха.
+  1. GroupsMigrationInstrumentedTest открывает базу через
+     FrameworkSQLiteOpenHelperFactory, то есть МИНУЕТ RoomOpenHelper. Значит SQL
+     миграции исполняется, но схема со сущностями не сверяется: расхождение в
+     типе, NOT NULL или DEFAULT (isPinned объявлен @ColumnInfo(defaultValue="0"))
+     такой тест пропускает, а приложение падает на старте с «Migration didn't
+     properly handle». Добавлен
+     GroupsProductionMigrationInstrumentedTest по образцу уже принятого в проекте
+     FileTransferProductionMigrationInstrumentedTest: Room.databaseBuilder без
+     fallbackToDestructiveMigration открывает настоящий messenger_database, сам
+     гоняет MIGRATION_7_8, сам валидирует схему и обновляет identity hash;
+     снимок chats/messages/contacts/mtproto_proxies (число строк + SHA-256
+     упорядоченных id, для messages отдельно ещё content и timestamp) до и после
+     обязан совпасть. onDowngrade переопределён, чтобы повторный запуск на уже
+     мигрированной базе давал внятную ошибку, а не исключение Room.
+  2. В scripts/groups-phone-check.ps1 резервная копия базы могла молча не
+     состояться: adb shell run-as работает только для debuggable-сборки, а
+     прежняя версия писала «skipped ... (absent or not readable)» и шла дальше.
+     Теперь скрипт читает флаги из dumpsys package, различает «не установлено» /
+     «не debuggable» / «есть база», проверяет, что файл действительно лёг на ПК и
+     весит больше нуля, и останавливается, если messenger_database на телефоне
+     есть, а копия не получилась. Все вызовы adb идут через Invoke-Adb с локальным
+     ErrorActionPreference=Continue: при Stop перенаправленный stderr нативной
+     команды на PowerShell 5.1 способен оборвать скрипт.
+  В гейт добавлен шаг 4 :app:compileDebugAndroidTestKotlin — он выполняется на
+  хосте без телефона и ловит ошибку в инструментальных тестах до того, как телефон
+  подключён. Шаг с телефоном перенумерован в 5 и гоняет оба класса миграции.
+  Статически сверено в песочнице: SQL в тестах против MIGRATION_7_8 (вставка в
+  groups 15/15 столбцов, group_members 8/8, group_topics 13/13, ни одного
+  пропущенного NOT NULL без DEFAULT; четыре ALTER TABLE ADD COLUMN у messages —
+  ровно те четыре столбца, что использует тест); 8 имён индексов из @Entity
+  совпали со списком в тесте; все 6 имён групповых таблиц существуют среди 13
+  @Entity; struct_check --ascii=strict по трём изменённым файлам и по всему репо
+  (409 файлов) — 0 ошибок; неопределённых переменных в обоих скриптах нет.
+  НЕ проверено (в песочнице нет JDK/Gradle): компиляция androidTest-исходников и
+  сам прогон на устройстве. Именно поэтому шаг 4 в гейте идёт до телефонного шага.
+  Команда для телефона Ани (MTN NX1, AUYF6R5923006121):
+    powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\groups-phone-check.ps1 -ExpectedCommit <хеш>

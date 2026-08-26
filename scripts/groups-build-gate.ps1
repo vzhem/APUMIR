@@ -135,14 +135,31 @@ try {
         exit $AssembleExit
     }
 
+    # Step 4: the androidTest sources, which contain the instrumented
+    # migration test. This compiles on the host and needs no phone, so a bad
+    # import or a wrong Room API is caught here instead of after the phone is
+    # plugged in and connectedDebugAndroidTest is already running.
+    Write-Output ''
+    Write-Output '===== step 4: compileDebugAndroidTestKotlin ====='
+    & $Gradlew --console=plain :app:compileDebugAndroidTestKotlin
+    $AndroidTestExit = $LASTEXITCODE
+    Write-Output "androidTest compile exit code: $AndroidTestExit"
+    if ($AndroidTestExit -ne 0) {
+        Write-Output 'RESULT: ANDROIDTEST COMPILE FAILED - the phone check would fail too.'
+        exit $AndroidTestExit
+    }
+
     # Optional: exercise migration 7 -> 8 on a real device database.
     # Deliberately behind a switch - it installs a test APK and needs a phone,
     # and phones are only touched with the owner's explicit go-ahead.
     if ($RunMigrationTest) {
         Write-Output ''
-        Write-Output '===== step 4: migration 7 -> 8 on a connected phone ====='
-        $MigrationClass = 'com.vladimir.messenger.data.local.GroupsMigrationInstrumentedTest'
-        $RunnerArg = '-Pandroid.testInstrumentationRunnerArguments.class=' + $MigrationClass
+        Write-Output '===== step 5: migration 7 -> 8 on a connected phone ====='
+        Write-Output 'NOTE: the second test opens the real messenger_database on that phone.'
+        Write-Output 'Prefer scripts\groups-phone-check.ps1, which backs the database up first.'
+        $MigrationClasses = 'com.vladimir.messenger.data.local.GroupsMigrationInstrumentedTest,' +
+            'com.vladimir.messenger.data.local.GroupsProductionMigrationInstrumentedTest'
+        $RunnerArg = '-Pandroid.testInstrumentationRunnerArguments.class=' + $MigrationClasses
         & $AdbPath devices
         & $Gradlew --console=plain :app:connectedDebugAndroidTest $RunnerArg
         $MigrationExit = $LASTEXITCODE
@@ -161,12 +178,11 @@ try {
     }
 
     Write-Output ''
-    Write-Output 'RESULT: GREEN - groups unit tests, compile and assemble all passed.'
+    Write-Output 'RESULT: GREEN - groups unit tests, compile, assemble and the'
+    Write-Output 'androidTest sources (migration test included) all passed.'
     Write-Output 'This is a HOST gate only. It is not an acceptance run on real phones.'
-    Write-Output 'Manual check on a phone that already has v11.18.0 installed:'
-    Write-Output '  1. install the debug APK with: adb install -r -t -d app-debug.apk'
-    Write-Output '  2. confirm the app opens (Room migration 7 -> 8 ran)'
-    Write-Output '  3. menu -> Gruppy -> create a group, add a topic, send a message'
+    Write-Output 'Next, on the phone: scripts\groups-phone-check.ps1 backs the database'
+    Write-Output 'up, runs the migration test on the device, installs and launches the app.'
     exit 0
 }
 finally {
