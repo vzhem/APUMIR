@@ -24,6 +24,7 @@ class FileTransferSender(
     private val chunkStore: FileTransferChunkStore,
     private val transport: PacketTransport,
     private val ownBindingProvider: () -> ByteArray?,
+    private val sleeper: suspend (Long) -> Unit,
     private val nowMs: () -> Long = System::currentTimeMillis,
     /** Параллельный QUIC-поток: (recipientId, payload) -> true если доставлено напрямую. */
     val directTransport: ((String, String) -> Boolean)? = null,
@@ -38,27 +39,26 @@ class FileTransferSender(
     )
 
     private val mutex = Mutex()
-    private val ackedContiguous = ConcurrentHashMap<String, Long>()
+    private val ackedContiguous = ConcurrentHashMap<String, Int>()
     private val lastPumpAt = ConcurrentHashMap<String, Long>()
-    private val lastPumpAcked = ConcurrentHashMap<String, Long>()
+    private val lastPumpAcked = ConcurrentHashMap<String, Int>()
 
     /**
      * Receiver file-ACK: remembers the confirmed contiguous prefix (window advance) and, when the
      * receiver confirms the whole file, flips the transfer COMPLETE. The local chunk copies stay
      * on disk until TTL cleanup; no SENT/DELIVERED claim is inferred from transport accepts.
      */
-    suspend fun onReceiverAck(transferIdHex: String, contiguousChunks: Long) {
+    suspend fun onReceiverAck(transferIdHex: String, contiguousChunks: Int) {
         FileTransferWire.requireValidTransferId(transferIdHex)
-        if (contiguousChunks < 0L) return
+        if (contiguousChunks < 0) return
+        val current = ackedContiguous[transferIdHex] ?: 0
+        if (contiguousChunks > current) {
+            ackedContiguous[transferIdHex] = contiguousChunks
+        }
         mutex.withLock {
             val transfer = transferDao.getTransfer(transferIdHex) ?: return
             if (transfer.direction != "OUTGOING" || transfer.state == "COMPLETE") return
-            if (contiguousChunks > transfer.chunkCount) return
-            val current = ackedContiguous[transferIdHex] ?: 0L
-            if (contiguousChunks > current) {
-                ackedContiguous[transferIdHex] = contiguousChunks
-            }
-            if (contiguousChunks == transfer.chunkCount) {
+            if (contiguousChunks >= transfer.chunkCount) {
                 advance(transfer, newState = "COMPLETE")
                 Log.i(TAG, "File transfer COMPLETE by receiver ACK: $transferIdHex")
             }
@@ -73,7 +73,7 @@ class FileTransferSender(
         for (transfer in transferDao.getActiveOutgoing(now)) {
             if (!shouldPumpNow(transfer.transferId, now)) continue
             lastPumpAt[transfer.transferId] = now
-            lastPumpAcked[transfer.transferId] = ackedContiguous[transfer.transferId] ?: 0L
+            lastPumpAcked[transfer.transferId] = ackedContiguous[transfer.transferId] ?: 0
             val result = runCatching { pumpTransfer(transfer) }
             result.getOrNull()?.let { pumped++; packets += it }
             if (result.isFailure) {
@@ -104,15 +104,15 @@ class FileTransferSender(
         sentPackets += sendItem(
             FileTransferPacketCodec.Type.OFFER,
             transferIdHex,
-            itemIndex = 0L,
+            itemIndex = 0,
             payload = FileOfferPdu.encode(manifestBytes, keyEnvelope, ownBinding),
             messageIdFor = { fragment -> FileTransferWire.offerMessageId(transferIdHex, fragment) },
             transfer = transfer,
         )
 
         // 2) Windowed chunks beyond the receiver-confirmed contiguous prefix.
-        val acked = ackedContiguous[transferIdHex] ?: 0L
-        if (transfer.chunkCount > 0L && acked >= transfer.chunkCount) return sentPackets
+        val acked = ackedContiguous[transferIdHex] ?: 0
+        if (transfer.chunkCount > 0 && acked >= transfer.chunkCount) return sentPackets
         val fragmentsPerChunk = maxOf(
             1,
             (transfer.chunkSize + FileTransferChunkStore.AEAD_TAG_BYTES +
@@ -127,7 +127,7 @@ class FileTransferSender(
             MAX_INFLIGHT_MESSAGES
         }
         val windowChunks = maxOf(1, inflightBudget / fragmentsPerChunk)
-        val windowEnd = minOf(transfer.chunkCount, acked + windowChunks.toLong())
+        val windowEnd = minOf(transfer.chunkCount, acked + windowChunks)
         for (chunkIndex in acked until windowEnd) {
             val ciphertext = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
                 ?: throw IllegalStateException("Chunk $chunkIndex missing for $transferIdHex")
@@ -157,7 +157,7 @@ class FileTransferSender(
     private suspend fun sendItem(
         type: FileTransferPacketCodec.Type,
         transferIdHex: String,
-        itemIndex: Long,
+        itemIndex: Int,
         payload: ByteArray,
         messageIdFor: (Int) -> String,
         transfer: FileTransferEntity,
@@ -179,6 +179,7 @@ class FileTransferSender(
                 // Direct transport not configured (tests) — use regular path
                 transport.send(messageIdFor(fragmentIndex), transfer.chatId, transfer.peerNodeId, text)
             }
+            sleeper(PACKET_GAP_MS)
         }
         return fragments.size
     }
@@ -203,8 +204,8 @@ class FileTransferSender(
 
     private fun shouldPumpNow(transferIdHex: String, now: Long): Boolean {
         val last = lastPumpAt[transferIdHex] ?: return true
-        val acked = ackedContiguous[transferIdHex] ?: 0L
-        if (acked > 0L && lastPumpAcked[transferIdHex] != acked) return true
+        val acked = ackedContiguous[transferIdHex] ?: 0
+        if (acked in 1 until Int.MAX_VALUE && lastPumpAcked[transferIdHex] != acked) return true
         return now - last >= REPUMP_INTERVAL_MS
     }
 
@@ -215,6 +216,7 @@ class FileTransferSender(
 
     companion object {
         private const val TAG = "FileTransferSender"
+        const val PACKET_GAP_MS = 120L
         const val MAX_INFLIGHT_MESSAGES = 120
         const val MAX_INFLIGHT_MESSAGES_LARGE = 360
         const val LARGE_CHUNK_BYTES = 1024 * 1024

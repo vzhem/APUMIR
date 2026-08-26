@@ -9,7 +9,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.runBlocking
 
 /**
  * Facade the service layer talks to: routes incoming packet/handshake texts (before they are
@@ -32,7 +31,6 @@ class FileTransferRouter @Inject constructor(
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val transport: PacketTransport
-    private lateinit var lanChannel: LanDirectChannel
     private lateinit var chunkStore: FileTransferChunkStore
     private val receivedStore: ReceivedFileStore
     private val lastHelloAt = HashMap<String, Long>()
@@ -43,15 +41,7 @@ class FileTransferRouter @Inject constructor(
         val receivedStoreLocal = ReceivedFileStore(File(appContext.noBackupFilesDir, "file_received/v1"))
         receivedStore = receivedStoreLocal
         val transportLocal: PacketTransport = RustPacketTransport()
-        val lan = LanDirectChannel.get()
-        syncLanIdentity()
-        lan.onDiagnostic = { message -> Log.i(TAG, message) }
-        lan.incomingRoute = { senderId, chatId, messageId, text ->
-            routeIncoming(senderId, chatId, messageId, text)
-        }
-        lanChannel = lan
-        val switchingTransport: PacketTransport = SwitchingPacketTransport(transportLocal, lan)
-        transport = switchingTransport
+        transport = transportLocal
         val crypto: FileCryptoGateway = FfiFileCryptoGateway()
         val identity: LocalExchangeIdentity = AndroidLocalExchangeIdentity(appContext)
         val keyVault: TransferKeyVaultAccess = AndroidTransferKeyVaultAccess(appContext)
@@ -70,41 +60,14 @@ class FileTransferRouter @Inject constructor(
         val senderLocal = FileTransferSender(
             transferDao = transferDao,
             chunkStore = chunkStore,
-            transport = switchingTransport,
+            transport = transportLocal,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
+            sleeper = { millis -> kotlinx.coroutines.delay(millis) },
             directTransport = { recipientId, payload ->
-                // F4-F: LAN direct channel first (phone-to-phone TCP over shared
-                // Wi-Fi). Falls back to the QUIC direct path when LAN is not
-                // available. Mesh signalling is used to find the endpoint, and
-                // when the mesh itself is dead a /24 subnet discovery scan runs.
-                // The router singleton is created before the Rust engine is up,
-                // so the LAN identity is re-synced here on every use (during
-                // startup RustBridge.nodeId() is null and the old one-shot
-                // assignment left myNodeId empty — servers then rejected every
-                // handshake with "bad lan sender id").
-                syncLanIdentity()
-                val lanOk = runBlocking {
-                    val scope = FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE
-                    val quick = lan.hasChannel(recipientId) &&
-                        lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
-                    if (quick) {
-                        true
-                    } else {
-                        val viaSignal = lan.awaitChannel(recipientId, System.currentTimeMillis()) { requestText ->
-                            transportLocal.send("lan-seek-" + System.nanoTime(), scope, recipientId, requestText)
-                        }
-                        val established = viaSignal || lan.discoverPeer(recipientId)
-                        established && lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
-                    }
-                }
-                if (lanOk) {
-                    true
-                } else {
-                    try {
-                        com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
-                    } catch (_: Exception) {
-                        false
-                    }
+                try {
+                    com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
+                } catch (_: Exception) {
+                    false
                 }
             },
         )
@@ -119,27 +82,16 @@ class FileTransferRouter @Inject constructor(
             crypto = crypto,
             keyVault = keyVault,
             identity = identity,
-            transport = switchingTransport,
+            transport = transportLocal,
             ackSink = { transferIdHex, contiguousChunks ->
                 senderLocal.onReceiverAck(transferIdHex, contiguousChunks)
-                // ACK progress immediately opens the next bounded window. The periodic job is
-                // only a restart/offline retry safety net, never a throughput throttle.
-                senderLocal.pumpOnce()
             },
             notifier = notifier,
         )
-        // LAN server starts only after sender/receiver exist: an early incoming
-        // frame must never hit a half-constructed router.
-        lan.startServer()
-        Log.i(TAG, "router init complete: lan build=2026-08-25-B, lan port=${lan.listenPort}, node=${lan.myNodeId}")
     }
 
     /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */
     suspend fun routeIncoming(senderId: String, chatId: String, messageId: String, text: String): Boolean {
-        if (LanDirectChannel.isLanSignalText(text)) {
-            handleLanSignal(senderId, text)
-            return true
-        }
         if (FileTransferWire.isHelloText(text)) {
             when (receiver.onHelloText(senderId, text)) {
                 FileTransferReceiver.HelloResult.PINNED_NEW -> {
@@ -150,81 +102,12 @@ class FileTransferRouter @Inject constructor(
             }
             return true
         }
-        if (!FileTransferWire.isFilePacketText(text)) return false
-
-        // Chat UUIDs are device-local. In particular, direct QUIC frames carry the explicit
-        // "direct" transport scope rather than a remote chat UUID. Resolve it to THIS phone's
-        // chat before the receiver writes transfer state; never let the sentinel reach Room.
-        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }
-            .onFailure { Log.w(TAG, "Cannot resolve local chat for incoming file packet: ${it.message}") }
-            .getOrNull()
-        val resolvedChatId = FileTransferChatRouting.resolve(chatId, localChatId)
-        if (resolvedChatId == null) {
-            Log.w(TAG, "Direct file packet dropped: no local chat for sender ${senderId.takeLast(8)}")
-            return true
-        }
-        if (chatId == FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE) {
-            Log.i(TAG, "Direct file packet routed to local chat $resolvedChatId")
-        }
-        return receiver.onIncomingText(senderId, resolvedChatId, messageId, text)
-    }
-
-    /**
-     * F4-F v1 LAN signalling over the mesh: "APULAN1|req" is answered with
-     * "APULAN1|offer|<lan-ip>|<port>" so the peer can open a direct socket.
-     */
-    /**
-     * Refreshes the LAN channel identity from the live Rust engine. The router
-     * singleton is constructed early in process start, when the engine may not
-     * have a node id yet; calling this before every LAN use keeps the identity
-     * correct without restarting the LAN server.
-     */
-    private fun syncLanIdentity() {
-        val nodeId = RustBridge.nodeId() ?: return
-        val lan = LanDirectChannel.get()
-        if (nodeId.startsWith("pk_") && lan.myNodeId != nodeId) {
-            val previous = lan.myNodeId
-            lan.myNodeId = nodeId
-            Log.i(TAG, "lan identity synced: ${nodeId.take(16)} (was ${if (previous.isBlank()) "blank" else previous.take(16)})")
-        }
-    }
-
-    private suspend fun handleLanSignal(senderId: String, text: String) {
-        syncLanIdentity()
-        val endpoint = lanChannel.parseOfferText(text)
-        if (endpoint != null) {
-            lanChannel.onOfferReceived(senderId, endpoint)
-            return
-        }
-        if (!lanChannel.isRequestText(text)) return
-        val offer = lanChannel.buildOfferText()
-        if (offer == null) {
-            Log.w(TAG, "LAN request from $senderId but no local Wi-Fi endpoint found")
-            return
-        }
-        Log.i(TAG, "LAN request from $senderId, replying with offer $offer")
-        runCatching {
-            transport.send(
-                "lan-" + System.nanoTime(),
-                FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
-                senderId,
-                offer,
-            )
-        }.onFailure { Log.w(TAG, "LAN offer reply failed: ${it.message}") }
-        // The request carried the requester's own LAN endpoint: deliver the
-        // offer straight to the sender's socket as well, so channel setup does
-        // not depend on the (slow, chunk-flooded) mesh in either direction.
-        val requester = lanChannel.parseRequestEndpoint(text)
-        if (requester != null) {
-            val host = requester.address?.hostAddress ?: requester.hostString
-            if (host != null) {
-                runCatching {
-                    lanChannel.sendSignalFrame(host, requester.port, FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE, offer)
-                }.onSuccess { delivered ->
-                    Log.i(TAG, "LAN offer socket delivery to $host:${requester.port} ok=$delivered")
-                }
-            }
-        }
+        // File packets carry the SENDER's local chat UUID in the envelope; the recipient must
+        // file the transfer and its completion message under ITS OWN chat with that sender,
+        // otherwise the bubble lands in a nonexistent chat and never renders.
+        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }.getOrNull()
+            ?: chatId
+        return receiver.onIncomingText(senderId, localChatId, messageId, text)
     }
 
     /**

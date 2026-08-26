@@ -3,103 +3,69 @@
 Ниже находится готовый prompt. Пользователь может целиком вставить его в новый Arena Agent Mode
 чат. Следующий ИИ не должен заставлять пользователя заново объяснять проект, историю и правила.
 
-## CURRENT OVERRIDE 2026-08-22 — сначала единая file-архитектура, не старый M8
-
-Этот блок заменяет старые указания ниже при любом противоречии. Не начинай с M8-A/M8-E, нового
-телефонного gate, release или «быстрого увеличения QUIC». Владелец подтвердил F4 architecture;
-текущий продуктовый приоритет — надёжная и максимально быстрая файловая доставка через все
-доступные сети, маленькими доказуемыми slices.
-
-### Сначала прочитать и сверить
-
-1. этот CURRENT OVERRIDE целиком;
-2. верхний `CURRENT OVERRIDE 2026-08-22` в `SECURE_FILE_TRANSFER.md` — authoritative file design;
-3. актуальный file-раздел в `MASTER_PLAN_v2.md`;
-4. конец `AI_COLLABORATION_NOTES.md`, особенно доп.349–361;
-5. только затем соответствующий production source. Нельзя говорить «разобрался во всём проекте»,
-   если обязательный контекст и фактические limits не проверены.
-
-### Неподвижные решения владельца
-
-- Серверов хранения у проекта нет: **каждый телефон — сервер**.
-- Внешний ресурс допустим только как transient realtime-провод для E2E ciphertext. External
-  message/file inbox, blob-store и store-and-forward запрещены.
-- Нужны оба режима: быстрый online direct/transit между любыми доступными сетями и delayed delivery
-  полного файла через relay-телефоны, когда sender/recipient не совпали online.
-- Relay-владелец сам выбирает режим/квоты; hard safety, reserve disk и приоритет текста обязательны.
-- Нет физического overlap/path — файл честно остаётся в Outbox. Enqueue/custody не равны delivered.
-- Работать маленькими срезами: один срез → отдельный доказанный gate → следующий.
-- Телефоны не трогать без предварительного сообщения с точным списком устройств. Release/tag/PR/
-  публикацию не делать без отдельного явного разрешения.
-- Единственный канонический Windows-клон: `C:\APU-M8`.
-
-### Фактическое состояние, которое нельзя переименовывать в «готово»
-
-- Published stable остаётся v11.17.1, но это не доказательство нового direct file path.
-- Малые файлы прошли старый F3 phone runtime; новый `send_direct_payload` compile/install PASS, но
-  законченной transfer через него ещё не доказано.
-- Commit `fc157cd` укрепляет direct chat routing; только source/static PASS, phones untouched.
-- Текущий sender идёт последовательно: 4-KiB Base64 fragment → новый QUIC connection → ACK →
-  120-ms pause. Persistent binary connection, concurrent streams и adaptive window отсутствуют.
-- Direct failure ставит `WAITING_RECIPIENT`; отдельной file custody через телефоны пока нет.
-- Generic RelayQueue (64 KiB envelope, 500/recipient) не является file/blob store.
-- Manifest всегда создаётся с 128-KiB chunk, а local store допускает лишь 640 chunks: объявленные
-  4 GiB сейчас фактически не достижимы (около 80 MiB при текущей geometry).
-
-### Текущий порядок работы
-
-`SECURE_FILE_TRANSFER.md` определяет slices F4-A…F4-H. Владелец разрешил последовательно выполнять
-все нужные slices. F4-B1 имеет focused Windows PASS 11/11; F4-B2 pure signed control boundary —
-focused Windows PASS 12/12 на exact `96dbe28`; combined B1/B2/B3 exact `5ab2517` дал 34 passed,
-0 failed, 592 filtered. F4-B закрыт в focused host scope. F4-C1 audit и host-only source/static
-готовы на exact `bf4f0c6`; fixes `bedf671`/`ca2edb6` прошли focused Windows 9/9 и combined exact
-`ca2edb6` 43/43 (592 filtered). F4-C1 host gate закрыт. F4-C2 read-only ownership review завершён:
-legacy pool/engine identity нельзя безопасно подключать к C1. Host-only C2a signer seam exact
-`0736d9b` прошёл Windows 46/46. C2b source `fd5d1f3` + test-only `471d099` прошёл focused 7/7 и
-combined 53/53; F4-C host gate закрыт. F4-D1 exact `0ef7706` bounded ACK window прошёл Windows
-13/13 focused и 56/56 combined. D2 exact `fc20f33` parallel streams внутри одного authenticated
-connection прошёл Windows 17/17 focused и 61/61 combined. D3 exact `0032c67` прошёл explicit 3/3 и
-combined 62/62: debug loopback 59,040,998 B/s, text 678 μs, controlled 30-ms RTT/5% loss recovered с
-adaptive backoff. F4-E exact `103f041` + `f7e7562` signed 60/90 path manager, durable restart store
-и typed dispatch прошёл Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` opaque range store
-прошёл Windows custody 8/8/combined 79/79; F2 exact `2cc0e36` + `80416bc` signed atomic receipt/
-missing pull прошёл custody 11/11/combined 86/86. F3a exact `ac0fde9` replication planner прошёл
-4/4/combined 90/90. Следующий F3b production wiring; Android/engine/physical F…H ещё впереди,
-телефоны пока не трогать.
-
-> ## Исторический M8 handoff
+> ## ⚠️ ОБНОВЛЕНИЕ СТАТУСА 2026-08-16 (вечер) — прочитать ПЕРЕД вставкой текста ниже
 >
-> M8-A…F и старые branch/release gates больше не являются bootstrap-инструкцией. Их evidence
-> сохранён в `AI_COLLABORATION_NOTES.md`; повторять или продолжать их как current task нельзя.
+> Prompt ниже частично устарел: он требует «начать с M8-A», но с тех пор уже выполнено
+> (ветка `arena/01a00674-apumir`, актуальный tip):
+>
+> - **M8-A** (`b5408e2`) — durable epoch-ms модель RelayQueue + валидация + 12 тестов;
+> - **M8-B/D** (`b881d65`) — durable RelayStore (SQLite) + persist/restore/tombstone wiring;
+> - **M8-C slice 1** (`aafdb3a`) — versioned at-rest AEAD envelope `storage/relay_at_rest.rs`;
+> - **M8-C slice 2** (`6ebe4ae`) — relay schema v2 + quarantine + encrypted API, SQL 24/24 PASS;
+> - **M8-C slice 3** — Android Keystore-мост (`RelayAtRestMasterKey.kt` + Rust
+>   `MasterSecretKeySource`/install-реестр) и engine полностью на encrypted API (`RelayCustody`);
+>   custody всегда encrypted, без ключа — честный RAM-only ephemeral; UniFFI добавлены
+>   `install_relay_at_rest_key` / `create_engine_durable` / `relay_custody_mode` /
+>   `relay_quarantine_count`; backup-исключения для relay-файла и ключевых prefs.
+>
+> Полная M8-C3 история сохранена на GitHub: tip `arena/01a013d0-apumir` = `24303b4`.
+> Новая Arena-сессия продолжается линейно от этой точки; старые slices повторять нельзя.
+>
+> **M8 A→C3 compile и основной three-phone durable gate закрыты.** На v11.16.23 exact chain
+> Anna→offline Stas через Zhenya PASS: encrypted store, Zhenya process death/restore, exactly one
+> UI delivery, intermediate RAM+SQLite cleanup, Anna eventual DELIVERED, tombstone1/quarantine0
+> на всех; final DB state `8CD48812…B2526A`. В ходе gate исправлены exact relay DB path, unsafe
+> restored identity и receipt cleanup fanout.
+> **Текущий шаг — завершить M8-E/F:** отдельно доказать реальный bounded WorkManager wake при
+> stopped foreground service, затем delayed relay D+reboot и mixed N↔N-1 acceptance
+> Anna→Zhenya→D→Stas с kill/reboot, датчики: `relay_custody_mode` + `relay_quarantine_count` +
+> quarantine-warn в logcat). **Новый релиз НЕ делать** до закрытия релизных гейтов — см.
+> доп.196/197 в AI_COLLABORATION_NOTES. Остальные правила prompt'а ниже (телефоны, флешка,
+> релизы, PowerShell-гэтчи, запрет sandbox cargo test) остаются в силе. Всегда сначала сверяй
+> этот файл с tip'ом новейшей arena-ветки (`git for-each-ref --sort=-committerdate`) —
+> репозиторий может быть новее текста.
 
 ---
 
 ## Текст для вставки в новый ИИ-чат
 
 Ты продолжаешь разработку Android-мессенджера **APU** в репозитории `vzhem/APUMIR`. Пользователь —
-новичок, поэтому говори простым русским языком, но работай как строгий senior engineer. Не начинай
-код по одному историческому next-step: сначала сверяй CURRENT OVERRIDE, актуальный план и source.
-Спроси пользователя, если архитектурное/продуктовое решение существенно неясно. Перед телефонами,
-install, publication/release/tag/PR всегда нужно отдельное предупреждение или разрешение по правилам
-выше.
+новичок, поэтому говори простым русским языком, но работай как строгий senior engineer. Не задавай
+вводных и повторных вопросов: вся необходимая исходная информация ниже. Сразу начинай следующий
+безопасный coding-шаг. Вопрос допустим только перед разрушительным действием, изменением телефонов,
+новым install, publication/release/tag/PR или если фактический workspace существенно противоречит
+этому handoff.
 
-### 1. Как начать сейчас
+### 1. Как начать — без уточняющих вопросов
 
-В первом ответе коротко скажи: «F4-C1 combined 43/43 PASS на `ca2edb6`; начинаю read-only F4-C2
-ownership review; Android и телефоны не трогаю». Затем:
+В первом же ответе напиши коротко: «Продолжаю с M8-A: сохраняемое время и durable schema для
+RelayQueue. Телефоны не трогаю». Затем самостоятельно:
 
 1. проверь текущую branch/HEAD/status, но не переключай branch;
-2. полностью прочитай актуальные override-блоки и обязательные документы из раздела 2;
-3. сверяй committed C1 audit и source с actual files, не повторяй реализацию;
-4. выполни только Windows host gate из раздела 8 и исправляй лишь C1 при реальной ошибке;
-5. точно раздели `source/static / host compile/runtime / network runtime / pending`;
-6. не подключай Android/FFI/phones и не начинай concurrency F4-D;
-7. обычный commit/push текущей Arena branch разрешён; другую branch не создавать и не переключать;
-8. отчитайся: что доказано, что ещё не доказано и какой один slice идёт следующим.
+2. полностью прочитай обязательные документы из раздела 2;
+3. перечитай целевые Rust-файлы из раздела 7;
+4. реализуй первый маленький M8-A slice из раздела 8;
+5. выполни только разрешённые статические проверки (`git diff --check`, grep/source review);
+6. не запускай sandbox/host `cargo test` и не собирай Android/Rust в sandbox;
+7. сделай обычный commit в текущую Arena branch и push этой же branch без отдельного вопроса;
+8. отчитайся: изменённые файлы, что доказано, что ещё не доказано, следующий маленький шаг.
 
-При расхождении workspace с handoff источником истины являются фактический checkout, текущая fixed
-Arena branch, newest committed override и production source. Не подтягивай старую Arena-ветку по
-историческому hash без отдельного доказательства, что это действительно нужный линейный ancestor.
+Если actual branch имеет другое Arena-generated имя, не переключай её: используй фактическую
+текущую branch и сообщи расхождение. Не создавай другую branch. Если commit с этим handoff отсутствует
+в новом checkout, выполни read-only `git fetch origin arena/01a000bc-apumir`, проверь remote handoff и
+сделай только `git merge --ff-only origin/arena/01a000bc-apumir` в текущую fixed Arena branch — без
+checkout/switch. Если fast-forward невозможен или worktree не clean, остановись и сообщи точное
+расхождение; не заставляй пользователя заново пересказывать проект.
 
 ### 2. Обязательные документы — прочитать полностью до изменения кода
 
@@ -118,169 +84,228 @@ Arena branch, newest committed override и production source. Не подтяг�
 - Единственное пользовательское название: **APU**.
 - Технический repository/package пока могут называться APUMIR / `com.vladimir.messenger`; package не
   переименовывать.
-- Канонический Windows workspace: `C:\APU-M8`; другие APU-клоны/пути не использовать.
+- Канонический Windows workspace: `C:\APUMIR-arena-test`.
 - Для дальнейшей APU-работы на Windows использовать только диск C:, кроме уже готовой APU-флешки F:.
-- В этой Arena-сессии branch fixed = `arena/01a0290d-apumir`. В новом session имя может быть другим:
-  всегда проверь actual branch/HEAD и используй только назначенную Arena branch; не переключай её.
+- В предыдущем чате Arena branch была `arena/01a000bc-apumir`; version-statistics baseline commit —
+  `579ce7a`, а authoritative текущий HEAD — commit, содержащий этот handoff. Сначала проверь actual
+  branch/HEAD: в новом Arena session branch может иметь другое generated имя. Никогда самовольно не
+  переключай branch.
 - Не делать PR/tag/release/publication без нового явного разрешения пользователя.
 - Не коммитить generated `.so`, APK, build outputs, caches или signing keystore.
 
-### 4. Текущее доказанное состояние
+### 4. Что уже завершено
 
-#### Product/release
+#### Продукт и сеть
 
-- Published stable/latest = **v11.17.1**, release asset `app-release.apk` = 35,285,255 B; tag target
-  commit `6deb532`. Это не является proof нового direct file transport.
-- Тестовые телефоны debug-signed; public release APK поверх них не ставится.
-- Message mesh/durable custody, receipts и bounded RelayQueue существуют для малых message/control
-  envelopes. Их file/blob store не расширять.
-- File F0–F3 foundation: SAF streaming, canonical manifest/chunk AEAD, Room progress, device-bound
-  key vault, app-private encrypted chunks, small direct-chat UI. Малые 3-KiB/26-KiB phone transfers
-  имеют runtime PASS в старом transport scope.
-- `send_direct_payload` и binding compile/install PASS, но завершённой file transfer именно через
-  новый direct route не доказано. `fc157cd` имеет source/static PASS; JVM/phone gate pending.
-- F4-A docs/architecture синхронизирован и подтверждён владельцем.
-- F4-B1 source/static и focused Windows host PASS: `network/file_wire.rs` содержит canonical
-  bounded binary frame/capability negotiation; exact `4815582`, 11 passed, 0 failed, 592 filtered.
-- F4-B2 source/static и focused Windows host PASS: exact `96dbe28`, 12 passed, 0 failed,
-  603 filtered; module не wired к sender/QUIC/FFI/Android.
-- F4-B3 + combined F4-B focused Windows PASS: exact `5ab2517`, 34 passed, 0 failed, 592 filtered;
-  network/FFI/Android/phones всё ещё unwired.
-- F4-C1 source `bf4f0c6` + fixes `bedf671`/`ca2edb6`: TLS-exporter-bound mutual B2 auth, bounded
-  `APUS`, one ordered QUIC stream, durable-before-ACK/admission и signed resume seam; Windows focused
-  9/9 и combined 43/43 PASS, no engine/FFI/Android wiring.
-- Канонический Windows clone после последнего gate находится на
-  `arena/01a0290d-apumir`/`ca2edb6`, но сохраняет
-  две прежние модификации generated artifacts: UniFFI `p2p_core.kt` и
-  `arm64-v8a/libp2p_core.so`. Их нельзя
-  reset/перезаписывать без отдельной проверки; при B1 gate SHA-256 сохранились без изменений.
+- Rust RelayQueue, TTL 7 дней, `MAX_HOPS=8`, per-recipient=200, global=10000.
+- Relay/receipt/gossip summary wire formats.
+- Bounded gossip и missing-relay forwarding.
+- Direct recipient delivery, receipt cleanup и origin delivery path.
+- Automatic origin relay при недоступном recipient, Outbox и честный `QUEUED_OFFLINE`.
+- Bounded dual MQTT broker transport и production dedup.
+- v11.16.16 build/install/launch readiness PASS на Анне, Жене и Стасе.
+- Пользователь вручную видел успешную offline UI-доставку через третий телефон.
+- Строгий post-capture не содержал exact message/protocol markers, поэтому конкретная message-ID
+  chain, полный receipt cleanup и eventual origin `DELIVERED` не доказаны финальным acceptance.
 
-#### Backup и публикация
+#### Release
 
-- На F: существует принятый portable milestone backup; **флешку больше никогда не форматировать**.
-- Release/tag/PR/publication и backup rotation только после отдельного разрешения владельца.
-- Старые v11.16.x hashes/attempts — исторический evidence в collaboration notes, не current gate.
+- Опубликован **prerelease v11.16.16**:
+  `https://github.com/vzhem/APUMIR/releases/tag/v11.16.16`.
+- APK: 22,664,712 B.
+- APK SHA-256:
+  `446A1EE9254B7F57E037398E81209DB9E60C915CE2E3ADBCFA43A3FC8429DC0D`.
+- Signer certificate SHA-256:
+  `F843CBE70332BAB67A9671EBDE32FEE541E84CD904D3A508E5626346A1A4A5F7`.
+- Tag/target: `85aecb0fa9893184e357b6c565869d0f1ebd69b7`.
+- GitHub server asset digest совпал; tag workflow success, build job skipped, APK не пересобирался.
+- Stable release ещё не заявлен: M8, mixed-version/r4.5 и security gates впереди.
 
-### 5. Обязательный пользовательский сценарий
+#### Portable backup
 
-1. Если sender/recipient достижимы сейчас, APU выбирает самый быстрый разрешённый LAN/direct/NAT/
-   TCP-TLS/WS/proxy/VPN/transient conduit path.
-2. Внешний conduit только live-forward E2E ciphertext: no retained payload, offline inbox, blob
-   storage или server retry после disconnect.
-3. Если endpoints не совпали online, другие consented телефоны durable хранят encrypted chunks и
-   доставляют их по будущим пересечениям; sender после handoff может уйти offline.
-4. Relay owner выбирает место, трафик, Wi-Fi/mobile/roaming, charging/thermal mode; hard safety и
-   text-first scheduling остаются всегда.
-5. Disconnect/network change/process death/reboot продолжают missing chunks с тем же transfer ID.
-6. Только verified recipient receipt означает DELIVERED; phone custody и transport FIN — не доставка.
-7. Если ни одного физического path/overlap нет, файл честно ждёт в Outbox.
+- Готова компактная копия `F:\APU_PORTABLE`.
+- 278 manifest entries, все hashes PASS.
+- previous v11.16.15 + latest v11.16.16.
+- Bundle verify, forbidden scan и restore rehearsal PASS.
+- Final backup state SHA-256:
+  `A96500612DD1AC80D908F1F49ADE9536931E512D387C2FD0EDA8CB82772D2483`.
+- **Флешку больше никогда не форматировать.** Только verified rotation: incoming latest → проверить;
+  старая latest → previous; удалить можно лишь версии старше previous после final verify.
+- Browser release flow признан удобным и теперь preferred: Arena создаёт draft → пользователь
+  загружает APK+sha через GitHub browser → Arena проверяет server digests → Arena публикует.
+- Не требовать Windows `gh` token/password; Windows keyring token оказался invalid.
 
-### 6. Текущий source-gap
+#### Документация
 
-- Sender последователен: 4-KiB Base64 fragment → generic text frame → новый QUIC connection → FIN
-  → 120-ms pause. Persistent binary connection/concurrent streams отсутствуют.
-- Direct failure даёт `WAITING_RECIPIENT`; separate phone FileCustody отсутствует.
-- Generic RelayQueue = 64-KiB envelope, 500/recipient, 10,000 total; file fragments туда не класть.
-- Manifest default 128 KiB и chunk-store cap 640 дают practical preparation boundary около 80 MiB,
-  несмотря на source constant 4 GiB. 4-MiB plaintext+tag также не помещается в 1024 packet fragments.
-- OFFER filename/size confidentiality, signed 60/90 presence, path manager, adaptive scheduler,
-  file custody quotas и mixed-version binary negotiation не доказаны.
+- Master plan, mesh design, collaboration notes, flash runbook и recovery guide обновлены.
+- `docs/VERSION_STATISTICS.md` — append-only отчёт каждой глобальной версии.
+- Baseline v11.16.16: основной код 31,645 physical / 27,685 nonblank; с generated 34,155 /
+  29,750; automation 17,117. Для следующей глобальной версии добавить LOC delta тем же методом.
 
-### 7. Код, который прочитать перед F4-B
+### 5. Главный незакрытый пользовательский сценарий
 
-- `rust-core/src/crypto/file_transfer.rs` и file-transfer FFI в `rust-core/src/lib.rs`;
-- `rust-core/src/network/wire.rs`, `quic_client.rs`, `quic_server.rs`, `relay_queue.rs`;
-- `rust-core/src/engine/core.rs`, особенно `send_direct_payload` и peer endpoint ownership;
-- Android `FileTransferPacketCodec.kt`, `FileTransferSender.kt`, `FileTransferReceiver.kt`,
-  `FileTransferChunkStore.kt`, `OutgoingFilePreparationService.kt`;
-- существующие Rust/Kotlin file tests и generated-binding boundary.
+APU должен гарантировать:
 
-Перед изменением grep всех callsites и фактических constants. Комментарий/старый journal claim не
-считать реализацией.
+1. Анна отправляет сообщение офлайн-Стасу; Женя получает relay custody.
+2. Женя не может доставить, атомарно сохраняет encrypted custody и засыпает.
+3. Все телефоны могут быть offline.
+4. Через сутки Женя просыпается, восстанавливает старую очередь, запрашивает новые eligible relay
+   items и пытается передать старые+новые.
+5. Женя кратко пересекается online с relay D и передаёт custody; затем Женя offline/process killed.
+6. Позже только D и Стас пересекаются online; D доставляет ровно одно UI message.
+7. Анна и Женя в момент доставки не нужны.
+8. Receipt/tombstone переживают restart, очищают все custody copies при следующих появлениях и
+   eventually ставят origin `DELIVERED`.
+9. Process death, app restart и reboot любого relay не теряют сообщение.
+10. Если физического разрешённого online-overlap двух соседей не было, APU честно сохраняет Outbox и
+    не обещает невозможную доставку.
 
-### 8. Непосредственный следующий шаг — F4-D throughput data plane
+### 6. Текущий архитектурный разрыв
 
-F4-C1 exact `ca2edb6` закрыл focused 9/9 и combined 43/43 host gates. C2 read-only audit подтвердил:
-production send создаёт endpoint/connection на каждый old send, listener endpoint локален его task,
-а unwired `ConnectionPool` unauthenticated, keyed произвольными bytes и допускает concurrent duplicate
-connect. Его нельзя расширять как file-session owner.
+`rust-core/src/network/relay_queue.rs` сейчас содержит:
 
-До owner есть обязательный identity prerequisite. `ffi::CryptoManager` использует fake legacy
-подписи и не является Ed25519. Реальный device-bound `Arc<InstalledSigningIdentity>` устанавливается
-Android до engine start и не экспортирует private seed/key, но C1 принимает concrete
-`&Ed25519KeyPair`.
+- `Mutex<HashMap<String, RelayMessage>>` только в RAM;
+- `RelayMessage.created_at: Instant`;
+- `RelayMessage.expires_at: Instant`;
+- no persistent backing, startup recovery или durable tombstones.
 
-C2a source/static exact `0736d9b62c64f0cc8daeff29dfef82f85377901c` уже сделал:
+Поэтому текущая multi-hop цепочка возможна только пока custody processes/queues живы. После process
+death/reboot relay может потеряться. Это главный blocker M8.
 
-1. crate-internal signer abstraction только для exact public key + sign operation;
-2. implementations для test `Ed25519KeyPair`, real `InstalledSigningIdentity` и existing `Arc<T>`,
-   без seed export и без fallback к fake CryptoManager;
-3. обязательную self-verification результата adapter; 2 new control tests + 1 mutual C1 loopback;
-4. Jinx `Program`/zero MissingNode, static contract и diff check PASS.
+Важная security-оговорка: комментарий типа называет payload E2E encrypted, но M7 strict acceptance
+ещё не завершён и notes указывают, что payload path нельзя считать доказанно безопасным. Не записывать
+plaintext в persistent store и не заявлять encryption без доказательства. Persistent design должен
+хранить recipient ciphertext и/или дополнительно encrypted-at-rest record с ключом, защищённым
+Android Keystore. Relay не должен читать plaintext.
 
-Windows exact `0736d9b`: `adapter` 2/2, `installed_sidecars` 1/1, combined `network::file_` 46/46
-(592 filtered) PASS; три warnings только прежние, generated hash guard PASS. C2a закрыт.
+### 7. Код, который прочитать перед первым изменением
 
-C2b source/static exact `fd5d1f3ac2c31e7b52fe123190ee2f560504f89a` уже добавил отдельный
-`file_session_owner.rs`: один endpoint, fixed Ed25519-key + address map, per-slot connect/auth mutex,
-bounded/idle/failed eviction, fresh reconnect, MissingRanges delegation и explicit shutdown. 7 tests
-покрывают reuse, 16-caller race, idle fresh scope, signed resume после reconnect, wrong peer + retry,
-capacity и shutdown. Jinx `Program`/zero MissingNode, static contract и diff check PASS.
+- `rust-core/src/network/relay_queue.rs` — RAM queue и tests.
+- `rust-core/src/engine/core.rs` — RelayQueue ownership, relay/receipt/gsumm paths.
+- `rust-core/src/network/offline_send.rs` — origin relay creation.
+- `rust-core/src/network/wire.rs` — protocol formats.
+- `rust-core/src/storage/db.rs` — существующий rusqlite migration V1.
+- `rust-core/src/storage/models.rs` — epoch-ms helper/model convention.
+- `rust-core/src/storage/mod.rs` и `rust-core/Cargo.toml`.
 
-После test-only `471d0994885a5bf66139b8775bcefcb67734d8ed` Windows focused owner дал
-7/7, combined `network::file_` 53/53 и 592 filtered; C2b/F4-C host gate закрыт.
+`rusqlite` bundled, serde, bincode, chacha20poly1305 и sha2 уже есть. Не добавляй новую тяжёлую
+зависимость без необходимости.
 
-D1 exact `0ef770618292ce1f7ba259cc051a1c390bf7ca62` прошёл Windows 13/13 focused и
-56/56 combined. D2 exact `fc20f331ef3dcfabad8749c4c8f262a7bc807e6d` держит base C1 authenticated
-connection живым, открывает scope-bound QUIC data streams без нового TLS/identity handshake на chunk,
-preflight-ит полный batch под единым 32-MiB hard budget и проверяет monotonic `u64` stream ID/scope.
-Windows: 17/17 focused, 61/61 combined, только три прежних warnings, generated guard PASS. Concurrent
-durable persistence, duplicate/scope/budget negatives, repeated batch и signed reconnect resume host
-tests PASS. D3 exact `0032c67` добавил measured joint window/concurrency controller и stream
-priorities. Explicit 3/3: fast debug loopback 15,728,640 B/266 ms (`59,040,998 B/s`), text 678 μs
-при 260-ms bulk, controlled 30-ms RTT/5% loss recovered all 524,288 B и backoff 2→1 streams/8→4
-frames. Combined 62/62, generated guard PASS. Controlled F4-D host scope закрыт. Теперь E path
-manager, F custody, G switching, H physical LAN/NAT/UDP-blocked/phone acceptance. E1 exact `103f041`
-добавил contact-scoped signed canonical beacon, 60/90 lifetime, 8-candidate/256-contact caps,
-replay/expiry/failure cooldown и LAN QUIC → Internet QUIC → direct TCP → tunnel selection. Windows
-path 7/7, combined 69/69, generated guard PASS. E2 exact `f7e7562` типизированно передаёт только QUIC
-route в pinned `FileSessionTarget`, оставляет TCP/tunnel отдельными variants и транзакционно сохраняет
-full `u64` sequence/beacon до manager visibility; restart/replay test PASS. Windows path 9/9, combined
-71/71. Engine publish/physical transport остаётся G/H; legacy text listener для file bytes запрещён.
+### 8. Непосредственный coding-шаг M8-A — выполнить сейчас
 
-### 9. Порядок после F4-B
+Сделай только foundation slice, не пытайся сразу закончить весь M8:
 
-- **F4-C:** persistent authenticated single-peer QUIC, один binary stream, durable-before-ACK resume.
-- **F4-D:** bounded adaptive parallel streams/window/backpressure + LAN/slow-link benchmarks и
-  text-latency guard.
-- **F4-E:** signed contact-scoped 60/90 presence и any-network path manager.
-- **F4-F:** separate device-bound encrypted phone FileCustody, owner policy/quotas, custody receipts,
-  inventory/missing pull, TTL/tombstone/cleanup/reboot/flood defense.
-- **F4-G:** seamless direct/transient/live-phone/delayed-custody path switching.
-- **F4-H:** full boundary/NAT/UDP-blocked/loss/reboot/quota/non-overlap/mixed-version/privacy gates.
+1. Убери process-local `Instant` из persistent-facing `RelayMessage`.
+2. Введи serializable absolute UTC epoch milliseconds (`created_at_ms`, `expires_at_ms`) с безопасным
+   conversion из `Duration` и без продления TTL после restart.
+3. Добавь `Serialize/Deserialize` для durable relay record только если все поля имеют bounded/
+   validated representation.
+4. Добавь методы с explicit clock для детерминированных tests, например `is_expired_at(now_ms)`, а
+   `is_expired()` оставь thin wrapper над system UTC.
+5. Добавь validation/loading constructor: reject empty/oversized metadata, invalid timestamps
+   (`expires < created`), expired records и `hop_count >= MAX_HOPS`; не panic на clock-before-epoch.
+   Не придумывай другие лимиты: вынеси/переиспользуй текущие offline-send bounds — msg ID 128 B,
+   recipient/origin 128 B, chat scope 256 B, envelope 64 KiB — без циклического module dependency и
+   без несовместимого wire change.
+6. Сохрани существующее внешнее поведение `new`, `with_ttl`, dedup, limits, gossip и hop semantics.
+7. Обнови все Rust callsites/тесты, которые используют старые поля.
+8. Добавь unit tests в `relay_queue.rs` на:
+   - fixed timestamp round-trip;
+   - TTL не продлевается после serialize/deserialize;
+   - expired persisted record rejected/cleaned;
+   - invalid timestamp/hop rejected;
+   - `next_hop` сохраняет absolute expiry;
+   - clock-before-epoch/default handling без panic.
+9. Не добавляй SQLite write в этом же slice — сначала добейся чистой durable model boundary.
+10. Выполни `git diff --check` и source-level checks. Sandbox `cargo test` запрещён; прямо напиши, что
+    compile/runtime ждут Windows `build-rust.ps1` в отдельном следующем gate.
 
-Не начинать несколько пунктов сразу и не обещать throughput/file limit до benchmark.
+Перед API-изменением grep всех callsites. Не ломай wire compatibility: timestamps persistence model
+не должны самовольно менять current relay wire format в этом slice.
 
-### 10. Телефоны и evidence
+### 9. Последовательность после M8-A
 
-Телефоны: Стас `11567254BK001192`, Женя `3B665800EES00000`, Анна `AUYF6R5923006121`. Сейчас их не
-трогать. Не повторять старые v11.16.x install/reconnect/capture/release/format-F attempts; evidence
-сохранён в `AI_COLLABORATION_NOTES.md`.
+#### M8-B — storage abstraction
+
+- Ввести `RelayStore`/durable repository boundary.
+- Отдельная SQLite migration для relay records и tombstones.
+- Atomic transaction: persist custody before enqueue/ACK/offer.
+- Unique primary key `msg_id`, recipient index, absolute expiry index.
+- Bounded startup load; expired records delete without UI delivery.
+- Не держать `rusqlite::Connection` бездумно через async await; использовать строгий sync boundary/
+  mutex или dedicated worker.
+
+#### M8-C — encryption and key lifecycle
+
+- Persist only recipient ciphertext.
+- Дополнительное encryption at rest для record metadata/payload.
+- Android Keystore-backed key lifecycle, versioned envelope, nonce uniqueness.
+- Corrupt/unknown key/version quarantine, не crash и не plaintext fallback.
+- App update migration; data clear закономерно теряет local custody, но не маскировать это.
+
+#### M8-D — startup/process/reboot recovery
+
+- Load validated unexpired records при start.
+- Restore dedup, hop, receipt tombstones, quotas и cursor без TTL reset.
+- Crash-safe insert/remove transactions.
+- Idempotent replay: UI exactly once.
+
+#### M8-E — sleep/wake/background cycle
+
+- Explicit relay consent.
+- Bounded WorkManager/foreground window после network/app/periodic wake.
+- Сначала restore old queue, затем summary/missing-ID request, затем old+new delivery attempt.
+- Всё недоставленное снова durable сохраняется; no busy loop.
+- Battery/network/traffic budgets и honest restricted status.
+
+#### M8-F — acceptance
+
+- Local tests first, потом controlled 3–4 phone test.
+- Non-overlapping windows Anna→Zhenya→D→Stas.
+- Delay up to at least one day.
+- Process kill/restart и reboot Zhenya/D.
+- Exactly-one UI, receipt cleanup, eventual origin delivered.
+- Mixed N↔N-1 и compatible schema migration.
+
+### 10. Телефоны и уже использованные сценарии — не повторять
+
+Телефоны: Анна, Женя, Стас. Сейчас их не трогать.
+
+Не повторять:
+
+- reconnect Анны и старые v11.16.12/v11.16.13/v11.16.14/v11.16.15 attempts;
+- v11.16.16 Rust/APK build, install, launch/readiness;
+- consumed M3(d) offline prepare;
+- manual capture;
+- format F:;
+- compact backup v1/v2/resume v3/v4;
+- release upload attempts и publication v11.16.16.
+
+Не удалять их state/evidence. Особенно:
+
+- format state SHA-256 `A75443F8D302B8D856237F63C2122ABA4C676A6456078066125EF1455E1FACFF`;
+- compact backup final state SHA-256
+  `A96500612DD1AC80D908F1F49ADE9536931E512D387C2FD0EDA8CB82772D2483`;
+- phase-A prepare state SHA-256
+  `0FCA3B35B5887C3F56C3A5D0BB23EA5F370200EA7CBDB22132693B082469607A`;
+- manual capture state SHA-256
+  `27D9B17773349E36060D869A866DA73B2EE20DA423B9F3323A16BC025238C98A`.
 
 Перед любой будущей phone-командой:
 
-1. непосредственно назвать конкретные телефоны и попросить подключить/разблокировать;
-2. команда начинает с read-only visibility/authorization gate;
-3. absent/unauthorized/offline = stop до изменения;
-4. uninstall/data clear/необоснованные force-stop/logcat clear/network changes запрещены;
-5. install/network toggles требуют отдельного явного разрешения.
+1. простыми словами назвать конкретные телефоны и попросить подключить/разблокировать;
+2. не ждать отдельного «готово»;
+3. команда сама начинает с read-only visibility/authorization gate;
+4. при absent/unauthorized/offline остановиться до изменения;
+5. uninstall/data clear/необоснованные force-stop/logcat clear/network changes запрещены;
+6. install/network toggles требуют отдельного явного разрешения.
 
 ### 11. Жёсткие правила пользователя
 
 - Один маленький шаг → проверка → следующий шаг.
 - Не спрашивать разрешение на обычные правки, проверки, commit/push текущей Arena branch.
 - Спрашивать только перед destructive, phones/install/network, release/tag/PR/publication.
-- Все Windows-команды — PowerShell и начинаются `Set-Location C:\APU-M8`.
+- Все Windows-команды — PowerShell и начинаются `Set-Location C:\APUMIR-arena-test`.
 - Python на Windows только `py -3`.
 - Не использовать Arena Downloads; большие versioned scripts — authenticated inline Base64 с
   per-chunk/full gzip hash, raw hash и Parser::ParseFile.
@@ -295,13 +320,11 @@ full `u64` sequence/beacon до manager visibility; restart/replay test PASS. Wi
 - После Windows `git apply` нормализовать CRLF→LF в памяти, доказать expected hash, затем Parser.
 - Empty tree size считать явным `[int64]$Total=0`, не читать отсутствующее `$Measure.Sum`.
 - Не запускать public high-load/security traffic; только локальная лаборатория.
-- Не pop Windows stash и не commit generated `.so`/APK/build outputs.
-- Relevant local host tests запускать только после проверки toolchain; отсутствующий prerequisite
-  фиксировать как pending, а не обходить ослаблением теста. Windows Android/native gate выполняется
-  отдельным `build-rust.ps1`/Gradle шагом; завершённые install не повторять без причины.
+- Не pop Windows stash, не commit generated `.so`, не запускать sandbox cargo test.
+- Windows Rust проверять только `build-rust.ps1`; завершённые build/install не повторять.
 - Приложение должно работать с разными соседними версиями.
 - При отсутствии разрешённого пути показывать честный restricted/offline и сохранять Outbox.
-- Иконка/косметика не являются приоритетом до F4 acceptance.
+- Иконка заморожена до завершения offline delivery.
 
 ### 12. Как отвечать пользователю
 
@@ -310,19 +333,7 @@ full `u64` sequence/beacon до manager visibility; restart/replay test PASS. Wi
 - Явно разделять: source/static PASS, compile PASS, runtime PASS и что ещё pending.
 - После каждого шага фиксировать важные решения/ошибки в `AI_COLLABORATION_NOTES.md` и тематическом
   документе, а global release stats — в `VERSION_STATISTICS.md`.
-- Не предлагать косметику, группы, каналы, рост или новую иконку до F4 file-delivery acceptance.
-- F4-B combined 34/34 PASS на `5ab2517`; не повторять отдельно.
-- F4-C1 exact `ca2edb6`: focused 9/9 и combined 43/43 PASS; не повторять без code change.
-- C2a exact `0736d9b` Windows 46/46 PASS; не повторять без code change.
-- C2b source `fd5d1f3` + test-only `471d099`: Windows 7/7 focused, 53/53 combined PASS.
-- F4-D1 exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS.
-- F4-D2 exact `fc20f33`: Windows 17/17 session + 61/61 combined PASS; generated guard PASS.
-- F4-D3 exact `0032c67`: explicit 3/3 + combined 62/62 PASS; fast/text/slow-loss metrics записаны.
-- F4-E1/E2 exact `103f041`/`f7e7562`: Windows path 9/9 + combined 71/71 PASS; guard PASS.
-- F4-F1 exact `60407fa`: Windows custody 8/8 + combined 79/79 PASS; guard PASS.
-- F4-F2 exact `2cc0e36`/`80416bc`: Windows custody 11/11 + combined 86/86 PASS.
-- F4-F3a exact `ac0fde9`: Windows replication 4/4 + combined 90/90 PASS.
-- Следующий F3b production wiring; phones только после source/compile gates.
+- Не предлагать косметику, группы, каналы, рост или новую иконку до M8 delivery gate.
+- Ближайшая цель — не новый release, а durable encrypted relay custody и delayed multi-hop acceptance.
 
-Делай F3b engine/FFI/Android/device-bound at-rest wiring. Legacy Base64/text path не использовать,
-не сохранять app 4-GiB/u32 limits. Physical acceptance остаётся в F4-H.
+Начинай работу сейчас с раздела 8, без уточняющих вопросов и без телефонов.

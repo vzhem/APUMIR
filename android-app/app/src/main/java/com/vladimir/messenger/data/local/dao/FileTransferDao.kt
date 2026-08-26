@@ -34,21 +34,6 @@ interface FileTransferDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertChunk(chunk: FileTransferChunkEntity)
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertChunkIgnore(chunk: FileTransferChunkEntity): Long
-
-    @Query("SELECT COUNT(*) FROM file_transfer_chunks WHERE transferId = :transferId")
-    suspend fun countChunks(transferId: String): Long
-
-    @Query(
-        """
-        SELECT COALESCE(SUM(ciphertextBytes - 16), 0)
-        FROM file_transfer_chunks
-        WHERE transferId = :transferId
-        """
-    )
-    suspend fun receivedPlaintextBytes(transferId: String): Long
-
     @Query(
         """
         UPDATE file_transfers
@@ -67,7 +52,7 @@ interface FileTransferDao {
     suspend fun advanceProgress(
         transferId: String,
         state: String,
-        completedChunks: Long,
+        completedChunks: Int,
         transferredBytes: Long,
         updatedAtMs: Long,
         errorCode: String?,

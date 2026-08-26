@@ -49,7 +49,7 @@ class FileTransferFunctionalCryptoInstrumentedTest {
                 now + 24 * 60 * 60 * 1_000L,
             )
             assertTrue(manifest.transferIdHex.matches(Regex("^[0-9a-f]{32}$")))
-            assertEquals(1uL, manifest.chunkCount)
+            assertEquals(1u, manifest.chunkCount)
             val parsed = parseFileTransferManifest(manifest.manifestBytes)
             assertEquals(manifest.transferIdHex, parsed.transferIdHex)
             assertEquals(sender, parsed.senderNodeId)
@@ -58,7 +58,7 @@ class FileTransferFunctionalCryptoInstrumentedTest {
             val ciphertext = encryptFileTransferChunk(
                 manifest.manifestBytes,
                 key,
-                0uL,
+                0u,
                 plaintext,
             )
             assertFalse(ciphertext.contentEquals(plaintext))
@@ -67,13 +67,13 @@ class FileTransferFunctionalCryptoInstrumentedTest {
             val stored = store.readEncryptedChunk(manifest.transferIdHex, 0)!!
             assertArrayEquals(
                 plaintext,
-                decryptFileTransferChunk(manifest.manifestBytes, key, 0uL, stored),
+                decryptFileTransferChunk(manifest.manifestBytes, key, 0u, stored),
             )
             assertFalse(store.storeEncryptedChunk(manifest.transferIdHex, 0, ciphertext).newlyStored)
 
             val tampered = stored.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
             expectFailure {
-                decryptFileTransferChunk(manifest.manifestBytes, key, 0uL, tampered)
+                decryptFileTransferChunk(manifest.manifestBytes, key, 0u, tampered)
             }
             expectFailure {
                 parseFileTransferManifest(manifest.manifestBytes.copyOf(manifest.manifestBytes.size - 1))

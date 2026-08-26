@@ -56,7 +56,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                         Text(current.rankName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text("Подтверждённых друзей: $qualified")
                         Text(
-                            "Текст, отправка и получение файлов, вступление в группы/каналы доступны без ранга. " +
+                            "Текст, получение файлов и вступление в группы/каналы доступны без ранга. " +
                                 "Засчитываются только прямые приглашения после handshake и DELIVERED.",
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -71,16 +71,25 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                             fontWeight = if (tier == current) FontWeight.Bold else FontWeight.Medium,
                         )
                         tier.unlockedFeatureSummary().forEach { feature -> Text("• $feature") }
+                        if (tier.rankMaxBytes > 0) {
+                            Text("Лимит ранга на файл: ${formatBytes(tier.rankMaxBytes)}")
+                        }
                     }
                 }
             }
             item {
                 Text(
-                    "Приложение не задаёт лимит размера файла. Фактическая передача зависит от " +
-                        "свободного места, возможностей устройства и доступной сети.",
+                    "Фактический размер ограничен также текущим transport/storage лимитом. " +
+                        "В тестовой debug-сборке может использоваться отдельный лабораторный ранг.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    val gib = 1024L * 1024 * 1024
+    val mib = 1024L * 1024
+    return if (bytes >= gib && bytes % gib == 0L) "${bytes / gib} ГиБ" else "${bytes / mib} МиБ"
 }

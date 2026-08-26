@@ -5,6 +5,7 @@ import java.security.MessageDigest
 
 /** Streaming metadata/hash preflight. It never retains source bytes or a filesystem path. */
 object FileTransferSourceInspector {
+    const val MAX_FILE_BYTES = 4L * 1024 * 1024 * 1024
     const val HASH_BUFFER_BYTES = 64 * 1024
     const val MAX_DISPLAY_NAME_BYTES = 255
     const val MAX_PROVIDER_NAME_CHARS = 4_096
@@ -24,8 +25,8 @@ object FileTransferSourceInspector {
         declaredSize: Long?,
         openStream: () -> InputStream,
     ): InspectedFile {
-        require(declaredSize == null || declaredSize >= 0) {
-            "Declared file size is invalid"
+        require(declaredSize == null || declaredSize in 0..MAX_FILE_BYTES) {
+            "Declared file size is outside the MVP limit"
         }
         val displayName = safeDisplayName(providerDisplayName)
         val mediaType = safeMediaType(providerMediaType)
@@ -39,6 +40,7 @@ object FileTransferSourceInspector {
                     if (read < 0) break
                     if (read == 0) continue
                     total = Math.addExact(total, read.toLong())
+                    require(total <= MAX_FILE_BYTES) { "Selected file exceeds the technical limit" }
                     digest.update(buffer, 0, read)
                 }
             }

@@ -34,7 +34,7 @@ class FileTransferReceiver(
     private val keyVault: TransferKeyVaultAccess,
     private val identity: LocalExchangeIdentity,
     private val transport: PacketTransport,
-    private val ackSink: suspend (transferIdHex: String, contiguousChunks: Long) -> Unit,
+    private val ackSink: suspend (transferIdHex: String, contiguousChunks: Int) -> Unit,
     private val notifier: FileChatNotifier,
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
@@ -45,9 +45,8 @@ class FileTransferReceiver(
 
     private val mutex = Mutex()
     private val pendingItems = LinkedHashMap<String, PendingItem>()
-    private val bufferedChunks = LinkedHashMap<String, MutableMap<Long, ByteArray>>()
-    /** One bounded progress cursor per active transfer; never one heap entry per file chunk. */
-    private val contiguousPrefixes = HashMap<String, Long>()
+    private val bufferedChunks = HashMap<String, MutableMap<Int, ByteArray>>()
+    private val receivedIndices = HashMap<String, MutableSet<Int>>()
     private var pendingBytes = 0L
 
     /** Returns true when the text was a file packet (caller must not store it as chat text). */
@@ -105,7 +104,7 @@ class FileTransferReceiver(
         transferIdHex: String,
         packet: FileTransferPacketCodec.Packet,
     ) {
-        val key = "${transferIdHex}|${packet.wireVersion}|${packet.type.wire}|${packet.itemIndex}"
+        val key = "${transferIdHex}|${packet.type.wire}|${packet.itemIndex}"
         val pending = pendingItems[key] ?: PendingItem().also {
             pendingItems[key] = it
             evictOldestIfOverBudget()
@@ -113,17 +112,13 @@ class FileTransferReceiver(
         check(pending.fragmentCount == -1 || pending.fragmentCount == packet.fragmentCount) {
             "Fragment count conflict for file item"
         }
-        val ownedFragment = packet.payload.copyOf()
-        val existing = pending.fragments.putIfAbsent(packet.fragmentIndex, ownedFragment)
+        val existing = pending.fragments.put(packet.fragmentIndex, packet.payload.copyOf())
         if (existing != null) {
-            ownedFragment.fill(0)
-            check(existing.contentEquals(packet.payload)) { "Conflicting duplicate file fragment" }
+            existing.fill(0)
             return
         }
         pending.fragmentCount = packet.fragmentCount
-        pendingBytes = Math.addExact(pendingBytes, packet.payload.size.toLong())
-        evictOldestIfOverBudget()
-        if (pendingItems[key] !== pending) return
+        pendingBytes += packet.payload.size
         if (pending.fragments.size < packet.fragmentCount) return
 
         // Complete item: re-encode fragments and strictly reassemble.
@@ -136,7 +131,6 @@ class FileTransferReceiver(
                     fragment,
                     packet.fragmentCount,
                     pending.fragments.getValue(fragment),
-                    packet.wireVersion,
                 )
             )
         }
@@ -146,8 +140,7 @@ class FileTransferReceiver(
             when (packet.type) {
                 FileTransferPacketCodec.Type.OFFER -> handleOffer(senderId, chatId, payload)
                 FileTransferPacketCodec.Type.CHUNK -> handleChunk(transferIdHex, packet.itemIndex, payload)
-                FileTransferPacketCodec.Type.ACK ->
-                    handleAck(senderId, transferIdHex, packet.itemIndex, payload)
+                FileTransferPacketCodec.Type.ACK -> ackSink(transferIdHex, packet.itemIndex)
                 FileTransferPacketCodec.Type.CANCEL ->
                     Log.i(TAG, "File transfer CANCEL notice for $transferIdHex")
             }
@@ -171,37 +164,9 @@ class FileTransferReceiver(
         }
     }
 
-    private suspend fun handleAck(
-        senderId: String,
-        transferIdHex: String,
-        contiguousChunks: Long,
-        payload: ByteArray,
-    ) {
-        if (!payload.contentEquals(byteArrayOf(1))) {
-            Log.w(TAG, "Malformed file ACK payload for $transferIdHex; dropped")
-            return
-        }
-        val transfer = transferDao.getTransfer(transferIdHex)
-        if (transfer == null || transfer.direction != "OUTGOING" || transfer.peerNodeId != senderId) {
-            Log.w(TAG, "Unauthorized file ACK from $senderId for $transferIdHex; dropped")
-            return
-        }
-        if (contiguousChunks !in 0L..transfer.chunkCount) {
-            Log.w(TAG, "Out-of-range file ACK $contiguousChunks for $transferIdHex; dropped")
-            return
-        }
-        ackSink(transferIdHex, contiguousChunks)
-    }
-
     private suspend fun handleOffer(senderId: String, chatId: String, payload: ByteArray) {
         val offer = FileOfferPdu.decode(payload)
         val manifest = crypto.parseManifest(offer.manifest)
-        if (manifest.fileSize > Long.MAX_VALUE.toULong() ||
-            manifest.chunkCount > Long.MAX_VALUE.toULong()
-        ) {
-            Log.w(TAG, "File offer geometry exceeds Android durable range; dropped")
-            return
-        }
         val now = nowMs()
         if (manifest.senderNodeId != senderId) {
             Log.w(TAG, "File offer sender mismatch: ${manifest.senderNodeId} != $senderId")
@@ -249,7 +214,7 @@ class FileTransferReceiver(
         if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) {
             openAndImportKey(transferIdHex, offer)
         }
-        recoverDurableProgress(transferIdHex)
+        rememberExistingReceivedIndices(transferIdHex)
 
         // Chunks may have arrived before the offer: ingest them now.
         bufferedChunks.remove(transferIdHex)?.let { buffered ->
@@ -262,14 +227,14 @@ class FileTransferReceiver(
         val contiguous = contiguousReceived(transferIdHex)
         sendFileAck(transferIdHex, contiguous)
         val fresh = transferDao.getTransfer(transferIdHex) ?: return
-        if (contiguous >= manifest.chunkCount.toLong()) {
+        if (contiguous >= manifest.chunkCount.toInt()) {
             finalizeTransfer(fresh, manifest)
         } else if (fresh.state == "OFFERED") {
             advance(fresh, newState = "TRANSFERRING")
         }
     }
 
-    private suspend fun handleChunk(transferIdHex: String, chunkIndex: Long, ciphertext: ByteArray) {
+    private suspend fun handleChunk(transferIdHex: String, chunkIndex: Int, ciphertext: ByteArray) {
         if (transferDao.getTransfer(transferIdHex) == null ||
             chunkStore.readManifest(transferIdHex) == null
         ) {
@@ -279,23 +244,17 @@ class FileTransferReceiver(
         ingestChunkCiphertext(transferIdHex, chunkIndex, ciphertext)
     }
 
-    private fun bufferOrDropChunk(transferIdHex: String, chunkIndex: Long, ciphertext: ByteArray) {
-        if (chunkIndex < 0L) return
-        val buffered = bufferedChunks.getOrPut(transferIdHex) { LinkedHashMap() }
-        // collectFragment wipes its reassembled payload after dispatch; retain an owned copy.
-        val existing = buffered.put(chunkIndex, ciphertext.copyOf())
+    private fun bufferOrDropChunk(transferIdHex: String, chunkIndex: Int, ciphertext: ByteArray) {
+        if (chunkIndex !in 0 until FileTransferChunkStore.MAX_CHUNKS_PER_TRANSFER) return
+        val buffered = bufferedChunks.getOrPut(transferIdHex) { HashMap() }
+        val existing = buffered.put(chunkIndex, ciphertext)
         if (existing != null) existing.fill(0)
-        while (bufferedChunks.size > MAX_BUFFERED_TRANSFERS ||
-            bufferedChunkCount() > MAX_BUFFERED_CHUNKS ||
-            bufferedChunkBytes() > MAX_BUFFERED_CHUNK_BYTES
-        ) {
+        while (bufferedChunkBytes() > MAX_BUFFERED_CHUNK_BYTES) {
             val oldestTransfer = bufferedChunks.keys.firstOrNull() ?: break
             bufferedChunks.remove(oldestTransfer)?.values?.forEach { it.fill(0) }
             Log.w(TAG, "Dropped pre-offer chunk buffer for $oldestTransfer")
         }
     }
-
-    private fun bufferedChunkCount(): Int = bufferedChunks.values.sumOf { it.size }
 
     private fun bufferedChunkBytes(): Long {
         var total = 0L
@@ -309,15 +268,15 @@ class FileTransferReceiver(
 
     private suspend fun ingestChunkCiphertext(
         transferIdHex: String,
-        chunkIndex: Long,
+        chunkIndex: Int,
         ciphertext: ByteArray,
     ) {
         val transfer = transferDao.getTransfer(transferIdHex) ?: return
         if (transfer.state == "COMPLETE" || transfer.state == "FAILED") return
         val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return
         val manifest = crypto.parseManifest(manifestBytes)
-        val chunkCount = manifest.chunkCount.toLong()
-        if (chunkIndex !in 0L until chunkCount) {
+        val chunkCount = manifest.chunkCount.toInt()
+        if (chunkIndex !in 0 until chunkCount) {
             Log.w(TAG, "Chunk index $chunkIndex out of range for $transferIdHex")
             return
         }
@@ -330,13 +289,21 @@ class FileTransferReceiver(
             Log.w(TAG, "Chunk $chunkIndex geometry mismatch for $transferIdHex")
             return
         }
+        val received = receivedIndices.getOrPut(transferIdHex) { HashSet() }
+        if (chunkIndex in received) {
+            // Дубликат: повторяем ACK с текущим прогрессом — отправитель мог потерять
+            // финальный ACK (рестарт/обрыв) и иначе никогда не закроет передачу.
+            sendFileAck(transferIdHex, contiguousReceived(transferIdHex))
+            return
+        }
+
         val stored = try {
             chunkStore.storeEncryptedChunk(transferIdHex, chunkIndex, ciphertext)
         } catch (storeError: Exception) {
             Log.w(TAG, "Chunk $chunkIndex rejected by store for $transferIdHex: ${storeError.message}")
             return
         }
-        val inserted = transferDao.insertChunkIgnore(
+        transferDao.upsertChunk(
             FileTransferChunkEntity(
                 transferId = transferIdHex,
                 chunkIndex = chunkIndex,
@@ -345,35 +312,26 @@ class FileTransferReceiver(
                 chunkSha256 = stored.sha256,
                 updatedAtMs = nowMs(),
             )
-        ) != -1L
-        val contiguous = advanceContiguousPrefix(transferIdHex)
-        if (!inserted) {
-            // Duplicate: repeat current ACK. No per-chunk in-memory set is retained.
-            sendFileAck(transferIdHex, contiguous)
-            return
-        }
-
-        val completedChunks = Math.addExact(transfer.completedChunks, 1L)
-        val transferredBytes = Math.addExact(
-            transfer.transferredBytes,
-            plaintextLengthOf(manifest, chunkIndex).toLong(),
         )
+        received.add(chunkIndex)
         Log.i(
             TAG,
             "File chunk stored: $chunkIndex for $transferIdHex " +
-                "($completedChunks/$chunkCount, contiguous=$contiguous)",
+                "(${received.size}/${chunkCount}, contiguous=${contiguousReceived(transferIdHex)})",
         )
 
+        val contiguous = contiguousReceived(transferIdHex)
+        val transferredBytes = received.sumOf { index -> plaintextLengthOf(manifest, index).toLong() }
         val updated = advance(
             transfer,
-            newState = if (completedChunks == chunkCount) "VERIFYING" else "TRANSFERRING",
-            completedChunks = completedChunks,
+            newState = if (received.size == chunkCount) "VERIFYING" else "TRANSFERRING",
+            completedChunks = received.size,
             transferredBytes = transferredBytes,
         )
         if (updated == 0) return
 
         sendFileAck(transferIdHex, contiguous)
-        if (completedChunks == chunkCount) {
+        if (received.size == chunkCount) {
             finalizeTransfer(transfer, manifest)
         }
     }
@@ -396,7 +354,7 @@ class FileTransferReceiver(
         )
         try {
             keyVault.withExistingKey(transferIdHex) { fileKey ->
-                for (chunkIndex in 0L until manifest.chunkCount.toLong()) {
+                for (chunkIndex in 0 until manifest.chunkCount.toInt()) {
                     val ciphertext = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
                         ?: throw IllegalStateException("Missing chunk $chunkIndex at finalize")
                     try {
@@ -416,9 +374,7 @@ class FileTransferReceiver(
                 throw IllegalStateException("Whole-file SHA-256 mismatch")
             }
             writer.commit()
-            check(advance(fresh, newState = "COMPLETE") == 1) {
-                "Cannot persist verified file completion"
-            }
+            advance(fresh, newState = "COMPLETE")
             Log.i(TAG, "File transfer COMPLETE: $transferIdHex (${manifest.displayName})")
             notifier.onFileReceived(
                 chatId = fresh.chatId,
@@ -429,7 +385,7 @@ class FileTransferReceiver(
                 totalBytes = manifest.fileSize.toLong(),
                 fileSha256 = manifest.fileSha256Hex,
             )
-            sendFileAck(transferIdHex, manifest.chunkCount.toLong())
+            sendFileAck(transferIdHex, manifest.chunkCount.toInt())
         } catch (error: Exception) {
             // abort() is a no-op after a successful commit (Writer guards its finished state).
             writer.abort()
@@ -452,52 +408,24 @@ class FileTransferReceiver(
         }
     }
 
-    private suspend fun recoverDurableProgress(transferIdHex: String) {
-        if (contiguousPrefixes.containsKey(transferIdHex)) return
-        val transfer = transferDao.getTransfer(transferIdHex) ?: return
-        val completedChunks = transferDao.countChunks(transferIdHex)
-        val transferredBytes = transferDao.receivedPlaintextBytes(transferIdHex)
-        if (completedChunks > transfer.completedChunks || transferredBytes > transfer.transferredBytes) {
-            advance(
-                transfer,
-                newState = transfer.state,
-                completedChunks = completedChunks,
-                transferredBytes = transferredBytes,
-            )
-        }
-        contiguousPrefixes[transferIdHex] = discoverContiguousPrefix(transferIdHex)
+    private fun rememberExistingReceivedIndices(transferIdHex: String) {
+        if (receivedIndices.containsKey(transferIdHex)) return
+        receivedIndices[transferIdHex] = chunkStore.storedChunkIndices(transferIdHex).toHashSet()
     }
 
-    private fun discoverContiguousPrefix(transferIdHex: String): Long {
-        var contiguous = 0L
-        while (chunkStore.hasEncryptedChunk(transferIdHex, contiguous)) {
-            contiguous = Math.addExact(contiguous, 1L)
-        }
+    private fun contiguousReceived(transferIdHex: String): Int {
+        val received = receivedIndices[transferIdHex] ?: return 0
+        var contiguous = 0
+        while (contiguous in received) contiguous++
         return contiguous
     }
 
-    private fun advanceContiguousPrefix(transferIdHex: String): Long {
-        var contiguous = contiguousPrefixes[transferIdHex]
-            ?: discoverContiguousPrefix(transferIdHex)
-        while (chunkStore.hasEncryptedChunk(transferIdHex, contiguous)) {
-            contiguous = Math.addExact(contiguous, 1L)
-        }
-        contiguousPrefixes[transferIdHex] = contiguous
-        return contiguous
-    }
+    private fun plaintextLengthOf(manifest: FileTransferManifestFfi, chunkIndex: Int): Int = minOf(
+        manifest.chunkSize.toLong(),
+        manifest.fileSize.toLong() - chunkIndex.toLong() * manifest.chunkSize.toLong(),
+    ).toInt()
 
-    private fun contiguousReceived(transferIdHex: String): Long =
-        contiguousPrefixes[transferIdHex] ?: discoverContiguousPrefix(transferIdHex).also {
-            contiguousPrefixes[transferIdHex] = it
-        }
-
-    private fun plaintextLengthOf(manifest: FileTransferManifestFfi, chunkIndex: Long): Int {
-        val chunkSize = manifest.chunkSize.toLong()
-        val offset = Math.multiplyExact(chunkIndex, chunkSize)
-        return minOf(chunkSize, manifest.fileSize.toLong() - offset).toInt()
-    }
-
-    private suspend fun sendFileAck(transferIdHex: String, contiguousChunks: Long) {
+    private suspend fun sendFileAck(transferIdHex: String, contiguousChunks: Int) {
         runCatching {
             val packet = FileTransferPacketCodec.encode(
                 FileTransferPacketCodec.Packet(
@@ -537,7 +465,7 @@ class FileTransferReceiver(
             mediaType = manifest.mediaType,
             totalBytes = manifest.fileSize.toLong(),
             chunkSize = manifest.chunkSize.toInt(),
-            chunkCount = manifest.chunkCount.toLong(),
+            chunkCount = manifest.chunkCount.toInt(),
             fileSha256 = manifest.fileSha256Hex,
             state = "OFFERED",
             createdAtMs = now,
@@ -550,7 +478,7 @@ class FileTransferReceiver(
     private suspend fun advance(
         transfer: FileTransferEntity,
         newState: String,
-        completedChunks: Long = transfer.completedChunks,
+        completedChunks: Int = transfer.completedChunks,
         transferredBytes: Long = transfer.transferredBytes,
         errorCode: String? = null,
     ): Int = transferDao.advanceProgress(
@@ -585,8 +513,6 @@ class FileTransferReceiver(
         private const val TAG = "FileTransferReceiver"
         const val MAX_PENDING_ITEMS = 64
         const val MAX_PENDING_BYTES = 32L * 1024 * 1024
-        const val MAX_BUFFERED_TRANSFERS = 32
-        const val MAX_BUFFERED_CHUNKS = 64
         const val MAX_BUFFERED_CHUNK_BYTES = 16L * 1024 * 1024
     }
 }

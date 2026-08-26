@@ -133,9 +133,7 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
         manifests: MutableMap<String, FileTransferManifestFfi>,
         received: MutableMap<String, ByteArray>,
     ) {
-        // Публичные MQTT-брокеры бывают очень медленными: реальный прогон
-        // 2026-08-24 показал отправку через ~17 минут. Окно приёма 15 минут.
-        val deadline = System.currentTimeMillis() + 900_000
+        val deadline = System.currentTimeMillis() + 180_000
         while (System.currentTimeMillis() < deadline && received.size < 2) {
             RustBridge.drainEvents().forEach { event ->
                 if (event.eventType == "message_received" && event.senderId == expectedSender) {
@@ -167,17 +165,17 @@ class FileTransferCrossPhoneReceiverInstrumentedTest {
                 val manifest = parseFileTransferManifest(decode(fields[4]))
                 assertEquals(expectedSender, manifest.senderNodeId)
                 assertEquals(receiver, manifest.recipientNodeId)
-                assertEquals(1uL, manifest.chunkCount)
+                assertEquals(1u, manifest.chunkCount)
                 manifests[kind] = manifest
                 store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)
             }
             "chunk" -> {
                 require(fields.size == 6)
                 val kind = fields[3]
-                val index = fields[4].toULong()
+                val index = fields[4].toUInt()
                 val manifest = manifests[kind] ?: return
                 val ciphertext = decode(fields[5])
-                store.storeEncryptedChunk(manifest.transferIdHex, index.toLong(), ciphertext)
+                store.storeEncryptedChunk(manifest.transferIdHex, index.toInt(), ciphertext)
                 val plaintext = decryptFileTransferChunk(manifest.manifestBytes, key, index, ciphertext)
                 assertEquals(manifest.fileSha256Hex, sha256(plaintext))
                 received.putIfAbsent(kind, plaintext)

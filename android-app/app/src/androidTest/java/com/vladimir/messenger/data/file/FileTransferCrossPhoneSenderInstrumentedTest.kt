@@ -82,8 +82,8 @@ class FileTransferCrossPhoneSenderInstrumentedTest {
             now,
             now + 24 * 60 * 60 * 1_000L,
         )
-        assertEquals(1uL, manifest.chunkCount)
-        val ciphertext = encryptFileTransferChunk(manifest.manifestBytes, key, 0uL, plaintext)
+        assertEquals(1u, manifest.chunkCount)
+        val ciphertext = encryptFileTransferChunk(manifest.manifestBytes, key, 0u, plaintext)
         try {
             repeat(if (tcpPort == null) 2 else 1) { attempt ->
                 publish(

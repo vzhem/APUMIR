@@ -26,7 +26,7 @@ class FileTransferWireTest {
         assertTrue(FileTransferWire.isFilePacketText(text))
         val decoded = FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(text))
         assertEquals(FileTransferPacketCodec.Type.CHUNK, decoded.type)
-        assertEquals(7L, decoded.itemIndex)
+        assertEquals(7, decoded.itemIndex)
         assertTrue(decoded.transferId.contentEquals(transferId))
     }
 

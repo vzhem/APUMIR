@@ -8,15 +8,13 @@ import java.security.MessageDigest
 object FileTransferPacketCodec {
     // 9 KiB wire frames: lossy/filtered networks pass small MQTT messages and silently stall
     // large ones (observed on the 2026-08-21 acceptance: ~33KB base64 fragments never arrived
-    // while every small envelope flowed). Per-item fragment memory remains explicitly bounded.
-    const val VERSION_V1: Byte = 1
-    const val VERSION: Byte = 2
+    // while every small envelope flowed). 32 frames still cover the 256KiB+tag reassembly cap.
+    const val VERSION: Byte = 1
     const val TRANSFER_ID_BYTES = 16
     const val MAX_FRAGMENT_PAYLOAD_BYTES = 4 * 1024
     const val MAX_FRAGMENTS = 1024
     const val AUTH_DIGEST_BYTES = 16
-    private const val HEADER_V1_BYTES = 1 + 1 + TRANSFER_ID_BYTES + 4 + 2 + 2 + 2
-    private const val HEADER_BYTES = 1 + 1 + TRANSFER_ID_BYTES + 8 + 2 + 2 + 2
+    private const val HEADER_BYTES = 1 + 1 + TRANSFER_ID_BYTES + 4 + 2 + 2 + 2
     private const val MAX_REASSEMBLED_BYTES = 4 * 1024 * 1024 + 16
     private val DOMAIN = "apu-file-packet-v1\u0000".toByteArray(Charsets.US_ASCII)
 
@@ -35,17 +33,16 @@ object FileTransferPacketCodec {
     data class Packet(
         val type: Type,
         val transferId: ByteArray,
-        val itemIndex: Long,
+        val itemIndex: Int,
         val fragmentIndex: Int,
         val fragmentCount: Int,
         val payload: ByteArray,
-        val wireVersion: Byte = VERSION,
     )
 
     fun fragment(
         type: Type,
         transferId: ByteArray,
-        itemIndex: Long,
+        itemIndex: Int,
         payload: ByteArray,
     ): List<ByteArray> {
         validateTransferId(transferId)
@@ -71,16 +68,12 @@ object FileTransferPacketCodec {
 
     fun encode(packet: Packet): ByteArray {
         validate(packet)
-        val headerBytes = if (packet.wireVersion == VERSION_V1) HEADER_V1_BYTES else HEADER_BYTES
-        val unsigned = ByteBuffer.allocate(headerBytes + packet.payload.size)
+        val unsigned = ByteBuffer.allocate(HEADER_BYTES + packet.payload.size)
             .order(ByteOrder.BIG_ENDIAN)
-            .put(packet.wireVersion)
+            .put(VERSION)
             .put(packet.type.wire)
             .put(packet.transferId)
-            .also { output ->
-                if (packet.wireVersion == VERSION_V1) output.putInt(packet.itemIndex.toInt())
-                else output.putLong(packet.itemIndex)
-            }
+            .putInt(packet.itemIndex)
             .putShort(packet.fragmentIndex.toShort())
             .putShort(packet.fragmentCount.toShort())
             .putShort(packet.payload.size.toShort())
@@ -91,7 +84,8 @@ object FileTransferPacketCodec {
     }
 
     fun decode(bytes: ByteArray): Packet {
-        require(bytes.size >= HEADER_V1_BYTES + 1 + AUTH_DIGEST_BYTES)
+        require(bytes.size in (HEADER_BYTES + 1 + AUTH_DIGEST_BYTES)..
+            (HEADER_BYTES + MAX_FRAGMENT_PAYLOAD_BYTES + AUTH_DIGEST_BYTES))
         val unsignedSize = bytes.size - AUTH_DIGEST_BYTES
         val unsigned = bytes.copyOfRange(0, unsignedSize)
         val suppliedDigest = bytes.copyOfRange(unsignedSize, bytes.size)
@@ -99,19 +93,16 @@ object FileTransferPacketCodec {
             "File packet digest mismatch"
         }
         val input = ByteBuffer.wrap(unsigned).order(ByteOrder.BIG_ENDIAN)
-        val version = input.get()
-        require(version == VERSION_V1 || version == VERSION) { "Unsupported file packet version" }
-        val expectedHeader = if (version == VERSION_V1) HEADER_V1_BYTES else HEADER_BYTES
-        require(unsigned.size in (expectedHeader + 1)..(expectedHeader + MAX_FRAGMENT_PAYLOAD_BYTES))
+        require(input.get() == VERSION) { "Unsupported file packet version" }
         val type = Type.fromWire(input.get())
         val transferId = ByteArray(TRANSFER_ID_BYTES).also(input::get)
-        val itemIndex = if (version == VERSION_V1) input.int.toLong() else input.long
+        val itemIndex = input.int
         val fragmentIndex = input.short.toInt() and 0xffff
         val fragmentCount = input.short.toInt() and 0xffff
         val payloadSize = input.short.toInt() and 0xffff
         require(payloadSize == input.remaining()) { "File packet payload length mismatch" }
         val payload = ByteArray(payloadSize).also(input::get)
-        return Packet(type, transferId, itemIndex, fragmentIndex, fragmentCount, payload, version)
+        return Packet(type, transferId, itemIndex, fragmentIndex, fragmentCount, payload)
             .also(::validate)
     }
 
@@ -122,7 +113,6 @@ object FileTransferPacketCodec {
         require(packets.size == first.fragmentCount)
         require(packets.all {
             it.type == first.type &&
-                it.wireVersion == first.wireVersion &&
                 it.itemIndex == first.itemIndex &&
                 it.fragmentCount == first.fragmentCount &&
                 it.transferId.contentEquals(first.transferId)
@@ -145,9 +135,7 @@ object FileTransferPacketCodec {
 
     private fun validate(packet: Packet) {
         validateTransferId(packet.transferId)
-        require(packet.wireVersion == VERSION_V1 || packet.wireVersion == VERSION)
         require(packet.itemIndex >= 0)
-        require(packet.wireVersion != VERSION_V1 || packet.itemIndex <= Int.MAX_VALUE.toLong())
         require(packet.fragmentCount in 1..MAX_FRAGMENTS)
         require(packet.fragmentIndex in 0 until packet.fragmentCount)
         require(packet.payload.size in 1..MAX_FRAGMENT_PAYLOAD_BYTES)

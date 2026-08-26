@@ -511,22 +511,6 @@ pub fn clear_signing_identity() {
     *guard = None;
 }
 
-/// Тестовая сериализация доступа к глобальному реестру установленной
-/// signing identity. Lib-тести выполняются параллельно в одном процессе,
-/// поэтому одновременные install/clear из разных модулей (signing_identity,
-/// file_key_envelope) ломают друг другу cross-call инварианты: читатель
-/// между двумя вызовами получает чужой или отсутствующий identity.
-/// Каждый тест, который устанавливает/читает/сбрасывает реестр, обязан
-/// держать этот guard всё время своего выполнения.
-#[cfg(test)]
-pub(crate) fn signing_identity_registry_guard() -> std::sync::MutexGuard<'static, ()> {
-    static GUARD: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
-    GUARD
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 pub fn signing_identity_mode() -> &'static str {
     if installed_signing_identity().is_some() {
         "legacy+ed25519-sidecar-v1"
@@ -658,7 +642,6 @@ mod tests {
 
     #[test]
     fn invalid_install_does_not_replace_previous_identity() {
-        let _signing_identity_guard = signing_identity_registry_guard();
         clear_signing_identity();
         let installed = install_signing_identity(1, legacy(), &[8; 32]).unwrap();
         assert!(matches!(
@@ -672,7 +655,6 @@ mod tests {
 
     #[test]
     fn registry_snapshot_survives_clear() {
-        let _signing_identity_guard = signing_identity_registry_guard();
         clear_signing_identity();
         let snapshot = install_signing_identity(1, legacy(), &[10; 32]).unwrap();
         clear_signing_identity();
@@ -726,7 +708,6 @@ mod tests {
 
     #[test]
     fn installed_binding_match_is_strict() {
-        let _signing_identity_guard = signing_identity_registry_guard();
         clear_signing_identity();
         let identity = install_signing_identity(1, legacy(), &[23; 32]).unwrap();
         let bytes = identity.create_binding(1_800_000_000_000).unwrap().to_bytes().unwrap();
@@ -840,7 +821,6 @@ mod tests {
 
     #[test]
     fn installed_registry_creates_and_extracts_verified_referral_token() {
-        let _signing_identity_guard = signing_identity_registry_guard();
         clear_signing_identity();
         let identity = install_signing_identity(1, legacy(), &[34; 32]).unwrap();
         let binding = identity

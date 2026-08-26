@@ -23,10 +23,6 @@ use std::time::Duration;
 use quinn::{ClientConfig, Connection, Endpoint, RecvStream, SendStream, ServerConfig};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 
-const INTERACTIVE_STREAM_PRIORITY: i32 = 20;
-const FILE_CONTROL_STREAM_PRIORITY: i32 = 10;
-const FILE_DATA_STREAM_PRIORITY: i32 = -10;
-
 // ═══════════════════════════════════════════════════════════════════
 // ОШИБКИ
 // ═══════════════════════════════════════════════════════════════════
@@ -65,7 +61,6 @@ pub type QuicResult<T> = Result<T, QuicClientError>;
 ///
 /// Держит внутри `quinn::Connection`, предоставляет удобные методы
 /// для отправки/приёма сообщений через bidirectional streams.
-#[derive(Clone)]
 pub struct QuicConnection {
     inner: Connection,
     remote_addr: SocketAddr,
@@ -100,8 +95,6 @@ impl QuicConnection {
             .inner
             .open_uni()
             .await
-            .map_err(|e| QuicClientError::StreamOpen(e.to_string()))?;
-        send.set_priority(INTERACTIVE_STREAM_PRIORITY)
             .map_err(|e| QuicClientError::StreamOpen(e.to_string()))?;
 
         // Отправляем длину + payload
@@ -186,71 +179,6 @@ impl QuicConnection {
     /// Проверить, закрыто ли соединение.
     pub fn is_closed(&self) -> bool {
         self.inner.close_reason().is_some()
-    }
-
-    /// Open the one ordered bidirectional stream owned by an F4 file session.
-    pub(crate) async fn open_file_session_stream(
-        &self,
-    ) -> QuicResult<(SendStream, RecvStream)> {
-        let (send, recv) = self
-            .inner
-            .open_bi()
-            .await
-            .map_err(|error| QuicClientError::StreamOpen(error.to_string()))?;
-        send.set_priority(FILE_CONTROL_STREAM_PRIORITY)
-            .map_err(|error| QuicClientError::StreamOpen(error.to_string()))?;
-        Ok((send, recv))
-    }
-
-    /// Accept the one ordered bidirectional stream owned by an F4 file session.
-    pub(crate) async fn accept_file_session_stream(
-        &self,
-    ) -> QuicResult<(SendStream, RecvStream)> {
-        let (send, recv) = self
-            .inner
-            .accept_bi()
-            .await
-            .map_err(|error| QuicClientError::ReceiveFailed(error.to_string()))?;
-        send.set_priority(FILE_CONTROL_STREAM_PRIORITY)
-            .map_err(|error| QuicClientError::ReceiveFailed(error.to_string()))?;
-        Ok((send, recv))
-    }
-
-    /// File ciphertext is deliberately lower priority than interactive/control streams on the same
-    /// QUIC connection. This affects only local scheduling; all byte/window limits remain unchanged.
-    pub(crate) fn prioritize_file_data_stream(send: &SendStream) -> QuicResult<()> {
-        send.set_priority(FILE_DATA_STREAM_PRIORITY)
-            .map_err(|error| QuicClientError::StreamOpen(error.to_string()))
-    }
-
-    /// Cumulative transport measurements used by the adaptive file scheduler. Callers subtract two
-    /// snapshots; no wall-clock timer or guessed network class is involved.
-    pub(crate) fn file_path_metrics(&self) -> (Duration, u64, u64, u64) {
-        let path = self.inner.stats().path;
-        (
-            path.rtt,
-            path.sent_packets,
-            path.lost_packets,
-            path.congestion_events,
-        )
-    }
-
-    /// Export a per-connection TLS channel binding for the signed F4 handshake.
-    pub(crate) fn file_session_channel_binding(
-        &self,
-        initiator_record_id: &[u8],
-    ) -> QuicResult<[u8; 32]> {
-        let mut binding = [0u8; 32];
-        self.inner
-            .export_keying_material(
-                &mut binding,
-                b"EXPORTER-APU-FILE-SESSION-v1",
-                initiator_record_id,
-            )
-            .map_err(|_| {
-                QuicClientError::TlsConfig("QUIC TLS exporter failed".to_string())
-            })?;
-        Ok(binding)
     }
 }
 

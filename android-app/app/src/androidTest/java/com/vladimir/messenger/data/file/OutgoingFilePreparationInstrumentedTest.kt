@@ -73,14 +73,14 @@ class OutgoingFilePreparationInstrumentedTest {
                 qualifiedDirectReferrals = 10,
                 nowMs = 1_800_000_000_000,
             )
-            assertEquals(2L, prepared.chunkCount)
+            assertEquals(2, prepared.chunkCount)
             val entity = dao.getTransfer(prepared.transferId)!!
             assertEquals("PREPARED", entity.state)
             assertEquals(entity.chunkCount, entity.completedChunks)
             assertEquals(entity.totalBytes, entity.transferredBytes)
             val chunks = dao.getChunks(prepared.transferId)
             assertEquals(2, chunks.size)
-            assertEquals(listOf(0L, 1L), store.storedChunkIndices(prepared.transferId))
+            assertEquals(listOf(0, 1), store.storedChunkIndices(prepared.transferId))
 
             val manifestBytes = store.readManifest(prepared.transferId)!!
             val manifest = parseFileTransferManifest(manifestBytes)
@@ -92,7 +92,7 @@ class OutgoingFilePreparationInstrumentedTest {
                     decryptFileTransferChunk(
                         manifestBytes,
                         key,
-                        chunk.chunkIndex.toULong(),
+                        chunk.chunkIndex.toUInt(),
                         encrypted,
                     )
                 }

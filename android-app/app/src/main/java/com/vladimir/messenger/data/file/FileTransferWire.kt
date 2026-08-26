@@ -42,14 +42,14 @@ object FileTransferWire {
         return "f${transferIdHex}o$fragmentIndex".also(::requireValidMessageId)
     }
 
-    fun chunkMessageId(transferIdHex: String, chunkIndex: Long, fragmentIndex: Int): String {
+    fun chunkMessageId(transferIdHex: String, chunkIndex: Int, fragmentIndex: Int): String {
         requireValidTransferId(transferIdHex)
         require(chunkIndex >= 0)
         require(fragmentIndex in 0..FileTransferPacketCodec.MAX_FRAGMENTS)
         return "f${transferIdHex}c${chunkIndex}f$fragmentIndex".also(::requireValidMessageId)
     }
 
-    fun ackMessageId(transferIdHex: String, contiguousChunks: Long): String {
+    fun ackMessageId(transferIdHex: String, contiguousChunks: Int): String {
         requireValidTransferId(transferIdHex)
         require(contiguousChunks >= 0)
         return "f${transferIdHex}a$contiguousChunks".also(::requireValidMessageId)

@@ -91,9 +91,7 @@ fun FileTransferBubble(
             if (transfer.state == "TRANSFERRING" && transfer.transferredBytes > 0) {
                 val elapsedMs = System.currentTimeMillis() - transfer.createdAtMs
                 if (elapsedMs > 1000) {
-                    val bytesPerSec = (
-                        transfer.transferredBytes.toDouble() * 1_000.0 / elapsedMs.toDouble()
-                    ).coerceAtMost(Long.MAX_VALUE.toDouble()).toLong()
+                    val bytesPerSec = transfer.transferredBytes * 1000 / elapsedMs
                     if (bytesPerSec > 0) {
                         val remaining = transfer.totalBytes - transfer.transferredBytes
                         val etaSec = remaining / bytesPerSec

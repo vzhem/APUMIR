@@ -20,7 +20,7 @@ import androidx.room.Index
 )
 data class FileTransferChunkEntity(
     val transferId: String,
-    val chunkIndex: Long,
+    val chunkIndex: Int,
     val state: String,
     val ciphertextBytes: Long,
     val chunkSha256: String? = null,

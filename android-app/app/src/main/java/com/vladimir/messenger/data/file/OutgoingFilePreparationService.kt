@@ -89,7 +89,7 @@ class OutgoingFilePreparationService private constructor(
         val displayName: String,
         val mediaType: String,
         val totalBytes: Long,
-        val chunkCount: Long,
+        val chunkCount: Int,
         val fileSha256: String,
     )
 
@@ -110,6 +110,7 @@ class OutgoingFilePreparationService private constructor(
             qualifiedDirectReferrals = qualifiedDirectReferrals,
             mediaType = inspected.mediaType,
             sizeBytes = inspected.sizeBytes,
+            technicalLimitBytes = FileTransferSourceInspector.MAX_FILE_BYTES,
         )
         val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
         val manifest = createFileTransferManifest(
@@ -158,9 +159,7 @@ class OutgoingFilePreparationService private constructor(
                 displayName = manifest.displayName,
                 mediaType = manifest.mediaType,
                 totalBytes = manifest.fileSize.toLong(),
-                chunkCount = manifest.chunkCount.toLong().also {
-                    check(it >= 0) { "Chunk count exceeds Android durable range" }
-                },
+                chunkCount = manifest.chunkCount.toInt(),
                 fileSha256 = manifest.fileSha256Hex,
             )
         } catch (error: Exception) {
@@ -183,11 +182,7 @@ class OutgoingFilePreparationService private constructor(
         val digest = MessageDigest.getInstance("SHA-256")
         var transferred = 0L
         input.use { stream ->
-            val chunkCount = manifest.chunkCount.toLong().also {
-                check(it >= 0) { "Chunk count exceeds Android durable range" }
-            }
-            var index = 0L
-            while (index < chunkCount) {
+            for (index in 0 until manifest.chunkCount.toInt()) {
                 val expected = minOf(
                     manifest.chunkSize.toLong(),
                     manifest.fileSize.toLong() - transferred,
@@ -200,7 +195,7 @@ class OutgoingFilePreparationService private constructor(
                         encryptFileTransferChunk(
                             manifest.manifestBytes,
                             key,
-                            index.toULong(),
+                            index.toUInt(),
                             plaintext,
                         )
                     }
@@ -230,20 +225,19 @@ class OutgoingFilePreparationService private constructor(
                 check(
                     transferDao.advanceProgress(
                         transferId = manifest.transferIdHex,
-                        state = if (index + 1 == chunkCount) "PREPARED" else "PREPARING",
+                        state = if (index + 1 == manifest.chunkCount.toInt()) "PREPARED" else "PREPARING",
                         completedChunks = index + 1,
                         transferredBytes = transferred,
                         updatedAtMs = System.currentTimeMillis(),
                         errorCode = null,
                     ) == 1
                 ) { "Cannot persist monotonic file preparation progress" }
-                index++
             }
             check(stream.read() == -1) { "Selected file grew during preparation" }
         }
         check(transferred == manifest.fileSize.toLong()) { "Selected file was truncated" }
         check(digest.digest().toHex() == expectedSha256) { "Selected file changed after inspection" }
-        if (manifest.chunkCount.toLong() == 0L) {
+        if (manifest.chunkCount == 0u) {
             check(
                 transferDao.advanceProgress(
                     transferId = manifest.transferIdHex,
@@ -281,9 +275,7 @@ class OutgoingFilePreparationService private constructor(
         mediaType = mediaType,
         totalBytes = fileSize.toLong(),
         chunkSize = chunkSize.toInt(),
-        chunkCount = chunkCount.toLong().also {
-            check(it >= 0) { "Chunk count exceeds Android durable range" }
-        },
+        chunkCount = chunkCount.toInt(),
         fileSha256 = fileSha256Hex,
         state = "PREPARING",
         createdAtMs = createdAtMs,

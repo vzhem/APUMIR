@@ -25,6 +25,7 @@ class TestRankOverrideInstrumentedTest {
         assertEquals(requested, actual)
         val entitlement = FileTransferRankPolicy.entitlement(actual)
         if (requested == 1_000) {
+            assertTrue(entitlement.allowedCategories.containsAll(FileTransferRankPolicy.Category.entries))
             assertTrue(entitlement.canCreateGroup)
             assertTrue(entitlement.canUseAutomaticProxy)
             assertTrue(entitlement.canCreateChannel)

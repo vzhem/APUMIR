@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.map
 /** In-memory fake mirroring the Room guards (IGNORE inserts, monotonic progress) for JVM tests. */
 class FakeFileTransferDao : FileTransferDao {
     private val transfers = LinkedHashMap<String, FileTransferEntity>()
-    private val chunks = HashMap<Pair<String, Long>, FileTransferChunkEntity>()
+    private val chunks = HashMap<Pair<String, Int>, FileTransferChunkEntity>()
     private val observe = MutableStateFlow(0)
 
     override fun observeForChat(chatId: String): Flow<List<FileTransferEntity>> =
@@ -38,25 +38,10 @@ class FakeFileTransferDao : FileTransferDao {
         chunks[chunk.transferId to chunk.chunkIndex] = chunk
     }
 
-    override suspend fun insertChunkIgnore(chunk: FileTransferChunkEntity): Long {
-        val key = chunk.transferId to chunk.chunkIndex
-        if (chunks.containsKey(key)) return -1L
-        chunks[key] = chunk
-        return 1L
-    }
-
-    override suspend fun countChunks(transferId: String): Long =
-        chunks.keys.count { it.first == transferId }.toLong()
-
-    override suspend fun receivedPlaintextBytes(transferId: String): Long =
-        chunks.filterKeys { it.first == transferId }.values.sumOf {
-            it.ciphertextBytes - FileTransferChunkStore.AEAD_TAG_BYTES
-        }
-
     override suspend fun advanceProgress(
         transferId: String,
         state: String,
-        completedChunks: Long,
+        completedChunks: Int,
         transferredBytes: Long,
         updatedAtMs: Long,
         errorCode: String?,

@@ -58,7 +58,7 @@ pub struct FileTransferManifestFfi {
     pub media_type: String,
     pub file_size: u64,
     pub chunk_size: u32,
-    pub chunk_count: u64,
+    pub chunk_count: u32,
     pub file_sha256_hex: String,
     pub created_at_ms: i64,
     pub expires_at_ms: i64,
@@ -521,12 +521,11 @@ pub fn open_file_key_envelope(
 pub fn file_transfer_crypto_self_test() -> bool {
     use crypto::file_transfer::{
         decrypt_file_chunk_v1, encrypt_file_chunk_v1, expected_chunk_count,
-        FileTransferManifestV1, CURRENT_FILE_TRANSFER_VERSION, DEFAULT_FILE_CHUNK_BYTES,
+        FileTransferManifestV1, DEFAULT_FILE_CHUNK_BYTES,
     };
 
     let file_size = u64::from(DEFAULT_FILE_CHUNK_BYTES) * 2;
     let manifest = FileTransferManifestV1 {
-        wire_version: CURRENT_FILE_TRANSFER_VERSION,
         transfer_id: [0x61; 16],
         sender_node_id: "pk_0123456789abcdef0123456789abcdef".to_string(),
         recipient_node_id: "pk_fedcba9876543210fedcba9876543210".to_string(),
@@ -573,8 +572,8 @@ pub fn create_file_transfer_manifest(
     expires_at_ms: i64,
 ) -> Result<FileTransferManifestFfi, CoreError> {
     use crypto::file_transfer::{
-        expected_chunk_count, FileTransferManifestV1, CURRENT_FILE_TRANSFER_VERSION,
-        DEFAULT_FILE_CHUNK_BYTES, FILE_HASH_BYTES, FILE_TRANSFER_ID_BYTES,
+        expected_chunk_count, FileTransferManifestV1, DEFAULT_FILE_CHUNK_BYTES, FILE_HASH_BYTES,
+        FILE_TRANSFER_ID_BYTES,
     };
     use rand::{rngs::OsRng, RngCore};
 
@@ -589,7 +588,6 @@ pub fn create_file_transfer_manifest(
         rng.fill_bytes(&mut transfer_id);
     }
     let manifest = FileTransferManifestV1 {
-        wire_version: CURRENT_FILE_TRANSFER_VERSION,
         transfer_id,
         sender_node_id,
         recipient_node_id,
@@ -622,7 +620,7 @@ pub fn parse_file_transfer_manifest(
 pub fn encrypt_file_transfer_chunk(
     manifest_bytes: Vec<u8>,
     mut file_key: Vec<u8>,
-    chunk_index: u64,
+    chunk_index: u32,
     mut plaintext: Vec<u8>,
 ) -> Result<Vec<u8>, CoreError> {
     let result = crypto::file_transfer::FileTransferManifestV1::from_canonical_bytes(&manifest_bytes)
@@ -644,7 +642,7 @@ pub fn encrypt_file_transfer_chunk(
 pub fn decrypt_file_transfer_chunk(
     manifest_bytes: Vec<u8>,
     mut file_key: Vec<u8>,
-    chunk_index: u64,
+    chunk_index: u32,
     ciphertext: Vec<u8>,
 ) -> Result<Vec<u8>, CoreError> {
     let result = crypto::file_transfer::FileTransferManifestV1::from_canonical_bytes(&manifest_bytes)
