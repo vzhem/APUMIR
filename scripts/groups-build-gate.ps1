@@ -25,12 +25,34 @@ if (-not (Test-Path -LiteralPath $Gradlew)) {
 
 Push-Location $RepoRoot
 try {
-    Write-Output '===== repo head ====='
-    $Head = (& git rev-parse HEAD)
-    Write-Output "Repo HEAD: $Head"
+    Write-Output "===== repo state in $RepoRoot ====="
+    $Head = (& git rev-parse HEAD | Out-String).Trim()
+    $Branch = (& git rev-parse --abbrev-ref HEAD | Out-String).Trim()
+    Write-Output "Repo HEAD:   $Head"
+    Write-Output "Repo branch: $Branch"
+
+    if ($Head -eq '' -or $Head.Length -lt 7) {
+        Write-Output 'FATAL: git rev-parse returned nothing. Is git on PATH and is this a repo?'
+        exit 1
+    }
+
+    $Dirty = (& git status --porcelain | Out-String).Trim()
+    if ($Dirty -ne '') {
+        Write-Output 'WARNING: the working tree is not clean:'
+        Write-Output $Dirty
+        Write-Output 'Uncommitted changes will take part in the build.'
+    }
+
     if ($ExpectedCommit -ne '' -and $Head -ne $ExpectedCommit) {
-        Write-Output "FATAL: HEAD does not match the expected commit $ExpectedCommit"
-        Write-Output 'Fix the checkout first (git pull may have failed silently).'
+        Write-Output ''
+        Write-Output "FATAL: HEAD $Head does not match the expected commit $ExpectedCommit."
+        Write-Output 'The build would test different code. Fix the checkout first:'
+        Write-Output '  cd C:\APU-M8'
+        Write-Output '  git fetch origin'
+        Write-Output '  git checkout arena/01a03c3d-apumir'
+        Write-Output '  git log --oneline -1'
+        Write-Output 'A failed git pull is a known trap (docs/AI_HANDOFF.md), so this gate'
+        Write-Output 'refuses to continue on a wrong HEAD instead of reporting a fake pass.'
         exit 1
     }
     if ($ExpectedCommit -eq '') {
