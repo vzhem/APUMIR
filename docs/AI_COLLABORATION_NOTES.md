@@ -4747,3 +4747,43 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   повторно, поэтому перезапуск приложения не обязателен; скрипт всё равно
   останавливает приложение перед чтением настроек.
   НЕ проверено: сам прогон set-rank.ps1 (в песочнице нет adb).
+- 2026-08-26 (ПРИЁМКА МИГРАЦИИ ПРОЙДЕНА на Стасе; найдена причина потери данных
+  на обоих телефонах - это был мой инструмент, не миграция):
+  Приёмка: на телефоне Стаса (11567254BK001192) база messenger_database
+  2572288 байт, schema version 7, копия снята и сверена (размер совпал с ls -l,
+  заголовок SQLite format 3). Группы: tests=2 failures=0,
+  «RESULT: migration 7 -> 8 passed on a real device, Room schema accepted».
+  То есть GroupsProductionMigrationInstrumentedTest открыл настоящую базу 2,5 МБ
+  через Room, прогнал MIGRATION_7_8, схема прошла валидацию и снимок
+  chats/messages/contacts/mtproto_proxies до и после совпал. Дефект с отсутствующим
+  FOREIGN KEY у group_topics закрыт окончательно.
+  Причина потери данных: :app:connectedDebugAndroidTest в конце прогона снимает
+  с устройства ОБА пакета - тестовый и приложение, - а вместе с приложением
+  уходит его каталог данных. Доказательства в выводе владельца:
+  1. у Ани пакет был (versionName=v11.16, lastUpdateTime=2026-08-25 21:27:20),
+     а сразу после прогона - «The app is NOT installed on this phone»;
+  2. у Стаса firstInstallTime == lastUpdateTime == timeStamp == 2026-08-26
+     21:30:32, то есть установка была чистой, и база стала 4096 байт;
+  3. set-rank.ps1 в следующей же команде получил
+     «run-as: unknown package: com.vladimir.messenger» уже ПОСЛЕ того, как его
+     тест отчитался tests=1 failures=0.
+  Миграция здесь ни при чём: базу удалил сборочный инструмент после успешного
+  теста. Обе копии целы в %TEMP%: apu-groups-db-backup-20260826-203457 (Аня,
+  1081344 байта, v7) и apu-groups-db-backup-20260826-213013 (Стас, 2572288 байт,
+  v7) - возвращаются режимом -RestoreFrom.
+  Решение: scripts/lib-instrumented-tests.ps1. Обе APK собираются
+  :app:assembleDebug и :app:assembleDebugAndroidTest, ставятся обычным
+  adb install -r -t -d, тесты гоняются через adb shell am instrument -w -e class.
+  Ничего не удаляется, кроме тестового пакета в конце (данных приложения это не
+  касается). am instrument возвращает 0 даже при упавших тестах, поэтому вердикт
+  берётся из разбора вывода: OK (N test / Tests run: N, Failures: M /
+  INSTRUMENTATION_FAILED. Разбор проверен на четырёх формах вывода.
+  Обе функции переведены на Write-Host внутри Invoke-InstrumentedTests:
+  Write-Output внутри функции попадает в тот же конвейер, что и возвращаемое
+  значение, и $Result превратился бы в массив строк вместо таблицы.
+  set-rank.ps1 больше не падает, если приложения нет: он его ставит и задаёт
+  переопределение в свежей сборке (у Ани пакет отсутствовал).
+  Предупреждение Gradle про «custom test runner argument ... is not compatible
+  with configuration caching» осталось только в старом пути через -P; в новом
+  пути аргументы передаются напрямую в am instrument, предупреждения нет.
+  НЕ проверено: прогон новых скриптов на телефоне (в песочнице нет adb).

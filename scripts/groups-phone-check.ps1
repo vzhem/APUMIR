@@ -20,6 +20,11 @@ param(
 # broken migration would wipe existing chats. The script therefore proves the
 # copy really landed on the PC and stops if it did not.
 #
+# The tests are run through lib-instrumented-tests.ps1 and NOT through
+# :app:connectedDebugAndroidTest. That task uninstalls the application after the
+# run and takes the data directory with it, which is how the earlier runs wiped
+# the databases on both test phones after proving the migration on them.
+#
 # How the copy is made: "run-as <pkg> cp ... /sdcard/..." does NOT work - under
 # scoped storage an app cannot write to the root of external storage, adb
 # answers "Permission denied". Instead the file is streamed straight to the PC
@@ -34,12 +39,12 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = 'C:\APU-M8'
 $AndroidRoot = Join-Path $RepoRoot 'android-app'
-$Gradlew = Join-Path $AndroidRoot 'gradlew.bat'
 $Adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
 $Package = 'com.vladimir.messenger'
-$ApkPath = Join-Path $AndroidRoot 'app\build\outputs\apk\debug\app-debug.apk'
 $BackupDir = Join-Path $env:TEMP ('apu-groups-db-backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $DbNames = @('messenger_database', 'messenger_database-wal', 'messenger_database-shm')
+
+. (Join-Path $PSScriptRoot 'lib-instrumented-tests.ps1')
 
 if (-not (Test-Path -LiteralPath $Adb)) {
     Write-Output "FATAL: adb not found at $Adb"
@@ -316,45 +321,15 @@ if ($DbVersionBefore -eq 7) {
     Write-Output 'NOTE: the phone database version is unknown (no backup), so only the'
     Write-Output 'scratch-database test will run.'
 }
-$Arg = '-Pandroid.testInstrumentationRunnerArguments.class=' + $Classes
-Write-Output "classes: $Classes"
-Push-Location $AndroidRoot
-try {
-    & $Gradlew --console=plain :app:connectedDebugAndroidTest $Arg
-    $TestExit = $LASTEXITCODE
-}
-finally {
-    Pop-Location
-}
-Write-Output "migration test exit code: $TestExit"
-
-# A zero exit code alone does not prove the tests ran: read the real counters.
-$AndroidTestResults = Join-Path $AndroidRoot 'app\build\outputs\androidTest-results\connected'
-$DevTests = 0
-$DevFailures = 0
-if (Test-Path -LiteralPath $AndroidTestResults) {
-    foreach ($File in Get-ChildItem -LiteralPath $AndroidTestResults -Recurse -Filter 'TEST-*.xml') {
-        $Doc = [xml](Get-Content -LiteralPath $File.FullName)
-        $Suite = $Doc.testsuite
-        # Only the migration classes: a report left by an earlier run of another
-        # test must not be counted as proof that these executed.
-        if ($Suite.name -notlike '*GroupsMigrationInstrumentedTest*' -and
-            $Suite.name -notlike '*GroupsProductionMigrationInstrumentedTest*') { continue }
-        $DevTests += [int]$Suite.tests
-        $DevFailures += [int]$Suite.failures + [int]$Suite.errors
-        Write-Output (
-            '  {0}: tests={1} failures={2} errors={3} skipped={4}' -f
-            $Suite.name, $Suite.tests, $Suite.failures, $Suite.errors, $Suite.skipped
-        )
-    }
-} else {
-    Write-Output "WARNING: no androidTest reports found in $AndroidTestResults"
-}
-Write-Output "device test totals: tests=$DevTests failures=$DevFailures"
-
-if ($DevTests -eq 0 -or $DevFailures -ne 0 -or $TestExit -ne 0) {
+$Result = Invoke-InstrumentedTests `
+    -Serial $DeviceSerial `
+    -AdbPath $Adb `
+    -AndroidRoot $AndroidRoot `
+    -Classes $Classes
+Write-Output ("device test totals: tests=" + $Result.Tests + " failures=" + $Result.Failures)
+if (-not $Result.Ok) {
     Write-Output ''
-    Write-Output 'RESULT: MIGRATION TESTS DID NOT PASS.'
+    Write-Output ('RESULT: MIGRATION TESTS DID NOT PASS - ' + $Result.Reason)
     Write-Output 'Do NOT open the app on this phone until the migration is fixed.'
     Write-Output "Database backup (if taken): $BackupDir"
     exit 1
@@ -366,24 +341,12 @@ if ($ProductionRan) {
     Write-Output 'Room schema validation on the real database was NOT performed.'
 }
 
-# ---- step 2: install the app and prove which build landed ------------------
+# ---- step 2: prove which build is installed now ----------------------------
+# The APK was installed by Invoke-InstrumentedTests with "adb install -r -t -d",
+# which keeps application data. Freshness is checked through dumpsys, not
+# through logcat markers that get rotated away by noise.
 Write-Output ''
-Write-Output '===== step 2: install debug APK ====='
-if (-not (Test-Path -LiteralPath $ApkPath)) {
-    Write-Output "FATAL: APK not found at $ApkPath - run groups-build-gate.ps1 first."
-    exit 1
-}
-& $Adb -s $DeviceSerial install -r -t -d $ApkPath
-$InstallExit = $LASTEXITCODE
-Write-Output "install exit code: $InstallExit"
-if ($InstallExit -ne 0) {
-    Write-Output 'RESULT: INSTALL FAILED. A release-signed build cannot be replaced by a debug one.'
-    Write-Output "Database backup (if taken): $BackupDir"
-    exit $InstallExit
-}
-
-Write-Output ''
-Write-Output '===== installed build freshness (dumpsys, not logcat) ====='
+Write-Output '===== step 2: installed build freshness (dumpsys, not logcat) ====='
 Invoke-Adb @('shell', "dumpsys package $Package") -split "`n" |
     Select-String -Pattern 'versionName|lastUpdateTime|firstInstallTime' |
     ForEach-Object { $_.ToString().Trim() }

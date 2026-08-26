@@ -17,44 +17,34 @@ param(
 # the number as the "qualified_referrals" instrumentation argument, writes it
 # through ReferralRankStore.setDebugOverride and asserts that the app itself
 # reads the same value back. Release builds reject the write
-# (check(BuildConfig.DEBUG)), so this cannot be used to fake a rank in
-# production.
+# (check(BuildConfig.DEBUG)), so a rank cannot be faked in production.
 #
 # What the number unlocks, from FileTransferRankPolicy:
 #    1 -> manual proxy, 10 -> group creation and automatic proxy,
-#   30 -> channel creation, 1000 is the top tier ("Sozdatel seti").
+#   30 -> channel creation, 1000 is the top tier.
 # MAX_SUPPORTED_COUNT in ReferralRankStore is 1000, so larger values are cut.
 #
-# Remove the override later with -Clear.
+# The tests are run through lib-instrumented-tests.ps1, NOT through
+# :app:connectedDebugAndroidTest - that task uninstalls the application
+# afterwards and wipes its data, which is how the previous run destroyed the
+# database on this phone. Remove the override later with -Clear.
 # ============================================================================
 
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = 'C:\APU-M8'
 $AndroidRoot = Join-Path $RepoRoot 'android-app'
-$Gradlew = Join-Path $AndroidRoot 'gradlew.bat'
 $Adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
 $Package = 'com.vladimir.messenger'
 $PrefsPath = 'shared_prefs/apu_test_entitlements.xml'
 $TestClass = 'com.vladimir.messenger.data.referral.TestRankOverrideInstrumentedTest'
 $TestMethod = 'setExplicitDebugRankForTestPhone'
 
+. (Join-Path $PSScriptRoot 'lib-instrumented-tests.ps1')
+
 if (-not (Test-Path -LiteralPath $Adb)) {
     Write-Output "FATAL: adb not found at $Adb"
     exit 1
-}
-
-function Invoke-Adb {
-    param([string[]]$AdbArgs)
-    $Previous = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $Lines = & $Adb -s $DeviceSerial @AdbArgs 2>&1 | ForEach-Object { "$_" }
-    }
-    finally {
-        $ErrorActionPreference = $Previous
-    }
-    return ($Lines -join "`n")
 }
 
 # ---- repo state -------------------------------------------------------------
@@ -84,22 +74,30 @@ if (-not (& $Adb devices | Select-String -Pattern $DeviceSerial -SimpleMatch)) {
 Write-Output "Target phone: $DeviceSerial"
 $env:ANDROID_SERIAL = $DeviceSerial
 
+function Invoke-Adb {
+    param([string[]]$AdbArgs)
+    return (Invoke-AdbRaw $DeviceSerial $AdbArgs $Adb)
+}
+
 $Dump = Invoke-Adb @('shell', "dumpsys package $Package")
 if ("$Dump" -notmatch 'versionName=') {
-    Write-Output 'FATAL: the app is not installed on this phone. Install the debug build first.'
-    exit 1
-}
-$IsDebuggable = $false
-foreach ($Line in ("$Dump" -split "`n")) {
-    if ($Line -match 'pkgFlags=\[' -and $Line -match 'DEBUGGABLE') { $IsDebuggable = $true }
-}
-"$Dump" -split "`n" | Select-String -Pattern 'versionName|lastUpdateTime' |
-    ForEach-Object { $_.ToString().Trim() }
-if (-not $IsDebuggable) {
     Write-Output ''
-    Write-Output 'FATAL: the installed build is not debuggable, so ReferralRankStore'
-    Write-Output 'ignores the override by design (check(BuildConfig.DEBUG)).'
-    exit 1
+    Write-Output 'NOTE: the app is not installed on this phone. It will be installed from'
+    Write-Output 'the current debug build, and the override will be set in that build.'
+} else {
+    "$Dump" -split "`n" | Select-String -Pattern 'versionName|lastUpdateTime' |
+        ForEach-Object { $_.ToString().Trim() }
+    $IsDebuggable = $false
+    foreach ($Line in ("$Dump" -split "`n")) {
+        if ($Line -match 'pkgFlags=\[' -and $Line -match 'DEBUGGABLE') { $IsDebuggable = $true }
+    }
+    if (-not $IsDebuggable) {
+        Write-Output ''
+        Write-Output 'FATAL: the installed build is not debuggable, so ReferralRankStore'
+        Write-Output 'ignores the override by design (check(BuildConfig.DEBUG)). A debug APK'
+        Write-Output 'cannot replace a release-signed one either.'
+        exit 1
+    }
 }
 
 # ---- clear mode -------------------------------------------------------------
@@ -127,39 +125,16 @@ if ($QualifiedReferrals -lt 0 -or $QualifiedReferrals -gt 1000) {
 # ---- run the project's own override test ------------------------------------
 Write-Output ''
 Write-Output "===== setting qualified referrals to $QualifiedReferrals ====="
-$ClassArg = '-Pandroid.testInstrumentationRunnerArguments.class=' + $TestClass + '#' + $TestMethod
-$ValueArg = '-Pandroid.testInstrumentationRunnerArguments.qualified_referrals=' + $QualifiedReferrals
-Push-Location $AndroidRoot
-try {
-    & $Gradlew --console=plain :app:connectedDebugAndroidTest $ClassArg $ValueArg
-    $Exit = $LASTEXITCODE
-}
-finally {
-    Pop-Location
-}
-Write-Output "exit code: $Exit"
+$Result = Invoke-InstrumentedTests `
+    -Serial $DeviceSerial `
+    -AdbPath $Adb `
+    -AndroidRoot $AndroidRoot `
+    -Classes ($TestClass + '#' + $TestMethod) `
+    -ExtraArgs @{ qualified_referrals = "$QualifiedReferrals" }
 
-$Results = Join-Path $AndroidRoot 'app\build\outputs\androidTest-results\connected'
-$Tests = 0
-$Failures = 0
-if (Test-Path -LiteralPath $Results) {
-    foreach ($File in Get-ChildItem -LiteralPath $Results -Recurse -Filter 'TEST-*.xml') {
-        $Doc = [xml](Get-Content -LiteralPath $File.FullName)
-        $Suite = $Doc.testsuite
-        # Only this class: a report left by an earlier run of another test must
-        # not be counted as proof that this one executed.
-        if ($Suite.name -notlike '*TestRankOverrideInstrumentedTest*') { continue }
-        $Tests += [int]$Suite.tests
-        $Failures += [int]$Suite.failures + [int]$Suite.errors
-        Write-Output (
-            '  {0}: tests={1} failures={2} errors={3}' -f
-            $Suite.name, $Suite.tests, $Suite.failures, $Suite.errors
-        )
-    }
-}
-Write-Output "totals: tests=$Tests failures=$Failures"
-if ($Tests -eq 0 -or $Failures -ne 0 -or $Exit -ne 0) {
-    Write-Output 'RESULT: FAILED - the override was not confirmed by the app itself.'
+Write-Output ("tests=" + $Result.Tests + " failures=" + $Result.Failures)
+if (-not $Result.Ok) {
+    Write-Output ("RESULT: FAILED - " + $Result.Reason)
     exit 1
 }
 
