@@ -37,7 +37,7 @@ class FileTransferChunkStoreTest {
         assertFalse(read.all { it == 0.toByte() })
         val retry = store.storeEncryptedChunk(transferId, 0, read)
         assertFalse(retry.newlyStored)
-        assertEquals(listOf(0), store.storedChunkIndices(transferId))
+        assertEquals(listOf(0L), store.storedChunkIndices(transferId))
         assertArrayEquals(read, store.readEncryptedChunk(transferId, 0))
     }
 
@@ -104,14 +104,28 @@ class FileTransferChunkStoreTest {
             expectFailure { store.storeEncryptedChunk(invalid, 0, ByteArray(16)) }
         }
         expectFailure { store.storeEncryptedChunk(transferId, -1, ByteArray(16)) }
-        expectFailure {
-            store.storeEncryptedChunk(
-                transferId,
-                FileTransferChunkStore.MAX_CHUNKS_PER_TRANSFER,
-                ByteArray(16),
-            )
-        }
-        assertEquals(0, store.currentStoredBytes())
+        assertEquals(0L, store.currentStoredBytes())
+    }
+
+    @Test
+    fun indicesBeyondLegacyUnsignedRangeAreStoredWithoutApplicationCeiling() {
+        val store = FileTransferChunkStore(root)
+        val highIndex = 5_000_000_000L
+        val ciphertext = ByteArray(16) { 7 }
+        store.storeEncryptedChunk(transferId, highIndex, ciphertext)
+        assertTrue(store.hasEncryptedChunk(transferId, highIndex))
+        assertArrayEquals(ciphertext, store.readEncryptedChunk(transferId, highIndex))
+        assertEquals(listOf(highIndex), store.storedChunkIndices(transferId))
+    }
+
+    @Test
+    fun legacyEightDigitChunkNamesRemainReadableAfterUpgrade() {
+        val legacyChunks = java.io.File(root, "$transferId/chunks")
+        assertTrue(legacyChunks.mkdirs())
+        val ciphertext = ByteArray(16) { 8 }
+        java.io.File(legacyChunks, "00000007.chunk").writeBytes(ciphertext)
+        assertTrue(FileTransferChunkStore(root).hasEncryptedChunk(transferId, 7L))
+        assertArrayEquals(ciphertext, FileTransferChunkStore(root).readEncryptedChunk(transferId, 7L))
     }
 
     @Test

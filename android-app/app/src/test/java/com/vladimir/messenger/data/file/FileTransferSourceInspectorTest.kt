@@ -54,23 +54,16 @@ class FileTransferSourceInspectorTest {
     }
 
     @Test
-    fun declaredSizeMismatchAndOversizeAreRejected() {
+    fun declaredSizeMismatchAndNegativeLengthAreRejected() {
         expectFailure {
             FileTransferSourceInspector.inspect("a", "text/plain", 4) {
                 "hello".byteInputStream()
             }
         }
         expectFailure {
-            FileTransferSourceInspector.inspect("large", null, null) {
-                RepeatingInputStream(FileTransferSourceInspector.MAX_FILE_BYTES + 1)
+            FileTransferSourceInspector.inspect("negative", null, -1L) {
+                byteArrayOf().inputStream()
             }
-        }
-        expectFailure {
-            FileTransferSourceInspector.inspect(
-                "declared-large",
-                null,
-                FileTransferSourceInspector.MAX_FILE_BYTES + 1,
-            ) { byteArrayOf().inputStream() }
         }
     }
 

@@ -3,6 +3,42 @@
 
 ---
 
+## CURRENT OVERRIDE 2026-08-22
+
+Текущий практический приоритет — F4: быстрые online-файлы в любой доступной сети плюс delayed
+phone-owned file custody. Внешний ресурс может быть только transient realtime conduit для E2E
+ciphertext; внешнее хранение запрещено. Authoritative детали и точный порядок F4-A…F4-H:
+[`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md). Старые M8, R1, 10-MiB и release-next формулировки
+в исторических разделах не переопределяют этот блок.
+
+Владелец подтвердил F4 architecture и разрешил последовательно выполнять все необходимые slices.
+F4-B pure binary boundary полностью прошёл combined Windows gate на exact `5ab2517`: 34 passed,
+0 failed, 592 filtered. `u64` geometry, signed controls, ciphertext identity и Merkle доказаны в
+focused host scope; network/Android/phones всё ещё unwired. F4-C1 audit + host-only source/static
+готов на exact `bf4f0c6`: TLS-exporter-bound mutual B2 auth, one ordered binary stream и
+durable-before-ACK sink. E0599 исправлен `bedf671`; первый combined runtime дал 41/43 и выявил
+слишком ранний drop test server после queued final ACK. Test-only lifecycle fix `ca2edb6` прошёл
+focused Windows 9/9, затем combined exact `ca2edb6` дал 43 passed, 0 failed, 592 filtered.
+F4-C1 host gate закрыт; engine/FFI/Android/phones всё ещё unwired, F4-D не начинать. C2 read-only
+audit нашёл prerequisite: fake `CryptoManager` нельзя использовать для C1, а real installed Ed25519
+sidecar не реализовывал требуемый signer API. C2a exact `0736d9b` добавил internal public-key/sign
+adapter для real `Arc<InstalledSigningIdentity>` без экспорта seed; Windows filters 2/2 и 1/1,
+combined 46/46 PASS. C2a host gate закрыт. C2b source exact `fd5d1f3` добавил отдельный host-only
+bounded single-flight owner. После test-only `471d099` Windows focused 7/7 и combined 53/53 PASS;
+C2b host gate закрыт. F4-D1 exact `0ef7706` hard-bounded ACK window прошёл Windows focused 13/13 и
+combined 56/56. D2 exact `fc20f33` scope-bound parallel streams на одном authenticated connection с
+единым 32-MiB budget прошёл Windows focused 17/17 и combined 61/61. D3 exact `0032c67` measured
+adaptive scheduler прошёл explicit 3/3 и combined 62/62: debug loopback 59,040,998 B/s, text 678 μs,
+controlled 30-ms RTT/5% loss полностью восстановлен с backoff. F4-E exact `103f041` + `f7e7562`
+signed 60/90 path manager, durable replay/restart store и typed QUIC/TCP/tunnel dispatch прошёл
+Windows path 9/9 и combined 71/71. F4-F1 exact `60407fa` отдельный opaque ciphertext range store
+прошёл Windows custody 8/8 и combined 79/79; F2a exact `2cc0e36` signed receipt — 4/4 и combined
+83/83. F2b exact `80416bc` atomic receipt/missing pull прошёл custody 11/11 и combined 86/86.
+F3a exact `ac0fde9` replication planner прошёл 4/4 + combined 90/90. Следующий F3b production
+engine/FFI/Android/at-rest wiring; physical LAN/NAT и F4-G/H ещё обязательны.
+
+---
+
 ## 🤖 ДЛЯ СЛЕДУЮЩЕЙ СЕССИИ ИИ — ПРОЧТИ ПЕРВЫМ
 
 > Полный живой документ (его поддерживает сам ИИ): [`AI_COLLABORATION_NOTES.md`](AI_COLLABORATION_NOTES.md).
@@ -10,7 +46,7 @@
 
 - Пошагово, маленькими шагами: шаг → проверка → следующий шаг. Без подтверждения — никаких больших пачек задач.
 - Команды для Windows-машины — Windows PowerShell, каждый блок начинается с `Set-Location`. Python — `py -3`.
-- Путь к локальному клону репозитория заранее НЕ известен — подтверждать у пользователя, не предполагать `C:\APUMIR\android-app`.
+- Единственный канонический Windows-клон — `C:\APU-M8`; старые пути/копии не использовать.
 - Перед публикацией/тегами/релизом — всегда отдельно спрашивать подтверждение. PR не мержить без явного разрешения.
 - Правки одного файла — строго по одной с проверкой (параллельные правки одного файла ломают файл).
 - Android/Rust в sandbox агента не собираются — код пишется диффами, сборка/тест на машине пользователя.
@@ -29,7 +65,7 @@
   [`VERSION_STATISTICS.md`](VERSION_STATISTICS.md); старые записи не переписывать.
 - При передаче работы в новый чат использовать готовый authoritative prompt
   [`NEXT_AI_CHAT_BOOTSTRAP.md`](NEXT_AI_CHAT_BOOTSTRAP.md); пользователь не должен заново объяснять
-  историю, запреты и следующий M8-шаг.
+  историю, запреты и текущий F4 file-transfer шаг.
 
 ---
 
@@ -51,14 +87,14 @@ v2.0 добавляет практический путь развития пр�
 
 ### Последний опубликованный релиз
 
-- Version: `v11.16.4`
-- Source commit: `991da05ec13eab11867f2b201b5c063966a61bbf`
-- Release: `https://github.com/vzhem/APUMIR/releases/tag/v11.16.4`
-- Проверенный APK: `P2P-Messenger-v11.16.4.apk`
-- APK SHA-256: `444C255A14DEC2DACF3701BE624465BC358ABE231076B21E8E9A1EE26F3F4F55`
-- Checksum (`.apk.sha256`) SHA-256: `6D62E247F8A133B152B1A4E5FB1A3796131D50420EE0D0FF5D9044202FAAE70F`
-- Provenance JSON SHA-256: `0D90A8DA5D93B4F7C50D7CDDF9C17F54F4ED46747403D2013437AF3FB8C7A567`
-- Установлен поверх `v11.16.3` через `adb install -r` на всех трёх тестовых устройствах.
+- Version: `v11.17.1` (`latest`, не prerelease).
+- Source tag после workflow fix: commit `6deb532` (краткий hash из release-журнала).
+- Release: `https://github.com/vzhem/APUMIR/releases/tag/v11.17.1`
+- APK asset: `35,285,255` bytes; CI Rust 3 ABI + `assembleRelease` PASS.
+- SHA-256 asset не зафиксирован в этом документе: release CDN был недоступен из sandbox; не
+  подставлять старый hash от v11.16.4.
+- Тестовые телефоны остаются на debug-подписи, поэтому public release APK поверх них не ставится;
+  их обновляют только data-preserving debug build после отдельного предупреждения владельца.
 
 ### Проверенные устройства
 
@@ -847,9 +883,11 @@ https://apu.example/i/<invite_id>?r=<opaque_signed_referral_token>
 | 700 | **Легенда APU** | до 2 GiB | создание групп и каналов |
 | 1 000 | **Создатель сети** | до 4 GiB | создание групп и каналов |
 
-\* Эффективный лимит всегда `min(rank limit, current technical/transport/storage limit)`. Пока F1
-технически ограничен 10 MiB: более высокие лимиты не объявляются доступными в UI до streaming,
-resume, quota и transport acceptance. MIME неизвестного типа считается обычным файлом, а не фото.
+\* Эффективный лимит всегда `min(rank limit, proven end-to-end technical/transport/storage limit)`.
+Rank-таблица — entitlement target, не обещание transport readiness. Сейчас runtime строго доказан
+только на малых файлах, а source geometry конфликтует выше примерно 80 MiB; любые большие ступени
+остаются закрыты до F4 streaming/resume/quota/path acceptance. MIME неизвестного типа считается
+обычным файлом, а не фото.
 
 ### Что доступно сразу после установки, без ранга
 
@@ -1648,109 +1686,105 @@ APU имеет signed launch-ready build, красивый и понятный o
 - [ ] QR invite.
 - [ ] Offline invite file.
 
-## Ближайший новый этап после текущего R1 — Secure File Transfer MVP
+## Текущий этап — F4 Secure File Delivery: online any-network + delayed phone mesh
 
-> По решению пользователя передача файлов поднята из далёкой Фазы 5.3 в ближайший практический
-> roadmap. Порядок: закрыть уже начатый R1 pending-referral gate → сделать минимальную безопасную
-> передачу файлов в личном чате → затем продолжить R2 qualification/status и Groups. Фото/video/
-> voice и расширенный media editor остаются в Фазе 5.3 и переиспользуют готовый file transport.
+Authoritative design и доказательные статусы:
+[`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md). Этот master-раздел задаёт порядок, но не
+дублирует полный wire/storage design.
 
-Цель MVP: выбрать файл через системный Android picker, надёжно и E2E-зашифрованно передать его
-контакту, увидеть progress/result и безопасно сохранить полученный файл без загрузки целиком в RAM.
-Authoritative design: [`SECURE_FILE_TRANSFER.md`](SECURE_FILE_TRANSFER.md).
+### Product acceptance
 
-### F0 — формат и threat model
+- Когда sender и recipient достижимы сейчас, APU использует самый быстрый разрешённый direct или
+  transient путь: LAN/QUIC, internet NAT traversal, TCP/TLS/WS fallback, user proxy/VPN/conduit.
+- Внешний conduit видит только E2E ciphertext и ничего не сохраняет: no retained payload,
+  persistent offline session/inbox или server-side retry после disconnect.
+- Когда endpoints не совпали online, relay-телефоны с consent сохраняют encrypted chunks и позже
+  передают их дальше. Каждый владелец выбирает disk/traffic/network/charging policy.
+- После разрыва, смены сети, process death/reboot скачиваются только missing chunks; второй файл и
+  повторный UI message не создаются.
+- Bulk file scheduler всегда ниже text/control/receipt; generic message RelayQueue не хранит file
+  chunks.
+- Нет разрешённого physical path/overlap — статус честно остаётся waiting/outbox, без ложного SENT
+  или DELIVERED.
 
-> Canonical manifest + chunk AEAD source готов; production Rust + APK compile PASS. Host tests всё ещё
-> заблокированы отсутствующим MSVC `link.exe`. Bounded no-input/no-secret Android runtime diagnostic,
-> native, generated binding, app APK и test APK build PASS; normalized binding accepted as commit
-> `e36d1ba`; data-preserving Stas runtime roundtrip/tamper/index/manifest gate PASS. Host test
-> execution remains pending only because the current PC lacks MSVC `link.exe`.
+### Current evidence and gaps (2026-08-22)
 
-- [ ] Versioned signed attachment manifest: `transfer_id`, message/chat binding, sender/recipient,
-  безопасное display name, declared MIME/size, chunk size/count, whole-file hash, timestamps/TTL.
-- [ ] Случайный file key; manifest/key и каждый chunk защищены E2E. Relay/MQTT не видит plaintext,
-  исходное имя файла или ключ.
-- [ ] Начальный лимит личного чата: 10 MiB; chunk 64–256 KiB после benchmark. Лимиты повышаются
-  только после memory/disk/network gates. Не класть файл целиком в MQTT message envelope.
-- [ ] SAF (`ACTION_OPEN_DOCUMENT`/`ACTION_CREATE_DOCUMENT`), без broad storage permission и без
-  доверия к внешнему path/MIME/имени.
+- [x] Manifest/chunk AEAD, SAF streaming, Room progress, device-bound key vault и app-private chunk
+  store созданы; малые 3-KiB/26-KiB transfers имеют phone runtime PASS.
+- [x] Direct generic QUIC API и Kotlin bridge compile/install PASS; direct chat routing source/static
+  hardening = `fc157cd`.
+- [ ] Новый direct API не имеет завершённого file runtime PASS; routing JVM/phone gate pending.
+- [ ] Direct data path пока sequential text/Base64: новый QUIC connection на каждый 4-KiB fragment
+  и 120-ms pause. Persistent binary connection/concurrent streams отсутствуют.
+- [ ] Direct failure даёт `WAITING_RECIPIENT`; отдельной durable phone FileCustody ещё нет.
+- [ ] Объявленные 4 GiB не поддержаны end-to-end: manifest default 128 KiB × store cap 640 даёт
+  practical preparation boundary около 80 MiB; packet geometry имеет отдельный 4-MiB+tag overflow.
+- [ ] Confidential filename/size offer, signed 60/90 presence, any-network fallback и strict privacy/
+  fairness/mixed-version gates ещё не закрыты.
 
-### F1 — core transfer и локальное хранение
+### Обязательный порядок F4
 
-> Additive Room v5→v6 transfer/chunk schema, bounded progress DAO and isolated migration/cascade
-> app/test APK build PASS. Existing chats/messages are not rewritten. A second instrumentation source
-> hashes legacy row IDs before/after real production migration and opens generated Room v6 schema;
-> rebuilt test APK PASS. First Stas harness applied additive SQL outside Room, preserving legacy rows but
-> leaving DB v6 with old v5 `room_master_table` identity; app data was not deleted. One-time recovery
-> Stas Room identity recovered and v6 generated schema validated with legacy state preserved. Bounded
-> no-backup encrypted chunk store JVM/APK gate PASS. Streaming SAF source inspector now sanitizes
-> provider metadata, enforces 10 MiB/exact declared size and computes SHA-256 with a fixed 64 KiB
-> buffer; JVM/APK tests PASS. F1 functional Rust seam source now adds strict canonical manifest decode,
-> random transfer ID and bounded per-chunk encrypt/decrypt APIs; native/binding/APK build PASS,
-> normalized generated binding accepted as commit `2477417`. Isolated Android functional test now covers
-> create/parse/encrypt/store/read/decrypt/idempotent retry/tamper/truncation/cleanup with transient key;
-> test APK/device gate pending. File key remains transient-only until a device-bound transfer key vault
-> and E2E key envelope are wired. Functional Android pipeline on Stas PASS with production state
-> preserved. Device-bound transfer key vault source now wraps per-transfer 32-byte keys with a
-> non-exportable Android Keystore AES-GCM key, transfer-ID AAD and atomic no-backup envelope;
-> Stas Keystore execution PASS with test alias/root cleanup and production state preserved. Outgoing local
-> preparation owner source now connects SAF inspection → canonical manifest → wrapped transfer key →
-> streaming chunk encryption → atomic no-backup store → monotonic Room progress, without publishing;
-> JVM/APK build PASS. Dependencies are now isolatable and an Android integration test stages a
-> two-chunk content:// file through in-memory Room + test vault/store, decrypts exact bytes and cleans
-> all test state; app/test APK and data-preserving Stas two-chunk execution PASS.
+- [x] **F4-A — architecture/docs:** file design, bootstrap, master и collaboration notes
+  синхронизированы и подтверждены владельцем; production code/телефоны не менялись.
+- [x] **F4-B — pure binary protocol boundary, no network wiring:**
+  - [x] B1 canonical frame + capability codec: source/static PASS; focused Windows host command на
+    exact `4815582` дал 11 passed, 0 failed, 592 filtered. Full suite/Android/phones не запускались.
+  - [x] B2 signed bounded control records: focused Windows `96dbe28`, 12 passed, 0 failed,
+    603 filtered; network/Android/phones unwired.
+  - [x] B3 ciphertext chunk/Merkle identities + `u64` geometry: combined exact `5ab2517` gave
+    34 passed, 0 failed, 592 filtered. Legacy F3/network/Android/phones untouched.
+- [ ] **F4-C — persistent single-peer QUIC:** один authenticated connection, один binary stream,
+  durable chunk-before-ACK, missing-range resume; no Base64/message queue.
+  - [x] C1 read-only audit: legacy TLS unauthenticated, connection pool unwired, endpoint/handshake
+    per send, generic text/whole-message boundary и transport-FIN не равен durable file ACK.
+  - [x] C1 source/static exact `bf4f0c6`: TLS exporter + mutual pinned B2 capability transcript,
+    bounded `APUS` records, exact B1 decode, one ordered stream, injected durable admission/sink,
+    signed missing-range seam; engine/FFI/Android unwired.
+  - [x] C1 focused Windows host gate: E0599 исправлен `bedf671`; после combined 41/43 test-only
+    final-ACK lifecycle fix `ca2edb6` дал 9 passed, 0 failed, 626 filtered (50.56 s + 0.20 s).
+  - [x] C1 combined Windows gate exact `ca2edb6`: 43 passed, 0 failed, 592 filtered
+    (compile 1.61 s; tests 1.25 s); три warnings только прежние, phones untouched.
+  - [x] C2 read-only prerequisite audit: legacy pool допускает duplicate connect race и не
+    authenticated; listener endpoint недоступен owner; fake FFI CryptoManager не является Ed25519.
+  - [x] C2a real signer seam exact `0736d9b`: internal public-key/sign trait для test key и real
+    `Arc<InstalledSigningIdentity>`, no seed/fake fallback; Windows 2/2 + 1/1 focused и 46/46 combined
+    PASS, три warnings только прежние, generated guard PASS.
+  - [x] C2b bounded single-flight persistent owner/reconnect: source `fd5d1f3`, test-only `471d099`;
+    Windows focused 7/7 + combined 53/53 PASS, 3 прежних warnings, generated guard PASS.
+- [x] **F4-D — adaptive parallel streams (controlled host scope):** bounded concurrency/window/
+  backpressure по фактическим RTT/loss/throughput; fast-loopback/slow-loss benchmark и text guard.
+  - [x] D1 bounded ACK window exact `0ef7706`: Windows 13/13 session + 56/56 combined PASS; hard
+    64-frame/16-MiB caps, measured AIMD, owner delegation, generated guard PASS.
+  - [x] D2 connection-level parallel streams exact `fc20f33`: one authenticated QUIC connection/scope,
+    monotonic `u64` stream IDs, 32-MiB global preflight budget, durable concurrent receive; Windows
+    17/17 session + 61/61 combined PASS, generated guard PASS.
+  - [x] D3 exact `0032c67`: explicit 3/3 + combined 62/62; debug loopback 59,040,998 B/s,
+    interactive text 678 μs under bulk, controlled RTT 30 ms/5% loss recovered with 2→1 stream and
+    8→4 frame backoff. Physical LAN/NAT remains F4-H acceptance, not inferred from loopback.
+- [x] **F4-E — signed presence/path manager (host data/selection layer):** contact-scoped beacon 60 s,
+  offline/expiry 90 s, expiring endpoint candidates, deterministic fallback, honest unavailable.
+  - [x] E1 exact `103f041`: bounded signed beacon/path table, replay/expiry/cooldown/capacity,
+    UDP-blocked direct-TCP/tunnel selection; Windows 7/7 + combined 69/69, generated guard PASS.
+  - [x] E2 exact `f7e7562`: typed QUIC/TCP/tunnel dispatch and transactional SQLite sequence/restart
+    store; Windows 9/9 + combined 71/71. Engine publish/physical transports remain G/H gates.
+- [ ] **F4-F — phone-owned FileCustody:** отдельный encrypted disk store, owner modes/quotas,
+  custody receipts, inventory/missing pull, bounded replication, TTL/cleanup/reboot/flood defense.
+  - [x] F1 exact `60407fa`: opaque ciphertext ranges, opt-in policy, quotas/TTL/flood bounds,
+    transactional restart/tombstone/disk-full store; Windows 8/8 + combined 79/79, guard PASS.
+  - [x] F2 durable signed receipt + explicit bounded inventory/missing-range pull: signed codec exact
+    `2cc0e36` Windows 4/4; atomic SQLite/pull exact `80416bc` custody 11/11 + combined 86/86.
+  - [ ] F3 bounded replication/recovery and production engine/Android/device-bound at-rest wiring.
+    - [x] F3a exact `ac0fde9`: restart-stable signed-receipt planner; Windows 4/4 + combined 90/90.
+    - [ ] F3b production binary engine/FFI/Android/at-rest wiring; legacy text path forbidden.
+- [ ] **F4-G — path switching:** direct ↔ transient conduit ↔ live phone relay ↔ delayed custody с
+  одним transfer ID и без сброса verified progress.
+- [ ] **F4-H — acceptance:** boundaries/large file, different NAT, UDP-blocked/TCP-only, slow/lossy,
+  sender/recipient non-overlap via relay phones, reboot/process death, quota/disk-full, mixed N↔N-1,
+  privacy audit и normal-text control.
 
-- [ ] Room-модель transfer/manifest/chunk state; сами большие encrypted bytes — в bounded app-private
-  files, не в строках Room и не в Compose state.
-- [ ] Streaming encrypt/hash/read и streaming verify/decrypt/write с фиксированным memory ceiling.
-- [ ] Chunk index/hash, out-of-order сборка, dedup, retry только отсутствующих chunks, pause/cancel.
-- [ ] Atomic finalization: файл становится доступен только после exact size + whole hash + AEAD PASS;
-  partial/corrupt state очищается безопасно после TTL.
-- [ ] Process death/reboot resume и idempotent receipt; duplicate manifest/chunk не создаёт второй файл.
-
-### F2 — transport и UI
-
-> First controlled cross-phone online harness source is intentionally test-only: a random key is
-> passed out-of-band by the local gate, while real manifest and encrypted file/photo packets traverse
-> existing addressed MQTT between Anna and Stas. Test APK build PASS. This proves bytes/network routing
-> but is not the production E2E key exchange or user UI. Two-phone gate pending; Anna first runs the
-> corrected data-preserving Room v5→v6 migration test. First gate timed out because Stas foreground
-> service likely drained test events before instrumentation. Migration and sender PASS; recovery source
-> cleans only synthetic harness rows, replace-installs both apps to stop competing services, waits on
-> receiver-ready marker and retries packets. Public MQTT still delivered no receiver events and shutdown
-> blocked. Recovery-02 switches only the controlled harness to an explicit ADB-tunneled direct TCP
-> path (Anna localhost → PC tunnel → Stas:7778), retaining real cross-device encrypted bytes while
-> avoiding public-broker uncertainty. Engine-based tunnel then hung before sender because receiver
-> initialization/listener never became ready. Recovery-03 uses a test-only length-prefixed Java
-> ServerSocket/Socket over the same ADB tunnel, with no Rust network engine. Sender reached the tunnel
-> but timed out waiting for ACK; this confirms test plumbing is not a product transport. Per user
-> direction, further tunnel retries stop here. Production work resumes with a versioned bounded packet
-> fragmentation/reassembly layer for encrypted offers/chunks, followed by authenticated key exchange,
-> direct QUIC/relay ownership and real chat picker/progress UI. Authenticated exchange source has now
-> started: a separate static X25519 public key is signed by the installed Ed25519 sidecar and nested
-> verified legacy identity binding; strict wire/tamper/foreign-binding tests are included. Native/generated binding/APK PASS and binding
-> accepted as `2c252ce`. Device-bound static secret store + startup binding verification source added;
-> compile/instrumentation pending. Additive v6→v7 public peer-binding pin table and strict TOFU store source added; migration/compile pending.
-
-- [ ] Сначала direct QUIC/P2P path; bounded fallback/offline relay только с квотами, TTL и backpressure.
-- [ ] Кнопка-скрепка в личном чате, имя/размер, upload/download progress, cancel/retry, понятные ошибки.
-- [ ] Получатель явно нажимает «Скачать/Сохранить»; executable/APK не открываются автоматически.
-- [ ] Auto-download по умолчанию выключен; позже отдельные лимиты Wi-Fi/mobile/roaming.
-- [ ] File transfer не блокирует текстовые сообщения и не получает повышенный transport priority.
-
-### F3 — обязательные acceptance gates
-
-- [ ] Boundary tests: 0 B, 1 B, chunk−1/chunk/chunk+1, 10 MiB, oversize rejection.
-- [ ] Filename/path traversal, ложный MIME, corrupt/truncated/reordered/duplicate chunks, wrong key/tag,
-  disk full/quota, cancel/restart/process death и sender/recipient mismatch.
-- [ ] Два телефона: online transfer с SHA-256 equality; затем interruption/resume без дубля.
-- [ ] Три телефона: offline custody с малым тестовым файлом, relay не показывает содержимое, receipt
-  очищает chunks exactly-once; текстовая durable delivery остаётся работоспособной.
-- [ ] Packet/log/DB audit: нет plaintext файла, полного local path, file key или содержимого в логах.
-
-Расширенная Фаза 5.3 остаётся authoritative backlog для фото, видео, voice, previews, больших файлов,
-cache manager и media UX, но её базовый encrypted chunk transport теперь реализуется здесь раньше.
+Точные file limits, chunk size, stream concurrency и relay defaults фиксируются только после
+benchmarks и safety gates. Нельзя выдавать source-константу или успешную маленькую transfer за
+доказательство гигабайтной/«любой сети» готовности.
 
 ## Следующая полная задача после file-transfer release — Groups + Topics + Admin Cabinet
 

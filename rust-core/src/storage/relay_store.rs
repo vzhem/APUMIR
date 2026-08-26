@@ -952,12 +952,15 @@ mod tests {
         b.expires_at_ms = 1500;
         let mut c = relay("c", "pk_c", now);
         c.expires_at_ms = 2000;
-        let mut d = relay("d", "pk_c", now);
-        d.expires_at_ms = 500; // уже истёк при now=1000
+        // d создаётся раньше (created=400) и истекает в 500: валидно при
+        // сохранении в now=400, но уже истекло к моменту загрузки в now=1000.
+        let mut d = relay("d", "pk_c", 400);
+        d.expires_at_ms = 500;
 
-        for m in [&a, &b, &c, &d] {
+        for m in [&a, &b, &c] {
             s.store(m, now).unwrap();
         }
+        s.store(&d, 400).unwrap();
 
         let loaded = s.load_unexpired(1000, 100).unwrap();
         let ids: Vec<&str> = loaded.iter().map(|m| m.msg_id.as_str()).collect();
