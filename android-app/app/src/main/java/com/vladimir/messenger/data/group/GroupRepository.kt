@@ -36,6 +36,9 @@ class GroupRepository(
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
 
+    /** Для экранов: доступно ли текущему рангу создание групп. */
+    fun canCreateGroupsNow(): Boolean = canCreateGroups()
+
     /**
      * Создание группы. Возвращает ошибку, если ранг не даёт права создавать
      * группы, — правило из MASTER_PLAN и FileTransferRankPolicy.canCreateGroup.
@@ -482,6 +485,10 @@ class GroupRepository(
     fun observePinned(groupId: String): Flow<List<MessageEntity>> =
         messageDao.observePinnedMessages(groupId)
 
+    /** Лента сообщений конкретной темы. */
+    fun observeTopicMessages(groupId: String, topicId: String): Flow<List<MessageEntity>> =
+        messageDao.observeTopicMessages(groupId, topicId)
+
     // ── Заявки на вступление ──────────────────────────────────────────────────
 
     fun observeJoinRequests(groupId: String): Flow<List<JoinRequestSummary>> =
@@ -495,7 +502,7 @@ class GroupRepository(
         val admins = groupDao.getAdmins(groupId)
         if (admins.isEmpty()) return Result.failure(IllegalStateException("В группе нет администраторов"))
         val envelope = GroupWire.buildJoinRequest(groupId, myDisplayName(), note.trim().take(MAX_NOTE_CHARS))
-        delivery.deliver(envelope, admins.map { it.nodeId }.filter { it != me })
+        delivery.deliver(groupId, envelope, admins.map { it.nodeId }.filter { it != me })
         return Result.success(Unit)
     }
 
@@ -530,7 +537,7 @@ class GroupRepository(
             groupDao.refreshMemberCount(groupId)
             publishRoster(groupId)
         }
-        delivery.deliver(GroupWire.buildJoinDecision(groupId, nodeId, approve), listOf(nodeId))
+        delivery.deliver(groupId, GroupWire.buildJoinDecision(groupId, nodeId, approve), listOf(nodeId))
         return Result.success(Unit)
     }
 
@@ -857,7 +864,7 @@ class GroupRepository(
             .filter { !it.isBanned }
             .map { it.nodeId }
             .filter { !excludeSelf || it != me }
-        return delivery.deliver(envelope, recipients)
+        return delivery.deliver(groupId, envelope, recipients)
     }
 
     /** После изменения состава рассылаем актуальный список участников. */

@@ -24,7 +24,15 @@ data class DeliveryReport(
 interface GroupDelivery {
     val name: String
 
-    suspend fun deliver(envelope: String, recipients: List<String>): DeliveryReport
+    /**
+     * @param groupId идентификатор группы; транспорт использует его как chatId,
+     *   поэтому одна и та же отправка 1:1 остаётся пригодной для групп.
+     */
+    suspend fun deliver(
+        groupId: String,
+        envelope: String,
+        recipients: List<String>,
+    ): DeliveryReport
 }
 
 /**
@@ -36,10 +44,14 @@ interface GroupDelivery {
 class PerMemberFanoutDelivery(
     override val name: String = "per-member-fanout",
     private val maxConcurrent: Int = 8,
-    private val send: suspend (recipientId: String, envelope: String) -> Boolean,
+    private val send: suspend (groupId: String, recipientId: String, envelope: String) -> Boolean,
 ) : GroupDelivery {
 
-    override suspend fun deliver(envelope: String, recipients: List<String>): DeliveryReport =
+    override suspend fun deliver(
+        groupId: String,
+        envelope: String,
+        recipients: List<String>,
+    ): DeliveryReport =
         coroutineScope {
             val targets = recipients.filter { it.isNotBlank() }.distinct()
             if (targets.isEmpty()) return@coroutineScope DeliveryReport(0, 0, emptyList())
@@ -50,7 +62,7 @@ class PerMemberFanoutDelivery(
 
             targets.chunked(width).forEach { batch ->
                 val results = batch.map { id ->
-                    async { id to runCatching { send(id, envelope) }.getOrDefault(false) }
+                    async { id to runCatching { send(groupId, id, envelope) }.getOrDefault(false) }
                 }.awaitAll()
                 results.forEach { (id, ok) ->
                     if (ok) delivered++ else failed.add(id)

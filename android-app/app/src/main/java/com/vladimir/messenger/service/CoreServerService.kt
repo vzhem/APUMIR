@@ -52,6 +52,7 @@ class CoreServerService : Service() {
     @Inject lateinit var notificationHelper: NotificationHelper
     @Inject lateinit var botApi: BotApi
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
+    @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -440,6 +441,19 @@ class CoreServerService : Service() {
                             Log.i(TAG, "📤 File packet ACK sent for msgId=$messageId")
                         } catch (e: Exception) {
                             Log.w(TAG, "⚠ File packet ACK failed: ${e.message}")
+                        }
+                        return
+                    }
+
+                    // Группы: APUGRP1-конверт разбирается здесь же, ДО авто-создания
+                    // контакта. Иначе каждое групповое событие превратилось бы в личный
+                    // чат с отправителем.
+                    if (groupRouter.routeIncoming(senderId, chatId, messageId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                            Log.i(TAG, "Group packet ACK sent for msgId=$messageId")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Group packet ACK failed: " + e.message)
                         }
                         return
                     }

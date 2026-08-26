@@ -48,6 +48,7 @@ fun ChatListScreen(
     onShowMyQrClick: () -> Unit = {},
     onRankClick: () -> Unit = {},
     onContactsClick: () -> Unit = {},
+    onGroupsClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -135,6 +136,14 @@ fun ChatListScreen(
                                         onClick = {
                                             menuOpen = false
                                             onContactsClick()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Группы") },
+                                        leadingIcon = { Icon(Icons.Filled.Groups, null) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onGroupsClick()
                                         },
                                     )
                                     DropdownMenuItem(

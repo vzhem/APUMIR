@@ -41,6 +41,9 @@ import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
 import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
+import com.vladimir.messenger.ui.screens.groups.GroupsScreen
+import com.vladimir.messenger.ui.screens.groups.GroupChatScreen
+import com.vladimir.messenger.ui.screens.groups.GroupAdminScreen
 
 // =============================================================================
 // РњРђР РЁР РЈРўР«
@@ -96,6 +99,19 @@ sealed class Screen(val route: String) {
 
     // QR-сканер для добавления контакта
     data object QrScanner : Screen("qr_scanner")
+
+    // Раздел «Группы»
+    data object Groups : Screen("groups")
+
+    data object GroupChat : Screen("group_chat/{groupId}") {
+        fun createRoute(groupId: String): String =
+            "group_chat/" + java.net.URLEncoder.encode(groupId, "UTF-8")
+    }
+
+    data object GroupAdmin : Screen("group_admin/{groupId}") {
+        fun createRoute(groupId: String): String =
+            "group_admin/" + java.net.URLEncoder.encode(groupId, "UTF-8")
+    }
 }
 
 // =============================================================================
@@ -178,6 +194,9 @@ fun MessengerNavGraph(
                 },
                 onContactsClick = {
                     navController.navigate(Screen.Contacts.route)
+                },
+                onGroupsClick = {
+                    navController.navigate(Screen.Groups.route)
                 },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
@@ -322,6 +341,46 @@ fun MessengerNavGraph(
             RenameContactScreen(
                 onRenamed = { navController.popBackStack() },
                 onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        // ------------------------------------------------------------------
+        // Группы: список, чат с темами, административный кабинет
+        // ------------------------------------------------------------------
+        composable(route = Screen.Groups.route) {
+            GroupsScreen(
+                onGroupClick = { groupId ->
+                    navController.navigate(Screen.GroupChat.createRoute(groupId))
+                },
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        composable(
+            route = Screen.GroupChat.route,
+            arguments = listOf(
+                navArgument("groupId") { type = NavType.StringType },
+            ),
+        ) {
+            GroupChatScreen(
+                onOpenAdmin = { groupId ->
+                    navController.navigate(Screen.GroupAdmin.createRoute(groupId))
+                },
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        composable(
+            route = Screen.GroupAdmin.route,
+            arguments = listOf(
+                navArgument("groupId") { type = NavType.StringType },
+            ),
+        ) {
+            GroupAdminScreen(
+                onBackClick = { navController.popBackStack() },
+                onLeftGroup = {
+                    navController.popBackStack(Screen.Groups.route, inclusive = false)
+                },
             )
         }
 
