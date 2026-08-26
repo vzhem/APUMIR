@@ -1,5 +1,6 @@
 param(
-    [string]$ExpectedCommit = ''
+    [string]$ExpectedCommit = '',
+    [switch]$RunMigrationTest
 )
 
 # ============================================================================
@@ -17,6 +18,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = 'C:\APU-M8'
 $AndroidRoot = Join-Path $RepoRoot 'android-app'
 $Gradlew = Join-Path $AndroidRoot 'gradlew.bat'
+$AdbPath = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
 
 if (-not (Test-Path -LiteralPath $Gradlew)) {
     Write-Output "FATAL: gradlew.bat not found at $Gradlew"
@@ -79,6 +81,36 @@ try {
         exit $TestExit
     }
 
+    # A zero exit code alone does not prove the tests ran: report the real
+    # counters from the JUnit XML so "0 tests matched" cannot look like a pass.
+    $ReportDir = Join-Path $AndroidRoot 'app\build\test-results\testDebugUnitTest'
+    $TotalTests = 0
+    $TotalFailures = 0
+    $TotalSkipped = 0
+    if (Test-Path -LiteralPath $ReportDir) {
+        foreach ($File in Get-ChildItem -LiteralPath $ReportDir -Filter 'TEST-*.xml') {
+            $Doc = [xml](Get-Content -LiteralPath $File.FullName)
+            $Suite = $Doc.testsuite
+            $TotalTests += [int]$Suite.tests
+            $TotalFailures += [int]$Suite.failures + [int]$Suite.errors
+            $TotalSkipped += [int]$Suite.skipped
+            Write-Output ("  {0}: tests={1} failures={2} errors={3} skipped={4}" -f `
+                $Suite.name, $Suite.tests, $Suite.failures, $Suite.errors, $Suite.skipped)
+        }
+    } else {
+        Write-Output "WARNING: no test reports found in $ReportDir"
+    }
+    Write-Output ("unit test totals: tests=$TotalTests failures=$TotalFailures skipped=$TotalSkipped")
+    if ($TotalTests -eq 0) {
+        Write-Output 'RESULT: NO TESTS RAN - the --tests filter matched nothing.'
+        Write-Output 'Treat this as a failure, not as a green run.'
+        exit 1
+    }
+    if ($TotalFailures -ne 0) {
+        Write-Output 'RESULT: UNIT TESTS REPORTED FAILURES'
+        exit 1
+    }
+
     # Step 2: main source compilation, including Room schema validation and
     # Hilt graph generation for GroupsModule.
     Write-Output ''
@@ -101,6 +133,31 @@ try {
     if ($AssembleExit -ne 0) {
         Write-Output 'RESULT: ASSEMBLE FAILED'
         exit $AssembleExit
+    }
+
+    # Optional: exercise migration 7 -> 8 on a real device database.
+    # Deliberately behind a switch - it installs a test APK and needs a phone,
+    # and phones are only touched with the owner's explicit go-ahead.
+    if ($RunMigrationTest) {
+        Write-Output ''
+        Write-Output '===== step 4: migration 7 -> 8 on a connected phone ====='
+        $MigrationClass = 'com.vladimir.messenger.data.local.GroupsMigrationInstrumentedTest'
+        $RunnerArg = '-Pandroid.testInstrumentationRunnerArguments.class=' + $MigrationClass
+        & $AdbPath devices
+        & $Gradlew --console=plain :app:connectedDebugAndroidTest $RunnerArg
+        $MigrationExit = $LASTEXITCODE
+        Write-Output "migration test exit code: $MigrationExit"
+        if ($MigrationExit -ne 0) {
+            Write-Output 'RESULT: MIGRATION TEST FAILED - do not ship this database change.'
+            exit $MigrationExit
+        }
+        Write-Output 'RESULT: migration 7 -> 8 verified on a real device database.'
+    } else {
+        Write-Output ''
+        Write-Output 'NOTE: migration 7 -> 8 was NOT exercised. The host gate cannot run it.'
+        Write-Output 'AppModule uses fallbackToDestructiveMigration(), so a wrong migration is'
+        Write-Output 'a data-loss risk on upgrade. To verify on a phone that already holds a'
+        Write-Output 'version 7 database, rerun with -RunMigrationTest.'
     }
 
     Write-Output ''
