@@ -152,7 +152,7 @@ interface GroupDao {
     @Query("SELECT * FROM group_join_requests WHERE groupId = :groupId AND status = 'PENDING' ORDER BY requestedAtMs DESC")
     suspend fun getPendingRequests(groupId: String): List<GroupJoinRequestEntity>
 
-    @Query("SELECT COUNT(*) FROM group_join_requests WHERE groupId = :groupId AND status = 'PENDING')")
+    @Query("SELECT COUNT(*) FROM group_join_requests WHERE groupId = :groupId AND status = 'PENDING'")
     suspend fun countPendingRequests(groupId: String): Int
 
     @Query("SELECT * FROM group_join_requests WHERE groupId = :groupId AND nodeId = :nodeId")

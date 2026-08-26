@@ -29,6 +29,7 @@ cargo, ни JDK/Gradle. Языки: Kotlin, Rust, PowerShell.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 OPEN = {"{": "}", "(": ")", "[": "]"}
@@ -438,6 +439,35 @@ def _lex_ps(src):
 # ═══════════════════════════════════════════════════════════════════════════
 #  Диспетчер
 # ═══════════════════════════════════════════════════════════════════════════
+def check_room_queries(src):
+    """
+    Баланс скобок внутри Room @Query("...").
+
+    Лексер Kotlin этого не видит по определению: SQL лежит внутри строкового
+    литерала. Именно так в GroupDao.kt уехала лишняя ')' и KSP упал уже на
+    Windows: "no viable alternative at input ''PENDING')'".
+    """
+    errors = []
+    pattern = re.compile(r'@Query\(\s*((?:"(?:[^"\\]|\\.)*"\s*(?:\+\s*)?)+)\)')
+    for m in pattern.finditer(src):
+        parts = re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))
+        sql = " ".join(parts)
+        line = src[:m.start()].count("\n") + 1
+        depth = 0
+        for ch in sql:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth < 0:
+                    break
+        if depth != 0:
+            errors.append(
+                "строка %d: @Query SQL с несбалансированными скобками (баланс %+d)"
+                % (line, depth)
+            )
+    return errors
+
 def check_file(path):
     ext = os.path.splitext(path)[1].lower()
     lang = {".kt": "kotlin", ".kts": "kotlin", ".rs": "rust",
@@ -450,6 +480,8 @@ def check_file(path):
         errors, counts, ascii_info = _lex_ps(src)
     else:
         errors, counts, ascii_info = _lex(src, lang)
+    if lang == "kotlin":
+        errors = errors + check_room_queries(src)
     return lang, errors, counts, ascii_info
 
 
