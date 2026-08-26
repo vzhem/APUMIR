@@ -91,6 +91,50 @@ python3 tools/sandbox/struct_check.py --ascii=strict scripts/<новый>.ps1
 Известное ограничение: `'a;` в Rust (lifetime там, где нужен символьный
 литерал) ошибкой не считается — это задача компилятора.
 
+## 3.1. Сверщик схемы Room: `tools/sandbox/check_room_schema.py`
+
+Появился после реального дефекта: в `MIGRATION_7_8` таблица `group_topics`
+была создана без `FOREIGN KEY ... ON DELETE CASCADE`. KSP это не видит (SQL
+внутри строк), компиляция проходит, юнит-тесты проходят, а Room бросает
+`Migration didn't properly handle: group_topics` только при открытии базы на
+телефоне. До этого инструмента такое расхождение ловилось исключительно
+прогоном на устройстве.
+
+Сверщик разбирает `@Entity` (столбцы и их Kotlin-типы, `@PrimaryKey` и
+`primaryKeys`, `foreignKeys` с `onDelete/onUpdate`, `indices`) и SQL миграции
+(`CREATE TABLE`, `PRIMARY KEY`, `FOREIGN KEY ... ON UPDATE ... ON DELETE`,
+`CREATE INDEX`, `ALTER TABLE ... ADD COLUMN`) и сравнивает их так, как это
+делает Room: имена, типы, NOT NULL, состав и порядок первичного ключа,
+внешние ключи, индексы.
+
+```
+python3 tools/sandbox/check_room_schema.py \
+    android-app/app/src/main/java/com/vladimir/messenger/data/local/AppDatabase.kt \
+    android-app/app/src/main/java/com/vladimir/messenger/data/local/entity \
+    MIGRATION_7_8
+```
+
+Код возврата 0 — расхождений нет, 1 — есть. Встроен в
+`scripts/groups-build-gate.ps1` как шаг 0: если Python на PATH не найден, шаг
+честно пропускается и гейт не роняет.
+
+Фактические результаты: по исправленной миграции — 6 таблиц и 8 индексов
+совпадают, 4 добавленных столбца `messages` совпадают, расхождений 0.
+Мутационно проверен тремя способами, каждый ловится (код возврата 1):
+убранный `FOREIGN KEY` у `group_topics` (реальный дефект, пойман до правки),
+`messageCount INTEGER NOT NULL` → `TEXT` у `group_message_stats`,
+убранный `CREATE INDEX ... index_group_invites_slug`.
+
+Самопроверка парсера обязательна: первая версия молча возвращала ноль
+индексов для всех таблиц (регэксп требовал закрывающую `)` от `@Entity`,
+которой в разбираемом фрагменте нет), и сравнение индексов ничего не делало.
+Полезный признак правильного разбора — найденный внешний ключ у
+`file_transfer_chunks` (`transferId -> file_transfers`), которого я не писал.
+
+**Чего сверщик НЕ доказывает:** что SQL вообще исполняется (синтаксис внутри
+`@Query` проверяет `check_room_queries` в `struct_check.py`), и что данные
+сохраняются. Данные и валидацию схемы Room доказывает прогон на телефоне.
+
 ## 4. Якоря в коде под незакрытые задачи
 
 Номера строк сверены на `f0ca016`.

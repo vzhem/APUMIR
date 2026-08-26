@@ -75,6 +75,14 @@ class GroupsMigrationInstrumentedTest {
             })
             val db = migrated.writableDatabase
             db.execSQL("PRAGMA foreign_keys=ON")
+            db.query("PRAGMA foreign_keys").use { cursor ->
+                assertTrue("PRAGMA foreign_keys не применилась к соединению", cursor.moveToFirst())
+                assertEquals(
+                    "внешние ключи выключены, каскад не сработает и тест соврёт",
+                    1,
+                    cursor.getInt(0),
+                )
+            }
 
             // 3. Старое сообщение цело, новые столбцы для него пусты.
             db.query("SELECT content, topicId, isPinned, pinnedAtMs, pinnedBy FROM messages WHERE id = 'm_old'")
@@ -135,7 +143,7 @@ class GroupsMigrationInstrumentedTest {
             )
             db.query("SELECT COUNT(*) FROM group_members WHERE groupId = 'g1'").use { cursor ->
                 assertTrue(cursor.moveToFirst())
-                assertEquals(1, cursor.getInt(0))
+                assertEquals("участник группы не записался", 1, cursor.getInt(0))
             }
 
             // 7. Сообщение темы сохраняется в общую таблицу messages с topicId.
@@ -146,7 +154,7 @@ class GroupsMigrationInstrumentedTest {
             )
             db.query("SELECT COUNT(*) FROM messages WHERE topicId = 't1'").use { cursor ->
                 assertTrue(cursor.moveToFirst())
-                assertEquals(1, cursor.getInt(0))
+                assertEquals("сообщение темы не сохранилось с topicId", 1, cursor.getInt(0))
             }
             db.query("SELECT COUNT(*) FROM messages WHERE topicId IS NULL").use { cursor ->
                 assertTrue(cursor.moveToFirst())
@@ -157,17 +165,17 @@ class GroupsMigrationInstrumentedTest {
             db.execSQL("DELETE FROM groups WHERE id = 'g1'")
             db.query("SELECT COUNT(*) FROM group_members WHERE groupId = 'g1'").use { cursor ->
                 assertTrue(cursor.moveToFirst())
-                assertEquals(0, cursor.getInt(0))
+                assertEquals("ON DELETE CASCADE не снял участников", 0, cursor.getInt(0))
             }
             db.query("SELECT COUNT(*) FROM group_topics WHERE groupId = 'g1'").use { cursor ->
                 assertTrue(cursor.moveToFirst())
-                assertEquals(0, cursor.getInt(0))
+                assertEquals("ON DELETE CASCADE не снял темы", 0, cursor.getInt(0))
             }
 
             // 9. Итог: сообщений осталось два — старое личное и новое групповое.
             db.query("SELECT COUNT(*) FROM messages").use { cursor ->
                 assertTrue(cursor.moveToFirst())
-                assertEquals(2, cursor.getInt(0))
+                assertEquals("ожидались старое личное и новое групповое сообщения", 2, cursor.getInt(0))
             }
 
             migrated.close()

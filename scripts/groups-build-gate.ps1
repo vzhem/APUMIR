@@ -67,6 +67,33 @@ finally {
 
 Push-Location $AndroidRoot
 try {
+    # Step 0: cross-check the migration SQL against the Room entities. KSP does
+    # not look inside @Query or migration strings, and Room itself only compares
+    # the schema when the database is opened on a device, so this is the only
+    # host-side defence against a migration that Room would reject. Needs
+    # Python; when Python is absent the step is skipped, not failed.
+    Write-Output ''
+    Write-Output '===== step 0: Room schema cross-check ====='
+    $Python = $null
+    foreach ($Candidate in @('py', 'python', 'python3')) {
+        if (Get-Command $Candidate -ErrorAction SilentlyContinue) { $Python = $Candidate; break }
+    }
+    if (-not $Python) {
+        Write-Output 'NOTE: no Python on PATH, the schema cross-check was skipped.'
+    } else {
+        $PyArgs = @()
+        if ($Python -eq 'py') { $PyArgs = @('-3') }
+        $DataLocal = Join-Path $RepoRoot 'android-app\app\src\main\java\com\vladimir\messenger\data\local'
+        & $Python @PyArgs (Join-Path $RepoRoot 'tools\sandbox\check_room_schema.py') `
+            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_7_8'
+        $SchemaExit = $LASTEXITCODE
+        Write-Output "schema cross-check exit code: $SchemaExit"
+        if ($SchemaExit -ne 0) {
+            Write-Output 'RESULT: SCHEMA CROSS-CHECK FAILED - Room would reject this migration.'
+            exit $SchemaExit
+        }
+    }
+
     # Step 1: JVM unit tests for the Groups logic only.
     # Deliberately not mixed with assemble in the same --tests invocation
     # (rule from docs/AI_HANDOFF.md).

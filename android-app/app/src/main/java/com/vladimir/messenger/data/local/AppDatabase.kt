@@ -197,7 +197,9 @@ abstract class AppDatabase : RoomDatabase() {
                         `lastMessageAtMs` INTEGER,
                         `isClosed` INTEGER NOT NULL,
                         `isGeneral` INTEGER NOT NULL,
-                        PRIMARY KEY(`id`)
+                        PRIMARY KEY(`id`),
+                        FOREIGN KEY(`groupId`) REFERENCES `groups`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
                     )
                     """.trimIndent()
                 )
