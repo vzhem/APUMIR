@@ -45,7 +45,7 @@ try {
         Write-Output 'Uncommitted changes will take part in the build.'
     }
 
-    if ($ExpectedCommit -ne '' -and $Head -ne $ExpectedCommit) {
+    if ($ExpectedCommit -ne '' -and $Head -ne $ExpectedCommit -and -not $Head.StartsWith($ExpectedCommit)) {
         Write-Output ''
         Write-Output "FATAL: HEAD $Head does not match the expected commit $ExpectedCommit."
         Write-Output 'The build would test different code. Fix the checkout first:'

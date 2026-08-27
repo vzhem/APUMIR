@@ -136,7 +136,7 @@ try {
     $Branch = (& git rev-parse --abbrev-ref HEAD | Out-String).Trim()
     Write-Output "Repo HEAD:   $Head"
     Write-Output "Repo branch: $Branch"
-    if ($ExpectedCommit -ne '' -and $Head -ne $ExpectedCommit) {
+    if ($ExpectedCommit -ne '' -and $Head -ne $ExpectedCommit -and -not $Head.StartsWith($ExpectedCommit)) {
         Write-Output "FATAL: HEAD $Head does not match $ExpectedCommit - wrong code would be tested."
         exit 1
     }

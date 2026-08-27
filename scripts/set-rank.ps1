@@ -53,7 +53,7 @@ try {
     $Head = (& git rev-parse HEAD | Out-String).Trim()
     Write-Output "Repo HEAD:   $Head"
     Write-Output ("Repo branch: " + (& git rev-parse --abbrev-ref HEAD | Out-String).Trim())
-    if ($ExpectedCommit -ne '' -and $Head -ne $ExpectedCommit) {
+    if ($ExpectedCommit -ne '' -and $Head -ne $ExpectedCommit -and -not $Head.StartsWith($ExpectedCommit)) {
         Write-Output "FATAL: HEAD $Head does not match $ExpectedCommit."
         exit 1
     }
