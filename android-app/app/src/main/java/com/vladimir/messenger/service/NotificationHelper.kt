@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.repository.ContactRepository
 import javax.inject.Inject
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -21,6 +22,7 @@ import javax.inject.Singleton
 class NotificationHelper @Inject constructor(
     @ApplicationContext private val context: Context,
     private val contactRepository: ContactRepository,
+    private val groupDao: GroupDao,
 ) {
     companion object {
         private const val MESSAGE_NOTIFICATION_BASE_ID = 2000
@@ -51,7 +53,16 @@ class NotificationHelper @Inject constructor(
         
         // Получить имя и аватар отправителя
         val contact = contactRepository.getContactById(senderId)
-        val senderName = contact?.displayName ?: senderId.take(8)
+
+        // Групповое сообщение: в заголовке нужна группа, а не «pk_40d2401a».
+        // Отправитель в группе обычно не в контактах, поэтому имя берём из
+        // списка участников, и только потом - из идентификатора узла.
+        val group = groupDao.getGroupById(chatId)
+        val senderName = contact?.displayName
+            ?: groupDao.getMember(chatId, senderId)?.displayName?.takeIf { it.isNotBlank() }
+            ?: senderId.take(8)
+        val title = group?.title ?: senderName
+        val body = if (group != null) "$senderName: $messageText" else messageText
         
         // Создать intent для открытия чата
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -69,9 +80,9 @@ class NotificationHelper @Inject constructor(
         // Создать notification
         val notification = NotificationCompat.Builder(context, MessengerApplication.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)  // Нужна иконка
-            .setContentTitle(senderName)
-            .setContentText(messageText)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(messageText))
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)

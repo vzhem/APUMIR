@@ -128,6 +128,7 @@ fun GroupAdminScreen(
                     onToggleAdmin = viewModel::toggleAdmin,
                     onTogglePermission = viewModel::setAdminPermission,
                     onBlock = viewModel::blockMember,
+                    onResync = viewModel::resyncMembers,
                 )
 
                 3 -> RequestsTab(requests = uiState.requests, onDecide = viewModel::decideRequest)
@@ -343,8 +344,14 @@ private fun MembersTab(
     onToggleAdmin: (String, Boolean) -> Unit,
     onTogglePermission: (String, Long, Boolean) -> Unit,
     onBlock: (String) -> Unit,
+    onResync: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
+        // У вступивших раньше, чем появились темы, список тем пустой.
+        // Кнопка рассылает карточку группы, темы и состав заново.
+        TextButton(onClick = onResync) {
+            Text("Разослать темы и состав заново")
+        }
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,

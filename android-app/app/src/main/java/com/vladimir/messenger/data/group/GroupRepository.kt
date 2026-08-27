@@ -467,25 +467,34 @@ class GroupRepository(
                 // Карточку принимаем только от владельца группы.
                 if (packet.ownerId != senderId) return
                 val current = groupDao.getGroupById(packet.groupId)
-                groupDao.insertGroup(
-                    GroupEntity(
-                        id = packet.groupId,
-                        title = packet.title.ifBlank { "Группа" },
+                if (current == null) {
+                    // Группы ещё нет - вставляем. Конфликта нет, каскада нет.
+                    groupDao.insertGroup(
+                        GroupEntity(
+                            id = packet.groupId,
+                            title = packet.title.ifBlank { "Группа" },
+                            about = packet.about,
+                            ownerId = packet.ownerId,
+                            isPublic = packet.isPublic,
+                            topicsEnabled = packet.topicsEnabled,
+                            createdAtMs = clock(),
+                            memberCount = 1,
+                            inviteSlug = packet.inviteSlug,
+                        )
+                    )
+                } else {
+                    // Группа уже есть - ТОЛЬКО UPDATE: перезапись строки стёрла бы
+                    // участников и темы каскадом по внешнему ключу.
+                    groupDao.updateGroupFromOwner(
+                        groupId = packet.groupId,
+                        title = packet.title.ifBlank { current.title },
                         about = packet.about,
-                        ownerId = packet.ownerId,
+                        inviteSlug = packet.inviteSlug,
                         isPublic = packet.isPublic,
                         topicsEnabled = packet.topicsEnabled,
-                        createdAtMs = current?.createdAtMs ?: clock(),
-                        memberCount = current?.memberCount ?: 1,
-                        inviteSlug = packet.inviteSlug,
-                        memberPermissions = current?.memberPermissions ?: 0L,
-                        isLeft = false,
-                        lastMessagePreview = current?.lastMessagePreview,
-                        lastMessageAtMs = current?.lastMessageAtMs,
-                        unreadCount = current?.unreadCount ?: 0,
                     )
-                )
-                if (groupDao.getMember(packet.groupId, me) == null) {
+                }
+                if (current == null && groupDao.getMember(packet.groupId, me) == null) {
                     groupDao.insertMember(
                         GroupMemberEntity(
                             groupId = packet.groupId,
@@ -498,6 +507,30 @@ class GroupRepository(
                     groupDao.refreshMemberCount(packet.groupId)
                 }
                 Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
+            }
+
+            is GroupWire.Packet.Topics -> {
+                // Список тем приходит новому участнику от владельца группы.
+                val group = groupDao.getGroupById(packet.groupId)
+                if (group == null || group.ownerId != senderId) return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val now = clock()
+                packet.entries.forEach { entry ->
+                    if (groupDao.getTopicById(entry.topicId) == null) {
+                        groupDao.insertTopic(
+                            GroupTopicEntity(
+                                id = entry.topicId,
+                                groupId = packet.groupId,
+                                name = entry.name,
+                                ownerId = senderId,
+                                ownerName = groupDao.getMember(packet.groupId, senderId)
+                                    ?.displayName.orEmpty(),
+                                createdAtMs = now,
+                            )
+                        )
+                    }
+                }
+                Log.i(TAG, "topics applied group=${packet.groupId} count=${packet.entries.size}")
             }
 
             is GroupWire.Packet.Roster -> {
@@ -866,11 +899,12 @@ class GroupRepository(
         if (!GroupPermissions.canChangeInfo(actor.role, actor.permissions, 0L)) {
             return Result.failure(SecurityException("Нет права менять разрешения группы"))
         }
-        val group = groupDao.getGroupById(groupId)
+        // Только точечный UPDATE. Перезапись строки группы (INSERT OR REPLACE)
+        // удаляет её, а внешний ключ с ON DELETE CASCADE стирает участников,
+        // темы, ссылки и заявки - именно так группа «теряла» темы и владельца.
+        groupDao.getGroupById(groupId)
             ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        groupDao.insertGroup(
-            group.copy(memberPermissions = mask and GroupPermissions.Member.ALL)
-        )
+        groupDao.updateGroupMemberPermissions(groupId, mask and GroupPermissions.Member.ALL)
         return Result.success(Unit)
     }
 
@@ -1050,6 +1084,7 @@ class GroupRepository(
         if (slug.isNotBlank()) groupDao.registerInviteUse(slug)
         groupDao.refreshMemberCount(group.id)
         sendGroupInfo(group, nodeId)
+        sendTopics(group.id, nodeId)
         publishRoster(group.id)
         delivery.deliver(
             group.id,
@@ -1057,6 +1092,49 @@ class GroupRepository(
             listOf(nodeId),
         )
         Log.i(TAG, "member admitted group=${group.id} node=$nodeId")
+    }
+
+    /**
+     * Разослать участникам карточку группы, темы и состав заново.
+     *
+     * Нужно для тех, кто вступил до появления этих пакетов: темы и состав они
+     * не получили и видят пустую группу. Повторная отправка безопасна - приёмник
+     * добавляет только отсутствующие строки.
+     */
+    suspend fun resyncMembers(groupId: String): Result<Int> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val actor = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupRole.isAdminOrOwner(actor.role)) {
+            return Result.failure(SecurityException("Рассылка доступна только администраторам"))
+        }
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val others = groupDao.getMembers(groupId).map { it.nodeId }.filter { it != me }
+        others.forEach { id ->
+            sendGroupInfo(group, id)
+            sendTopics(group.id, id)
+        }
+        publishRoster(groupId)
+        Log.i(TAG, "resync sent group=$groupId to=${others.size}")
+        return Result.success(others.size)
+    }
+
+    /**
+     * Темы группы новому участнику. Без них он попадает в пустой чат: темы
+     * создаются пакетом TopicCreated в момент создания, и опоздавший их не видел.
+     */
+    private suspend fun sendTopics(groupId: String, nodeId: String) {
+        val topics = groupDao.getTopics(groupId)
+        if (topics.isEmpty()) return
+        delivery.deliver(
+            groupId,
+            GroupWire.buildTopics(
+                groupId,
+                topics.map { GroupWire.TopicEntry(it.id, it.name) },
+            ),
+            listOf(nodeId),
+        )
     }
 
     /** Карточка группы новому участнику: название, описание, владелец, настройки. */

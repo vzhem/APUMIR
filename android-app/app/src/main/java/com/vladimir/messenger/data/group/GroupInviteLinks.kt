@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.group
 
 import java.net.URI
 import java.security.SecureRandom
+import java.util.regex.Pattern
 
 /**
  * Ссылки-приглашения в группу. Рядом со ссылкой экран рисует QR-код того же
@@ -86,6 +87,18 @@ object GroupInviteLinks {
         // Голый slug без схемы — старый образец ссылки.
         normalizeSlug(text)?.let { return InviteTarget(it, null, null) }
 
+        parseClean(text)?.let { return it }
+
+        // Мессенджеры (MAX и подобные) переносят длинную ссылку по словам, а
+        // скопировать только её нельзя - копируется всё сообщение, с переводами
+        // строк внутри ссылки. Убираем переводы строк и ищем ссылку в тексте.
+        val glued = text.replace("\r", "").replace("\n", "")
+        val found = LINK_PATTERN.matcher(glued).find() ?: return null
+        return parseClean(found.group())
+    }
+
+    /** Разбор уже выделенной ссылки, без поиска внутри текста. */
+    private fun parseClean(text: String): InviteTarget? {
         if (text.startsWith(SHORT_LINK_PREFIX)) {
             val rest = text.removePrefix(SHORT_LINK_PREFIX)
             val slug = normalizeSlug(rest.substringBefore('?')) ?: return null
@@ -108,6 +121,18 @@ object GroupInviteLinks {
             null
         }
     }
+
+    /**
+     * Поиск ссылки внутри произвольного текста. Классы символов намеренно без
+     * пробелов и без кириллицы: на первом же русском слове или пробеле ссылка
+     * заканчивается, поэтому приклеившийся текст сообщения в неё не попадает.
+     */
+    private val LINK_PATTERN: Pattern = Pattern.compile(
+        "p2pmessenger://group[?&=A-Za-z0-9_.%/-]*" +
+            "|p2p://group/[A-Za-z0-9_.%/?&=-]*" +
+            "|https?://t\\.me/[A-Za-z0-9_]+\\?start=" + TELEGRAM_START_PREFIX + "[A-Za-z0-9]+",
+        Pattern.CASE_INSENSITIVE,
+    )
 
     /** Один параметр запроса по имени; null, если его нет или он пустой. */
     private fun queryParam(query: String?, name: String): String? {

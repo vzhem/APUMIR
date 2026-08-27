@@ -31,6 +31,7 @@ object GroupWire {
     const val KIND_ROSTER = "roster"
     const val KIND_GROUP_DELETED = "grpdel"
     const val KIND_GROUP_INFO = "info"
+    const val KIND_TOPICS = "topics"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -93,6 +94,16 @@ object GroupWire {
          *
          * Принимаем только от `ownerId` (проверка в приёмнике).
          */
+        /**
+         * Список тем группы. Шлётся новому участнику вместе с карточкой группы:
+         * темы создаются пакетом TopicCreated в момент создания, и тот, кто
+         * вступил позже, без такого списка видит пустой чат без тем.
+         */
+        data class Topics(
+            val groupId: String,
+            val entries: List<TopicEntry>,
+        ) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -105,6 +116,8 @@ object GroupWire {
     }
 
     data class RosterEntry(val nodeId: String, val displayName: String, val role: String)
+
+    data class TopicEntry(val topicId: String, val name: String)
 
     fun isGroupPacket(text: String?): Boolean =
         text != null && text.length <= MAX_ENVELOPE_BYTES && text.startsWith("$PREFIX|")
@@ -141,6 +154,14 @@ object GroupWire {
             "${encode(it.nodeId)},${encode(it.displayName)},${it.role}"
         }
         return "$PREFIX|$KIND_ROSTER|$groupId|$csv"
+    }
+
+    /** Список тем: строки "topicId,name" через ';'. */
+    fun buildTopics(groupId: String, entries: List<TopicEntry>): String {
+        val csv = entries.joinToString(";") {
+            "${encode(it.topicId)},${encode(it.name)}"
+        }
+        return "$PREFIX|$KIND_TOPICS|$groupId|$csv"
     }
 
     /** Карточка группы для нового участника. Все текстовые поля — base64url. */
@@ -229,6 +250,13 @@ object GroupWire {
                 null
             }
 
+            KIND_TOPICS -> if (parts.size == 4) {
+                val entries = parseTopics(parts[3]) ?: return null
+                Packet.Topics(groupId, entries)
+            } else {
+                null
+            }
+
             KIND_GROUP_INFO -> if (parts.size == 9) {
                 val title = decode(parts[3]) ?: return null
                 val about = decode(parts[4]) ?: return null
@@ -257,6 +285,21 @@ object GroupWire {
 
             else -> null
         }
+    }
+
+    private fun parseTopics(csv: String): List<TopicEntry>? {
+        if (csv.isBlank()) return emptyList()
+        val out = ArrayList<TopicEntry>()
+        for (row in csv.split(';')) {
+            if (row.isBlank()) continue
+            val cells = row.split(',')
+            if (cells.size != 2) return null
+            val topicId = decode(cells[0]) ?: return null
+            val name = decode(cells[1]) ?: return null
+            if (topicId.isBlank()) return null
+            out.add(TopicEntry(topicId, name))
+        }
+        return out
     }
 
     private fun parseRoster(csv: String): List<RosterEntry>? {

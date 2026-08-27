@@ -146,6 +146,20 @@ class GroupAdminViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Разослать темы и состав заново. Лечит участников, которые вступили раньше,
+     * чем группа научилась присылать темы, и видят пустой чат.
+     */
+    fun resyncMembers() {
+        viewModelScope.launch {
+            groupRepository.resyncMembers(groupId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess { count ->
+                    _uiState.update { it.copy(notice = "Отправлено участникам: $count") }
+                }
+        }
+    }
+
     fun revokeInvite(slug: String) {
         viewModelScope.launch {
             groupRepository.revokeInvite(groupId, slug)

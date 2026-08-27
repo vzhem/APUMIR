@@ -58,6 +58,25 @@ class GroupWireTest {
     }
 
     @Test
+    fun topicsRoundTrip() {
+        val envelope = GroupWire.buildTopics(
+            "grp-1",
+            listOf(
+                GroupWire.TopicEntry("t-1", "Общий | чат"),
+                GroupWire.TopicEntry("t-2", "Флуд"),
+            ),
+        )
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Topics)
+        val topics = parsed as GroupWire.Packet.Topics
+        assertEquals("grp-1", topics.groupId)
+        assertEquals(2, topics.entries.size)
+        assertEquals("t-1", topics.entries[0].topicId)
+        assertEquals("Общий | чат", topics.entries[0].name)
+        assertEquals("Флуд", topics.entries[1].name)
+    }
+
+    @Test
     fun groupInfoRoundTrip() {
         val envelope = GroupWire.buildGroupInfo(
             groupId = "grp-1",

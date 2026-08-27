@@ -29,8 +29,42 @@ interface GroupDao {
     @Query("SELECT * FROM groups WHERE id = :groupId")
     fun observeGroup(groupId: String): Flow<GroupEntity?>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    /**
+     * ВАЖНО: ABORT, а не REPLACE.
+     *
+     * У group_members, group_topics, group_invites, group_join_requests и
+     * group_message_stats внешний ключ на groups.id с ON DELETE CASCADE, а
+     * INSERT OR REPLACE под капотом УДАЛЯЕТ старую строку группы. Вместе с ней
+     * каскадом улетают все участники и все темы - группа остаётся, но пустая,
+     * а владелец видит «вы не участник группы». Поэтому здесь ABORT: случайная
+     * перезапись упадёт громко, а не тихо сотрёт данные.
+     *
+     * Обновлять поля существующей группы нужно точечными UPDATE ниже.
+     */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertGroup(group: GroupEntity)
+
+    /** Маска прав обычных участников. Только UPDATE: см. предупреждение у insertGroup. */
+    @Query("UPDATE groups SET memberPermissions = :mask WHERE id = :groupId")
+    suspend fun updateGroupMemberPermissions(groupId: String, mask: Long)
+
+    /**
+     * Обновить карточку группы по данным владельца - используется, когда
+     * человек вошёл по ссылке и получил пакет GroupInfo. Только UPDATE:
+     * перезапись строки стёрла бы участников и темы.
+     */
+    @Query(
+        "UPDATE groups SET title = :title, about = :about, inviteSlug = :inviteSlug, " +
+            "isPublic = :isPublic, topicsEnabled = :topicsEnabled WHERE id = :groupId"
+    )
+    suspend fun updateGroupFromOwner(
+        groupId: String,
+        title: String,
+        about: String,
+        inviteSlug: String,
+        isPublic: Boolean,
+        topicsEnabled: Boolean,
+    )
 
     @Query("UPDATE groups SET title = :title, about = :about WHERE id = :groupId")
     suspend fun updateGroupProfile(groupId: String, title: String, about: String)

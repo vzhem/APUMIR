@@ -12,8 +12,16 @@ import android.content.Intent
  */
 object AppShare {
 
-    /** Куда ставить приложение. Тот же адрес, что читает UpdateChecker. */
-    const val INSTALL_LINK = "https://github.com/vzhem/APUMIR/releases/latest"
+    /**
+     * Куда ставить приложение.
+     *
+     * Ссылка ведёт НА ФАЙЛ, а не на страницу релиза: latest/download/<имя
+     * ассета> — постоянный адрес GitHub для последней публикации, а ассет
+     * называется app-release.apk (его собирает рабочий процесс релиза, см.
+     * scripts/make-release.ps1). Получателю не надо искать файл в списке.
+     */
+    const val INSTALL_LINK =
+        "https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk"
 
     /**
      * Текст приглашения.
@@ -27,7 +35,8 @@ object AppShare {
         val who = displayName.trim().ifBlank { "APU" }
         return "Привет! Это $who в APU — мессенджере без серверов: " +
             "сообщения и файлы идут напрямую между телефонами.\n\n" +
-            "Добавь меня в контакты — открой ссылку или вставь её в APU:\n" +
+            "Добавь меня в контакты — открой ссылку или вставь её в APU " +
+            "(можно вставить всё сообщение целиком):\n" +
             contactLink + "\n\n" +
             "Скачать APU:\n" +
             INSTALL_LINK
@@ -42,7 +51,7 @@ object AppShare {
             "Присоединяйся к группе «$title» в APU."
         }
         return head + "\n\n" +
-            "Открой ссылку или вставь её в APU:\n" +
+            "Открой ссылку или вставь её в APU (можно вставить всё сообщение целиком):\n" +
             link + "\n\n" +
             "Скачать APU:\n" +
             INSTALL_LINK

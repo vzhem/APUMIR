@@ -44,6 +44,34 @@ class GroupInviteLinksTest {
     }
 
     @Test
+    fun linkIsFoundInsideMessengerMessage() {
+        // MAX и подобные переносят длинную ссылку по словам, а скопировать
+        // только её нельзя: копируется всё сообщение, с разрывами внутри ссылки.
+        val slug = GroupInviteLinks.newSlug()
+        val link = GroupInviteLinks.build(slug, "grp-1", "pk_owner")
+        val broken = link.replace("&g=", "\n&g=").replace("&o=", "\n&o=")
+        val message = "Присоединяйся к группе «Работа» в APU.\n\n" +
+            "Открой ссылку или вставь её в APU:\n" + broken + "\n\n" +
+            "Скачать APU:\nhttps://github.com/vzhem/APUMIR/releases/latest"
+        val target = GroupInviteLinks.parseTarget(message)
+        assertTrue("ссылка не найдена в тексте сообщения", target != null)
+        assertEquals(slug, target!!.slug)
+        assertEquals("grp-1", target.groupId)
+        assertEquals("pk_owner", target.ownerId)
+    }
+
+    @Test
+    fun cyrillicTailDoesNotStickToLink() {
+        // Если мессенджер склеил ссылку со следующим русским словом, оно не
+        // должно попасть в адрес владельца.
+        val slug = GroupInviteLinks.newSlug()
+        val glued = GroupInviteLinks.build(slug, "grp-1", "pk_owner") + "СкачатьAPU"
+        val target = GroupInviteLinks.parseTarget(glued)
+        assertTrue(target != null)
+        assertEquals("pk_owner", target!!.ownerId)
+    }
+
+    @Test
     fun oldLinkWithoutOwnerIsNotRoutable() {
         val slug = GroupInviteLinks.newSlug()
         val target = GroupInviteLinks.parseTarget(GroupInviteLinks.build(slug))
