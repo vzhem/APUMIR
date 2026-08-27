@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.group.GroupSummary
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +69,7 @@ fun GroupsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
     var showRankHint by remember { mutableStateOf(false) }
+    var showJoin by remember { mutableStateOf(false) }
 
     LaunchedEffect(joinSlug) {
         if (!joinSlug.isNullOrBlank()) viewModel.joinBySlug(joinSlug)
@@ -78,6 +81,12 @@ fun GroupsScreen(
                 title = { Text("Группы") },
                 navigationIcon = {
                     TextButton(onClick = onBackClick) { Text("Назад") }
+                },
+                actions = {
+                    // Кроме QR: вставить скопированную ссылку и войти.
+                    IconButton(onClick = { showJoin = true }) {
+                        Icon(Icons.Filled.Link, contentDescription = "Войти по ссылке")
+                    }
                 },
             )
         },
@@ -117,6 +126,10 @@ fun GroupsScreen(
                             "Создайте первую или войдите по ссылке-приглашению",
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = { showJoin = true }) {
+                            Text("Войти по ссылке")
+                        }
                     }
                 }
 
@@ -155,6 +168,16 @@ fun GroupsScreen(
                         if (target != null) onGroupClick(target)
                     },
                 ) { Text(if (target != null) "Открыть чат" else "Готово") }
+            },
+        )
+    }
+
+    if (showJoin) {
+        JoinByLinkDialog(
+            onDismiss = { showJoin = false },
+            onSubmit = { slug ->
+                showJoin = false
+                viewModel.joinBySlug(slug)
             },
         )
     }
@@ -290,5 +313,60 @@ private fun CreateGroupDialog(
             ) { Text("Создать") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+    )
+}
+
+/**
+ * Вход в группу по вставленной ссылке-приглашению. Разбор строгий: если строка
+ * не похожа на приглашение, показываем ошибку, а не молча закрываемся.
+ */
+@Composable
+private fun JoinByLinkDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (slug: String) -> Unit,
+) {
+    var link by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Войти по ссылке") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = link,
+                    onValueChange = {
+                        link = it
+                        error = null
+                    },
+                    label = { Text("Ссылка-приглашение") },
+                    placeholder = { Text("p2pmessenger://group?slug=...") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val slug = GroupInviteLinks.parseSlug(link)
+                    if (slug == null) {
+                        error = "Не похоже на ссылку-приглашение в группу"
+                    } else {
+                        onSubmit(slug)
+                    }
+                },
+            ) { Text("Войти") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
     )
 }
