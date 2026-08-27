@@ -67,6 +67,19 @@ finally {
 
 Push-Location $AndroidRoot
 try {
+    # Delete the previous debug APK before anything else.
+    #
+    # Twice already this gate stopped before step 3 (a compile error, then a
+    # failing unit test), and the next "adb install" silently pushed the OLD
+    # app-debug.apk that was still lying in build/outputs. The phones were then
+    # tested against stale code and every "still broken" report was worthless.
+    # With no APK on disk the install fails loudly instead of lying.
+    $DebugApk = Join-Path $AndroidRoot 'app\build\outputs\apk\debug\app-debug.apk'
+    if (Test-Path $DebugApk) {
+        Remove-Item $DebugApk -Force
+        Write-Output "removed the previous debug apk, so a failed gate cannot be installed by mistake"
+    }
+
     # Step 0: cross-check the migration SQL against the Room entities. KSP does
     # not look inside @Query or migration strings, and Room itself only compares
     # the schema when the database is opened on a device, so this is the only
@@ -164,6 +177,16 @@ try {
     if ($AssembleExit -ne 0) {
         Write-Output 'RESULT: ASSEMBLE FAILED'
         exit $AssembleExit
+    }
+
+    # Show what was produced, so freshness on the phone can be compared against
+    # "dumpsys package <pkg> | Select-String lastUpdateTime" after the install.
+    if (Test-Path $DebugApk) {
+        $ApkItem = Get-Item $DebugApk
+        Write-Output ("debug apk: {0} bytes, built {1}" -f $ApkItem.Length, $ApkItem.LastWriteTime)
+        Write-Output "install: adb install -r -t -d `"$DebugApk`""
+    } else {
+        Write-Output 'WARNING: assembleDebug succeeded but the debug apk was not found.'
     }
 
     # Step 4: the androidTest sources, which contain the instrumented

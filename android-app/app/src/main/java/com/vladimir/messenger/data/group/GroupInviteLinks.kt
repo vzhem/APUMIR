@@ -87,15 +87,24 @@ object GroupInviteLinks {
         // Голый slug без схемы — старый образец ссылки.
         normalizeSlug(text)?.let { return InviteTarget(it, null, null) }
 
-        parseClean(text)?.let { return it }
-
         // Мессенджеры (MAX и подобные) переносят длинную ссылку по словам, а
         // скопировать только её нельзя - копируется всё сообщение, с переводами
-        // строк внутри ссылки. Убираем переводы строк и ищем ссылку в тексте.
+        // строк внутри ссылки. Убираем переводы строк.
         val glued = text.replace("\r", "").replace("\n", "")
+
+        // Ссылку СНАЧАЛА вырезаем, и только потом разбираем. Разбирать строку
+        // целиком нельзя: java.net.URI разрешает не-ASCII символы, поэтому
+        // приклеившийся русский текст («...o=pk_ownerСкачатьAPU») уедет прямо в
+        // адрес владельца. Регулярка обрывается на первом же пробеле или
+        // кириллическом символе.
         val matcher = LINK_PATTERN.matcher(glued)
-        if (!matcher.find()) return null
-        return parseClean(matcher.group().orEmpty())
+        if (matcher.find()) {
+            parseClean(matcher.group().orEmpty())?.let { return it }
+        }
+
+        // Регулярка не нашла - пробуем разобрать как есть (на случай формы,
+        // которую она не покрывает).
+        return parseClean(glued)
     }
 
     /** Разбор уже выделенной ссылки, без поиска внутри текста. */
