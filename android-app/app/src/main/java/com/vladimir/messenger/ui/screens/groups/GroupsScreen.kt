@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,11 +60,17 @@ import com.vladimir.messenger.data.group.GroupSummary
 fun GroupsScreen(
     onGroupClick: (groupId: String) -> Unit,
     onBackClick: () -> Unit,
+    /** Короткий код группы из ссылки-приглашения или QR: сразу пробуем войти. */
+    joinSlug: String? = null,
     viewModel: GroupsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
     var showRankHint by remember { mutableStateOf(false) }
+
+    LaunchedEffect(joinSlug) {
+        if (!joinSlug.isNullOrBlank()) viewModel.joinBySlug(joinSlug)
+    }
 
     Scaffold(
         topBar = {
@@ -121,6 +128,35 @@ fun GroupsScreen(
                 }
             }
         }
+    }
+
+    val joinMessage = uiState.joinMessage
+    if (uiState.joining || joinMessage != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.consumeJoinResult() },
+            title = { Text("Вход по ссылке") },
+            text = {
+                if (uiState.joining) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Text("Подключаемся к группе...")
+                    }
+                } else {
+                    Text(joinMessage.orEmpty())
+                }
+            },
+            confirmButton = {
+                val target = uiState.joinedGroupId
+                TextButton(
+                    enabled = !uiState.joining,
+                    onClick = {
+                        viewModel.consumeJoinResult()
+                        if (target != null) onGroupClick(target)
+                    },
+                ) { Text(if (target != null) "Открыть чат" else "Готово") }
+            },
+        )
     }
 
     if (showCreate) {

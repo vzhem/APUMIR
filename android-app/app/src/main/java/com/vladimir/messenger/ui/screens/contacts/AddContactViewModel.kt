@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.util.InviteLinkParser
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +54,11 @@ class AddContactViewModel @Inject constructor(
             return
         }
 
-        val fingerprint = when {
+        // Сначала общий разборщик ссылок: приложение само генерирует
+        // p2pmessenger://add?node_id=..., а этот блок раньше понимал только
+        // p2p://invite/, p2p://key/ и голый pk_, то есть QR контакта не срабатывал.
+        val parsedInvite = InviteLinkParser.parse(raw)
+        val fingerprint = parsedInvite?.nodeId ?: when {
             raw.contains("node=pk_") -> "pk_" + raw.substringAfter("node=pk_").substringBefore("&")
             raw.startsWith("p2p://invite/") -> raw.removePrefix("p2p://invite/").trim()
             raw.startsWith("p2p://key/") -> raw.removePrefix("p2p://key/").trim()
@@ -69,7 +74,8 @@ class AddContactViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            val displayName = _uiState.value.displayName.trim().takeIf { it.isNotBlank() } 
+            val displayName = _uiState.value.displayName.trim().takeIf { it.isNotBlank() }
+                ?: parsedInvite?.displayName?.trim()?.takeIf { it.isNotBlank() }
                 ?: "Contact ${fingerprint.takeLast(8)}"
 
             // 1. обавляем контакт

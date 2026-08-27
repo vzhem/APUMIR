@@ -20,8 +20,10 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -44,6 +46,8 @@ import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
 import com.vladimir.messenger.ui.screens.groups.GroupsScreen
 import com.vladimir.messenger.ui.screens.groups.GroupChatScreen
 import com.vladimir.messenger.ui.screens.groups.GroupAdminScreen
+import com.vladimir.messenger.data.group.GroupInviteLinks
+import com.vladimir.messenger.util.InviteLinkParser
 
 // =============================================================================
 // РњРђР РЁР РЈРўР«
@@ -101,7 +105,10 @@ sealed class Screen(val route: String) {
     data object QrScanner : Screen("qr_scanner")
 
     // Раздел «Группы»
-    data object Groups : Screen("groups")
+    data object Groups : Screen("groups?joinSlug={joinSlug}") {
+        fun createJoinRoute(slug: String): String =
+            "groups?joinSlug=" + java.net.URLEncoder.encode(slug, "UTF-8")
+    }
 
     data object GroupChat : Screen("group_chat/{groupId}") {
         fun createRoute(groupId: String): String =
@@ -347,12 +354,22 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         // Группы: список, чат с темами, административный кабинет
         // ------------------------------------------------------------------
-        composable(route = Screen.Groups.route) {
+        composable(
+            route = Screen.Groups.route,
+            arguments = listOf(
+                navArgument("joinSlug") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+            ),
+        ) { entry ->
             GroupsScreen(
                 onGroupClick = { groupId ->
                     navController.navigate(Screen.GroupChat.createRoute(groupId))
                 },
                 onBackClick = { navController.popBackStack() },
+                joinSlug = entry.arguments?.getString("joinSlug"),
             )
         }
 
@@ -385,13 +402,34 @@ fun MessengerNavGraph(
         }
 
         composable(route = Screen.QrScanner.route) {
+            val scanContext = LocalContext.current
             QrScannerScreen(
                 onBackClick = { navController.popBackStack() },
                 onQrScanned = { qrContent ->
-                    // Извлечь invite link из QR и перейти к AddContact
-                    val inviteLink = qrContent.removePrefix("p2p://invite/")
-                    navController.navigate(Screen.AddContact.createRoute(inviteLink)) {
-                        popUpTo(Screen.QrScanner.route) { inclusive = true }
+                    // Сканер отдаёт весь прочитанный текст, разбор здесь.
+                    // Раньше отсюда в AddContact уходило то, что осталось после
+                    // снятия префикса "p2p://invite/", — формат, которого приложение
+                    // не генерирует, поэтому коды групп и контактов не работали.
+                    val groupSlug = GroupInviteLinks.parseSlug(qrContent)
+                    when {
+                        !groupSlug.isNullOrBlank() ->
+                            navController.navigate(Screen.Groups.createJoinRoute(groupSlug)) {
+                                popUpTo(Screen.QrScanner.route) { inclusive = true }
+                            }
+
+                        InviteLinkParser.parse(qrContent) != null ->
+                            navController.navigate(Screen.AddContact.createRoute(qrContent)) {
+                                popUpTo(Screen.QrScanner.route) { inclusive = true }
+                            }
+
+                        else -> {
+                            Toast.makeText(
+                                scanContext,
+                                "Это не ссылка APUMIR: " + qrContent.take(64),
+                                Toast.LENGTH_LONG,
+                            ).show()
+                            navController.popBackStack()
+                        }
                     }
                 }
             )

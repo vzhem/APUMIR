@@ -69,13 +69,20 @@ fun QrScannerScreen(
                     factory = { ctx ->
                         DecoratedBarcodeView(ctx).apply {
                             resume()
+                            var reported = ""
                             decodeContinuous(object : BarcodeCallback {
                                 override fun barcodeResult(result: BarcodeResult?) {
-                                    result?.text?.let { qrContent ->
-                                        if (qrContent.startsWith("p2p://invite/")) {
-                                            pause()
-                                            onQrScanned(qrContent)
-                                        }
+                                    val scanned = result?.text?.trim().orEmpty()
+                                    if (scanned.isNotEmpty() && scanned != reported) {
+                                        // Принимаем ЛЮБОЙ прочитанный текст и сообщаем его
+                                        // ровно один раз. Раньше здесь требовался префикс
+                                        // "p2p://invite/", которого приложение не генерирует
+                                        // вовсе: сканер молча глотал собственные коды групп и
+                                        // контактов, поэтому между телефонами "не читал".
+                                        // Разбором занимается навигация (NavGraph).
+                                        reported = scanned
+                                        pause()
+                                        onQrScanned(scanned)
                                     }
                                 }
                             })

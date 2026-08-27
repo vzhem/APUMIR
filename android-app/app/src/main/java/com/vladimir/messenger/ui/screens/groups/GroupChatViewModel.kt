@@ -48,7 +48,8 @@ class GroupChatViewModel @Inject constructor(
         observeGroup()
         observeMembers()
         observeTopics()
-        observePinned()
+        // Закрепы подписываем на выбранную тему, а не на всю группу:
+        // observePinned(topicId) стартует вместе с лентой сообщений.
     }
 
     private fun observeGroup() {
@@ -90,7 +91,10 @@ class GroupChatViewModel @Inject constructor(
                         ?: topics.firstOrNull()?.id
                     state.copy(topics = topics, selectedTopicId = selected)
                 }
-                _uiState.value.selectedTopicId?.let { observeMessages(it) }
+                _uiState.value.selectedTopicId?.let {
+                    observeMessages(it)
+                    observePinned(it)
+                }
             }
         }
     }
@@ -106,17 +110,22 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
-    private fun observePinned() {
-        viewModelScope.launch {
-            groupRepository.observePinned(groupId).collect { list ->
+    private var pinnedJob: kotlinx.coroutines.Job? = null
+
+    /** Закрепы выбранной темы. У каждой темы — свой список закреплённых. */
+    private fun observePinned(topicId: String) {
+        pinnedJob?.cancel()
+        pinnedJob = viewModelScope.launch {
+            groupRepository.observePinned(groupId, topicId).collect { list ->
                 _uiState.update { it.copy(pinned = list) }
             }
         }
     }
 
     fun selectTopic(topicId: String) {
-        _uiState.update { it.copy(selectedTopicId = topicId) }
+        _uiState.update { it.copy(selectedTopicId = topicId, pinned = emptyList()) }
         observeMessages(topicId)
+        observePinned(topicId)
     }
 
     fun createTopic(name: String) {

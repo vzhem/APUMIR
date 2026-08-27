@@ -136,12 +136,19 @@ fun GroupChatScreen(
 
             // ── Закреплённые сообщения
             if (uiState.pinned.isNotEmpty()) {
+                // Закрепы у каждой темы свои, поэтому показываем и имя темы.
+                val pinnedTopicName = uiState.topics
+                    .firstOrNull { it.id == uiState.selectedTopicId }
+                    ?.name
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Закреплённые", fontWeight = FontWeight.Medium)
+                            Text(
+                                "Закреплённые" + (pinnedTopicName?.let { " · $it" }.orEmpty()),
+                                fontWeight = FontWeight.Medium,
+                            )
                         }
                         uiState.pinned.take(3).forEach { m ->
                             Text(

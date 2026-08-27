@@ -482,8 +482,9 @@ class GroupRepository(
         return Result.success(Unit)
     }
 
-    fun observePinned(groupId: String): Flow<List<MessageEntity>> =
-        messageDao.observePinnedMessages(groupId)
+    /** Закреплённые сообщения конкретной темы (а не всей группы). */
+    fun observePinned(groupId: String, topicId: String): Flow<List<MessageEntity>> =
+        messageDao.observePinnedMessages(groupId, topicId)
 
     /** Лента сообщений конкретной темы. */
     fun observeTopicMessages(groupId: String, topicId: String): Flow<List<MessageEntity>> =
