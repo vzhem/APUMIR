@@ -93,8 +93,9 @@ object GroupInviteLinks {
         // скопировать только её нельзя - копируется всё сообщение, с переводами
         // строк внутри ссылки. Убираем переводы строк и ищем ссылку в тексте.
         val glued = text.replace("\r", "").replace("\n", "")
-        val found = LINK_PATTERN.matcher(glued).find() ?: return null
-        return parseClean(found.group())
+        val matcher = LINK_PATTERN.matcher(glued)
+        if (!matcher.find()) return null
+        return parseClean(matcher.group().orEmpty())
     }
 
     /** Разбор уже выделенной ссылки, без поиска внутри текста. */

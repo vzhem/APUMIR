@@ -509,6 +509,24 @@ class GroupRepository(
                 Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
             }
 
+            is GroupWire.Packet.Kick -> {
+                if (packet.nodeId != me) return
+                // Исключить мог только владелец или администратор с правом бана.
+                val sender = groupDao.getMember(packet.groupId, senderId)
+                if (sender == null || !GroupPermissions.canBan(sender.role, sender.permissions)) return
+                groupDao.deleteMember(packet.groupId, me)
+                groupDao.markLeft(packet.groupId)
+                Log.i(TAG, "kicked from group=${packet.groupId} by=$senderId")
+            }
+
+            is GroupWire.Packet.TopicsRequest -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (group.ownerId != me) return
+                if (groupDao.getMember(packet.groupId, senderId) == null) return
+                sendTopics(packet.groupId, senderId)
+                Log.i(TAG, "topics sent on request group=${packet.groupId} to=$senderId")
+            }
+
             is GroupWire.Packet.Topics -> {
                 // Список тем приходит новому участнику от владельца группы.
                 val group = groupDao.getGroupById(packet.groupId)
@@ -927,6 +945,9 @@ class GroupRepository(
         }
         groupDao.refreshMemberCount(groupId)
         publishRoster(groupId)
+        // Самому исключённому говорим отдельно: рассылка состава до него уже
+        // не доходит как «вас убрали», и группа остаётся у него в списке.
+        delivery.deliver(groupId, GroupWire.buildKick(groupId, nodeId), listOf(nodeId))
         return Result.success(Unit)
     }
 
@@ -1092,6 +1113,26 @@ class GroupRepository(
             listOf(nodeId),
         )
         Log.i(TAG, "member admitted group=${group.id} node=$nodeId")
+    }
+
+    /** Группы, у которых мы уже просили темы в этом запуске приложения. */
+    private val topicsRequested = HashSet<String>()
+
+    /**
+     * Попросить у владельца список тем.
+     *
+     * Вызывается при открытии чата группы: вступивший позже не застал пакеты
+     * TopicCreated и видит пустой список тем. Просим не чаще раза запуск на
+     * группу - пакет маленький, а приёмник добавляет только отсутствующие темы.
+     */
+    suspend fun requestTopics(groupId: String) {
+        val me = myNodeId() ?: return
+        val group = groupDao.getGroupById(groupId) ?: return
+        if (group.ownerId == me) return
+        if (groupDao.getMember(groupId, me) == null) return
+        if (!topicsRequested.add(groupId)) return
+        delivery.deliver(groupId, GroupWire.buildTopicsRequest(groupId), listOf(group.ownerId))
+        Log.i(TAG, "topics requested group=$groupId")
     }
 
     /**

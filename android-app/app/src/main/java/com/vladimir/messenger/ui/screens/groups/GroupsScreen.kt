@@ -73,7 +73,11 @@ fun GroupsScreen(
     var showJoin by remember { mutableStateOf(false) }
 
     LaunchedEffect(joinLink) {
-        if (!joinLink.isNullOrBlank()) viewModel.joinByLink(joinLink)
+        // Проверяем, что это действительно ссылка: в параметр может прилететь
+        // шаблон маршрута или посторонний текст - тогда нечего и пытаться.
+        if (!joinLink.isNullOrBlank() && GroupInviteLinks.parseTarget(joinLink) != null) {
+            viewModel.joinByLink(joinLink)
+        }
     }
 
     Scaffold(

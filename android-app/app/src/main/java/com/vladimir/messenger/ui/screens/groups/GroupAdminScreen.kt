@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -310,18 +311,38 @@ private fun AdminsTab(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (admin.role == GroupRole.ADMIN) {
+                        // Разрешения занимают пол-экрана, поэтому список сворачивается:
+                        // нажал на строку - развернулось, нажал ещё раз - свернулось.
+                        var expanded by remember(admin.nodeId) { mutableStateOf(false) }
                         HorizontalDivider()
-                        Text("Разрешения администратора", style = MaterialTheme.typography.labelLarge)
-                        GroupPermissions.Admin.entries.forEach { entry ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(entry.title)
-                                    Text(entry.hint, style = MaterialTheme.typography.bodySmall)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expanded = !expanded },
+                        ) {
+                            Text(
+                                if (expanded) {
+                                    "Разрешения администратора — нажмите, чтобы свернуть"
+                                } else {
+                                    "Разрешения администратора — нажмите, чтобы развернуть"
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (expanded) {
+                            GroupPermissions.Admin.entries.forEach { entry ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(entry.title)
+                                        Text(entry.hint, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Switch(
+                                        checked = GroupPermissions.has(admin.permissions, entry.flag),
+                                        onCheckedChange = { onTogglePermission(admin.nodeId, entry.flag, it) },
+                                    )
                                 }
-                                Switch(
-                                    checked = GroupPermissions.has(admin.permissions, entry.flag),
-                                    onCheckedChange = { onTogglePermission(admin.nodeId, entry.flag, it) },
-                                )
                             }
                         }
                         if (!admin.isMe) {
@@ -466,8 +487,11 @@ private fun InvitesTab(
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { onCreate(false) }) { Text("Ссылка с одобрением") }
-                TextButton(onClick = { onCreate(true) }) { Text("Ссылка без одобрения") }
+                // requestApproval = true означает «нужно одобрение».
+                // Раньше здесь было наоборот: кнопка «с одобрением» создавала
+                // ссылку БЕЗ одобрения, и человек влетал в группу сразу.
+                TextButton(onClick = { onCreate(true) }) { Text("Ссылка с одобрением") }
+                TextButton(onClick = { onCreate(false) }) { Text("Ссылка без одобрения") }
             }
             if (!isPublic) {
                 Text(

@@ -107,6 +107,15 @@ sealed class Screen(val route: String) {
 
     // Раздел «Группы»
     data object Groups : Screen("groups?joinLink={joinLink}") {
+        /**
+         * Обычный вход в раздел, без ссылки.
+         *
+         * Ходить по Screen.Groups.route нельзя: в нём стоит шаблон
+         * "{joinLink}", и навигация подставит его как ЕСТЬ - экран получит
+         * строку "{joinLink}" и покажет «это не ссылка-приглашение».
+         */
+        const val plain: String = "groups"
+
         fun createJoinRoute(link: String): String =
             "groups?joinLink=" + java.net.URLEncoder.encode(link, "UTF-8")
     }
@@ -218,7 +227,7 @@ fun MessengerNavGraph(
                     navController.navigate(Screen.Contacts.route)
                 },
                 onGroupsClick = {
-                    navController.navigate(Screen.Groups.route)
+                    navController.navigate(Screen.Groups.plain)
                 },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)

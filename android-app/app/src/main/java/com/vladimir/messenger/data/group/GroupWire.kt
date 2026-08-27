@@ -32,6 +32,8 @@ object GroupWire {
     const val KIND_GROUP_DELETED = "grpdel"
     const val KIND_GROUP_INFO = "info"
     const val KIND_TOPICS = "topics"
+    const val KIND_TOPICS_REQUEST = "treq"
+    const val KIND_KICK = "kick"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -104,6 +106,19 @@ object GroupWire {
             val entries: List<TopicEntry>,
         ) : Packet()
 
+        /**
+         * Участник просит прислать список тем. Нужно вступившим позже: темы
+         * создаются пакетом TopicCreated, и опоздавший их не застал.
+         */
+        data class TopicsRequest(val groupId: String) : Packet()
+
+        /**
+         * Участника исключили или ограничили. Без этого пакета он так и видит
+         * группу у себя: состав обновляется рассылкой, а самого исключённого
+         * она не касается.
+         */
+        data class Kick(val groupId: String, val nodeId: String) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -163,6 +178,10 @@ object GroupWire {
         }
         return "$PREFIX|$KIND_TOPICS|$groupId|$csv"
     }
+
+    fun buildTopicsRequest(groupId: String): String = "$PREFIX|$KIND_TOPICS_REQUEST|$groupId"
+
+    fun buildKick(groupId: String, nodeId: String): String = "$PREFIX|$KIND_KICK|$groupId|$nodeId"
 
     /** Карточка группы для нового участника. Все текстовые поля — base64url. */
     fun buildGroupInfo(
@@ -246,6 +265,19 @@ object GroupWire {
             KIND_ROSTER -> if (parts.size == 4) {
                 val entries = parseRoster(parts[3]) ?: return null
                 Packet.Roster(groupId, entries)
+            } else {
+                null
+            }
+
+            KIND_TOPICS_REQUEST -> if (parts.size == 3) {
+                Packet.TopicsRequest(groupId)
+            } else {
+                null
+            }
+
+            KIND_KICK -> if (parts.size == 4) {
+                val nodeId = parts[3]
+                if (nodeId.isBlank()) null else Packet.Kick(groupId, nodeId)
             } else {
                 null
             }

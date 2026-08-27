@@ -58,6 +58,18 @@ class GroupWireTest {
     }
 
     @Test
+    fun kickAndTopicsRequestRoundTrip() {
+        val kick = GroupWire.parse(GroupWire.buildKick("grp-1", "pk_abc"))
+        assertTrue(kick is GroupWire.Packet.Kick)
+        assertEquals("pk_abc", (kick as GroupWire.Packet.Kick).nodeId)
+        assertEquals("grp-1", kick.groupId)
+
+        val request = GroupWire.parse(GroupWire.buildTopicsRequest("grp-1"))
+        assertTrue(request is GroupWire.Packet.TopicsRequest)
+        assertEquals("grp-1", (request as GroupWire.Packet.TopicsRequest).groupId)
+    }
+
+    @Test
     fun topicsRoundTrip() {
         val envelope = GroupWire.buildTopics(
             "grp-1",

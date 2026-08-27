@@ -48,6 +48,8 @@ class GroupChatViewModel @Inject constructor(
         observeGroup()
         observeMembers()
         observeTopics()
+        // Вступивший позже не застал создание тем - просим список у владельца.
+        viewModelScope.launch { groupRepository.requestTopics(groupId) }
         // Закрепы подписываем на выбранную тему, а не на всю группу:
         // observePinned(topicId) стартует вместе с лентой сообщений.
     }
