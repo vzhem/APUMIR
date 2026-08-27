@@ -94,13 +94,17 @@ try {
         }
     }
 
-    # Step 1: JVM unit tests for the Groups logic only.
-    # Deliberately not mixed with assemble in the same --tests invocation
-    # (rule from docs/AI_HANDOFF.md).
+    # Step 1: JVM unit tests. Groups plus the two areas this branch touched
+    # outside that package: the rank policy that now gates attachments, and the
+    # link parsers the QR scanner routes through.
+    # Still a test-only invocation, deliberately not mixed with assemble in the
+    # same --tests call (rule from docs/AI_HANDOFF.md).
     Write-Output ''
-    Write-Output '===== step 1: groups unit tests ====='
+    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers) ====='
     & $Gradlew --console=plain :app:testDebugUnitTest `
-        --tests 'com.vladimir.messenger.data.group.*'
+        --tests 'com.vladimir.messenger.data.group.*' `
+        --tests 'com.vladimir.messenger.data.file.FileTransferRankPolicyTest' `
+        --tests 'com.vladimir.messenger.util.*'
     $TestExit = $LASTEXITCODE
     Write-Output "unit tests exit code: $TestExit"
     if ($TestExit -ne 0) {

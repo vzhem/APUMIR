@@ -4983,7 +4983,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   запрос и якорь отбрасываются) и ui/components/ImagePreview.kt (Coil
   SubcomposeAsyncImage с индикатором загрузки и честной подписью при ошибке).
   Подключено в двух местах: MessageBubble личного чата и пузырь сообщения в
-  темах группы. Добавлен ImageLinkDetectorTest - 8 тестов.
+  темах группы. Добавлен ImageLinkDetectorTest - 9 тестов.
   Что НЕ сделано и почему. Приём гифок и стикеров с клавиатуры требует
   перехода на BasicTextField(state = TextFieldState) и модификатор приёма
   контента; в Compose 1.7.6 API стабильный, но точное имя модификатора
@@ -5004,4 +5004,14 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   0 ошибок; по android-app, scripts, rust-core, tools - 418 файлов, 0 ошибок.
   НЕ проверено: ImageLinkDetectorTest не запускался (нет JVM/Gradle), Coil в
   деле не проверялся, на телефоне ничего не открывалось. Ожидание для гейта:
-  появится пакет com.vladimir.messenger.util с ImageLinkDetectorTest tests=8.
+  Гейт расширен: scripts/groups-build-gate.ps1 гонял только
+  com.vladimir.messenger.data.group.*, поэтому новые тесты рангов и ссылок в
+  него не попадали вовсе. Теперь в том же тестовом вызове (по-прежнему без
+  assemble) три фильтра: data.group.*, data.file.FileTransferRankPolicyTest и
+  util.*. Ожидание по счётчикам JUnit XML - всего 72 теста:
+    data.group 35 (GroupInviteLinksTest 9, GroupPermissionsTest 13,
+                   GroupWireTest 13 - было 11, два новых на пакет grpdel)
+    FileTransferRankPolicyTest 10 (было 8)
+    util 27 (ContactShareLinkTest 3, ImageLinkDetectorTest 9,
+             InviteLinkParserTest 8, ReferralInviteLinkTest 7)
+  Если в отчёте меньше - значит часть тестов не подхватилась.
