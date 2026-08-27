@@ -30,6 +30,7 @@ object GroupWire {
     const val KIND_PIN = "pin"
     const val KIND_ROSTER = "roster"
     const val KIND_GROUP_DELETED = "grpdel"
+    const val KIND_GROUP_INFO = "info"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -51,6 +52,12 @@ object GroupWire {
             val groupId: String,
             val displayName: String,
             val note: String,
+            /**
+             * Slug ссылки, по которой пришёл человек. По нему владелец находит
+             * пригласительную запись и решает, пускать сразу или ждать одобрения.
+             * У заявок старого образца slug пустой.
+             */
+            val slug: String = "",
         ) : Packet()
 
         data class JoinDecision(
@@ -77,6 +84,24 @@ object GroupWire {
             val groupId: String,
             val entries: List<RosterEntry>,
         ) : Packet()
+
+        /**
+         * Карточка группы: её шлёт владелец человеку, которого только что
+         * принял. Без неё у нового участника нет ни названия, ни владельца —
+         * создать локальную строку группы не из чего, и вступление «проходит»,
+         * но группа не появляется в списке.
+         *
+         * Принимаем только от `ownerId` (проверка в приёмнике).
+         */
+        data class GroupInfo(
+            val groupId: String,
+            val title: String,
+            val about: String,
+            val ownerId: String,
+            val inviteSlug: String,
+            val isPublic: Boolean,
+            val topicsEnabled: Boolean,
+        ) : Packet()
     }
 
     data class RosterEntry(val nodeId: String, val displayName: String, val role: String)
@@ -92,8 +117,14 @@ object GroupWire {
     fun buildTopicCreated(groupId: String, topicId: String, name: String): String =
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}"
 
-    fun buildJoinRequest(groupId: String, displayName: String, note: String): String =
-        "$PREFIX|$KIND_JOIN_REQUEST|$groupId|${encode(displayName)}|${encode(note)}"
+    fun buildJoinRequest(
+        groupId: String,
+        displayName: String,
+        note: String,
+        slug: String = "",
+    ): String =
+        "$PREFIX|$KIND_JOIN_REQUEST|$groupId|${encode(displayName)}|${encode(note)}|" +
+            encode(slug)
 
     fun buildJoinDecision(groupId: String, nodeId: String, approved: Boolean): String =
         "$PREFIX|$KIND_JOIN_DECISION|$groupId|$nodeId|" +
@@ -111,6 +142,21 @@ object GroupWire {
         }
         return "$PREFIX|$KIND_ROSTER|$groupId|$csv"
     }
+
+    /** Карточка группы для нового участника. Все текстовые поля — base64url. */
+    fun buildGroupInfo(
+        groupId: String,
+        title: String,
+        about: String,
+        ownerId: String,
+        inviteSlug: String,
+        isPublic: Boolean,
+        topicsEnabled: Boolean,
+    ): String =
+        "$PREFIX|$KIND_GROUP_INFO|$groupId|" +
+            encode(title) + "|" + encode(about) + "|" + encode(ownerId) + "|" +
+            encode(inviteSlug) + "|" + (if (isPublic) 1 else 0) + "|" +
+            if (topicsEnabled) 1 else 0
 
     // ── Разбор ────────────────────────────────────────────────────────────────
 
@@ -136,10 +182,12 @@ object GroupWire {
                 null
             }
 
-            KIND_JOIN_REQUEST -> if (parts.size == 5) {
+            KIND_JOIN_REQUEST -> if (parts.size == 5 || parts.size == 6) {
                 val name = decode(parts[3]) ?: return null
                 val note = decode(parts[4]) ?: return null
-                if (name.isBlank()) null else Packet.JoinRequest(groupId, name, note)
+                // Заявки старого образца приходили без slug — считаем его пустым.
+                val slug = if (parts.size == 6) decode(parts[5]).orEmpty() else ""
+                if (name.isBlank()) null else Packet.JoinRequest(groupId, name, note, slug)
             } else {
                 null
             }
@@ -177,6 +225,32 @@ object GroupWire {
             KIND_ROSTER -> if (parts.size == 4) {
                 val entries = parseRoster(parts[3]) ?: return null
                 Packet.Roster(groupId, entries)
+            } else {
+                null
+            }
+
+            KIND_GROUP_INFO -> if (parts.size == 9) {
+                val title = decode(parts[3]) ?: return null
+                val about = decode(parts[4]) ?: return null
+                val ownerId = decode(parts[5]) ?: return null
+                val slug = decode(parts[6]).orEmpty()
+                val isPublic = parts[7]
+                val topics = parts[8]
+                if (ownerId.isBlank() || (isPublic != "0" && isPublic != "1") ||
+                    (topics != "0" && topics != "1")
+                ) {
+                    null
+                } else {
+                    Packet.GroupInfo(
+                        groupId = groupId,
+                        title = title,
+                        about = about,
+                        ownerId = ownerId,
+                        inviteSlug = slug,
+                        isPublic = isPublic == "1",
+                        topicsEnabled = topics == "1",
+                    )
+                }
             } else {
                 null
             }

@@ -22,6 +22,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import android.widget.Toast
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
@@ -105,9 +106,9 @@ sealed class Screen(val route: String) {
     data object QrScanner : Screen("qr_scanner")
 
     // Раздел «Группы»
-    data object Groups : Screen("groups?joinSlug={joinSlug}") {
-        fun createJoinRoute(slug: String): String =
-            "groups?joinSlug=" + java.net.URLEncoder.encode(slug, "UTF-8")
+    data object Groups : Screen("groups?joinLink={joinLink}") {
+        fun createJoinRoute(link: String): String =
+            "groups?joinLink=" + java.net.URLEncoder.encode(link, "UTF-8")
     }
 
     data object GroupChat : Screen("group_chat/{groupId}") {
@@ -128,10 +129,23 @@ sealed class Screen(val route: String) {
 @Composable
 fun MessengerNavGraph(
     navController: NavHostController = rememberNavController(),
-    startDestination: String,  // РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ РІ MainActivity (onboarding РёР»Рё chat_list)
+    startDestination: String,
+    /**
+     * Ссылка-приглашение, с которой приложение открыли извне (тап по ссылке,
+     * QR, Telegram). Не null — сразу ведём в раздел «Группы» и пробуем войти.
+     */
+    initialGroupInvite: String? = null,  // РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ РІ MainActivity (onboarding РёР»Рё chat_list)
 ) {
     // Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ Р°РЅРёРјР°С†РёРё РїРµСЂРµС…РѕРґРѕРІ (РјСЃ)
     val transitionDuration = 300
+
+    // Приложение открыли по ссылке-приглашению в группу — ведём в «Группы».
+    LaunchedEffect(initialGroupInvite) {
+        val link = initialGroupInvite
+        if (!link.isNullOrBlank()) {
+            navController.navigate(Screen.Groups.createJoinRoute(link))
+        }
+    }
 
     NavHost(
         navController    = navController,
@@ -357,7 +371,7 @@ fun MessengerNavGraph(
         composable(
             route = Screen.Groups.route,
             arguments = listOf(
-                navArgument("joinSlug") {
+                navArgument("joinLink") {
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null
@@ -369,7 +383,7 @@ fun MessengerNavGraph(
                     navController.navigate(Screen.GroupChat.createRoute(groupId))
                 },
                 onBackClick = { navController.popBackStack() },
-                joinSlug = entry.arguments?.getString("joinSlug"),
+                joinLink = entry.arguments?.getString("joinLink"),
             )
         }
 
@@ -410,10 +424,13 @@ fun MessengerNavGraph(
                     // Раньше отсюда в AddContact уходило то, что осталось после
                     // снятия префикса "p2p://invite/", — формат, которого приложение
                     // не генерирует, поэтому коды групп и контактов не работали.
-                    val groupSlug = GroupInviteLinks.parseSlug(qrContent)
+                    // Проверяем, что это группа, но в навигацию отдаём ВЕСЬ
+                    // прочитанный текст: в ссылке есть id группы и адрес
+                    // владельца, без них с чужого телефона не войти.
+                    val isGroupInvite = GroupInviteLinks.parseTarget(qrContent) != null
                     when {
-                        !groupSlug.isNullOrBlank() ->
-                            navController.navigate(Screen.Groups.createJoinRoute(groupSlug)) {
+                        isGroupInvite ->
+                            navController.navigate(Screen.Groups.createJoinRoute(qrContent)) {
                                 popUpTo(Screen.QrScanner.route) { inclusive = true }
                             }
 
@@ -425,7 +442,7 @@ fun MessengerNavGraph(
                         else -> {
                             Toast.makeText(
                                 scanContext,
-                                "Это не ссылка APUMIR: " + qrContent.take(64),
+                                "Это не ссылка APU: " + qrContent.take(64),
                                 Toast.LENGTH_LONG,
                             ).show()
                             navController.popBackStack()

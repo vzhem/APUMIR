@@ -4,6 +4,8 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPCHATSCREEN.KT — чат группы: темы, сообщения, закрепы
 // =============================================================================
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
@@ -149,16 +152,46 @@ fun GroupChatScreen(
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "Закреплённые" + (pinnedTopicName?.let { " · $it" }.orEmpty()),
+                                "Закреплённые" +
+                                    (pinnedTopicName?.let { " · $it" }.orEmpty()) +
+                                    if (uiState.pinned.size > 1) {
+                                        " (" + uiState.pinned.size + ")"
+                                    } else {
+                                        ""
+                                    },
                                 fontWeight = FontWeight.Medium,
                             )
                         }
-                        uiState.pinned.take(3).forEach { m ->
-                            Text(
-                                m.content,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 2,
-                            )
+                        // Каждое закреплённое сообщение — своей строкой, и рядом
+                        // кнопка «Открепить»: снять закреп можно прямо отсюда,
+                        // не разыскивая сообщение в ленте.
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 168.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            uiState.pinned.forEach { m ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        m.content,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 2,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (uiState.canPin) {
+                                        IconButton(
+                                            onClick = { viewModel.togglePin(m.id, false) },
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.Close,
+                                                contentDescription = "Открепить",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

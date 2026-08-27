@@ -384,15 +384,40 @@ class GroupRepository(
                 if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
                 val existing = groupDao.getJoinRequest(packet.groupId, senderId)
                 if (existing != null && existing.status == "APPROVED") return
-                groupDao.insertJoinRequest(
-                    GroupJoinRequestEntity(
-                        groupId = packet.groupId,
-                        nodeId = senderId,
-                        displayName = packet.displayName,
-                        note = packet.note,
-                        requestedAtMs = clock(),
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                val banned = groupDao.getMember(packet.groupId, senderId)?.isBanned == true
+                if (banned) {
+                    Log.i(TAG, "join request dropped: node is banned, node=$senderId")
+                    return
+                }
+
+                // Ссылку проверяем по СВОЕЙ базе: только у владельца есть её запись.
+                val invite = if (packet.slug.isNotBlank()) {
+                    groupDao.getInviteBySlug(packet.slug)
+                } else {
+                    null
+                }
+                val admitAtOnce = invite != null &&
+                    invite.groupId == packet.groupId &&
+                    !invite.revoked &&
+                    !invite.requestApproval &&
+                    (invite.expiresAtMs == null || invite.expiresAtMs > clock()) &&
+                    (invite.maxUses <= 0 || invite.useCount < invite.maxUses)
+
+                if (admitAtOnce) {
+                    admitMember(group, senderId, packet.displayName, packet.slug)
+                } else {
+                    groupDao.insertJoinRequest(
+                        GroupJoinRequestEntity(
+                            groupId = packet.groupId,
+                            nodeId = senderId,
+                            displayName = packet.displayName,
+                            note = packet.note,
+                            requestedAtMs = clock(),
+                        )
                     )
-                )
+                    Log.i(TAG, "join request queued group=${packet.groupId} node=$senderId")
+                }
             }
 
             is GroupWire.Packet.JoinDecision -> {
@@ -436,6 +461,43 @@ class GroupRepository(
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 if (group.ownerId != senderId) return
                 deleteGroupLocally(packet.groupId)
+            }
+
+            is GroupWire.Packet.GroupInfo -> {
+                // Карточку принимаем только от владельца группы.
+                if (packet.ownerId != senderId) return
+                val current = groupDao.getGroupById(packet.groupId)
+                groupDao.insertGroup(
+                    GroupEntity(
+                        id = packet.groupId,
+                        title = packet.title.ifBlank { "Группа" },
+                        about = packet.about,
+                        ownerId = packet.ownerId,
+                        isPublic = packet.isPublic,
+                        topicsEnabled = packet.topicsEnabled,
+                        createdAtMs = current?.createdAtMs ?: clock(),
+                        memberCount = current?.memberCount ?: 1,
+                        inviteSlug = packet.inviteSlug,
+                        memberPermissions = current?.memberPermissions ?: 0L,
+                        isLeft = false,
+                        lastMessagePreview = current?.lastMessagePreview,
+                        lastMessageAtMs = current?.lastMessageAtMs,
+                        unreadCount = current?.unreadCount ?: 0,
+                    )
+                )
+                if (groupDao.getMember(packet.groupId, me) == null) {
+                    groupDao.insertMember(
+                        GroupMemberEntity(
+                            groupId = packet.groupId,
+                            nodeId = me,
+                            displayName = myDisplayName(),
+                            role = GroupRole.MEMBER,
+                            joinedAtMs = clock(),
+                        )
+                    )
+                    groupDao.refreshMemberCount(packet.groupId)
+                }
+                Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
             }
 
             is GroupWire.Packet.Roster -> {
@@ -511,7 +573,12 @@ class GroupRepository(
         val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val admins = groupDao.getAdmins(groupId)
         if (admins.isEmpty()) return Result.failure(IllegalStateException("В группе нет администраторов"))
-        val envelope = GroupWire.buildJoinRequest(groupId, myDisplayName(), note.trim().take(MAX_NOTE_CHARS))
+        val envelope = GroupWire.buildJoinRequest(
+            groupId = groupId,
+            displayName = myDisplayName(),
+            note = note.trim().take(MAX_NOTE_CHARS),
+            slug = groupDao.getGroupById(groupId)?.inviteSlug.orEmpty(),
+        )
         delivery.deliver(groupId, envelope, admins.map { it.nodeId }.filter { it != me })
         return Result.success(Unit)
     }
@@ -535,31 +602,35 @@ class GroupRepository(
             groupId, nodeId, if (approve) "APPROVED" else "REJECTED", clock(), me,
         )
         if (approve) {
-            groupDao.insertMember(
-                GroupMemberEntity(
-                    groupId = groupId,
-                    nodeId = nodeId,
-                    displayName = request.displayName,
-                    role = GroupRole.MEMBER,
-                    joinedAtMs = clock(),
-                )
+            val group = groupDao.getGroupById(groupId)
+                ?: return Result.failure(IllegalStateException("Группа не найдена"))
+            admitMember(group, nodeId, request.displayName, slug = "")
+        } else {
+            delivery.deliver(
+                groupId,
+                GroupWire.buildJoinDecision(groupId, nodeId, false),
+                listOf(nodeId),
             )
-            groupDao.refreshMemberCount(groupId)
-            publishRoster(groupId)
         }
-        delivery.deliver(groupId, GroupWire.buildJoinDecision(groupId, nodeId, approve), listOf(nodeId))
         return Result.success(Unit)
     }
 
     // ── Ссылки-приглашения и QR ───────────────────────────────────────────────
 
     fun observeInvites(groupId: String): Flow<List<InviteSummary>> =
-        groupDao.observeInvites(groupId).map { list -> list.map { toInviteSummary(it) } }
+        groupDao.observeInvites(groupId).map { list ->
+            val ownerId = groupDao.getGroupById(groupId)?.ownerId
+            list.map { toInviteSummary(it, ownerId) }
+        }
 
-    private fun toInviteSummary(i: GroupInviteEntity) = InviteSummary(
+    /**
+     * Ссылка-приглашение. Кроме slug несёт id группы и адрес владельца — иначе
+     * вступающий телефон не знает, у кого её запрашивать.
+     */
+    private fun toInviteSummary(i: GroupInviteEntity, ownerId: String? = null) = InviteSummary(
         slug = i.slug,
         groupId = i.groupId,
-        link = GroupInviteLinks.build(i.slug),
+        link = GroupInviteLinks.build(i.slug, i.groupId, ownerId),
         createdAtMs = i.createdAtMs,
         expiresAtMs = i.expiresAtMs,
         maxUses = i.maxUses,
@@ -595,7 +666,7 @@ class GroupRepository(
             requestApproval = requestApproval ?: !group.isPublic,
         )
         groupDao.insertInvite(entity)
-        return Result.success(toInviteSummary(entity))
+        return Result.success(toInviteSummary(entity, group.ownerId))
     }
 
     suspend fun revokeInvite(groupId: String, slug: String): Result<Unit> {
@@ -629,13 +700,60 @@ class GroupRepository(
     }
 
     /**
-     * Вступление по ссылке. Публичная группа и ссылка без одобрения — сразу в
-     * участники; иначе создаётся заявка администраторам.
+     * Вступление по ссылке или QR — с ЛЮБОГО телефона.
+     *
+     * Пригласительная запись есть только в базе создателя группы, поэтому искать
+     * её по slug на чужом телефоне бессмысленно: ссылка сама несёт id группы и
+     * адрес владельца. Мы шлём владельцу заявку прямо по этим данным, а он уже
+     * проверяет ссылку у себя и либо пускает сразу, либо показывает заявку в
+     * админ-кабинете.
+     *
+     * Если приглашение всё-таки нашлось локально (владелец открыл собственную
+     * ссылку на своём телефоне) — работаем по старому локальному пути.
+     */
+    suspend fun joinByLink(raw: String, note: String = ""): JoinOutcome {
+        val target = GroupInviteLinks.parseTarget(raw)
+            ?: return JoinOutcome.Failed("Это не ссылка-приглашение в группу")
+        val me = myNodeId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
+
+        // Уже в группе — не шлём повторную заявку.
+        val known = target.groupId?.let { groupDao.getGroupById(it) }
+        if (known != null && !known.isLeft && groupDao.getMember(known.id, me) != null) {
+            return JoinOutcome.Joined(known.id, known.title)
+        }
+
+        // Своя ссылка на своём телефоне: приглашение лежит в локальной базе.
+        if (groupDao.getInviteBySlug(target.slug) != null) return joinBySlug(target.slug, note)
+
+        if (!target.isRoutable) {
+            return JoinOutcome.Failed(
+                "Ссылка старого образца: попросите владельца прислать её заново из раздела «Группы»"
+            )
+        }
+        val groupId = target.groupId.orEmpty()
+        val ownerId = target.ownerId.orEmpty()
+        if (ownerId == me) return JoinOutcome.Failed("Это ваша группа")
+
+        val envelope = GroupWire.buildJoinRequest(
+            groupId = groupId,
+            displayName = myDisplayName(),
+            note = note.trim().take(MAX_NOTE_CHARS),
+            slug = target.slug,
+        )
+        delivery.deliver(groupId, envelope, listOf(ownerId))
+        Log.i(TAG, "join request sent to owner group=$groupId")
+        return JoinOutcome.RequestSent(groupId, "")
+    }
+
+    /**
+     * Вступление по slug, когда приглашение лежит в ЛОКАЛЬНОЙ базе — то есть на
+     * телефоне владельца группы. С чужого телефона сюда попадать не должно:
+     * там работает [joinByLink].
      */
     suspend fun joinBySlug(slug: String, note: String = ""): JoinOutcome {
         val me = myNodeId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
         val invite = groupDao.getInviteBySlug(slug)
-            ?: return JoinOutcome.Failed("Приглашение не найдено")
+            ?: return JoinOutcome.Failed("Приглашение не найдено на этом телефоне")
         if (invite.revoked) return JoinOutcome.Failed("Приглашение отозвано")
         val expired = invite.expiresAtMs != null && invite.expiresAtMs <= clock()
         if (expired) return JoinOutcome.Failed("Приглашение истекло")
@@ -908,6 +1026,55 @@ class GroupRepository(
      */
     private fun effectiveMemberMask(group: GroupEntity): Long =
         if (group.memberPermissions == 0L) GroupPermissions.Member.DEFAULT else group.memberPermissions
+
+    /**
+     * Принять человека в группу и прислать ему всё, без чего группа у него не
+     * появится: карточку группы, состав и решение. Вызывается и при вступлении
+     * по ссылке без одобрения, и при ручном одобрении заявки.
+     */
+    private suspend fun admitMember(
+        group: GroupEntity,
+        nodeId: String,
+        displayName: String,
+        slug: String,
+    ) {
+        groupDao.insertMember(
+            GroupMemberEntity(
+                groupId = group.id,
+                nodeId = nodeId,
+                displayName = displayName,
+                role = GroupRole.MEMBER,
+                joinedAtMs = clock(),
+            )
+        )
+        if (slug.isNotBlank()) groupDao.registerInviteUse(slug)
+        groupDao.refreshMemberCount(group.id)
+        sendGroupInfo(group, nodeId)
+        publishRoster(group.id)
+        delivery.deliver(
+            group.id,
+            GroupWire.buildJoinDecision(group.id, nodeId, true),
+            listOf(nodeId),
+        )
+        Log.i(TAG, "member admitted group=${group.id} node=$nodeId")
+    }
+
+    /** Карточка группы новому участнику: название, описание, владелец, настройки. */
+    private suspend fun sendGroupInfo(group: GroupEntity, nodeId: String) {
+        delivery.deliver(
+            group.id,
+            GroupWire.buildGroupInfo(
+                groupId = group.id,
+                title = group.title,
+                about = group.about,
+                ownerId = group.ownerId,
+                inviteSlug = group.inviteSlug,
+                isPublic = group.isPublic,
+                topicsEnabled = group.topicsEnabled,
+            ),
+            listOf(nodeId),
+        )
+    }
 
     private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
         val me = myNodeId().orEmpty()

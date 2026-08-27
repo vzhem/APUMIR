@@ -37,6 +37,59 @@ class GroupWireTest {
     }
 
     @Test
+    fun joinRequestCarriesInviteSlug() {
+        val parsed = GroupWire.parse(
+            GroupWire.buildJoinRequest("g", "Стас", "пустите", "AbCdEf2345678901")
+        )
+        assertTrue(parsed is GroupWire.Packet.JoinRequest)
+        assertEquals("AbCdEf2345678901", (parsed as GroupWire.Packet.JoinRequest).slug)
+    }
+
+    @Test
+    fun joinRequestFromOlderBuildStillParses() {
+        // Заявка старого образца приходит без slug — её нельзя отбрасывать,
+        // иначе заявка просто потеряется.
+        val enc = java.util.Base64.getUrlEncoder().withoutPadding()
+        val name = enc.encodeToString("Аня".toByteArray(Charsets.UTF_8))
+        val note = enc.encodeToString("привет".toByteArray(Charsets.UTF_8))
+        val parsed = GroupWire.parse("APUGRP1|req|g|$name|$note")
+        assertTrue(parsed is GroupWire.Packet.JoinRequest)
+        assertEquals("", (parsed as GroupWire.Packet.JoinRequest).slug)
+    }
+
+    @Test
+    fun groupInfoRoundTrip() {
+        val envelope = GroupWire.buildGroupInfo(
+            groupId = "grp-1",
+            title = "Работа | важная",
+            about = "описание\nна две строки",
+            ownerId = "pk_owner",
+            inviteSlug = "AbCdEf2345678901",
+            isPublic = true,
+            topicsEnabled = false,
+        )
+        assertTrue(envelope.length <= GroupWire.MAX_ENVELOPE_BYTES)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.GroupInfo)
+        val info = parsed as GroupWire.Packet.GroupInfo
+        assertEquals("grp-1", info.groupId)
+        assertEquals("Работа | важная", info.title)
+        assertEquals("описание\nна две строки", info.about)
+        assertEquals("pk_owner", info.ownerId)
+        assertEquals("AbCdEf2345678901", info.inviteSlug)
+        assertTrue(info.isPublic)
+        assertFalse(info.topicsEnabled)
+    }
+
+    @Test
+    fun groupInfoWithoutOwnerIsRejected() {
+        // Карточка без владельца бесполезна: по ней нельзя проверить отправителя.
+        val enc = java.util.Base64.getUrlEncoder().withoutPadding()
+        val t = enc.encodeToString("Т".toByteArray(Charsets.UTF_8))
+        assertNull(GroupWire.parse("APUGRP1|info|grp-1|$t|$t||$t|1|1"))
+    }
+
+    @Test
     fun joinDecisionCarriesVerdict() {
         val approved = GroupWire.parse(GroupWire.buildJoinDecision("g", "pk_abc", true))
         assertTrue(approved is GroupWire.Packet.JoinDecision)

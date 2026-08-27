@@ -30,8 +30,21 @@ object GroupInviteLinks {
         return sb.toString()
     }
 
-    /** Основная ссылка — её показываем текстом и кодируем в QR. */
-    fun build(slug: String): String = APP_LINK_PREFIX + slug
+    /**
+     * Основная ссылка — её показываем текстом и кодируем в QR.
+     *
+     * Кроме slug ссылка несёт id группы (`g`) и адрес владельца (`o`): без них
+     * вступающий телефон не знает, у кого спрашивать группу. Пригласительная
+     * запись живёт только в базе создателя, поэтому «найти приглашение по
+     * slug» на чужом телефоне невозможно — ссылка обязана быть самодостаточной.
+     * Оба параметра необязательны: старая ссылка без них тоже разбирается.
+     */
+    fun build(slug: String, groupId: String? = null, ownerId: String? = null): String {
+        val sb = StringBuilder(APP_LINK_PREFIX).append(slug)
+        if (!groupId.isNullOrBlank()) sb.append("&g=").append(groupId)
+        if (!ownerId.isNullOrBlank()) sb.append("&o=").append(ownerId)
+        return sb.toString()
+    }
 
     fun buildTelegramLink(slug: String): String =
         "https://t.me/" + TELEGRAM_BOT_USERNAME + "?start=" + TELEGRAM_START_PREFIX + slug
@@ -42,31 +55,69 @@ object GroupInviteLinks {
             slug.all { it in SLUG_ALPHABET }
 
     /**
+     * Разобранная ссылка-приглашение. `groupId` и `ownerId` есть только в
+     * ссылках нового образца — без них вступить с другого телефона нельзя.
+     */
+    data class InviteTarget(
+        val slug: String,
+        val groupId: String?,
+        val ownerId: String?,
+    ) {
+        /** Хватает ли данных, чтобы попросить группу по сети. */
+        val isRoutable: Boolean
+            get() = !groupId.isNullOrBlank() && !ownerId.isNullOrBlank()
+    }
+
+    /**
      * Достаёт slug из любой поддерживаемой формы. Возвращает null, если строка
      * не похожа на приглашение в группу — тогда её не надо путать с личным
      * приглашением контакта.
      */
-    fun parseSlug(raw: String?): String? {
+    fun parseSlug(raw: String?): String? = parseTarget(raw)?.slug
+
+    /**
+     * Полная разборка ссылки: slug плюс, если они есть, id группы и адрес
+     * владельца. Принимает и голый slug (старый QR, вставка из буфера).
+     */
+    fun parseTarget(raw: String?): InviteTarget? {
         val text = raw?.trim().orEmpty()
         if (text.isBlank()) return null
 
+        // Голый slug без схемы — старый образец ссылки.
+        normalizeSlug(text)?.let { return InviteTarget(it, null, null) }
+
         if (text.startsWith(SHORT_LINK_PREFIX)) {
-            return normalizeSlug(text.removePrefix(SHORT_LINK_PREFIX))
+            val rest = text.removePrefix(SHORT_LINK_PREFIX)
+            val slug = normalizeSlug(rest.substringBefore('?')) ?: return null
+            val query = if (rest.contains('?')) rest.substringAfter('?') else ""
+            return InviteTarget(slug, queryParam(query, "g"), queryParam(query, "o"))
         }
 
         return try {
             val uri = URI(text)
-            when (uri.scheme?.lowercase()) {
+            val slug = when (uri.scheme?.lowercase()) {
                 "p2pmessenger" -> {
                     if (!uri.host.equals("group", ignoreCase = true)) return null
                     parseQuerySlug(uri.rawQuery)
                 }
                 "https", "http" -> parseTelegramStart(uri.rawQuery)
                 else -> null
-            }
+            } ?: return null
+            InviteTarget(slug, queryParam(uri.rawQuery, "g"), queryParam(uri.rawQuery, "o"))
         } catch (_: Exception) {
             null
         }
+    }
+
+    /** Один параметр запроса по имени; null, если его нет или он пустой. */
+    private fun queryParam(query: String?, name: String): String? {
+        if (query.isNullOrBlank()) return null
+        val value = query.split('&')
+            .map { it.split('=', limit = 2) }
+            .firstOrNull { it.size == 2 && it[0].equals(name, ignoreCase = true) }
+            ?.get(1)?.trim()
+            .orEmpty()
+        return value.ifBlank { null }
     }
 
     private fun parseQuerySlug(query: String?): String? {

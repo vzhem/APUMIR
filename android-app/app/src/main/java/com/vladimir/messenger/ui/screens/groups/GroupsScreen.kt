@@ -63,8 +63,8 @@ import com.vladimir.messenger.data.group.GroupSummary
 fun GroupsScreen(
     onGroupClick: (groupId: String) -> Unit,
     onBackClick: () -> Unit,
-    /** Короткий код группы из ссылки-приглашения или QR: сразу пробуем войти. */
-    joinSlug: String? = null,
+    /** Ссылка-приглашение из QR или из внешнего открытия: сразу пробуем войти. */
+    joinLink: String? = null,
     viewModel: GroupsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -72,8 +72,8 @@ fun GroupsScreen(
     var showRankHint by remember { mutableStateOf(false) }
     var showJoin by remember { mutableStateOf(false) }
 
-    LaunchedEffect(joinSlug) {
-        if (!joinSlug.isNullOrBlank()) viewModel.joinBySlug(joinSlug)
+    LaunchedEffect(joinLink) {
+        if (!joinLink.isNullOrBlank()) viewModel.joinByLink(joinLink)
     }
 
     Scaffold(
@@ -176,9 +176,9 @@ fun GroupsScreen(
     if (showJoin) {
         JoinByLinkDialog(
             onDismiss = { showJoin = false },
-            onSubmit = { slug ->
+            onSubmit = { link ->
                 showJoin = false
-                viewModel.joinBySlug(slug)
+                viewModel.joinByLink(link)
             },
         )
     }
@@ -324,7 +324,7 @@ private fun CreateGroupDialog(
 @Composable
 private fun JoinByLinkDialog(
     onDismiss: () -> Unit,
-    onSubmit: (slug: String) -> Unit,
+    onSubmit: (link: String) -> Unit,
 ) {
     var link by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -342,7 +342,8 @@ private fun JoinByLinkDialog(
                     },
                     label = { Text("Ссылка-приглашение") },
                     placeholder = { Text("p2pmessenger://group?slug=...") },
-                    singleLine = true,
+                    // Ссылка длинная (в ней адрес владельца) — даём ей переноситься.
+                    maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 error?.let {
@@ -357,11 +358,13 @@ private fun JoinByLinkDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    val slug = GroupInviteLinks.parseSlug(link)
-                    if (slug == null) {
+                    // Проверяем, что это приглашение в группу, но отдаём ВСЮ
+                    // ссылку: в ней id группы и адрес владельца, без них войти
+                    // с другого телефона нельзя.
+                    if (GroupInviteLinks.parseTarget(link) == null) {
                         error = "Не похоже на ссылку-приглашение в группу"
                     } else {
-                        onSubmit(slug)
+                        onSubmit(link.trim())
                     }
                 },
             ) { Text("Войти") }

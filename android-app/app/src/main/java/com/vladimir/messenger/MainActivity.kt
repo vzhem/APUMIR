@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
 import com.vladimir.messenger.ui.update.UpdateDialog
@@ -59,6 +60,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private var pendingContactInfo by mutableStateOf<Triple<String, String, String>?>(null)
+
+    /** Ссылка-приглашение в группу: сначала спрашиваем разрешение, потом ведём в «Группы». */
+    private var pendingGroupInviteLink by mutableStateOf<String?>(null)
+    private var pendingGroupInvite by mutableStateOf<String?>(null)
     private var updateRelease by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
     private var lastHandledInviteUri: String? = null
     private val viewModel: MainViewModel by viewModels()
@@ -78,6 +83,16 @@ class MainActivity : ComponentActivity() {
         val uri: Uri = intent?.data ?: return
         val rawUri = uri.toString()
         if (rawUri == lastHandledInviteUri) return
+
+        // Ссылка-приглашение в группу. Разбираем ДО личных приглашений: у них
+        // общая схема p2pmessenger://, различается только host (add / group).
+        val groupInvite = GroupInviteLinks.parseTarget(rawUri)
+        if (groupInvite != null) {
+            lastHandledInviteUri = rawUri
+            pendingGroupInviteLink = rawUri
+            Log.i("MainActivity", "Group invite link accepted")
+            return
+        }
 
         val verifiedReferral = VerifiedReferralInviteLink.verify(rawUri)
         if (verifiedReferral != null) {
@@ -186,6 +201,33 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
+                val pendingGroupLink = pendingGroupInviteLink
+                if (pendingGroupLink != null) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { pendingGroupInviteLink = null },
+                        title = { androidx.compose.material3.Text("Войти в группу?") },
+                        text = {
+                            androidx.compose.material3.Text(
+                                "Открыта ссылка-приглашение в группу. " +
+                                    "Отправить заявку на вступление?"
+                            )
+                        },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(onClick = {
+                                pendingGroupInviteLink = null
+                                pendingGroupInvite = pendingGroupLink
+                            }) {
+                                androidx.compose.material3.Text("Войти")
+                            }
+                        },
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = { pendingGroupInviteLink = null }) {
+                                androidx.compose.material3.Text("Отмена")
+                            }
+                        }
+                    )
+                }
+
                 // иалог обновления
                 val currentUpdate = updateRelease
                 if (currentUpdate != null) {
@@ -225,7 +267,8 @@ class MainActivity : ComponentActivity() {
                         startDestination = if (uiState.hasIdentity)
                             Screen.ChatList.route
                         else
-                            Screen.Onboarding.route
+                            Screen.Onboarding.route,
+                        initialGroupInvite = pendingGroupInvite,
                     )
                 }
             }

@@ -29,6 +29,41 @@ class GroupInviteLinksTest {
     }
 
     @Test
+    fun fullLinkCarriesGroupAndOwner() {
+        // Без id группы и адреса владельца вступающий телефон не знает, у кого
+        // спрашивать группу, — ссылка обязана нести их в себе.
+        val slug = GroupInviteLinks.newSlug()
+        val link = GroupInviteLinks.build(slug, "grp-1", "pk_owner")
+        val target = GroupInviteLinks.parseTarget(link)
+        assertTrue(target != null)
+        assertEquals(slug, target!!.slug)
+        assertEquals("grp-1", target.groupId)
+        assertEquals("pk_owner", target.ownerId)
+        assertTrue(target.isRoutable)
+        assertEquals(slug, GroupInviteLinks.parseSlug(link))
+    }
+
+    @Test
+    fun oldLinkWithoutOwnerIsNotRoutable() {
+        val slug = GroupInviteLinks.newSlug()
+        val target = GroupInviteLinks.parseTarget(GroupInviteLinks.build(slug))
+        assertTrue(target != null)
+        assertEquals(slug, target!!.slug)
+        assertNull(target.groupId)
+        assertNull(target.ownerId)
+        assertFalse(target.isRoutable)
+    }
+
+    @Test
+    fun bareSlugIsAcceptedButNotRoutable() {
+        val slug = GroupInviteLinks.newSlug()
+        val target = GroupInviteLinks.parseTarget(slug)
+        assertTrue(target != null)
+        assertEquals(slug, target!!.slug)
+        assertFalse(target.isRoutable)
+    }
+
+    @Test
     fun shortLinkRoundTrip() {
         val slug = GroupInviteLinks.newSlug()
         assertEquals(slug, GroupInviteLinks.parseSlug(GroupInviteLinks.SHORT_LINK_PREFIX + slug))

@@ -87,14 +87,14 @@ class GroupsViewModel @Inject constructor(
     }
 
     /**
-     * Вход в группу по короткому коду из ссылки-приглашения или QR.
-     * Публичная группа — сразу участник; частная — уйдёт заявка.
+     * Вход в группу по ссылке или QR — с любого телефона.
+     * Ссылка без одобрения — сразу участник; иначе владельцу уходит заявка.
      */
-    fun joinBySlug(slug: String) {
-        if (slug.isBlank() || _uiState.value.joining) return
+    fun joinByLink(raw: String) {
+        if (raw.isBlank() || _uiState.value.joining) return
         viewModelScope.launch {
             _uiState.update { it.copy(joining = true, joinMessage = null, joinedGroupId = null) }
-            val outcome = groupRepository.joinBySlug(slug)
+            val outcome = groupRepository.joinByLink(raw)
             when (outcome) {
                 is JoinOutcome.Joined -> _uiState.update {
                     it.copy(
@@ -104,9 +104,15 @@ class GroupsViewModel @Inject constructor(
                     )
                 }
                 is JoinOutcome.RequestSent -> _uiState.update {
+                    val where = if (outcome.title.isBlank()) {
+                        "группу"
+                    } else {
+                        "«" + outcome.title + "»"
+                    }
                     it.copy(
                         joining = false,
-                        joinMessage = "Заявка в «" + outcome.title + "» отправлена, ждёт решения администратора",
+                        joinMessage = "Заявка в $where отправлена владельцу. " +
+                            "Как только он её одобрит, группа появится в списке.",
                     )
                 }
                 is JoinOutcome.Failed -> _uiState.update {

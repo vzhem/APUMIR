@@ -87,6 +87,24 @@
                       android:host="add" />
             </intent-filter>
 
+            <!-- Ссылка-приглашение в группу: p2pmessenger://group?slug=... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="p2pmessenger"
+                      android:host="group" />
+            </intent-filter>
+
+            <!-- Короткая форма той же ссылки: p2p://group/<slug> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="p2p"
+                      android:host="group" />
+            </intent-filter>
+
         </activity>
 
         <!-- Foreground Service -->
