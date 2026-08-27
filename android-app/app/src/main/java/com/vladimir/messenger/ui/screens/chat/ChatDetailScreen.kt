@@ -145,7 +145,14 @@ fun ChatDetailScreen(
                 onTextChange = viewModel::onInputTextChanged,
                 onSend       = viewModel::onSendMessage,
                 isSending    = uiState.isSending,
-                onAttach     = { filePicker.launch(arrayOf("*/*")) },
+                canAttach    = uiState.canSendAttachments,
+                onAttach     = {
+                    if (uiState.canSendAttachments) {
+                        filePicker.launch(arrayOf("*/*"))
+                    } else {
+                        viewModel.onAttachmentsLocked()
+                    }
+                },
                 isPreparingFile = uiState.isPreparingFile,
             )
         },
@@ -313,6 +320,7 @@ private fun MessageInputBar(
     isSending: Boolean,
     onAttach: () -> Unit = {},
     isPreparingFile: Boolean = false,
+    canAttach: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -339,8 +347,16 @@ private fun MessageInputBar(
                 } else {
                     Icon(
                         Icons.Default.AttachFile,
-                        contentDescription = "Прикрепить файл",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        contentDescription = if (canAttach) {
+                            "Прикрепить файл"
+                        } else {
+                            "Вложения откроются с ранга «Круг друзей»"
+                        },
+                        tint = if (canAttach) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        },
                     )
                 }
             }

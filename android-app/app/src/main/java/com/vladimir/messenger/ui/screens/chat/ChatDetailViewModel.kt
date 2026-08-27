@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileTransferRouter
 import com.vladimir.messenger.data.file.OutgoingFilePreparationService
 import com.vladimir.messenger.data.local.dao.FileTransferDao
@@ -36,6 +37,9 @@ data class ChatDetailUiState(
     val isContactOnline: Boolean = false,
     val scrollToBottom: Boolean = false,
     val pendingSave: FileTransferEntity? = null,
+    /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
+    val canSendAttachments: Boolean = true,
+    val attachmentsLockedHint: String = "",
 )
 
 @HiltViewModel
@@ -58,9 +62,36 @@ class ChatDetailViewModel @Inject constructor(
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
     init {
+        refreshAttachmentRights()
         loadMessages()
         observeTransfers()
         markAsRead()
+    }
+
+    /**
+     * Отправка файлов, фото, видео, GIF и стикеров открывается с ранга
+     * «Круг друзей» (3 подтверждённых приглашения). Текст доступен всегда.
+     */
+    private fun refreshAttachmentRights() {
+        val qualified = ReferralRankStore.qualifiedDirectCount(appContext)
+        val allowed = FileTransferRankPolicy.canSendAttachments(qualified)
+        _uiState.update {
+            it.copy(
+                canSendAttachments = allowed,
+                attachmentsLockedHint = if (allowed) {
+                    ""
+                } else {
+                    "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
+                        "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified. " +
+                        "Текстовые сообщения доступны без ограничений."
+                },
+            )
+        }
+    }
+
+    /** Тап по скрепке при закрытых вложениях: объясняем, а не открываем выбор файла. */
+    fun onAttachmentsLocked() {
+        _uiState.update { it.copy(error = it.attachmentsLockedHint) }
     }
 
     private fun loadMessages() {
@@ -141,6 +172,11 @@ class ChatDetailViewModel @Inject constructor(
      */
     fun onFileSelected(uri: Uri) {
         if (_uiState.value.isPreparingFile) return
+        // Второй рубеж: даже если кнопку обошли, подготовка файла не пройдёт.
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isPreparingFile = true) }
             var targetRecipientId: String? = null

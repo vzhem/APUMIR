@@ -2,7 +2,15 @@ package com.vladimir.messenger.data.file
 
 /**
  * Community feature ranks based on qualified direct referrals.
- * Sending/receiving media, text, security and transport priority are never rank-gated.
+ *
+ * Решение владельца от 2026-08-27: текстовые сообщения доступны всегда, а
+ * отправка файлов, фото, видео, GIF и стикеров открывается с третьего
+ * подтверждённого приглашения (ранг «Круг друзей»). До этого отправка медиа
+ * рангом не ограничивалась вовсе.
+ *
+ * Приём входящих файлов рангом не ограничивается никогда: иначе чужой ранг
+ * решал бы, увидите вы уже отправленное вам или нет. Размер файла рангом не
+ * ограничивается тоже — только сама возможность отправить не-текст.
  */
 object FileTransferRankPolicy {
     enum class Category { PHOTO, FILE, VIDEO }
@@ -16,13 +24,18 @@ object FileTransferRankPolicy {
         val canUseManualProxy: Boolean get() = minimumQualifiedReferrals >= 1
         val canCreateChannel: Boolean get() = minimumQualifiedReferrals >= 30
 
+        /** Отправка файлов, фото, видео, GIF и стикеров. Текст — без ограничений. */
+        val canSendAttachments: Boolean get() = minimumQualifiedReferrals >= 3
+
         fun unlockedFeatureSummary(): List<String> = buildList {
             add("Текстовые сообщения")
             add("Вступление в группы и каналы")
             add("Получение файлов, фото и видео")
-            add("Отправка фото")
-            add("Отправка файлов")
-            add("Отправка видео")
+            if (canSendAttachments) {
+                add("Отправка фото")
+                add("Отправка файлов")
+                add("Отправка видео")
+            }
             if (canCreateGroup) add("Создание групп")
             if (canUseManualProxy) add("Ручное добавление прокси")
             if (canUseAutomaticProxy) add("Автосбор и автоматический выбор прокси")
@@ -57,15 +70,26 @@ object FileTransferRankPolicy {
         else -> Category.FILE
     }
 
+    /**
+     * Проверка перед отправкой вложения. Размер и тип файла рангом не
+     * ограничены, ограничена сама возможность отправить что-то кроме текста.
+     * Сообщение об отказе показывается владельцу дословно, поэтому оно на
+     * русском и говорит, чего не хватает.
+     */
     fun requireCanSend(
         qualifiedDirectReferrals: Int,
         mediaType: String,
         sizeBytes: Long,
     ): Entitlement {
         require(sizeBytes >= 0)
-        // File transfer is basic communication: rank never gates category or byte length.
         require(mediaType.isNotBlank())
-        return entitlement(qualifiedDirectReferrals)
+        val current = entitlement(qualifiedDirectReferrals)
+        check(current.canSendAttachments) {
+            "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
+                "это 3 подтверждённых приглашения. Сейчас подтверждено: " +
+                "$qualifiedDirectReferrals. Текстовые сообщения доступны без ограничений."
+        }
+        return current
     }
 
     fun canCreateGroup(qualifiedDirectReferrals: Int): Boolean =
@@ -79,6 +103,10 @@ object FileTransferRankPolicy {
 
     fun canUseManualProxy(qualifiedDirectReferrals: Int): Boolean =
         entitlement(qualifiedDirectReferrals).canUseManualProxy
+
+    /** Для интерфейса: показывать ли кнопку вложения и что писать в подсказке. */
+    fun canSendAttachments(qualifiedDirectReferrals: Int): Boolean =
+        entitlement(qualifiedDirectReferrals).canSendAttachments
 
     /** Basic communication and joining communities remain available immediately after install. */
     fun canSendTextAtAnyRank(): Boolean = true

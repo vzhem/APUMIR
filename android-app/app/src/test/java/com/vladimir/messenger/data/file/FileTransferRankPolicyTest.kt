@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.file
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,19 +33,38 @@ class FileTransferRankPolicyTest {
     }
 
     @Test
-    fun photoFileAndVideoSendingIsAvailableAtEveryRank() {
-        canSend(0, "image/jpeg", 1)
-        canSend(0, "application/pdf", 1)
-        canSend(0, "video/mp4", 1)
-        canSend(1, "application/pdf", 1)
+    fun attachmentSendingOpensAtThirdQualifiedReferral() {
+        // Раньше медиа отправлялось на любом ранге. Решение владельца от
+        // 2026-08-27: до «Круга друзей» доступен только текст.
+        listOf(0, 1, 2).forEach { rank ->
+            assertThrows(IllegalStateException::class.java) {
+                FileTransferRankPolicy.requireCanSend(rank, "image/jpeg", 1)
+            }
+            assertFalse(FileTransferRankPolicy.canSendAttachments(rank))
+        }
+        canSend(3, "image/jpeg", 1)
+        canSend(3, "application/pdf", 1)
         canSend(3, "video/mp4", 1)
+        canSend(1_000, "image/gif", 1)
+        assertTrue(FileTransferRankPolicy.canSendAttachments(3))
+    }
+
+    @Test
+    fun refusalMessageExplainsWhatIsMissing() {
+        val failure = assertThrows(IllegalStateException::class.java) {
+            FileTransferRankPolicy.requireCanSend(1, "image/gif", 1)
+        }
+        val message = failure.message.orEmpty()
+        assertTrue(message.contains("Круг друзей"))
+        assertTrue(message.contains("Текстовые сообщения доступны"))
     }
 
     @Test
     fun rankDoesNotCapFileBytes() {
+        // Ранг открывает саму отправку, но размер не ограничивает никогда.
         val mib = 1024L * 1024
-        canSend(0, "image/png", Long.MAX_VALUE)
-        canSend(1, "application/zip", 10 * mib + 1)
+        canSend(3, "image/png", Long.MAX_VALUE)
+        canSend(3, "application/zip", 10 * mib + 1)
         canSend(10, "video/mp4", Long.MAX_VALUE)
         assertEquals("Проводник", FileTransferRankPolicy.entitlement(10).rankName)
     }
@@ -54,8 +75,10 @@ class FileTransferRankPolicyTest {
             FileTransferRankPolicy.Category.FILE,
             FileTransferRankPolicy.categoryFor("application/octet-stream"),
         )
-        canSend(0, "application/octet-stream", 1)
-        canSend(1, "application/octet-stream", 1)
+        canSend(3, "application/octet-stream", 1)
+        assertThrows(IllegalStateException::class.java) {
+            FileTransferRankPolicy.requireCanSend(2, "application/octet-stream", 1)
+        }
     }
 
     @Test
@@ -95,12 +118,24 @@ class FileTransferRankPolicyTest {
         val base = FileTransferRankPolicy.entitlement(0).unlockedFeatureSummary()
         assertTrue("Текстовые сообщения" in base)
         assertTrue("Вступление в группы и каналы" in base)
+        // Приём входящих не ограничивается рангом отправителя или получателя.
         assertTrue("Получение файлов, фото и видео" in base)
-        assertTrue("Отправка фото" in base)
-        assertTrue("Отправка файлов" in base)
-        assertTrue("Отправка видео" in base)
+        // А отправка до «Круга друзей» закрыта, поэтому в списке её нет.
+        assertTrue("Отправка фото" !in base)
+        assertTrue("Отправка файлов" !in base)
+        assertTrue("Отправка видео" !in base)
         assertTrue("Создание групп" !in base)
         assertTrue("Создание каналов" !in base)
+    }
+
+    @Test
+    fun attachmentSendingAppearsInSummaryFromThirdRank() {
+        val second = FileTransferRankPolicy.entitlement(2).unlockedFeatureSummary()
+        assertTrue("Отправка файлов" !in second)
+        val circle = FileTransferRankPolicy.entitlement(3).unlockedFeatureSummary()
+        assertTrue("Отправка фото" in circle)
+        assertTrue("Отправка файлов" in circle)
+        assertTrue("Отправка видео" in circle)
     }
 
     @Test

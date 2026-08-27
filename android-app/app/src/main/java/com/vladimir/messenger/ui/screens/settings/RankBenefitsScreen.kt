@@ -87,7 +87,8 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                         Text(current.rankName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text("Подтверждённых друзей: $qualified")
                         Text(
-                            "Текст, отправка и получение файлов, вступление в группы/каналы доступны без ранга. " +
+                            "Без ранга: текст, получение файлов и вступление в группы/каналы. " +
+                                "Отправка файлов, фото и видео — с 3 подтверждённых приглашений. " +
                                 "Засчитываются только прямые приглашения после handshake и DELIVERED.",
                             style = MaterialTheme.typography.bodySmall,
                         )
