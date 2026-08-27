@@ -6,11 +6,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import android.content.Intent
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.ContactShareLink
+import com.vladimir.messenger.util.OwnInvite
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -29,19 +32,30 @@ fun ContactsScreen(
     viewModel: ContactsViewModel = hiltViewModel()
 ) {
     val contacts by viewModel.contacts.collectAsState()
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Contacts") },
+                title = { Text("Контакты") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
                     }
                 },
                 actions = {
+                    // Пригласить друга — в один тап, прямо из списка контактов.
+                    IconButton(
+                        onClick = {
+                            OwnInvite.link(context)?.let { link ->
+                                AppShare.shareInvite(context, OwnInvite.displayName(context), link)
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Пригласить друга")
+                    }
                     IconButton(onClick = onAddContactClick) {
-                        Icon(Icons.Default.Add, contentDescription = "Add contact")
+                        Icon(Icons.Default.Add, contentDescription = "Добавить контакт")
                     }
                 }
             )
@@ -59,7 +73,7 @@ fun ContactsScreen(
                     verticalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        text = "No contacts yet",
+                        text = "Пока нет контактов",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -67,7 +81,20 @@ fun ContactsScreen(
                     Button(onClick = onAddContactClick) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Add contact")
+                        Text("Добавить контакт")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Пустой список - самое место, чтобы позвать первого друга.
+                    OutlinedButton(
+                        onClick = {
+                            OwnInvite.link(context)?.let { link ->
+                                AppShare.shareInvite(context, OwnInvite.displayName(context), link)
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Пригласить друга")
                     }
                 }
             }

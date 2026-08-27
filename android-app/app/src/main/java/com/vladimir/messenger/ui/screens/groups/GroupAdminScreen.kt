@@ -7,8 +7,6 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
-import android.content.Context
-import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -65,6 +63,7 @@ import com.vladimir.messenger.data.group.InviteSummary
 import com.vladimir.messenger.data.group.JoinRequestSummary
 import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
+import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.QrCodeGenerator
 
 private val TABS = listOf(
@@ -135,6 +134,7 @@ fun GroupAdminScreen(
 
                 4 -> InvitesTab(
                     invites = uiState.invites,
+                    groupTitle = uiState.group?.title.orEmpty(),
                     isPublic = uiState.group?.isPublic == true,
                     onCreate = viewModel::createInvite,
                     onRevoke = viewModel::revokeInvite,
@@ -450,6 +450,7 @@ private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, B
 @Composable
 private fun InvitesTab(
     invites: List<InviteSummary>,
+    groupTitle: String,
     isPublic: Boolean,
     onCreate: (Boolean) -> Unit,
     onRevoke: (String) -> Unit,
@@ -471,6 +472,7 @@ private fun InvitesTab(
         items(invites, key = { it.slug }) { invite ->
             InviteCard(
                 invite = invite,
+                groupTitle = groupTitle,
                 onRevoke = { onRevoke(invite.slug) },
                 onDelete = { onDelete(invite.slug) },
             )
@@ -486,6 +488,7 @@ private fun InvitesTab(
 @Composable
 private fun InviteCard(
     invite: InviteSummary,
+    groupTitle: String,
     onRevoke: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -528,7 +531,7 @@ private fun InviteCard(
                 TextButton(onClick = { clipboard.setText(AnnotatedString(invite.link)) }) {
                     Text("Копировать")
                 }
-                TextButton(onClick = { shareInviteLink(context, invite.link) }) {
+                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.link) }) {
                     Text("Поделиться")
                 }
                 if (invite.revoked) {
@@ -541,14 +544,6 @@ private fun InviteCard(
     }
 }
 
-/** Отдать ссылку системному меню «Поделиться»: там и мессенджеры, и почта. */
-private fun shareInviteLink(context: Context, link: String) {
-    val send = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_TEXT, link)
-    }
-    context.startActivity(Intent.createChooser(send, "Поделиться ссылкой-приглашением"))
-}
 
 @Composable
 private fun StatsTab(stats: GroupStats?, topics: List<TopicSummary>) {

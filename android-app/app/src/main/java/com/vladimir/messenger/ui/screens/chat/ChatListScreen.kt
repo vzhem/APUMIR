@@ -33,10 +33,9 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.QrCode2
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalContext
-import android.content.Intent
+import com.vladimir.messenger.ui.components.InviteShareCard
+import com.vladimir.messenger.util.OwnInvite
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +56,9 @@ fun ChatListScreen(
     var showInviteDialog by remember { mutableStateOf(false) }
     var showConnectDialog by remember { mutableStateOf(false) }
     var inviteLink by remember { mutableStateOf("") }
+    var inviteName by remember { mutableStateOf("") }
     var connectLink by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -148,9 +149,16 @@ fun ChatListScreen(
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Поделиться приглашением") },
+                                        leadingIcon = { Icon(Icons.Default.Share, null) },
                                         onClick = {
                                             menuOpen = false
-                                            inviteLink = RustBridge.generateInvite()
+                                            // Одна и та же ссылка во всём приложении.
+                                            // RustBridge.generateInvite() остаётся запасным
+                                            // путём: он отдаёт p2pm://connect со вшитым IP,
+                                            // который устареет, и без имени владельца.
+                                            inviteLink = OwnInvite.link(context)
+                                                ?: RustBridge.generateInvite()
+                                            inviteName = OwnInvite.displayName(context)
                                             showInviteDialog = true
                                         },
                                     )
@@ -241,34 +249,22 @@ fun ChatListScreen(
 
     // Invite dialog
     if (showInviteDialog) {
-        val clipboardManager = LocalClipboardManager.current
-        val context = LocalContext.current
         AlertDialog(
             onDismissRequest = { showInviteDialog = false },
-            title = { Text("ой адрес для подключения") },
+            // Текст здесь был побит: «ой адрес», «тправьте», «опировать», «оделиться».
+            title = { Text("Мой адрес для подключения") },
             text = {
                 Column {
-                    Text("тправьте эту ссылку собеседнику:", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(inviteLink, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth())
+                    Text(
+                        "Отправьте эту ссылку собеседнику или покажите ему QR-код:",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = {
-                            clipboardManager.setText(AnnotatedString(inviteLink))
-                        }) { Text("опировать") }
-                        TextButton(onClick = {
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, inviteLink)
-                                type = "text/plain"
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "оделиться"))
-                        }) { Text("оделиться") }
-                    }
+                    InviteShareCard(link = inviteLink, displayName = inviteName)
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showInviteDialog = false }) { Text("OK") }
+                TextButton(onClick = { showInviteDialog = false }) { Text("Закрыть") }
             },
         )
     }
