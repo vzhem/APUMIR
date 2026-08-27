@@ -129,12 +129,13 @@ sealed class Screen(val route: String) {
 @Composable
 fun MessengerNavGraph(
     navController: NavHostController = rememberNavController(),
+    // Определяется в MainActivity: onboarding или chat_list
     startDestination: String,
     /**
      * Ссылка-приглашение, с которой приложение открыли извне (тап по ссылке,
      * QR, Telegram). Не null — сразу ведём в раздел «Группы» и пробуем войти.
      */
-    initialGroupInvite: String? = null,  // РћРїСЂРµРґРµР»СЏРµС‚СЃСЏ РІ MainActivity (onboarding РёР»Рё chat_list)
+    initialGroupInvite: String? = null,
 ) {
     // Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ Р°РЅРёРјР°С†РёРё РїРµСЂРµС…РѕРґРѕРІ (РјСЃ)
     val transitionDuration = 300
