@@ -40,6 +40,9 @@ class GroupsViewModel @Inject constructor(
 
     init {
         _uiState.update { it.copy(canCreate = groupRepository.canCreateGroupsNow()) }
+        // Возвращаем владельцу его строку участника, если её стёрла авария с
+        // перезаписью группы: иначе группа есть в списке, но ничего не даёт.
+        viewModelScope.launch { groupRepository.repairOwnerMemberships() }
         observe()
     }
 

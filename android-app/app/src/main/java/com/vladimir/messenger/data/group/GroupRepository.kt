@@ -1095,6 +1095,38 @@ class GroupRepository(
     }
 
     /**
+     * Самолечение после аварии с перезаписью группы.
+     *
+     * Если у владельца нет своей строки участника (её стёр каскад по внешнему
+     * ключу, когда строка группы перезаписывалась через INSERT OR REPLACE),
+     * возвращаем её: без этой строки владелец не может ни писать, ни управлять
+     * группой - везде «вы не участник группы». Сами темы такая авария не
+     * возвращает, но группа снова становится управляемой.
+     */
+    suspend fun repairOwnerMemberships(): Int {
+        val me = myNodeId() ?: return 0
+        var repaired = 0
+        groupDao.getGroups().forEach { group ->
+            if (group.ownerId != me) return@forEach
+            if (groupDao.getMember(group.id, me) != null) return@forEach
+            groupDao.insertMember(
+                GroupMemberEntity(
+                    groupId = group.id,
+                    nodeId = me,
+                    displayName = myDisplayName(),
+                    role = GroupRole.OWNER,
+                    joinedAtMs = clock(),
+                )
+            )
+            groupDao.clearLeft(group.id)
+            groupDao.refreshMemberCount(group.id)
+            repaired++
+            Log.i(TAG, "owner membership repaired group=${group.id}")
+        }
+        return repaired
+    }
+
+    /**
      * Разослать участникам карточку группы, темы и состав заново.
      *
      * Нужно для тех, кто вступил до появления этих пакетов: темы и состав они
