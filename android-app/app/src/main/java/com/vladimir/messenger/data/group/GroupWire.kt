@@ -29,6 +29,7 @@ object GroupWire {
     const val KIND_JOIN_DECISION = "reqd"
     const val KIND_PIN = "pin"
     const val KIND_ROSTER = "roster"
+    const val KIND_GROUP_DELETED = "grpdel"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -65,6 +66,12 @@ object GroupWire {
             val pinned: Boolean,
         ) : Packet()
 
+        /**
+         * Владелец удалил группу: получатели стирают свою копию.
+         * Принимаем только от ownerId группы (проверка в приёмнике).
+         */
+        data class GroupDeleted(val groupId: String) : Packet()
+
         /** Список участников: строки "nodeId,displayName,role" через ';'. */
         data class Roster(
             val groupId: String,
@@ -94,6 +101,9 @@ object GroupWire {
 
     fun buildPin(groupId: String, topicId: String, messageId: String, pinned: Boolean): String =
         "$PREFIX|$KIND_PIN|$groupId|$topicId|$messageId|${if (pinned) 1 else 0}"
+
+    fun buildGroupDeleted(groupId: String): String =
+        "$PREFIX|$KIND_GROUP_DELETED|$groupId"
 
     fun buildRoster(groupId: String, entries: List<RosterEntry>): String {
         val csv = entries.joinToString(";") {
@@ -154,6 +164,12 @@ object GroupWire {
                 } else {
                     null
                 }
+            } else {
+                null
+            }
+
+            KIND_GROUP_DELETED -> if (parts.size == 3) {
+                Packet.GroupDeleted(groupId)
             } else {
                 null
             }

@@ -7,6 +7,8 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,9 +25,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -47,6 +51,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -57,9 +64,12 @@ import com.vladimir.messenger.data.group.GroupStats
 import com.vladimir.messenger.data.group.InviteSummary
 import com.vladimir.messenger.data.group.JoinRequestSummary
 import com.vladimir.messenger.data.group.MemberSummary
+import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.util.QrCodeGenerator
 
-private val TABS = listOf("Обзор", "Участники", "Заявки", "Ссылки", "Статистика", "Разрешения")
+private val TABS = listOf(
+    "Обзор", "Администраторы", "Участники", "Заявки", "Ссылки", "Статистика", "Разрешения",
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,12 +109,20 @@ fun GroupAdminScreen(
                     title = uiState.group?.title.orEmpty(),
                     about = uiState.group?.about.orEmpty(),
                     isPublic = uiState.group?.isPublic == true,
+                    isOwner = uiState.isOwner,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
+                    onDeleteGroup = { viewModel.deleteGroup(onLeftGroup) },
                 )
 
-                1 -> MembersTab(
+                1 -> AdminsTab(
+                    members = uiState.members,
+                    onToggleAdmin = viewModel::toggleAdmin,
+                    onTogglePermission = viewModel::setAdminPermission,
+                )
+
+                2 -> MembersTab(
                     members = uiState.searchResults,
                     query = uiState.searchQuery,
                     onQueryChange = viewModel::onSearchQueryChanged,
@@ -113,18 +131,19 @@ fun GroupAdminScreen(
                     onBlock = viewModel::blockMember,
                 )
 
-                2 -> RequestsTab(requests = uiState.requests, onDecide = viewModel::decideRequest)
+                3 -> RequestsTab(requests = uiState.requests, onDecide = viewModel::decideRequest)
 
-                3 -> InvitesTab(
+                4 -> InvitesTab(
                     invites = uiState.invites,
                     isPublic = uiState.group?.isPublic == true,
                     onCreate = viewModel::createInvite,
                     onRevoke = viewModel::revokeInvite,
+                    onDelete = viewModel::deleteInvite,
                 )
 
-                4 -> StatsTab(stats = uiState.stats)
+                5 -> StatsTab(stats = uiState.stats, topics = uiState.topics)
 
-                5 -> PermissionsTab(
+                6 -> PermissionsTab(
                     mask = uiState.memberPermissions,
                     onToggle = viewModel::setMemberPermission,
                 )
@@ -138,12 +157,19 @@ private fun OverviewTab(
     title: String,
     about: String,
     isPublic: Boolean,
+    isOwner: Boolean,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
     onLeave: () -> Unit,
+    onDeleteGroup: () -> Unit,
 ) {
-    var titleDraft by remember { mutableStateOf(title) }
-    var aboutDraft by remember { mutableStateOf(about) }
+    // Ключи в remember обязательны: без них черновики запоминали пустые строки
+    // с первой композиции, когда группа ещё не загрузилась, и название с
+    // описанием появлялись только после переключения вкладок туда-сюда.
+    var titleDraft by remember(title) { mutableStateOf(title) }
+    var aboutDraft by remember(about) { mutableStateOf(about) }
+    var showLeaveConfirm by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
@@ -167,7 +193,145 @@ private fun OverviewTab(
         }
 
         HorizontalDivider()
-        TextButton(onClick = onLeave) { Text("Покинуть группу") }
+        TextButton(onClick = { showLeaveConfirm = true }) { Text("Покинуть группу") }
+
+        if (isOwner) {
+            Text(
+                "Удаление стирает группу, её темы и сообщения у всех участников.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            TextButton(onClick = { showDeleteConfirm = true }) {
+                Text("Удалить группу", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+
+    if (showLeaveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLeaveConfirm = false },
+            title = { Text("Покинуть группу?") },
+            text = { Text("Вы перестанете получать сообщения этой группы. Вернуться можно только по ссылке-приглашению.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLeaveConfirm = false
+                        onLeave()
+                    },
+                ) { Text("Покинуть") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLeaveConfirm = false }) { Text("Отмена") }
+            },
+        )
+    }
+
+    if (showDeleteConfirm) {
+        DeleteGroupDialog(
+            expectedTitle = title,
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                onDeleteGroup()
+            },
+        )
+    }
+}
+
+/**
+ * Защита от случайного удаления: кроме нажатия кнопки нужно ввести название
+ * группы. Если названия нет, просим ввести слово УДАЛИТЬ.
+ */
+@Composable
+private fun DeleteGroupDialog(
+    expectedTitle: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val expected = expectedTitle.trim().ifBlank { "УДАЛИТЬ" }
+    var typed by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Удалить группу?") },
+        text = {
+            Column {
+                Text(
+                    "Группа, её темы, сообщения и ссылки-приглашения будут удалены " +
+                        "у всех участников. Отменить это нельзя.",
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = typed,
+                    onValueChange = { typed = it },
+                    label = { Text("Введите: $expected") },
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = typed.trim() == expected,
+                onClick = onConfirm,
+            ) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+/** Вкладка «Администраторы»: кто управляет группой и с какими правами. */
+@Composable
+private fun AdminsTab(
+    members: List<MemberSummary>,
+    onToggleAdmin: (String, Boolean) -> Unit,
+    onTogglePermission: (String, Long, Boolean) -> Unit,
+) {
+    val admins = members.filter { it.role == GroupRole.OWNER || it.role == GroupRole.ADMIN }
+
+    LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Text(
+                "Назначить администратора можно во вкладке «Участники».",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (admins.isEmpty()) {
+            item { Text("Администраторов пока нет") }
+        }
+        items(admins, key = { it.nodeId }) { admin ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(admin.displayName.ifBlank { admin.nodeId }, fontWeight = FontWeight.Medium)
+                    Text(
+                        if (admin.role == GroupRole.OWNER) "Владелец — все права безусловно" else "Администратор",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (admin.role == GroupRole.ADMIN) {
+                        HorizontalDivider()
+                        Text("Разрешения администратора", style = MaterialTheme.typography.labelLarge)
+                        GroupPermissions.Admin.entries.forEach { entry ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(entry.title)
+                                    Text(entry.hint, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(
+                                    checked = GroupPermissions.has(admin.permissions, entry.flag),
+                                    onCheckedChange = { onTogglePermission(admin.nodeId, entry.flag, it) },
+                                )
+                            }
+                        }
+                        if (!admin.isMe) {
+                            TextButton(onClick = { onToggleAdmin(admin.nodeId, false) }) {
+                                Text("Снять администратора")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -289,6 +453,7 @@ private fun InvitesTab(
     isPublic: Boolean,
     onCreate: (Boolean) -> Unit,
     onRevoke: (String) -> Unit,
+    onDelete: (String) -> Unit,
 ) {
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -304,50 +469,89 @@ private fun InvitesTab(
             }
         }
         items(invites, key = { it.slug }) { invite ->
-            InviteCard(invite = invite, onRevoke = { onRevoke(invite.slug) })
+            InviteCard(
+                invite = invite,
+                onRevoke = { onRevoke(invite.slug) },
+                onDelete = { onDelete(invite.slug) },
+            )
         }
     }
 }
 
-/** Ссылка-приглашение и QR-код того же текста рядом с ней. */
+/**
+ * Ссылка-приглашение и QR-код того же текста рядом с ней.
+ * Ссылку можно выделить пальцем, скопировать одной кнопкой и отдать в любое
+ * приложение системным меню «Поделиться».
+ */
 @Composable
-private fun InviteCard(invite: InviteSummary, onRevoke: () -> Unit) {
+private fun InviteCard(
+    invite: InviteSummary,
+    onRevoke: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val bitmap = remember(invite.link) { QrCodeGenerator.generateQrCode(invite.link, 320) }
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
 
     Card(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.padding(12.dp)) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(invite.link, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    buildString {
-                        append(if (invite.requestApproval) "с одобрением" else "без одобрения")
-                        append(" • использований: ").append(invite.useCount)
-                        if (invite.maxUses > 0) append("/").append(invite.maxUses)
-                        if (invite.revoked) append(" • отозвана")
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (!invite.revoked) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row {
+                Column(modifier = Modifier.weight(1f)) {
+                    // SelectionContainer делает текст выделяемым: без него
+                    // ссылку нельзя было ни отметить, ни скопировать.
+                    SelectionContainer {
+                        Text(invite.link, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        buildString {
+                            append(if (invite.requestApproval) "с одобрением" else "без одобрения")
+                            append(" • использований: ").append(invite.useCount)
+                            if (invite.maxUses > 0) append("/").append(invite.maxUses)
+                            if (invite.revoked) append(" • отозвана")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "QR-код приглашения",
+                        modifier = Modifier.size(120.dp),
+                    )
+                } else {
+                    Text("QR недоступен", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(invite.link)) }) {
+                    Text("Копировать")
+                }
+                TextButton(onClick = { shareInviteLink(context, invite.link) }) {
+                    Text("Поделиться")
+                }
+                if (invite.revoked) {
+                    TextButton(onClick = onDelete) { Text("Удалить") }
+                } else {
                     TextButton(onClick = onRevoke) { Text("Отозвать") }
                 }
             }
-            Spacer(Modifier.width(12.dp))
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "QR-код приглашения",
-                    modifier = Modifier.size(120.dp),
-                )
-            } else {
-                Text("QR недоступен", style = MaterialTheme.typography.bodySmall)
-            }
         }
     }
 }
 
+/** Отдать ссылку системному меню «Поделиться»: там и мессенджеры, и почта. */
+private fun shareInviteLink(context: Context, link: String) {
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, link)
+    }
+    context.startActivity(Intent.createChooser(send, "Поделиться ссылкой-приглашением"))
+}
+
 @Composable
-private fun StatsTab(stats: GroupStats?) {
+private fun StatsTab(stats: GroupStats?, topics: List<TopicSummary>) {
     if (stats == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Статистика доступна администраторам")
@@ -376,7 +580,14 @@ private fun StatsTab(stats: GroupStats?) {
 
         HorizontalDivider()
         Text("Сообщения по темам", fontWeight = FontWeight.Medium)
-        stats.perTopic.forEach { (topicId, count) -> StatRow(topicId.take(8), count.toString()) }
+        // Идентификатор темы человеку ничего не говорит — показываем её имя.
+        stats.perTopic.forEach { (topicId, count) ->
+            val name = topics.firstOrNull { it.id == topicId }
+                ?.name
+                ?.takeIf { it.isNotBlank() }
+                ?: if (topicId.isBlank()) "Без темы" else topicId.take(8)
+            StatRow(name, count.toString())
+        }
     }
 }
 

@@ -147,6 +147,7 @@ class GroupRepository(
             ownerId = g.ownerId,
             isPublic = g.isPublic,
             topicsEnabled = g.topicsEnabled,
+            memberPermissions = g.memberPermissions,
             memberCount = g.memberCount,
             unreadCount = g.unreadCount,
             lastMessagePreview = g.lastMessagePreview,
@@ -429,6 +430,14 @@ class GroupRepository(
                 )
             }
 
+            is GroupWire.Packet.GroupDeleted -> {
+                // Стираем копию, только если пакет прислал владелец группы:
+                // иначе любой участник мог бы удалять чужие переписки.
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (group.ownerId != senderId) return
+                deleteGroupLocally(packet.groupId)
+            }
+
             is GroupWire.Packet.Roster -> {
                 if (groupDao.getMember(packet.groupId, me) == null) return
                 val now = clock()
@@ -599,6 +608,23 @@ class GroupRepository(
             return Result.failure(SecurityException("Нет права управлять ссылками"))
         }
         groupDao.revokeInvite(slug)
+        return Result.success(Unit)
+    }
+
+    /**
+     * Убрать ссылку из списка совсем. Отзыв только помечает её недействующей,
+     * а владельцу нужно ещё и очистить список от мертвых строк.
+     */
+    suspend fun deleteInvite(groupId: String, slug: String): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (!GroupPermissions.canInvite(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Нет права управлять ссылками"))
+        }
+        groupDao.deleteInvite(slug)
         return Result.success(Unit)
     }
 
@@ -795,6 +821,30 @@ class GroupRepository(
     }
 
     // ── Статистика для администраторов ────────────────────────────────────────
+
+    /**
+     * Удалить группу безвозвратно. Право только у владельца: это не выход из
+     * группы, а уничтожение переписки у всех участников. Остальным уходит
+     * пакет GroupDeleted, и они стирают свою копию.
+     */
+    suspend fun deleteGroup(groupId: String): Result<Unit> {
+        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (group.ownerId != me) {
+            return Result.failure(SecurityException("Удалить группу может только её владелец"))
+        }
+        // Рассылаем ДО зачистки: список получателей берётся из участников группы.
+        broadcast(groupId, GroupWire.buildGroupDeleted(groupId), excludeSelf = true)
+        deleteGroupLocally(groupId)
+        return Result.success(Unit)
+    }
+
+    /** Локальная зачистка: сообщения группы, затем сама группа (дочерние строки — каскадом). */
+    private suspend fun deleteGroupLocally(groupId: String) {
+        messageDao.deleteGroupMessages(groupId)
+        groupDao.deleteGroup(groupId)
+    }
 
     suspend fun stats(groupId: String, days: Int = 7): Result<GroupStats> {
         val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))

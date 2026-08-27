@@ -68,4 +68,11 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND topicId = :topicId")
     suspend fun countTopicMessages(chatId: String, topicId: String): Int
 
+    /**
+     * Стереть все сообщения группы. У messages нет внешнего ключа на groups,
+     * поэтому каскад их не убирает — чистим явно при удалении группы.
+     */
+    @Query("DELETE FROM messages WHERE chatId = :chatId")
+    suspend fun deleteGroupMessages(chatId: String)
+
 }

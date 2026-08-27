@@ -11,6 +11,7 @@ import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.InviteSummary
 import com.vladimir.messenger.data.group.JoinRequestSummary
 import com.vladimir.messenger.data.group.MemberSummary
+import com.vladimir.messenger.data.group.TopicSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,8 @@ data class GroupAdminUiState(
     val requests: List<JoinRequestSummary> = emptyList(),
     val invites: List<InviteSummary> = emptyList(),
     val stats: GroupStats? = null,
+    /** Темы нужны, чтобы в статистике показывать имена тем, а не их идентификаторы. */
+    val topics: List<TopicSummary> = emptyList(),
     val memberPermissions: Long = GroupPermissions.Member.DEFAULT,
     val isAdmin: Boolean = false,
     val isOwner: Boolean = false,
@@ -51,6 +54,7 @@ class GroupAdminViewModel @Inject constructor(
         observeMembers()
         observeRequests()
         observeInvites()
+        observeTopics()
     }
 
     private fun observeGroup() {
@@ -62,7 +66,11 @@ class GroupAdminViewModel @Inject constructor(
                         group = summary,
                         isAdmin = GroupRole.isAdminOrOwner(me?.role ?: GroupRole.MEMBER),
                         isOwner = me?.role == GroupRole.OWNER,
-                        memberPermissions = GroupPermissions.Member.DEFAULT,
+                        // Берём сохранённую политику группы: раньше здесь всегда
+                        // подставлялся DEFAULT, и вкладка «Разрешения» показывала
+                        // не то, что реально включено.
+                        memberPermissions = summary?.memberPermissions
+                            ?: GroupPermissions.Member.DEFAULT,
                     )
                 }
                 refreshStats()
@@ -95,6 +103,14 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.observeInvites(groupId).collect { list ->
                 _uiState.update { it.copy(invites = list) }
+            }
+        }
+    }
+
+    private fun observeTopics() {
+        viewModelScope.launch {
+            groupRepository.observeTopics(groupId).collect { list ->
+                _uiState.update { it.copy(topics = list) }
             }
         }
     }
@@ -135,6 +151,15 @@ class GroupAdminViewModel @Inject constructor(
             groupRepository.revokeInvite(groupId, slug)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 .onSuccess { _uiState.update { it.copy(notice = "Ссылка отозвана") } }
+        }
+    }
+
+    /** Убрать отозванную ссылку из списка совсем. */
+    fun deleteInvite(slug: String) {
+        viewModelScope.launch {
+            groupRepository.deleteInvite(groupId, slug)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess { _uiState.update { it.copy(notice = "Ссылка удалена") } }
         }
     }
 
@@ -190,6 +215,19 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.leaveGroup(groupId)
                 .onSuccess { onLeft() }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /**
+     * Удалить группу целиком. UI обязан спросить подтверждение дважды
+     * (второй раз — ввести название группы), поэтому вызов сюда доходит
+     * только при осознанном решении.
+     */
+    fun deleteGroup(onDeleted: () -> Unit) {
+        viewModelScope.launch {
+            groupRepository.deleteGroup(groupId)
+                .onSuccess { onDeleted() }
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }

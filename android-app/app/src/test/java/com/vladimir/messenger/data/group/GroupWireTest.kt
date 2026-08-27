@@ -110,4 +110,19 @@ class GroupWireTest {
         assertFalse(GroupWire.isGroupPacket("APULANHS1|pk_abc"))
         assertTrue(GroupWire.isGroupPacket(GroupWire.buildMessage("g", "t", "текст")))
     }
+
+    @Test
+    fun groupDeletedRoundTrip() {
+        val envelope = GroupWire.buildGroupDeleted("grp-42")
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.GroupDeleted)
+        assertEquals("grp-42", (parsed as GroupWire.Packet.GroupDeleted).groupId)
+    }
+
+    @Test
+    fun groupDeletedRejectsMalformedEnvelope() {
+        // Лишнее поле и пустой идентификатор группы — пакет отбрасывается.
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_GROUP_DELETED}|g|лишнее"))
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_GROUP_DELETED}||"))
+    }
 }

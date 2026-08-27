@@ -9,6 +9,8 @@ data class GroupSummary(
     val ownerId: String,
     val isPublic: Boolean,
     val topicsEnabled: Boolean,
+    /** Маска разрешений обычных участников — общая политика группы. */
+    val memberPermissions: Long,
     val memberCount: Int,
     val unreadCount: Int,
     val lastMessagePreview: String?,

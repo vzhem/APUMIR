@@ -67,9 +67,11 @@ fun QrScannerScreen(
             if (hasCameraPermission) {
                 AndroidView(
                     factory = { ctx ->
+                        // Один и тот же код камера показывает много кадров подряд,
+                        // поэтому запоминаем последний обработанный текст.
+                        var reported = ""
                         DecoratedBarcodeView(ctx).apply {
                             resume()
-                            var reported = ""
                             decodeContinuous(object : BarcodeCallback {
                                 override fun barcodeResult(result: BarcodeResult?) {
                                     val scanned = result?.text?.trim().orEmpty()

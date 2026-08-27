@@ -189,6 +189,10 @@ interface GroupDao {
     @Query("UPDATE group_invites SET revoked = 1 WHERE slug = :slug")
     suspend fun revokeInvite(slug: String)
 
+    /** Совсем убрать ссылку из списка: отозванная уже никого не пускает. */
+    @Query("DELETE FROM group_invites WHERE slug = :slug")
+    suspend fun deleteInvite(slug: String)
+
     @Query("UPDATE group_invites SET useCount = useCount + 1 WHERE slug = :slug")
     suspend fun registerInviteUse(slug: String)
 
@@ -211,6 +215,15 @@ interface GroupDao {
             "WHERE groupId = :groupId AND topicId = '' AND dayKey >= :fromDayKey"
     )
     suspend fun sumMessagesSince(groupId: String, fromDayKey: String): Int
+
+    // ── Удаление группы ───────────────────────────────────────────────────────
+    /**
+     * Удалить группу. Дочерние строки (участники, темы, заявки, ссылки,
+     * статистика) убираются сами: у их таблиц внешний ключ на groups(id)
+     * с ON DELETE CASCADE. Сообщения чистит MessageDao.deleteGroupMessages.
+     */
+    @Query("DELETE FROM groups WHERE id = :groupId")
+    suspend fun deleteGroup(groupId: String)
 
     // ── Служебное ─────────────────────────────────────────────────────────────
     /** Пересчёт memberCount из таблицы участников; вызывать после добавления/удаления. */
