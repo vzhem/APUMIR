@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.ui.components.ImagePreview
+import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -222,6 +225,7 @@ fun GroupChatScreen(
 
 @Composable
 private fun MessageBubble(
+    // Картинки и гифки в темах показываем так же, как в личном чате.
     message: MessageEntity,
     senderName: String,
     canPin: Boolean,
@@ -239,7 +243,18 @@ private fun MessageBubble(
                 if (!message.isFromMe) {
                     Text(senderName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 }
-                Text(message.content)
+                val imageUrl = remember(message.content) {
+                    ImageLinkDetector.directImageUrl(message.content)
+                }
+                if (imageUrl != null) {
+                    ImagePreview(
+                        model = imageUrl,
+                        contentDescription = "Картинка из сообщения",
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                    )
+                } else {
+                    Text(message.content)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(time, style = MaterialTheme.typography.labelSmall)
                     if (message.isPinned) {

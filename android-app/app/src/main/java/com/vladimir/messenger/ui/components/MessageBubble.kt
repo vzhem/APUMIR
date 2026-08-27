@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
 import com.vladimir.messenger.ui.theme.MessageBubbleOwn
+import com.vladimir.messenger.util.ImageLinkDetector
 import com.vladimir.messenger.ui.theme.MessageBubbleOther
 import java.text.SimpleDateFormat
 import java.util.*
@@ -76,8 +77,23 @@ fun MessageBubble(
                 val annotatedText = remember(message.content, linkColor) {
                     buildAnnotatedMessageText(message.content, linkColor)
                 }
+                // Сообщение из одной ссылки на картинку или гифку показываем
+                // картинкой: клавиатура вставляет гифки именно ссылкой, и в чате
+                // вместо картинки висел текст.
+                val imageUrl = remember(message.content) {
+                    ImageLinkDetector.directImageUrl(message.content)
+                }
 
-                if (isSelected) {
+                if (imageUrl != null) {
+                    ImagePreview(
+                        model = imageUrl,
+                        contentDescription = "Картинка из сообщения",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                    )
+                } else if (isSelected) {
                     // Режим выделения текста
                     SelectionContainer {
                         Text(
