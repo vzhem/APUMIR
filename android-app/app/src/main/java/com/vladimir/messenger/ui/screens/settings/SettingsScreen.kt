@@ -30,6 +30,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.Avatar
+import com.vladimir.messenger.ui.theme.ThemeMode
+import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.theme.StatusConnecting
 import com.vladimir.messenger.ui.theme.StatusDegraded
 import com.vladimir.messenger.ui.theme.StatusOffline
@@ -179,6 +182,35 @@ fun SettingsScreen(
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // ОФОРМЛЕНИЕ: день / ночь / авто
+            // ----------------------------------------------------------------
+            item {
+                SettingsSectionTitle("Оформление")
+            }
+            item {
+                SettingsCard {
+                    val context = LocalContext.current
+                    val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
+                    ThemeMode.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { ThemeModeHolder.set(context, mode) }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = themeMode == mode,
+                                onClick = { ThemeModeHolder.set(context, mode) },
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(mode.title, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
                 }
             }
 

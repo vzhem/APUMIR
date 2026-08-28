@@ -22,6 +22,7 @@ import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
 import com.vladimir.messenger.ui.navigation.MessengerNavGraph
 import com.vladimir.messenger.ui.theme.P2PMessengerTheme
+import com.vladimir.messenger.ui.theme.ThemeModeHolder
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 import com.vladimir.messenger.data.repository.ContactRepository
@@ -156,8 +157,10 @@ class MainActivity : ComponentActivity() {
         startCoreService()
         checkForUpdates()
 
+        ThemeModeHolder.init(this)
         setContent {
-            P2PMessengerTheme {
+            val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
+            P2PMessengerTheme(themeMode = themeMode) {
                 val pendingContact = pendingContactInfo
                 Log.d("MainActivity", "Checking dialog: pendingContact=${pendingContact != null}")
                 

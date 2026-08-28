@@ -29,9 +29,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
-import com.vladimir.messenger.ui.theme.MessageBubbleOwn
+import com.vladimir.messenger.ui.theme.LocalMessengerColors
 import com.vladimir.messenger.util.ImageLinkDetector
-import com.vladimir.messenger.ui.theme.MessageBubbleOther
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -54,7 +53,8 @@ fun MessageBubble(
 ) {
     val isOwn = message.isFromMe
     val context = LocalContext.current
-    val textColor = if (isOwn) Color.White else Color.Black
+    val messenger = LocalMessengerColors.current
+    val textColor = if (isOwn) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
 
     Row(
         modifier = modifier
@@ -66,7 +66,7 @@ fun MessageBubble(
             modifier = Modifier
                 .widthIn(min = 80.dp, max = 280.dp)
                 .clip(if (isOwn) OwnBubbleShape else OtherBubbleShape)
-                .background(if (isOwn) MessageBubbleOwn else MessageBubbleOther)
+                .background(if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther)
                 .combinedClickable(
                     onClick = onTap,
                     onLongClick = { onLongClick?.invoke() }
@@ -132,11 +132,12 @@ fun MessageBubble(
                     Text(
                         text = formatMessageTime(message.timestamp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isOwn) Color.White.copy(alpha = 0.7f) else Color.Gray,
+                        color = if (isOwn) messenger.messageBubbleOwnText.copy(alpha = 0.7f)
+                                else messenger.messageBubbleOtherText.copy(alpha = 0.6f),
                     )
                     if (isOwn) {
                         Spacer(modifier = Modifier.width(4.dp))
-                        MessageStatusIcon(status = message.status)
+                        MessageStatusIcon(status = message.status, tint = messenger.messageBubbleOwnText)
                     }
                 }
             }
@@ -169,19 +170,20 @@ private fun buildAnnotatedMessageText(text: String, linkColor: Color): Annotated
 }
 
 @Composable
-private fun MessageStatusIcon(status: MessageStatus) {
-    val (icon, tint) = when (status) {
-        MessageStatus.PENDING        -> Pair(Icons.Default.Schedule, Color.White.copy(alpha = 0.7f))
-        MessageStatus.QUEUED_OFFLINE -> Pair(Icons.Default.Schedule, Color.White.copy(alpha = 0.5f))
-        MessageStatus.SENT           -> Pair(Icons.Default.Done, Color.White.copy(alpha = 0.7f))
-        MessageStatus.DELIVERED      -> Pair(Icons.Default.DoneAll, Color.White)
-        MessageStatus.READ           -> Pair(Icons.Default.DoneAll, Color(0xFF66D9EF))
+private fun MessageStatusIcon(status: MessageStatus, tint: Color) {
+    // tint — цвет текста пузыря своих сообщений: галочки читаются и на золоте, и на синем.
+    val (icon, iconTint) = when (status) {
+        MessageStatus.PENDING        -> Pair(Icons.Default.Schedule, tint.copy(alpha = 0.7f))
+        MessageStatus.QUEUED_OFFLINE -> Pair(Icons.Default.Schedule, tint.copy(alpha = 0.5f))
+        MessageStatus.SENT           -> Pair(Icons.Default.Done, tint.copy(alpha = 0.7f))
+        MessageStatus.DELIVERED      -> Pair(Icons.Default.DoneAll, tint)
+        MessageStatus.READ           -> Pair(Icons.Default.DoneAll, tint)
         MessageStatus.FAILED         -> Pair(Icons.Default.Error, Color.Red.copy(alpha = 0.8f))
     }
     Icon(
         imageVector = icon,
         contentDescription = status.name,
-        tint = tint,
+        tint = iconTint,
         modifier = Modifier.size(14.dp),
     )
 }
