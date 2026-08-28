@@ -5334,3 +5334,20 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   git fetch origin <ветка> и git reset <SHA> (mixed, НЕ --soft: индекс тоже
   остаётся от старого HEAD и показывает файлы как удалённые). Рабочее дерево
   при этом не трогается, правки не потерялись.
+- 2026-08-28 (гейт на 6727b4d - зелёный, сборка стоит на обоих телефонах):
+  step 0 - схема MIGRATION_7_8, 0 расхождений; step 1 - unit test totals:
+  tests=87 failures=0 skipped=0 (GroupPermissionsTest 15, GroupWireTest 21,
+  GroupInviteLinksTest 14, FileTransferRankPolicyTest 10, ContactShareLink 3,
+  ImageLinkDetector 9, InviteLinkParser 8, ReferralInviteLink 7); step 2 -
+  compileDebugKotlin exit 0; step 3 - assembleDebug exit 0, debug apk
+  30 135 636 байт, built 28.08.2026 16:58:33; step 4 - androidTest compile 0;
+  RESULT: GREEN. Сборка поставлена на Аню (AUYF6R5923006121) и Стаса
+  (11567254BK001192) командой install -r -t -d, оба ответа Success.
+  То есть всё, что в прошлой записи было помечено как непроверенное
+  (компиляция интерфейса, полоска разделов, вкладки админ-кабинета по ролям,
+  новый запрос GroupDao.getMyMemberships), теперь проверено компилятором и
+  тестами. Владелец посмотрел экраны - «визуально пока хорошо».
+  Миграция 7 -> 8 гейтом по-прежнему не прогонялась (хостовый гейт её не
+  умеет). Запускать -RunMigrationTest на телефоне с нужными данными нельзя:
+  connectedAndroidTest стирает данные приложения. Если проверка понадобится,
+  сначала scripts\groups-phone-check.ps1 - он делает резервную копию базы.
