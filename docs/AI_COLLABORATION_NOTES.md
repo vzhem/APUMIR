@@ -5634,3 +5634,20 @@ FAB-карандаш: DropdownMenu «Новый чат / Новая группа
   /releases/latest и редиректа latest/download/app-release.apk.
   Напоминание: на Ане и Стасе debug-подпись - релизный APK встанет на
   эти два телефона только после удаления отладочной сборки.
+
+- 2026-08-29 (релиз v11.22.0 выпущен): тег v11.22.0 на c755bbe запушен,
+  workflow Build Release APK отработал за ~12,5 минут (run 33213759987,
+  success), app-release.apk 36 151 637 байт. Продвижение: gh release edit
+  --prerelease=false --latest + новый текст выпуска (--notes-file) -
+  в этот раз /releases/latest переключился сразу, републикация
+  draft=true/false не понадобилась. Проверено: /releases/latest отдаёт
+  v11.22.0; releases/latest/download/app-release.apk редиректит на
+  ассет v11.22.0; prerelease=false, draft=false. versionCode v11.22.0 =
+  11 022 000 > 11 021 000, подсказка об обновлении появится у всех на
+  релизной v11.21.0. Checksum-ассет НЕ добавлен: песочница не может
+  скачать ассет (release-assets хост недоступен), у v11.20/11.21 его
+  тоже не было; в публичном тексте ссылка на checksum убрана. Если
+  понадобится - на ПК: Get-FileHash app-release.apk -Algorithm SHA256 и
+  gh release upload v11.22.0 <файл>. Напоминание: Аня и Стас на
+  debug-подписи - релиз встанет на их телефоны только после удаления
+  отладочной сборки.
