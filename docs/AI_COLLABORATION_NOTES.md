@@ -5567,3 +5567,12 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   База v10: гейт-скрипт сверяет MIGRATION_9_10, instrumented-тесты миграций
   продлены до 10 (на телефоне гоняются только с -RunMigrationTest).
   Тестов стало 102 (GroupWireTest 27 -> 29).
+- 2026-08-28 (гейт на d6aadda упал): GroupsScreen.kt:22 Unresolved reference
+  'item' - я добавил import androidx.compose.foundation.lazy.item, но item -
+  ЧЛЕН интерфейса LazyListScope, а не топ-уровневая функция; импорт не
+  существует. Импорт убран (6a79a8f).
+- Свои обои: WallpaperHolder (p2p_prefs ключ custom_wallpaper_uri), в
+  Настройки → Оформление строка «Обои для чатов» с кнопками «Из галереи»
+  (GetContent image/* + takePersistableUriPermission) и «Вернуть стандартные»;
+  ChatWallpaper рисует свою картинку на всех экранах с подложкой, при сбое
+  чтения - стандартный арт темы. Ждём гейт на 6a79a8f (тестов 102).
