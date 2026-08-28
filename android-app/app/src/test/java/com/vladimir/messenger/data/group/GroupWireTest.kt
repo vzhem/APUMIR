@@ -20,6 +20,31 @@ class GroupWireTest {
         assertEquals(text, msg.text)
     }
 
+    /**
+     * Идентификатор сообщения обязан доходить до получателя.
+     *
+     * Без него закреп работал только у отправителя: получатель клал строку под
+     * транспортным id, а конверт Pin ссылался на id отправителя.
+     */
+    @Test
+    fun messageCarriesSenderId() {
+        val envelope = GroupWire.buildMessage("grp1", "topic1", "текст", messageId = "msg-42")
+        val msg = GroupWire.parse(envelope) as GroupWire.Packet.Message
+        assertEquals("msg-42", msg.messageId)
+    }
+
+    /** Старые конверты без id (5 частей) принимаются: id пустой, сообщение не теряется. */
+    @Test
+    fun legacyMessageWithoutIdStillParses() {
+        val text = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("старое сообщение".toByteArray(Charsets.UTF_8))
+        val parsed = GroupWire.parse("APUGRP1|msg|grp1|topic1|$text")
+        assertTrue(parsed is GroupWire.Packet.Message)
+        val msg = parsed as GroupWire.Packet.Message
+        assertEquals("старое сообщение", msg.text)
+        assertEquals("", msg.messageId)
+    }
+
     @Test
     fun topicRoundTrip() {
         val parsed = GroupWire.parse(GroupWire.buildTopicCreated("g", "t", "Флуд | оффтоп"))

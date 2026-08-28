@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,9 +68,21 @@ import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.QrCodeGenerator
 
-private val TABS = listOf(
-    "Обзор", "Администраторы", "Участники", "Заявки", "Ссылки", "Статистика", "Разрешения",
-)
+/**
+ * Вкладки админ-кабинета.
+ *
+ * Обычному участнику показываются только «Обзор» (без полей редактирования) и
+ * «Участники»: раньше он видел все вкладки и мог создавать и удалять ссылки.
+ */
+private enum class AdminTab(val title: String) {
+    Overview("Обзор"),
+    Admins("Администраторы"),
+    Members("Участники"),
+    Requests("Заявки"),
+    Invites("Ссылки"),
+    Stats("Статистика"),
+    Permissions("Разрешения"),
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,7 +92,16 @@ fun GroupAdminScreen(
     viewModel: GroupAdminViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var tab by remember { mutableStateOf(0) }
+    val visibleTabs = if (uiState.isAdmin) {
+        AdminTab.entries.toList()
+    } else {
+        listOf(AdminTab.Overview, AdminTab.Members)
+    }
+    var tab by remember { mutableStateOf(AdminTab.Overview) }
+    // Права могли измениться (сняли администратора) - уходим на доступную вкладку.
+    LaunchedEffect(visibleTabs) {
+        if (tab !in visibleTabs) tab = AdminTab.Overview
+    }
 
     Scaffold(
         topBar = {
@@ -98,31 +120,40 @@ fun GroupAdminScreen(
                 Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(12.dp))
             }
 
-            ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-                TABS.forEachIndexed { index, title ->
-                    Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
+            ScrollableTabRow(
+                selectedTabIndex = visibleTabs.indexOf(tab).coerceAtLeast(0),
+                edgePadding = 8.dp,
+            ) {
+                visibleTabs.forEach { item ->
+                    Tab(
+                        selected = tab == item,
+                        onClick = { tab = item },
+                        text = { Text(item.title) },
+                    )
                 }
             }
 
             when (tab) {
-                0 -> OverviewTab(
+                AdminTab.Overview -> OverviewTab(
                     title = uiState.group?.title.orEmpty(),
                     about = uiState.group?.about.orEmpty(),
                     isPublic = uiState.group?.isPublic == true,
                     isOwner = uiState.isOwner,
+                    canChangeInfo = uiState.canChangeInfo,
+                    canChangeVisibility = uiState.isAdmin,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
                     onDeleteGroup = { viewModel.deleteGroup(onLeftGroup) },
                 )
 
-                1 -> AdminsTab(
+                AdminTab.Admins -> AdminsTab(
                     members = uiState.members,
                     onToggleAdmin = viewModel::toggleAdmin,
                     onTogglePermission = viewModel::setAdminPermission,
                 )
 
-                2 -> MembersTab(
+                AdminTab.Members -> MembersTab(
                     members = uiState.searchResults,
                     query = uiState.searchQuery,
                     onQueryChange = viewModel::onSearchQueryChanged,
@@ -132,20 +163,21 @@ fun GroupAdminScreen(
                     onResync = viewModel::resyncMembers,
                 )
 
-                3 -> RequestsTab(requests = uiState.requests, onDecide = viewModel::decideRequest)
+                AdminTab.Requests -> RequestsTab(requests = uiState.requests, onDecide = viewModel::decideRequest)
 
-                4 -> InvitesTab(
+                AdminTab.Invites -> InvitesTab(
                     invites = uiState.invites,
                     groupTitle = uiState.group?.title.orEmpty(),
                     isPublic = uiState.group?.isPublic == true,
+                    canManage = uiState.canManageInvites,
                     onCreate = viewModel::createInvite,
                     onRevoke = viewModel::revokeInvite,
                     onDelete = viewModel::deleteInvite,
                 )
 
-                5 -> StatsTab(stats = uiState.stats, topics = uiState.topics)
+                AdminTab.Stats -> StatsTab(stats = uiState.stats, topics = uiState.topics)
 
-                6 -> PermissionsTab(
+                AdminTab.Permissions -> PermissionsTab(
                     mask = uiState.memberPermissions,
                     onToggle = viewModel::setMemberPermission,
                 )
@@ -160,6 +192,8 @@ private fun OverviewTab(
     about: String,
     isPublic: Boolean,
     isOwner: Boolean,
+    canChangeInfo: Boolean,
+    canChangeVisibility: Boolean,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
     onLeave: () -> Unit,
@@ -177,9 +211,23 @@ private fun OverviewTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        OutlinedTextField(value = titleDraft, onValueChange = { titleDraft = it }, label = { Text("Название") })
-        OutlinedTextField(value = aboutDraft, onValueChange = { aboutDraft = it }, label = { Text("Описание") })
-        TextButton(onClick = { onSave(titleDraft, aboutDraft) }) { Text("Сохранить") }
+        if (canChangeInfo) {
+            OutlinedTextField(value = titleDraft, onValueChange = { titleDraft = it }, label = { Text("Название") })
+            OutlinedTextField(value = aboutDraft, onValueChange = { aboutDraft = it }, label = { Text("Описание") })
+            TextButton(onClick = { onSave(titleDraft, aboutDraft) }) { Text("Сохранить") }
+        } else {
+            // Без права менять информацию показываем только текст: поля и
+            // кнопка «Сохранить» обещали правку, которой на самом деле нет -
+            // сохранение молча отклонялось.
+            Text("Название", style = MaterialTheme.typography.labelLarge)
+            Text(title.ifBlank { "—" })
+            Text("Описание", style = MaterialTheme.typography.labelLarge)
+            Text(about.ifBlank { "—" }, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Название и описание меняют администраторы.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
 
         HorizontalDivider()
 
@@ -191,7 +239,9 @@ private fun OverviewTab(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Switch(checked = isPublic, onCheckedChange = onTogglePublic)
+            if (canChangeVisibility) {
+                Switch(checked = isPublic, onCheckedChange = onTogglePublic)
+            }
         }
 
         HorizontalDivider()
@@ -480,18 +530,27 @@ private fun InvitesTab(
     invites: List<InviteSummary>,
     groupTitle: String,
     isPublic: Boolean,
+    canManage: Boolean,
     onCreate: (Boolean) -> Unit,
     onRevoke: (String) -> Unit,
     onDelete: (String) -> Unit,
 ) {
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // requestApproval = true означает «нужно одобрение».
-                // Раньше здесь было наоборот: кнопка «с одобрением» создавала
-                // ссылку БЕЗ одобрения, и человек влетал в группу сразу.
-                TextButton(onClick = { onCreate(true) }) { Text("Ссылка с одобрением") }
-                TextButton(onClick = { onCreate(false) }) { Text("Ссылка без одобрения") }
+            if (canManage) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // requestApproval = true означает «нужно одобрение».
+                    // Раньше здесь было наоборот: кнопка «с одобрением» создавала
+                    // ссылку БЕЗ одобрения, и человек влетал в группу сразу.
+                    TextButton(onClick = { onCreate(true) }) { Text("Ссылка с одобрением") }
+                    TextButton(onClick = { onCreate(false) }) { Text("Ссылка без одобрения") }
+                }
+            } else {
+                Text(
+                    "Ссылки создают и отзывают администраторы. Попросите ссылку у них " +
+                        "или воспользуйтесь QR-кодом группы.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             if (!isPublic) {
                 Text(
@@ -504,6 +563,7 @@ private fun InvitesTab(
             InviteCard(
                 invite = invite,
                 groupTitle = groupTitle,
+                canManage = canManage,
                 onRevoke = { onRevoke(invite.slug) },
                 onDelete = { onDelete(invite.slug) },
             )
@@ -520,6 +580,7 @@ private fun InvitesTab(
 private fun InviteCard(
     invite: InviteSummary,
     groupTitle: String,
+    canManage: Boolean,
     onRevoke: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -565,10 +626,14 @@ private fun InviteCard(
                 TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.link) }) {
                     Text("Поделиться")
                 }
-                if (invite.revoked) {
-                    TextButton(onClick = onDelete) { Text("Удалить") }
-                } else {
-                    TextButton(onClick = onRevoke) { Text("Отозвать") }
+                // Отозвать и удалить ссылку может только администратор:
+                // участник без права приглашать этих кнопок не видит.
+                if (canManage) {
+                    if (invite.revoked) {
+                        TextButton(onClick = onDelete) { Text("Удалить") }
+                    } else {
+                        TextButton(onClick = onRevoke) { Text("Отозвать") }
+                    }
                 }
             }
         }

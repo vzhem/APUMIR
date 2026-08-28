@@ -55,8 +55,43 @@ class GroupPermissionsTest {
         val mask = GroupPermissions.Member.DEFAULT
         assertTrue(GroupPermissions.has(mask, GroupPermissions.Member.SEND_MESSAGES))
         assertTrue(GroupPermissions.has(mask, GroupPermissions.Member.SEND_MEDIA))
-        assertTrue(GroupPermissions.has(mask, GroupPermissions.Member.ADD_MEMBERS))
         assertFalse(GroupPermissions.has(mask, GroupPermissions.Member.CHANGE_INFO))
+    }
+
+    /**
+     * Право приглашать НЕ входит в маску обычного участника.
+     *
+     * Раньше ADD_MEMBERS стоял в Member.DEFAULT, и любой участник мог
+     * создавать и отзывать ссылки-приглашения своей группы.
+     */
+    @Test
+    fun defaultMemberMaskDoesNotAllowInvites() {
+        assertFalse(
+            "обычный участник не должен иметь право приглашать",
+            GroupPermissions.has(GroupPermissions.Member.DEFAULT, GroupPermissions.Member.ADD_MEMBERS),
+        )
+    }
+
+    @Test
+    fun onlyOwnerAndAdminWithInviteRightManageInvites() {
+        assertTrue(GroupPermissions.canManageInvites(GroupRole.OWNER, 0L))
+        assertTrue(
+            GroupPermissions.canManageInvites(
+                GroupRole.ADMIN,
+                GroupPermissions.withFlag(0L, GroupPermissions.Admin.INVITE_USERS, true),
+            ),
+        )
+        assertFalse(
+            "админ без права приглашать ссылками не управляет",
+            GroupPermissions.canManageInvites(GroupRole.ADMIN, 0L),
+        )
+        assertFalse(
+            "участник ссылками не управляет, даже с ADD_MEMBERS в маске",
+            GroupPermissions.canManageInvites(
+                GroupRole.MEMBER,
+                GroupPermissions.withFlag(0L, GroupPermissions.Member.ADD_MEMBERS, true),
+            ),
+        )
     }
 
     @Test

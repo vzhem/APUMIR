@@ -237,7 +237,13 @@ fun MessengerNavGraph(
                 },
                 onShowMyQrClick = {
                     navController.navigate(Screen.ShareProfile.route)
-                }
+                },
+                onGroupClick = { groupId ->
+                    navController.navigate(Screen.GroupChat.createRoute(groupId))
+                },
+                onGroupAdminClick = { groupId ->
+                    navController.navigate(Screen.GroupAdmin.createRoute(groupId))
+                },
             )
         }
 

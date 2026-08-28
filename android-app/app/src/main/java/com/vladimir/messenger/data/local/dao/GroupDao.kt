@@ -104,6 +104,16 @@ interface GroupDao {
     @Query("SELECT * FROM group_members WHERE groupId = :groupId AND isBanned = 0 ORDER BY joinedAtMs ASC")
     suspend fun getMembers(groupId: String): List<GroupMemberEntity>
 
+    /**
+     * Роли этого телефона во всех группах разом.
+     *
+     * Нужно главному экрану: раздел «Админ группы» показывается только тем,
+     * кто группу создал или кого назначили администратором. Один запрос вместо
+     * обхода всех групп.
+     */
+    @Query("SELECT * FROM group_members WHERE nodeId = :nodeId AND isBanned = 0")
+    suspend fun getMyMemberships(nodeId: String): List<GroupMemberEntity>
+
     @Query("SELECT * FROM group_members WHERE groupId = :groupId AND nodeId = :nodeId")
     suspend fun getMember(groupId: String, nodeId: String): GroupMemberEntity?
 

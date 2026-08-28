@@ -69,8 +69,16 @@ object GroupPermissions {
         val ALL: Long = SEND_MESSAGES or SEND_MEDIA or SEND_STICKERS or SEND_POLLS or
             ADD_MEMBERS or CHANGE_INFO
 
-        /** По умолчанию участники могут всё, кроме изменения информации о группе. */
-        val DEFAULT: Long = SEND_MESSAGES or SEND_MEDIA or SEND_STICKERS or SEND_POLLS or ADD_MEMBERS
+        /**
+         * По умолчанию участники пишут, шлют медиа и стикеры, но НЕ приглашают
+         * и НЕ меняют информацию о группе.
+         *
+         * Раньше в набор входил ADD_MEMBERS, и любой участник мог создавать и
+         * отзывать ссылки-приглашения - так Владимир, не будучи
+         * администратором, создавал и удалял ссылки. Право по-прежнему можно
+         * выдать всем участникам вкладкой «Разрешения».
+         */
+        val DEFAULT: Long = SEND_MESSAGES or SEND_MEDIA or SEND_STICKERS or SEND_POLLS
 
         val entries: List<Entry> = listOf(
             Entry(SEND_MESSAGES, "Отправка сообщений", "Текст в любые открытые темы"),
@@ -113,6 +121,17 @@ object GroupPermissions {
         GroupRole.OWNER -> true
         GroupRole.ADMIN -> has(adminMask, Admin.INVITE_USERS)
         else -> has(memberMask, Member.ADD_MEMBERS)
+    }
+
+    /**
+     * Создавать, отзывать и удалять ссылки-приглашения может только владелец
+     * или администратор с правом INVITE_USERS. Право участников ADD_MEMBERS
+     * позволяет поделиться ссылкой, но не управлять чужими.
+     */
+    fun canManageInvites(role: String, adminMask: Long): Boolean = when (role) {
+        GroupRole.OWNER -> true
+        GroupRole.ADMIN -> has(adminMask, Admin.INVITE_USERS)
+        else -> false
     }
 
     fun canManageTopics(role: String, adminMask: Long): Boolean = when (role) {

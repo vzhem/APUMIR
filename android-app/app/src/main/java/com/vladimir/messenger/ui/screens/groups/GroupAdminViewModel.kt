@@ -34,6 +34,10 @@ data class GroupAdminUiState(
     val memberPermissions: Long = GroupPermissions.Member.DEFAULT,
     val isAdmin: Boolean = false,
     val isOwner: Boolean = false,
+    /** Менять название и описание: владелец, админ с CHANGE_INFO или участник с таким правом группы. */
+    val canChangeInfo: Boolean = false,
+    /** Создавать, отзывать и удалять ссылки-приглашения: только владелец и админы с правом приглашать. */
+    val canManageInvites: Boolean = false,
     val error: String? = null,
     val notice: String? = null,
 )
@@ -61,11 +65,16 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.observeGroup(groupId).collect { summary ->
                 val me = groupRepository.searchMembers(groupId, "").firstOrNull { it.isMe }
+                val role = me?.role ?: GroupRole.MEMBER
+                val myMask = me?.permissions ?: 0L
+                val memberMask = summary?.memberPermissions ?: GroupPermissions.Member.DEFAULT
                 _uiState.update { state ->
                     state.copy(
                         group = summary,
-                        isAdmin = GroupRole.isAdminOrOwner(me?.role ?: GroupRole.MEMBER),
-                        isOwner = me?.role == GroupRole.OWNER,
+                        isAdmin = GroupRole.isAdminOrOwner(role),
+                        isOwner = role == GroupRole.OWNER,
+                        canChangeInfo = GroupPermissions.canChangeInfo(role, myMask, memberMask),
+                        canManageInvites = GroupPermissions.canManageInvites(role, myMask),
                         // Берём сохранённую политику группы: раньше здесь всегда
                         // подставлялся DEFAULT, и вкладка «Разрешения» показывала
                         // не то, что реально включено.

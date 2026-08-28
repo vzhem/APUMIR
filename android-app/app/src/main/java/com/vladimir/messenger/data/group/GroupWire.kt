@@ -43,6 +43,15 @@ object GroupWire {
             val groupId: String,
             val topicId: String,
             val text: String,
+            /**
+             * Идентификатор сообщения у ОТПРАВИТЕЛЯ.
+             *
+             * Без него у каждого получателя сообщение ложилось под своим
+             * транспортным id, и пакет Pin (в нём id отправителя) не находил
+             * строку: закреп видела только тот, кто закреплял. Теперь id один
+             * на всю группу. У старых конвертов поля нет - оно пустое.
+             */
+            val messageId: String = "",
         ) : Packet()
 
         data class TopicCreated(
@@ -139,8 +148,17 @@ object GroupWire {
 
     // ── Сборка ────────────────────────────────────────────────────────────────
 
-    fun buildMessage(groupId: String, topicId: String, text: String): String =
-        "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(text)}"
+    fun buildMessage(
+        groupId: String,
+        topicId: String,
+        text: String,
+        messageId: String = "",
+    ): String {
+        val base = "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(text)}"
+        // Без id поле не добавляем вовсе: конверт остаётся старого образца
+        // (5 частей) и его понимают телефоны с прошлой версией.
+        return if (messageId.isBlank()) base else "$base|${encode(messageId)}"
+    }
 
     fun buildTopicCreated(groupId: String, topicId: String, name: String): String =
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}"
@@ -208,9 +226,11 @@ object GroupWire {
         if (groupId.isBlank()) return null
 
         return when (parts[1]) {
-            KIND_MESSAGE -> if (parts.size == 5) {
+            KIND_MESSAGE -> if (parts.size == 5 || parts.size == 6) {
                 val body = decode(parts[4]) ?: return null
-                Packet.Message(groupId, parts[3], body)
+                // Конверты старого образца приходили без id - считаем его пустым.
+                val senderMessageId = if (parts.size == 6) decode(parts[5]).orEmpty() else ""
+                Packet.Message(groupId, parts[3], body, senderMessageId)
             } else {
                 null
             }

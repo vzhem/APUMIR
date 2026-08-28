@@ -9,10 +9,19 @@ package com.vladimir.messenger.ui.screens.chat
 // =============================================================================
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import com.vladimir.messenger.ui.components.Avatar
+import com.vladimir.messenger.data.group.GroupRole
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -48,6 +57,8 @@ fun ChatListScreen(
     onRankClick: () -> Unit = {},
     onContactsClick: () -> Unit = {},
     onGroupsClick: () -> Unit = {},
+    onGroupClick: (groupId: String) -> Unit = {},
+    onGroupAdminClick: (groupId: String) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -80,28 +91,20 @@ fun ChatListScreen(
                                 },
                             )
                         } else {
-                            // Заголовок + компактный бейдж ранга одной колонкой: AssistChip
-                            // (рамка/отступы/минимальная высота) не влезал в высоту TopAppBar
-                            // и сжимал заголовок до обрезанной последней буквы.
-                            Column(modifier = Modifier.clickable(onClick = onRankClick)) {
+                            // Бейдж ранга обычным Text: AssistChip (рамка, отступы,
+                            // минимальная высота) не влезал в высоту TopAppBar и
+                            // сжимал текст до обрезанной последней буквы.
+                            // Слово «Сообщения» убрано по просьбе владельца:
+                            // заголовок - это сразу бейдж ранга, тап по нему
+                            // открывает, что уже доступно и как расти дальше.
+                            if (uiState.rankBadge.isNotBlank()) {
                                 Text(
-                                    "Сообщения",
+                                    uiState.rankBadge,
+                                    modifier = Modifier.clickable(onClick = onRankClick),
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                if (uiState.rankBadge.isNotBlank()) {
-                                    // Бейдж ранга на самом видном месте: под заголовком,
-                                    // всегда перед глазами; тап — что открыто и как расти дальше.
-                                    Text(
-                                        uiState.rankBadge,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
                             }
                         }
                     },
@@ -182,6 +185,14 @@ fun ChatListScreen(
                     },
                     scrollBehavior = scrollBehavior,
                 )
+
+                // Полоска разделов: во всю ширину экрана и пролистывается
+                // пальцем вбок - разделов может стать больше, чем влезает.
+                SectionChips(
+                    sections = uiState.sections,
+                    selected = uiState.section,
+                    onSelect = viewModel::onSectionSelected,
+                )
             }
         },
         floatingActionButton = {
@@ -211,8 +222,26 @@ fun ChatListScreen(
                     )
                 }
 
+                // Каналов в приложении пока нет - разделы про них показывают
+                // понятную заглушку вместо пустого экрана.
+                uiState.section == InboxSection.Channels ||
+                    uiState.section == InboxSection.AdminChannels -> {
+                    Text(
+                        if (uiState.section == InboxSection.Channels) {
+                            "Каналов пока нет. Они появятся в следующих версиях."
+                        } else {
+                            "Вы ещё не создали ни одного канала."
+                        },
+                        modifier       = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
+                        textAlign      = TextAlign.Center,
+                        style          = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
                 // Список пуст
-                uiState.filteredChats.isEmpty() -> {
+                uiState.items.isEmpty() -> {
                     EmptyChatList(
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
                         onAddContact   = onAddContactClick,
@@ -220,21 +249,49 @@ fun ChatListScreen(
                     )
                 }
 
-                // Список чатов
+                // Общий список: личные чаты и группы вместе
                 else -> {
                     LazyColumn(
                         modifier       = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(vertical = 4.dp),
                     ) {
                         items(
-                            items = uiState.filteredChats,
-                            key   = { it.id },  // key для эффективных обновлений
-                        ) { chat ->
-                            ContactCard(
-                                chat    = chat,
-                                onClick = { onChatClick(chat.id, chat.contactName, chat.contactId) },
-                            )
-                            // Разделитель между чатами
+                            items = uiState.items,
+                            key   = { item ->
+                                when (item) {
+                                    is InboxItem.Personal -> "chat:" + item.chat.id
+                                    is InboxItem.Group -> "group:" + item.group.id
+                                }
+                            },
+                        ) { item ->
+                            when (item) {
+                                is InboxItem.Personal -> ContactCard(
+                                    chat    = item.chat,
+                                    onClick = {
+                                        onChatClick(
+                                            item.chat.id,
+                                            item.chat.contactName,
+                                            item.chat.contactId,
+                                        )
+                                    },
+                                )
+
+                                // Тап по своей группе в разделе «Админ группы»
+                                // открывает сразу админ-кабинет, по остальным -
+                                // обычный экран группы.
+                                is InboxItem.Group -> GroupCard(
+                                    group   = item.group,
+                                    openAdmin = uiState.section == InboxSection.AdminGroups,
+                                    onClick = {
+                                        if (uiState.section == InboxSection.AdminGroups) {
+                                            onGroupAdminClick(item.group.id)
+                                        } else {
+                                            onGroupClick(item.group.id)
+                                        }
+                                    },
+                                )
+                            }
+                            // Разделитель между строками
                             HorizontalDivider(
                                 modifier  = Modifier.padding(start = 82.dp),
                                 thickness = 0.5.dp,
@@ -380,4 +437,133 @@ private fun EmptyChatList(
         }
     }
 
+}
+
+// =============================================================================
+// ПОЛОСКА РАЗДЕЛОВ И СТРОКА ГРУППЫ
+// =============================================================================
+
+/**
+ * Полоска разделов главного экрана.
+ *
+ * Занимает всю ширину и пролистывается вбок: разделов может стать больше,
+ * чем влезает на экран. Разделы «Админ ...» сюда попадают только если у
+ * телефона есть своя группа или канал - список собирается во ViewModel.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SectionChips(
+    sections: List<InboxSection>,
+    selected: InboxSection,
+    onSelect: (InboxSection) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(items = sections, key = { it.name }) { section ->
+            FilterChip(
+                selected = selected == section,
+                onClick = { onSelect(section) },
+                label = { Text(section.title, maxLines = 1) },
+            )
+        }
+    }
+}
+
+/** Строка группы в общем списке: аватар, название, предпросмотр, счётчик. */
+@Composable
+private fun GroupCard(
+    group: InboxGroup,
+    openAdmin: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Avatar(name = group.title, modifier = Modifier.size(52.dp))
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = group.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // Пометка, что это своя группа: в разделе «Админ группы» тап
+                // открывает админ-кабинет.
+                if (openAdmin) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (group.myRole == GroupRole.OWNER) "владелец" else "админ",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Text(
+                text = group.preview ?: if (group.isPublic) {
+                    "Публичная группа - ${group.memberCount} уч."
+                } else {
+                    "Частная группа - ${group.memberCount} уч."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Column(horizontalAlignment = Alignment.End) {
+            if (group.timeMs != null) {
+                Text(
+                    text = formatGroupTime(group.timeMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (group.unreadCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .padding(horizontal = 6.dp, vertical = 1.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (group.unreadCount > 99) "99+" else group.unreadCount.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Время строки группы: сегодня - часы и минуты, раньше - дата. */
+private fun formatGroupTime(timestamp: Long): String {
+    val today = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    return if (timestamp > today.timeInMillis) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
+    } else {
+        SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date(timestamp))
+    }
 }

@@ -296,7 +296,9 @@ class GroupRepository(
 
         val report = broadcast(
             groupId,
-            GroupWire.buildMessage(groupId, topic.id, body),
+            // Id сообщения уходит в конверт: у получателей строка ляжет под тем
+            // же id, и закреп (Pin) найдёт её на всех телефонах.
+            GroupWire.buildMessage(groupId, topic.id, body, messageId),
             excludeSelf = true,
         )
         Log.i(
@@ -337,11 +339,15 @@ class GroupRepository(
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 val member = groupDao.getMember(packet.groupId, me) ?: return
                 if (member.isBanned) return
-                if (messageDao.messageExists(messageId)) return
+                // Сообщение хранится под id отправителя, если он пришёл в
+                // конверте: иначе закреп и ответы не найдут его на этом
+                // телефоне. Для старых конвертов остаётся транспортный id.
+                val localId = packet.messageId.ifBlank { messageId }
+                if (messageDao.messageExists(localId)) return
                 val now = clock()
                 messageDao.insertMessage(
                     MessageEntity(
-                        id = messageId,
+                        id = localId,
                         chatId = packet.groupId,
                         senderId = senderId,
                         content = packet.text,
@@ -726,8 +732,11 @@ class GroupRepository(
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         val group = groupDao.getGroupById(groupId)
             ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        if (!GroupPermissions.canInvite(member.role, member.permissions, effectiveMemberMask(group))) {
-            return Result.failure(SecurityException("Нет права управлять ссылками"))
+        // Управление ссылками - только владелец или администратор с правом
+        // приглашать. Право «добавлять участников» у обычных участников такого
+        // разрешения не даёт: иначе любой мог отозвать чужую ссылку.
+        if (!GroupPermissions.canManageInvites(member.role, member.permissions)) {
+            return Result.failure(SecurityException("Ссылками управляют только администраторы"))
         }
         groupDao.revokeInvite(slug)
         return Result.success(Unit)
@@ -743,8 +752,8 @@ class GroupRepository(
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         val group = groupDao.getGroupById(groupId)
             ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        if (!GroupPermissions.canInvite(member.role, member.permissions, effectiveMemberMask(group))) {
-            return Result.failure(SecurityException("Нет права управлять ссылками"))
+        if (!GroupPermissions.canManageInvites(member.role, member.permissions)) {
+            return Result.failure(SecurityException("Ссылками управляют только администраторы"))
         }
         groupDao.deleteInvite(slug)
         return Result.success(Unit)
