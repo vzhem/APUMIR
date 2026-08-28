@@ -35,7 +35,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vladimir.messenger.R
-import com.vladimir.messenger.ui.theme.LocalMessengerColors
 import kotlinx.coroutines.delay
 
 private const val SPLASH_MILLIS = 2500L
@@ -43,7 +42,8 @@ private const val SPLASH_MILLIS = 2500L
 /** Полноэкранный сплэш: иконка во весь экран + бегущие пакеты данных. */
 @Composable
 fun AppSplash(onFinished: () -> Unit) {
-    val colors = LocalMessengerColors.current
+    // Золото сети - как акцент темы (её палитровые константы приватные).
+    val gold = Color(0xFFE4B45A)
 
     LaunchedEffect(Unit) {
         delay(SPLASH_MILLIS)
@@ -111,7 +111,7 @@ fun AppSplash(onFinished: () -> Unit) {
             // Линии связи между узлами.
             links.forEach { (a, b) ->
                 drawLine(
-                    color = colors.gold.copy(alpha = 0.28f),
+                    color = gold.copy(alpha = 0.28f),
                     start = nodes[a],
                     end   = nodes[b],
                     strokeWidth = 2f,
@@ -119,7 +119,7 @@ fun AppSplash(onFinished: () -> Unit) {
             }
             // Узлы-«серверы».
             nodes.forEach { node ->
-                drawCircle(color = colors.gold.copy(alpha = 0.55f), radius = 7f, center = node)
+                drawCircle(color = gold.copy(alpha = 0.55f), radius = 7f, center = node)
             }
             // Бегущие пакеты данных: у каждой связи своя фаза.
             links.forEachIndexed { index, (a, b) ->
@@ -129,8 +129,8 @@ fun AppSplash(onFinished: () -> Unit) {
                     y = nodes[a].y + (nodes[b].y - nodes[a].y) * phase,
                 )
                 // След пакета.
-                drawCircle(color = colors.gold.copy(alpha = 0.18f), radius = 14f, center = p)
-                drawCircle(color = colors.gold, radius = 6f, center = p)
+                drawCircle(color = gold.copy(alpha = 0.18f), radius = 14f, center = p)
+                drawCircle(color = gold, radius = 6f, center = p)
             }
         }
 
@@ -143,7 +143,7 @@ fun AppSplash(onFinished: () -> Unit) {
         ) {
             Text(
                 text     = "APU - связь напрямую, без посредников",
-                color    = colors.gold,
+                color    = gold,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
