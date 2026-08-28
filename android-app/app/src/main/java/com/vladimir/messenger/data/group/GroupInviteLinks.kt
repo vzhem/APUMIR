@@ -40,10 +40,21 @@ object GroupInviteLinks {
      * slug» на чужом телефоне невозможно — ссылка обязана быть самодостаточной.
      * Оба параметра необязательны: старая ссылка без них тоже разбирается.
      */
-    fun build(slug: String, groupId: String? = null, ownerId: String? = null): String {
+    fun build(
+        slug: String,
+        groupId: String? = null,
+        ownerId: String? = null,
+        isChannel: Boolean = false,
+        requestApproval: Boolean = false,
+    ): String {
         val sb = StringBuilder(APP_LINK_PREFIX).append(slug)
         if (!groupId.isNullOrBlank()) sb.append("&g=").append(groupId)
         if (!ownerId.isNullOrBlank()) sb.append("&o=").append(ownerId)
+        // Признаки нужны вступающему телефону: по ним он пишет правду -
+        // «заявка отправлена» или «входим сразу», и называет канал каналом.
+        // Владелец им не доверяет и проверяет всё по своей базе.
+        if (isChannel) sb.append("&c=1")
+        if (requestApproval) sb.append("&a=1")
         return sb.toString()
     }
 
@@ -63,6 +74,10 @@ object GroupInviteLinks {
         val slug: String,
         val groupId: String?,
         val ownerId: String?,
+        /** Приглашение в канал, а не в группу. В старых ссылках признака нет. */
+        val isChannel: Boolean = false,
+        /** Ссылка создана с одобрением: владелец должен подтвердить вход. */
+        val needsApproval: Boolean = false,
     ) {
         /** Хватает ли данных, чтобы попросить группу по сети. */
         val isRoutable: Boolean
@@ -113,7 +128,13 @@ object GroupInviteLinks {
             val rest = text.removePrefix(SHORT_LINK_PREFIX)
             val slug = normalizeSlug(rest.substringBefore('?')) ?: return null
             val query = if (rest.contains('?')) rest.substringAfter('?') else ""
-            return InviteTarget(slug, queryParam(query, "g"), queryParam(query, "o"))
+            return InviteTarget(
+                slug = slug,
+                groupId = queryParam(query, "g"),
+                ownerId = queryParam(query, "o"),
+                isChannel = queryParam(query, "c") == "1",
+                needsApproval = queryParam(query, "a") == "1",
+            )
         }
 
         return try {
@@ -126,7 +147,13 @@ object GroupInviteLinks {
                 "https", "http" -> parseTelegramStart(uri.rawQuery)
                 else -> null
             } ?: return null
-            InviteTarget(slug, queryParam(uri.rawQuery, "g"), queryParam(uri.rawQuery, "o"))
+            InviteTarget(
+                slug = slug,
+                groupId = queryParam(uri.rawQuery, "g"),
+                ownerId = queryParam(uri.rawQuery, "o"),
+                isChannel = queryParam(uri.rawQuery, "c") == "1",
+                needsApproval = queryParam(uri.rawQuery, "a") == "1",
+            )
         } catch (_: Exception) {
             null
         }

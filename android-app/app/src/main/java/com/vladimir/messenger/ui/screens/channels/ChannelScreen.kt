@@ -114,6 +114,16 @@ fun ChannelScreen(
                     modifier = Modifier.align(Alignment.Center),
                 )
 
+                // Канала нет в базе: вышли из него или исключили. Экран не
+                // должен оставаться пустым - объясняем и оставляем выход.
+                uiState.channel == null -> Text(
+                    "Канал недоступен: вы в нём больше не состоите.",
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+
                 uiState.posts.isEmpty() -> Text(
                     if (uiState.canPost) {
                         "Постов пока нет. Нажмите «+», чтобы опубликовать первый."

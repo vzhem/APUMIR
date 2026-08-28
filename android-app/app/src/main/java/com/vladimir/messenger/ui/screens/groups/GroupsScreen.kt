@@ -165,7 +165,7 @@ fun GroupsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
-                        Text("Подключаемся к группе...")
+                        Text("Подключаемся...")
                     }
                 } else {
                     Text(joinMessage.orEmpty())

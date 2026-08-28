@@ -94,6 +94,7 @@ class GroupChatViewModel @Inject constructor(
     private fun observeTopics() {
         viewModelScope.launch {
             groupRepository.observeTopics(groupId).collect { topics ->
+                val previous = _uiState.value.selectedTopicId
                 _uiState.update { state ->
                     val selected = state.selectedTopicId?.takeIf { id -> topics.any { it.id == id } }
                         ?: requestedTopicId?.takeIf { id -> topics.any { it.id == id } }
@@ -101,9 +102,16 @@ class GroupChatViewModel @Inject constructor(
                         ?: topics.firstOrNull()?.id
                     state.copy(topics = topics, selectedTopicId = selected)
                 }
-                _uiState.value.selectedTopicId?.let {
-                    observeMessages(it)
-                    observePinned(it)
+                val selected = _uiState.value.selectedTopicId
+                // Ленту и закрепы перезапускаем ТОЛЬКО при смене темы.
+                //
+                // Раньше они перезапускались на каждом обновлении списка тем, и
+                // вместе со сбросом непрочитанных это давало замкнутый круг:
+                // запись в group_topics -> новый список тем -> перезапуск ленты
+                // -> снова запись. Экран при этом намертво зависал.
+                if (selected != null && selected != previous) {
+                    observeMessages(selected)
+                    observePinned(selected)
                 }
             }
         }

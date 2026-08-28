@@ -113,23 +113,27 @@ class GroupsViewModel @Inject constructor(
             val outcome = groupRepository.joinByLink(raw)
             when (outcome) {
                 is JoinOutcome.Joined -> _uiState.update {
+                    val what = if (outcome.isChannel) "канал" else "группу"
                     it.copy(
                         joining = false,
                         joinedGroupId = outcome.groupId,
-                        joinMessage = "Вы вошли в группу «" + outcome.title + "»",
+                        joinMessage = "Вы вошли в $what «" + outcome.title + "»",
                     )
                 }
                 is JoinOutcome.RequestSent -> _uiState.update {
-                    val where = if (outcome.title.isBlank()) {
-                        "группу"
+                    val what = if (outcome.isChannel) "канал" else "группа"
+                    val where = if (outcome.title.isBlank()) what else "«" + outcome.title + "»"
+                    // Ссылка без одобрения: владелец принимает сразу, и заявки
+                    // не будет. Обещать заявку в таком случае нельзя - ровно
+                    // это и выглядело как «заявки в канале не появляются».
+                    val message = if (outcome.needsApproval) {
+                        "Заявка в $where отправлена владельцу. " +
+                            "Как только он её одобрит, $what появится в списке."
                     } else {
-                        "«" + outcome.title + "»"
+                        "Входим в $where: одобрение не требуется. " +
+                            "Как только владелец будет на связи, $what появится в списке."
                     }
-                    it.copy(
-                        joining = false,
-                        joinMessage = "Заявка в $where отправлена владельцу. " +
-                            "Как только он её одобрит, группа появится в списке.",
-                    )
+                    it.copy(joining = false, joinMessage = message)
                 }
                 is JoinOutcome.Failed -> _uiState.update {
                     it.copy(joining = false, joinMessage = "Не удалось войти: " + outcome.reason)

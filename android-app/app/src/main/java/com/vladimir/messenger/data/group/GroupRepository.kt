@@ -657,10 +657,24 @@ class GroupRepository(
      */
     suspend fun markRead(groupId: String, topicId: String?) {
         if (groupId.isBlank()) return
+        // ВАЖНО: писать в базу только когда есть что менять.
+        //
+        // Экран темы вызывает этот метод на каждом обновлении ленты, а лента
+        // темы и список тем живут в одной таблице group_topics. Без этой
+        // проверки получался замкнутый круг: сброс непрочитанных писал в
+        // таблицу, поток тем перезапускал ленту, лента снова звала сброс - и
+        // так без конца, пока приложение не зависало.
         if (!topicId.isNullOrBlank()) {
-            groupDao.markTopicRead(topicId)
+            val topic = groupDao.getTopicById(topicId)
+            if (topic != null && topic.unreadCount > 0) {
+                groupDao.markTopicRead(topicId)
+            }
         }
-        groupDao.syncGroupUnread(groupId)
+        val group = groupDao.getGroupById(groupId) ?: return
+        val unread = groupDao.sumTopicUnread(groupId)
+        if (group.unreadCount != unread) {
+            groupDao.setGroupUnread(groupId, unread)
+        }
     }
 
     /** Закреплённые сообщения конкретной темы (а не всей группы). */
@@ -729,18 +743,28 @@ class GroupRepository(
 
     fun observeInvites(groupId: String): Flow<List<InviteSummary>> =
         groupDao.observeInvites(groupId).map { list ->
-            val ownerId = groupDao.getGroupById(groupId)?.ownerId
-            list.map { toInviteSummary(it, ownerId) }
+            val group = groupDao.getGroupById(groupId)
+            list.map { toInviteSummary(it, group?.ownerId, group?.isChannel == true) }
         }
 
     /**
      * Ссылка-приглашение. Кроме slug несёт id группы и адрес владельца — иначе
      * вступающий телефон не знает, у кого её запрашивать.
      */
-    private fun toInviteSummary(i: GroupInviteEntity, ownerId: String? = null) = InviteSummary(
+    private fun toInviteSummary(
+        i: GroupInviteEntity,
+        ownerId: String? = null,
+        isChannel: Boolean = false,
+    ) = InviteSummary(
         slug = i.slug,
         groupId = i.groupId,
-        link = GroupInviteLinks.build(i.slug, i.groupId, ownerId),
+        link = GroupInviteLinks.build(
+            slug = i.slug,
+            groupId = i.groupId,
+            ownerId = ownerId,
+            isChannel = isChannel,
+            requestApproval = i.requestApproval,
+        ),
         createdAtMs = i.createdAtMs,
         expiresAtMs = i.expiresAtMs,
         maxUses = i.maxUses,
@@ -776,7 +800,7 @@ class GroupRepository(
             requestApproval = requestApproval ?: !group.isPublic,
         )
         groupDao.insertInvite(entity)
-        return Result.success(toInviteSummary(entity, group.ownerId))
+        return Result.success(toInviteSummary(entity, group.ownerId, group.isChannel))
     }
 
     suspend fun revokeInvite(groupId: String, slug: String): Result<Unit> {
@@ -832,7 +856,7 @@ class GroupRepository(
         // Уже в группе — не шлём повторную заявку.
         val known = target.groupId?.let { groupDao.getGroupById(it) }
         if (known != null && !known.isLeft && groupDao.getMember(known.id, me) != null) {
-            return JoinOutcome.Joined(known.id, known.title)
+            return JoinOutcome.Joined(known.id, known.title, known.isChannel)
         }
 
         // Своя ссылка на своём телефоне: приглашение лежит в локальной базе.
@@ -855,7 +879,14 @@ class GroupRepository(
         )
         delivery.deliver(groupId, envelope, listOf(ownerId))
         Log.i(TAG, "join request sent to owner group=$groupId")
-        return JoinOutcome.RequestSent(groupId, "")
+        // Признаки берём из ссылки: своей базы с приглашением здесь нет, а
+        // писать «заявка отправлена», когда владелец принимает сразу, - врать.
+        return JoinOutcome.RequestSent(
+            groupId = groupId,
+            title = "",
+            isChannel = target.isChannel,
+            needsApproval = target.needsApproval,
+        )
     }
 
     /**
@@ -876,7 +907,7 @@ class GroupRepository(
         val group = groupDao.getGroupById(invite.groupId)
             ?: return JoinOutcome.Failed("Группа не найдена")
         if (groupDao.getMember(group.id, me) != null) {
-            return JoinOutcome.Joined(group.id, group.title)
+            return JoinOutcome.Joined(group.id, group.title, group.isChannel)
         }
 
         return if (invite.requestApproval) {
@@ -890,7 +921,12 @@ class GroupRepository(
                 )
             )
             sendJoinRequest(group.id, note)
-            JoinOutcome.RequestSent(group.id, group.title)
+            JoinOutcome.RequestSent(
+                groupId = group.id,
+                title = group.title,
+                isChannel = group.isChannel,
+                needsApproval = true,
+            )
         } else {
             groupDao.insertMember(
                 GroupMemberEntity(
@@ -903,7 +939,7 @@ class GroupRepository(
             )
             groupDao.registerInviteUse(slug)
             groupDao.refreshMemberCount(group.id)
-            JoinOutcome.Joined(group.id, group.title)
+            JoinOutcome.Joined(group.id, group.title, group.isChannel)
         }
     }
 
@@ -1009,7 +1045,12 @@ class GroupRepository(
         publishRoster(groupId)
         // Самому исключённому говорим отдельно: рассылка состава до него уже
         // не доходит как «вас убрали», и группа остаётся у него в списке.
-        delivery.deliver(groupId, GroupWire.buildKick(groupId, nodeId), listOf(nodeId))
+        // Сеть могла отказать - в базе он уже исключён, поэтому падать нельзя.
+        runCatching {
+            delivery.deliver(groupId, GroupWire.buildKick(groupId, nodeId), listOf(nodeId))
+        }.onFailure { e ->
+            Log.w(TAG, "kick notice not delivered to $nodeId: ${e.message}")
+        }
         return Result.success(Unit)
     }
 

@@ -106,12 +106,11 @@ interface GroupDao {
      * сообщения могли остаться непрочитанными. Поэтому после сброса темы
      * счётчик группы просто пересчитывается.
      */
-    @Query(
-        "UPDATE groups SET unreadCount = " +
-            "(SELECT COALESCE(SUM(unreadCount), 0) FROM group_topics WHERE groupId = :groupId) " +
-            "WHERE id = :groupId"
-    )
-    suspend fun syncGroupUnread(groupId: String)
+    @Query("SELECT COALESCE(SUM(unreadCount), 0) FROM group_topics WHERE groupId = :groupId")
+    suspend fun sumTopicUnread(groupId: String): Int
+
+    @Query("UPDATE groups SET unreadCount = :count WHERE id = :groupId")
+    suspend fun setGroupUnread(groupId: String, count: Int)
 
     @Query("UPDATE groups SET memberCount = :count WHERE id = :groupId")
     suspend fun updateMemberCount(groupId: String, count: Int)

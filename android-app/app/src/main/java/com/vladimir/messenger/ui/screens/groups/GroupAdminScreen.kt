@@ -538,13 +538,28 @@ private fun InvitesTab(
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             if (canManage) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // requestApproval = true означает «нужно одобрение».
-                    // Раньше здесь было наоборот: кнопка «с одобрением» создавала
-                    // ссылку БЕЗ одобрения, и человек влетал в группу сразу.
-                    TextButton(onClick = { onCreate(true) }) { Text("Ссылка с одобрением") }
-                    TextButton(onClick = { onCreate(false) }) { Text("Ссылка без одобрения") }
+                // Одна ссылка и один понятный переключатель.
+                //
+                // Две кнопки («с одобрением» и «без одобрения») читались
+                // двояко: «с одобрением» можно понять и как «уже одобрено,
+                // заходи». Из-за этого создавалась ссылка не того типа, и
+                // владелец либо получал лишнюю заявку, либо не получал её вовсе.
+                var needsApproval by remember { mutableStateOf(!isPublic) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Вход только после одобрения", fontWeight = FontWeight.Medium)
+                        Text(
+                            if (needsApproval) {
+                                "По ссылке человек оставляет заявку владельцу"
+                            } else {
+                                "По ссылке человек входит сразу"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Switch(checked = needsApproval, onCheckedChange = { needsApproval = it })
                 }
+                TextButton(onClick = { onCreate(needsApproval) }) { Text("Создать ссылку") }
             } else {
                 Text(
                     "Ссылки создают и отзывают администраторы. Попросите ссылку у них " +
@@ -600,7 +615,7 @@ private fun InviteCard(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         buildString {
-                            append(if (invite.requestApproval) "с одобрением" else "без одобрения")
+                            append(if (invite.requestApproval) "по заявке" else "вход сразу")
                             append(" • использований: ").append(invite.useCount)
                             if (invite.maxUses > 0) append("/").append(invite.maxUses)
                             if (invite.revoked) append(" • отозвана")

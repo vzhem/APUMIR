@@ -3,11 +3,41 @@ package com.vladimir.messenger.data.group
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GroupInviteLinksTest {
+
+    /** Признаки канала и одобрения доезжают во вступающий телефон вместе со ссылкой. */
+    @Test
+    fun linkCarriesChannelAndApprovalFlags() {
+        val link = GroupInviteLinks.build(
+            slug = "AbCdEf2345678901",
+            groupId = "grp-1",
+            ownerId = "pk_owner",
+            isChannel = true,
+            requestApproval = true,
+        )
+        val target = GroupInviteLinks.parseTarget(link)
+        assertNotNull(target)
+        target!!
+        assertTrue("канал должен остаться каналом", target.isChannel)
+        assertTrue("одобрение должно быть видно из ссылки", target.needsApproval)
+    }
+
+    /** Старая ссылка без признаков: не канал, тип одобрения неизвестен. */
+    @Test
+    fun linkWithoutFlagsIsNotChannel() {
+        val target = GroupInviteLinks.parseTarget(
+            "p2pmessenger://group?slug=AbCdEf2345678901&g=grp-1&o=pk_owner"
+        )
+        assertNotNull(target)
+        target!!
+        assertFalse(target.isChannel)
+        assertFalse(target.needsApproval)
+    }
 
     @Test
     fun generatedSlugsAreValidAndUnique() {

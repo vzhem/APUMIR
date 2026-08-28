@@ -92,10 +92,22 @@ data class GroupStats(
 /** Результат попытки вступить по ссылке-приглашению. */
 sealed class JoinOutcome {
     /** Сразу добавлен в участники (публичная группа или ссылка без одобрения). */
-    data class Joined(val groupId: String, val title: String) : JoinOutcome()
+    data class Joined(
+        val groupId: String,
+        val title: String,
+        val isChannel: Boolean = false,
+    ) : JoinOutcome()
 
-    /** Группа частная: создана заявка, ждёт решения администратора. */
-    data class RequestSent(val groupId: String, val title: String) : JoinOutcome()
+    /**
+     * Заявка ушла владельцу. `needsApproval` - из ссылки: по нему экран пишет
+     * правду, заявка это или вход сразу.
+     */
+    data class RequestSent(
+        val groupId: String,
+        val title: String,
+        val isChannel: Boolean = false,
+        val needsApproval: Boolean = true,
+    ) : JoinOutcome()
 
     data class Failed(val reason: String) : JoinOutcome()
 }
