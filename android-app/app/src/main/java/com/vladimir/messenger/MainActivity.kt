@@ -23,6 +23,7 @@ import com.vladimir.messenger.ui.navigation.Screen
 import com.vladimir.messenger.ui.navigation.MessengerNavGraph
 import com.vladimir.messenger.ui.theme.P2PMessengerTheme
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.WallpaperHolder
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 import com.vladimir.messenger.data.repository.ContactRepository
@@ -158,6 +159,7 @@ class MainActivity : ComponentActivity() {
         checkForUpdates()
 
         ThemeModeHolder.init(this)
+        WallpaperHolder.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             P2PMessengerTheme(themeMode = themeMode) {

@@ -32,13 +32,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.WallpaperHolder
 import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.theme.StatusConnecting
 import com.vladimir.messenger.ui.theme.StatusDegraded
 import com.vladimir.messenger.ui.theme.StatusOffline
 import com.vladimir.messenger.ui.theme.StatusOnline
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
@@ -220,6 +224,57 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(mode.title, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+
+                    // Свои обои чатов: из галереи или стандартные в тон теме.
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    val customWallpaper by WallpaperHolder.uri.collectAsStateWithLifecycle()
+                    val wallpaperPicker = rememberLauncherForActivityResult(
+                        ActivityResultContracts.GetContent()
+                    ) { uri ->
+                        if (uri != null) {
+                            try {
+                                context.contentResolver.takePersistableUriPermission(
+                                    uri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                )
+                            } catch (_: Exception) {
+                            }
+                            WallpaperHolder.set(context, uri.toString())
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Обои для чатов", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (customWallpaper != null) {
+                                    "Своя картинка из галереи"
+                                } else {
+                                    "Стандартные, в тон теме"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
+                            Text("Из галереи")
+                        }
+                    }
+                    if (customWallpaper != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 2.dp),
+                        ) {
+                            TextButton(onClick = { WallpaperHolder.set(context, null) }) {
+                                Text("Вернуть стандартные")
+                            }
                         }
                     }
                 }
