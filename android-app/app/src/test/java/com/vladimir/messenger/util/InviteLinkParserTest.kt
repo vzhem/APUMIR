@@ -62,6 +62,36 @@ class InviteLinkParserTest {
     }
 
     @Test
+    fun parsesProfileQrInviteLink() {
+        // Именно такой QR приложение показывает в профиле (SettingsViewModel).
+        val invite = InviteLinkParser.parse("p2p://invite/pk_abc123")
+
+        assertEquals("pk_abc123", invite?.nodeId)
+        assertEquals(InviteLinkParser.Source.RUST_CONNECT_LINK, invite?.source)
+    }
+
+    @Test
+    fun parsesKeyQrLinkWithName() {
+        val invite = InviteLinkParser.parse("p2p://key/pk_abc123?name=Evzhem")
+
+        assertEquals("pk_abc123", invite?.nodeId)
+        assertEquals("Evzhem", invite?.displayName)
+    }
+
+    @Test
+    fun parsesBareKeyQr() {
+        val invite = InviteLinkParser.parse("pk_abc123")
+
+        assertEquals("pk_abc123", invite?.nodeId)
+        assertEquals(InviteLinkParser.Source.APP_LINK, invite?.source)
+    }
+
+    @Test
+    fun ignoresUnknownP2pHost() {
+        assertNull(InviteLinkParser.parse("p2p://other/pk_abc123"))
+    }
+
+    @Test
     fun ignoresInvalidLinks() {
         assertNull(InviteLinkParser.parse(""))
         assertNull(InviteLinkParser.parse("not a uri"))

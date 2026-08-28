@@ -5489,3 +5489,25 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   Служебное: песочница снова откатила HEAD на f0ca016, из-за чего тег сначала
   не ставился (git tag не находил 3deb4be). Лечится git fetch origin <ветка> и
   git reset --mixed FETCH_HEAD, после чего тег вешается по полному SHA.
+- 2026-08-28 (раунд 32): Стас отсканировал QR профиля с телефона Жени и получил
+  тост «Это не ссылка APU». Причина найдена в коде: QR профиля - это
+  p2p://invite/pk_... (SettingsViewModel.kt:114 и CreateIdentityUseCase.kt:61),
+  а InviteLinkParser знал только p2pmessenger://add, p2pm://connect и t.me;
+  сканер в NavGraph шёл в ветку тоста. Комментарии «формат, которого приложение
+  не генерирует» были неверны - приложение его генерирует. Исправление: в
+  InviteLinkParser.parse добавлена ветка p2p (host invite/key/connect, ключ из
+  запроса или из пути) и голый pk_ без пробелов; +4 теста в InviteLinkParserTest
+  (8 -> 12, всего в гейте теперь 100).
+- Краш из логката Стаса: ForegroundServiceDidNotStopInTimeException типа
+  dataSync у CoreServerService - сервис не успевал снять foreground-статус при
+  остановке. Исправление: stopServiceSafely() = stopForeground(REMOVE) и только
+  потом stopSelf(); то же первым делом в onDestroy(). На экране не проверено,
+  только лексер/компиляция на гейте.
+- Иконка: файл APU.jpg из вложения в workspace НЕ доехал (каталога uploads/
+  нет). Иконку перерисовал генератором по виду оригинала (icon-design-source.png
+  в корне репозитория), вырезал квадрат 840 px и разложил по плотностям:
+  mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png и ic_launcher_round.png
+  (48/72/96/144/192). Старые webp удалены, mipmap-anydpi с adaptive-icon удалён
+  (иначе он перекрывал бы PNG на всех устройствах с minSdk 26), неиспользуемые
+  векторы ic_launcher_foreground/background удалены. Если владелец пришлёт файл
+  ещё раз - перенарезать тем же скриптом, замены только в res.

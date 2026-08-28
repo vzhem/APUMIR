@@ -305,10 +305,24 @@ class CoreServerService : Service() {
                 startEventPolling()
             } else {
                 updateNotification("Connection failed")
-                stopSelf()
+                stopServiceSafely()
             }
         }
         return START_STICKY
+    }
+
+    /**
+     * Система убивает приложение (ForegroundServiceDidNotStopInTimeException),
+     * если foreground-сервис не уложился в таймаут остановки. Поэтому сначала
+     * снимаем foreground-статус и уведомление, и только затем stopSelf().
+     */
+    private fun stopServiceSafely() {
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            Log.w(TAG, "stopForeground failed", e)
+        }
+        stopSelf()
     }
 
     /**
@@ -325,7 +339,7 @@ class CoreServerService : Service() {
             kotlinx.coroutines.delay(delay)
             try {
                 // Перезапуск сервиса (onDestroy + onStartCommand)
-                stopSelf()
+                stopServiceSafely()
                 val restartIntent = android.content.Intent(applicationContext, CoreServerService::class.java)
                 applicationContext.startForegroundService(restartIntent)
                 reconnectAttempt = 0
@@ -338,6 +352,13 @@ class CoreServerService : Service() {
     }
 
     override fun onDestroy() {
+        // Снимаем foreground-статус первым делом, чтобы система не считала
+        // сервис зависшим, пока мы закрываем реле и Rust-ядро.
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            Log.w(TAG, "stopForeground in onDestroy failed", e)
+        }
         telegramRelay?.stop()
         cloudflareRelay?.stop()
         Log.i(TAG, "CoreServerService destroyed")
