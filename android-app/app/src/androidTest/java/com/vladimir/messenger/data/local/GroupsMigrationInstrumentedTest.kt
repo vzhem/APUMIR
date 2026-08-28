@@ -65,15 +65,16 @@ class GroupsMigrationInstrumentedTest {
 
             // 2. Открываем как v10 и прогоняем миграции: 7 -> 8 (группы),
             // 8 -> 9 (каналы) и 9 -> 10 (@имя контакта + сетевой каталог).
-            val migrated = open(10, object : SupportSQLiteOpenHelper.Callback(10) {
+            val migrated = open(11, object : SupportSQLiteOpenHelper.Callback(11) {
                 override fun onCreate(db: SupportSQLiteDatabase) = Unit
 
                 override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
                     assertEquals(7, oldVersion)
-                    assertEquals(10, newVersion)
+                    assertEquals(11, newVersion)
                     AppDatabase.MIGRATION_7_8.migrate(db)
                     AppDatabase.MIGRATION_8_9.migrate(db)
                     AppDatabase.MIGRATION_9_10.migrate(db)
+                    AppDatabase.MIGRATION_10_11.migrate(db)
                 }
             })
             val db = migrated.writableDatabase
@@ -107,6 +108,7 @@ class GroupsMigrationInstrumentedTest {
                 "group_invites",
                 "group_message_stats",
                 "directory",
+                "nicknames",
             ).forEach { table ->
                 db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='$table'")
                     .use { cursor -> assertTrue("нет таблицы $table", cursor.moveToFirst()) }

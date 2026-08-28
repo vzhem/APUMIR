@@ -109,7 +109,7 @@ fun ContactCard(
             // Оригинальное имя через собаку - золотом, как акценты темы.
             if (username.isNotEmpty()) {
                 Text(
-                    text     = username,
+                    text     = "@$username",
                     style    = MaterialTheme.typography.bodySmall,
                     color    = MaterialTheme.colorScheme.primary,
                     maxLines = 1,

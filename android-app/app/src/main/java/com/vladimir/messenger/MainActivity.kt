@@ -21,8 +21,11 @@ import com.vladimir.messenger.ui.update.UpdateDialog
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
 import com.vladimir.messenger.ui.navigation.MessengerNavGraph
+import com.vladimir.messenger.ui.components.AppSplash
+import com.vladimir.messenger.ui.components.UsernameConflictDialog
 import com.vladimir.messenger.ui.theme.P2PMessengerTheme
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.EntryPointAccessors
@@ -160,9 +163,20 @@ class MainActivity : ComponentActivity() {
 
         ThemeModeHolder.init(this)
         WallpaperHolder.init(this)
+        UsernameHolder.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
+            // Сплэш показывается при запуске приложения (нажатии на иконку).
+            var showSplash by remember { mutableStateOf(true) }
+            // Роевой спор за @имя: система сняла наше имя - просим новое.
+            val usernameConflict by UsernameHolder.conflict.collectAsStateWithLifecycle()
             P2PMessengerTheme(themeMode = themeMode) {
+                if (usernameConflict) {
+                    UsernameConflictDialog()
+                }
+                if (showSplash) {
+                    AppSplash(onFinished = { showSplash = false })
+                } else {
                 val pendingContact = pendingContactInfo
                 Log.d("MainActivity", "Checking dialog: pendingContact=${pendingContact != null}")
                 
@@ -275,6 +289,7 @@ class MainActivity : ComponentActivity() {
                             Screen.Onboarding.route,
                         initialGroupInvite = pendingGroupInvite,
                     )
+                }
                 }
             }
         }

@@ -119,7 +119,8 @@ private fun Content(
             value = uiState.newUsername,
             onValueChange = onNewUsernameChanged,
             label = { Text("@имя") },
-            placeholder = { Text("@evzhem") },
+            placeholder = { Text("evzhem") },
+            prefix = { Text("@") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )

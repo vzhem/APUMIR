@@ -419,12 +419,8 @@ fun SettingsScreen(
     // Своё @имя: сохраняется в p2p_prefs и уезжает в ссылку профиля (u=).
     if (showUsernameDialog) {
         val usernameContext = LocalContext.current
-        var usernameValue by remember {
-            mutableStateOf(
-                usernameContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
-                    .getString("my_username", "").orEmpty()
-            )
-        }
+        val currentUsername by UsernameHolder.name.collectAsStateWithLifecycle()
+        var usernameValue by remember { mutableStateOf(currentUsername.orEmpty()) }
         AlertDialog(
             onDismissRequest = { showUsernameDialog = false },
             title = { Text("Ваше @имя") },
@@ -432,22 +428,18 @@ fun SettingsScreen(
                 OutlinedTextField(
                     value = usernameValue,
                     onValueChange = { usernameValue = it },
-                    label = { Text("@имя") },
-                    placeholder = { Text("@evzhem") },
+                    label = { Text("имя") },
+                    placeholder = { Text("evzhem") },
+                    prefix = { Text("@") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val raw = usernameValue.trim()
-                    val normalized = when {
-                        raw.isEmpty()  -> ""
-                        raw.startsWith("@") -> raw
-                        else           -> "@$raw"
-                    }
-                    usernameContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
-                        .edit().putString("my_username", normalized).apply()
+                    // Собака - неснимаемый префикс; храним имя без неё.
+                    UsernameHolder.set(usernameContext, usernameValue)
+                    UsernameHolder.clearConflict(usernameContext)
                     showUsernameDialog = false
                 }) { Text("Сохранить") }
             },

@@ -74,10 +74,11 @@ fun ContactsScreen(
             )
             val shown = remember(contacts, query) {
                 val q = query.trim().lowercase()
+                val qNick = q.removePrefix("@")
                 if (q.isEmpty()) contacts
                 else contacts.filter {
                     it.displayName.lowercase().contains(q) ||
-                        it.username.lowercase().contains(q)
+                        it.username.lowercase().contains(qNick)
                 }
             }
             if (shown.isEmpty() && contacts.isNotEmpty()) {

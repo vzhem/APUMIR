@@ -35,6 +35,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.drop
 import uniffi.p2p_core.CoreEventFfi
 import javax.inject.Inject
 
@@ -53,6 +54,8 @@ class CoreServerService : Service() {
     @Inject lateinit var botApi: BotApi
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
+    @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
+    private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -123,6 +126,21 @@ class CoreServerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "CoreServerService started")
         startForeground(NOTIFICATION_ID, buildNotification("Connecting..."))
+
+        // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
+        if (!gossipStarted) {
+            gossipStarted = true
+            serviceScope.launch {
+                kotlinx.coroutines.delay(3000)
+                runCatching { groupRepository.publishMyNickname() }
+                runCatching { groupRepository.publishMyDirectory() }
+            }
+            serviceScope.launch {
+                com.vladimir.messenger.ui.theme.UsernameHolder.name
+                    .drop(1)
+                    .collect { runCatching { groupRepository.publishMyNickname() } }
+            }
+        }
 
         val prefs = getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
         var displayName = prefs.getString("display_name", "Anonymous") ?: "Anonymous"

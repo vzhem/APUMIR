@@ -97,9 +97,9 @@ object InviteLinkParser {
         )
     }
 
-    /** @имя всегда храним с собакой, чтобы показывать как есть. */
+    /** @имя храним без собаки: собака - неснимаемый префикс при показе и вводе. */
     private fun normalizeUsername(raw: String?): String? =
-        raw?.trim()?.takeIf { it.isNotEmpty() }?.let { if (it.startsWith("@")) it else "@$it" }
+        raw?.trim()?.trimStart('@')?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun parseRustConnectLink(uri: URI, original: String): Invite? {
         if (!uri.host.equals("connect", ignoreCase = true)) return null

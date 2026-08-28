@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
+import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
@@ -15,6 +16,7 @@ import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
+import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.local.entity.FileExchangePeerEntity
@@ -43,8 +45,9 @@ import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
         GroupInviteEntity::class,
         GroupMessageStatEntity::class,
         DirectoryEntity::class,
+        NicknameEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -56,6 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun fileExchangePeerDao(): FileExchangePeerDao
     abstract fun groupDao(): GroupDao
     abstract fun directoryDao(): DirectoryDao
+    abstract fun nicknameDao(): NicknameDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -308,6 +312,22 @@ abstract class AppDatabase : RoomDatabase() {
                         "`hops` INTEGER NOT NULL, " +
                         "`updatedAtMs` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`groupId`))"
+                )
+            }
+        }
+
+        /**
+         * v11: реестр @имён для роевой проверки уникальности. Операция
+         * добавочная, существующие данные не трогает.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `nicknames` (" +
+                        "`ownerId` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`registeredAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`ownerId`))"
                 )
             }
         }

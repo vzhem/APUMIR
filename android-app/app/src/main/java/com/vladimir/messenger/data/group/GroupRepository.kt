@@ -4,7 +4,9 @@ import android.util.Log
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
+import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.local.entity.GroupEntity
 import com.vladimir.messenger.data.local.entity.GroupInviteEntity
 import com.vladimir.messenger.data.local.entity.GroupJoinRequestEntity
@@ -38,6 +40,13 @@ class GroupRepository(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val directoryDao: DirectoryDao,
     private val contactIds: suspend () -> List<String>,
+    private val nicknameDao: NicknameDao,
+    /** Моё @имя без собаки (null - имени ещё нет). */
+    private val myUsername: () -> String?,
+    /** Время моей регистрации имени. */
+    private val myRegisteredAt: () -> Long,
+    /** Система сняла моё имя из-за более раннего владельца: UI предложит новое. */
+    private val onUsernameConflict: () -> Unit,
 ) {
 
     /**
@@ -187,6 +196,61 @@ class GroupRepository(
             )
             runCatching { delivery.deliver(g.id, envelope, ids) }
                 .onFailure { Log.w(TAG, "dir publish failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * Роевая публикация моего @имени: контакты сохраняют в реестр и передают
+     * дальше, поэтому сеть знает, кто и когда зарегистрировал имя.
+     */
+    suspend fun publishMyNickname() {
+        val me = myNodeId() ?: return
+        val name = myUsername() ?: return
+        val ids = contactIds()
+        if (ids.isEmpty()) return
+        val envelope = GroupWire.buildNick(
+            ownerId = me,
+            name = name,
+            registeredAtMs = myRegisteredAt(),
+            hops = 0,
+        )
+        runCatching { delivery.deliver("nicknames", envelope, ids) }
+            .onFailure { Log.w(TAG, "nick publish failed: ${it.message}") }
+    }
+
+    private suspend fun handleNick(packet: GroupWire.Packet.Nick, senderId: String) {
+        nicknameDao.upsert(
+            NicknameEntity(
+                ownerId = packet.ownerId,
+                name = packet.name,
+                registeredAtMs = packet.registeredAtMs,
+            )
+        )
+        // Спор об имени: такое же имя у чужого владельца. Прав тот, у кого
+        // регистрация раньше (при равенстве времени - тот, у кого id меньше).
+        val me = myNodeId() ?: return
+        val mine = myUsername() ?: return
+        if (packet.ownerId != me && packet.name.equals(mine, ignoreCase = true)) {
+            val myAt = myRegisteredAt()
+            val iLost = packet.registeredAtMs < myAt ||
+                (packet.registeredAtMs == myAt && packet.ownerId < me)
+            if (iLost) {
+                Log.w(TAG, "username @$mine lost to ${packet.ownerId}, clearing")
+                onUsernameConflict()
+            }
+        }
+        // Эпидемия дальше, кроме отправителя.
+        if (packet.hops < MAX_DIR_HOPS) {
+            val next = contactIds().filter { it != senderId }
+            if (next.isNotEmpty()) {
+                val envelope = GroupWire.buildNick(
+                    ownerId = packet.ownerId,
+                    name = packet.name,
+                    registeredAtMs = packet.registeredAtMs,
+                    hops = packet.hops + 1,
+                )
+                runCatching { delivery.deliver("nicknames", envelope, next) }
+            }
         }
     }
 
@@ -634,6 +698,8 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.Directory -> handleDirectory(packet, senderId)
+
+            is GroupWire.Packet.Nick -> handleNick(packet, senderId)
 
             is GroupWire.Packet.TopicsRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return

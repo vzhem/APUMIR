@@ -80,13 +80,9 @@ class RenameContactViewModel @Inject constructor(
             result
                 .onSuccess {
                     Log.i(TAG, "Contact renamed: $contactId -> $newName")
-                    // @имя: нормализуем с собакой и сохраняем рядом с именем.
+                    // @имя храним без собаки: собака неснимаемый префикс в UI.
                     val rawUser = _uiState.value.newUsername.trim()
-                    val username = when {
-                        rawUser.isEmpty() -> ""
-                        rawUser.startsWith("@") -> rawUser
-                        else -> "@$rawUser"
-                    }
+                    val username = rawUser.trimStart('@').trim()
                     try {
                         contactRepository.updateUsername(contactId, username)
                     } catch (e: Exception) {

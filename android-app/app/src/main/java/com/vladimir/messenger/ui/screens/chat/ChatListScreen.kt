@@ -52,6 +52,8 @@ import com.vladimir.messenger.util.OwnInvite
 fun ChatListScreen(
     onChatClick: (chatId: String, contactName: String, contactId: String) -> Unit,
     onAddContactClick: () -> Unit,
+    onCreateGroupClick: () -> Unit = {},
+    onCreateChannelClick: () -> Unit = {},
     onSettingsClick: () -> Unit,
     onScanQrClick: () -> Unit = {},
     onShowMyQrClick: () -> Unit = {},
@@ -72,6 +74,9 @@ fun ChatListScreen(
     var inviteName by remember { mutableStateOf("") }
     var connectLink by remember { mutableStateOf("") }
     val context = LocalContext.current
+
+    // Меню создания у кнопки-карандаша: чат, группа, канал.
+    var fabMenuExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -198,14 +203,14 @@ fun ChatListScreen(
             }
         },
         floatingActionButton = {
-            // FAB: добавить контакт / новый чат
+            // FAB-карандаш: открывает меню создания чата, группы и канала.
             FloatingActionButton(
-                onClick = onAddContactClick,
+                onClick = { fabMenuExpanded = true },
                 containerColor = MaterialTheme.colorScheme.primary,
             ) {
                 Icon(
                     Icons.Default.Edit,
-                    contentDescription = "Новый чат",
+                    contentDescription = "Создать",
                     tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
@@ -217,6 +222,38 @@ fun ChatListScreen(
                 .padding(paddingValues),
         ) {
             ChatWallpaper()
+            DropdownMenu(
+                expanded = fabMenuExpanded,
+                onDismissRequest = { fabMenuExpanded = false },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 96.dp),
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Новый чат") },
+                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                    onClick = {
+                        fabMenuExpanded = false
+                        onAddContactClick()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Новая группа") },
+                    leadingIcon = { Icon(Icons.Default.Group, contentDescription = null) },
+                    onClick = {
+                        fabMenuExpanded = false
+                        onCreateGroupClick()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Новый канал") },
+                    leadingIcon = { Icon(Icons.Default.Campaign, contentDescription = null) },
+                    onClick = {
+                        fabMenuExpanded = false
+                        onCreateChannelClick()
+                    },
+                )
+            }
             when {
                 // Загрузка
                 uiState.isLoading -> {

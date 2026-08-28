@@ -43,6 +43,7 @@ object GroupWire {
     const val KIND_ROSTER_REQUEST = "rreq"
     const val KIND_KICK = "kick"
     const val KIND_DIRECTORY = "dir"
+    const val KIND_NICK = "nick"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -164,6 +165,18 @@ object GroupWire {
             val hops: Int,
         ) : Packet()
 
+        /**
+         * Регистрация @имени: владелец объявляет имя и время регистрации,
+         * контакты сохраняют и пересылают дальше. При споре прав тот, у кого
+         * время раньше. Имя хранится без собаки.
+         */
+        data class Nick(
+            val ownerId: String,
+            val name: String,
+            val registeredAtMs: Long,
+            val hops: Int,
+        ) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -217,6 +230,10 @@ object GroupWire {
     ): String =
         "$PREFIX|$KIND_DIRECTORY|$groupId|${encode(title)}|${encode(about)}|$ownerId|" +
             "${encode(slug)}|${if (isChannel) 1 else 0}|${if (needsApproval) 1 else 0}|$hops"
+
+    /** Роевая публикация @имени. */
+    fun buildNick(ownerId: String, name: String, registeredAtMs: Long, hops: Int): String =
+        "$PREFIX|$KIND_NICK|$ownerId|${encode(name)}|$registeredAtMs|$hops"
 
     fun buildTopicCreated(groupId: String, topicId: String, name: String): String =
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}"
@@ -424,6 +441,24 @@ object GroupWire {
                         isChannel = parts[7] == "1",
                         needsApproval = parts[8] == "1",
                         hops = parts[9].toIntOrNull() ?: 0,
+                    )
+                }
+            } else {
+                null
+            }
+
+            KIND_NICK -> if (parts.size == 6) {
+                val ownerId = parts[2]
+                val name = decode(parts[3])?.trim()?.trimStart('@').orEmpty()
+                val at = parts[4].toLongOrNull() ?: return null
+                if (ownerId.isBlank() || name.isBlank()) {
+                    null
+                } else {
+                    Packet.Nick(
+                        ownerId = ownerId,
+                        name = name,
+                        registeredAtMs = at,
+                        hops = parts[5].toIntOrNull() ?: 0,
                     )
                 }
             } else {

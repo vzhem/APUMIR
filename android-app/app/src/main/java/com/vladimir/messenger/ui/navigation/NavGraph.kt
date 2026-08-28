@@ -107,7 +107,7 @@ sealed class Screen(val route: String) {
     data object QrScanner : Screen("qr_scanner")
 
     // Раздел «Группы»
-    data object Groups : Screen("groups?joinLink={joinLink}") {
+    data object Groups : Screen("groups?joinLink={joinLink}&create={create}") {
         /**
          * Обычный вход в раздел, без ссылки.
          *
@@ -119,6 +119,10 @@ sealed class Screen(val route: String) {
 
         fun createJoinRoute(link: String): String =
             "groups?joinLink=" + java.net.URLEncoder.encode(link, "UTF-8")
+
+        /** Из меню кнопки-карандаша: сразу открыть диалог создания группы/канала. */
+        fun createCreateRoute(create: String): String =
+            "groups?create=" + java.net.URLEncoder.encode(create, "UTF-8")
     }
 
     data object GroupChat : Screen("group_chat/{groupId}?topicId={topicId}") {
@@ -234,6 +238,12 @@ fun MessengerNavGraph(
                 },
                 onAddContactClick = {
                     navController.navigate(Screen.AddContact.createRoute())
+                },
+                onCreateGroupClick = {
+                    navController.navigate(Screen.Groups.createCreateRoute("group"))
+                },
+                onCreateChannelClick = {
+                    navController.navigate(Screen.Groups.createCreateRoute("channel"))
                 },
                 onRankClick = {
                     navController.navigate(Screen.RankBenefits.route)
@@ -410,6 +420,11 @@ fun MessengerNavGraph(
                     nullable = true
                     defaultValue = null
                 },
+                navArgument("create") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
             ),
         ) { entry ->
             GroupsScreen(
@@ -421,6 +436,7 @@ fun MessengerNavGraph(
                 },
                 onBackClick = { navController.popBackStack() },
                 joinLink = entry.arguments?.getString("joinLink"),
+                create = entry.arguments?.getString("create"),
             )
         }
 

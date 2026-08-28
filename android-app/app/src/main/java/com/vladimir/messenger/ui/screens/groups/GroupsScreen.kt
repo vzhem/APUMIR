@@ -67,10 +67,16 @@ fun GroupsScreen(
     onBackClick: () -> Unit,
     /** Ссылка-приглашение из QR или из внешнего открытия: сразу пробуем войти. */
     joinLink: String? = null,
+    /** Из меню кнопки-карандаша: "group" или "channel" - сразу открыть создание. */
+    create: String? = null,
     viewModel: GroupsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
+    // Из меню кнопки-карандаша сразу открываем диалог создания группы/канала.
+    LaunchedEffect(create) {
+        if (!create.isNullOrBlank() && uiState.canCreate) showCreate = true
+    }
     var showRankHint by remember { mutableStateOf(false) }
     var showJoin by remember { mutableStateOf(false) }
 
@@ -214,6 +220,7 @@ fun GroupsScreen(
         CreateGroupDialog(
             creating = uiState.creating,
             error = uiState.createError,
+            initialIsChannel = create == "channel",
             onDismiss = {
                 showCreate = false
                 viewModel.dismissCreateError()
@@ -294,12 +301,13 @@ private fun CreateGroupDialog(
     error: String?,
     onDismiss: () -> Unit,
     onCreate: (String, String, Boolean, Boolean, Boolean) -> Unit,
+    initialIsChannel: Boolean = false,
 ) {
     var title by remember { mutableStateOf("") }
     var about by remember { mutableStateOf("") }
     var isPublic by remember { mutableStateOf(false) }
     var topics by remember { mutableStateOf(true) }
-    var isChannel by remember { mutableStateOf(false) }
+    var isChannel by remember { mutableStateOf(initialIsChannel) }
 
     AlertDialog(
         onDismissRequest = onDismiss,

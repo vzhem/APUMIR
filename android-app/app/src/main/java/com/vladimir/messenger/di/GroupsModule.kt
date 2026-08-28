@@ -11,6 +11,7 @@ import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import dagger.Module
 import dagger.Provides
@@ -48,6 +49,7 @@ object GroupsModule {
         delivery: GroupDelivery,
         directoryDao: DirectoryDao,
         contactDao: ContactDao,
+        nicknameDao: NicknameDao,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -55,6 +57,24 @@ object GroupsModule {
         delivery = delivery,
         directoryDao = directoryDao,
         contactIds = { contactDao.allIds() },
+        nicknameDao = nicknameDao,
+        myUsername = {
+            com.vladimir.messenger.ui.theme.UsernameHolder.normalize(
+                context.applicationContext
+                    .getSharedPreferences(IDENTITY_PREFS, Context.MODE_PRIVATE)
+                    .getString("my_username", null)
+            )
+        },
+        myRegisteredAt = {
+            context.applicationContext
+                .getSharedPreferences(IDENTITY_PREFS, Context.MODE_PRIVATE)
+                .getLong("my_nick_registered_at", 0L)
+        },
+        onUsernameConflict = {
+            // Снимаем проигравшее имя и показываем предложение задать новое.
+            com.vladimir.messenger.ui.theme.UsernameHolder.set(context.applicationContext, null)
+            com.vladimir.messenger.ui.theme.UsernameHolder.raiseConflict(context.applicationContext)
+        },
         myNodeId = { RustBridge.nodeId() },
         myDisplayName = {
             context.applicationContext

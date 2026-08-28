@@ -9,11 +9,17 @@ package com.vladimir.messenger.ui.screens.onboarding
 //   3. Предоставляет invite-ссылку для первого контакта
 // =============================================================================
 
+import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vladimir.messenger.data.local.dao.NicknameDao
+import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.domain.usecase.CreateIdentityUseCase
 import com.vladimir.messenger.domain.usecase.CheckIdentityUseCase
+import com.vladimir.messenger.ui.theme.UsernameHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,7 +48,42 @@ enum class OnboardingStep {
 class OnboardingViewModel @Inject constructor(
     private val createIdentityUseCase: CreateIdentityUseCase,
     private val checkIdentityUseCase: CheckIdentityUseCase,
+    private val nicknameDao: NicknameDao,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    companion object {
+        // Короткие «космические» слова для случайных @имён при регистрации.
+        private val NICK_WORDS = listOf(
+            "astrid", "vega", "altair", "sirius", "lyra", "orion", "draco",
+            "persei", "foton", "kvazar", "pulsar", "neon", "argon", "krypton",
+            "xenon", "radon", "cobalt", "titan", "zircon", "osmium", "iridium",
+            "hafnium", "photon", "quasar", "nova", "comet", "meteor", "orbit",
+            "sputnik", "vostok",
+        )
+    }
+
+    /**
+     * Случайное свободное @имя: проверяем роевой реестр, чтобы в системе не
+     * было двух одинаковых ников. Своё сразу регистрируем в реестре.
+     */
+    private suspend fun assignRandomUsername(me: String) {
+        val now = System.currentTimeMillis()
+        repeat(25) {
+            val name = NICK_WORDS.random() + (200..999).random()
+            val taken = nicknameDao.byName(name).any { it.ownerId != me }
+            if (!taken) {
+                nicknameDao.upsert(NicknameEntity(ownerId = me, name = name, registeredAtMs = now))
+                appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("my_username", name)
+                    .putLong("my_nick_registered_at", now)
+                    .apply()
+                UsernameHolder.set(appContext, name)
+                return
+            }
+        }
+    }
 
     private val _uiState = MutableStateFlow(OnboardingUiState())
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
@@ -86,6 +127,14 @@ class OnboardingViewModel @Inject constructor(
             // Создаём идентичность (генерация Ed25519/X25519 ключей в Rust)
             createIdentityUseCase(name)
                 .onSuccess { identity ->
+                    // Регистрация: автоматически присваиваем случайное свободное @имя.
+                    viewModelScope.launch {
+                        try {
+                            assignRandomUsername(identity.fingerprint)
+                        } catch (e: Exception) {
+                            Log.e("OnboardingVM", "username assign failed", e)
+                        }
+                    }
                     _uiState.update { it.copy(
                         step            = OnboardingStep.ShowInvite,
                         isLoading       = false,

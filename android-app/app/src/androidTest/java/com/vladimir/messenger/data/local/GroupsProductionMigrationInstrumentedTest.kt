@@ -56,11 +56,12 @@ class GroupsProductionMigrationInstrumentedTest {
                 AppDatabase.MIGRATION_7_8,
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
+                AppDatabase.MIGRATION_10_11,
             )
             .build()
         try {
             val db = room.openHelper.writableDatabase
-            assertEquals(10, db.version)
+            assertEquals(11, db.version)
 
             // Ни одна старая строка не переписана и не потеряна.
             assertEquals(before, legacyState(db))
@@ -78,6 +79,7 @@ class GroupsProductionMigrationInstrumentedTest {
                 "group_invites",
                 "group_message_stats",
                 "directory",
+                "nicknames",
             ).forEach { table ->
                 assertEquals("table $table must exist and be empty", 0, scalarInt(db, "SELECT COUNT(*) FROM $table"))
             }
