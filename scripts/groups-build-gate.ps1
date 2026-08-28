@@ -225,13 +225,14 @@ try {
             Write-Output 'RESULT: MIGRATION TEST FAILED - do not ship this database change.'
             exit $MigrationExit
         }
-        Write-Output 'RESULT: migration 7 -> 8 verified on a real device database.'
+        Write-Output 'RESULT: the migrations up to the current schema were verified on a real device database.'
     } else {
         Write-Output ''
-        Write-Output 'NOTE: migration 7 -> 8 was NOT exercised. The host gate cannot run it.'
+        Write-Output 'NOTE: the database migrations were NOT exercised. The host gate cannot run them.'
         Write-Output 'AppModule uses fallbackToDestructiveMigration(), so a wrong migration is'
-        Write-Output 'a data-loss risk on upgrade. To verify on a phone that already holds a'
-        Write-Output 'version 7 database, rerun with -RunMigrationTest.'
+        Write-Output 'a data-loss risk on upgrade. The current schema is version 9; 8 -> 9 only'
+        Write-Output 'adds groups.isChannel. To verify on a phone that already holds an older'
+        Write-Output 'database, rerun with -RunMigrationTest - it wipes app data, back up first.'
     }
 
     Write-Output ''

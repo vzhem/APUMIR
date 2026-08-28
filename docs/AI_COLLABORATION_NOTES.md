@@ -5415,3 +5415,15 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
      файлов релизов release-assets.githubusercontent.com заблокирован, поэтому
      ни JDK (Temurin), ни kotlinc скачать нельзя; apt без прав root. Проверка
      компиляцией остаётся только на ПК владельца.
+- 2026-08-28 (гейт на 095fbfa - зелёный): схема MIGRATION_8_9 - 0 расхождений;
+  unit test totals: tests=94 failures=0 skipped=0 (GroupWireTest 27,
+  GroupPermissionsTest 16, GroupInviteLinksTest 14, FileTransferRankPolicyTest 10,
+  ContactShareLink 3, ImageLinkDetector 9, InviteLinkParser 8, ReferralInviteLink 7);
+  compileDebugKotlin exit 0; assembleDebug exit 0, debug apk 30 184 788 байт,
+  built 28.08.2026 18:15:31; androidTest compile 0; RESULT: GREEN.
+  Значит каналы, лента постов с комментариями, имена отправителей в конверте,
+  запрос состава и сброс непрочитанных компилируются и не ломают тесты.
+  Единственное предупреждение компилятора (Icons.Filled.ArrowBack устарела)
+  убрано: в ChannelScreen используется Icons.AutoMirrored.Filled.ArrowBack.
+  Текст напоминания в groups-build-gate.ps1 про «migration 7 -> 8» обновлён на
+  текущую схему (версия 9, 8 -> 9 добавляет groups.isChannel).
