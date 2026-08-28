@@ -62,8 +62,7 @@ private val IvoryOnVar    = Color(0xFF4A4639)
 private val IvoryOutline  = Color(0xFF7B7668)
 private val IvoryOutlineV = Color(0xFFD8D2C2)
 
-private val Error40       = Color(0xFFBA1A1A)
-private val Error80       = Color(0xFFFFB4AB)
+// Error40 и Error80 уже объявлены в Color.kt — здесь только контейнеры.
 private val ErrorContD    = Color(0xFFFFDAD6)
 private val ErrorContOnD  = Color(0xFF410002)
 private val ErrorContN    = Color(0xFF93000A)
