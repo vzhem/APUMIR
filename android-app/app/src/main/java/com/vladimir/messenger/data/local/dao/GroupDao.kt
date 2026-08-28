@@ -17,11 +17,16 @@ import kotlinx.coroutines.flow.Flow
 interface GroupDao {
 
     // ── Группы ────────────────────────────────────────────────────────────────
-    @Query("SELECT * FROM groups WHERE isLeft = 0 ORDER BY lastMessageAtMs DESC")
+    // Каналы лежат в той же таблице, поэтому в выборках групп они отсекаются:
+    // иначе канал показывался бы и в списке групп, и в списке каналов.
+    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY lastMessageAtMs DESC")
     fun observeGroups(): Flow<List<GroupEntity>>
 
-    @Query("SELECT * FROM groups WHERE isLeft = 0 ORDER BY lastMessageAtMs DESC")
+    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY lastMessageAtMs DESC")
     suspend fun getGroups(): List<GroupEntity>
+
+    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 ORDER BY lastMessageAtMs DESC")
+    fun observeChannels(): Flow<List<GroupEntity>>
 
     @Query("SELECT * FROM groups WHERE id = :groupId")
     suspend fun getGroupById(groupId: String): GroupEntity?

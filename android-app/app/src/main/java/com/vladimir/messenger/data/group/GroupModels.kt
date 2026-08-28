@@ -9,6 +9,8 @@ data class GroupSummary(
     val ownerId: String,
     val isPublic: Boolean,
     val topicsEnabled: Boolean,
+    /** Канал, а не группа: посты пишут администраторы, обсуждение в комментариях. */
+    val isChannel: Boolean = false,
     /** Маска разрешений обычных участников — общая политика группы. */
     val memberPermissions: Long,
     val memberCount: Int,

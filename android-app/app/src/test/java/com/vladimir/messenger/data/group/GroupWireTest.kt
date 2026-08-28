@@ -63,6 +63,41 @@ class GroupWireTest {
         assertEquals("", msg.senderName)
     }
 
+    /** Канал отличается от группы одним полем в карточке. */
+    @Test
+    fun channelInfoRoundTrip() {
+        val envelope = GroupWire.buildGroupInfo(
+            groupId = "ch-1",
+            title = "Новости",
+            about = "",
+            ownerId = "pk_owner",
+            inviteSlug = "AbCdEf2345678901",
+            isPublic = true,
+            topicsEnabled = true,
+            isChannel = true,
+        )
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.GroupInfo
+        assertTrue("канал должен остаться каналом", parsed.isChannel)
+        assertEquals("ch-1", parsed.groupId)
+    }
+
+    /** Обычная группа: конверт из 9 частей, каналом не считается. */
+    @Test
+    fun groupInfoWithoutChannelFieldIsNotChannel() {
+        val envelope = GroupWire.buildGroupInfo(
+            groupId = "grp-2",
+            title = "Работа",
+            about = "",
+            ownerId = "pk_owner",
+            inviteSlug = "AbCdEf2345678901",
+            isPublic = false,
+            topicsEnabled = true,
+        )
+        assertEquals(9, envelope.split('|').size)
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.GroupInfo
+        assertFalse(parsed.isChannel)
+    }
+
     @Test
     fun rosterRequestRoundTrip() {
         val parsed = GroupWire.parse(GroupWire.buildRosterRequest("grp1"))

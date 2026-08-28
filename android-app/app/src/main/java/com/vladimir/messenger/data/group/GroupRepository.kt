@@ -51,6 +51,11 @@ class GroupRepository(
         about: String,
         isPublic: Boolean,
         topicsEnabled: Boolean,
+        /**
+         * true - создаём канал: та же доставка и те же участники, но посты
+         * пишут администраторы, а обсуждение живёт в комментариях под постом.
+         */
+        isChannel: Boolean = false,
     ): Result<GroupSummary> {
         if (!canCreateGroups()) {
             return Result.failure(
@@ -82,6 +87,7 @@ class GroupRepository(
                 ownerName = myName,
                 isPublic = isPublic,
                 topicsEnabled = topicsEnabled,
+                isChannel = isChannel,
                 createdAtMs = now,
                 memberCount = 1,
                 inviteSlug = slug,
@@ -140,6 +146,10 @@ class GroupRepository(
     private suspend fun requireSummary(groupId: String): GroupSummary =
         toSummary(groupDao.getGroupById(groupId) ?: error("group $groupId vanished"))
 
+    /** Каналы этого телефона - для раздела «Каналы» на главном экране. */
+    fun observeChannels(): Flow<List<GroupSummary>> =
+        groupDao.observeChannels().map { list -> list.map { toSummary(it) } }
+
     private suspend fun toSummary(g: GroupEntity): GroupSummary {
         val me = myNodeId().orEmpty()
         val mine = groupDao.getMember(g.id, me)
@@ -150,6 +160,7 @@ class GroupRepository(
             ownerId = g.ownerId,
             isPublic = g.isPublic,
             topicsEnabled = g.topicsEnabled,
+            isChannel = g.isChannel,
             memberPermissions = g.memberPermissions,
             memberCount = g.memberCount,
             unreadCount = g.unreadCount,
@@ -504,6 +515,7 @@ class GroupRepository(
                             ownerId = packet.ownerId,
                             isPublic = packet.isPublic,
                             topicsEnabled = packet.topicsEnabled,
+                            isChannel = packet.isChannel,
                             createdAtMs = clock(),
                             memberCount = 1,
                             inviteSlug = packet.inviteSlug,
@@ -1252,6 +1264,7 @@ class GroupRepository(
                 inviteSlug = group.inviteSlug,
                 isPublic = group.isPublic,
                 topicsEnabled = group.topicsEnabled,
+                isChannel = group.isChannel,
             ),
             listOf(nodeId),
         )

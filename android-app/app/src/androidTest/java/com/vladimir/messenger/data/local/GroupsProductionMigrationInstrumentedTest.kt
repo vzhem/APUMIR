@@ -19,7 +19,7 @@ import org.junit.runner.RunWith
  * GroupsMigrationInstrumentedTest проверяет SQL миграции на пустой копии базы и
  * при этом не проходит через RoomOpenHelper. Этот тест закрывает ровно то, что
  * остаётся непроверенным: Room сам открывает messenger_database, сам вызывает
- * MIGRATION_7_8, сам сверяет получившуюся схему со своей (типы столбцов,
+ * MIGRATION_7_8 и MIGRATION_8_9, сам сверяет получившуюся схему со своей (типы столбцов,
  * NOT NULL, DEFAULT, индексы) и сам обновляет identity hash в
  * room_master_table. Расхождение там даёт "Migration didn't properly handle"
  * и падение приложения при старте.
@@ -48,14 +48,15 @@ class GroupsProductionMigrationInstrumentedTest {
             preflight.close()
         }
 
-        // Room owns the upgrade: it runs MIGRATION_7_8, validates the resulting
-        // schema against the entities and rewrites the identity hash.
+        // Room owns the upgrade: it runs MIGRATION_7_8 and MIGRATION_8_9,
+        // validates the resulting schema against the entities and rewrites the
+        // identity hash.
         val room = Room.databaseBuilder(context, AppDatabase::class.java, "messenger_database")
-            .addMigrations(AppDatabase.MIGRATION_7_8)
+            .addMigrations(AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
             .build()
         try {
             val db = room.openHelper.writableDatabase
-            assertEquals(8, db.version)
+            assertEquals(9, db.version)
 
             // Ни одна старая строка не переписана и не потеряна.
             assertEquals(before, legacyState(db))

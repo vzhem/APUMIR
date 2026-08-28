@@ -63,14 +63,16 @@ class GroupsMigrationInstrumentedTest {
                 override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
             }).close()
 
-            // 2. Открываем как v8 и прогоняем миграцию.
-            val migrated = open(8, object : SupportSQLiteOpenHelper.Callback(8) {
+            // 2. Открываем как v9 и прогоняем обе миграции: 7 -> 8 (группы)
+            // и 8 -> 9 (каналы).
+            val migrated = open(9, object : SupportSQLiteOpenHelper.Callback(9) {
                 override fun onCreate(db: SupportSQLiteDatabase) = Unit
 
                 override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) {
                     assertEquals(7, oldVersion)
-                    assertEquals(8, newVersion)
+                    assertEquals(9, newVersion)
                     AppDatabase.MIGRATION_7_8.migrate(db)
+                    AppDatabase.MIGRATION_8_9.migrate(db)
                 }
             })
             val db = migrated.writableDatabase

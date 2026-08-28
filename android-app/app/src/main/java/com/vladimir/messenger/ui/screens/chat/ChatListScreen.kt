@@ -59,6 +59,7 @@ fun ChatListScreen(
     onGroupsClick: () -> Unit = {},
     onGroupClick: (groupId: String) -> Unit = {},
     onGroupAdminClick: (groupId: String) -> Unit = {},
+    onChannelClick: (channelId: String) -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -222,16 +223,12 @@ fun ChatListScreen(
                     )
                 }
 
-                // Каналов в приложении пока нет - разделы про них показывают
-                // понятную заглушку вместо пустого экрана.
-                uiState.section == InboxSection.Channels ||
-                    uiState.section == InboxSection.AdminChannels -> {
+                // В разделе каналов пусто - объясняем, где их взять.
+                uiState.items.isEmpty() &&
+                    uiState.section == InboxSection.Channels -> {
                     Text(
-                        if (uiState.section == InboxSection.Channels) {
-                            "Каналов пока нет. Они появятся в следующих версиях."
-                        } else {
-                            "Вы ещё не создали ни одного канала."
-                        },
+                        "Каналов пока нет. Создайте свой в разделе «Группы» " +
+                            "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
                         modifier       = Modifier
                             .align(Alignment.Center)
                             .padding(24.dp),
@@ -276,17 +273,22 @@ fun ChatListScreen(
                                     },
                                 )
 
-                                // Тап по своей группе в разделе «Админ группы»
-                                // открывает сразу админ-кабинет, по остальным -
-                                // обычный экран группы.
+                                // В админ-разделах тап открывает сразу
+                                // админ-кабинет. В остальных канал открывается
+                                // лентой постов, группа - общим чатом.
                                 is InboxItem.Group -> GroupCard(
                                     group   = item.group,
-                                    openAdmin = uiState.section == InboxSection.AdminGroups,
+                                    openAdmin = uiState.section == InboxSection.AdminGroups ||
+                                        uiState.section == InboxSection.AdminChannels,
                                     onClick = {
-                                        if (uiState.section == InboxSection.AdminGroups) {
-                                            onGroupAdminClick(item.group.id)
-                                        } else {
-                                            onGroupClick(item.group.id)
+                                        when {
+                                            uiState.section == InboxSection.AdminGroups ||
+                                                uiState.section == InboxSection.AdminChannels ->
+                                                onGroupAdminClick(item.group.id)
+
+                                            item.group.isChannel -> onChannelClick(item.group.id)
+
+                                            else -> onGroupClick(item.group.id)
                                         }
                                     },
                                 )
@@ -503,6 +505,14 @@ private fun GroupCard(
                 )
                 // Пометка, что это своя группа: в разделе «Админ группы» тап
                 // открывает админ-кабинет.
+                if (group.isChannel) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "канал",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 if (openAdmin) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(

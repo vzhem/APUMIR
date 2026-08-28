@@ -62,6 +62,7 @@ import com.vladimir.messenger.data.group.GroupSummary
 @Composable
 fun GroupsScreen(
     onGroupClick: (groupId: String) -> Unit,
+    onChannelClick: (channelId: String) -> Unit = { onGroupClick(it) },
     onBackClick: () -> Unit,
     /** Ссылка-приглашение из QR или из внешнего открытия: сразу пробуем войти. */
     joinLink: String? = null,
@@ -140,7 +141,13 @@ fun GroupsScreen(
 
                 else -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
                     items(uiState.filtered, key = { it.id }) { group ->
-                        GroupRow(group = group, onClick = { onGroupClick(group.id) })
+                        GroupRow(
+                            group = group,
+                            onClick = {
+                                // Канал открывается лентой постов, группа - чатом.
+                                if (group.isChannel) onChannelClick(group.id) else onGroupClick(group.id)
+                            },
+                        )
                         HorizontalDivider()
                     }
                 }
@@ -195,11 +202,18 @@ fun GroupsScreen(
                 showCreate = false
                 viewModel.dismissCreateError()
             },
-            onCreate = { title, about, isPublic, topics ->
-                viewModel.createGroup(title, about, isPublic, topics) { groupId ->
-                    showCreate = false
-                    onGroupClick(groupId)
-                }
+            onCreate = { title, about, isPublic, topics, isChannel ->
+                viewModel.createGroup(
+                    title = title,
+                    about = about,
+                    isPublic = isPublic,
+                    topicsEnabled = topics,
+                    onCreated = { groupId ->
+                        showCreate = false
+                        if (isChannel) onChannelClick(groupId) else onGroupClick(groupId)
+                    },
+                    isChannel = isChannel,
+                )
             },
         )
     }
@@ -263,16 +277,17 @@ private fun CreateGroupDialog(
     creating: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onCreate: (String, String, Boolean, Boolean) -> Unit,
+    onCreate: (String, String, Boolean, Boolean, Boolean) -> Unit,
 ) {
     var title by remember { mutableStateOf("") }
     var about by remember { mutableStateOf("") }
     var isPublic by remember { mutableStateOf(false) }
     var topics by remember { mutableStateOf(true) }
+    var isChannel by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Новая группа") },
+        title = { Text(if (isChannel) "Новый канал" else "Новая группа") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -296,12 +311,26 @@ private fun CreateGroupDialog(
                     }
                     Switch(checked = isPublic, onCheckedChange = { isPublic = it })
                 }
+                // Канал - это лента постов с комментариями: посты пишут
+                // администраторы, обсуждение живёт под постом.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Темы", fontWeight = FontWeight.Medium)
-                        Text("Обсуждения внутри группы", style = MaterialTheme.typography.bodySmall)
+                        Text("Это канал", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Посты пишут администраторы, под ними комментарии",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
-                    Switch(checked = topics, onCheckedChange = { topics = it })
+                    Switch(checked = isChannel, onCheckedChange = { isChannel = it })
+                }
+                if (!isChannel) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Темы", fontWeight = FontWeight.Medium)
+                            Text("Обсуждения внутри группы", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = topics, onCheckedChange = { topics = it })
+                    }
                 }
                 if (error != null) {
                     Text(error, color = MaterialTheme.colorScheme.error)
@@ -314,7 +343,7 @@ private fun CreateGroupDialog(
         confirmButton = {
             TextButton(
                 enabled = title.isNotBlank() && !creating,
-                onClick = { onCreate(title, about, isPublic, topics) },
+                onClick = { onCreate(title, about, isPublic, topics, isChannel) },
             ) { Text("Создать") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },

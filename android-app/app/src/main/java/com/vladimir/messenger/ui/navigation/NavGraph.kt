@@ -47,6 +47,7 @@ import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
 import com.vladimir.messenger.ui.screens.groups.GroupsScreen
 import com.vladimir.messenger.ui.screens.groups.GroupChatScreen
 import com.vladimir.messenger.ui.screens.groups.GroupAdminScreen
+import com.vladimir.messenger.ui.screens.channels.ChannelScreen
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.util.InviteLinkParser
 
@@ -120,9 +121,23 @@ sealed class Screen(val route: String) {
             "groups?joinLink=" + java.net.URLEncoder.encode(link, "UTF-8")
     }
 
-    data object GroupChat : Screen("group_chat/{groupId}") {
+    data object GroupChat : Screen("group_chat/{groupId}?topicId={topicId}") {
         fun createRoute(groupId: String): String =
             "group_chat/" + java.net.URLEncoder.encode(groupId, "UTF-8")
+
+        /**
+         * Вход сразу в нужную тему: так канал открывает комментарии
+         * конкретного поста, а не первую тему подряд.
+         */
+        fun createTopicRoute(groupId: String, topicId: String): String =
+            "group_chat/" + java.net.URLEncoder.encode(groupId, "UTF-8") +
+                "?topicId=" + java.net.URLEncoder.encode(topicId, "UTF-8")
+    }
+
+    // Лента канала: посты и комментарии под ними
+    data object Channel : Screen("channel/{channelId}") {
+        fun createRoute(channelId: String): String =
+            "channel/" + java.net.URLEncoder.encode(channelId, "UTF-8")
     }
 
     data object GroupAdmin : Screen("group_admin/{groupId}") {
@@ -243,6 +258,9 @@ fun MessengerNavGraph(
                 },
                 onGroupAdminClick = { groupId ->
                     navController.navigate(Screen.GroupAdmin.createRoute(groupId))
+                },
+                onChannelClick = { channelId ->
+                    navController.navigate(Screen.Channel.createRoute(channelId))
                 },
             )
         }
@@ -398,6 +416,9 @@ fun MessengerNavGraph(
                 onGroupClick = { groupId ->
                     navController.navigate(Screen.GroupChat.createRoute(groupId))
                 },
+                onChannelClick = { channelId ->
+                    navController.navigate(Screen.Channel.createRoute(channelId))
+                },
                 onBackClick = { navController.popBackStack() },
                 joinLink = entry.arguments?.getString("joinLink"),
             )
@@ -407,11 +428,33 @@ fun MessengerNavGraph(
             route = Screen.GroupChat.route,
             arguments = listOf(
                 navArgument("groupId") { type = NavType.StringType },
+                navArgument("topicId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
             ),
         ) {
             GroupChatScreen(
                 onOpenAdmin = { groupId ->
                     navController.navigate(Screen.GroupAdmin.createRoute(groupId))
+                },
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        composable(
+            route = Screen.Channel.route,
+            arguments = listOf(
+                navArgument("channelId") { type = NavType.StringType },
+            ),
+        ) {
+            ChannelScreen(
+                onOpenComments = { channelId, topicId ->
+                    navController.navigate(Screen.GroupChat.createTopicRoute(channelId, topicId))
+                },
+                onOpenAdmin = { channelId ->
+                    navController.navigate(Screen.GroupAdmin.createRoute(channelId))
                 },
                 onBackClick = { navController.popBackStack() },
             )

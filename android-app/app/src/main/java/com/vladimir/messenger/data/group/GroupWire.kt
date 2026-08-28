@@ -155,6 +155,8 @@ object GroupWire {
             val inviteSlug: String,
             val isPublic: Boolean,
             val topicsEnabled: Boolean,
+            /** Канал, а не группа. У старых конвертов поля нет - это группа. */
+            val isChannel: Boolean = false,
         ) : Packet()
     }
 
@@ -235,11 +237,16 @@ object GroupWire {
         inviteSlug: String,
         isPublic: Boolean,
         topicsEnabled: Boolean,
-    ): String =
-        "$PREFIX|$KIND_GROUP_INFO|$groupId|" +
+        isChannel: Boolean = false,
+    ): String {
+        val base = "$PREFIX|$KIND_GROUP_INFO|$groupId|" +
             encode(title) + "|" + encode(about) + "|" + encode(ownerId) + "|" +
             encode(inviteSlug) + "|" + (if (isPublic) 1 else 0) + "|" +
-            if (topicsEnabled) 1 else 0
+            (if (topicsEnabled) 1 else 0)
+        // Десятое поле добавляем только для канала: обычный конверт группы
+        // остаётся из 9 частей, и его понимают телефоны с прошлой версией.
+        return if (isChannel) "$base|1" else base
+    }
 
     // ── Разбор ────────────────────────────────────────────────────────────────
 
@@ -341,13 +348,14 @@ object GroupWire {
                 null
             }
 
-            KIND_GROUP_INFO -> if (parts.size == 9) {
+            KIND_GROUP_INFO -> if (parts.size == 9 || parts.size == 10) {
                 val title = decode(parts[3]) ?: return null
                 val about = decode(parts[4]) ?: return null
                 val ownerId = decode(parts[5]) ?: return null
                 val slug = decode(parts[6]).orEmpty()
                 val isPublic = parts[7]
                 val topics = parts[8]
+                val isChannel = parts.size == 10 && parts[9] == "1"
                 if (ownerId.isBlank() || (isPublic != "0" && isPublic != "1") ||
                     (topics != "0" && topics != "1")
                 ) {
@@ -361,6 +369,7 @@ object GroupWire {
                         inviteSlug = slug,
                         isPublic = isPublic == "1",
                         topicsEnabled = topics == "1",
+                        isChannel = isChannel,
                     )
                 }
             } else {

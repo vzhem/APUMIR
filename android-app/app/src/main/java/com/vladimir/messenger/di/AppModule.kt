@@ -31,6 +31,7 @@ object AppModule {
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
                 AppDatabase.MIGRATION_7_8,
+                AppDatabase.MIGRATION_8_9,
             )
             .fallbackToDestructiveMigration()
             .build()

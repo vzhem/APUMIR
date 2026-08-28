@@ -48,6 +48,15 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC")
     fun observeTopicMessages(chatId: String, topicId: String): Flow<List<MessageEntity>>
 
+    /**
+     * Все сообщения чата разом, без разреза по темам.
+     *
+     * Нужно ленте канала: пост - это первое сообщение темы, а число
+     * комментариев считается по остальным сообщениям той же темы.
+     */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
+    fun observeChatMessages(chatId: String): Flow<List<MessageEntity>>
+
     // Закрепы читаются в разрезе темы: закреп из одной темы не должен висеть
     // вверху другой (фильтр topicId обязателен, иначе закреп общий на группу).
     @Query(

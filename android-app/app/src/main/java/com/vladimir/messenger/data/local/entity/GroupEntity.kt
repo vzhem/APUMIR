@@ -18,6 +18,11 @@ data class GroupEntity(
     val ownerName: String = "",
     val isPublic: Boolean = false,
     val topicsEnabled: Boolean = true,
+    /**
+     * Канал, а не группа: посты пишут администраторы, обсуждение - в
+     * комментариях под постом. Хранится в той же таблице groups.
+     */
+    val isChannel: Boolean = false,
     val createdAtMs: Long = 0L,
     val memberCount: Int = 1,
     val inviteSlug: String = "",

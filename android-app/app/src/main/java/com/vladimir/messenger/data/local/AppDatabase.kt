@@ -41,7 +41,7 @@ import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
         GroupInviteEntity::class,
         GroupMessageStatEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -262,6 +262,22 @@ abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_group_message_stats_groupId` ON `group_message_stats` (`groupId`)")
+            }
+        }
+
+        /**
+         * 8 -> 9: каналы.
+         *
+         * Канал - это группа с флагом: те же участники, доставка, темы и
+         * админ-кабинет, но посты пишут администраторы, а обсуждение живёт в
+         * комментариях под постом. Поэтому хватает одного столбца, таблицы не
+         * пересоздаются и данные не теряются.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `groups` ADD COLUMN `isChannel` INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
 

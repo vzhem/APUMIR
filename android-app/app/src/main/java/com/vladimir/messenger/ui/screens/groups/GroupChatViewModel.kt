@@ -41,6 +41,13 @@ class GroupChatViewModel @Inject constructor(
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
 
+    /**
+     * Тема, которую надо открыть сразу. Так канал открывает комментарии
+     * конкретного поста, а не первую тему подряд.
+     */
+    private val requestedTopicId: String? =
+        savedStateHandle.get<String>("topicId")?.takeIf { it.isNotBlank() }
+
     private val _uiState = MutableStateFlow(GroupChatUiState(groupId = groupId))
     val uiState: StateFlow<GroupChatUiState> = _uiState.asStateFlow()
 
@@ -89,6 +96,7 @@ class GroupChatViewModel @Inject constructor(
             groupRepository.observeTopics(groupId).collect { topics ->
                 _uiState.update { state ->
                     val selected = state.selectedTopicId?.takeIf { id -> topics.any { it.id == id } }
+                        ?: requestedTopicId?.takeIf { id -> topics.any { it.id == id } }
                         ?: topics.firstOrNull { it.isGeneral }?.id
                         ?: topics.firstOrNull()?.id
                     state.copy(topics = topics, selectedTopicId = selected)

@@ -72,15 +72,28 @@ class GroupsViewModel @Inject constructor(
         isPublic: Boolean,
         topicsEnabled: Boolean,
         onCreated: (String) -> Unit,
+        isChannel: Boolean = false,
     ) {
         _uiState.update { it.copy(creating = true, createError = null) }
         viewModelScope.launch {
-            val result = groupRepository.createGroup(title, about, isPublic, topicsEnabled)
+            val result = groupRepository.createGroup(
+                title = title,
+                about = about,
+                isPublic = isPublic,
+                topicsEnabled = topicsEnabled,
+                isChannel = isChannel,
+            )
             result.onSuccess { group ->
                 _uiState.update { it.copy(creating = false, createError = null) }
                 onCreated(group.id)
             }.onFailure { e ->
-                _uiState.update { it.copy(creating = false, createError = e.message ?: "Не удалось создать группу") }
+                _uiState.update {
+                    it.copy(
+                        creating = false,
+                        createError = e.message
+                            ?: if (isChannel) "Не удалось создать канал" else "Не удалось создать группу",
+                    )
+                }
             }
         }
     }

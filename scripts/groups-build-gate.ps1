@@ -85,6 +85,9 @@ try {
     # the schema when the database is opened on a device, so this is the only
     # host-side defence against a migration that Room would reject. Needs
     # Python; when Python is absent the step is skipped, not failed.
+    # The migration named here is the LAST one: the checker compares a single
+    # migration against the current entities, so an older one (7 -> 8) now
+    # differs by exactly the columns the newer migrations add.
     Write-Output ''
     Write-Output '===== step 0: Room schema cross-check ====='
     $Python = $null
@@ -98,7 +101,7 @@ try {
         if ($Python -eq 'py') { $PyArgs = @('-3') }
         $DataLocal = Join-Path $RepoRoot 'android-app\app\src\main\java\com\vladimir\messenger\data\local'
         & $Python @PyArgs (Join-Path $RepoRoot 'tools\sandbox\check_room_schema.py') `
-            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_7_8'
+            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_8_9'
         $SchemaExit = $LASTEXITCODE
         Write-Output "schema cross-check exit code: $SchemaExit"
         if ($SchemaExit -ne 0) {

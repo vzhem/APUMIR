@@ -12,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -43,6 +44,8 @@ data class InboxGroup(
     val isPublic: Boolean,
     /** OWNER | ADMIN | MEMBER - роль этого телефона. */
     val myRole: String,
+    /** Канал открывается лентой постов, группа - общим чатом. */
+    val isChannel: Boolean = false,
 )
 
 /** Строка общего списка: личный чат или группа. */
@@ -103,7 +106,11 @@ class ChatListViewModel @Inject constructor(
      */
     private fun observeGroups() {
         viewModelScope.launch {
-            groupDao.observeGroups().collect { entities ->
+            // Группы и каналы лежат в одной таблице, но выборки разные: в
+            // разделе «Группы» каналы не показываются и наоборот.
+            combine(groupDao.observeGroups(), groupDao.observeChannels()) { groups, channels ->
+                groups + channels
+            }.collect { entities ->
                 val me = com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
                 val roles = if (me.isBlank()) {
                     emptyMap()
@@ -120,6 +127,7 @@ class ChatListViewModel @Inject constructor(
                         memberCount = g.memberCount,
                         isPublic = g.isPublic,
                         myRole = if (g.ownerId == me) GroupRole.OWNER else roles[g.id] ?: GroupRole.MEMBER,
+                        isChannel = g.isChannel,
                     )
                 }
                 _uiState.update { state ->
@@ -141,12 +149,13 @@ class ChatListViewModel @Inject constructor(
             InboxSection.Groups,
             InboxSection.Channels,
         )
-        val managesGroup = groups.any {
-            it.myRole == GroupRole.OWNER || it.myRole == GroupRole.ADMIN
+        val manages = { row: InboxGroup ->
+            row.myRole == GroupRole.OWNER || row.myRole == GroupRole.ADMIN
         }
-        if (managesGroup) sections += InboxSection.AdminGroups
-        // Каналов в приложении пока нет: раздел «Админ каналы» появится вместе
-        // с первым созданным каналом, пустым он показываться не должен.
+        if (groups.any { !it.isChannel && manages(it) }) sections += InboxSection.AdminGroups
+        // Раздел появляется только у того, кто канал создал или ведёт:
+        // пустым он показываться не должен.
+        if (groups.any { it.isChannel && manages(it) }) sections += InboxSection.AdminChannels
         return sections
     }
 
@@ -166,13 +175,17 @@ class ChatListViewModel @Inject constructor(
         val personal = filterChats(chats, query).map {
             InboxItem.Personal(it, it.lastMessageTime ?: 0L)
         }
+        val adminOnly = section == InboxSection.AdminGroups ||
+            section == InboxSection.AdminChannels
         val groupRows = groups.filter { row ->
             when (section) {
-                InboxSection.All, InboxSection.Groups -> true
-                InboxSection.AdminGroups ->
-                    row.myRole == GroupRole.OWNER || row.myRole == GroupRole.ADMIN
-                InboxSection.Chats, InboxSection.Channels, InboxSection.AdminChannels -> false
+                InboxSection.All -> true
+                InboxSection.Groups, InboxSection.AdminGroups -> !row.isChannel
+                InboxSection.Channels, InboxSection.AdminChannels -> row.isChannel
+                InboxSection.Chats -> false
             }
+        }.filter { row ->
+            !adminOnly || row.myRole == GroupRole.OWNER || row.myRole == GroupRole.ADMIN
         }.filter { row ->
             query.isBlank() ||
                 row.title.contains(query, ignoreCase = true) ||
@@ -181,10 +194,8 @@ class ChatListViewModel @Inject constructor(
 
         val items = when (section) {
             InboxSection.Chats -> personal
-            InboxSection.Groups, InboxSection.AdminGroups -> groupRows
-            // Заглушки: каналов в приложении ещё нет.
-            InboxSection.Channels, InboxSection.AdminChannels -> emptyList()
             InboxSection.All -> personal + groupRows
+            else -> groupRows
         }.sortedByDescending { it.sortKey }
 
         return copy(items = items)
