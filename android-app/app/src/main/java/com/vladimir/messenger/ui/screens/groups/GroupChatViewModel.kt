@@ -116,6 +116,9 @@ class GroupChatViewModel @Inject constructor(
         messagesJob = viewModelScope.launch {
             groupRepository.observeTopicMessages(groupId, topicId).collect { list ->
                 _uiState.update { it.copy(messages = list) }
+                // Экран открыт - значит тема прочитана. Вызываем на каждом
+                // обновлении, чтобы счётчик гас и на новых сообщениях.
+                groupRepository.markRead(groupId, topicId)
             }
         }
     }

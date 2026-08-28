@@ -28,9 +28,6 @@ class GroupRepository(
     private val groupDao: GroupDao,
     private val messageDao: MessageDao,
     private val delivery: GroupDelivery,
-    /** Узлы, для которых состав уже запрашивали: повторно не спрашиваем. */
-    private val rosterAsked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-
     private val myNodeId: () -> String?,
     private val myDisplayName: () -> String,
     /** Порог ранга: создание групп доступно с ранга «Проводник» и выше. */
@@ -38,6 +35,13 @@ class GroupRepository(
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
+
+    /**
+     * Узлы, для которых состав уже запрашивали: повторно не спрашиваем,
+     * чтобы одно неизвестное имя не породило поток запросов.
+     */
+    private val rosterAsked: MutableSet<String> =
+        java.util.Collections.synchronizedSet(mutableSetOf())
 
     /** Для экранов: доступно ли текущему рангу создание групп. */
     fun canCreateGroupsNow(): Boolean = canCreateGroups()
@@ -641,6 +645,22 @@ class GroupRepository(
         messageDao.updatePinned(messageId, pinned, if (pinned) clock() else null, if (pinned) me else null)
         broadcast(groupId, GroupWire.buildPin(groupId, message.topicId.orEmpty(), messageId, pinned), excludeSelf = true)
         return Result.success(Unit)
+    }
+
+    /**
+     * Тема прочитана.
+     *
+     * Счётчик непрочитанных только рос: markTopicRead и markGroupRead в DAO
+     * были, но их никто не вызывал, поэтому цифры на группе висели даже после
+     * чтения. Теперь экран ленты вызывает этот метод при каждом обновлении -
+     * и при входе в тему, и когда новое сообщение приходит на открытом экране.
+     */
+    suspend fun markRead(groupId: String, topicId: String?) {
+        if (groupId.isBlank()) return
+        if (!topicId.isNullOrBlank()) {
+            groupDao.markTopicRead(topicId)
+        }
+        groupDao.syncGroupUnread(groupId)
     }
 
     /** Закреплённые сообщения конкретной темы (а не всей группы). */
