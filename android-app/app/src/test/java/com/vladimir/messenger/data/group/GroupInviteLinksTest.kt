@@ -14,7 +14,7 @@ class GroupInviteLinksTest {
     @Test
     fun linkCarriesChannelAndApprovalFlags() {
         val link = GroupInviteLinks.build(
-            slug = "AbCdEf2345678901",
+            slug = "Abcdefghijkmnopq",
             groupId = "grp-1",
             ownerId = "pk_owner",
             isChannel = true,
@@ -31,7 +31,7 @@ class GroupInviteLinksTest {
     @Test
     fun linkWithoutFlagsIsNotChannel() {
         val target = GroupInviteLinks.parseTarget(
-            "p2pmessenger://group?slug=AbCdEf2345678901&g=grp-1&o=pk_owner"
+            "p2pmessenger://group?slug=Abcdefghijkmnopq&g=grp-1&o=pk_owner"
         )
         assertNotNull(target)
         target!!
