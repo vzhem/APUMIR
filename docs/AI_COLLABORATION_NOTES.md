@@ -5465,3 +5465,27 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   I, O и l. Ссылка с таким slug справедливо считается мусором. В тестах теперь
   «Abcdefghijkmnopq», как в уже работающих тестах этого файла. Урок: данные в
   тест надо брать из того же алфавита, что и генератор, а не выдумывать.
+- 2026-08-28 (релиз v11.21.0 выпущен): гейт на 3deb4be зелёный - схема
+  MIGRATION_8_9 0 расхождений, unit test totals: tests=96 failures=0 skipped=0
+  (GroupInviteLinksTest 16, GroupPermissionsTest 16, GroupWireTest 27,
+  FileTransferRankPolicyTest 10, ContactShareLink 3, ImageLinkDetector 9,
+  InviteLinkParser 8, ReferralInviteLink 7), compileDebugKotlin 0,
+  assembleDebug 0, debug apk 30 184 788 байт от 28.08.2026 19:56:24,
+  androidTest compile 0, RESULT: GREEN.
+  Тег v11.21.0 поставлен на 3deb4bead5c14e6e44ae6e0e384d9689eb27ce41, рабочий
+  процесс Build Release APK (прогон 33192578405) отработал успешно и выложил
+  app-release.apk 35 782 307 байт. Дальше по уже известной схеме: снят флаг
+  пре-релиза, затем повторная публикация (draft=true, пауза, draft=false) -
+  без этого /releases/latest остаётся на прошлом теге. После этого
+  /releases/latest сразу вернул v11.21.0, published_at 2026-08-28T17:15:52Z,
+  а releases/latest/download/app-release.apk редиректит на APK из v11.21.0.
+  versionCode для v11.21.0 по формуле build.gradle.kts - 11 021 000, то есть
+  выше 11 020 000 у v11.20.0, поэтому подсказка об обновлении появится и
+  обновление встанет. Текст выпуска переписан по-русски через
+  gh release edit --notes-file.
+  Напоминание про тестовые телефоны не изменилось: на Ане и Стасе стоят
+  debug-сборки с отладочной подписью, релиз поверх них без удаления приложения
+  не встаёт.
+  Служебное: песочница снова откатила HEAD на f0ca016, из-за чего тег сначала
+  не ставился (git tag не находил 3deb4be). Лечится git fetch origin <ветка> и
+  git reset --mixed FETCH_HEAD, после чего тег вешается по полному SHA.
