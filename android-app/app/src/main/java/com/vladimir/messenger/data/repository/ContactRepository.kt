@@ -17,7 +17,11 @@ class ContactRepository @Inject constructor(
     fun observeContacts(): Flow<List<Contact>> =
         contactDao.observeAllContacts().map { it.map { e -> e.toDomain() } }
 
-    suspend fun addContact(displayName: String, fingerprint: String): Result<Contact> {
+    suspend fun addContact(
+        displayName: String,
+        fingerprint: String,
+        username: String = "",
+    ): Result<Contact> {
         return try {
             val existing = contactDao.getContactByFingerprint(fingerprint)
             if (existing != null) {
@@ -35,6 +39,7 @@ class ContactRepository @Inject constructor(
                 id = contactId,
                 displayName = displayName,
                 fingerprint = fingerprint,
+                username = username,
             )
 
             contactDao.insertContact(entity)
@@ -69,7 +74,12 @@ class ContactRepository @Inject constructor(
         fingerprint = fingerprint,
         isOnline = isOnline,
         lastSeen = lastSeen,
+        username = username,
     )
+
+    suspend fun updateUsername(contactId: String, username: String) {
+        contactDao.updateUsername(contactId, username)
+    }
 
     suspend fun renameContact(contactId: String, newName: String): Result<Unit> {
         return try {

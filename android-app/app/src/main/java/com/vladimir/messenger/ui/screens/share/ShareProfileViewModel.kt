@@ -48,7 +48,10 @@ class ShareProfileViewModel @Inject constructor(
             val displayName = prefs.getString("display_name", "Me") ?: "Me"
             val encodedNodeId = nodeId.urlEncode()
             val encodedName = displayName.urlEncode()
-            val legacyLink = "p2pmessenger://add?node_id=$encodedNodeId&name=$encodedName"
+            // Своё @имя едет в ссылке, чтобы новые контакты сохраняли его сами.
+            val myUsername = (prefs.getString("my_username", "") ?: "").trim()
+            val usernamePart = if (myUsername.isEmpty()) "" else "&u=${myUsername.urlEncode()}"
+            val legacyLink = "p2pmessenger://add?node_id=$encodedNodeId&name=$encodedName$usernamePart"
             val alternativeLink = botApi.generateShareLink(nodeId)
 
             val signedLink = if (ReferralInviteLink.DEPLOYMENT_ENABLED &&

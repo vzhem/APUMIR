@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
@@ -109,6 +110,7 @@ fun ChannelScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
+            ChatWallpaper()
             when {
                 uiState.isLoading -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),

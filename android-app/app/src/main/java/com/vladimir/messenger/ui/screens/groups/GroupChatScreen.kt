@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
@@ -94,7 +95,9 @@ fun GroupChatScreen(
             )
         },
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+            ChatWallpaper()
+            Column(modifier = Modifier.fillMaxSize()) {
 
             // ── Темы: у каждой видно, сколько сообщений накопилось и сколько не прочитано
             if (uiState.group?.topicsEnabled == true && uiState.topics.isNotEmpty()) {
@@ -243,6 +246,7 @@ fun GroupChatScreen(
                     },
                 ) { Text("Отправить") }
             }
+        }
         }
     }
 

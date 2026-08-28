@@ -44,6 +44,8 @@ fun ContactCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onShareClick: (() -> Unit)? = null,
+    /** Оригинальное имя через собаку, например @evzhem. */
+    username: String = "",
 ) {
     Row(
         modifier = modifier
@@ -103,6 +105,17 @@ fun ContactCard(
                 maxLines  = 1,
                 overflow  = TextOverflow.Ellipsis,
             )
+
+            // Оригинальное имя через собаку - золотом, как акценты темы.
+            if (username.isNotEmpty()) {
+                Text(
+                    text     = username,
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
 
             Spacer(modifier = Modifier.height(2.dp))
 

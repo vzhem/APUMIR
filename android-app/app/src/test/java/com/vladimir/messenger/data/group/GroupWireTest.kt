@@ -299,4 +299,35 @@ class GroupWireTest {
         assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_GROUP_DELETED}|g|лишнее"))
         assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_GROUP_DELETED}||"))
     }
+
+    @Test
+    fun directoryRoundTrip() {
+        // Роевой каталог: владелец делится каналом, получатель разбирает конверт.
+        val envelope = GroupWire.buildDirectory(
+            groupId = "grp-9",
+            title = "Канал Владимира",
+            about = "про рыбалку",
+            ownerId = "pk_owner",
+            slug = "Abcdefghijkmnopq",
+            isChannel = true,
+            needsApproval = false,
+            hops = 1,
+        )
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Directory)
+        val dir = parsed as GroupWire.Packet.Directory
+        assertEquals("grp-9", dir.groupId)
+        assertEquals("Канал Владимира", dir.title)
+        assertEquals("про рыбалку", dir.about)
+        assertEquals("pk_owner", dir.ownerId)
+        assertEquals("Abcdefghijkmnopq", dir.slug)
+        assertTrue(dir.isChannel)
+        assertFalse(dir.needsApproval)
+        assertEquals(1, dir.hops)
+    }
+
+    @Test
+    fun directoryRejectsShortEnvelope() {
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_DIRECTORY}|g|t|a|o|s|1|0"))
+    }
 }

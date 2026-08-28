@@ -1,8 +1,10 @@
 package com.vladimir.messenger.data.group
 
 import android.util.Log
+import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import com.vladimir.messenger.data.local.entity.GroupEntity
 import com.vladimir.messenger.data.local.entity.GroupInviteEntity
 import com.vladimir.messenger.data.local.entity.GroupJoinRequestEntity
@@ -34,6 +36,8 @@ class GroupRepository(
     private val canCreateGroups: () -> Boolean,
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = { System.currentTimeMillis() },
+    private val directoryDao: DirectoryDao,
+    private val contactIds: suspend () -> List<String>,
 ) {
 
     /**
@@ -133,6 +137,8 @@ class GroupRepository(
         }
 
         Log.i(TAG, "group created id=$groupId public=$isPublic topics=$topicsEnabled")
+        runCatching { publishMyDirectory() }
+            .onFailure { Log.w(TAG, "directory publish failed: ${it.message}") }
         return runCatching { requireSummary(groupId) }
     }
 
@@ -153,6 +159,71 @@ class GroupRepository(
     /** Каналы этого телефона - для раздела «Каналы» на главном экране. */
     fun observeChannels(): Flow<List<GroupSummary>> =
         groupDao.observeChannels().map { list -> list.map { toSummary(it) } }
+
+    /** Сетевой каталог: чужие публичные группы и каналы для поиска. */
+    fun observeDirectory(): Flow<List<DirectoryEntity>> = directoryDao.observeAll()
+
+    /**
+     * Роевая публикация каталога: владелец рассказывает контактам о своих
+     * публичных группах и каналах, контакты передают запись дальше (hops не
+     * больше [MAX_DIR_HOPS) - так поиск находит созданное другими людьми без
+     * центрального сервера.
+     */
+    suspend fun publishMyDirectory() {
+        val me = myNodeId() ?: return
+        val ids = contactIds()
+        if (ids.isEmpty()) return
+        for (g in groupDao.getOwnPublishable(me)) {
+            val approval = groupDao.getInviteBySlug(g.inviteSlug)?.requestApproval ?: !g.isPublic
+            val envelope = GroupWire.buildDirectory(
+                groupId = g.id,
+                title = g.title,
+                about = g.about,
+                ownerId = me,
+                slug = g.inviteSlug,
+                isChannel = g.isChannel,
+                needsApproval = approval,
+                hops = 0,
+            )
+            runCatching { delivery.deliver(g.id, envelope, ids) }
+                .onFailure { Log.w(TAG, "dir publish failed: ${it.message}") }
+        }
+    }
+
+    private suspend fun handleDirectory(packet: GroupWire.Packet.Directory, senderId: String) {
+        if (packet.groupId.isBlank() || packet.title.isBlank()) return
+        if (packet.ownerId == myNodeId()) return // своё не храним
+        directoryDao.upsert(
+            DirectoryEntity(
+                groupId = packet.groupId,
+                title = packet.title,
+                about = packet.about,
+                ownerId = packet.ownerId,
+                slug = packet.slug,
+                isChannel = packet.isChannel,
+                needsApproval = packet.needsApproval,
+                hops = packet.hops,
+                updatedAtMs = clock(),
+            )
+        )
+        // Эпидемия: передаём дальше, пока дальность позволяет, кроме отправителя.
+        if (packet.hops < MAX_DIR_HOPS) {
+            val next = contactIds().filter { it != senderId }
+            if (next.isNotEmpty()) {
+                val envelope = GroupWire.buildDirectory(
+                    groupId = packet.groupId,
+                    title = packet.title,
+                    about = packet.about,
+                    ownerId = packet.ownerId,
+                    slug = packet.slug,
+                    isChannel = packet.isChannel,
+                    needsApproval = packet.needsApproval,
+                    hops = packet.hops + 1,
+                )
+                runCatching { delivery.deliver(packet.groupId, envelope, next) }
+            }
+        }
+    }
 
     private suspend fun toSummary(g: GroupEntity): GroupSummary {
         val me = myNodeId().orEmpty()
@@ -561,6 +632,8 @@ class GroupRepository(
                 groupDao.markLeft(packet.groupId)
                 Log.i(TAG, "kicked from group=${packet.groupId} by=$senderId")
             }
+
+            is GroupWire.Packet.Directory -> handleDirectory(packet, senderId)
 
             is GroupWire.Packet.TopicsRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return
@@ -1401,6 +1474,8 @@ class GroupRepository(
         const val MAX_MESSAGE_CHARS = 4096
         const val MAX_NOTE_CHARS = 256
         private const val PREVIEW_CHARS = 80
+        /** Дальность эпидемии каталога: владелец -> контакты -> их контакты. */
+        private const val MAX_DIR_HOPS = 2
         private const val DAY_MS = 24L * 60 * 60 * 1000
         private const val TAG = "GroupRepository"
     }

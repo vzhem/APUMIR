@@ -101,7 +101,7 @@ try {
         if ($Python -eq 'py') { $PyArgs = @('-3') }
         $DataLocal = Join-Path $RepoRoot 'android-app\app\src\main\java\com\vladimir\messenger\data\local'
         & $Python @PyArgs (Join-Path $RepoRoot 'tools\sandbox\check_room_schema.py') `
-            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_8_9'
+            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_9_10'
         $SchemaExit = $LASTEXITCODE
         Write-Output "schema cross-check exit code: $SchemaExit"
         if ($SchemaExit -ne 0) {

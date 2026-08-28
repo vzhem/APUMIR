@@ -28,6 +28,10 @@ interface GroupDao {
     @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 ORDER BY lastMessageAtMs DESC")
     fun observeChannels(): Flow<List<GroupEntity>>
 
+    /** Мои группы и каналы со ссылкой - их каталог рассылает контактам. */
+    @Query("SELECT * FROM groups WHERE ownerId = :ownerId AND isLeft = 0 AND inviteSlug != ''")
+    suspend fun getOwnPublishable(ownerId: String): List<GroupEntity>
+
     @Query("SELECT * FROM groups WHERE id = :groupId")
     suspend fun getGroupById(groupId: String): GroupEntity?
 

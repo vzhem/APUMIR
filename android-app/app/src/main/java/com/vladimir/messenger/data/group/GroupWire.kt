@@ -42,6 +42,7 @@ object GroupWire {
      */
     const val KIND_ROSTER_REQUEST = "rreq"
     const val KIND_KICK = "kick"
+    const val KIND_DIRECTORY = "dir"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -147,6 +148,22 @@ object GroupWire {
          */
         data class Kick(val groupId: String, val nodeId: String) : Packet()
 
+        /**
+         * Запись сетевого каталога: владелец публично делится группой/каналом,
+         * контакты сохраняют и пересылают дальше (hops ограничивает дальность).
+         * Старые сборки видят неизвестный вид «dir» и молча пропускают.
+         */
+        data class Directory(
+            val groupId: String,
+            val title: String,
+            val about: String,
+            val ownerId: String,
+            val slug: String,
+            val isChannel: Boolean,
+            val needsApproval: Boolean,
+            val hops: Int,
+        ) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -186,6 +203,20 @@ object GroupWire {
 
     /** «Пришлите состав группы» - лечит неизвестные имена у отправителя. */
     fun buildRosterRequest(groupId: String): String = "$PREFIX|$KIND_ROSTER_REQUEST|$groupId"
+
+    /** Роевая публикация публичной группы/канала в сетевой каталог. */
+    fun buildDirectory(
+        groupId: String,
+        title: String,
+        about: String,
+        ownerId: String,
+        slug: String,
+        isChannel: Boolean,
+        needsApproval: Boolean,
+        hops: Int,
+    ): String =
+        "$PREFIX|$KIND_DIRECTORY|$groupId|${encode(title)}|${encode(about)}|$ownerId|" +
+            "${encode(slug)}|${if (isChannel) 1 else 0}|${if (needsApproval) 1 else 0}|$hops"
 
     fun buildTopicCreated(groupId: String, topicId: String, name: String): String =
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}"
@@ -370,6 +401,29 @@ object GroupWire {
                         isPublic = isPublic == "1",
                         topicsEnabled = topics == "1",
                         isChannel = isChannel,
+                    )
+                }
+            } else {
+                null
+            }
+
+            KIND_DIRECTORY -> if (parts.size == 10) {
+                val title = decode(parts[3]) ?: return null
+                val about = decode(parts[4]).orEmpty()
+                val ownerId = parts[5]
+                val slug = decode(parts[6]).orEmpty()
+                if (ownerId.isBlank() || slug.isBlank()) {
+                    null
+                } else {
+                    Packet.Directory(
+                        groupId = groupId,
+                        title = title,
+                        about = about,
+                        ownerId = ownerId,
+                        slug = slug,
+                        isChannel = parts[7] == "1",
+                        needsApproval = parts[8] == "1",
+                        hops = parts[9].toIntOrNull() ?: 0,
                     )
                 }
             } else {

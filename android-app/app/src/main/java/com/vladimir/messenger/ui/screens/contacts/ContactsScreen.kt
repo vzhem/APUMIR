@@ -1,4 +1,4 @@
-﻿package com.vladimir.messenger.ui.screens.contacts
+package com.vladimir.messenger.ui.screens.contacts
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import android.content.Intent
@@ -61,11 +62,37 @@ fun ContactsScreen(
             )
         }
     ) { paddingValues ->
+        Column(Modifier.fillMaxSize().padding(paddingValues)) {
+            var query by remember { mutableStateOf("") }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                placeholder = { Text("Поиск: имя или @имя") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+            )
+            val shown = remember(contacts, query) {
+                val q = query.trim().lowercase()
+                if (q.isEmpty()) contacts
+                else contacts.filter {
+                    it.displayName.lowercase().contains(q) ||
+                        it.username.lowercase().contains(q)
+                }
+            }
+            if (shown.isEmpty() && contacts.isNotEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "Никого не нашли по запросу «$query»",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
         if (contacts.isEmpty()) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -100,13 +127,11 @@ fun ContactsScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 items(
-                    items = contacts,
+                    items = shown,
                     key = { it.id }
                 ) { contact ->
                     // ContactCard expects Chat, create a minimal Chat from Contact
@@ -119,6 +144,7 @@ fun ContactsScreen(
                             isContactOnline = contact.isOnline,
                         ),
                         onClick = { onContactClick(contact) },
+                        username = contact.username,
                         onShareClick = {
                             try {
                                 val link = ContactShareLink.build(contact.id, contact.displayName)
@@ -137,6 +163,7 @@ fun ContactsScreen(
                     )
                 }
             }
+        }
         }
     }
 }

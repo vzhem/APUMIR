@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.JoinOutcome
 import com.vladimir.messenger.data.group.GroupSummary
+import com.vladimir.messenger.data.local.entity.DirectoryEntity
+import kotlinx.coroutines.delay
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +30,8 @@ data class GroupsUiState(
     val joinMessage: String? = null,
     /** Группа, в которую удалось войти: экран откроет её чат. */
     val joinedGroupId: String? = null,
+    /** Найдено в сети: чужие публичные группы и каналы из роевого каталога. */
+    val directoryMatches: List<DirectoryEntity> = emptyList(),
 )
 
 @HiltViewModel
@@ -38,11 +42,19 @@ class GroupsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(GroupsUiState())
     val uiState: StateFlow<GroupsUiState> = _uiState.asStateFlow()
 
+    /** Последнее состояние сетевого каталога - для матчинга по запросу. */
+    private var latestDirectory: List<DirectoryEntity> = emptyList()
+
     init {
         _uiState.update { it.copy(canCreate = groupRepository.canCreateGroupsNow()) }
         // Возвращаем владельцу его строку участника, если её стёрла авария с
         // перезаписью группы: иначе группа есть в списке, но ничего не даёт.
         viewModelScope.launch { groupRepository.repairOwnerMemberships() }
+        // Делимся своими публичными группами/каналами с контактами (каталог).
+        viewModelScope.launch {
+            delay(2000)
+            runCatching { groupRepository.publishMyDirectory() }
+        }
         observe()
     }
 
@@ -53,8 +65,17 @@ class GroupsViewModel @Inject constructor(
                     state.copy(
                         groups = groups,
                         filtered = filter(groups, state.searchQuery),
+                        directoryMatches = matchDirectory(state.searchQuery, groups),
                         isLoading = false,
                     )
+                }
+            }
+        }
+        viewModelScope.launch {
+            groupRepository.observeDirectory().collect { dir ->
+                latestDirectory = dir
+                _uiState.update { state ->
+                    state.copy(directoryMatches = matchDirectory(state.searchQuery, state.groups))
                 }
             }
         }
@@ -62,8 +83,20 @@ class GroupsViewModel @Inject constructor(
 
     fun onSearchQueryChanged(query: String) {
         _uiState.update { state ->
-            state.copy(searchQuery = query, filtered = filter(state.groups, query))
+            state.copy(
+                searchQuery = query,
+                filtered = filter(state.groups, query),
+                directoryMatches = matchDirectory(query, state.groups),
+            )
         }
+    }
+
+    /** Ищем в каталоге то, чего ещё нет в своих группах. */
+    private fun matchDirectory(query: String, groups: List<GroupSummary>): List<DirectoryEntity> {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) return emptyList()
+        val mine = groups.map { it.id }.toSet()
+        return latestDirectory.filter { it.groupId !in mine && it.title.lowercase().contains(q) }
     }
 
     fun createGroup(

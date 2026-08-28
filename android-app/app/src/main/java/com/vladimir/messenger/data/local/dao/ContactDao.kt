@@ -1,4 +1,4 @@
-﻿package com.vladimir.messenger.data.local.dao
+package com.vladimir.messenger.data.local.dao
 
 import androidx.room.*
 import com.vladimir.messenger.data.local.entity.ContactEntity
@@ -8,6 +8,9 @@ import kotlinx.coroutines.flow.Flow
 interface ContactDao {
     @Query("SELECT * FROM contacts ORDER BY displayName ASC")
     fun observeAllContacts(): Flow<List<ContactEntity>>
+
+    @Query("SELECT id FROM contacts")
+    suspend fun allIds(): List<String>
 
     @Query("SELECT * FROM contacts WHERE id = :contactId")
     suspend fun getContactById(contactId: String): ContactEntity?
@@ -29,4 +32,7 @@ interface ContactDao {
 
     @Query("UPDATE contacts SET displayName = :name WHERE id = :contactId")
     suspend fun updateDisplayName(contactId: String, name: String)
+
+    @Query("UPDATE contacts SET username = :username WHERE id = :contactId")
+    suspend fun updateUsername(contactId: String, username: String)
 }

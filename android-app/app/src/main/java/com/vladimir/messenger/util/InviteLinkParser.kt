@@ -25,6 +25,8 @@ object InviteLinkParser {
         val nodeId: String,
         val publicKey: String? = null,
         val displayName: String? = null,
+        /** Оригинальное имя через собаку из параметра u=, если владелец указал. */
+        val username: String? = null,
         val source: Source,
         val original: String,
     )
@@ -89,10 +91,15 @@ object InviteLinkParser {
             nodeId = nodeId,
             publicKey = publicKey,
             displayName = displayName,
+            username = normalizeUsername(query.firstNonBlank("u", "username")),
             source = Source.APP_LINK,
             original = original,
         )
     }
+
+    /** @имя всегда храним с собакой, чтобы показывать как есть. */
+    private fun normalizeUsername(raw: String?): String? =
+        raw?.trim()?.takeIf { it.isNotEmpty() }?.let { if (it.startsWith("@")) it else "@$it" }
 
     private fun parseRustConnectLink(uri: URI, original: String): Invite? {
         if (!uri.host.equals("connect", ignoreCase = true)) return null

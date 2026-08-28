@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import com.vladimir.messenger.ui.components.Avatar
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -215,6 +216,7 @@ fun ChatListScreen(
                 .fillMaxSize()
                 .padding(paddingValues),
         ) {
+            ChatWallpaper()
             when {
                 // Загрузка
                 uiState.isLoading -> {

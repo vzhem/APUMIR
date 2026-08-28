@@ -52,11 +52,15 @@ class GroupsProductionMigrationInstrumentedTest {
         // validates the resulting schema against the entities and rewrites the
         // identity hash.
         val room = Room.databaseBuilder(context, AppDatabase::class.java, "messenger_database")
-            .addMigrations(AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9)
+            .addMigrations(
+                AppDatabase.MIGRATION_7_8,
+                AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10,
+            )
             .build()
         try {
             val db = room.openHelper.writableDatabase
-            assertEquals(9, db.version)
+            assertEquals(10, db.version)
 
             // Ни одна старая строка не переписана и не потеряна.
             assertEquals(before, legacyState(db))
@@ -73,6 +77,7 @@ class GroupsProductionMigrationInstrumentedTest {
                 "group_join_requests",
                 "group_invites",
                 "group_message_stats",
+                "directory",
             ).forEach { table ->
                 assertEquals("table $table must exist and be empty", 0, scalarInt(db, "SELECT COUNT(*) FROM $table"))
             }

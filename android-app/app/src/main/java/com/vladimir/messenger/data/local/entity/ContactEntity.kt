@@ -10,4 +10,6 @@ data class ContactEntity(
     val fingerprint: String = "",
     val isOnline: Boolean = false,
     val lastSeen: String? = null,
+    /** Дополнительное оригинальное имя через собаку, например @evzhem. */
+    val username: String = "",
 )

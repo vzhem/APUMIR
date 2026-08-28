@@ -1,11 +1,7 @@
 package com.vladimir.messenger.ui.screens.chat
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.Image
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import com.vladimir.messenger.R
-import com.vladimir.messenger.ui.theme.LocalAppDarkTheme
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -404,18 +400,4 @@ private fun MessageInputBar(
             }
         }
     }
-}
-
-/** Подложка под чаты: сдержанный арт «множество каналов связи» в тон теме. */
-@Composable
-private fun ChatWallpaper() {
-    val dark = LocalAppDarkTheme.current
-    Image(
-        painter = painterResource(
-            if (dark) R.drawable.chat_wallpaper_dark else R.drawable.chat_wallpaper_light
-        ),
-        contentDescription = null,
-        modifier = Modifier.fillMaxSize(),
-        contentScale = ContentScale.Crop,
-    )
 }

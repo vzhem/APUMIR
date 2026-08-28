@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.item
+import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Link
@@ -119,7 +121,8 @@ fun GroupsScreen(
                     CircularProgressIndicator()
                 }
 
-                uiState.filtered.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) {
+                uiState.filtered.isEmpty() && uiState.directoryMatches.isEmpty() ->
+                    Box(Modifier.fillMaxSize(), Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
                             Icons.Filled.Groups,
@@ -149,6 +152,20 @@ fun GroupsScreen(
                             },
                         )
                         HorizontalDivider()
+                    }
+                    // Поиск по сетевому каталогу: чужие публичные группы и каналы.
+                    if (uiState.directoryMatches.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Найдено в сети",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
+                        }
+                        items(uiState.directoryMatches, key = { it.groupId }) { entry ->
+                            DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
+                        }
                     }
                 }
             }
@@ -406,4 +423,39 @@ private fun JoinByLinkDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
+}
+
+/** Строка найденного в сетевом каталоге: чужая публичная группа или канал. */
+@Composable
+private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                entry.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                (if (entry.isChannel) "Канал" else "Группа") +
+                    (if (entry.needsApproval) " · по заявке" else " · вход сразу"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        TextButton(onClick = {
+            onJoin(
+                GroupInviteLinks.build(
+                    slug = entry.slug,
+                    groupId = entry.groupId,
+                    ownerId = entry.ownerId,
+                    isChannel = entry.isChannel,
+                    requestApproval = entry.needsApproval,
+                )
+            )
+        }) { Text("Вступить") }
+    }
+    HorizontalDivider()
 }

@@ -16,6 +16,8 @@ data class RenameContactUiState(
     val contactId: String = "",
     val currentName: String = "",
     val newName: String = "",
+    val currentUsername: String = "",
+    val newUsername: String = "",
     val isLoading: Boolean = false,
     val error: String? = null,
     val renamed: Boolean = false,
@@ -39,10 +41,20 @@ class RenameContactViewModel @Inject constructor(
         val currentName = savedStateHandle.get<String>("currentName") ?: ""
         _uiState.update { it.copy(contactId = contactId, currentName = currentName, newName = currentName) }
         Log.i(TAG, "RenameContactVM: contactId=$contactId currentName=$currentName")
+        // Подтягиваем сохранённое @имя контакта.
+        viewModelScope.launch {
+            val contact = contactRepository.getContactById(contactId)
+            val username = contact?.username.orEmpty()
+            _uiState.update { it.copy(currentUsername = username, newUsername = username) }
+        }
     }
 
     fun onNewNameChanged(value: String) {
         _uiState.update { it.copy(newName = value, error = null) }
+    }
+
+    fun onNewUsernameChanged(value: String) {
+        _uiState.update { it.copy(newUsername = value, error = null) }
     }
 
     fun clearError() {
@@ -68,6 +80,18 @@ class RenameContactViewModel @Inject constructor(
             result
                 .onSuccess {
                     Log.i(TAG, "Contact renamed: $contactId -> $newName")
+                    // @имя: нормализуем с собакой и сохраняем рядом с именем.
+                    val rawUser = _uiState.value.newUsername.trim()
+                    val username = when {
+                        rawUser.isEmpty() -> ""
+                        rawUser.startsWith("@") -> rawUser
+                        else -> "@$rawUser"
+                    }
+                    try {
+                        contactRepository.updateUsername(contactId, username)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Username update failed", e)
+                    }
                     _uiState.update { it.copy(isLoading = false, renamed = true) }
                 }
                 .onFailure { e ->

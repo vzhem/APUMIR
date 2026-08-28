@@ -6,4 +6,6 @@ data class Contact(
     val fingerprint: String = "",
     val isOnline: Boolean = false,
     val lastSeen: String? = null,
+    /** Оригинальное имя через собаку, например @evzhem. */
+    val username: String = "",
 )

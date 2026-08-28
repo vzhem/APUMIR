@@ -37,6 +37,7 @@ import com.vladimir.messenger.ui.theme.StatusConnecting
 import com.vladimir.messenger.ui.theme.StatusDegraded
 import com.vladimir.messenger.ui.theme.StatusOffline
 import com.vladimir.messenger.ui.theme.StatusOnline
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
@@ -58,6 +59,7 @@ fun SettingsScreen(
     val clipboardManager = LocalClipboardManager.current
     var showBackupDialog by remember { mutableStateOf(false) }
     var showMyQrDialog by remember { mutableStateOf(false) }
+    var showUsernameDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -179,6 +181,15 @@ fun SettingsScreen(
                             Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Копировать")
+                        }
+                        // Своё оригинальное имя через собаку.
+                        OutlinedButton(
+                            onClick  = { showUsernameDialog = true },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("@имя")
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -350,6 +361,47 @@ fun SettingsScreen(
                 }
 
     // Диалог показа моего QR-кода
+    // Своё @имя: сохраняется в p2p_prefs и уезжает в ссылку профиля (u=).
+    if (showUsernameDialog) {
+        val usernameContext = LocalContext.current
+        var usernameValue by remember {
+            mutableStateOf(
+                usernameContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                    .getString("my_username", "").orEmpty()
+            )
+        }
+        AlertDialog(
+            onDismissRequest = { showUsernameDialog = false },
+            title = { Text("Ваше @имя") },
+            text = {
+                OutlinedTextField(
+                    value = usernameValue,
+                    onValueChange = { usernameValue = it },
+                    label = { Text("@имя") },
+                    placeholder = { Text("@evzhem") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val raw = usernameValue.trim()
+                    val normalized = when {
+                        raw.isEmpty()  -> ""
+                        raw.startsWith("@") -> raw
+                        else           -> "@$raw"
+                    }
+                    usernameContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                        .edit().putString("my_username", normalized).apply()
+                    showUsernameDialog = false
+                }) { Text("Сохранить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUsernameDialog = false }) { Text("Отмена") }
+            },
+        )
+    }
+
     if (showMyQrDialog) {
         val qrBitmap = remember(uiState.inviteLink) {
             try {

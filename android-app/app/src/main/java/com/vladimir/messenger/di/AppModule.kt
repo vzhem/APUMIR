@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
@@ -32,6 +33,7 @@ object AppModule {
                 AppDatabase.MIGRATION_6_7,
                 AppDatabase.MIGRATION_7_8,
                 AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -57,6 +59,9 @@ object AppModule {
 
     @Provides @Singleton
     fun provideGroupDao(db: AppDatabase): GroupDao = db.groupDao()
+
+    @Provides @Singleton
+    fun provideDirectoryDao(db: AppDatabase): DirectoryDao = db.directoryDao()
 
     @Provides @Singleton
     fun provideChatRepository(chatDao: ChatDao, messageDao: MessageDao): ChatRepository =

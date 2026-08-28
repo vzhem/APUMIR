@@ -72,6 +72,7 @@ fun RenameContactScreen(
             paddingValues = paddingValues,
             uiState = uiState,
             onNewNameChanged = viewModel::onNewNameChanged,
+            onNewUsernameChanged = viewModel::onNewUsernameChanged,
             onRenameClicked = viewModel::onRenameClicked,
         )
     }
@@ -82,6 +83,7 @@ private fun Content(
     paddingValues: PaddingValues,
     uiState: RenameContactUiState,
     onNewNameChanged: (String) -> Unit,
+    onNewUsernameChanged: (String) -> Unit,
     onRenameClicked: () -> Unit,
 ) {
     Column(
@@ -108,6 +110,18 @@ private fun Content(
             supportingText = {
                 uiState.error?.let { Text(it) }
             },
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Оригинальное имя через собаку - дополнительное к обычному имени.
+        OutlinedTextField(
+            value = uiState.newUsername,
+            onValueChange = onNewUsernameChanged,
+            label = { Text("@имя") },
+            placeholder = { Text("@evzhem") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
         )
 
         Spacer(modifier = Modifier.height(16.dp))

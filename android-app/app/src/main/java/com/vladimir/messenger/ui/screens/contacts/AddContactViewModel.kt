@@ -79,7 +79,11 @@ class AddContactViewModel @Inject constructor(
                 ?: "Contact ${fingerprint.takeLast(8)}"
 
             // 1. обавляем контакт
-            val contactResult = contactRepository.addContact(displayName, fingerprint)
+            val contactResult = contactRepository.addContact(
+                displayName = displayName,
+                fingerprint = fingerprint,
+                username = parsedInvite?.username.orEmpty(),
+            )
 
             contactResult
                 .onSuccess { contact ->

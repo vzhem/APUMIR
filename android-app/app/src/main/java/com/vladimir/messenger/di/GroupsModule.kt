@@ -7,6 +7,8 @@ import com.vladimir.messenger.data.group.GroupDelivery
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRouter
 import com.vladimir.messenger.data.group.PerMemberFanoutDelivery
+import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.referral.ReferralRankStore
@@ -44,11 +46,15 @@ object GroupsModule {
         groupDao: GroupDao,
         messageDao: MessageDao,
         delivery: GroupDelivery,
+        directoryDao: DirectoryDao,
+        contactDao: ContactDao,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
         messageDao = messageDao,
         delivery = delivery,
+        directoryDao = directoryDao,
+        contactIds = { contactDao.allIds() },
         myNodeId = { RustBridge.nodeId() },
         myDisplayName = {
             context.applicationContext

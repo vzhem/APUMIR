@@ -6,6 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
@@ -13,6 +14,7 @@ import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
+import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.local.entity.FileExchangePeerEntity
@@ -40,8 +42,9 @@ import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
         GroupJoinRequestEntity::class,
         GroupInviteEntity::class,
         GroupMessageStatEntity::class,
+        DirectoryEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -52,6 +55,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun fileTransferDao(): FileTransferDao
     abstract fun fileExchangePeerDao(): FileExchangePeerDao
     abstract fun groupDao(): GroupDao
+    abstract fun directoryDao(): DirectoryDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -277,6 +281,33 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "ALTER TABLE `groups` ADD COLUMN `isChannel` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        /**
+         * v10: у контактов появляется оригинальное имя через собаку (@evzhem),
+         * а для поиска по чужим группам и каналам - таблица сетевого каталога,
+         * куда роевая рассылка складывает публичные группы и каналы.
+         * Обе операции добавочные: существующие строки не переписываются.
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `contacts` ADD COLUMN `username` TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `directory` (" +
+                        "`groupId` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`about` TEXT NOT NULL, " +
+                        "`ownerId` TEXT NOT NULL, " +
+                        "`slug` TEXT NOT NULL, " +
+                        "`isChannel` INTEGER NOT NULL, " +
+                        "`needsApproval` INTEGER NOT NULL, " +
+                        "`hops` INTEGER NOT NULL, " +
+                        "`updatedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`groupId`))"
                 )
             }
         }
