@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
 import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.theme.StatusConnecting

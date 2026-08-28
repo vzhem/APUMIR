@@ -29,14 +29,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vladimir.messenger.R
-import com.vladimir.messenger.ui.theme.MessengerColors
+import com.vladimir.messenger.ui.theme.LocalMessengerColors
 import kotlinx.coroutines.delay
 
 private const val SPLASH_MILLIS = 2500L
@@ -44,8 +43,7 @@ private const val SPLASH_MILLIS = 2500L
 /** Полноэкранный сплэш: иконка во весь экран + бегущие пакеты данных. */
 @Composable
 fun AppSplash(onFinished: () -> Unit) {
-    val context = LocalContext.current
-    val colors = MessengerColors.of(context)
+    val colors = LocalMessengerColors.current
 
     LaunchedEffect(Unit) {
         delay(SPLASH_MILLIS)
@@ -73,7 +71,7 @@ fun AppSplash(onFinished: () -> Unit) {
     ) {
         // Иконка APU во весь экран (вектор - масштаб без потерь).
         Image(
-            painter = painterResource(R.drawable.ic_launcher_foreground),
+            painter = painterResource(R.mipmap.ic_launcher),
             contentDescription = "APU",
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
