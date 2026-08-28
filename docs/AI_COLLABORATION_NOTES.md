@@ -5576,3 +5576,7 @@ Rust-правка → `.uild-rust.ps1` → APK (`assembleRelease -x lint…`, �
   (GetContent image/* + takePersistableUriPermission) и «Вернуть стандартные»;
   ChatWallpaper рисует свою картинку на всех экранах с подложкой, при сбое
   чтения - стандартный арт темы. Ждём гейт на 6a79a8f (тестов 102).
+- 2026-08-28 (гейт на d57def4): RESULT: GREEN, tests=102 failures=0, debug apk
+  30 571 438 байт от 28.08.2026 23:12:51. Приписка NOTE в гейт-скрипте
+  обновлена: схема теперь version 10, 9 -> 10 добавляет contacts.username и
+  таблицу directory (раньше скрипт писал про 9).

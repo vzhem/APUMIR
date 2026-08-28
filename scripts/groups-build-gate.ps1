@@ -230,9 +230,9 @@ try {
         Write-Output ''
         Write-Output 'NOTE: the database migrations were NOT exercised. The host gate cannot run them.'
         Write-Output 'AppModule uses fallbackToDestructiveMigration(), so a wrong migration is'
-        Write-Output 'a data-loss risk on upgrade. The current schema is version 9; 8 -> 9 only'
-        Write-Output 'adds groups.isChannel. To verify on a phone that already holds an older'
-        Write-Output 'database, rerun with -RunMigrationTest - it wipes app data, back up first.'
+        Write-Output 'a data-loss risk on upgrade. The current schema is version 10; 9 -> 10'
+        Write-Output 'adds contacts.username and the directory table. To verify on a phone that'
+        Write-Output 'already holds an older database, rerun with -RunMigrationTest - it wipes app data, back up first.'
     }
 
     Write-Output ''
