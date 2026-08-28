@@ -12,6 +12,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -66,14 +67,13 @@ class DirectoryRoundTripTest {
                 updatedAtMs = 7L,
             )
             kotlinx.coroutines.runBlocking { dao.upsert(row) }
-            val bySlug = kotlinx.coroutines.runBlocking { dao.bySlug("Zz99abcdefghijkm") }
-            assertNotNull(bySlug)
-            assertEquals("Канал", bySlug!!.title)
-            val byOwner = kotlinx.coroutines.runBlocking { dao.byOwner("o2") }
-            assertEquals(1, byOwner.size)
-            // Обновление той же группы не плодит строки.
+            val byId = kotlinx.coroutines.runBlocking { dao.getById("g2") }
+            assertNotNull(byId)
+            assertEquals("Канал", byId!!.title)
+            assertEquals("Zz99abcdefghijkm", byId.slug)
+            // Обновление той же группы не плодит строки (REPLACE по groupId).
             kotlinx.coroutines.runBlocking { dao.upsert(row.copy(title = "Канал 2", updatedAtMs = 8L)) }
-            val all = kotlinx.coroutines.runBlocking { dao.all().first() }
+            val all = kotlinx.coroutines.runBlocking { dao.observeAll().first() }
             assertEquals(1, all.size)
             assertEquals("Канал 2", all.first().title)
         } finally {
