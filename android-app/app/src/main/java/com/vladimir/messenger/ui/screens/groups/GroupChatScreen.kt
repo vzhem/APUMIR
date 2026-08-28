@@ -214,7 +214,8 @@ fun GroupChatScreen(
                 items(uiState.messages, key = { it.id }) { message ->
                     MessageBubble(
                         message = message,
-                        senderName = senderNames[message.senderId] ?: message.senderId.takeLast(6),
+                        senderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
+                            ?: "Участник " + message.senderId.takeLast(4),
                         canPin = uiState.canPin,
                         onTogglePin = { viewModel.togglePin(message.id, !message.isPinned) },
                     )

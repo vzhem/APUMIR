@@ -94,6 +94,29 @@ class GroupPermissionsTest {
         )
     }
 
+    /**
+     * Закреплять можно ЛЮБОЕ сообщение группы, не только своё: проверка идёт
+     * по роли и праву, автор сообщения в ней не участвует.
+     */
+    @Test
+    fun ownerAndAdminWithPinRightCanPinAnyMessage() {
+        assertTrue(GroupPermissions.canPinMessages(GroupRole.OWNER, 0L))
+        assertTrue(
+            GroupPermissions.canPinMessages(
+                GroupRole.ADMIN,
+                GroupPermissions.withFlag(0L, GroupPermissions.Admin.PIN_MESSAGES, true),
+            ),
+        )
+        assertFalse(
+            "админ без права закреплять не может",
+            GroupPermissions.canPinMessages(GroupRole.ADMIN, 0L),
+        )
+        assertFalse(
+            "участник не может закреплять даже со всеми правами участника",
+            GroupPermissions.canPinMessages(GroupRole.MEMBER, GroupPermissions.Member.ALL),
+        )
+    }
+
     @Test
     fun withFlagTogglesSingleBit() {
         var mask = GroupPermissions.Admin.DEFAULT

@@ -33,6 +33,14 @@ object GroupWire {
     const val KIND_GROUP_INFO = "info"
     const val KIND_TOPICS = "topics"
     const val KIND_TOPICS_REQUEST = "treq"
+    /**
+     * Запрос списка участников.
+     *
+     * Телефон, который получил сообщение от незнакомого участника, просит
+     * группу прислать состав: иначе вместо имени он показывает обрывок
+     * идентификатора («буквы и цифры»).
+     */
+    const val KIND_ROSTER_REQUEST = "rreq"
     const val KIND_KICK = "kick"
 
     const val DECISION_APPROVED = "APPROVED"
@@ -52,6 +60,15 @@ object GroupWire {
              * на всю группу. У старых конвертов поля нет - оно пустое.
              */
             val messageId: String = "",
+            /**
+             * Имя отправителя на его собственном телефоне.
+             *
+             * Список участников рассылается только при изменении состава, и
+             * телефон, который в тот момент был не в сети, имени так и не
+             * узнаёт. Поэтому имя ездит вместе с сообщением: получил
+             * сообщение - сразу знаешь, кто написал.
+             */
+            val senderName: String = "",
         ) : Packet()
 
         data class TopicCreated(
@@ -121,6 +138,8 @@ object GroupWire {
          */
         data class TopicsRequest(val groupId: String) : Packet()
 
+        data class RosterRequest(val groupId: String) : Packet()
+
         /**
          * Участника исключили или ограничили. Без этого пакета он так и видит
          * группу у себя: состав обновляется рассылкой, а самого исключённого
@@ -153,12 +172,18 @@ object GroupWire {
         topicId: String,
         text: String,
         messageId: String = "",
+        senderName: String = "",
     ): String {
         val base = "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(text)}"
-        // Без id поле не добавляем вовсе: конверт остаётся старого образца
-        // (5 частей) и его понимают телефоны с прошлой версией.
-        return if (messageId.isBlank()) base else "$base|${encode(messageId)}"
+        // Поля добавляются по порядку и только если есть что добавить:
+        // конверт из 5 частей понимают даже телефоны с прошлой версией.
+        if (messageId.isBlank() && senderName.isBlank()) return base
+        val withId = "$base|${encode(messageId)}"
+        return if (senderName.isBlank()) withId else "$withId|${encode(senderName)}"
     }
+
+    /** «Пришлите состав группы» - лечит неизвестные имена у отправителя. */
+    fun buildRosterRequest(groupId: String): String = "$PREFIX|$KIND_ROSTER_REQUEST|$groupId"
 
     fun buildTopicCreated(groupId: String, topicId: String, name: String): String =
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}"
@@ -226,11 +251,18 @@ object GroupWire {
         if (groupId.isBlank()) return null
 
         return when (parts[1]) {
-            KIND_MESSAGE -> if (parts.size == 5 || parts.size == 6) {
+            KIND_MESSAGE -> if (parts.size in 5..7) {
                 val body = decode(parts[4]) ?: return null
-                // Конверты старого образца приходили без id - считаем его пустым.
-                val senderMessageId = if (parts.size == 6) decode(parts[5]).orEmpty() else ""
-                Packet.Message(groupId, parts[3], body, senderMessageId)
+                // Конверты старого образца приходили без id и без имени.
+                val senderMessageId = if (parts.size >= 6) decode(parts[5]).orEmpty() else ""
+                val senderName = if (parts.size >= 7) decode(parts[6]).orEmpty() else ""
+                Packet.Message(groupId, parts[3], body, senderMessageId, senderName)
+            } else {
+                null
+            }
+
+            KIND_ROSTER_REQUEST -> if (parts.size == 3) {
+                Packet.RosterRequest(groupId)
             } else {
                 null
             }

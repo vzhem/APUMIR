@@ -28,6 +28,9 @@ class GroupRepository(
     private val groupDao: GroupDao,
     private val messageDao: MessageDao,
     private val delivery: GroupDelivery,
+    /** Узлы, для которых состав уже запрашивали: повторно не спрашиваем. */
+    private val rosterAsked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     private val myNodeId: () -> String?,
     private val myDisplayName: () -> String,
     /** Порог ранга: создание групп доступно с ранга «Проводник» и выше. */
@@ -297,8 +300,15 @@ class GroupRepository(
         val report = broadcast(
             groupId,
             // Id сообщения уходит в конверт: у получателей строка ляжет под тем
-            // же id, и закреп (Pin) найдёт её на всех телефонах.
-            GroupWire.buildMessage(groupId, topic.id, body, messageId),
+            // же id, и закреп (Pin) найдёт её на всех телефонах. Имя - чтобы
+            // получатель сразу знал, кто написал, даже без списка участников.
+            GroupWire.buildMessage(
+                groupId = groupId,
+                topicId = topic.id,
+                text = body,
+                messageId = messageId,
+                senderName = member.displayName,
+            ),
             excludeSelf = true,
         )
         Log.i(
@@ -359,6 +369,7 @@ class GroupRepository(
                         topicId = packet.topicId,
                     )
                 )
+                rememberSender(packet.groupId, senderId, packet.senderName, now)
                 val topic = groupDao.getTopicById(packet.topicId)
                 if (topic != null) {
                     groupDao.registerTopicMessage(topic.id, preview(packet.text), now)
@@ -459,6 +470,16 @@ class GroupRepository(
                     if (packet.pinned) clock() else null,
                     if (packet.pinned) senderId else null,
                 )
+            }
+
+            is GroupWire.Packet.RosterRequest -> {
+                // Отвечают владелец и администраторы: у них состав полный.
+                // Обычный участник не отвечает, чтобы на один запрос не
+                // приходило десять одинаковых списков.
+                val member = groupDao.getMember(packet.groupId, me) ?: return
+                if (!GroupRole.isAdminOrOwner(member.role)) return
+                publishRoster(packet.groupId)
+                Log.i(TAG, "roster resent group=${packet.groupId} to=$senderId")
             }
 
             is GroupWire.Packet.GroupDeleted -> {
@@ -1243,6 +1264,45 @@ class GroupRepository(
             .map { it.nodeId }
             .filter { !excludeSelf || it != me }
         return delivery.deliver(groupId, envelope, recipients)
+    }
+
+    /**
+     * Запоминает автора сообщения, чтобы в ленте было имя, а не обрывок
+     * идентификатора.
+     *
+     * Список участников приходит только при изменении состава, и пропустивший
+     * его телефон имени не знает. Если имя приехало вместе с сообщением -
+     * заводим или дополняем строку участника. Если имени нет - просим группу
+     * прислать состав (по одному разу на незнакомый узел, чтобы не спамить).
+     */
+    private suspend fun rememberSender(
+        groupId: String,
+        senderId: String,
+        senderName: String,
+        now: Long,
+    ) {
+        if (senderId.isBlank()) return
+        val known = groupDao.getMember(groupId, senderId)
+        if (known == null) {
+            if (senderName.isNotBlank()) {
+                groupDao.insertMember(
+                    GroupMemberEntity(
+                        groupId = groupId,
+                        nodeId = senderId,
+                        displayName = senderName,
+                        role = GroupRole.MEMBER,
+                        joinedAtMs = now,
+                    ),
+                )
+                groupDao.refreshMemberCount(groupId)
+            } else if (rosterAsked.add(groupId + '|' + senderId)) {
+                broadcast(groupId, GroupWire.buildRosterRequest(groupId), excludeSelf = true)
+            }
+            return
+        }
+        if (known.displayName.isBlank() && senderName.isNotBlank()) {
+            groupDao.insertMember(known.copy(displayName = senderName))
+        }
     }
 
     /** После изменения состава рассылаем актуальный список участников. */

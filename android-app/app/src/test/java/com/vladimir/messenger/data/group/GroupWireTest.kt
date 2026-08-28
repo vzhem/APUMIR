@@ -45,6 +45,36 @@ class GroupWireTest {
         assertEquals("", msg.messageId)
     }
 
+    /** Имя отправителя ездит вместе с сообщением: без него получатель показывает обрывок id. */
+    @Test
+    fun messageCarriesSenderName() {
+        val envelope = GroupWire.buildMessage("grp1", "t", "текст", "msg-7", "Владимир")
+        val msg = GroupWire.parse(envelope) as GroupWire.Packet.Message
+        assertEquals("msg-7", msg.messageId)
+        assertEquals("Владимир", msg.senderName)
+    }
+
+    /** Конверт из 6 частей (id есть, имени ещё нет) принимается: имя пустое. */
+    @Test
+    fun messageWithIdButWithoutNameStillParses() {
+        val envelope = GroupWire.buildMessage("grp1", "t", "текст", messageId = "msg-8")
+        val msg = GroupWire.parse(envelope) as GroupWire.Packet.Message
+        assertEquals("msg-8", msg.messageId)
+        assertEquals("", msg.senderName)
+    }
+
+    @Test
+    fun rosterRequestRoundTrip() {
+        val parsed = GroupWire.parse(GroupWire.buildRosterRequest("grp1"))
+        assertTrue(parsed is GroupWire.Packet.RosterRequest)
+        assertEquals("grp1", (parsed as GroupWire.Packet.RosterRequest).groupId)
+    }
+
+    @Test
+    fun rosterRequestWithExtraPartsIsRejected() {
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_ROSTER_REQUEST}|g|x"))
+    }
+
     @Test
     fun topicRoundTrip() {
         val parsed = GroupWire.parse(GroupWire.buildTopicCreated("g", "t", "Флуд | оффтоп"))
