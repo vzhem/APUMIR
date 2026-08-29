@@ -7,6 +7,7 @@ import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.ContactRepository
+import com.vladimir.messenger.data.referral.ReferralAttributionSender
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.util.InviteLinkParser
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,6 +34,7 @@ class AddContactViewModel @Inject constructor(
     private val contactRepository: ContactRepository,
     private val chatRepository: ChatRepository,
     private val nicknameDao: NicknameDao,
+    private val referralAttribution: ReferralAttributionSender,
 ) : ViewModel() {
 
     companion object {
@@ -148,6 +150,15 @@ class AddContactViewModel @Inject constructor(
                     // 2. Сразу создаём чат для этого контакта
                     val chat = chatRepository.createChat(fingerprint, contact.displayName)
                     Log.i(TAG, "Chat created: ${chat.id} for ${chat.contactName}")
+                    // Контакт пришёл по пригласительной ссылке: запоминаем
+                    // пригласившего и сразу пробуем отправить ему служебный
+                    // конверт атрибуции. Если транспорта нет, отправка повторится
+                    // на первом же сообщении (см. ChatRepository.sendMessage).
+                    parsedInvite?.nodeId?.let { inviter ->
+                        if (referralAttribution.rememberInviter(fingerprint, inviter)) {
+                            referralAttribution.sendPending(chat.id, fingerprint)
+                        }
+                    }
                     _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                 }
                 .onFailure { error ->
@@ -159,7 +170,12 @@ class AddContactViewModel @Inject constructor(
                         val existing = contactRepository.getContactByFingerprint(fingerprint)
                         if (existing != null) {
                             // роверяем есть ли уже чат, если нет — создаём
-                            chatRepository.getOrCreateChat(fingerprint, existing.displayName)
+                            val existingChat = chatRepository.getOrCreateChat(fingerprint, existing.displayName)
+                            parsedInvite?.nodeId?.let { inviter ->
+                                if (referralAttribution.rememberInviter(fingerprint, inviter)) {
+                                    referralAttribution.sendPending(existingChat.id, fingerprint)
+                                }
+                            }
                         }
                         _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                     } else {

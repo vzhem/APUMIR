@@ -55,6 +55,7 @@ class CoreServerService : Service() {
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
+    @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
@@ -503,6 +504,20 @@ class CoreServerService : Service() {
                             Log.i(TAG, "Group packet ACK sent for msgId=$messageId")
                         } catch (e: Exception) {
                             Log.w(TAG, "Group packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Реферальная атрибуция: служебный конверт «я пришёл по твоей
+                    // ссылке». Разбирается здесь же и ДО авто-создания контакта —
+                    // иначе вместо начисления ранга пригласившему появился бы чат
+                    // с мусорным текстом.
+                    if (referralAttributionRouter.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                            Log.i(TAG, "Referral packet ACK sent for msgId=$messageId")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Referral packet ACK failed: " + e.message)
                         }
                         return
                     }

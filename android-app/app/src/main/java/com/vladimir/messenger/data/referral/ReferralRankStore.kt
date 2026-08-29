@@ -9,6 +9,7 @@ object ReferralRankStore {
     private const val REAL_COUNT = "qualified_direct_count_v1"
     private const val TEST_PREFS = "apu_test_entitlements"
     private const val TEST_OVERRIDE = "qualified_direct_override_v1"
+    private const val TEST_PREFS_PREFIX = "apu_referral_qualification_test_"
     const val MAX_SUPPORTED_COUNT = 1_000
 
     fun qualifiedDirectCount(context: Context): Int {
@@ -18,7 +19,42 @@ object ReferralRankStore {
                 .getInt(TEST_OVERRIDE, -1)
             if (override >= 0) return override.coerceAtMost(MAX_SUPPORTED_COUNT)
         }
-        return app.getSharedPreferences(REAL_PREFS, Context.MODE_PRIVATE)
+        return qualifiedDirectCountIn(context, REAL_PREFS)
+    }
+
+    /**
+     * Единственный production-писатель настоящего счётчика.
+     *
+     * До раунда 49 ключ `qualified_direct_count_v1` не писал никто: ранг
+     * читался из него повсюду, но приглашения его не поднимали вовсе, и
+     * единственным источником числа был debug-override. Вызывается из
+     * [ReferralAttributionRouter] и только после того, как идемпотентная
+     * отметка [ReferralAttributionStore.markCredited] вернула true.
+     *
+     * @return новое значение счётчика (с прежним ограничением сверху).
+     */
+    @Synchronized
+    internal fun creditQualifiedDirect(context: Context, by: Int = 1): Int =
+        creditQualifiedDirectIn(context, REAL_PREFS, by)
+
+    @Synchronized
+    internal fun creditQualifiedDirectIn(context: Context, prefsName: String, by: Int): Int {
+        requireAllowedStore(prefsName)
+        if (by <= 0) return qualifiedDirectCountIn(context, prefsName)
+        val prefs = context.applicationContext.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        val current = prefs.getInt(REAL_COUNT, 0).coerceIn(0, MAX_SUPPORTED_COUNT)
+        val next = (current + by).coerceIn(0, MAX_SUPPORTED_COUNT)
+        if (next == current) return current
+        prefs.edit().putInt(REAL_COUNT, next).commit()
+        return next
+    }
+
+    /** Значение настоящего счётчика без учёта debug-override. */
+    @Synchronized
+    internal fun qualifiedDirectCountIn(context: Context, prefsName: String): Int {
+        requireAllowedStore(prefsName)
+        return context.applicationContext
+            .getSharedPreferences(prefsName, Context.MODE_PRIVATE)
             .getInt(REAL_COUNT, 0)
             .coerceIn(0, MAX_SUPPORTED_COUNT)
     }
@@ -41,5 +77,11 @@ object ReferralRankStore {
             .edit()
             .remove(TEST_OVERRIDE)
             .commit()
+    }
+
+    private fun requireAllowedStore(prefsName: String) {
+        require(prefsName == REAL_PREFS || prefsName.startsWith(TEST_PREFS_PREFIX)) {
+            "Unexpected referral rank store"
+        }
     }
 }

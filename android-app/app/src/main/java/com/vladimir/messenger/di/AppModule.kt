@@ -74,8 +74,11 @@ object AppModule {
     fun provideAvatarDao(db: AppDatabase): AvatarDao = db.avatarDao()
 
     @Provides @Singleton
-    fun provideChatRepository(chatDao: ChatDao, messageDao: MessageDao): ChatRepository =
-        ChatRepository(chatDao, messageDao)
+    fun provideChatRepository(
+        chatDao: ChatDao,
+        messageDao: MessageDao,
+        referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
+    ): ChatRepository = ChatRepository(chatDao, messageDao, referralAttribution)
 
     @Provides @Singleton
     fun provideContactRepository(contactDao: ContactDao, chatRepository: ChatRepository): ContactRepository =

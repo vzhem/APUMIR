@@ -21,6 +21,7 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
+    private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
     private val lastFullSyncTime = mutableMapOf<String, Long>()
@@ -99,6 +100,20 @@ class ChatRepository @Inject constructor(
                 messageDao.updateMessageStatus(messageId, MessageStatus.QUEUED_OFFLINE.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.STORE_FORWARD.name)
                 Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
+            }
+
+            // Реферальная атрибуция: если контакт добавлен по пригласительной
+            // ссылке, пригласившему уходит отдельный служебный конверт (один раз
+            // на контакт, повторная отправка помечается и не выполняется).
+            // На само сообщение это не влияет: сбой атрибуции не должен мешать
+            // переписке, поэтому исключение глотается.
+            try {
+                val contactId = chat?.contactId.orEmpty()
+                if (contactId.isNotBlank()) {
+                    referralAttribution.sendPending(chatId, contactId)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "referral attribution failed: ${e.message}")
             }
 
             Result.success(entity.toDomain())
