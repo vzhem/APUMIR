@@ -6282,3 +6282,54 @@ androidTest compile — коды 0, debug APK 30 765 580 байт. `deploy-f4-di
 Правило резервной копии уточнено в START_HERE раздел 5: копия — после каждого
 релиза (агент сам предлагает флешку и одну команду), после мелких правок —
 по желанию владельца.
+
+## Раунд 48, приёмка на телефонах и разбор «ссылки не прибавляют ранг»
+
+Приёмка: debug APK 30 781 964 байт (собран 29.08.2026 20:15:15) встал на Стас
+`11567254BK001192` и Аню `AUYF6R5923006121`, `lastUpdateTime` 20:16:17 и
+20:16:19, гейт GREEN (юнит-тесты 108/0, compile/assemble/androidTest — коды 0).
+Владелец подтвердил: текст подсказок теперь виден.
+
+Замечание владельца: «пригласительные ссылки не прибавляют ранг. протестил
+чат начал но не прибавилось». Разбор по коду (не по памяти):
+
+1. Ранг — это `FileTransferRankPolicy.Entitlement`, ступени 0/1/3/10/20/30/50/
+   100/200/300/500/700/1000, аргумент — число подтверждённых прямых приглашений.
+2. Число берётся из `ReferralRankStore.qualifiedDirectCount()`:
+   `SharedPreferences "apu_referral_qualification"`, ключ
+   `qualified_direct_count_v1`.
+3. **Этот ключ в production-коде НЕ ЗАПИСЫВАЕТСЯ НИГДЕ.** Единственный
+   `putInt` в `main` по этой теме — `ReferralRankStore.setDebugOverride`
+   (ключ `qualified_direct_override_v1`, prefs `apu_test_entitlements`),
+   вызывается только из `TestRankOverrideInstrumentedTest` и guarded
+   `check(BuildConfig.DEBUG)`. Проверено перебором всех `putInt(` в
+   `android-app/app/src/main`.
+4. Токен приглашённого сохраняется: `MainActivity.kt:104` проверяет ссылку
+   (`VerifiedReferralInviteLink.verify`) и `:106` кладёт токен через
+   `PendingReferralStore.saveVerified`. Но `PendingReferralStore.loadVerified`
+   в `main` НЕ ВЫЗЫВАЕТСЯ НИ РАЗУ (только `loadVerifiedIn` в
+   `PendingReferralStoreInstrumentedTest`). То есть токен лежит мёртвым грузом.
+5. В сетевом протоколе реферального пакета нет: `grep -rn "referral"
+   rust-core/src/network/ rust-core/src/protocol/` — пусто. В ядре есть только
+   криптография токена (`rust-core/src/crypto/referral.rs`:
+   `sign_referral_invite_v1`, `verify_referral_invite_v1`).
+6. Все 20+ обращений к `qualifiedDirectCount` — ЧТЕНИЯ (MessengerApplication,
+   GroupsModule, CoreServerService:230, ProxyAutopilot, ChatDetailViewModel,
+   ChatListViewModel, MtProxyViewModel, RankBenefitsScreen,
+   ProxyCollectorWorker).
+
+Вывод: это НЕ регрессия, а незакрытый этап. В `docs/MASTER_PLAN_v2.md`
+(Фаза 2.5.2A, «Этапы реализации») готовы R0.5 (slices 1-3B) и R1 (slices 1-5:
+создание и проверка подписанного токена, сохранение через onboarding,
+исходящий шаринг), а **R2 — «local qualification: handshake+DELIVERED ->
+idempotent signed receipt -> уровни 1/3/10» — не отмечен ни одним [x]**.
+Пункт Acceptance gate «inviter получает уровень 1 без повторного ручного
+ввода ссылки» тоже не закрыт. По замыслу приглашённый после первого
+доставленного сообщения должен вернуть подписанный receipt (version, token
+hash, inviter binding, псевдоним, время, подпись — без контактов/IP), и уже
+он увеличивает счётчик приглашающего.
+
+Единственный способ сегодня получить ранг — тестовый override:
+`scripts/set-rank.ps1 -QualifiedReferrals N` (по умолчанию Аня, 1000; снимается
+`-Clear`). В релизной сборке override недоступен, то есть у обычных
+пользователей ранг сейчас не растёт вовсе.
