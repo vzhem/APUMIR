@@ -16,7 +16,8 @@ import javax.inject.Singleton
  * обычный текст.
  *
  * Возвращает true, если текст оказался реферальным конвертом и обработан, —
- * даже когда разобрать его не удалось: битый конверт намеренно поглощается.
+ * даже когда разобрать или подтвердить его не удалось: битый и неподписанный
+ * конверт намеренно поглощается.
  */
 @Singleton
 class ReferralAttributionRouter @Inject constructor(
@@ -31,20 +32,45 @@ class ReferralAttributionRouter @Inject constructor(
         if (!ReferralWire.isReferralPacket(text)) return false
 
         val app = context.applicationContext
-        val packet = ReferralWire.parse(text)
-        if (packet == null) {
-            Log.w(TAG, "referral packet from $senderId is malformed, dropped")
-            return true
-        }
+        when (val packet = ReferralWire.parse(text)) {
+            null -> {
+                Log.w(TAG, "referral packet from $senderId is malformed, dropped")
+                recordRejection(app, senderId, "malformed envelope", nowMs)
+            }
 
+            is ReferralWire.Packet.UnsignedAttribution -> {
+                // Версия 1 была без подписи: принимать её значит позволить
+                // накрутку чужим идентификатором. Поглощаем, но не зачисляем.
+                Log.i(TAG, "unsigned referral from $senderId ignored")
+                recordRejection(app, senderId, "unsigned envelope is not credited", nowMs)
+            }
+
+            is ReferralWire.Packet.SignedAttribution -> {
+                val receipt = ReferralReceiptVerifier.verify(packet, nowMs)
+                if (receipt == null) {
+                    Log.w(TAG, "referral receipt from $senderId failed signature or token checks")
+                    recordRejection(app, senderId, "signature or token verification failed", nowMs)
+                } else {
+                    credit(app, senderId, receipt, nowMs)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun credit(
+        app: Context,
+        senderId: String,
+        receipt: VerifiedReceipt,
+        nowMs: Long,
+    ) {
         val decision = ReferralCreditPolicy.decide(
-            packet = packet,
+            receipt = receipt,
             transportSenderId = senderId,
             ownNodeId = RustBridge.nodeId(),
             alreadyCredited = ReferralAttributionStore.creditedInvitees(app),
             nowMs = nowMs,
         )
-
         when (decision) {
             is ReferralCreditPolicy.Decision.Credit -> {
                 // Порядок важен: сначала отметка о зачислении, потом счётчик.
@@ -55,14 +81,23 @@ class ReferralAttributionRouter @Inject constructor(
                     val total = ReferralRankStore.creditQualifiedDirect(app)
                     Log.i(TAG, "referral credited from ${decision.inviteeNodeId}, qualified=$total")
                 } else {
-                    Log.i(TAG, "referral from ${decision.inviteeNodeId} already recorded, count unchanged")
+                    Log.i(TAG, "referral from ${decision.inviteeNodeId} already recorded")
                 }
             }
+
             is ReferralCreditPolicy.Decision.Reject -> {
                 Log.i(TAG, "referral from $senderId not credited: ${decision.reason}")
+                recordRejection(app, senderId, decision.reason, nowMs)
             }
         }
-        return true
+    }
+
+    private fun recordRejection(app: Context, senderId: String, reason: String, nowMs: Long) {
+        try {
+            ReferralAttributionStore.recordRejection(app, senderId, reason, nowMs)
+        } catch (e: Exception) {
+            Log.w(TAG, "could not record the rejection reason: ${e.message}")
+        }
     }
 
     private companion object {

@@ -1,6 +1,8 @@
 package com.vladimir.messenger.util
 
 import android.content.Context
+import com.vladimir.messenger.data.referral.ReferralWire
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import java.net.URLEncoder
 
 /**
@@ -28,10 +30,28 @@ object OwnInvite {
      * Null бывает на первом запуске, до генерации ключей.
      */
     fun link(context: Context): String? {
-        val nodeId = prefs(context).getString(KEY_NODE_ID, "").orEmpty()
+        val app = context.applicationContext
+        val nodeId = prefs(app).getString(KEY_NODE_ID, "").orEmpty()
         if (nodeId.isBlank()) return null
-        val name = URLEncoder.encode(displayName(context), "UTF-8")
-        return "p2pmessenger://add?node_id=$nodeId&name=$name"
+        val name = URLEncoder.encode(displayName(app), "UTF-8")
+        val base = "p2pmessenger://add?node_id=$nodeId&name=$name"
+        // Подписанный токен превращает обычную ссылку в приглашение: по нему
+        // пригласивший потом зачтёт друга (см. data/referral). Если подпись
+        // недоступна, ссылка остаётся рабочей, просто без начисления ранга.
+        val token = signedToken(app, nodeId) ?: return base
+        return base + "&" + ReferralInviteLink.TOKEN_PARAMETER + "=" + ReferralWire.encode(token)
+    }
+
+    private fun signedToken(context: Context, nodeId: String): ByteArray? = try {
+        IdentitySigningKeyStore.createSignedReferralToken(context)
+            ?: run {
+                // Sidecar могли ещё не установить в этом процессе: ставим и
+                // пробуем ещё раз, иначе приглашения молча теряли бы токен.
+                IdentitySigningKeyStore.installIntoCore(context, nodeId)
+                IdentitySigningKeyStore.createSignedReferralToken(context)
+            }
+    } catch (error: Exception) {
+        null
     }
 
     private fun prefs(context: Context) =

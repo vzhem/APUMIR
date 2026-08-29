@@ -8,8 +8,10 @@ import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.data.referral.ReferralAttributionSender
+import com.vladimir.messenger.data.referral.ReferralWire
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.util.InviteLinkParser
+import com.vladimir.messenger.util.VerifiedReferralInviteLink
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -151,14 +153,10 @@ class AddContactViewModel @Inject constructor(
                     val chat = chatRepository.createChat(fingerprint, contact.displayName)
                     Log.i(TAG, "Chat created: ${chat.id} for ${chat.contactName}")
                     // Контакт пришёл по пригласительной ссылке: запоминаем
-                    // пригласившего и сразу пробуем отправить ему служебный
-                    // конверт атрибуции. Если транспорта нет, отправка повторится
-                    // на первом же сообщении (см. ChatRepository.sendMessage).
-                    parsedInvite?.nodeId?.let { inviter ->
-                        if (referralAttribution.rememberInviter(fingerprint, inviter)) {
-                            referralAttribution.sendPending(chat.id, fingerprint)
-                        }
-                    }
+                    // подписанный токен и сразу пробуем отправить пригласившему
+                    // атрибуцию. Если транспорта нет, отправка повторится на
+                    // первом же сообщении (см. ChatRepository.sendMessage).
+                    rememberReferral(parsedInvite, fingerprint, chat.id)
                     _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                 }
                 .onFailure { error ->
@@ -171,11 +169,7 @@ class AddContactViewModel @Inject constructor(
                         if (existing != null) {
                             // роверяем есть ли уже чат, если нет — создаём
                             val existingChat = chatRepository.getOrCreateChat(fingerprint, existing.displayName)
-                            parsedInvite?.nodeId?.let { inviter ->
-                                if (referralAttribution.rememberInviter(fingerprint, inviter)) {
-                                    referralAttribution.sendPending(existingChat.id, fingerprint)
-                                }
-                            }
+                            rememberReferral(parsedInvite, fingerprint, existingChat.id)
                         }
                         _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                     } else {
@@ -185,6 +179,33 @@ class AddContactViewModel @Inject constructor(
                         }
                     }
                 }
+        }
+    }
+
+    /**
+     * Ссылка несла подписанный токен приглашения — проверяем подпись и
+     * запоминаем приглашение. Без токена (обычная ссылка на контакт) функция
+     * ничего не делает: начисление ранга возможно только по подписанному
+     * приглашению.
+     */
+    private fun rememberReferral(
+        parsedInvite: InviteLinkParser.Invite?,
+        fingerprint: String,
+        chatId: String,
+    ) {
+        val encoded = parsedInvite?.referralToken ?: return
+        val token = ReferralWire.decode(encoded) ?: return
+        val verified = VerifiedReferralInviteLink.verifyToken(token)
+        if (verified == null) {
+            Log.w(TAG, "invite token failed verification, attribution skipped")
+            return
+        }
+        if (!verified.inviterNodeId.equals(fingerprint, ignoreCase = true)) {
+            Log.w(TAG, "invite token does not match the added contact")
+            return
+        }
+        if (referralAttribution.rememberInviter(fingerprint, verified.inviterNodeId, verified.token)) {
+            referralAttribution.sendPending(chatId, fingerprint)
         }
     }
 }

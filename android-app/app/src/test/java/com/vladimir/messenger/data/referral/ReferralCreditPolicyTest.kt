@@ -4,71 +4,89 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * Правила зачисления приглашения (MASTER_PLAN 2.5.2A, полная версия).
+ *
+ * На вход подаётся уже подтверждённый receipt: считается, что подписи токена и
+ * привязки identity проверены ядром, поэтому все его поля аутентичны, кроме
+ * открытой метки [VerifiedReceipt.qualifiedAtMs].
+ */
 class ReferralCreditPolicyTest {
 
-    private val own = "pk_" + "22".repeat(32)
-    private val invitee = "pk_" + "11".repeat(32)
-    private val stranger = "pk_" + "33".repeat(32)
-    private val now = 1_800_000_000_000L
+    private val own = ReferralFixtures.INVITER
+    private val invitee = ReferralFixtures.INVITEE
+    private val stranger = ReferralFixtures.STRANGER
+    private val now = ReferralFixtures.NOW
 
-    private fun packet(
+    /** Ссылка создана сегодня, identity приглашённого — минуту назад. */
+    private fun receipt(
         inviteeId: String = invitee,
+        identityCreatedAtMs: Long = now - 60_000,
         inviterId: String = own,
-        createdAtMs: Long = now,
-    ) = ReferralWire.Attribution(
+        tokenCreatedAtMs: Long = now - 60_000,
+        tokenExpiresAtMs: Long = now + ReferralFixtures.WEEK_MS,
+        qualifiedAtMs: Long = now,
+    ) = VerifiedReceipt(
         inviteeNodeId = inviteeId,
+        inviteeIdentityCreatedAtMs = identityCreatedAtMs,
         inviterNodeId = inviterId,
-        createdAtMs = createdAtMs,
-        nonce = "AAECAwQFBgcICQoLDA0ODw",
+        tokenCreatedAtMs = tokenCreatedAtMs,
+        tokenExpiresAtMs = tokenExpiresAtMs,
+        qualifiedAtMs = qualifiedAtMs,
     )
 
     private fun decide(
-        pkt: ReferralWire.Attribution = packet(),
+        verified: VerifiedReceipt = receipt(),
         sender: String = invitee,
         ownNodeId: String? = own,
         credited: Set<String> = emptySet(),
         nowMs: Long = now,
-    ) = ReferralCreditPolicy.decide(pkt, sender, ownNodeId, credited, nowMs)
+    ) = ReferralCreditPolicy.decide(verified, sender, ownNodeId, credited, nowMs)
 
     private fun reason(decision: ReferralCreditPolicy.Decision): String =
         (decision as ReferralCreditPolicy.Decision.Reject).reason
 
     @Test
-    fun firstAttributionCreditsTheSender() {
+    fun newcomerWithASignedInviteIsCredited() {
         val decision = decide()
         assertTrue(decision is ReferralCreditPolicy.Decision.Credit)
         assertEquals(invitee, (decision as ReferralCreditPolicy.Decision.Credit).inviteeNodeId)
     }
 
     /**
-     * Зачисляется фактический отправитель пакета, а не тот, кто назван внутри:
-     * иначе любой узел мог бы приписать себе чужое приглашение.
+     * Зачисляется узел из подписанной привязки identity, совпадающий с
+     * фактическим отправителем пакета. Пересланный чужой receipt не работает:
+     * узел в нём не совпадёт с тем, кто реально прислал конверт.
      */
     @Test
-    fun creditIsKeyedOnTransportSenderNotOnTheEnvelope() {
-        val decision = decide(pkt = packet(inviteeId = stranger), sender = invitee)
-        assertEquals(invitee, (decision as ReferralCreditPolicy.Decision.Credit).inviteeNodeId)
+    fun forwardedReceiptIsRejected() {
+        val decision = decide(verified = receipt(inviteeId = stranger), sender = invitee)
+        assertEquals("receipt does not match the transport sender", reason(decision))
     }
 
     @Test
-    fun packetAddressedToAnotherNodeIsRejected() {
-        assertEquals(
-            "packet is addressed to another node",
-            reason(decide(pkt = packet(inviterId = stranger))),
-        )
+    fun creditFollowsTheTransportSender() {
+        val decision = decide(verified = receipt(inviteeId = stranger), sender = stranger)
+        assertEquals(stranger, (decision as ReferralCreditPolicy.Decision.Credit).inviteeNodeId)
+    }
+
+    @Test
+    fun tokenAddressedToAnotherNodeIsRejected() {
+        assertEquals("token is addressed to another node", reason(decide(verified = receipt(inviterId = stranger))))
     }
 
     @Test
     fun selfReferralIsRejected() {
-        assertEquals("self referral", reason(decide(sender = own)))
+        val decision = decide(verified = receipt(inviteeId = own), sender = own)
+        assertEquals("self referral", reason(decision))
     }
 
+    /** Повторная установка/клон той же identity счётчик не двигает. */
     @Test
-    fun secondAttributionFromTheSameInviteeIsRejected() {
+    fun secondReceiptFromTheSameIdentityIsRejected() {
         assertEquals("already credited", reason(decide(credited = setOf(invitee))))
     }
 
-    /** Тот же узел в другом регистре не должен засчитываться второй раз. */
     @Test
     fun duplicateCheckIgnoresNodeIdCase() {
         assertEquals("already credited", reason(decide(credited = setOf(invitee.uppercase()))))
@@ -77,25 +95,74 @@ class ReferralCreditPolicyTest {
     @Test
     fun expiredAttributionIsRejected() {
         val stale = now - ReferralCreditPolicy.MAX_ATTRIBUTION_AGE_MS - 1
-        assertEquals("attribution expired", reason(decide(pkt = packet(createdAtMs = stale))))
+        assertEquals("attribution expired", reason(decide(verified = receipt(qualifiedAtMs = stale))))
     }
 
     @Test
     fun attributionAtTheAgeLimitIsStillAccepted() {
         val edge = now - ReferralCreditPolicy.MAX_ATTRIBUTION_AGE_MS
-        assertTrue(decide(pkt = packet(createdAtMs = edge)) is ReferralCreditPolicy.Decision.Credit)
+        assertTrue(decide(verified = receipt(qualifiedAtMs = edge)) is ReferralCreditPolicy.Decision.Credit)
     }
 
     @Test
-    fun attributionFromTheFutureBeyondSkewIsRejected() {
+    fun qualificationFromTheFutureBeyondSkewIsRejected() {
         val future = now + ReferralCreditPolicy.CLOCK_SKEW_MS + 1
-        assertEquals("created in the future", reason(decide(pkt = packet(createdAtMs = future))))
+        assertEquals("qualified in the future", reason(decide(verified = receipt(qualifiedAtMs = future))))
     }
 
     @Test
     fun smallClockSkewIsTolerated() {
         val skewed = now + ReferralCreditPolicy.CLOCK_SKEW_MS
-        assertTrue(decide(pkt = packet(createdAtMs = skewed)) is ReferralCreditPolicy.Decision.Credit)
+        assertTrue(decide(verified = receipt(qualifiedAtMs = skewed)) is ReferralCreditPolicy.Decision.Credit)
+    }
+
+    @Test
+    fun expiredInviteTokenIsRejected() {
+        val dead = receipt(tokenExpiresAtMs = now - ReferralCreditPolicy.CLOCK_SKEW_MS - 1)
+        assertEquals("invite token expired", reason(decide(verified = dead)))
+    }
+
+    @Test
+    fun inviteTokenAtTheExpiryEdgeIsAccepted() {
+        val edge = receipt(tokenExpiresAtMs = now - ReferralCreditPolicy.CLOCK_SKEW_MS)
+        assertTrue(decide(verified = edge) is ReferralCreditPolicy.Decision.Credit)
+    }
+
+    @Test
+    fun identityCreatedInTheFutureIsRejected() {
+        val impossible = receipt(identityCreatedAtMs = now + ReferralCreditPolicy.CLOCK_SKEW_MS + 1)
+        assertEquals("invitee identity created in the future", reason(decide(verified = impossible)))
+    }
+
+    /**
+     * Правило «только новенькие» (решение владельца от 2026-08-29): identity,
+     * созданная задолго до ссылки, не засчитывается. Сутки запаса — только на
+     * перекос часов между телефонами.
+     */
+    @Test
+    fun existingIdentityIsNotANewcomer() {
+        val old = receipt(
+            identityCreatedAtMs = now - ReferralCreditPolicy.NEW_IDENTITY_SKEW_MS - 1,
+            tokenCreatedAtMs = now,
+        )
+        assertEquals("invitee identity is not new", reason(decide(verified = old)))
+    }
+
+    /** Реальный случай двух телефонов: identity старше ссылки на несколько дней. */
+    @Test
+    fun identityFromDaysAgoIsRejected() {
+        val threeDays = 3L * 24 * 60 * 60 * 1000
+        val decision = decide(verified = receipt(identityCreatedAtMs = now - threeDays, tokenCreatedAtMs = now))
+        assertEquals("invitee identity is not new", reason(decision))
+    }
+
+    @Test
+    fun identitySlightlyOlderThanTheTokenIsStillNew() {
+        val edge = receipt(
+            identityCreatedAtMs = now - ReferralCreditPolicy.NEW_IDENTITY_SKEW_MS,
+            tokenCreatedAtMs = now,
+        )
+        assertTrue(decide(verified = edge) is ReferralCreditPolicy.Decision.Credit)
     }
 
     @Test
@@ -110,16 +177,15 @@ class ReferralCreditPolicyTest {
     }
 
     /**
-     * Правило владельца от 2026-08-29: на первом шаге засчитывается любой,
-     * кто пришёл по ссылке. Тест фиксирует текущее поведение, чтобы переход на
-     * «только новая identity» был осознанным изменением, а не случайностью.
+     * Повторный прогон той же подписанной пары (token + identity) после того, как
+     * узел уже зачислен, ничего не добавляет: идемпотентность держится на узле, а
+     * не на содержимом конверта.
      */
     @Test
-    fun anyInviteeIsCreditedForNow() {
-        repeat(3) { index ->
-            val peer = "pk_" + (index + 4).toString().repeat(64).take(64)
-            val decision = decide(pkt = packet(inviteeId = peer), sender = peer)
-            assertTrue(decision is ReferralCreditPolicy.Decision.Credit)
-        }
+    fun replayedReceiptDoesNotDoubleCount() {
+        val first = decide()
+        assertTrue(first is ReferralCreditPolicy.Decision.Credit)
+        val replay = decide(credited = setOf((first as ReferralCreditPolicy.Decision.Credit).inviteeNodeId))
+        assertEquals("already credited", reason(replay))
     }
 }

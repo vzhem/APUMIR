@@ -86,6 +86,35 @@ class InviteLinkParserTest {
         assertEquals(InviteLinkParser.Source.APP_LINK, invite?.source)
     }
 
+    /**
+     * OwnInvite.link кладёт подписанный токен в параметр r=, и он обязан дойти
+     * до AddContactViewModel/MainActivity: без токена ранг не начисляется.
+     */
+    @Test
+    fun carriesTheReferralTokenFromTheLink() {
+        val token = "AQECAgMEBQYH" + "aB3_-".repeat(20)
+        val invite = InviteLinkParser.parse("p2pmessenger://add?node_id=pk_abc123&name=Stas&r=$token")
+
+        assertEquals("pk_abc123", invite?.nodeId)
+        assertEquals(token, invite?.referralToken)
+    }
+
+    @Test
+    fun linkWithoutTokenHasNoReferralToken() {
+        val invite = InviteLinkParser.parse("p2pmessenger://add?node_id=pk_abc123&name=Stas")
+
+        assertNull(invite?.referralToken)
+    }
+
+    /** Мусорный или непомерно длинный токен отбрасывается, ссылка остаётся рабочей. */
+    @Test
+    fun overlongReferralTokenIsDropped() {
+        val invite = InviteLinkParser.parse("p2pmessenger://add?node_id=pk_abc123&r=" + "A".repeat(701))
+
+        assertEquals("pk_abc123", invite?.nodeId)
+        assertNull(invite?.referralToken)
+    }
+
     @Test
     fun ignoresUnknownP2pHost() {
         assertNull(InviteLinkParser.parse("p2p://other/pk_abc123"))

@@ -27,6 +27,13 @@ class ReferralAttributionInstrumentedTest {
     private val invitee = "pk_" + "11".repeat(32)
     private val inviter = "pk_" + "22".repeat(32)
 
+    /**
+     * Подпись проверяет ядро, а хранилище смотрит только на то, что токен
+     * вообще есть, это base64url и он помещается в предел ссылки. Поэтому здесь
+     * достаточно синтетических байтов нужной длины.
+     */
+    private val tokenB64 = ReferralWire.encode(ByteArray(140) { it.toByte() })
+
     private fun reset() {
         context.deleteSharedPreferences(attributionPrefs)
         context.deleteSharedPreferences(rankPrefs)
@@ -36,13 +43,17 @@ class ReferralAttributionInstrumentedTest {
     fun invitedContactRemembersTheInviterUntilAttributionIsSent() {
         reset()
         try {
-            assertTrue(ReferralAttributionStore.rememberInviterIn(context, attributionPrefs, invitee, inviter))
-            assertEquals(inviter, ReferralAttributionStore.pendingInviterIn(context, attributionPrefs, invitee))
+            assertTrue(
+                ReferralAttributionStore.rememberInviterIn(context, attributionPrefs, invitee, inviter, tokenB64),
+            )
+            val pending = ReferralAttributionStore.pendingAttributionIn(context, attributionPrefs, invitee)
+            assertEquals(inviter, pending?.inviterNodeId)
+            assertEquals(tokenB64, pending?.tokenB64)
 
             assertTrue(ReferralAttributionStore.markAttributionSentIn(context, attributionPrefs, invitee))
             assertNull(
                 "после успешной отправки атрибуция не повторяется",
-                ReferralAttributionStore.pendingInviterIn(context, attributionPrefs, invitee),
+                ReferralAttributionStore.pendingAttributionIn(context, attributionPrefs, invitee),
             )
         } finally {
             reset()
@@ -53,8 +64,44 @@ class ReferralAttributionInstrumentedTest {
     fun contactAddedWithoutALinkHasNoAttribution() {
         reset()
         try {
-            assertNull(ReferralAttributionStore.pendingInviterIn(context, attributionPrefs, invitee))
-            assertFalse(ReferralAttributionStore.rememberInviterIn(context, attributionPrefs, invitee, "не-узел"))
+            assertNull(ReferralAttributionStore.pendingAttributionIn(context, attributionPrefs, invitee))
+            assertFalse(
+                "неканонический пригласивший не запоминается",
+                ReferralAttributionStore.rememberInviterIn(context, attributionPrefs, invitee, "не-узел", tokenB64),
+            )
+            assertFalse(
+                "без подписанного токена атрибуции не будет",
+                ReferralAttributionStore.rememberInviterIn(context, attributionPrefs, invitee, inviter, ""),
+            )
+            assertFalse(
+                "мусор вместо base64url не запоминается",
+                ReferralAttributionStore.rememberInviterIn(context, attributionPrefs, invitee, inviter, "!!!не base64"),
+            )
+            assertNull(ReferralAttributionStore.pendingAttributionIn(context, attributionPrefs, invitee))
+        } finally {
+            reset()
+        }
+    }
+
+    /** Причина отказа остаётся на телефоне: буфер logcat вытесняется быстро. */
+    @Test
+    fun lastRejectionIsKeptForDiagnostics() {
+        reset()
+        try {
+            assertNull(ReferralAttributionStore.lastRejectionIn(context, attributionPrefs))
+            assertTrue(
+                ReferralAttributionStore.recordRejectionIn(
+                    context,
+                    attributionPrefs,
+                    invitee,
+                    "invitee identity is not new",
+                    1_800L,
+                ),
+            )
+            assertEquals(
+                "$invitee|invitee identity is not new|1800",
+                ReferralAttributionStore.lastRejectionIn(context, attributionPrefs),
+            )
         } finally {
             reset()
         }

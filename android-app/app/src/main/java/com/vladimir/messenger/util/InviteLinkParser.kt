@@ -19,6 +19,8 @@ import java.nio.charset.StandardCharsets
  */
 object InviteLinkParser {
     const val TELEGRAM_BOT_USERNAME = "p2p_messenger_relay_bot"
+    /** Предел длины токена в base64url: 512 байт дают не больше 684 символов. */
+    private const val MAX_TOKEN_CHARS = 700
     const val LEGACY_TELEGRAM_BOT_USERNAME = "P2PMessengerBot"
 
     data class Invite(
@@ -27,6 +29,12 @@ object InviteLinkParser {
         val displayName: String? = null,
         /** Оригинальное имя через собаку из параметра u=, если владелец указал. */
         val username: String? = null,
+        /**
+         * Подписанный токен приглашения из параметра r= (base64url), если
+         * ссылка его несла. Сам по себе он ничего не значит: подпись проверяет
+         * VerifiedReferralInviteLink, а начисляет ранг data/referral.
+         */
+        val referralToken: String? = null,
         val source: Source,
         val original: String,
     )
@@ -87,11 +95,16 @@ object InviteLinkParser {
             ?: return null
         val publicKey = query.firstNonBlank("public_key", "publicKey")?.normalizeNodeId()
         val displayName = query.firstNonBlank("name", "display_name", "displayName")
+        val referralToken = query[ReferralInviteLink.TOKEN_PARAMETER]
+            ?.singleOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it.length <= MAX_TOKEN_CHARS }
         return Invite(
             nodeId = nodeId,
             publicKey = publicKey,
             displayName = displayName,
             username = normalizeUsername(query.firstNonBlank("u", "username")),
+            referralToken = referralToken,
             source = Source.APP_LINK,
             original = original,
         )

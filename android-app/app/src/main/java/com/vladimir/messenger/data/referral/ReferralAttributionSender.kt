@@ -3,19 +3,19 @@ package com.vladimir.messenger.data.referral
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.security.SecureRandom
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Отправка реферальной атрибуции на стороне приглашённого.
+ * Отправка подписанной реферальной атрибуции на стороне приглашённого.
  *
  * Моменты, когда атрибуция уходит пригласившему:
  * 1. сразу после того, как контакт добавлен по ссылке (чат создан);
  * 2. при первой отправке сообщения этому контакту — на случай, если в первый
- *    момент транспорта не было.
+ *    момент транспорта или подписанной identity ещё не было.
  *
  * Отправка идемпотентна: после успешной передачи контакт помечается, и дальше
  * [sendPending] для него ничего не делает. Пакет идёт тем же транспортом 1:1,
@@ -26,12 +26,24 @@ class ReferralAttributionSender @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
-    private val random = SecureRandom()
-
-    /** Запомнить, что контакт добавлен по пригласительной ссылке/QR. */
-    fun rememberInviter(contactId: String, inviterNodeId: String): Boolean {
+    /**
+     * Запомнить приглашение из ссылки: узел пригласившего и его подписанный
+     * токен. Токен кладётся и в штатный [PendingReferralStore], который
+     * проверяет подпись при каждом чтении.
+     */
+    fun rememberInviter(contactId: String, inviterNodeId: String, token: ByteArray): Boolean {
         return try {
-            ReferralAttributionStore.rememberInviter(context.applicationContext, contactId, inviterNodeId)
+            val app = context.applicationContext
+            val saved = ReferralAttributionStore.rememberInviter(
+                app,
+                contactId,
+                inviterNodeId,
+                ReferralWire.encode(token),
+            )
+            if (saved) {
+                PendingReferralStore.saveVerified(app, token)
+            }
+            saved
         } catch (e: Exception) {
             Log.w(TAG, "rememberInviter failed for $contactId: ${e.message}")
             false
@@ -47,28 +59,42 @@ class ReferralAttributionSender @Inject constructor(
     fun sendPending(chatId: String, contactId: String): Boolean {
         val app = context.applicationContext
         return try {
-            val inviter = ReferralAttributionStore.pendingInviter(app, contactId) ?: return false
+            val pending = ReferralAttributionStore.pendingAttribution(app, contactId) ?: return false
             val own = ReferralWire.canonicalNodeId(RustBridge.nodeId())
             if (own == null) {
                 Log.w(TAG, "referral attribution skipped: own node id unavailable")
                 return false
             }
-            if (own.equals(inviter, ignoreCase = true)) {
-                // Своя же ссылка (например, отсканировали собственный QR):
-                // помечаем отправленной, чтобы не пробовать на каждом сообщении.
+            if (own.equals(pending.inviterNodeId, ignoreCase = true)) {
+                // Своя же ссылка (отсканировали собственный QR): помечаем
+                // отправленной, чтобы не пробовать на каждом сообщении.
                 ReferralAttributionStore.markAttributionSent(app, contactId)
                 return false
             }
-            val nonce = ByteArray(ReferralWire.NONCE_BYTES)
-            random.nextBytes(nonce)
-            val envelope = ReferralWire.buildAttribution(own, inviter, System.currentTimeMillis(), nonce)
-                ?: return false
-            val sent = RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, inviter, envelope)
+            val token = ReferralWire.decode(pending.tokenB64) ?: return false
+            val binding = IdentitySigningKeyStore.existingVerifiedBinding(app)
+            if (binding == null) {
+                Log.w(TAG, "referral attribution skipped: signed identity is not installed yet")
+                return false
+            }
+            val envelope = ReferralWire.buildSignedAttribution(
+                inviteeNodeId = own,
+                inviterNodeId = pending.inviterNodeId,
+                qualifiedAtMs = System.currentTimeMillis(),
+                token = token,
+                binding = binding,
+            ) ?: return false
+            val sent = RustBridge.sendMessage(
+                UUID.randomUUID().toString(),
+                chatId,
+                pending.inviterNodeId,
+                envelope,
+            )
             if (sent) {
                 ReferralAttributionStore.markAttributionSent(app, contactId)
-                Log.i(TAG, "referral attribution sent to $inviter for contact $contactId")
+                Log.i(TAG, "signed referral attribution sent to ${pending.inviterNodeId}")
             } else {
-                Log.i(TAG, "referral attribution to $inviter not delivered yet, will retry")
+                Log.i(TAG, "referral attribution to ${pending.inviterNodeId} not delivered yet")
             }
             sent
         } catch (e: Exception) {

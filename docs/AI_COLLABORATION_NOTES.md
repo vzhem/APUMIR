@@ -6636,3 +6636,107 @@ receipt из 2.5.2A — следующий шаг вместе с правило
 обёрнут в try/catch и не может уронить гейт. Логика преобразования пути в имя
 класса проверена прогоном на Python: «запущенные» — ровно 8 классов из отчёта
 владельца плюс 2 новых.
+
+## Раунд 52: полный подписанный вариант приглашения (MASTER_PLAN 2.5.2A)
+
+Владелец: «реши сам как сейчас сделать. но лучше сразу полный вариант. чтобы
+этот пункт был полностью решон и не возвращаться к нему.» Решил: делать на уже
+существующих криптопримитивах rust-core, без единой строчки Rust — нативная
+граница закрыта (в репозитории лежат готовые `libp2p_core.so` для arm64-v8a и
+armeabi-v7a, cargo/rustc в песочнице нет, пересобрать `.so` нечем).
+
+### Что сделано
+
+Новый конверт `APUREF1|attr|2|<invitee>|<inviter>|<qualifiedAtMs>|<token>|<binding>`
+(предел 2048 символа, транспортный — 16 КБ). Внутри два подписанных объекта:
+
+- токен приглашения, `IdentityBoundReferralInviteV1::to_bytes`:
+  `[v1][binding_len:u16][binding][nonce16][created i64][expires i64][sig64]`;
+- привязка identity приглашённого, `SignedIdentityBindingV1::to_bytes`:
+  `[v1][legacy_len:u16][legacy][pubkey32][created i64][sig64]`.
+
+Обе подписи самопроверяемые: `verify_identity_signing_binding` →
+`SignedIdentityBindingV1::from_bytes(..).verify()`, публичный ключ лежит внутри
+конверта, поэтому пригласивший проверяет привязку ЧУЖОГО узла без локальной
+установки. То же для токена: `verify_referral_invite_v1` сверяет подпись по
+встроенному ключу пригласившего и окно времени. Отдельного экспорта
+sign/verify для произвольных данных в `lib.udl` нет — поэтому пригласивший
+получает не подпись под свежим receipt, а два уже подписанных объекта, и
+подмена отправителя отсекается сверкой узла из подписи с фактическим
+отправителем пакета.
+
+Порядок на пригласившем: `ReferralAttributionRouter.routeIncoming` →
+`ReferralReceiptVerifier.verify` (размер → подпись токена → подпись привязки →
+`verified_referral_inviter_node_id` → чтение полей → сверка с открытой частью
+конверта) → `ReferralCreditPolicy.decide` → `markCredited` и только потом
+`creditQualifiedDirect`.
+
+Правила (`ReferralCreditPolicy`, все причины видны в `last_rejection_v1`):
+`own node id unavailable`, `sender is not a node id`, `token is addressed to
+another node`, `receipt does not match the transport sender`, `self referral`,
+`already credited`, `qualified in the future`, `attribution expired`,
+`invite token expired`, `invitee identity created in the future`,
+`invitee identity is not new`. Окна: атрибуция 30 суток (как
+`MAX_REFERRAL_LIFETIME_MS`), перекос часов 5 минут, запас «новизны» identity
+24 часа. Правило новичка: `identityCreatedAt < tokenCreatedAt - 24h` → отказ.
+
+Конверт версии 1 разбирается и поглощается, но не зачисляется
+(`unsigned envelope is not credited`) — иначе накрутка чужим идентификатором
+оставалась бы возможной.
+
+Ссылка: `OwnInvite.link()` теперь добавляет `&r=<base64url токена>`
+(`createSignedReferralToken`, 7 суток; при отсутствии sidecar в процессе —
+`installIntoCore` и повтор). `InviteLinkParser.Invite.referralToken` несёт его
+дальше; `AddContactViewModel.rememberReferral` и `MainActivity.rememberReferralToken`
+проверяют подпись (`VerifiedReferralInviteLink.verifyToken`), сверяют узел из
+токена с добавляемым контактом и только потом запоминают приглашение.
+
+Диагностика: `ReferralAttributionStore.recordRejection` пишет
+`last_rejection_v1` = `<узел>|<причина>|<время>`; `scripts/referral-proof.ps1`
+читает её и переводит причину на человеческий язык. Это ответ на прошлый раунд,
+где отсутствие строк в logcat нельзя было отличить от отсутствия события.
+
+### Тесты
+
+Ожидание гейта: **148** тестов (было 131; 108 в зелёном раунде 51, потому что
+тогда фильтр не покрывал `data.referral`). Состав: groups 67, referral 37
+(`ReferralCreditPolicyTest` 20, `ReferralWireTest` 11, `ReferralReceiptTest` 6),
+util 34 (`InviteLinkParserTest` +3 на параметр `r`), rank policy 10.
+`ReferralFixtures.kt` — не тест-класс (0 `@Test`), но компилируется вместе со
+всеми: это синтетические конверты rust-core для host-тестов, подпись в них
+неподдельная, проверяются разбор формата и правила.
+
+`ReferralAttributionInstrumentedTest` переведён на новую сигнатуру
+(`rememberInviterIn` теперь требует токен) и дополнен случаем
+`lastRejectionIsKeptForDiagnostics`; `recordRejection`/`lastRejection` получили
+тестовый шов `*In`, чтобы инструментальный тест не писал в боевой набор
+preferences.
+
+### Честно о проверке
+
+В песочнице нет ни JDK, ни Gradle, ни Kotlin-компилятора (проверено: `java`,
+`javac`, `kotlinc`, `gradle` — нет; из внешних хостов отвечает только
+github.com, зеркала Debian/Maven Central/Adoptium недоступны), поэтому
+`testDebugUnitTest` здесь невыполним. Что выполнено: `struct_check.py
+--ascii=strict` по всем 18 изменённым `.kt`/`.ps1` (0 ошибок; ещё два
+изменённых файла — документация, лексер их не разбирает), сквозная сверка всех
+обращений `ReferralX.член` с объявлениями, и ручной прогон каждого тестового
+ожидания по коду `decide`. Именно на ручном прогоне нашлась ошибка в моём же
+тесте: `existingIdentityIsNotANewcomer` задавал identity на сутки+1 старше
+`now`, но токен был создан на минуту раньше `now`, и запас перекрывал разницу —
+правило не срабатывало. Исправлено: токен создаётся в `now`. Компиляцию и
+поведение на телефонах подтверждает только гейт владельца.
+
+### Что сказать владельцу перед тестом
+
+Identity Ани создана раньше, чем ссылка, которую Стас сгенерирует сегодня,
+поэтому её пакет будет отклонён с причиной `invitee identity is not new` — это
+работа нового правила, а не поломка. Для положительного теста нужен новый узел
+на телефоне приглашённого (очистка данных приложения или переустановка), и
+только потом переход по ссылке. Отрицательный результат тоже доказательство:
+причина видна в `last_rejection_v1` через `scripts\referral-proof.ps1`.
+
+Не закрыто и требует отдельных раундов: подпись под свежим receipt (нужен новый
+экспорт из rust-core), «один invitee — только один inviter» на стороне
+приглашённого, D7-подтверждение для ступеней 10+, антифрод против
+emulator/device-farm, ослеплённые receipts в публичный реестр.

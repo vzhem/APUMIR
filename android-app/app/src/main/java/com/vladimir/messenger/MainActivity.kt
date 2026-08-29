@@ -43,6 +43,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.Alignment
 import com.vladimir.messenger.data.referral.PendingReferralStore
+import com.vladimir.messenger.data.referral.ReferralAttributionStore
+import com.vladimir.messenger.data.referral.ReferralWire
 import com.vladimir.messenger.util.InviteLinkParser
 import com.vladimir.messenger.util.VerifiedReferralInviteLink
 
@@ -121,8 +123,43 @@ class MainActivity : ComponentActivity() {
         }
 
         lastHandledInviteUri = rawUri
-        Log.i("MainActivity", "Legacy contact-only invite accepted")
+        // Ссылка может нести подписанный токен приглашения (его добавляет
+        // OwnInvite.link). Подпись проверяется тем же путём, что и официальный
+        // HTTPS-вариант выше; начисление у пригласившего случится после первого
+        // отправленного сообщения (ChatRepository -> ReferralAttributionSender).
+        rememberReferralToken(invite.nodeId, invite.referralToken)
+        Log.i("MainActivity", "Legacy contact invite accepted")
         resolveInviteContact(invite.nodeId, invite.publicKey, invite.displayName)
+    }
+
+    private fun rememberReferralToken(nodeId: String, encodedToken: String?) {
+        if (encodedToken.isNullOrBlank()) return
+        val token = ReferralWire.decode(encodedToken)
+        if (token == null) {
+            Log.w("MainActivity", "Invite token is not valid base64url, attribution skipped")
+            return
+        }
+        val verified = VerifiedReferralInviteLink.verifyToken(token)
+        if (verified == null) {
+            Log.w("MainActivity", "Invite token failed verification, attribution skipped")
+            return
+        }
+        if (!verified.inviterNodeId.equals(nodeId, ignoreCase = true)) {
+            Log.w("MainActivity", "Invite token does not match the node id in the link")
+            return
+        }
+        val pending = PendingReferralStore.saveVerified(applicationContext, verified.token)
+        if (pending == null) {
+            Log.w("MainActivity", "Verified referral could not be persisted")
+            return
+        }
+        ReferralAttributionStore.rememberInviter(
+            applicationContext,
+            nodeId,
+            verified.inviterNodeId,
+            ReferralWire.encode(verified.token),
+        )
+        Log.i("MainActivity", "Referral token from the invite link accepted")
     }
 
     private fun resolveInviteContact(nodeId: String, publicKey: String?, displayName: String?) {
