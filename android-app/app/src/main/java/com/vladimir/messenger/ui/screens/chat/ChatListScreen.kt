@@ -276,17 +276,32 @@ fun ChatListScreen(
                 }
 
                 // В разделе каналов пусто - объясняем, где их взять.
+                // Раунд 48: подсказка в белом пузыре с золотой рамкой (формула
+                // стиля из раунда 45), потому что голый Text брал цвет из темы
+                // и на тёмной подложке/обоях не читался вовсе.
                 uiState.items.isEmpty() &&
                     uiState.section == InboxSection.Channels -> {
-                    Text(
-                        "Каналов пока нет. Создайте свой в разделе «Группы» " +
-                            "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
-                        modifier       = Modifier
+                    Box(
+                        modifier = Modifier
                             .align(Alignment.Center)
-                            .padding(24.dp),
-                        textAlign      = TextAlign.Center,
-                        style          = MaterialTheme.typography.bodyMedium,
-                    )
+                            .padding(24.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                                shape = RoundedCornerShape(14.dp),
+                            )
+                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                    ) {
+                        Text(
+                            "Каналов пока нет. Создайте свой в разделе «Группы» " +
+                                "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
+                            textAlign = TextAlign.Center,
+                            style     = MaterialTheme.typography.bodyMedium,
+                            color     = Color(0xFF1E2430),
+                        )
+                    }
                 }
 
                 // Список пуст
