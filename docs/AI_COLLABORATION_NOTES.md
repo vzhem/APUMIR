@@ -5952,3 +5952,34 @@ git reset --hard FETCH_HEAD (после reset -q FETCH_HEAD git status пока�
 `main` eef4768 -> 5a03d53; защитная ветка сработала: при 1 чужом коммите в main
 порядок останавливается). Сам `.ps1` в песочнице не запускался — PowerShell
 сюда не устанавливается (хост ассетов GitHub недоступен), ASCII-only проверен.
+
+## Раунд 47, финал: что стало в origin и ещё одна найденная грабля
+
+Итоговое состояние origin (проверено `git ls-remote --heads origin`):
+`main` = `6bf8261`, `arena/01a04df9-apumir` = `6bf8261` (текущая сессия),
+`archive/release-v11.16.1` = `93d6a4c` (спасённый коммит-сирота). 14 веток
+удалено после проверки «уникальных коммитов к main = 0». Тегов в origin 56,
+все локальные 49 входят в `main`; `/releases/latest` не тронут (v11.23.0,
+draft=false, prerelease=false, APK 36 249 434 байт); новых прогонов Actions
+не появилось (последний — v11.23.0 два часа назад), потому что
+`build-release.yml` срабатывает только на пуш тега `v*`.
+Контроль «что получит человек»: свежий `git clone` даёт ветку `main`, HEAD
+`6bf8261`, в `docs/` 21 файл, `scripts/sync-main.ps1` на месте,
+`libp2p_core.so` (arm64 7 576 640 Б и armv7 2 076 080 Б) на месте,
+первая строка `.gitignore` — рабочая.
+
+Ещё одна причина путаницы, найденная по ходу: **клон Arena-песочницы
+одноветочный** — `git config --get-all remote.origin.fetch` =
+`+refs/heads/main:refs/remotes/origin/main`. Из-за этого `git fetch origin
+<не-main ветка>` не создаёт `refs/remotes/origin/<ветка>`, а пишет только в
+`FETCH_HEAD`, и «ветки нет» — неправда. Единственный надёжный источник правды
+о сервере здесь — `git ls-remote origin`. В `sync-main.ps1` из-за этого
+добавлен явный `git fetch origin <рабочая ветка>` перед проверками.
+
+Проверено на тестовом клоне (`/tmp`, не часть репозитория): последовательность
+git-команд `sync-main.ps1` в обе стороны — fast-forward прошёл
+(`main` eef4768 -> 5a03d53, сверка через `git ls-remote` совпала), защитная
+ветка сработала (при одном чужом коммите в `main` порядок останавливается
+и требует сначала `git merge origin/main`). Сам `.ps1` в песочнице не
+запускался: PowerShell сюда не ставится (release-assets.githubusercontent.com
+недоступен), проверен только ASCII-only.

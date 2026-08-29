@@ -75,6 +75,10 @@ if ($WorkBranch -eq '') {
     }
     $WorkBranch = $StartBranch
 }
+# A single-branch clone (remote.origin.fetch = +refs/heads/main:...) would not
+# have fetched the working branch above, so fetch it by name as well.
+& git fetch origin "$WorkBranch"
+if ($LASTEXITCODE -ne 0) { Write-Output "RESULT: could not fetch $WorkBranch."; Pop-Location; exit 1 }
 & git show-ref --verify --quiet "refs/heads/$WorkBranch"
 if ($LASTEXITCODE -ne 0) {
     Write-Output "FATAL: local branch $WorkBranch does not exist."
