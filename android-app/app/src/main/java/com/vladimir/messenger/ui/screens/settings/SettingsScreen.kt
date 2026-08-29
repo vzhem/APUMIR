@@ -374,21 +374,6 @@ private fun ProfileTabContent(
             }
         }
 
-        if (showAvatarPicker) {
-            AvatarPickerDialog(
-                context = context,
-                onPickUri = { uri ->
-                    AvatarHolder.set(context, uri)
-                    showAvatarPicker = false
-                },
-                onPickGallery = {
-                    showAvatarPicker = false
-                    avatarPicker.launch("image/*")
-                },
-                onDismiss = { showAvatarPicker = false },
-            )
-        }
-
         item {
             ListItem(
                 headlineContent = { Text("Поделиться профилем") },
@@ -407,6 +392,22 @@ private fun ProfileTabContent(
                 modifier = Modifier.clickable { onRankBenefits() },
             )
         }
+    }
+
+    // Диалог выбора аватара: стандартный набор из 50 или картинка из галереи.
+    if (showAvatarPicker) {
+        AvatarPickerDialog(
+            context = context,
+            onPickUri = { uri ->
+                AvatarHolder.set(context, uri)
+                showAvatarPicker = false
+            },
+            onPickGallery = {
+                showAvatarPicker = false
+                avatarPicker.launch("image/*")
+            },
+            onDismiss = { showAvatarPicker = false },
+        )
     }
 }
 
