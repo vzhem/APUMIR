@@ -1,6 +1,7 @@
 param(
     [string]$ExpectedCommit = '',
-    [switch]$RunMigrationTest
+    [switch]$RunMigrationTest,
+    [switch]$Clean
 )
 
 # ============================================================================
@@ -107,6 +108,22 @@ try {
         if ($SchemaExit -ne 0) {
             Write-Output 'RESULT: SCHEMA CROSS-CHECK FAILED - Room would reject this migration.'
             exit $SchemaExit
+        }
+    }
+
+    # Optional clean: wipe stale incremental caches (kapt stubs, ksp) before
+    # building. Round 40 showed a real trap: after a fix commit kapt kept old
+    # stubs and reported 'AvatarDao could not be resolved' for a file that is
+    # committed and fine. Use -Clean once after any confusing compile error.
+    if ($Clean) {
+        Write-Output ''
+        Write-Output '===== optional clean: wiping stale incremental caches ====='
+        & $Gradlew --console=plain clean
+        $CleanExit = $LASTEXITCODE
+        Write-Output "gradle clean exit code: $CleanExit"
+        if ($CleanExit -ne 0) {
+            Write-Output 'RESULT: GRADLE CLEAN FAILED.'
+            exit $CleanExit
         }
     }
 
