@@ -5860,3 +5860,9 @@ release: draft=false, prerelease=false, APK 36249434 байт, body = кратк
 не двинулся: draft-цикл сорвался сетью ПК (dial tcp graphql). Владельцу даны
 две ручные команды draft=true/draft=false; после них latest должен стать
 v11.23.0.
+
+## Релиз v11.23.0 - ВЫПУЩЕН (2026-08-29)
+/releases/latest = v11.23.0 (draft=false, prerelease=false, APK 36249434 байт,
+body = краткие заметки). Ручной draft-цикл на ПК прошёл со второй попытки
+(первый сорвался сетью). Все телефоны на старых версиях получат предложение
+обновления; APK - releases/latest/download/app-release.apk.
