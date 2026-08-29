@@ -170,6 +170,10 @@ class ChatDetailViewModel @Inject constructor(
      * local chat placeholder → immediate pump. Offline multi-day delivery is owned by the
      * durable transport, not by this UI path.
      */
+    /** Раунд 43: превью картинки для пузыря передачи файла. */
+    fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? =
+        fileTransferRouter.previewFileFor(transfer)
+
     fun onFileSelected(uri: Uri) {
         if (_uiState.value.isPreparingFile) return
         // Второй рубеж: даже если кнопку обошли, подготовка файла не пройдёт.

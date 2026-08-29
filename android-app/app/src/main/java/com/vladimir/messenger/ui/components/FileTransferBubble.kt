@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,6 +40,8 @@ fun FileTransferBubble(
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
     onSaveClick: (() -> Unit)? = null,
+    /** Раунд 43: файл превью картинки - показываем фото прямо в пузыре. */
+    previewFile: java.io.File? = null,
 ) {
     val background = if (isFromMe) {
         MaterialTheme.colorScheme.primary
@@ -60,6 +64,30 @@ fun FileTransferBubble(
                 .background(background, RoundedCornerShape(16.dp))
                 .padding(12.dp),
         ) {
+            // Превью картинки: исходящее доступно сразу, входящее - после
+            // приёма (COMPLETE).
+            val previewBitmap = androidx.compose.runtime.remember(previewFile) {
+                previewFile?.let { f ->
+                    runCatching {
+                        val opts = android.graphics.BitmapFactory.Options().apply {
+                            inSampleSize = 2
+                        }
+                        android.graphics.BitmapFactory.decodeFile(f.absolutePath, opts)
+                    }.getOrNull()
+                }
+            }
+            if (previewBitmap != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = previewBitmap.asImageBitmap(),
+                    contentDescription = transfer.displayName,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .padding(bottom = 8.dp),
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = iconFor(transfer.mediaType),

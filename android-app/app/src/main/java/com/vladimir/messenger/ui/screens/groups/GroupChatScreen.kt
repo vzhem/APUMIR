@@ -286,9 +286,19 @@ fun GroupChatScreen(
                 }
             }
 
-            // ── Поле ввода
+            // ── Поле ввода: светлая полосочка, как в личных чатах (раунд 43).
             Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.96f))
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .padding(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 OutlinedTextField(
@@ -297,6 +307,14 @@ fun GroupChatScreen(
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Сообщение") },
                     maxLines = 4,
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+                        unfocusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+                        focusedContainerColor = androidx.compose.ui.graphics.Color.White,
+                        unfocusedContainerColor = androidx.compose.ui.graphics.Color.White,
+                        focusedPlaceholderColor = androidx.compose.ui.graphics.Color(0xFF5A6472),
+                        unfocusedPlaceholderColor = androidx.compose.ui.graphics.Color(0xFF5A6472),
+                    ),
                 )
                 Spacer(Modifier.width(8.dp))
                 TextButton(

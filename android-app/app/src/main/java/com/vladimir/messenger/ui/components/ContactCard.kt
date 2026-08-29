@@ -74,7 +74,7 @@ fun ContactCard(
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
             .border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
@@ -129,7 +129,7 @@ fun ContactCard(
                 Icon(
                     Icons.Default.Share,
                     contentDescription = "Поделиться контактом",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = Color(0xFF5A6472),
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -141,6 +141,7 @@ fun ContactCard(
                 text      = chat.contactName,
                 style     = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                color     = Color(0xFF1E2430),
                 maxLines  = 1,
                 overflow  = TextOverflow.Ellipsis,
             )

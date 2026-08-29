@@ -299,6 +299,21 @@ class FileTransferRouter @Inject constructor(
             .getOrNull()
     }
 
+    /**
+     * Раунд 43: файл превью для пузыря в чате. Входящая картинка - принятый
+     * plaintext после COMPLETE; исходящая - маленькое превью, записанное при
+     * подготовке передачи.
+     */
+    fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
+        if (!transfer.mediaType.startsWith("image/")) return null
+        if (transfer.direction == "INCOMING") return receivedFileFor(transfer)
+        val f = java.io.File(
+            appContext.noBackupFilesDir,
+            "file_preview/v1/" + transfer.transferId + ".jpg",
+        )
+        return if (f.isFile) f else null
+    }
+
     /** Copies a completed incoming transfer's plaintext to the user-chosen SAF destination. */
     suspend fun exportReceivedFile(
         transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity,

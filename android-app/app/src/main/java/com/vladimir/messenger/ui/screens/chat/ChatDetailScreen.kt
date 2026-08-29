@@ -281,6 +281,7 @@ fun ChatDetailScreen(
                                 FileTransferBubble(
                                     transfer = transfer,
                                     isFromMe = transfer.direction == "OUTGOING",
+                                    previewFile = viewModel.previewFileFor(transfer),
                                     onSaveClick = if (
                                         transfer.direction == "INCOMING" &&
                                         transfer.state == "COMPLETE"
@@ -377,10 +378,12 @@ private fun MessageInputBar(
     LaunchedEffect(Unit) {
         snapshotFlow { inputState.text.toString() }.collect { onTextChange(it) }
     }
+    // Раунд 43: нижняя панель - светлая подложка, как полосочки списка, чтобы
+    // поле, скрепка и стрелка читались в обеих темах.
     Surface(
         modifier  = modifier.fillMaxWidth(),
         shadowElevation = 8.dp,
-        color     = MaterialTheme.colorScheme.surface,
+        color     = Color(0xFFF5F7FA).copy(alpha = 0.96f),
     ) {
         Row(
             modifier = Modifier
@@ -388,6 +391,17 @@ private fun MessageInputBar(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White)
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                        RoundedCornerShape(14.dp),
+                    ),
+            ) {
             IconButton(
                 onClick = onAttach,
                 enabled = !isPreparingFile && !isSending,
@@ -407,27 +421,28 @@ private fun MessageInputBar(
                             "Вложения откроются с ранга «Круг друзей»"
                         },
                         tint = if (canAttach) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            Color(0xFF5A6472)
                         } else {
-                            MaterialTheme.colorScheme.outline
+                            Color(0xFF9AA3AF)
                         },
                     )
                 }
+            }
             }
 
             BasicTextField(
                 state     = inputState,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = Color(0xFF1E2430),
                 ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(Color(0xFF1E2430)),
                 decorator   = object : TextFieldDecorator {
                     @Composable
                     override fun Decoration(content: @Composable () -> Unit) {
                         Box(
                             modifier = Modifier
                                 .background(
-                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    Color.White,
                                     MaterialTheme.shapes.extraLarge,
                                 )
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -435,7 +450,7 @@ private fun MessageInputBar(
                             if (inputState.text.isEmpty()) {
                                 Text(
                                     "Сообщение...",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = Color(0xFF5A6472),
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
                             }
