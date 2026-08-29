@@ -134,11 +134,21 @@ class CoreServerService : Service() {
                 kotlinx.coroutines.delay(3000)
                 runCatching { groupRepository.publishMyNickname() }
                 runCatching { groupRepository.publishMyDirectory() }
+                // Аватары: сначала поднять присланные из базы в витрину,
+                // затем разослать свой контактам (раунд 40).
+                runCatching { groupRepository.loadAvatars() }
+                runCatching { groupRepository.publishMyAvatar() }
             }
             serviceScope.launch {
                 com.vladimir.messenger.ui.theme.UsernameHolder.name
                     .drop(1)
                     .collect { runCatching { groupRepository.publishMyNickname() } }
+            }
+            // Сменил аватар - сразу разослать новый по контактам.
+            serviceScope.launch {
+                com.vladimir.messenger.ui.theme.AvatarHolder.uri
+                    .drop(1)
+                    .collect { runCatching { groupRepository.publishMyAvatar() } }
             }
         }
 

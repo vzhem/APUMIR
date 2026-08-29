@@ -200,9 +200,11 @@ private val DayMessengerColors = MessengerColors(
 
 private val NightMessengerColors = MessengerColors(
     messageBubbleOwn       = Gold80,
-    messageBubbleOther     = Color(0xFF16283F),
+    // Раунд 41: ночью чужие пузыри тоже светлые с тёмным текстом - текст
+    // читается на любой подложке (просьба владельца).
+    messageBubbleOther     = Color(0xFFF2F4F7),
     messageBubbleOwnText   = GoldOnDark,
-    messageBubbleOtherText = NavyOn,
+    messageBubbleOtherText = Color(0xFF1E2430),
     statusOnline           = StatusOnline,
     statusOffline          = StatusOffline,
     statusConnecting       = StatusConnecting,

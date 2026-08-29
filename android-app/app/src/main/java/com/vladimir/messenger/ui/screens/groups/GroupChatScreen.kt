@@ -37,6 +37,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -85,12 +89,33 @@ fun GroupChatScreen(
                     containerColor = androidx.compose.ui.graphics.Color.Transparent
                 ),
                 title = {
-                    Column {
-                        Text(uiState.group?.title ?: "Группа", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            (uiState.group?.memberCount ?: 0).toString() + " участн.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                    // Раунд 41: название группы на белой полосочке со
+                    // скруглениями и золотой рамкой - читается на любой подложке.
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(
+                                androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f)
+                            )
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                                RoundedCornerShape(18.dp),
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Column {
+                            Text(
+                                uiState.group?.title ?: "Группа",
+                                fontWeight = FontWeight.SemiBold,
+                                color = androidx.compose.ui.graphics.Color(0xFF1E2430),
+                            )
+                            Text(
+                                (uiState.group?.memberCount ?: 0).toString() + " участн.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = androidx.compose.ui.graphics.Color(0xFF5A6472),
+                            )
+                        }
                     }
                 },
                 navigationIcon = { TextButton(onClick = onBackClick) { Text("Назад") } },

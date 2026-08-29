@@ -15,7 +15,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.content.consumeContentWhen
+import androidx.compose.foundation.content.hasUri
+import androidx.compose.foundation.content.receiveContent
+import androidx.compose.foundation.content.uriOrNull
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.FileTransferBubble
@@ -105,19 +113,34 @@ fun ChatDetailScreen(
             TopAppBar(
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 title = {
-                    Column {
-                        Text(
-                            contactName,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text  = if (uiState.isContactOnline) "в сети" else "не в сети",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (uiState.isContactOnline)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    // Раунд 41: имя контакта/группы на белой полосочке со
+                    // скруглениями и золотой рамкой - читается на любой подложке.
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                                RoundedCornerShape(18.dp),
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Column {
+                            Text(
+                                contactName,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF1E2430),
+                            )
+                            Text(
+                                text  = if (uiState.isContactOnline) "в сети" else "не в сети",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (uiState.isContactOnline)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    Color(0xFF5A6472),
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -160,6 +183,8 @@ fun ChatDetailScreen(
                     }
                 },
                 isPreparingFile = uiState.isPreparingFile,
+                onPastedMedia = viewModel::onFileSelected,
+                onPasteLocked = viewModel::onAttachmentsLocked,
             )
         },
     ) { paddingValues ->
@@ -328,6 +353,8 @@ private fun MessageInputBar(
     onAttach: () -> Unit = {},
     isPreparingFile: Boolean = false,
     canAttach: Boolean = true,
+    onPastedMedia: (android.net.Uri) -> Unit = {},
+    onPasteLocked: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -380,7 +407,25 @@ private fun MessageInputBar(
                     unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 shape    = MaterialTheme.shapes.extraLarge,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    // Раунд 41: стикеры/картинки/гифки с клавиатуры (Gboard и
+                    // др.) вставляются прямо в поле. Раньше система писала
+                    // «приложение не поддерживает вставку изображений».
+                    // Вложения открываются с ранга «Круг друзей» (3) - тем же
+                    // правилом, что и кнопка скрепки.
+                    .receiveContent { _, content ->
+                        if (!content.hasUri()) return@receiveContent content
+                        val uri = content.uriOrNull()
+                        if (uri == null) return@receiveContent content
+                        if (canAttach && !isPreparingFile && !isSending) {
+                            onPastedMedia(uri)
+                        } else {
+                            onPasteLocked()
+                        }
+                        // Забираем URI себе - системный тост больше не нужен.
+                        consumeContentWhen(content) { it.uriOrNull != null }
+                    },
             )
 
             Spacer(modifier = Modifier.width(8.dp))
