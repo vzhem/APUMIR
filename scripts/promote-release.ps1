@@ -44,6 +44,12 @@ if ($null -eq $Gh) {
     exit 1
 }
 
+# gh resolves the repository from the CURRENT DIRECTORY. On v11.23.0 the script
+# was launched from C:\Users\User and every gh call died with "not a git
+# repository". Always step into the repo first; this is a separate powershell
+# process, so no Pop-Location is needed on exit.
+Push-Location 'C:\APU-M8'
+
 # ---- wait for Actions to publish the release -------------------------------
 Write-Step 'waiting for the release to appear'
 $Deadline = (Get-Date).AddMinutes($TimeoutMinutes)

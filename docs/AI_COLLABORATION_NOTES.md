@@ -5842,3 +5842,9 @@ primary 0.35 на подложке 0xFFF5F7FA.
 (делает FULL, двигает /releases/latest) -> gh release edit --notes-file
 docs/RELEASE_NOTES_v11.23.0.md (краткие заметки в окно обновления; воркфлоу не
 трогаем по правилу .github/workflows не пушить).
+
+## Релиз v11.23.0, ход (2026-08-29)
+make-release отработал: гейт GREEN, тег v11.23.0 на 374c72d запушен, Actions
+строит app-release.apk. promote-release упал: gh вызывался из C:\Users\User и
+не видел репозиторий ("not a git repository") - в скрипт добавлен
+Push-Location C:\APU-M8 (отдельный процесс powershell, Pop не нужен).
