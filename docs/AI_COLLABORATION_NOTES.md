@@ -5995,3 +5995,31 @@ PowerShell. Правило записано в `docs/START_HERE.md` (разде�
 `powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\<имя>.ps1`
 или `powershell -NoProfile -ExecutionPolicy Bypass -Command "<одна команда git
 с -C C:\APU-M8>"`, пути абсолютные.
+
+## Раунд 47, первый прогон команд на ПК владельца (2026-08-29)
+
+Владелец выполнил четыре команды. Итог по факту его вывода:
+
+1. `fetch origin --prune --tags`: 14 удалённых веток снялись, появились
+   `origin/main = 9fab4ae` и `origin/archive/release-v11.16.1`, но
+   `! [rejected] v11.17.1 (would clobber existing tag)` — локальный тег
+   владельца `347dc7d4...`, в origin объект `98d88852...`; оба указывают на
+   коммит `6deb5325...` (проверено по моему клону: `git rev-parse v11.17.1` =
+   `98d88852`, `v11.17.1^{commit}` = `6deb5325`). То есть релиз тот же,
+   отличается только объект аннотации.
+2. `status -sb`: `## arena/01a03c3d-apumir...origin/arena/01a03c3d-apumir [gone]`
+   — рабочий стол на `39d4557`, ветка в origin удалена (ожидаемо), дерево чистое.
+3. `sync-main.ps1` не запустился: `Аргумент ... для параметра -File не
+   существует` — скрипта в рабочем столе `39d4557` ещё нет, он появился в
+   `9fab4ae`. ОШИБКА ПОРЯДКА КОМАНД БЫЛА МОЯ: сначала надо перевести клон на
+   `main`. Грабля записана в раздел 6 START_HERE.
+4. `backup-to-flash.ps1`: ОТРАБОТАЛ. robocopy exit code 3 (норма), 700 файлов,
+   бандл переписан, `F:/APU-BACKUP/apumir-full.bundle is okay`,
+   `RESULT: OK - backup refreshed on F:`. В бандле 59 ссылок, в том числе
+   `refs/stash = 5ed7884a...` — у владельца ЕСТЬ заначка (stash), в моей
+   песочнице этого объекта нет, содержимое не проверял.
+
+Проверил по бандлу все четыре ЛОКАЛЬНЫЕ ветки владельца — `74cbde0`
+(arena/01a013d0), `bdc69ae` (01a02092), `5b266fe` (01a0290d), `39d4557`
+(01a03c3d): все четыре ВНУТРИ `main` (`git merge-base --is-ancestor 9fab4ae`),
+уникальной работы в них нет, терять нечего.
