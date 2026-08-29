@@ -6375,3 +6375,39 @@ v11.16 — ошибку поймал прогон логики на реальн
 поэтому сам `.kts` НЕ компилировался — подтвердит только гейт на Windows.
 Если сборка упадёт на конфигурации, откат одной командой:
 `git -C C:\APU-M8 checkout HEAD~1 -- android-app/app/build.gradle.kts`.
+
+## Раунд 48, гейт упал на моей правке build.gradle.kts (Gradle 9)
+
+Гейт на `75a9265` у владельца: `RESULT: UNIT TESTS FAILED - stop here` —
+`Script compilation errors` в `android-app/app/build.gradle.kts`:
+`Unresolved reference 'exec'`, `'workingDir'`, `'commandLine'`,
+`'standardOutput'`, `'isIgnoreExitValue'` и `'io'` (строки 38-43).
+Гейт отработал правильно: APK удалён заранее, поэтому
+`install-debug-on-phones.ps1` честно сказал `FATAL: debug apk not found`.
+Владелец откатил файл (`git checkout HEAD~1 -- ...`), сборка снова рабочая.
+
+Причина (подтверждена документацией Gradle): проект на **Gradle 9.5.0**
+(`android-app/gradle/wrapper/gradle-wrapper.properties` ->
+`gradle-9.5.0-bin.zip`), а `Project.exec` и его скриптовый аналог **удалены в
+Gradle 9.0** (deprecated с 8.11). Замена для конфигурационного времени —
+`ProviderFactory.exec` либо обычные JVM-API.
+
+Моя вина дважды: (1) не проверил версию Gradle перед тем, как писать `exec {}`;
+(2) зная, что Gradle в песочнице нет и проверить нечем, всё равно запушил
+в `main`. Правило записано в раздел 6 START_HERE: имена API сверять с версией
+инструмента в репозитории (wrapper, libs.versions.toml), а непроверенную
+правку сборочного файла так легко в main не отправлять.
+
+Исправление: `gitDescribeOrNull()` переписан на `java.lang.ProcessBuilder`
+(стандартный JVM, к Gradle отношения не имеет), с таймаутом 15 с через
+`waitFor(15, TimeUnit.SECONDS)` и `destroyForcibly()`; при любой неудаче
+`null`, то есть сборка деградирует в прежний fallback `v11.16`, а не падает.
+Логика выбора версии не менялась.
+
+Проверки: лексер — `android-app` 212 файлов, 0 ошибок; баланс скобок в
+`build.gradle.kts` 40/40; прогон той же логики (git describe -> отрезание
+хвоста -> суффикс) на реальном репозитории: локально
+`v11.23.0-24-g75a9265` -> `versionName v11.23.0-debug`, `versionCode 11023000`;
+Actions с тегом v11.24.0 -> `v11.24.0` / 11024000; без git/тегов -> `v11.16`.
+Gradle в песочнице по-прежнему нет, поэтому компиляцию `.kts` снова подтвердит
+только гейт на Windows.

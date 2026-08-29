@@ -179,6 +179,15 @@
   `fatal: unable to access ... Failed to connect to github.com:443 after
   21110 ms` и напечатал `RESULT: fetch failed.`, ничего не двигая. Так и
   задумано: без свежего fetch скрипт работать не будет. Лечение — повторить.
+- **Сборочные скрипты: сначала узнать версию инструмента** (ошибка агента
+  2026-08-29): правка `android-app/app/build.gradle.kts` с `exec { }` уронила
+  гейт — `Unresolved reference 'exec'`, потому что проект на Gradle 9.5.0
+  (`android-app/gradle/wrapper/gradle-wrapper.properties`), а `Project.exec`
+  удалён в Gradle 9 (deprecated с 8.11). Для запуска внешних команд в
+  конфигурации брать `java.lang.ProcessBuilder` или `providers.exec`, и
+  сначала смотреть версию Gradle/AGP/Kotlin в wrapper и `libs.versions.toml`.
+  Правило шире: имена API сверять с версией инструмента в РЕПОЗИТОРИИ, а не по
+  памяти (та же грабля была с Compose foundation 1.7.6).
 - PowerShell 5.1: `$ErrorActionPreference='Stop'` + stderr от `gh`
   («release not found», пока Actions строит) убивает скрипт. В циклах ожидания
   вызывать gh через `cmd /c "gh ... 2>nul"`.

@@ -31,21 +31,28 @@ fun versionCodeFromName(versionName: String): Int? {
 // никогда не выдавал себя за релиз; UpdateChecker.parse() отбрасывает хвост
 // после "-", а isVersionNewer() при равных числах возвращает false, поэтому
 // лишнее окно обновления не появится.
-fun gitDescribeOrNull(): String? {
+// ВНИМАНИЕ: Gradle 9 УДАЛИЛ Project.exec и скриптовый exec (deprecated с 8.11),
+// поэтому здесь обычный java.lang.ProcessBuilder, а не exec { } и не
+// providers.exec. Проверено на живом JVM: команда и разбор вывода те же.
+fun gitDescribeOrNull(): String? = try {
     val isWindows = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
     val git = if (isWindows) "git.exe" else "git"
-    return try {
-        val out = java.io.ByteArrayOutputStream()
-        val result = exec {
-            workingDir = rootDir
-            commandLine = listOf(git, "describe", "--tags")
-            standardOutput = out
-            isIgnoreExitValue = true
-        }
-        if (result.exitValue != 0) null else out.toString().trim().ifEmpty { null }
-    } catch (e: Exception) {
+    val process = ProcessBuilder(git, "describe", "--tags")
+        .directory(rootDir)
+        .redirectErrorStream(false)
+        .start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+    val finished = process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+    if (!finished) {
+        process.destroyForcibly()
         null
+    } else if (process.exitValue() != 0) {
+        null
+    } else {
+        output.ifEmpty { null }
     }
+} catch (e: Exception) {
+    null
 }
 
 val gitTagVersionName: String? = providers.gradleProperty("releaseVersionName")
