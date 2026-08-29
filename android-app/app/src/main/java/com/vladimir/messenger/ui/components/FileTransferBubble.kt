@@ -1,6 +1,9 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Icon
@@ -43,6 +47,8 @@ fun FileTransferBubble(
     onSaveClick: (() -> Unit)? = null,
     /** Раунд 43: файл превью картинки - показываем фото прямо в пузыре. */
     previewFile: java.io.File? = null,
+    /** Раунд 44: «Поделиться» из меню картинки. */
+    onShareClick: (() -> Unit)? = null,
 ) {
     val background = if (isFromMe) {
         MaterialTheme.colorScheme.primary
@@ -77,18 +83,81 @@ fun FileTransferBubble(
                     }.getOrNull()
                 }
             }
-            if (previewBitmap != null) {
-                androidx.compose.foundation.Image(
-                    bitmap = previewBitmap.asImageBitmap(),
-                    contentDescription = transfer.displayName,
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 240.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .padding(bottom = 8.dp),
-                )
+            val isImage = transfer.mediaType.startsWith("image/")
+            val canActOnImage = isImage && previewBitmap != null &&
+                transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
+            var imageMenuOpen = androidx.compose.runtime.remember {
+                androidx.compose.runtime.mutableStateOf(false)
             }
+            if (previewBitmap != null && isImage) {
+                // Раунд 44: картинка показывается полноценно, без имени файла и
+                // размера. Действия (сохранить/поделиться) - в меню: три точки в
+                // правом верхнем углу или удержание пальца.
+                Box {
+                    androidx.compose.foundation.Image(
+                        bitmap = previewBitmap.asImageBitmap(),
+                        contentDescription = transfer.displayName,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .combinedClickable(
+                                onClick = { },
+                                onLongClick = {
+                                    if (canActOnImage) imageMenuOpen.value = true
+                                },
+                            ),
+                    )
+                    if (canActOnImage) {
+                        Box(
+                            modifier = Modifier
+                                .align(androidx.compose.ui.Alignment.TopEnd)
+                                .padding(6.dp)
+                                .size(30.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(Color.Black.copy(alpha = 0.45f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = androidx.compose.material.icons.Icons.Default.MoreVert,
+                                contentDescription = "Действия с изображением",
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .clickable { imageMenuOpen.value = true }
+                                    .padding(6.dp),
+                            )
+                        }
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = imageMenuOpen.value,
+                            onDismissRequest = { imageMenuOpen.value = false },
+                        ) {
+                            if (onSaveClick != null) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Сохранить в папку") },
+                                    onClick = {
+                                        imageMenuOpen.value = false
+                                        onSaveClick()
+                                    },
+                                )
+                            }
+                            if (onShareClick != null) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Поделиться") },
+                                    onClick = {
+                                        imageMenuOpen.value = false
+                                        onShareClick()
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.padding(2.dp))
+            }
+            if (!(previewBitmap != null && isImage)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = iconFor(transfer.mediaType),
@@ -110,6 +179,7 @@ fun FileTransferBubble(
                         color = contentColor.copy(alpha = 0.8f),
                     )
                 }
+            }
             }
             Spacer(modifier = Modifier.padding(2.dp))
             Text(
@@ -143,7 +213,9 @@ fun FileTransferBubble(
                         .padding(top = 6.dp),
                 )
             }
-            if (transfer.state == "COMPLETE" && transfer.direction == "INCOMING" && onSaveClick != null) {
+            if (!(previewBitmap != null && isImage) &&
+                transfer.state == "COMPLETE" && transfer.direction == "INCOMING" && onSaveClick != null
+            ) {
                 TextButton(
                     onClick = onSaveClick,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(

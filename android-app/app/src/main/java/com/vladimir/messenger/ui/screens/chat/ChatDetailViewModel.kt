@@ -174,6 +174,33 @@ class ChatDetailViewModel @Inject constructor(
     fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? =
         fileTransferRouter.previewFileFor(transfer)
 
+    /**
+     * Раунд 44: «Поделиться» картинкой из пузыря: копирую файл в cache и
+     * отдаю системному меню через FileProvider.
+     */
+    fun shareTransferFile(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        val src = fileTransferRouter.previewFileFor(transfer) ?: return
+        val ctx = appContext
+        viewModelScope.launch {
+            runCatching {
+                val dir = java.io.File(ctx.cacheDir, "shared").apply { mkdirs() }
+                val dst = java.io.File(dir, transfer.displayName)
+                src.copyTo(dst, overwrite = true)
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    ctx, ctx.packageName + ".fileprovider", dst,
+                )
+                val intent = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType(transfer.mediaType)
+                    .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                ctx.startActivity(
+                    android.content.Intent.createChooser(intent, "Поделиться")
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }.onFailure { _uiState.update { st -> st.copy(error = "Не удалось поделиться") } }
+        }
+    }
+
     fun onFileSelected(uri: Uri) {
         if (_uiState.value.isPreparingFile) return
         // Второй рубеж: даже если кнопку обошли, подготовка файла не пройдёт.

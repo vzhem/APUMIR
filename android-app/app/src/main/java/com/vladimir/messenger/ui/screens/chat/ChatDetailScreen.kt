@@ -282,6 +282,7 @@ fun ChatDetailScreen(
                                     transfer = transfer,
                                     isFromMe = transfer.direction == "OUTGOING",
                                     previewFile = viewModel.previewFileFor(transfer),
+                                    onShareClick = { viewModel.shareTransferFile(transfer) },
                                     onSaveClick = if (
                                         transfer.direction == "INCOMING" &&
                                         transfer.state == "COMPLETE"
@@ -391,17 +392,6 @@ private fun MessageInputBar(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White)
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(14.dp),
-                    ),
-            ) {
             IconButton(
                 onClick = onAttach,
                 enabled = !isPreparingFile && !isSending,
@@ -427,7 +417,6 @@ private fun MessageInputBar(
                         },
                     )
                 }
-            }
             }
 
             BasicTextField(
@@ -491,6 +480,10 @@ private fun MessageInputBar(
                 onClick  = onSend,
                 enabled  = text.isNotBlank() && !isSending,
                 modifier = Modifier.size(48.dp),
+                colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
+                    disabledContainerColor = Color.White,
+                    disabledContentColor = Color(0xFF9AA3AF),
+                ),
             ) {
                 if (isSending) {
                     CircularProgressIndicator(
