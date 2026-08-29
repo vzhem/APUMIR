@@ -392,6 +392,17 @@ private fun MessageInputBar(
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White)
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                        RoundedCornerShape(14.dp),
+                    ),
+            ) {
             IconButton(
                 onClick = onAttach,
                 enabled = !isPreparingFile && !isSending,
@@ -417,6 +428,7 @@ private fun MessageInputBar(
                         },
                     )
                 }
+            }
             }
 
             BasicTextField(
@@ -476,26 +488,39 @@ private fun MessageInputBar(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            FilledIconButton(
-                onClick  = onSend,
-                enabled  = text.isNotBlank() && !isSending,
-                modifier = Modifier.size(48.dp),
-                colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
-                    disabledContainerColor = Color.White,
-                    disabledContentColor = Color(0xFF9AA3AF),
-                ),
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White)
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                        RoundedCornerShape(14.dp),
+                    ),
             ) {
-                if (isSending) {
-                    CircularProgressIndicator(
-                        modifier  = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color     = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.Send,
-                        contentDescription = "Отправить",
-                    )
+                IconButton(
+                    onClick  = onSend,
+                    enabled  = text.isNotBlank() && !isSending,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    if (isSending) {
+                        CircularProgressIndicator(
+                            modifier  = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color     = MaterialTheme.colorScheme.primary,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Send,
+                            contentDescription = "Отправить",
+                            tint = if (text.isNotBlank()) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color(0xFF9AA3AF)
+                            },
+                        )
+                    }
                 }
             }
         }
