@@ -5743,3 +5743,15 @@ reset --soft FETCH_HEAD + checkout удалённых, все правки св�
 3. ЧИТАЕМОСТЬ: ночью чужой пузырь белый (0xFFF2F4F7) с тёмным текстом; название
    контакта/группы в шапке чата - на белой полосочке со скруглениями и золотой
    рамкой (стиль раунда 40), в ChatDetailScreen и GroupChatScreen.
+
+## Раунд 41, фикс: правильный API вставки картинок (2026-08-29)
+
+Гейт на 630f53c поймал: пакета androidx.compose.foundation.content с
+receiveContent/Content в foundation 1.7.6 (BOM 2024.12.01) НЕТ - это API из
+1.8+. В 1.7.x стабилен (но experimental) contentReceiver + TransferableContent
+с consume/hasMediaType - поправлено в ChatDetailScreen (@OptIn
+ExperimentalFoundationApi). Урок: имена API сверять с артефактом/доками своей
+версии BOM, не с альфа-статьями.
+
+Стикеры в группах/каналах - ОСОЗНАННО ОТЛОЖЕНО (владелец: «если сложно -
+потом»): в группах пока нет трубы передачи файлов, стикер нечего отправить.

@@ -20,10 +20,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.content.consumeContentWhen
-import androidx.compose.foundation.content.hasUri
-import androidx.compose.foundation.content.receiveContent
-import androidx.compose.foundation.content.uriOrNull
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.TransferableContent
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.FileTransferBubble
@@ -345,6 +347,7 @@ fun ChatDetailScreen(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun MessageInputBar(
     text: String,
     onTextChange: (String) -> Unit,
@@ -414,17 +417,23 @@ private fun MessageInputBar(
                     // «приложение не поддерживает вставку изображений».
                     // Вложения открываются с ранга «Круг друзей» (3) - тем же
                     // правилом, что и кнопка скрепки.
-                    .receiveContent { _, content ->
-                        if (!content.hasUri()) return@receiveContent content
-                        val uri = content.uriOrNull()
-                        if (uri == null) return@receiveContent content
-                        if (canAttach && !isPreparingFile && !isSending) {
-                            onPastedMedia(uri)
-                        } else {
-                            onPasteLocked()
+                    .contentReceiver { transferableContent ->
+                        if (!transferableContent.hasMediaType(MediaType.Image)) {
+                            return@contentReceiver transferableContent
                         }
-                        // Забираем URI себе - системный тост больше не нужен.
-                        consumeContentWhen(content) { it.uriOrNull != null }
+                        if (!canAttach || isPreparingFile || isSending) {
+                            onPasteLocked()
+                            // Забираем картинки себе - системный тост не нужен.
+                            return@contentReceiver transferableContent.consume { it.uri != null }
+                        }
+                        transferableContent.consume { item ->
+                            if (item.uri != null) {
+                                onPastedMedia(item.uri!!)
+                                true
+                            } else {
+                                false
+                            }
+                        }
                     },
             )
 
