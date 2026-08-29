@@ -55,7 +55,11 @@ Write-Step 'waiting for the release to appear'
 $Deadline = (Get-Date).AddMinutes($TimeoutMinutes)
 $Assets = 0
 while ((Get-Date) -lt $Deadline) {
-    $Json = & gh release view $Version --json isDraft,isPrerelease,assets 2>$null | Out-String
+    # gh through cmd: while Actions is still building, gh prints
+    # "release not found" to stderr, and with ErrorActionPreference=Stop
+    # PowerShell turns that into a terminating error. The script must WAIT,
+    # not die (hit for real on v11.23.0).
+    $Json = cmd /c "gh release view $Version --json isDraft,isPrerelease,assets 2>nul" | Out-String
     if ($LASTEXITCODE -eq 0 -and $Json.Trim() -ne '') {
         $Parsed = $Json | ConvertFrom-Json
         $Assets = @($Parsed.assets).Count

@@ -5848,3 +5848,8 @@ make-release отработал: гейт GREEN, тег v11.23.0 на 374c72d з
 строит app-release.apk. promote-release упал: gh вызывался из C:\Users\User и
 не видел репозиторий ("not a git repository") - в скрипт добавлен
 Push-Location C:\APU-M8 (отдельный процесс powershell, Pop не нужен).
+
+## Релиз v11.23.0, промт 2: promote умирал на stderr gh
+ErrorActionPreference=Stop превращал «release not found» (пока Actions строит)
+в terminating error - цикл ожидания не ждал, а падал. Вызов gh в цикле
+ожидания обёрнут в cmd /c ... 2>nul. Run #62 на момент фикса in_progress.
