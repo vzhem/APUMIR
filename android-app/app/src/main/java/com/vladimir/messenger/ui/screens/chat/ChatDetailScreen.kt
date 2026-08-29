@@ -379,12 +379,13 @@ private fun MessageInputBar(
     LaunchedEffect(Unit) {
         snapshotFlow { inputState.text.toString() }.collect { onTextChange(it) }
     }
-    // Раунд 43: нижняя панель - светлая подложка, как полосочки списка, чтобы
-    // поле, скрепка и стрелка читались в обеих темах.
+    // Раунд 45: подложка панели следует теме (светлая/тёмная) и полупрозрачна -
+    // обои (фирменные или свои) проходят сквозь неё. Белые пузыри скрепки,
+    // поля и стрелки читаются на любом фоне.
     Surface(
         modifier  = modifier.fillMaxWidth(),
         shadowElevation = 8.dp,
-        color     = Color(0xFFF5F7FA).copy(alpha = 0.96f),
+        color     = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
     ) {
         Row(
             modifier = Modifier

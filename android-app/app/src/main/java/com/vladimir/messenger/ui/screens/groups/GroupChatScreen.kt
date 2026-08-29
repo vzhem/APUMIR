@@ -286,13 +286,15 @@ fun GroupChatScreen(
                 }
             }
 
-            // ── Поле ввода: светлая полосочка, как в личных чатах (раунд 43).
+            // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(8.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.96f))
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+                    )
                     .border(
                         1.dp,
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
