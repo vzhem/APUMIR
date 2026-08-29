@@ -19,15 +19,65 @@ fun versionCodeFromName(versionName: String): Int? {
     return versionCode.takeIf { it in 1L..2_100_000_000L }?.toInt()
 }
 
-val releaseVersionName = providers.gradleProperty("releaseVersionName")
+// Локальная сборка (debug на ПК владельца) не знает ни -PreleaseVersionName,
+// ни GITHUB_REF_NAME, поэтому раньше попадала в fallback "v11.16" и телефоны
+// показывали v11.16, хотя выпущен v11.23.0. Хуже того: UpdateChecker сравнивал
+// v11.16 с v11.23.0 и предлагал «обновление», которое поверх debug не
+// ставится (разные ключи подписи).
+//
+// Теперь версия берётся из ближайшего тега git. На GitHub Actions этот код не
+// влияет на релиз: там всегда задан GITHUB_REF_NAME (имя тега), он имеет
+// приоритет. Суффикс "-debug" добавляется только вне Actions, чтобы debug
+// никогда не выдавал себя за релиз; UpdateChecker.parse() отбрасывает хвост
+// после "-", а isVersionNewer() при равных числах возвращает false, поэтому
+// лишнее окно обновления не появится.
+fun gitDescribeOrNull(): String? {
+    val isWindows = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+    val git = if (isWindows) "git.exe" else "git"
+    return try {
+        val out = java.io.ByteArrayOutputStream()
+        val result = exec {
+            workingDir = rootDir
+            commandLine = listOf(git, "describe", "--tags")
+            standardOutput = out
+            isIgnoreExitValue = true
+        }
+        if (result.exitValue != 0) null else out.toString().trim().ifEmpty { null }
+    } catch (e: Exception) {
+        null
+    }
+}
+
+val gitTagVersionName: String? = providers.gradleProperty("releaseVersionName")
     .orElse(providers.environmentVariable("GITHUB_REF_NAME"))
     .orNull
     ?.takeIf { versionCodeFromName(it) != null }
-    ?: "v11.16"
+    ?: gitDescribeOrNull()?.let { described ->
+        // describe даёт "v11.23.0" (HEAD ровно на теге) или
+        // "v11.23.0-23-g1c7e54b" (23 коммита после тега). Во втором случае
+        // отрезаем хвост по частям: substringBeforeLast дал бы "v11.23.0-23",
+        // а это не версия.
+        var candidate = described
+        while (candidate.isNotEmpty() && versionCodeFromName(candidate) == null) {
+            val cut = candidate.substringBeforeLast('-', "")
+            if (cut.isEmpty() || cut == candidate) {
+                candidate = ""
+            } else {
+                candidate = cut
+            }
+        }
+        candidate.ifEmpty { null }
+    }
+
+val ciVersionFromEnvironment = providers.environmentVariable("GITHUB_REF_NAME").orNull
+    ?.takeIf { versionCodeFromName(it) != null }
+val releaseVersionName = gitTagVersionName?.let { tag ->
+    if (ciVersionFromEnvironment != null) tag else "$tag-debug"
+} ?: "v11.16"
 val releaseVersionCode = providers.gradleProperty("releaseVersionCode")
     .orNull
     ?.toIntOrNull()
-    ?: versionCodeFromName(releaseVersionName)
+    ?: versionCodeFromName(gitTagVersionName ?: releaseVersionName)
     ?: 11_016_000
 
 android {
