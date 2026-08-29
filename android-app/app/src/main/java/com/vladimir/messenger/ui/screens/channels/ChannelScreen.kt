@@ -44,10 +44,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.HintBubble
+import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
@@ -124,25 +127,37 @@ fun ChannelScreen(
 
                 // Канала нет в базе: вышли из него или исключили. Экран не
                 // должен оставаться пустым - объясняем и оставляем выход.
-                uiState.channel == null -> Text(
-                    "Канал недоступен: вы в нём больше не состоите.",
+                uiState.channel == null -> HintBubble(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(24.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                ) {
+                    Text(
+                        "Канал недоступен: вы в нём больше не состоите.",
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = HintBubbleTextColor,
+                    )
+                }
 
-                uiState.posts.isEmpty() -> Text(
-                    if (uiState.canPost) {
-                        "Постов пока нет. Нажмите «+», чтобы опубликовать первый."
-                    } else {
-                        "В канале пока нет постов."
-                    },
+                // Раунд 48: подсказка в пузыре HintBubble - голым Text она
+                // терялась на тёмной теме поверх обоев.
+                uiState.posts.isEmpty() -> HintBubble(
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(24.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                ) {
+                    Text(
+                        if (uiState.canPost) {
+                            "Постов пока нет. Нажмите «+», чтобы опубликовать первый."
+                        } else {
+                            "В канале пока нет постов."
+                        },
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = HintBubbleTextColor,
+                    )
+                }
 
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),

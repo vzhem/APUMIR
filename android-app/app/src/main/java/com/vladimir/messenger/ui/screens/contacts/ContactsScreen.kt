@@ -24,6 +24,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.domain.model.Contact
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.ui.components.ContactCard
+import com.vladimir.messenger.ui.components.HintBubble
+import com.vladimir.messenger.ui.components.HintBubbleTextColor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,12 +93,16 @@ fun ContactsScreen(
             }
             if (shown.isEmpty() && contacts.isNotEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Никого не нашли по запросу «$query»",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
+                    // Раунд 48: подсказка в пузыре HintBubble - на обоях и в
+                    // ночной теме голый текст не читался.
+                    HintBubble {
+                        Text(
+                            "Никого не нашли по запросу «$query»",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = HintBubbleTextColor,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
         if (contacts.isEmpty()) {
@@ -104,14 +110,16 @@ fun ContactsScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
+                // Раунд 48: пустой список контактов тоже в пузыре HintBubble.
+                HintBubble {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
                     Text(
                         text = "Пока нет контактов",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = HintBubbleTextColor
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(onClick = onAddContactClick) {
@@ -131,6 +139,7 @@ fun ContactsScreen(
                         Icon(Icons.Default.Share, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Пригласить друга")
+                    }
                     }
                 }
             }

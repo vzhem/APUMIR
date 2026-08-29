@@ -46,6 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ContactCard
+import com.vladimir.messenger.ui.components.HintBubble
+import com.vladimir.messenger.ui.components.HintBubbleMutedColor
+import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.NetworkStatusBar
 import com.vladimir.messenger.data.RustBridge
 import androidx.compose.material.icons.filled.Share
@@ -276,30 +279,22 @@ fun ChatListScreen(
                 }
 
                 // В разделе каналов пусто - объясняем, где их взять.
-                // Раунд 48: подсказка в белом пузыре с золотой рамкой (формула
-                // стиля из раунда 45), потому что голый Text брал цвет из темы
-                // и на тёмной подложке/обоях не читался вовсе.
+                // Раунд 48: подсказка в белом пузыре HintBubble, потому что
+                // голый Text брал цвет из темы и на тёмной подложке/обоях
+                // не читался вовсе.
                 uiState.items.isEmpty() &&
                     uiState.section == InboxSection.Channels -> {
-                    Box(
+                    HintBubble(
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .padding(24.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                shape = RoundedCornerShape(14.dp),
-                            )
-                            .padding(horizontal = 18.dp, vertical = 14.dp),
+                            .padding(24.dp),
                     ) {
                         Text(
                             "Каналов пока нет. Создайте свой в разделе «Группы» " +
                                 "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
                             textAlign = TextAlign.Center,
                             style     = MaterialTheme.typography.bodyMedium,
-                            color     = Color(0xFF1E2430),
+                            color     = HintBubbleTextColor,
                         )
                     }
                 }
@@ -455,43 +450,44 @@ private fun EmptyChatList(
     onAddContact: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier            = modifier.padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+    // Раунд 48: пустое состояние тоже в пузыре HintBubble - на обоях и в ночной
+    // теме текст цвета onSurfaceVariant читался плохо.
+    HintBubble(
+        modifier = modifier.padding(32.dp),
     ) {
         if (isSearchActive) {
             Icon(
                 Icons.Default.SearchOff,
                 contentDescription = null,
                 modifier = Modifier.size(64.dp),
-                tint     = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint     = HintBubbleMutedColor,
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
                 "Ничего не найдено",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = HintBubbleTextColor,
             )
         } else {
             Icon(
                 Icons.Default.Forum,
                 contentDescription = null,
                 modifier = Modifier.size(80.dp),
-                tint     = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                tint     = HintBubbleMutedColor,
             )
             Spacer(modifier = Modifier.height(20.dp))
             Text(
                 "Нет чатов",
                 style     = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
+                color     = HintBubbleTextColor,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 "Добавьте контакт через QR-код или пригласительную ссылку",
                 style     = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
-                color     = MaterialTheme.colorScheme.onSurfaceVariant,
+                color     = HintBubbleMutedColor,
             )
             Spacer(modifier = Modifier.height(24.dp))
             Button(onClick = onAddContact) {

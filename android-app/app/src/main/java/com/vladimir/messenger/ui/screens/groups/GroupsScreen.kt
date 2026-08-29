@@ -58,6 +58,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.group.GroupSummary
+import com.vladimir.messenger.ui.components.HintBubble
+import com.vladimir.messenger.ui.components.HintBubbleMutedColor
+import com.vladimir.messenger.ui.components.HintBubbleTextColor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -128,21 +131,31 @@ fun GroupsScreen(
 
                 uiState.filtered.isEmpty() && uiState.directoryMatches.isEmpty() ->
                     Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Filled.Groups,
-                            contentDescription = null,
-                            modifier = Modifier.size(56.dp),
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text("Групп пока нет", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "Создайте первую или войдите по ссылке-приглашению",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { showJoin = true }) {
-                            Text("Войти по ссылке")
+                    // Раунд 48: пустое состояние в пузыре HintBubble - голый
+                    // текст брал цвет из темы и на обоях не читался.
+                    HintBubble {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Filled.Groups,
+                                contentDescription = null,
+                                modifier = Modifier.size(56.dp),
+                                tint = HintBubbleMutedColor,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Групп пока нет",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = HintBubbleTextColor,
+                            )
+                            Text(
+                                "Создайте первую или войдите по ссылке-приглашению",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = HintBubbleMutedColor,
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            TextButton(onClick = { showJoin = true }) {
+                                Text("Войти по ссылке")
+                            }
                         }
                     }
                 }
