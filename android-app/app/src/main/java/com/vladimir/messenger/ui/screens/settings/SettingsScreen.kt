@@ -43,6 +43,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import com.vladimir.messenger.ui.components.MyAvatar
 import com.vladimir.messenger.ui.theme.AvatarHolder
 import com.vladimir.messenger.ui.theme.StatusConnecting
@@ -648,61 +649,6 @@ private fun SettingsTabContent(
 
 /** 50 стандартных аватаров в стиле APU + своя картинка из галереи. */
 @Composable
-private fun AvatarPickerDialog(
-    context: Context,
-    onPickUri: (String) -> Unit,
-    onPickGallery: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val ids = remember(context) {
-        (1..50).mapNotNull { i ->
-            val id = context.resources.getIdentifier(
-                String.format("avatar_std_%02d", i), "drawable", context.packageName
-            )
-            if (id != 0) id else null
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Выберите аватар") },
-        text = {
-            Column {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    modifier = Modifier.heightIn(max = 360.dp),
-                    contentPadding = PaddingValues(4.dp),
-                ) {
-                    items(ids.size) { idx ->
-                        val resId = ids[idx]
-                        Image(
-                            painter = painterResource(resId),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .padding(3.dp)
-                                .size(54.dp)
-                                .clip(CircleShape)
-                                .clickable {
-                                    val name = context.resources.getResourceEntryName(resId)
-                                    onPickUri(
-                                        "android.resource://" + context.packageName +
-                                            "/drawable/" + name
-                                    )
-                                },
-                        )
-                    }
-                }
-                TextButton(onClick = onPickGallery) {
-                    Text("Из галереи")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
-        },
-    )
-}
-
 // =============================================================================
 // ВСПОМОГАТЕЛЬНЫЕ КОМПОНЕНТЫ
 // =============================================================================

@@ -279,6 +279,30 @@ class GroupRepository(
         }
     }
 
+    /**
+     * Аватар группы/канала: хранится в том же роевом реестре avatars, ключ -
+     * «g:» + id группы. Админ сохранил - участники получают пакетом avat и
+     * показывают картинку в списке и в шапке группы (раунд 42).
+     */
+    suspend fun saveGroupAvatar(groupId: String, dataB64: String) {
+        val key = GROUP_AVATAR_PREFIX + groupId
+        avatarDao.upsert(AvatarEntity(ownerId = key, dataB64 = dataB64, updatedAtMs = clock()))
+        AvatarStore.put(key, dataB64)
+    }
+
+    suspend fun publishGroupAvatar(groupId: String, dataB64: String) {
+        val ids = contactIds()
+        if (ids.isEmpty()) return
+        val envelope = GroupWire.buildAvatar(
+            ownerId = GROUP_AVATAR_PREFIX + groupId,
+            dataB64 = dataB64,
+            updatedAtMs = clock(),
+            hops = 0,
+        )
+        runCatching { delivery.deliver("avatars", envelope, ids) }
+            .onFailure { Log.w(TAG, "group avatar publish failed: ${it.message}") }
+    }
+
     private suspend fun handleNick(packet: GroupWire.Packet.Nick, senderId: String) {
         nicknameDao.upsert(
             NicknameEntity(
@@ -1596,6 +1620,8 @@ class GroupRepository(
         Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
     companion object {
+        /** Ключ группового аватара в роевом реестре avatars. */
+        const val GROUP_AVATAR_PREFIX = "g:"
         const val GENERAL_TOPIC_NAME = "General"
         const val MAX_TITLE_CHARS = 128
         const val MAX_ABOUT_CHARS = 512

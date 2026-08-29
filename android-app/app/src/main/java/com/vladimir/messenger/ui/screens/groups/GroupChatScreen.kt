@@ -45,6 +45,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -104,7 +108,31 @@ fun GroupChatScreen(
                             )
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                     ) {
-                        Column {
+                        // Раунд 42: аватар группы слева от названия, если задан.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val storeAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                                .collectAsState()
+                            val gid = uiState.group?.id.orEmpty()
+                            val bmp = remember(storeAvatars["g:$gid"]) {
+                                storeAvatars["g:$gid"]?.let { b64 ->
+                                    try {
+                                        val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                    } catch (e: Exception) { null }
+                                }
+                            }
+                            if (bmp != null) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop,
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
+                            Column {
                             Text(
                                 uiState.group?.title ?: "Группа",
                                 fontWeight = FontWeight.SemiBold,
@@ -115,6 +143,7 @@ fun GroupChatScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = androidx.compose.ui.graphics.Color(0xFF5A6472),
                             )
+                            }
                         }
                     }
                 },

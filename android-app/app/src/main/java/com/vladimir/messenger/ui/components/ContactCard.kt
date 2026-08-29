@@ -162,7 +162,7 @@ fun ContactCard(
             Text(
                 text      = chat.lastMessage ?: "Нет сообщений",
                 style     = MaterialTheme.typography.bodySmall,
-                color     = MaterialTheme.colorScheme.onSurfaceVariant,
+                color     = Color(0xFF5A6472),
                 maxLines  = 1,
                 overflow  = TextOverflow.Ellipsis,
             )
@@ -184,7 +184,7 @@ fun ContactCard(
                     color = if (chat.unreadCount > 0)
                         MaterialTheme.colorScheme.primary
                     else
-                        MaterialTheme.colorScheme.onSurfaceVariant,
+                        Color(0xFF5A6472),
                 )
             }
 
@@ -205,7 +205,7 @@ fun ContactCard(
                     Text(
                         text  = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
+                        color = Color(0xFF3A2A05),
                     )
                 }
             }

@@ -7,6 +7,8 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +30,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -45,13 +48,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
+import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -143,12 +151,14 @@ fun GroupAdminScreen(
 
             when (tab) {
                 AdminTab.Overview -> OverviewTab(
+                    groupId = uiState.groupId,
                     title = uiState.group?.title.orEmpty(),
                     about = uiState.group?.about.orEmpty(),
                     isPublic = uiState.group?.isPublic == true,
                     isOwner = uiState.isOwner,
                     canChangeInfo = uiState.canChangeInfo,
                     canChangeVisibility = uiState.isAdmin,
+                    onSetAvatar = viewModel::setGroupAvatar,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
@@ -198,12 +208,14 @@ fun GroupAdminScreen(
 
 @Composable
 private fun OverviewTab(
+    groupId: String,
     title: String,
     about: String,
     isPublic: Boolean,
     isOwner: Boolean,
     canChangeInfo: Boolean,
     canChangeVisibility: Boolean,
+    onSetAvatar: (android.net.Uri) -> Unit,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
     onLeave: () -> Unit,
@@ -216,6 +228,24 @@ private fun OverviewTab(
     var aboutDraft by remember(about) { mutableStateOf(about) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    // Раунд 42: аватар группы/канала.
+    var showAvatarPicker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val galleryPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> uri?.let(onSetAvatar) }
+    val groupAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+        .collectAsState()
+    val groupAvatarBitmap = remember(groupAvatars["g:$groupId"]) {
+        groupAvatars["g:$groupId"]?.let { b64 ->
+            try {
+                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
@@ -237,6 +267,37 @@ private fun OverviewTab(
                 "Название и описание меняют администраторы.",
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+
+        // Аватар группы/канала: меняют те же, кто название и описание.
+        if (canChangeInfo) {
+            HorizontalDivider()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (groupAvatarBitmap != null) {
+                    Image(
+                        bitmap = groupAvatarBitmap.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.size(52.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Groups,
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Аватар группы", fontWeight = FontWeight.Medium)
+                    Text(
+                        "Видят участники и Ваши контакты в списке чатов",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                TextButton(onClick = { showAvatarPicker = true }) { Text("Сменить") }
+            }
         }
 
         HorizontalDivider()
@@ -296,6 +357,21 @@ private fun OverviewTab(
                 showDeleteConfirm = false
                 onDeleteGroup()
             },
+        )
+    }
+
+    if (showAvatarPicker) {
+        AvatarPickerDialog(
+            context = context,
+            onPickUri = { uri ->
+                showAvatarPicker = false
+                onSetAvatar(android.net.Uri.parse(uri))
+            },
+            onPickGallery = {
+                showAvatarPicker = false
+                galleryPicker.launch("image/*")
+            },
+            onDismiss = { showAvatarPicker = false },
         )
     }
 }

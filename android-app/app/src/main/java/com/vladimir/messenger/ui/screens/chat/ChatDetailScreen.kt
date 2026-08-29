@@ -26,6 +26,12 @@ import androidx.compose.foundation.content.consume
 import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.LineLimits
+import androidx.compose.foundation.text.input.TextFieldDecorator
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.SolidColor
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.FileTransferBubble
@@ -360,6 +366,18 @@ private fun MessageInputBar(
     onPasteLocked: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    // Раунд 42: новый BasicTextField(state) - только он проводит картинки со
+    // стикер-клавиатуры в contentReceiver. Старый TextField их не принимал, и
+    // система показывала тост «Приложение не поддерживает вставку изображений».
+    val inputState = rememberTextFieldState(text)
+    LaunchedEffect(text) {
+        if (inputState.text.toString() != text) {
+            inputState.edit { replace(0, length, text) }
+        }
+    }
+    LaunchedEffect(Unit) {
+        snapshotFlow { inputState.text.toString() }.collect { onTextChange(it) }
+    }
     Surface(
         modifier  = modifier.fillMaxWidth(),
         shadowElevation = 8.dp,
@@ -398,18 +416,35 @@ private fun MessageInputBar(
                 }
             }
 
-            TextField(
-                value         = text,
-                onValueChange = onTextChange,
-                placeholder   = { Text("Сообщение...") },
-                maxLines      = 5,
-                colors        = TextFieldDefaults.colors(
-                    focusedContainerColor   = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedIndicatorColor   = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            BasicTextField(
+                state     = inputState,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
                 ),
-                shape    = MaterialTheme.shapes.extraLarge,
+                lineLimits  = LineLimits(maxHeightInLines = 5),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                decorator   = object : TextFieldDecorator {
+                    @Composable
+                    override fun Decoration(content: @Composable () -> Unit) {
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    MaterialTheme.shapes.extraLarge,
+                                )
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            if (inputState.text.isEmpty()) {
+                                Text(
+                                    "Сообщение...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                )
+                            }
+                            content()
+                        }
+                    }
+                },
                 modifier = Modifier
                     .weight(1f)
                     // Раунд 41: стикеры/картинки/гифки с клавиатуры (Gboard и

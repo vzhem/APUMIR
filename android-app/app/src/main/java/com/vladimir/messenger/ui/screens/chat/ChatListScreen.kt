@@ -9,7 +9,12 @@ package com.vladimir.messenger.ui.screens.chat
 // =============================================================================
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.vladimir.messenger.ui.theme.AvatarStore
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -525,14 +530,25 @@ private fun GroupCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Полосочка со скруглениями и тонкой золотой рамкой: текст виден
-    // на любой подложке.
+    // Раунд 42: светлая полосочка со скруглениями и тонкой золотой рамкой -
+    // тёмный текст виден на любой подложке и в день, и в ночь.
+    val storeAvatars by AvatarStore.avatars.collectAsState()
+    val groupAvatarBitmap = remember(storeAvatars["g:" + group.id]) {
+        storeAvatars["g:" + group.id]?.let { b64 ->
+            try {
+                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
             .border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
@@ -542,7 +558,16 @@ private fun GroupCard(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(name = group.title, modifier = Modifier.size(52.dp))
+        if (groupAvatarBitmap != null) {
+            Image(
+                bitmap = groupAvatarBitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.size(52.dp).clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Avatar(name = group.title, modifier = Modifier.size(52.dp))
+        }
 
         Spacer(modifier = Modifier.width(14.dp))
 
@@ -552,6 +577,7 @@ private fun GroupCard(
                     text = group.title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1E2430),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -582,7 +608,7 @@ private fun GroupCard(
                     "Частная группа - ${group.memberCount} уч."
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color(0xFF5A6472),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -593,9 +619,9 @@ private fun GroupCard(
         Column(horizontalAlignment = Alignment.End) {
             if (group.timeMs != null) {
                 Text(
-                    text = formatGroupTime(group.timeMs),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = formatGroupTime(group.timeMs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF5A6472),
                 )
             }
             if (group.unreadCount > 0) {

@@ -46,6 +46,7 @@ data class GroupAdminUiState(
 class GroupAdminViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val groupRepository: GroupRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
@@ -223,6 +224,25 @@ class GroupAdminViewModel @Inject constructor(
             groupRepository.updateProfile(groupId, title, about)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 .onSuccess { _uiState.update { it.copy(notice = "Сохранено") } }
+        }
+    }
+
+    /**
+     * Аватар группы/канала (раунд 42): сжимаем выбранную картинку, сохраняем в
+     * роевой реестр и рассылаем контактам - участники увидят её в списке и в
+     * шапке группы.
+     */
+    fun setGroupAvatar(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val b64 = com.vladimir.messenger.util.AvatarCompress
+                .compressUri(appContext, uri.toString())
+            if (b64 == null) {
+                _uiState.update { it.copy(error = "Не удалось прочитать картинку") }
+                return@launch
+            }
+            groupRepository.saveGroupAvatar(groupId, b64)
+            groupRepository.publishGroupAvatar(groupId, b64)
+            _uiState.update { it.copy(notice = "Аватар группы обновлён") }
         }
     }
 
