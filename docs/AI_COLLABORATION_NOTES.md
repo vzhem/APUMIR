@@ -6493,3 +6493,39 @@ START_HERE).
 `v11.23.0-26-g8a9bb4a` -> `versionName v11.23.0-debug`, `versionCode 11023000`.
 Компиляцию `.kts` по-прежнему подтверждает только гейт на Windows — в песочнице
 нет ни java, ни gradle.
+
+## Раунд 50 закрыт: гейт GREEN на `cc03db6`, на телефонах `v11.23.0-debug`
+
+Гейт владельца на detached `cc03db6` (HEAD совпал, дерево чистое):
+`RESULT: GREEN`, unit-тесты `tests=108 failures=0 skipped=0`,
+schema cross-check `расхождений: 0`, assemble `43 actionable tasks:
+4 executed` (собирался именно новый код, не up-to-date), debug apk
+30 781 972 байта от 29.08.2026 21:27:49. Единственное предупреждение —
+прежнее `kotlinOptions` deprecated, оно было и до правки.
+
+Установка: `Success` на `11567254BK001192` (21:28:03) и `AUYF6R5923006121`
+(21:28:05), на обоих `versionName=v11.23.0-debug`. Это и есть доказательство,
+что fallback `v11.16` больше не срабатывает. Владелец видит «11.23 debug» в
+настройках — экран берёт `packageManager.getPackageInfo(...).versionName`
+(`ui/screens/settings/SettingsViewModel.kt`), то есть версию установленного
+APK; в релизе там будет чистое `v11.23.0`, суффикс добавляется только вне
+GitHub Actions.
+
+Окно обновления не появится: `UpdateChecker.isVersionNewer` -> локальный
+`parse()` делает `substringBefore('-')` и `substringBefore('+')`, поэтому
+`v11.23.0-debug` и `v11.23.0` дают одинаковый список `[11, 23, 0]`, а при
+равенстве функция возвращает false (проверено чтением кода, строки 204-228).
+
+Состояние GitHub после слияния: `git ls-remote --heads` ->
+`refs/heads/main` = `refs/heads/arena/01a04df9-apumir` = `cc03db6`,
+`archive/release-v11.16.1` = `93d6a4c`; `/releases/latest` = v11.23.0
+(`draft=false`, `prerelease=false`, `app-release.apk` 36 249 434 байта);
+последний прогон `Build Release APK` — success на `374c72d`. Новый прогон не
+запускался и не должен: `.github/workflows/build-release.yml` стартует только
+по `push: tags: v*`, пуш в `main` ничего не собирает.
+
+Уточнение прежней записи: «3 незадействованных bot-файла в main» не
+подтверждается. `git ls-files | grep -i bot` даёт два файла —
+`service/BotApi.kt` и `service/BotApiEntryPoint.kt`, и на `BotApi` ссылаются
+`MainActivity.kt:35,52`, `service/CoreServerService.kt:28,54` и
+`ui/screens/share/ShareProfileViewModel.kt:7,34`, то есть код задействован.
