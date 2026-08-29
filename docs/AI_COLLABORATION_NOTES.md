@@ -5773,3 +5773,10 @@ ExperimentalFoundationApi). Урок: имена API сверять с арте�
    ui/components/AvatarPicker.kt. Ключ в роевом реестре avatars: "g:<id>" -
    БЕЗ новой миграции БД. publishGroupAvatar рассылает пакет avat; участники и
    контакты показывают картинку в GroupCard и в шапке GroupChatScreen.
+
+## Раунд 42, фикс компиляции (2026-08-29)
+- LineLimits в foundation 1.7.6 не разрешился - параметр lineLimits убран
+  (поле растёт без жёсткого лимита строк), вид сохранён декоратором.
+- GroupChatScreen: добавлен импорт CircleShape.
+- SettingsScreen: после выноса AvatarPickerDialog остался висячий @Composable
+  перед следующим - убран («annotation is not repeatable»).

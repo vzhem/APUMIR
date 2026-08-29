@@ -27,7 +27,6 @@ import androidx.compose.foundation.content.contentReceiver
 import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.input.LineLimits
 import androidx.compose.foundation.text.input.TextFieldDecorator
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.snapshotFlow
@@ -421,7 +420,6 @@ private fun MessageInputBar(
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
-                lineLimits  = LineLimits(maxHeightInLines = 5),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                 decorator   = object : TextFieldDecorator {
                     @Composable
