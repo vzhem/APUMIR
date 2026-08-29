@@ -5983,3 +5983,15 @@ git-команд `sync-main.ps1` в обе стороны — fast-forward пр�
 и требует сначала `git merge origin/main`). Сам `.ps1` в песочнице не
 запускался: PowerShell сюда не ставится (release-assets.githubusercontent.com
 недоступен), проверен только ASCII-only.
+
+## Раунд 47, правило про команды (2026-08-29)
+
+Владелец вставил в PowerShell команду без первого слова (потерялось при
+копировании длинной строки): `-NoProfile : Имя "-NoProfile" не распознано как
+имя командлета...`. Его требование: команды давать «окошечками» — отдельным
+блоком кода, который копируется одной кнопкой, и всегда в расчёте на НОВОЕ окно
+PowerShell. Правило записано в `docs/START_HERE.md` (раздел 5 + грабля в
+разделе 6) и в `docs/AI_HANDOFF.md` («Где что»). Форма всегда одна:
+`powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\<имя>.ps1`
+или `powershell -NoProfile -ExecutionPolicy Bypass -Command "<одна команда git
+с -C C:\APU-M8>"`, пути абсолютные.
