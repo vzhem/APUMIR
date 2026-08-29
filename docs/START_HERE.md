@@ -188,6 +188,16 @@
   сначала смотреть версию Gradle/AGP/Kotlin в wrapper и `libs.versions.toml`.
   Правило шире: имена API сверять с версией инструмента в РЕПОЗИТОРИИ, а не по
   памяти (та же грабля была с Compose foundation 1.7.6).
+- **В `.kts` полное имя JDK безопасно только в позиции ТИПА** (ошибка агента
+  2026-08-29, вторая подряд на том же файле): `java.util.concurrent.TimeUnit`
+  в выражении дал `Unresolved reference 'util'`, потому что `java` в скрипте
+  Gradle — это accessor расширения `JavaPluginExtension`, а не пакет.
+  `ProcessBuilder(...)` и `catch (e: Exception)` при этом компилируются:
+  там `java...` стоит в позиции типа. Для значений — `import` в начале файла
+  (до блока `plugins`) либо обходиться без такого имени вовсе.
+- Непроверенную правку сборочного файла в `main` не отправлять: кандидат
+  живёт в ветке сессии, владелец прогоняет гейт на нём (`git checkout --detach
+  FETCH_HEAD`), и только после GREEN правка уходит в `main`.
 - PowerShell 5.1: `$ErrorActionPreference='Stop'` + stderr от `gh`
   («release not found», пока Actions строит) убивает скрипт. В циклах ожидания
   вызывать gh через `cmd /c "gh ... 2>nul"`.

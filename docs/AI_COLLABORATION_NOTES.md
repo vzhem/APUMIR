@@ -6452,3 +6452,44 @@ Gradle в песочнице по-прежнему нет, поэтому ком
 правку из индекса; для отмены — `git restore --source=HEAD --staged --worktree`
 или `git reset --hard HEAD`. И второе: «N actionable tasks: N up-to-date»
 при грязном дереве означает, что собирался старый код.
+
+## Раунд 50, попытка 3: `java.util.concurrent.TimeUnit` в .kts не компилируется
+
+Гейт на `8a9bb4a` (HEAD совпал, дерево чистое) упал на конфигурации:
+`app/build.gradle.kts:45:45: Unresolved reference 'util'` — строка
+`process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)`.
+Вторая строка отчёта (`kotlinOptions` deprecated) — предупреждение `w:`, оно
+было и до правки, сборку не валит.
+
+Причина: в скрипте Gradle имя `java` в ВЫРАЖЕНИИ resolves не в пакет, а в
+accessor расширения `JavaPluginExtension`, поэтому `.util` не находится.
+Показательно, что остальные строки функции гейт НЕ отметил: `ProcessBuilder(...)`
+и `catch (e: Exception)` стоят в позиции ТИПА и компилируются, `rootDir` внутри
+top-level `fun` тоже резолвится, `providers.gradleProperty` /
+`providers.environmentVariable` были в файле ещё до правки (строки 22, 23, 27
+на `75a9265~1`).
+
+Исправление — минимальная дельта от уже скомпилировавшегося кода: таймаут убран
+совсем, вместо `waitFor(15, TimeUnit.SECONDS)` + ветки `destroyForcibly()` —
+`if (process.waitFor() != 0)`. Это безопасно: `readText()` блокируется, пока git
+не закроет stdout, так что `waitFor()` без аргументов возвращается сразу, а
+`git describe` локальный и неинтерактивный. Логика выбора версии не менялась
+(видно в diff: тронуты только ожидание процесса и комментарии).
+
+Попутно из комментария убрано ложное утверждение «Проверено на живом JVM» —
+JVM в песочнице нет и проверить команду было нечем; обе ошибки поймал только
+гейт владельца.
+
+Процесс изменён: кандидат НЕ пушится в `main`, пока гейт его не подтвердит.
+Коммит живёт в `arena/01a04df9-apumir`, владелец проверяет его через
+`git fetch origin arena/01a04df9-apumir` + `git checkout --detach FETCH_HEAD`,
+и только после GREEN это уходит в `main` (правило записано в раздел 6
+START_HERE).
+
+Проверки в песочнице: `struct_check.py android-app` — 212 файлов, 0 ошибок;
+по всему дереву 447 файлов, 0 ошибок; баланс скобок в `build.gradle.kts` 40/40;
+`java.` в файле остался только в комментариях и в строке зависимости
+`net.java.dev.jna` (grep). Прогон логики версии не менялся: локально
+`v11.23.0-26-g8a9bb4a` -> `versionName v11.23.0-debug`, `versionCode 11023000`.
+Компиляцию `.kts` по-прежнему подтверждает только гейт на Windows — в песочнице
+нет ни java, ни gradle.
