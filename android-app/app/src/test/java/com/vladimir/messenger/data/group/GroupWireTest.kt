@@ -356,4 +356,28 @@ class GroupWireTest {
     fun nicknameRejectsShortEnvelope() {
         assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_NICK}|owner|bmFtZQ=="))
     }
+
+    // ---------------- аватар-конверт ----------------
+
+    @Test
+    fun avatarRoundTrip() {
+        val envelope = GroupWire.buildAvatar("owner_pk", "QUJD", 1770000000000L, hops = 1)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Avatar)
+        val av = parsed as GroupWire.Packet.Avatar
+        assertEquals("owner_pk", av.ownerId)
+        assertEquals("QUJD", av.dataB64)
+        assertEquals(1770000000000L, av.updatedAtMs)
+        assertEquals(1, av.hops)
+    }
+
+    @Test
+    fun avatarRejectsShortEnvelope() {
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_AVAT}|owner|QUJD|5"))
+    }
+
+    @Test
+    fun avatarRejectsBlankData() {
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_AVAT}|owner| |5|0"))
+    }
 }

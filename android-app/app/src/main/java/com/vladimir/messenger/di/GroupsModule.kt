@@ -11,6 +11,7 @@ import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import dagger.Module
@@ -50,6 +51,7 @@ object GroupsModule {
         directoryDao: DirectoryDao,
         contactDao: ContactDao,
         nicknameDao: NicknameDao,
+        avatarDao: AvatarDao,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -74,6 +76,15 @@ object GroupsModule {
             // Снимаем проигравшее имя и показываем предложение задать новое.
             com.vladimir.messenger.ui.theme.UsernameHolder.set(context.applicationContext, null)
             com.vladimir.messenger.ui.theme.UsernameHolder.raiseConflict(context.applicationContext)
+        },
+        avatarDao = avatarDao,
+        myAvatarB64 = {
+            val uri = context.applicationContext
+                .getSharedPreferences(IDENTITY_PREFS, Context.MODE_PRIVATE)
+                .getString("my_avatar_uri", null)
+            uri?.takeIf { it.isNotBlank() }?.let {
+                com.vladimir.messenger.util.AvatarCompress.compressUri(context.applicationContext, it)
+            }
         },
         myNodeId = { RustBridge.nodeId() },
         myDisplayName = {

@@ -44,6 +44,8 @@ object GroupWire {
     const val KIND_KICK = "kick"
     const val KIND_DIRECTORY = "dir"
     const val KIND_NICK = "nick"
+    /** Аватар участника: маленький JPEG в base64. */
+    const val KIND_AVAT = "avat"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -177,6 +179,17 @@ object GroupWire {
             val hops: Int,
         ) : Packet()
 
+        /**
+         * Аватар: JPEG 96x96 в base64, присланный владельцем. Свежесть по
+         * updatedAtMs: старые пакеты не затирают новые.
+         */
+        data class Avatar(
+            val ownerId: String,
+            val dataB64: String,
+            val updatedAtMs: Long,
+            val hops: Int,
+        ) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -234,6 +247,9 @@ object GroupWire {
     /** Роевая публикация @имени. */
     fun buildNick(ownerId: String, name: String, registeredAtMs: Long, hops: Int): String =
         "$PREFIX|$KIND_NICK|$ownerId|${encode(name)}|$registeredAtMs|$hops"
+
+    fun buildAvatar(ownerId: String, dataB64: String, updatedAtMs: Long, hops: Int): String =
+        "$PREFIX|$KIND_AVAT|$ownerId|$dataB64|$updatedAtMs|$hops"
 
     fun buildTopicCreated(groupId: String, topicId: String, name: String): String =
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}"
@@ -458,6 +474,24 @@ object GroupWire {
                         ownerId = ownerId,
                         name = name,
                         registeredAtMs = at,
+                        hops = parts[5].toIntOrNull() ?: 0,
+                    )
+                }
+            } else {
+                null
+            }
+
+            KIND_AVAT -> if (parts.size == 6) {
+                val ownerId = parts[2]
+                val dataB64 = parts[3].trim()
+                val at = parts[4].toLongOrNull() ?: return null
+                if (ownerId.isBlank() || dataB64.isBlank()) {
+                    null
+                } else {
+                    Packet.Avatar(
+                        ownerId = ownerId,
+                        dataB64 = dataB64,
+                        updatedAtMs = at,
                         hops = parts[5].toIntOrNull() ?: 0,
                     )
                 }

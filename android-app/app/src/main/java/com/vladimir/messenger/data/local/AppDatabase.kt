@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
+import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
@@ -27,6 +28,7 @@ import com.vladimir.messenger.data.local.entity.GroupJoinRequestEntity
 import com.vladimir.messenger.data.local.entity.GroupMemberEntity
 import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
+import com.vladimir.messenger.data.local.entity.AvatarEntity
 import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
 
 @Database(
@@ -46,8 +48,9 @@ import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
         GroupMessageStatEntity::class,
         DirectoryEntity::class,
         NicknameEntity::class,
+        AvatarEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -60,6 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupDao(): GroupDao
     abstract fun directoryDao(): DirectoryDao
     abstract fun nicknameDao(): NicknameDao
+    abstract fun avatarDao(): AvatarDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -327,6 +331,22 @@ abstract class AppDatabase : RoomDatabase() {
                         "`ownerId` TEXT NOT NULL, " +
                         "`name` TEXT NOT NULL, " +
                         "`registeredAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`ownerId`))"
+                )
+            }
+        }
+
+        /**
+         * v12: реестр присланных аватаров. Операция добавочная, существующие
+         * данные не трогает.
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `avatars` (" +
+                        "`ownerId` TEXT NOT NULL, " +
+                        "`dataB64` TEXT NOT NULL, " +
+                        "`updatedAtMs` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`ownerId`))"
                 )
             }

@@ -6,6 +6,7 @@ import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
+import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
@@ -36,6 +37,7 @@ object AppModule {
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
+                AppDatabase.MIGRATION_11_12,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -67,6 +69,9 @@ object AppModule {
 
     @Provides @Singleton
     fun provideNicknameDao(db: AppDatabase): NicknameDao = db.nicknameDao()
+
+    @Provides @Singleton
+    fun provideAvatarDao(db: AppDatabase): AvatarDao = db.avatarDao()
 
     @Provides @Singleton
     fun provideChatRepository(chatDao: ChatDao, messageDao: MessageDao): ChatRepository =

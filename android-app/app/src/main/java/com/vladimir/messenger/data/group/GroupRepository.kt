@@ -4,8 +4,10 @@ import android.util.Log
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
+import com.vladimir.messenger.data.local.entity.AvatarEntity
 import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.local.entity.GroupEntity
 import com.vladimir.messenger.data.local.entity.GroupInviteEntity
@@ -47,6 +49,10 @@ class GroupRepository(
     private val myRegisteredAt: () -> Long,
     /** Система сняла моё имя из-за более раннего владельца: UI предложит новое. */
     private val onUsernameConflict: () -> Unit,
+    /** Присланные аватары контактов. */
+    private val avatarDao: AvatarDao,
+    /** Мой сжатый аватар (JPEG base64) или null, если аватара нет. */
+    private val myAvatarB64: () -> String?,
 ) {
 
     /**
@@ -216,6 +222,60 @@ class GroupRepository(
         )
         runCatching { delivery.deliver("nicknames", envelope, ids) }
             .onFailure { Log.w(TAG, "nick publish failed: ${it.message}") }
+    }
+
+    /**
+     * Роевая публикация моего аватара: контакты сохраняют и показывают вместо
+     * инициалов. Маленький JPEG, отправляем нечасто.
+     */
+    suspend fun publishMyAvatar() {
+        val me = myNodeId() ?: return
+        val b64 = myAvatarB64() ?: return
+        val ids = contactIds()
+        if (ids.isEmpty()) return
+        val envelope = GroupWire.buildAvatar(
+            ownerId = me,
+            dataB64 = b64,
+            updatedAtMs = clock(),
+            hops = 0,
+        )
+        runCatching { delivery.deliver("avatars", envelope, ids) }
+            .onFailure { Log.w(TAG, "avatar publish failed: ${it.message}") }
+    }
+
+    /** Аватары из базы - в витрину для экранов. */
+    suspend fun loadAvatars() {
+        val rows = runCatching { avatarDao.all() }.getOrDefault(emptyList())
+        AvatarStore.putAll(rows.associate { it.ownerId to it.dataB64 })
+    }
+
+    private suspend fun handleAvatar(packet: GroupWire.Packet.Avatar, senderId: String) {
+        if (packet.ownerId == myNodeId()) return // свой из сети не храним
+        if (packet.dataB64.length > 40_000) return // защита от мусора
+        val older = avatarDao.byOwner(packet.ownerId)
+        if (older == null || packet.updatedAtMs >= older.updatedAtMs) {
+            avatarDao.upsert(
+                AvatarEntity(
+                    ownerId = packet.ownerId,
+                    dataB64 = packet.dataB64,
+                    updatedAtMs = packet.updatedAtMs,
+                )
+            )
+            AvatarStore.put(packet.ownerId, packet.dataB64)
+        }
+        // Эпидемия дальше, кроме отправителя.
+        if (packet.hops < MAX_DIR_HOPS) {
+            val next = contactIds().filter { it != senderId }
+            if (next.isNotEmpty()) {
+                val envelope = GroupWire.buildAvatar(
+                    ownerId = packet.ownerId,
+                    dataB64 = packet.dataB64,
+                    updatedAtMs = packet.updatedAtMs,
+                    hops = packet.hops + 1,
+                )
+                runCatching { delivery.deliver("avatars", envelope, next) }
+            }
+        }
     }
 
     private suspend fun handleNick(packet: GroupWire.Packet.Nick, senderId: String) {
@@ -700,6 +760,8 @@ class GroupRepository(
             is GroupWire.Packet.Directory -> handleDirectory(packet, senderId)
 
             is GroupWire.Packet.Nick -> handleNick(packet, senderId)
+
+            is GroupWire.Packet.Avatar -> handleAvatar(packet, senderId)
 
             is GroupWire.Packet.TopicsRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return

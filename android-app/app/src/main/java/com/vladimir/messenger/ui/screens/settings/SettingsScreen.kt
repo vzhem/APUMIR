@@ -15,6 +15,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +27,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -240,6 +245,7 @@ private fun ProfileTabContent(
     val context = LocalContext.current
     val myUsername by UsernameHolder.name.collectAsStateWithLifecycle()
     val avatarUri by AvatarHolder.uri.collectAsStateWithLifecycle()
+    var showAvatarPicker by remember { mutableStateOf(false) }
     val avatarPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -345,7 +351,7 @@ private fun ProfileTabContent(
                         Text("@никнейм", maxLines = 1)
                     }
                     OutlinedButton(
-                        onClick  = { avatarPicker.launch("image/*") },
+                        onClick  = { showAvatarPicker = true },
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -366,6 +372,21 @@ private fun ProfileTabContent(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
+        }
+
+        if (showAvatarPicker) {
+            AvatarPickerDialog(
+                context = context,
+                onPickUri = { uri ->
+                    AvatarHolder.set(context, uri)
+                    showAvatarPicker = false
+                },
+                onPickGallery = {
+                    showAvatarPicker = false
+                    avatarPicker.launch("image/*")
+                },
+                onDismiss = { showAvatarPicker = false },
+            )
         }
 
         item {
@@ -618,6 +639,67 @@ private fun SettingsTabContent(
             }
         }
     }
+}
+
+// =============================================================================
+// ДИАЛОГ ВЫБОРА АВАТАРА
+// =============================================================================
+
+/** 50 стандартных аватаров в стиле APU + своя картинка из галереи. */
+@Composable
+private fun AvatarPickerDialog(
+    context: Context,
+    onPickUri: (String) -> Unit,
+    onPickGallery: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val ids = remember(context) {
+        (1..50).mapNotNull { i ->
+            val id = context.resources.getIdentifier(
+                String.format("avatar_std_%02d", i), "drawable", context.packageName
+            )
+            if (id != 0) id else null
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Выберите аватар") },
+        text = {
+            Column {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(5),
+                    modifier = Modifier.heightIn(max = 360.dp),
+                    contentPadding = PaddingValues(4.dp),
+                ) {
+                    items(ids.size) { idx ->
+                        val resId = ids[idx]
+                        Image(
+                            painter = painterResource(resId),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .padding(3.dp)
+                                .size(54.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    val name = context.resources.getResourceEntryName(resId)
+                                    onPickUri(
+                                        "android.resource://" + context.packageName +
+                                            "/drawable/" + name
+                                    )
+                                },
+                        )
+                    }
+                }
+                TextButton(onClick = onPickGallery) {
+                    Text("Из галереи")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
 }
 
 // =============================================================================

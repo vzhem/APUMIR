@@ -16,16 +16,25 @@ package com.vladimir.messenger.ui.components
 //   - Индикатор онлайн-статуса
 // =============================================================================
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.remember
+import com.vladimir.messenger.ui.theme.AvatarStore
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,22 +56,52 @@ fun ContactCard(
     /** Оригинальное имя через собаку, например @evzhem. */
     username: String = "",
 ) {
+    // Присланный аватар из роевого реестра (если есть) - иначе инициалы.
+    val avatars by AvatarStore.avatars.collectAsState()
+    val avatarBitmap = remember(avatars[chat.contactId]) {
+        avatars[chat.contactId]?.let { b64 ->
+            try {
+                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // ------------------------------------------------------------------
         // АВАТАР с индикатором онлайн
         // ------------------------------------------------------------------
         Box {
-            // Аватар — круг с инициалами
-            Avatar(
-                name     = chat.contactName,
-                modifier = Modifier.size(52.dp),
-            )
+            // Аватар - картинка из сети либо круг с инициалами.
+            if (avatarBitmap != null) {
+                Image(
+                    bitmap = avatarBitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.size(52.dp).clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Avatar(
+                    name     = chat.contactName,
+                    modifier = Modifier.size(52.dp),
+                )
+            }
 
             // Точка онлайн-статуса
             if (chat.isContactOnline) {

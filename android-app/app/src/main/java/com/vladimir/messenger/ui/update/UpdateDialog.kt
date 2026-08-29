@@ -66,7 +66,7 @@ fun UpdateDialog(
                     modifier = Modifier
                         .matchParentSize()
                         .background(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                         )
                 )
             }
@@ -89,6 +89,7 @@ fun UpdateDialog(
                     "Версия: ${releaseInfo.version}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
 
                 if (releaseInfo.releaseNotes.isNotBlank()) {
@@ -96,10 +97,12 @@ fun UpdateDialog(
                         "Что нового:",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         releaseInfo.releaseNotes,
                         style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
 

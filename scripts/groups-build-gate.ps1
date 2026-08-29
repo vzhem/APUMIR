@@ -101,7 +101,7 @@ try {
         if ($Python -eq 'py') { $PyArgs = @('-3') }
         $DataLocal = Join-Path $RepoRoot 'android-app\app\src\main\java\com\vladimir\messenger\data\local'
         & $Python @PyArgs (Join-Path $RepoRoot 'tools\sandbox\check_room_schema.py') `
-            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_10_11'
+            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_11_12'
         $SchemaExit = $LASTEXITCODE
         Write-Output "schema cross-check exit code: $SchemaExit"
         if ($SchemaExit -ne 0) {
@@ -230,8 +230,8 @@ try {
         Write-Output ''
         Write-Output 'NOTE: the database migrations were NOT exercised. The host gate cannot run them.'
         Write-Output 'AppModule uses fallbackToDestructiveMigration(), so a wrong migration is'
-        Write-Output 'a data-loss risk on upgrade. The current schema is version 11; 10 -> 11'
-        Write-Output 'adds the nicknames registry. To verify on a phone that'
+        Write-Output 'a data-loss risk on upgrade. The current schema is version 12; 11 -> 12'
+        Write-Output 'adds the avatars registry (10 -> 11 adds nicknames). To verify on a phone that'
         Write-Output 'already holds an older database, rerun with -RunMigrationTest - it wipes app data, back up first.'
     }
 
