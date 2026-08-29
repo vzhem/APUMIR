@@ -6411,3 +6411,44 @@ Gradle 9.0** (deprecated с 8.11). Замена для конфигурацио�
 Actions с тегом v11.24.0 -> `v11.24.0` / 11024000; без git/тегов -> `v11.16`.
 Gradle в песочнице по-прежнему нет, поэтому компиляцию `.kts` снова подтвердит
 только гейт на Windows.
+
+## Раунд 50, продолжение: гейт был GREEN, но собрал СТАРЫЙ build.gradle.kts
+
+Что показал терминал владельца (21:04):
+- `git status -sb` -> `## main...origin/main [behind 1]` и
+  `M  android-app/app/build.gradle.kts` (M в ПЕРВОМ столбце = правка в индексе);
+- `git pull --ff-only` -> `error: Your local changes ... would be overwritten by
+  merge: android-app/app/build.gradle.kts ... Aborting`, то есть HEAD остался
+  `75a9265`, исправление `9291e7b` НЕ пришло;
+- гейт -> `RESULT: GREEN`, но `35 actionable tasks: 35 up-to-date` и
+  `43 actionable tasks: 1 executed, 42 up-to-date` (выполнился только
+  `packageDebug`) — не перекомпилировалось ничего, собирался прежний файл;
+- `install-debug-on-phones.ps1` -> `versionName=v11.16` на обоих телефонах —
+  это ровно прежний fallback `?: "v11.16"` (строка 26 файла на `75a9265~1`).
+
+Причина — моя команда отмены. Владелец откатывал файл через
+`git checkout 75a9265~1 -- <файл>`, а такая форма кладёт содержимое В ИНДЕКС.
+Данная мной `git checkout -- <файл>` восстанавливает рабочее дерево ИЗ ИНДЕКСА,
+то есть не делает ничего, и pull остался заблокированным.
+
+Воспроизведено в песочнице на копии репозитория (клон -> `git checkout -B main
+75a9265` -> `git checkout 75a9265~1 -- android-app/app/build.gradle.kts`):
+- статус в точности как у владельца: `## main...origin/main [behind 1]` +
+  `M  android-app/app/build.gradle.kts`;
+- после `git checkout -- <файл>` статус не меняется, `git diff HEAD` — 80 строк;
+- `git pull --ff-only` даёт то же сообщение `Aborting`;
+- `git reset --hard HEAD` + `git pull --ff-only` -> HEAD `9291e7b`, дерево
+  чистое, в файле `ProcessBuilder` (2 вхождения).
+
+Итог: правка версии `9291e7b` на телефонах владельца ЕЩЁ НЕ ПРОВЕРЕНА — зелёный
+гейт и `v11.16` относятся к прежнему файлу. После правильного pull ожидается
+`git describe --tags` = `v11.23.0-25-g9291e7b` -> `versionName v11.23.0-debug`,
+`versionCode 11023000` (прогон той же логики на Python: локально
+`v11.23.0-debug`/11023000; Actions с тегом v11.24.0 -> `v11.24.0`/11024000;
+без git/тегов -> `v11.16`/11016000; `-PreleaseVersionName=v12.0.0` ->
+`v12.0.0-debug`/12000000).
+
+Правило добавлено в раздел 6 START_HERE: `git checkout -- <файл>` не отменяет
+правку из индекса; для отмены — `git restore --source=HEAD --staged --worktree`
+или `git reset --hard HEAD`. И второе: «N actionable tasks: N up-to-date»
+при грязном дереве означает, что собирался старый код.

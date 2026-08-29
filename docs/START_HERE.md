@@ -208,6 +208,18 @@
   `BasicTextField(state = TextFieldState)` + `Modifier.contentReceiver`.
 - `MessengerColors.of(...)` / `colors.gold` / `ic_launcher_foreground` — таких
   сущностей нет, не выдумывать.
+- `git checkout -- <файл>` НЕ отменяет правку, которая уже в индексе
+  (а `git checkout <commit> -- <файл>` кладёт её именно в индекс: статус
+  показывает `M ` в ПЕРВОМ столбце). Команда выглядит выполненной, файл
+  остаётся изменённым, `git pull --ff-only` падает с «Your local changes ...
+  would be overwritten by merge» — и гейт собирает СТАРЫЙ код, сообщая GREEN.
+  Правильно: `git restore --source=HEAD --staged --worktree -- <файл>` либо
+  `git reset --hard HEAD`, и только потом `git pull`. Проверено воспроизведением
+  в песочнице 2026-08-29 (см. AI_COLLABORATION_NOTES, раунд 50, продолжение).
+- Зелёный гейт ещё не значит, что собран нужный код: если Gradle пишет
+  «N actionable tasks: N up-to-date», а дерево грязное — собирался прежний
+  файл. Сверять `Repo HEAD` в шапке гейта и `versionName` в
+  `install-debug-on-phones.ps1`.
 - Гейт `scripts/groups-build-gate.ps1` при провале удаляет APK; после правок,
   задевших kapt/Room, запускать с `-Clean`.
 - Release-APK подписан другим ключом — поверх debug не ставится.
