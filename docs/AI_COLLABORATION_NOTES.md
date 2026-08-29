@@ -6594,3 +6594,45 @@ receipt из 2.5.2A — следующий шаг вместе с правило
 счётчика + тестовый шов `*In`), `ChatRepository.kt` (+ отправка атрибуции),
 `AppModule.kt` (провайдер), `AddContactViewModel.kt` (+ запомнить пригласившего),
 `CoreServerService.kt` (+ роутер).
+
+## Раунд 51 закрыт на телефонах + моя ошибка с фильтром тестов в гейте
+
+Приглашение начислило ранг на реальном железе (гейт GREEN на `6841df2`, сборка
+30 781 972 байта от 22:16:46, установка 22:16:56 и 22:16:58,
+`versionName=v11.23.0-debug`). Отчёт `scripts/referral-proof.ps1`:
+
+- пригласивший `11567254BK001192`: `apu_referral_qualification.xml` ->
+  `<int name="qualified_direct_count_v1" value="1" />`;
+  `apu_referral_attribution.xml` -> `credited_invitees_v1` содержит
+  `pk_ac9f170ed88a7e8b22f4370964969c5d`;
+- приглашённая `AUYF6R5923006121`: `inviter_for_pk_3d94b6417734f69cde63c37cf2d5d2dd`
+  = `pk_3d94b6417734f69cde63c37cf2d5d2dd`, тот же узел в `attributed_contacts_v1`;
+- `apu_test_entitlements.xml` отсутствует на обоих (override снят заранее через
+  `set-rank.ps1 -Clear`), поэтому видно именно настоящий счётчик.
+
+Оба идентификатора на этих телефонах — КОРОТКАЯ форма `pk_` + 32 hex (35
+символов). Хорошо, что `ReferralWire.canonicalNodeId` принимает и 32, и 64:
+проверь я только длинную форму, атрибуция не сработала бы.
+
+Строк `ReferralRouter`/`ReferralAttribution` в logcat не оказалось — буфер
+вытесняется (CoreServerService логирует каждое событие по три раза). Это не
+приговор: доказательство здесь файлы preferences, а не лог.
+
+МОЯ ОШИБКА, найденная по отчёту гейта: я написал, что «гейт собирает список
+тестов по TEST-*.xml, поэтому новые классы подхватятся сами». Динамический там
+только РАЗБОР отчёта, а запуск идёт с явным фильтром:
+`--tests 'com.vladimir.messenger.data.group.*'`,
+`--tests '...data.file.FileTransferRankPolicyTest'`,
+`--tests 'com.vladimir.messenger.util.*'`. Пакета `data.referral` в нём не было,
+поэтому `ReferralWireTest` и `ReferralCreditPolicyTest` скомпилировались и НЕ
+ВЫПОЛНИЛИСЬ, а гейт показал те же `tests=108`, что и до правки, — то есть
+выглядел зелёным. Правило: новый тест-пакет добавляется в `--tests` в том же
+коммите.
+
+Исправление: в фильтр добавлен `--tests 'com.vladimir.messenger.data.referral.*'`
+(ожидание: 108 + 10 + 13 = **131** тест), и после итогов гейт печатает NOTE со
+списком тест-классов из `app\src\test`, которые фильтром не покрыты (сейчас их
+16: file.*, relay, repository, security, service, ExampleUnitTest). NOTE
+обёрнут в try/catch и не может уронить гейт. Логика преобразования пути в имя
+класса проверена прогоном на Python: «запущенные» — ровно 8 классов из отчёта
+владельца плюс 2 новых.

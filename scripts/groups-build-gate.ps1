@@ -127,16 +127,24 @@ try {
         }
     }
 
-    # Step 1: JVM unit tests. Groups plus the two areas this branch touched
-    # outside that package: the rank policy that now gates attachments, and the
-    # link parsers the QR scanner routes through.
+    # Step 1: JVM unit tests. Groups plus the areas this branch touched outside
+    # that package: the rank policy that now gates attachments, the link parsers
+    # the QR scanner routes through, and the referral attribution added in
+    # round 51.
     # Still a test-only invocation, deliberately not mixed with assemble in the
     # same --tests call (rule from docs/AI_HANDOFF.md).
+    #
+    # This list is a FILTER, not a report: a test class outside it compiles and
+    # is silently never run, while the totals below still look green. Round 51
+    # shipped ReferralWireTest and ReferralCreditPolicyTest that way - the gate
+    # reported the same 108 tests as before and gave no hint. When a new test
+    # package appears, add its --tests line here in the same commit.
     Write-Output ''
-    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers) ====='
+    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers, referrals) ====='
     & $Gradlew --console=plain :app:testDebugUnitTest `
         --tests 'com.vladimir.messenger.data.group.*' `
         --tests 'com.vladimir.messenger.data.file.FileTransferRankPolicyTest' `
+        --tests 'com.vladimir.messenger.data.referral.*' `
         --tests 'com.vladimir.messenger.util.*'
     $TestExit = $LASTEXITCODE
     Write-Output "unit tests exit code: $TestExit"
@@ -165,6 +173,33 @@ try {
         Write-Output "WARNING: no test reports found in $ReportDir"
     }
     Write-Output ("unit test totals: tests=$TotalTests failures=$TotalFailures skipped=$TotalSkipped")
+
+    # A test class that compiled but never ran is invisible in the totals above:
+    # round 51 shipped two referral test classes that the --tests filter did not
+    # cover, and the gate reported the very same 108 tests as before. List what
+    # did not run so that stays visible. NOTE only, never a failure, and wrapped
+    # so that a problem here cannot break an otherwise green gate.
+    try {
+        $TestSrc = Join-Path $AndroidRoot 'app\src\test\java'
+        if (Test-Path -LiteralPath $TestSrc) {
+            $RanNames = @()
+            if (Test-Path -LiteralPath $ReportDir) {
+                $RanNames = @(Get-ChildItem -LiteralPath $ReportDir -Filter 'TEST-*.xml' |
+                    ForEach-Object { $_.BaseName -replace '^TEST-', '' })
+            }
+            $NotRun = @(Get-ChildItem -LiteralPath $TestSrc -Recurse -Filter '*Test.kt' | ForEach-Object {
+                $Relative = $_.FullName.Substring($TestSrc.Length + 1)
+                (($Relative -replace '\\', '.') -replace '\.kt$', '')
+            } | Where-Object { $RanNames -notcontains $_ } | Sort-Object)
+            if ($NotRun.Count -gt 0) {
+                Write-Output ("NOTE: {0} test classes under app\src\test were NOT run by the filter:" -f $NotRun.Count)
+                $NotRun | ForEach-Object { Write-Output ("  " + $_) }
+            }
+        }
+    } catch {
+        Write-Output ("NOTE: could not list the untested classes: " + $_.Exception.Message)
+    }
+
     if ($TotalTests -eq 0) {
         Write-Output 'RESULT: NO TESTS RAN - the --tests filter matched nothing.'
         Write-Output 'Treat this as a failure, not as a green run.'
