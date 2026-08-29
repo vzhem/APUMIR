@@ -118,7 +118,7 @@ private fun Content(
         OutlinedTextField(
             value = uiState.newUsername,
             onValueChange = onNewUsernameChanged,
-            label = { Text("@имя") },
+            label = { Text("@никнейм") },
             placeholder = { Text("evzhem") },
             prefix = { Text("@") },
             modifier = Modifier.fillMaxWidth(),

@@ -18,6 +18,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.ui.components.Avatar
+import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.MyAvatar
 import com.vladimir.messenger.util.QrCodeGenerator
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.verticalScroll
@@ -38,9 +40,16 @@ fun ShareProfileScreen(
     val clipboardManager = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
-    Scaffold(
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                ),
                 title = { Text("Поделиться профилем", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
@@ -91,7 +100,8 @@ fun ShareProfileScreen(
                 )
             }
 
-            Avatar(name = uiState.displayName, size = 64)
+            // Свой аватар: картинка из галереи либо инициалы.
+            MyAvatar(displayName = uiState.displayName, modifier = Modifier.size(96.dp))
 
             Text(
                 text = uiState.displayName,
@@ -220,5 +230,6 @@ fun ShareProfileScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
     }
 }

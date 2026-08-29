@@ -10,6 +10,7 @@ package com.vladimir.messenger.ui.screens.groups
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -103,9 +104,16 @@ fun GroupAdminScreen(
         if (tab !in visibleTabs) tab = AdminTab.Overview
     }
 
-    Scaffold(
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                ),
                 title = { Text(uiState.group?.title ?: "Группа") },
                 navigationIcon = { TextButton(onClick = onBackClick) { Text("Назад") } },
             )
@@ -154,6 +162,7 @@ fun GroupAdminScreen(
                 )
 
                 AdminTab.Members -> MembersTab(
+                    isAdmin = uiState.isAdmin,
                     members = uiState.searchResults,
                     query = uiState.searchQuery,
                     onQueryChange = viewModel::onSearchQueryChanged,
@@ -183,6 +192,7 @@ fun GroupAdminScreen(
                 )
             }
         }
+    }
     }
 }
 
@@ -409,6 +419,7 @@ private fun AdminsTab(
 
 @Composable
 private fun MembersTab(
+    isAdmin: Boolean,
     members: List<MemberSummary>,
     query: String,
     onQueryChange: (String) -> Unit,
@@ -420,8 +431,11 @@ private fun MembersTab(
     Column(modifier = Modifier.fillMaxSize()) {
         // У вступивших раньше, чем появились темы, список тем пустой.
         // Кнопка рассылает карточку группы, темы и состав заново.
-        TextButton(onClick = onResync) {
-            Text("Разослать темы и состав заново")
+        // Обычному участнику не показываем: рассылка - дело администратора.
+        if (isAdmin) {
+            TextButton(onClick = onResync) {
+                Text("Разослать темы и состав заново")
+            }
         }
         OutlinedTextField(
             value = query,
@@ -434,6 +448,7 @@ private fun MembersTab(
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             items(members, key = { it.nodeId }) { member ->
                 MemberRow(
+                    isAdmin = isAdmin,
                     member = member,
                     onToggleAdmin = { onToggleAdmin(member.nodeId, member.role != GroupRole.ADMIN) },
                     onTogglePermission = { flag, enabled -> onTogglePermission(member.nodeId, flag, enabled) },
@@ -447,6 +462,7 @@ private fun MembersTab(
 
 @Composable
 private fun MemberRow(
+    isAdmin: Boolean,
     member: MemberSummary,
     onToggleAdmin: () -> Unit,
     onTogglePermission: (Long, Boolean) -> Unit,
@@ -468,7 +484,9 @@ private fun MemberRow(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (!member.isMe && member.role != GroupRole.OWNER) {
+                // Управление участниками видно только администраторам:
+                // обычный участник не должен видеть чужие «Права» и «Исключить».
+                if (isAdmin && !member.isMe && member.role != GroupRole.OWNER) {
                     TextButton(onClick = { expanded = !expanded }) { Text("Права") }
                     TextButton(onClick = onBlock) { Text("Исключить") }
                 }

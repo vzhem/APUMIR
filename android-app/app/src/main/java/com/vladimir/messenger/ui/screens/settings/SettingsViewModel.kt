@@ -8,10 +8,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import android.widget.Toast
 
 data class SettingsUiState(
@@ -102,6 +104,19 @@ class SettingsViewModel @Inject constructor(
                 "unknown"
             }
 
+            // Публичный IP: каким нас видит интернет. Определяем внешним
+            // сервисом; без сети честно пишем, что недоступен.
+            val publicIp = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = java.net.URL("https://api.ipify.org?text=true")
+                        .openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 5000
+                    conn.inputStream.bufferedReader().use { it.readText().trim() }
+                        .takeIf { it.isNotBlank() }
+                }.getOrNull()
+            }
+
             // Load display name from SharedPreferences
             val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             val savedName = prefs.getString("display_name", null)
@@ -117,6 +132,7 @@ class SettingsViewModel @Inject constructor(
                     connectionMode   = "P2P / QUIC",
                     appVersion       = appVersion,
                     rustCoreVersion  = "Rust Core",
+                    publicIp         = publicIp,
                 )
             }
         }

@@ -3,6 +3,8 @@ package com.vladimir.messenger.ui.screens.contacts
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vladimir.messenger.data.local.dao.NicknameDao
+import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.data.RustBridge
@@ -20,12 +22,17 @@ data class AddContactUiState(
     val isLoading: Boolean = false,
     val error: String? = null,
     val contactAdded: Boolean = false,
+    // Поиск по @никнейму в роевом реестре.
+    val nickQuery: String = "",
+    val nickResults: List<NicknameEntity> = emptyList(),
+    val nickSearching: Boolean = false,
 )
 
 @HiltViewModel
 class AddContactViewModel @Inject constructor(
     private val contactRepository: ContactRepository,
     private val chatRepository: ChatRepository,
+    private val nicknameDao: NicknameDao,
 ) : ViewModel() {
 
     companion object {
@@ -34,6 +41,56 @@ class AddContactViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(AddContactUiState())
     val uiState = _uiState.asStateFlow()
+
+    /** Поиск по части @никнейма в роевом реестре (кто раньше - тот выше). */
+    fun onNickQueryChanged(value: String) {
+        val clean = value.trim().removePrefix("@")
+        _uiState.update { it.copy(nickQuery = value, nickSearching = clean.isNotBlank()) }
+        viewModelScope.launch {
+            val found = if (clean.isBlank()) {
+                emptyList()
+            } else {
+                try {
+                    nicknameDao.search(clean.lowercase())
+                } catch (e: Exception) {
+                    Log.w(TAG, "nickname search failed", e)
+                    emptyList()
+                }
+            }
+            _uiState.update { it.copy(nickResults = found, nickSearching = false) }
+        }
+    }
+
+    /** Добавить в контакты прямо из поиска по @никнейму. */
+    fun onAddByNicknameClicked(entry: NicknameEntity) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null, contactAdded = false) }
+            val result = contactRepository.addContact(
+                displayName = entry.name,
+                fingerprint = entry.ownerId,
+                username = entry.name,
+            )
+            result
+                .onSuccess { contact ->
+                    chatRepository.createChat(entry.ownerId, contact.displayName)
+                    _uiState.update { it.copy(isLoading = false, contactAdded = true) }
+                }
+                .onFailure { error ->
+                    if (error.message == "Contact already exists") {
+                        val existing = contactRepository.getContactByFingerprint(entry.ownerId)
+                        if (existing != null) {
+                            chatRepository.getOrCreateChat(entry.ownerId, existing.displayName)
+                        }
+                        _uiState.update { it.copy(isLoading = false, contactAdded = true) }
+                    } else {
+                        Log.e(TAG, "add by nickname failed", error)
+                        _uiState.update {
+                            it.copy(isLoading = false, error = error.message ?: "Не удалось добавить")
+                        }
+                    }
+                }
+        }
+    }
 
     fun onInviteLinkChanged(value: String) {
         _uiState.update { it.copy(inviteLink = value, error = null, contactAdded = false) }

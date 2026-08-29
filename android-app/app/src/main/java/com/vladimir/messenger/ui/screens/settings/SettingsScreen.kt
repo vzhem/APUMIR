@@ -3,53 +3,51 @@ package com.vladimir.messenger.ui.screens.settings
 // =============================================================================
 // SETTINGSSCREEN.KT — Экран настроек
 // =============================================================================
-// Показывает:
-//   - Профиль пользователя (имя, fingerprint, QR-код для приглашений)
-//   - Статус сетевого движка (подключенные пиры, публичный IP)
-//   - Управление соединением (перезапуск движка)
-//   - Резервное копирование ключей
-//   - О приложении
+// Две вкладки в едином стиле APU (подложка на весь экран):
+//   - «Профиль»: аватар, имя, @никнейм, QR-код, ссылка, поделиться, ранги.
+//   - «Настройки»: оформление, сеть, передача файлов, безопасность, о программе.
 // =============================================================================
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.vladimir.messenger.ui.components.Avatar
-import com.vladimir.messenger.ui.theme.ThemeMode
-import com.vladimir.messenger.ui.theme.ThemeModeHolder
-import com.vladimir.messenger.ui.theme.UsernameHolder
-import com.vladimir.messenger.ui.theme.WallpaperHolder
-import androidx.compose.ui.platform.LocalContext
-import com.vladimir.messenger.ui.theme.StatusConnecting
-import com.vladimir.messenger.ui.theme.StatusDegraded
-import com.vladimir.messenger.ui.theme.StatusOffline
-import com.vladimir.messenger.ui.theme.StatusOnline
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.MyAvatar
+import com.vladimir.messenger.ui.theme.AvatarHolder
+import com.vladimir.messenger.ui.theme.StatusConnecting
+import com.vladimir.messenger.ui.theme.StatusDegraded
+import com.vladimir.messenger.ui.theme.StatusOffline
+import com.vladimir.messenger.ui.theme.StatusOnline
+import com.vladimir.messenger.ui.theme.ThemeMode
+import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.UsernameHolder
+import com.vladimir.messenger.ui.theme.WallpaperHolder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,371 +63,80 @@ fun SettingsScreen(
     var showBackupDialog by remember { mutableStateOf(false) }
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
+    // Профиль вынесен в отдельную вкладку.
+    var selectedTab by remember { mutableStateOf(0) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Настройки", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.Default.ArrowBack, "Назад")
-                    }
-                },
-            )
-        },
-    ) { paddingValues ->
-        LazyColumn(
-            modifier       = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-            contentPadding = PaddingValues(bottom = 32.dp),
-        ) {
-
-            // ----------------------------------------------------------------
-            // ПРОФИЛЬ
-            // ----------------------------------------------------------------
-            // ----------------------------------------------------------------
-            // ПОДЕЛИТЬСЯ ПРОФИЛЕМ
-            // ----------------------------------------------------------------
-            item {
-                ListItem(
-                    headlineContent = { Text("Поделиться профилем") },
-                    supportingContent = { Text("Отправить ссылку для добавления в контакты") },
-                    leadingContent = {
-                        Icon(Icons.Default.Share, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable { onShareProfileClick() }
-                )
-                HorizontalDivider()
-            }
-
-            item {
-                ListItem(
-                    headlineContent = { Text("Ранги и возможности") },
-                    supportingContent = { Text("Что открывается за подтверждённые приглашения") },
-                    leadingContent = { Icon(Icons.Default.EmojiEvents, contentDescription = null) },
-                    modifier = Modifier.clickable { onRankBenefitsClick() }
-                )
-                HorizontalDivider()
-            }
-
-            // ----------------------------------------------------------------
-            // MTPROTO ПРОКСИ
-            // ----------------------------------------------------------------
-            item {
-                ListItem(
-                    headlineContent = { Text("MTProto прокси") },
-                    supportingContent = { Text("Управление прокси для Telegram relay") },
-                    leadingContent = {
-                        Icon(Icons.Default.VpnKey, contentDescription = null)
-                    },
-                    modifier = Modifier.clickable { onMtProxyClick() }
-                )
-                HorizontalDivider()
-            }
-
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                ) {
-                    Row(
-                        modifier          = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Avatar(
-                            name     = uiState.displayName,
-                            modifier = Modifier.size(64.dp),
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(
-                                uiState.displayName,
-                                style     = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                uiState.fingerprint,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-
-                    // Кнопки профиля
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        // Показать QR-код (мой)
-                        OutlinedButton(
-                            onClick  = { showMyQrDialog = true },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Мой QR")
-                        }
-                        // Скопировать ссылку
-                        OutlinedButton(
-                            onClick  = {
-                                clipboardManager.setText(AnnotatedString(uiState.inviteLink))
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Копировать")
-                        }
-                        // Своё оригинальное имя через собаку.
-                        OutlinedButton(
-                            onClick  = { showUsernameDialog = true },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("@имя")
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-            }
-
-            // ----------------------------------------------------------------
-            // ОФОРМЛЕНИЕ: день / ночь / авто
-            // ----------------------------------------------------------------
-            item {
-                SettingsSectionTitle("Оформление")
-            }
-            item {
-                SettingsCard {
-                    val context = LocalContext.current
-                    val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
-                    ThemeMode.entries.forEach { mode ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { ThemeModeHolder.set(context, mode) }
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(
-                                selected = themeMode == mode,
-                                onClick = { ThemeModeHolder.set(context, mode) },
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(mode.title, style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
-
-                    // Свои обои чатов: из галереи или стандартные в тон теме.
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    val customWallpaper by WallpaperHolder.uri.collectAsStateWithLifecycle()
-                    val wallpaperPicker = rememberLauncherForActivityResult(
-                        ActivityResultContracts.GetContent()
-                    ) { uri ->
-                        if (uri != null) {
-                            try {
-                                context.contentResolver.takePersistableUriPermission(
-                                    uri,
-                                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                                )
-                            } catch (_: Exception) {
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                Column {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent
+                        ),
+                        title = { Text("Настройки", fontWeight = FontWeight.Bold) },
+                        navigationIcon = {
+                            IconButton(onClick = onBackClick) {
+                                Icon(Icons.Default.ArrowBack, "Назад")
                             }
-                            WallpaperHolder.set(context, uri.toString())
-                        }
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Обои для чатов", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (customWallpaper != null) {
-                                    "Своя картинка из галереи"
-                                } else {
-                                    "Стандартные, в тон теме"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
-                            Text("Из галереи")
-                        }
-                    }
-                    if (customWallpaper != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 2.dp),
-                        ) {
-                            TextButton(onClick = { WallpaperHolder.set(context, null) }) {
-                                Text("Вернуть стандартные")
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ----------------------------------------------------------------
-            // СТАТУС СЕТИ
-            // ----------------------------------------------------------------
-            item {
-                SettingsSectionTitle("Сеть")
-            }
-            item {
-                SettingsCard {
-                    // Статус соединения
-                    SettingsItem(
-                        icon  = Icons.Default.Hub,
-                        title = "Статус соединения",
-                        subtitle = uiState.connectionStatus.displayName,
-                        trailingContent = {
-                            StatusDot(status = uiState.connectionStatus)
-                        }
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon     = Icons.Default.People,
-                        title    = "Подключено пиров",
-                        subtitle = "${uiState.connectedPeers} устройств",
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon     = Icons.Default.Public,
-                        title    = "Публичный IP",
-                        subtitle = uiState.publicIp ?: "Определяется...",
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon     = Icons.Default.Router,
-                        title    = "Режим подключения",
-                        subtitle = uiState.connectionMode,
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    // Перезапуск движка
-                    SettingsItem(
-                        icon  = Icons.Default.RestartAlt,
-                        title = "Перезапустить сетевой движок",
-                        subtitle = "Пересоединиться со всеми пирами",
-                        onClick = viewModel::onRestartEngine,
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon  = Icons.Default.Refresh,
-                        title = "Собрать данные об абонентах",
-                        subtitle = "апустить Gossip для поиска пиров",
-                        onClick = viewModel::onTriggerGossipDiscovery,
-                    )
-                }
-            }
-
-            // ----------------------------------------------------------------
-            // БЕЗОПАСНОСТЬ
-            // ----------------------------------------------------------------
-            // ПЕРЕДАЧА ФАЙЛОВ
-            // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Передача файлов") }
-            item {
-                SettingsCard {
-                    SettingsItem(
-                        icon     = Icons.Default.Delete,
-                        title    = "Остановить зависшие отправки",
-                        subtitle = "Отменяет незавершённые отправки и чистит их очереди",
-                        onClick  = viewModel::onCancelStalledTransfers,
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon     = Icons.Default.CleaningServices,
-                        title    = "Очистить завершённые",
-                        subtitle = "Освобождает место; сохранённые файлы остаются у вас",
-                        onClick  = viewModel::onPurgeCompletedTransfers,
-                    )
-                }
-            }
-
-            // ----------------------------------------------------------------
-            // СЕТЬ
-            // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Сеть") }
-            item {
-                SettingsCard {
-                    SettingsItem(
-                        icon     = Icons.Default.VpnKey,
-                        title    = "Туннель через прокси",
-                        subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
-                        trailingContent = {
-                            Switch(
-                                checked = uiState.proxyTunnelEnabled,
-                                onCheckedChange = viewModel::onProxyTunnelToggle,
-                            )
                         },
                     )
+                    TabRow(
+                        selectedTabIndex = selectedTab,
+                        containerColor = Color.Transparent,
+                    ) {
+                        Tab(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            text = { Text("Профиль") },
+                        )
+                        Tab(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            text = { Text("Настройки") },
+                        )
+                    }
                 }
+            },
+        ) { paddingValues ->
+            if (selectedTab == 0) {
+                ProfileTabContent(
+                    paddingValues = paddingValues,
+                    uiState = uiState,
+                    onMyQr = { showMyQrDialog = true },
+                    onCopyLink = { clipboardManager.setText(AnnotatedString(uiState.inviteLink)) },
+                    onUsername = { showUsernameDialog = true },
+                    onShareProfile = onShareProfileClick,
+                    onRankBenefits = onRankBenefitsClick,
+                )
+            } else {
+                SettingsTabContent(
+                    paddingValues = paddingValues,
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    onMtProxyClick = onMtProxyClick,
+                    onBackup = { showBackupDialog = true },
+                )
             }
+        }
+    }
 
-            // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Безопасность") }
-            item {
-                SettingsCard {
-                    SettingsItem(
-                        icon     = Icons.Default.Backup,
-                        title    = "Резервная копия ключей",
-                        subtitle = "Экспорт ключей для восстановления",
-                        onClick  = { showBackupDialog = true },
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon     = Icons.Default.Security,
-                        title    = "Протокол шифрования",
-                        subtitle = "Ed25519 + X25519 + ChaCha20-Poly1305",
-                    )
-                }
-            }
-
-            // ----------------------------------------------------------------
-            // О ПРИЛОЖЕНИИ
-            // ----------------------------------------------------------------
-            item { SettingsSectionTitle("О приложении") }
-            item {
-                SettingsCard {
-                    SettingsItem(
-                        icon     = Icons.Default.Info,
-                        title    = "Версия",
-                        subtitle = "APU ${uiState.appVersion}",
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsItem(
-                        icon     = Icons.Default.Code,
-                        title    = "Rust Core",
-                        subtitle = uiState.rustCoreVersion,
-                    )
-                }
-
-    // Диалог показа моего QR-кода
-    // Своё @имя: сохраняется в p2p_prefs и уезжает в ссылку профиля (u=).
+    // Свой @никнейм: хранится без собаки и уезжает в ссылку профиля (u=).
     if (showUsernameDialog) {
         val usernameContext = LocalContext.current
         val currentUsername by UsernameHolder.name.collectAsStateWithLifecycle()
         var usernameValue by remember { mutableStateOf(currentUsername.orEmpty()) }
         AlertDialog(
             onDismissRequest = { showUsernameDialog = false },
-            title = { Text("Ваше @имя") },
+            title = { Text("Ваш @никнейм") },
             text = {
                 OutlinedTextField(
                     value = usernameValue,
                     onValueChange = { usernameValue = it },
-                    label = { Text("имя") },
+                    label = { Text("никнейм") },
                     placeholder = { Text("evzhem") },
                     prefix = { Text("@") },
                     singleLine = true,
@@ -450,6 +157,7 @@ fun SettingsScreen(
         )
     }
 
+    // Диалог «Мой QR-код».
     if (showMyQrDialog) {
         val qrBitmap = remember(uiState.inviteLink) {
             try {
@@ -472,15 +180,16 @@ fun SettingsScreen(
 
         AlertDialog(
             onDismissRequest = { showMyQrDialog = false },
-            title = { Text("My QR Code") },
+            title = { Text("Мой QR-код") },
             text = {
-                androidx.compose.foundation.layout.Column(
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (qrBitmap != null) {
                         Image(
                             bitmap = qrBitmap.asImageBitmap(),
-                            contentDescription = "QR Code",
+                            contentDescription = "QR-код профиля",
                             modifier = Modifier.size(280.dp),
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -496,16 +205,13 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showMyQrDialog = false }) {
-                    Text("Close")
+                    Text("Закрыть")
                 }
             },
         )
     }
-            }
-        }
-    }
 
-    // Диалог резервного копирования
+    // Диалог резервного копирования.
     if (showBackupDialog) {
         BackupDialog(
             onDismiss = { showBackupDialog = false },
@@ -514,6 +220,403 @@ fun SettingsScreen(
                 showBackupDialog = false
             }
         )
+    }
+}
+
+// =============================================================================
+// ВКЛАДКА «ПРОФИЛЬ»
+// =============================================================================
+
+@Composable
+private fun ProfileTabContent(
+    paddingValues: PaddingValues,
+    uiState: SettingsUiState,
+    onMyQr: () -> Unit,
+    onCopyLink: () -> Unit,
+    onUsername: () -> Unit,
+    onShareProfile: () -> Unit,
+    onRankBenefits: () -> Unit,
+) {
+    val context = LocalContext.current
+    val myUsername by UsernameHolder.name.collectAsStateWithLifecycle()
+    val avatarUri by AvatarHolder.uri.collectAsStateWithLifecycle()
+    val avatarPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (_: Exception) {
+            }
+            AvatarHolder.set(context, uri.toString())
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues),
+        contentPadding = PaddingValues(bottom = 32.dp),
+    ) {
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    // Свой аватар: картинка из галереи либо инициалы.
+                    MyAvatar(
+                        displayName = uiState.displayName,
+                        modifier = Modifier.size(96.dp),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        uiState.displayName,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        if (myUsername.isNullOrBlank()) {
+                            "@никнейм не задан"
+                        } else {
+                            "@$myUsername"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        uiState.fingerprint,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // Кнопки в два ряда: текст целиком умещается.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick  = onMyQr,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Мой QR", maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick  = onCopyLink,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Ссылка", maxLines = 1)
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick  = onUsername,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("@никнейм", maxLines = 1)
+                    }
+                    OutlinedButton(
+                        onClick  = { avatarPicker.launch("image/*") },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Аватар", maxLines = 1)
+                    }
+                }
+                if (avatarUri != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        TextButton(onClick = { AvatarHolder.set(context, null) }) {
+                            Text("Убрать аватар")
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
+        item {
+            ListItem(
+                headlineContent = { Text("Поделиться профилем") },
+                supportingContent = { Text("Отправить ссылку для добавления в контакты") },
+                leadingContent = { Icon(Icons.Default.Share, contentDescription = null) },
+                modifier = Modifier.clickable { onShareProfile() },
+            )
+            HorizontalDivider()
+        }
+
+        item {
+            ListItem(
+                headlineContent = { Text("Ранги и возможности") },
+                supportingContent = { Text("Что открывается за подтверждённые приглашения") },
+                leadingContent = { Icon(Icons.Default.EmojiEvents, contentDescription = null) },
+                modifier = Modifier.clickable { onRankBenefits() },
+            )
+        }
+    }
+}
+
+// =============================================================================
+// ВКЛАДКА «НАСТРОЙКИ»
+// =============================================================================
+
+@Composable
+private fun SettingsTabContent(
+    paddingValues: PaddingValues,
+    uiState: SettingsUiState,
+    viewModel: SettingsViewModel,
+    onMtProxyClick: () -> Unit,
+    onBackup: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(paddingValues),
+        contentPadding = PaddingValues(bottom = 32.dp),
+    ) {
+        item {
+            ListItem(
+                headlineContent = { Text("MTProto прокси") },
+                supportingContent = { Text("Управление прокси для Telegram relay") },
+                leadingContent = { Icon(Icons.Default.VpnKey, contentDescription = null) },
+                modifier = Modifier.clickable { onMtProxyClick() },
+            )
+        }
+
+        // ----------------------------------------------------------------
+        // ОФОРМЛЕНИЕ: день / ночь / авто + обои
+        // ----------------------------------------------------------------
+        item { SettingsSectionTitle("Оформление") }
+        item {
+            SettingsCard {
+                val context = LocalContext.current
+                val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
+                ThemeMode.entries.forEach { mode ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { ThemeModeHolder.set(context, mode) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = themeMode == mode,
+                            onClick = { ThemeModeHolder.set(context, mode) },
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(mode.title, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+
+                // Свои обои: из галереи или стандартные в тон теме.
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                val customWallpaper by WallpaperHolder.uri.collectAsStateWithLifecycle()
+                val wallpaperPicker = rememberLauncherForActivityResult(
+                    ActivityResultContracts.GetContent()
+                ) { uri ->
+                    if (uri != null) {
+                        try {
+                            context.contentResolver.takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                            )
+                        } catch (_: Exception) {
+                        }
+                        WallpaperHolder.set(context, uri.toString())
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Обои (подложка)", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (customWallpaper != null) {
+                                "Своя картинка из галереи"
+                            } else {
+                                "Стандартные, в тон теме"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
+                        Text("Из галереи")
+                    }
+                }
+                if (customWallpaper != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                    ) {
+                        TextButton(onClick = { WallpaperHolder.set(context, null) }) {
+                            Text("Вернуть стандартные")
+                        }
+                    }
+                }
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // СТАТУС СЕТИ
+        // ----------------------------------------------------------------
+        item { SettingsSectionTitle("Сеть") }
+        item {
+            SettingsCard {
+                SettingsItem(
+                    icon  = Icons.Default.Hub,
+                    title = "Статус соединения",
+                    subtitle = uiState.connectionStatus.displayName,
+                    trailingContent = {
+                        StatusDot(status = uiState.connectionStatus)
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon     = Icons.Default.People,
+                    title    = "Подключено пиров",
+                    subtitle = "${uiState.connectedPeers} устройств",
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon     = Icons.Default.Public,
+                    title    = "Публичный IP",
+                    subtitle = uiState.publicIp ?: "Не удалось определить (нет сети?)",
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon     = Icons.Default.Router,
+                    title    = "Режим подключения",
+                    subtitle = uiState.connectionMode,
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon  = Icons.Default.RestartAlt,
+                    title = "Перезапустить сетевой движок",
+                    subtitle = "Пересоединиться со всеми пирами",
+                    onClick = viewModel::onRestartEngine,
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon  = Icons.Default.Refresh,
+                    title = "Собрать данные об абонентах",
+                    subtitle = "Запустить поиск пиров по сети",
+                    onClick = viewModel::onTriggerGossipDiscovery,
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon     = Icons.Default.VpnKey,
+                    title    = "Туннель через прокси",
+                    subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.proxyTunnelEnabled,
+                            onCheckedChange = viewModel::onProxyTunnelToggle,
+                        )
+                    },
+                )
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // ПЕРЕДАЧА ФАЙЛОВ
+        // ----------------------------------------------------------------
+        item { SettingsSectionTitle("Передача файлов") }
+        item {
+            SettingsCard {
+                SettingsItem(
+                    icon     = Icons.Default.Delete,
+                    title    = "Остановить зависшие отправки",
+                    subtitle = "Отменяет незавершённые отправки и чистит их очереди",
+                    onClick  = viewModel::onCancelStalledTransfers,
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon     = Icons.Default.CleaningServices,
+                    title    = "Очистить завершённые",
+                    subtitle = "Освобождает место; сохранённые файлы остаются у вас",
+                    onClick  = viewModel::onPurgeCompletedTransfers,
+                )
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // БЕЗОПАСНОСТЬ
+        // ----------------------------------------------------------------
+        item { SettingsSectionTitle("Безопасность") }
+        item {
+            SettingsCard {
+                SettingsItem(
+                    icon     = Icons.Default.Backup,
+                    title    = "Резервная копия ключей",
+                    subtitle = "Экспорт ключей для восстановления",
+                    onClick  = onBackup,
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon     = Icons.Default.Security,
+                    title    = "Протокол шифрования",
+                    subtitle = "Ed25519 + X25519 + ChaCha20-Poly1305",
+                )
+            }
+        }
+
+        // ----------------------------------------------------------------
+        // О ПРИЛОЖЕНИИ
+        // ----------------------------------------------------------------
+        item { SettingsSectionTitle("О приложении") }
+        item {
+            SettingsCard {
+                SettingsItem(
+                    icon     = Icons.Default.Info,
+                    title    = "Версия",
+                    subtitle = "APU ${uiState.appVersion}",
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                SettingsItem(
+                    icon     = Icons.Default.Code,
+                    title    = "Rust Core",
+                    subtitle = uiState.rustCoreVersion,
+                )
+            }
+        }
     }
 }
 
@@ -583,8 +686,6 @@ private fun SettingsItem(
             )
         }
     }
-
-
 }
 
 @Composable

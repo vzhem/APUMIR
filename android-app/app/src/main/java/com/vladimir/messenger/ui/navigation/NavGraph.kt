@@ -339,7 +339,10 @@ fun MessengerNavGraph(
                 onContactAdded    = {
                     navController.popBackStack()
                 },
-                onBackClick       = { navController.popBackStack() }
+                onBackClick       = { navController.popBackStack() },
+                onScanQrClick     = {
+                    navController.navigate(Screen.QrScanner.route)
+                },
             )
         }
 

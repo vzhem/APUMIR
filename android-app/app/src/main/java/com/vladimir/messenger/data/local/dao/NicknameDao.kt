@@ -15,6 +15,10 @@ interface NicknameDao {
     @Query("SELECT * FROM nicknames WHERE name = :name")
     suspend fun byName(name: String): List<NicknameEntity>
 
+    /** Поиск по части @никнейма: кто зарегистрировался раньше - выше. */
+    @Query("SELECT * FROM nicknames WHERE name LIKE '%' || :q || '%' ORDER BY registeredAtMs ASC LIMIT 20")
+    suspend fun search(q: String): List<NicknameEntity>
+
     @Query("SELECT * FROM nicknames WHERE ownerId = :ownerId")
     suspend fun byOwner(ownerId: String): NicknameEntity?
 

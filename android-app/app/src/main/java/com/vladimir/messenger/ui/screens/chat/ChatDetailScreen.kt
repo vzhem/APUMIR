@@ -95,10 +95,15 @@ fun ChatDetailScreen(
         }
     }
 
-    Scaffold(
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+        containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 title = {
                     Column {
                         Text(
@@ -168,7 +173,6 @@ fun ChatDetailScreen(
                     )
                 },
         ) {
-            ChatWallpaper()
             when {
                 uiState.isLoading -> {
                     CircularProgressIndicator(
@@ -311,6 +315,7 @@ fun ChatDetailScreen(
                 }
             }
         )
+    }
     }
 }
 

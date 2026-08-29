@@ -38,14 +38,14 @@ fun UsernameConflictDialog() {
         text = {
             Column {
                 Text(
-                    "Ваше @имя оказалось занято пользователем, который " +
-                        "зарегистрировался раньше. Задайте себе новое имя."
+                    "Ваш @никнейм оказался занят пользователем, который " +
+                        "зарегистрировался раньше. Задайте себе новый никнейм."
                 )
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = usernameValue,
                     onValueChange = { usernameValue = it },
-                    label = { Text("имя") },
+                    label = { Text("никнейм") },
                     placeholder = { Text("evzhem") },
                     prefix = { Text("@") },
                     singleLine = true,

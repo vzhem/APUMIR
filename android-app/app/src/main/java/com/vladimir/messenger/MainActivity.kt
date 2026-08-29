@@ -26,6 +26,7 @@ import com.vladimir.messenger.ui.components.AppSplash
 import com.vladimir.messenger.ui.components.UsernameConflictDialog
 import com.vladimir.messenger.ui.theme.P2PMessengerTheme
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.AvatarHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
 import dagger.hilt.android.AndroidEntryPoint
@@ -165,6 +166,7 @@ class MainActivity : ComponentActivity() {
         ThemeModeHolder.init(this)
         WallpaperHolder.init(this)
         UsernameHolder.init(this)
+        AvatarHolder.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Сплэш показывается при запуске приложения (нажатии на иконку).

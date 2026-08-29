@@ -29,6 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,7 +79,11 @@ fun ChatListScreen(
     // Меню создания у кнопки-карандаша: чат, группа, канал.
     var fabMenuExpanded by remember { mutableStateOf(false) }
 
-    Scaffold(
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+        containerColor = Color.Transparent,
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             Column {
@@ -86,6 +91,7 @@ fun ChatListScreen(
                 NetworkStatusBar(status = uiState.networkStatus)
 
                 TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                     title = {
                         if (isSearchVisible) {
                             // Поиск по чатам
@@ -221,7 +227,6 @@ fun ChatListScreen(
                 .fillMaxSize()
                 .padding(paddingValues),
         ) {
-            ChatWallpaper()
             DropdownMenu(
                 expanded = fabMenuExpanded,
                 onDismissRequest = { fabMenuExpanded = false },
@@ -343,6 +348,7 @@ fun ChatListScreen(
                 }
             }
         }
+    }
     }
 
     // Invite dialog

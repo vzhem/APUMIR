@@ -74,9 +74,16 @@ fun GroupChatScreen(
         uiState.members.associate { it.nodeId to it.displayName }
     }
 
-    Scaffold(
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                ),
                 title = {
                     Column {
                         Text(uiState.group?.title ?: "Группа", fontWeight = FontWeight.SemiBold)
@@ -96,7 +103,6 @@ fun GroupChatScreen(
         },
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            ChatWallpaper()
             Column(modifier = Modifier.fillMaxSize()) {
 
             // ── Темы: у каждой видно, сколько сообщений накопилось и сколько не прочитано
@@ -248,6 +254,7 @@ fun GroupChatScreen(
             }
         }
         }
+    }
     }
 
     if (showNewTopic) {

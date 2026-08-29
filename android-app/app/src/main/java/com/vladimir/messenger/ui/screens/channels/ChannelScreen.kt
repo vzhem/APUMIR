@@ -65,9 +65,16 @@ fun ChannelScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showNewPost by remember { mutableStateOf(false) }
 
-    Scaffold(
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                ),
                 title = {
                     Column {
                         Text(
@@ -110,7 +117,6 @@ fun ChannelScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            ChatWallpaper()
             when {
                 uiState.isLoading -> CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),
@@ -162,6 +168,7 @@ fun ChannelScreen(
                 )
             }
         }
+    }
     }
 
     if (showNewPost) {

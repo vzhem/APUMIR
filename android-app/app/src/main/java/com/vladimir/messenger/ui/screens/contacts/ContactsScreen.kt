@@ -16,6 +16,7 @@ import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.ContactShareLink
 import com.vladimir.messenger.util.OwnInvite
 import androidx.compose.ui.Alignment
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -35,9 +36,16 @@ fun ContactsScreen(
     val contacts by viewModel.contacts.collectAsState()
     val context = LocalContext.current
 
-    Scaffold(
+    // Подложка на весь экран, в том числе под верхней панелью.
+    Box(modifier = Modifier.fillMaxSize()) {
+        ChatWallpaper()
+        Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                ),
                 title = { Text("Контакты") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
@@ -68,7 +76,7 @@ fun ContactsScreen(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("Поиск: имя или @имя") },
+                placeholder = { Text("Поиск: имя или @никнейм") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true,
             )
@@ -166,5 +174,6 @@ fun ContactsScreen(
             }
         }
         }
+    }
     }
 }
