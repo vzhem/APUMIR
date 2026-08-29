@@ -6023,3 +6023,43 @@ PowerShell. Правило записано в `docs/START_HERE.md` (разде�
 (arena/01a013d0), `bdc69ae` (01a02092), `5b266fe` (01a0290d), `39d4557`
 (01a03c3d): все четыре ВНУТРИ `main` (`git merge-base --is-ancestor 9fab4ae`),
 уникальной работы в них нет, терять нечего.
+
+## Раунд 47, второй прогон на ПК владельца: заначка важная (2026-08-29)
+
+Владелец выполнил команды 1-6. Факты из его вывода:
+
+1. `checkout main` + `merge --ff-only origin/main` — «Already up to date»,
+   `Test-Path ...\scripts\sync-main.ps1` = `True`. Клон на `main`.
+2. `sync-main.ps1 -DryRun` упал на сети: `Failed to connect to github.com:443
+   after 21110 ms` -> `RESULT: fetch failed.` Скрипт отработал правильно:
+   без свежего fetch он ничего не двигает.
+3. Команды с `^{commit}` и `^{}` PowerShell не принял
+   (`ScriptBlock следует указывать только в качестве значения для параметра
+   Command`) — фигурные скобки он читает как блок кода. Грабля записана в
+   раздел 6 START_HERE, замена: `git rev-list -n 1 <тег>`.
+4. **Заначка (stash) — НЕ мусор.** `git stash show --stat`:
+   `android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so |
+   Bin 6935552 -> 7525696 bytes`. То есть в заначке лежит ПЕРЕСОБРАННОЕ
+   Rust-ядро, а не старьё.
+
+Проверил в песочнице, что лежит в git:
+- `main:android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so` =
+  **6 935 552 байта**, sha256 `3c5e0d645b5fe80367aafdb8590ddc21b9e56b081dcc639e99a1a59a412b2832`,
+  последнее изменение — `68dbd7a` от 2026-08-26 («Restore v11.18.0 tree...»);
+- `armeabi-v7a/libp2p_core.so` = 2 076 080 байт, не менялся с `416b8be`
+  («Initial commit», 2026-08-08);
+- путь НЕ в .gitignore (`git check-ignore` пусто);
+- `build-release.yml` собирает ядро сам: `cargo ndk -t arm64-v8a -t armeabi-v7a
+  -t x86_64 -o ../android-app/app/src/main/jniLibs build --release --features
+  mqtt-dual-broker` — поэтому ОПУБЛИКОВАННЫЕ APK содержат свежее ядро;
+- в `scripts/groups-build-gate.ps1` и `scripts/deploy-f4-direct.ps1` слов
+  cargo/ndk/build-rust/jniLibs/libp2p_core НЕТ — локальная debug-сборка на
+  Windows берёт тот .so, что лежит в jniLibs.
+
+Вывод (честно): бинарь ядра в git отстал от исходников `rust-core` (arm64 —
+дерево v11.18.0 от 26.08, armv7 — вообще из первого коммита от 08.08).
+Публикациям это не вредит (Actions пересобирает), но debug-сборка на телефоне
+и гейт работают на устаревшем ядре. Заначка владельца — как раз более свежая
+пересборка arm64; она уже сохранена в `apumir-full.bundle` на флешке
+(`refs/stash = 5ed7884a`, в бандле 59 ссылок), поэтому не потеряется.
+Решение о том, класть ли свежий .so в git, — за владельцем.
