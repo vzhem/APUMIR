@@ -5853,3 +5853,10 @@ Push-Location C:\APU-M8 (отдельный процесс powershell, Pop не 
 ErrorActionPreference=Stop превращал «release not found» (пока Actions строит)
 в terminating error - цикл ожидания не ждал, а падал. Вызов gh в цикле
 ожидания обёрнут в cmd /c ... 2>nul. Run #62 на момент фикса in_progress.
+
+## Релиз v11.23.0, финал промота
+release: draft=false, prerelease=false, APK 36249434 байт, body = краткие
+заметки из docs/RELEASE_NOTES_v11.23.0.md (gh edit прошёл). /releases/latest
+не двинулся: draft-цикл сорвался сетью ПК (dial tcp graphql). Владельцу даны
+две ручные команды draft=true/draft=false; после них latest должен стать
+v11.23.0.
