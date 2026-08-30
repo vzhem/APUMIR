@@ -45,7 +45,12 @@ param(
     [switch]$IncludeToolchainCaches
 )
 
-$ErrorActionPreference = 'Stop'
+# 'Continue', not 'Stop': git reports progress on stderr even when it succeeds
+# ("Cloning into bare repository..."). Under 'Stop' PowerShell turns that first
+# stderr line into a terminating error and the script dies on its own success.
+# Every git call below is checked by $LASTEXITCODE instead, and the file copies
+# are checked by the verification pass at the end.
+$ErrorActionPreference = 'Continue'
 
 function Write-Step([string]$Message) {
     Write-Output ''
@@ -55,6 +60,15 @@ function Write-Step([string]$Message) {
 function Fail([string]$Message) {
     Write-Output ''
     Write-Output "FATAL: $Message"
+    # Do not leave a half-written backup on the drive: it looks like a good copy
+    # and would be trusted later. The timestamped folder is ours alone.
+    if ($script:Root -and (Test-Path $script:Root)) {
+        Write-Output "removing the incomplete backup at $($script:Root)"
+        Remove-Item -Recurse -Force $script:Root
+        if (Test-Path $script:Root) {
+            Write-Output "WARNING: could not remove $($script:Root) - delete it by hand."
+        }
+    }
     exit 1
 }
 
@@ -100,6 +114,8 @@ Write-Output "history:      $CommitCount commits, $TagCount tags"
 
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $Root = Join-Path $DriveRoot "APUMIR-backup-$Stamp"
+# Publish it so Fail() can clean up a half-written backup.
+$script:Root = $Root
 New-Item -ItemType Directory -Path $Root -Force | Out-Null
 $RepoDir = Join-Path $Root 'repo'
 $LocalDir = Join-Path $Root 'machine-local'
@@ -356,6 +372,40 @@ $FileCount = (Get-ChildItem -Path $Root -Recurse -File | Measure-Object).Count
 $TotalMB = [math]::Round(((Get-ChildItem -Path $Root -Recurse -File |
     Measure-Object -Property Length -Sum).Sum) / 1MB, 1)
 Write-Output "MANIFEST.txt written with sha256 for $FileCount files."
+
+# ---------------------------------------------------------------- 8. verify
+
+# With ErrorActionPreference set to 'Continue' a failed copy no longer aborts
+# the script, so the run ends here instead: everything that has to be on the
+# drive is checked to actually be there.
+Write-Step '8. verifying what was written to the drive'
+$Required = @(
+    @{ Name = 'mirror'; Path = (Join-Path $RepoDir 'apumir-mirror.git') },
+    @{ Name = 'bundle'; Path = $Bundle },
+    @{ Name = 'repo state'; Path = $DirtyFile },
+    @{ Name = 'manifest'; Path = $Manifest },
+    @{ Name = 'restore script'; Path = (Join-Path $Root 'restore-from-usb.ps1') },
+    @{ Name = 'restore guide'; Path = (Join-Path $Root 'RESTORE-ON-NEW-PC.md') }
+)
+$MissingRequired = 0
+foreach ($r in $Required) {
+    if (Test-Path $r.Path) {
+        Write-Output ("  ok       {0,-16} {1}" -f $r.Name, $r.Path.Substring($Root.Length + 1))
+    } else {
+        Write-Output ("  MISSING  {0,-16} {1}" -f $r.Name, $r.Path)
+        $MissingRequired++
+    }
+}
+$MirrorKeystore = & git --git-dir=$Mirror cat-file -e "${Head}:android-app/app/p2p-release.jks" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Output '  MISSING  release keystore is not in the mirrored history'
+    $MissingRequired++
+} else {
+    Write-Output '  ok       release keystore is in the mirrored history'
+}
+if ($MissingRequired -gt 0) {
+    Fail "$MissingRequired required items did not make it onto the drive."
+}
 
 # ---------------------------------------------------------------- summary
 

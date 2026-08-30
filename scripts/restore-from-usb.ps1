@@ -38,7 +38,11 @@ param(
     [switch]$Force
 )
 
-$ErrorActionPreference = 'Stop'
+# 'Continue', not 'Stop': git reports progress on stderr even when it succeeds.
+# Under 'Stop' PowerShell turns that into a terminating error and the script
+# dies on its own success. Git calls are checked by $LASTEXITCODE, and the
+# restored tree is checked file by file in step 7.
+$ErrorActionPreference = 'Continue'
 $OriginUrl = 'https://github.com/vzhem/APUMIR.git'
 
 function Write-Step([string]$Message) {
@@ -123,6 +127,9 @@ if (Test-Path $Target) {
     if ($Existing -and $Force) {
         Write-Output "-Force given: removing the existing $Target."
         Remove-Item -Recurse -Force $Target
+        if (Test-Path $Target) {
+            Fail "could not remove the existing $Target. Close anything holding it (Android Studio, a terminal sitting in it) and retry."
+        }
     }
 }
 
