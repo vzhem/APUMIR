@@ -10,7 +10,6 @@ package com.vladimir.messenger.ui.screens.settings
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -39,9 +38,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import com.vladimir.messenger.ui.components.MyAvatar
@@ -54,6 +50,7 @@ import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
+import com.vladimir.messenger.util.QrCodeGenerator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -165,23 +162,10 @@ fun SettingsScreen(
 
     // Диалог «Мой QR-код».
     if (showMyQrDialog) {
+        // Тот же генератор, что и везде: свой ZXing-блок здесь рисовал код с
+        // другими настройками, поэтому «Мой QR-код» отличался от QR в контактах.
         val qrBitmap = remember(uiState.inviteLink) {
-            try {
-                val writer = QRCodeWriter()
-                val hints = mapOf(EncodeHintType.CHARACTER_SET to "UTF-8")
-                val bitMatrix = writer.encode(uiState.inviteLink, BarcodeFormat.QR_CODE, 512, 512, hints)
-                val width = bitMatrix.width
-                val height = bitMatrix.height
-                val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-                for (x in 0 until width) {
-                    for (y in 0 until height) {
-                        bmp.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-                    }
-                }
-                bmp
-            } catch (e: Exception) {
-                null
-            }
+            QrCodeGenerator.generateQrCode(uiState.inviteLink, 512)
         }
 
         AlertDialog(

@@ -3,6 +3,7 @@
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.repository.NetworkStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -126,7 +127,11 @@ class SettingsViewModel @Inject constructor(
                 it.copy(
                     displayName      = displayName,
                     fingerprint      = shortFingerprint,
-                    inviteLink       = "p2p://invite/$pubKey",
+                    // Та же ссылка, что и во всём приложении: она несёт
+                    // подписанный токен, поэтому QR-код из настроек поднимает
+                    // ранг так же, как ссылка из раздела рангов. p2p://invite/
+                    // остаётся запасным путём, пока узел не создан.
+                    inviteLink       = OwnInvite.link(context) ?: "p2p://invite/$pubKey",
                     connectionStatus = networkStatus,
                     connectedPeers   = RustBridge.connectedPeers().toInt(),
                     connectionMode   = "P2P / QUIC",

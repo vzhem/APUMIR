@@ -6,6 +6,7 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
+import com.vladimir.messenger.util.OwnInvite
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -58,7 +59,10 @@ class CreateIdentityUseCase @Inject constructor(
                 .putString("existing_public_key", publicKey)
                 .apply()
 
-            val inviteLink = "p2p://invite/$publicKey"
+            // prefs выше уже записаны, sidecar установлен — значит OwnInvite
+            // может сразу выдать ссылку с подписанным токеном, и новичок видит
+            // в регистрации тот же QR, которым потом поднимают ранг.
+            val inviteLink = OwnInvite.link(context) ?: "p2p://invite/$publicKey"
             val fingerprint = if (publicKey.length > 16) publicKey.take(16) + "..." else publicKey
 
             Result.success(IdentityResult(inviteLink = inviteLink, fingerprint = fingerprint))

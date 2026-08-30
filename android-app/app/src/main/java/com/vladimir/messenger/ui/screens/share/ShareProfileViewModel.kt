@@ -1,10 +1,12 @@
 package com.vladimir.messenger.ui.screens.share
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.service.BotApi
+import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.util.ReferralInviteLink
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -51,7 +53,11 @@ class ShareProfileViewModel @Inject constructor(
             // Своё @имя едет в ссылке, чтобы новые контакты сохраняли его сами.
             val myUsername = (prefs.getString("my_username", "") ?: "").trim().trimStart('@').trim()
             val usernamePart = if (myUsername.isEmpty()) "" else "&u=${myUsername.urlEncode()}"
-            val legacyLink = "p2pmessenger://add?node_id=$encodedNodeId&name=$encodedName$usernamePart"
+            // Единый источник ссылки: OwnInvite.link добавляет подписанный
+            // токен, без которого приглашение не поднимает ранг. Ручная склейка
+            // оставлена запасным путём на случай, когда узел ещё не в prefs.
+            val legacyLink = OwnInvite.link(context)
+                ?: "p2pmessenger://add?node_id=$encodedNodeId&name=$encodedName$usernamePart"
             val alternativeLink = botApi.generateShareLink(nodeId)
 
             val signedLink = if (ReferralInviteLink.DEPLOYMENT_ENABLED &&
@@ -65,14 +71,19 @@ class ShareProfileViewModel @Inject constructor(
                 null
             }
 
+            val chosenLink = signedLink ?: legacyLink
             _uiState.update {
                 it.copy(
                     displayName = displayName,
                     nodeId = nodeId,
-                    shareLink = signedLink ?: legacyLink,
+                    shareLink = chosenLink,
                     legacyLink = legacyLink,
                     alternativeLink = alternativeLink,
-                    isSignedReferral = signedLink != null,
+                    // Правда о той ссылке, которая реально показана: токен может
+                    // лежать и в HTTPS-форме, и в параметре r= обычной ссылки.
+                    isSignedReferral = signedLink != null ||
+                        Uri.parse(chosenLink)
+                            .getQueryParameter(ReferralInviteLink.TOKEN_PARAMETER) != null,
                     isLoading = false,
                 )
             }

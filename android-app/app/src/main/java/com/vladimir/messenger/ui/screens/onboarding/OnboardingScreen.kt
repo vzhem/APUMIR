@@ -9,7 +9,6 @@ package com.vladimir.messenger.ui.screens.onboarding
 //   3. ShowInvite — QR-код + текстовая ссылка для первого контакта
 // =============================================================================
 
-import android.graphics.Bitmap
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -38,9 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.qrcode.QRCodeWriter
-import android.graphics.Color as AndroidColor
+import com.vladimir.messenger.util.QrCodeGenerator
 
 @Composable
 fun OnboardingScreen(
@@ -308,8 +305,10 @@ private fun ShowInviteStep(
     var copied by remember { mutableStateOf(false) }
 
     // QR-код из invite-ссылки
+    // Тот же генератор, что и в остальном приложении: QR в регистрации должен
+    // быть ровно таким же, каким его увидят в контактах и в разделе рангов.
     val qrBitmap = remember(inviteLink) {
-        generateQrCode(inviteLink, size = 512)
+        QrCodeGenerator.generateQrCode(inviteLink, 512)
     }
 
     Column(
@@ -425,22 +424,5 @@ private fun ShowInviteStep(
             Spacer(modifier = Modifier.width(8.dp))
             Icon(Icons.Default.ArrowForward, contentDescription = null)
         }
-    }
-}
-
-// Генерация QR-кода через ZXing
-private fun generateQrCode(content: String, size: Int): Bitmap? {
-    return try {
-        val writer = QRCodeWriter()
-        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, size, size)
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
-        for (x in 0 until size) {
-            for (y in 0 until size) {
-                bitmap.setPixel(x, y, if (bitMatrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE)
-            }
-        }
-        bitmap
-    } catch (e: Exception) {
-        null
     }
 }
