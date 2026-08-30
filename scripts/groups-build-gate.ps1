@@ -52,7 +52,21 @@ try {
         Write-Output 'The build would test different code. Fix the checkout first:'
         Write-Output '  cd C:\APU-M8'
         Write-Output '  git fetch origin'
-        Write-Output '  git checkout arena/01a03c3d-apumir'
+        # No branch name is hardcoded here: the previous hint named a branch
+        # that no longer exists and sent the user nowhere. Ask git instead.
+        & git fetch origin --quiet 2>$null
+        $Where = (& git branch -r --contains $ExpectedCommit 2>&1 | Out-String).Trim()
+        if ($Where -ne '' -and $Where -notmatch 'fatal|error|unknown revision') {
+            Write-Output "Commit $ExpectedCommit is on:"
+            $Where -split "`r?`n" | Where-Object { $_ -match 'origin/' } | ForEach-Object {
+                Write-Output ('  git checkout ' + ($_.Trim() -replace '^origin/', ''))
+            }
+        }
+        else {
+            Write-Output "  git fetch was not enough: $ExpectedCommit is not on origin."
+            Write-Output '  Ask which branch holds it before building anything.'
+        }
+        Write-Output '  git pull --ff-only origin <that branch>'
         Write-Output '  git log --oneline -1'
         Write-Output 'A failed git pull is a known trap (docs/AI_HANDOFF.md), so this gate'
         Write-Output 'refuses to continue on a wrong HEAD instead of reporting a fake pass.'
