@@ -140,10 +140,16 @@ if ($MirrorTags -lt $TagCount) { Fail "the mirror holds $MirrorTags tags but the
 # counterpart is what a restored PC would get, and the newer commits would be
 # nowhere in the restored clone. Reconcile here, where both are visible:
 # fast-forward when origin is strictly ahead, never discard anything else.
-$RemoteRefs = (& git --git-dir=$Mirror for-each-ref --format='%(refname:short)' refs/remotes/origin)
+# Full refnames, never %(refname:short): the short form of
+# refs/remotes/origin/HEAD is "origin/HEAD" on git 2.39 but plain "origin" on
+# newer git. The first version of this loop compared against 'origin/HEAD' only,
+# so on the owner's machine it fell through and created a branch literally
+# named "origin". Full refnames are not rewritten by git.
+$RemoteRefs = (& git --git-dir=$Mirror for-each-ref --format='%(refname)' refs/remotes/origin)
 foreach ($rr in $RemoteRefs) {
-    if (-not $rr -or $rr -eq 'origin/HEAD') { continue }
-    $Name = $rr -replace '^origin/', ''
+    if (-not $rr) { continue }
+    $Name = $rr -replace '^refs/remotes/origin/', ''
+    if (-not $Name -or $Name -eq 'HEAD' -or $Name -eq 'origin') { continue }
     $LocalSha = (& git --git-dir=$Mirror rev-parse --verify --quiet "refs/heads/$Name" 2>$null)
     $RemoteSha = (& git --git-dir=$Mirror rev-parse --verify --quiet $rr)
     if (-not $RemoteSha) { continue }
@@ -182,21 +188,40 @@ if ($LASTEXITCODE -ne 0) { Fail 'git bundle create failed.' }
 & git bundle verify $Bundle 2>&1 | Select-Object -Last 1 | ForEach-Object { Write-Output "verify:       $_" }
 
 # "git bundle verify" says "complete history" even for a broken bundle, so the
-# only trustworthy check is to clone it and look at the result.
+# bundle is cloned back and inspected.
+#
+# The probe deliberately does NOT check out a working tree. Cloning a bundle
+# leaves its refs under refs\remotes\origin\* with no HEAD, so "rev-parse HEAD"
+# fails and every file test comes back false even for a perfectly good bundle -
+# which is how the first version of this check printed "keystore in the clone:
+# False" and killed a valid run. Verification is done on the object database
+# instead; restore-from-usb.ps1 performs the real checkout.
 $Probe = Join-Path $env:TEMP "apumir-bundle-probe-$Stamp"
-& git clone --quiet $Bundle $Probe 2>&1 | Out-Null
+& git clone --quiet --no-checkout $Bundle $Probe 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     if (Test-Path $Probe) { Remove-Item -Recurse -Force $Probe }
     Fail 'the bundle could not be cloned back. Do not trust this backup.'
 }
-$ProbeHead = (& git -C $Probe rev-parse HEAD).Trim()
+
+# Depending on how git mapped the bundle, the branch lands under
+# refs\remotes\origin\ or refs\heads\ - accept either.
+$ProbeSha = ''
+$ProbeRef = ''
+foreach ($cand in @("refs/remotes/origin/$Branch", "refs/heads/$Branch")) {
+    $found = (& git -C $Probe rev-parse --verify --quiet $cand 2>$null)
+    if ($found) { $ProbeSha = "$found".Trim(); $ProbeRef = $cand; break }
+}
 $ProbeTags = (& git -C $Probe tag | Measure-Object -Line).Lines
-$ProbeCommits = ((& git -C $Probe rev-list --count HEAD) | Out-String).Trim()
-$ProbeKeystore = Test-Path (Join-Path $Probe 'android-app\app\p2p-release.jks')
-Write-Output "test clone:   HEAD $($ProbeHead.Substring(0, [math]::Min(12, $ProbeHead.Length))), $ProbeCommits commits, $ProbeTags tags"
-Write-Output "keystore in the clone: $ProbeKeystore"
+$ProbeCommits = ''
+if ($ProbeSha) { $ProbeCommits = ((& git -C $Probe rev-list --count $ProbeSha) | Out-String).Trim() }
+& git -C $Probe cat-file -e "${Head}:android-app/app/p2p-release.jks" 2>$null
+$ProbeKeystore = ($LASTEXITCODE -eq 0)
+
+Write-Output "test clone:   $ProbeRef = $($ProbeSha.Substring(0, [math]::Min(12, $ProbeSha.Length))), $ProbeCommits commits, $ProbeTags tags"
+Write-Output "keystore in the bundle: $ProbeKeystore"
 Remove-Item -Recurse -Force $Probe
-if ($ProbeHead -ne $Head) { Fail "the bundle's HEAD ($ProbeHead) differs from the repository HEAD ($Head)." }
+if (-not $ProbeSha) { Fail "the bundle has no ref for branch '$Branch'." }
+if ($ProbeSha -ne $Head) { Fail "the bundle's $Branch ($ProbeSha) differs from the repository HEAD ($Head)." }
 if ($ProbeTags -lt $TagCount) { Fail "the bundle holds $ProbeTags tags but the repository has $TagCount." }
 if (-not $ProbeKeystore) { Fail 'the release keystore did not come back out of the bundle.' }
 
