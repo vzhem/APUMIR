@@ -6796,3 +6796,59 @@ origin/<ветка>`: после него `git status` обязан показа
 `git rev-parse HEAD` с `git ls-remote origin refs/heads/<ветка>`, а не
 полагаться на состояние, оставленное предыдущим вызовом. После финального
 восстановления `git status` пуст — дерево совпадает с `37bb731` на origin.
+
+## Раунд 54: гейт GREEN на новом коде и публичный релиз v11.24.0
+
+Первый прогон гейта владелец сделал в detached HEAD на `bfceaa7` — Gradle
+отчитался `35 actionable tasks: 35 up-to-date`, `testDebugUnitTest UP-TO-DATE`,
+и показал `tests=131` с числами старого кода (`ReferralCreditPolicyTest` 13,
+`ReferralWireTest` 10, `InviteLinkParserTest` 12, `ReferralReceiptTest`
+отсутствует). Совпадение со старым коммитом до единицы и размер APK 30 781 972
+байт — тот же, что в раунде 51, — показали, что прогон ничего не проверял.
+Правило: перед гейтом сверять `git rev-parse HEAD`, и передавать
+`-ExpectedCommit`, иначе гейт молча прогонит чужое дерево из кэша. После
+`git checkout` + `git reset --hard origin/...` и `-Clean` прогон стал честным.
+
+Честный прогон на `2f365a0` (`35 actionable tasks: 35 executed`, APK
+30 798 356 байт, `RESULT: GREEN`):
+
+```
+ReferralCreditPolicyTest: tests=20   ReferralReceiptTest: tests=6
+ReferralWireTest:         tests=11   InviteLinkParserTest: tests=15
+unit test totals: tests=148 failures=0 skipped=0
+```
+
+Все 148 ожиданий, которые я в прошлом раунде считал вручную, подтвердились;
+компиляция подписанного варианта прошла с первого раза.
+
+Дальше: `sync-main.ps1 -WorkBranch arena/01a04df9-apumir` поднял `main`
+`84f213a -> 2f365a0` (fast-forward, 26 файлов, +2319/-16),
+`make-release.ps1 -Version v11.24.0 -ExpectedCommit 2f365a0` ещё раз прогнал
+гейт и запушил тег, `promote-release.ps1` снял prerelease и переопубликовал.
+Проверено через API, а не по логу: `/releases/latest` = `v11.24.0`,
+`draft=false prerelease=false`, `app-release.apk` 36 265 818 байт,
+опубликован 2026-08-30T07:23:01Z; аннотированный тег `v11.24.0` указывает
+ровно на `2f365a0dbc8e24b0cd97bfcda4f8458e364b7932`; `main` = `2f365a0`.
+
+### Что релиз НЕ доказывает
+
+Хост-гейт покрывает чистую логику: сборку и разбор конверта, чтение байтовых
+форматов, правила зачисления. Он НЕ покрывает и не может покрыть два места,
+которые работают только на устройстве:
+
+- `ReferralReceiptVerifier` — вызовы uniffi (`verifyReferralInviteToken`,
+  `verifyIdentitySigningBinding`, `verifiedReferralInviterNodeId`);
+- `ReferralAttributionSender.sendPending` — настоящий токен из
+  `createSignedReferralToken` и настоящая привязка из sidecar.
+
+То есть подписанная цепочка целиком на живом железе не проходила ни разу, а
+сборка уже публичная и телефоны получат предложение обновиться. Проверка на
+двух телефонах из необязательной стала срочной. Напоминание про правило
+новичков: identity, созданная до генерации ссылки, отклоняется с причиной
+`invitee identity is not new`, поэтому для положительного теста приглашённому
+нужен новый узел.
+
+Скачать и распаковать выпущенный APK из песочницы нельзя:
+`release-assets.githubusercontent.com` обрывает соединение, поэтому «в релиз
+попал именно новый код» подтверждается цепочкой тег -> коммит -> гейт на этом
+коммите, а не разбором артефакта.
