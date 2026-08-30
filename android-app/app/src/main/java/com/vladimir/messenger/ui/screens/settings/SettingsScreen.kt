@@ -165,7 +165,7 @@ fun SettingsScreen(
         // Тот же генератор, что и везде: свой ZXing-блок здесь рисовал код с
         // другими настройками, поэтому «Мой QR-код» отличался от QR в контактах.
         val qrBitmap = remember(uiState.inviteLink) {
-            QrCodeGenerator.generateQrCode(uiState.inviteLink, 512)
+            QrCodeGenerator.generateQrCode(uiState.inviteLink)
         }
 
         AlertDialog(

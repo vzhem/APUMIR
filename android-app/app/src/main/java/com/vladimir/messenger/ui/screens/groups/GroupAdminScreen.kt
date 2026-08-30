@@ -693,7 +693,7 @@ private fun InviteCard(
     onRevoke: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val bitmap = remember(invite.link) { QrCodeGenerator.generateQrCode(invite.link, 320) }
+    val bitmap = remember(invite.link) { QrCodeGenerator.generateQrCode(invite.link) }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 

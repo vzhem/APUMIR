@@ -308,7 +308,7 @@ private fun ShowInviteStep(
     // Тот же генератор, что и в остальном приложении: QR в регистрации должен
     // быть ровно таким же, каким его увидят в контактах и в разделе рангов.
     val qrBitmap = remember(inviteLink) {
-        QrCodeGenerator.generateQrCode(inviteLink, 512)
+        QrCodeGenerator.generateQrCode(inviteLink)
     }
 
     Column(

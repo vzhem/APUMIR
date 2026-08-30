@@ -41,7 +41,7 @@ fun InviteShareCard(
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val qrBitmap = remember(link) { QrCodeGenerator.generateQrCode(link, 512) }
+    val qrBitmap = remember(link) { QrCodeGenerator.generateQrCode(link) }
 
     Column(
         modifier = modifier.fillMaxWidth(),

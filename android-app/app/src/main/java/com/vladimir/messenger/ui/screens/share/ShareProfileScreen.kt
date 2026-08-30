@@ -83,7 +83,7 @@ fun ShareProfileScreen(
             // QR-код профиля сразу на экране: наводишь камеру друга — и контакт добавлен,
             // без передачи ссылок вручную.
             val qrBitmap = remember(uiState.shareLink) {
-                QrCodeGenerator.generateQrCode(uiState.shareLink, 512)
+                QrCodeGenerator.generateQrCode(uiState.shareLink)
             }
             if (qrBitmap != null) {
                 Image(
