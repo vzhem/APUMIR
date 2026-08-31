@@ -459,6 +459,18 @@ fun MessengerNavGraph(
                     navController.navigate(Screen.GroupAdmin.createRoute(groupId))
                 },
                 onBackClick = { navController.popBackStack() },
+                // Значок другой группы в левой колонке: подменяем текущий
+                // экран чата, чтобы «Назад» не вёл по цепочке старых групп.
+                onSwitchGroup = { groupId ->
+                    navController.navigate(Screen.GroupChat.createRoute(groupId)) {
+                        popUpTo(Screen.GroupChat.route) { inclusive = true }
+                    }
+                },
+                onSwitchChannel = { channelId ->
+                    navController.navigate(Screen.Channel.createRoute(channelId)) {
+                        popUpTo(Screen.GroupChat.route) { inclusive = true }
+                    }
+                },
             )
         }
 

@@ -21,6 +21,8 @@ import javax.inject.Inject
 data class GroupChatUiState(
     val groupId: String = "",
     val group: GroupSummary? = null,
+    /** Все свои группы и каналы — для левой колонки значков на экране чата. */
+    val allGroups: List<GroupSummary> = emptyList(),
     val topics: List<TopicSummary> = emptyList(),
     val selectedTopicId: String? = null,
     val messages: List<MessageEntity> = emptyList(),
@@ -31,6 +33,8 @@ data class GroupChatUiState(
     val canManageTopics: Boolean = false,
     val error: String? = null,
     val sending: Boolean = false,
+    /** Открыты с темой из канала (комментарии): сразу лента, не список тем. */
+    val startInTopic: Boolean = false,
 )
 
 @HiltViewModel
@@ -48,11 +52,14 @@ class GroupChatViewModel @Inject constructor(
     private val requestedTopicId: String? =
         savedStateHandle.get<String>("topicId")?.takeIf { it.isNotBlank() }
 
-    private val _uiState = MutableStateFlow(GroupChatUiState(groupId = groupId))
+    private val _uiState = MutableStateFlow(
+        GroupChatUiState(groupId = groupId, startInTopic = requestedTopicId != null)
+    )
     val uiState: StateFlow<GroupChatUiState> = _uiState.asStateFlow()
 
     init {
         observeGroup()
+        observeAllGroups()
         observeMembers()
         observeTopics()
         // Вступивший позже не застал создание тем - просим список у владельца.
@@ -65,6 +72,18 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.observeGroup(groupId).collect { summary ->
                 _uiState.update { it.copy(group = summary) }
+            }
+        }
+    }
+
+    /**
+     * Левая колонка значков: все свои группы и каналы с непрочитанными.
+     * Тот же поток, которым пользуется список групп, — счётчики те же.
+     */
+    private fun observeAllGroups() {
+        viewModelScope.launch {
+            groupRepository.observeGroups().collect { list ->
+                _uiState.update { it.copy(allGroups = list) }
             }
         }
     }
