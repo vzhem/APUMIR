@@ -185,7 +185,7 @@ fun AddContactScreen(
                             value = uiState.nickQuery,
                             onValueChange = viewModel::onNickQueryChanged,
                             label = { Text("никнейм") },
-                            placeholder = { Text("evzhem") },
+                            placeholder = { Text("nickname") },
                             prefix = { Text("@") },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                             singleLine = true,
