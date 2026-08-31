@@ -140,7 +140,7 @@ fun SettingsScreen(
                     value = usernameValue,
                     onValueChange = { usernameValue = it },
                     label = { Text("никнейм") },
-                    placeholder = { Text("evzhem") },
+                    placeholder = { Text("nickname") },
                     prefix = { Text("@") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),

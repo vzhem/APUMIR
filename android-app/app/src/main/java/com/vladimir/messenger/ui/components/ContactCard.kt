@@ -53,7 +53,7 @@ fun ContactCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     onShareClick: (() -> Unit)? = null,
-    /** Оригинальное имя через собаку, например @evzhem. */
+    /** Оригинальное имя через собаку, например @nickname. */
     username: String = "",
 ) {
     // Присланный аватар из роевого реестра (если есть) - иначе инициалы.

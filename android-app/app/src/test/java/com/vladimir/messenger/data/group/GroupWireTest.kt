@@ -335,21 +335,21 @@ class GroupWireTest {
 
     @Test
     fun nicknameRoundTrip() {
-        val envelope = GroupWire.buildNick("owner_pk", "evzhem", 1770000000000L, hops = 0)
+        val envelope = GroupWire.buildNick("owner_pk", "nickname", 1770000000000L, hops = 0)
         val parsed = GroupWire.parse(envelope)
         assertTrue(parsed is GroupWire.Packet.Nick)
         val nick = parsed as GroupWire.Packet.Nick
         assertEquals("owner_pk", nick.ownerId)
-        assertEquals("evzhem", nick.name)
+        assertEquals("nickname", nick.name)
         assertEquals(1770000000000L, nick.registeredAtMs)
         assertEquals(0, nick.hops)
     }
 
     @Test
     fun nicknameStripsLeadingAt() {
-        val parsed = GroupWire.parse(GroupWire.buildNick("owner", "@evzhem", 5L, hops = 1))
+        val parsed = GroupWire.parse(GroupWire.buildNick("owner", "@nickname", 5L, hops = 1))
         val nick = parsed as GroupWire.Packet.Nick
-        assertEquals("evzhem", nick.name)
+        assertEquals("nickname", nick.name)
     }
 
     @Test
