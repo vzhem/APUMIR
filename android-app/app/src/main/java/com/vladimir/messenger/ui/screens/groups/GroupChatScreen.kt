@@ -28,6 +28,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -749,48 +752,44 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
                     TopicIconView(icon, 34.dp)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Значок темы: " + (TopicIconCatalog.labels[icon] ?: ""),
+                        "Значок темы: " + TopicIconCatalog.describe(icon),
                         style = MaterialTheme.typography.titleSmall,
                         color = Color(0xFF5A6472),
                     )
                 }
-                // Живые значки: каждый анимирован прямо в сетке выбора,
-                // выбранный обведён золотым на светлом.
-                TopicIconCatalog.kinds.chunked(4).forEach { rowKinds ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        rowKinds.forEach { kind ->
-                            val selected = kind == icon
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFFE8EEF5))
-                                        .then(
-                                            if (selected) {
-                                                Modifier.border(
-                                                    2.dp,
-                                                    MaterialTheme.colorScheme.primary,
-                                                    RoundedCornerShape(12.dp),
-                                                )
-                                            } else {
-                                                Modifier
-                                            }
+                // Живые значки уже анимированы прямо в сетке выбора; сетка
+                // ленивая, чтобы 105 анимаций не тормозили телефон.
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(5),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(4.dp),
+                ) {
+                    gridItems(TopicIconCatalog.kinds, key = { it }) { kind ->
+                        val selected = kind == icon
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFE8EEF5))
+                                .then(
+                                    if (selected) {
+                                        Modifier.border(
+                                            2.dp,
+                                            MaterialTheme.colorScheme.primary,
+                                            RoundedCornerShape(12.dp),
                                         )
-                                        .clickable { icon = kind },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    AnimatedTopicIcon(kind, Modifier.size(34.dp))
-                                }
-                                Text(
-                                    TopicIconCatalog.labels[kind].orEmpty(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF5A6472),
+                                    } else {
+                                        Modifier
+                                    }
                                 )
-                            }
+                                .clickable { icon = kind },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AnimatedTopicIcon(kind, Modifier.size(36.dp))
                         }
                     }
                 }
