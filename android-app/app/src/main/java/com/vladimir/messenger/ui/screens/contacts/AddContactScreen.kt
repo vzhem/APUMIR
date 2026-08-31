@@ -139,7 +139,7 @@ fun AddContactScreen(
                             value = uiState.inviteLink,
                             onValueChange = viewModel::onInviteLinkChanged,
                             label = { Text("Ссылка") },
-                            placeholder = { Text("p2pmessenger://add?... или pk_...") },
+                            placeholder = { Text("Ссылка") },
                             modifier = Modifier.fillMaxWidth(),
                             supportingText = { uiState.error?.let { Text(it) } },
                         )

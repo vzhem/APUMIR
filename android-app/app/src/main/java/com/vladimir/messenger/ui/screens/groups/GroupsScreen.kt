@@ -411,7 +411,7 @@ private fun JoinByLinkDialog(
                         error = null
                     },
                     label = { Text("Ссылка-приглашение") },
-                    placeholder = { Text("p2pmessenger://group?slug=...") },
+                    placeholder = { Text("Ссылка") },
                     // Ссылка длинная (в ней адрес владельца) — даём ей переноситься.
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
