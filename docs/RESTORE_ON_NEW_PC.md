@@ -12,10 +12,12 @@
 ## 1. Сделать копию
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\backup-to-usb.ps1 -Drive E:
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\backup-to-usb.ps1
 ```
 
-`-Drive` — буква флешки. Добавь `-IncludeToolchainCaches`, если хочешь, чтобы
+Без аргументов скрипт находит флешку **по метке `APU_BACKUP`**, так что буква
+может быть любой. Если метки нет или хочется указать явно — `-Drive E:`.
+Добавь `-IncludeToolchainCaches`, если хочешь, чтобы
 новый ПК собирал проект и прошивал телефоны **без интернета**: тогда в копию
 лягут дистрибутив Gradle 9.5.0 и `platform-tools` (сотни мегабайт).
 

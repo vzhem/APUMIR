@@ -26,15 +26,26 @@
 # "Failed to traverse parents of commit ...". So this script refuses to run on a
 # shallow clone AND re-clones the bundle into a temp dir to prove it works.
 #
-# Usage (from any directory):
+# Usage (from any directory). With no -Drive the stick is found by its label
+# APU_BACKUP, so the letter does not matter:
+#   powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\backup-to-usb.ps1
+#   powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\backup-to-usb.ps1 -IncludeToolchainCaches
 #   powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\backup-to-usb.ps1 -Drive E:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\backup-to-usb.ps1 -Drive E: -IncludeToolchainCaches
 #
 # Restore on the new PC: see docs\RESTORE_ON_NEW_PC.md or scripts\restore-from-usb.ps1.
+#
+# Relationship to scripts\backup-to-flash.ps1: that older script (round 46)
+# mirrors the working tree with robocopy into APU-BACKUP\APUMIR and rewrites
+# APU-BACKUP\apumir-full.bundle. It is still valid and still the fastest way to
+# refresh a plain folder copy. This one writes a timestamped, self-verifying
+# backup with a sha256 manifest, the machine-local files git ignores, any
+# uncommitted work, and a restore script - use it before travelling or before
+# retiring a PC. docs\PC_TRANSFER.md describes both.
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    # Optional. With no -Drive the stick is found by its volume label, the way
+    # scripts\backup-to-flash.ps1 has done since round 46.
     [string]$Drive,
 
     # Defaults to the repository the script lives in.
@@ -73,6 +84,18 @@ function Fail([string]$Message) {
 }
 
 # ---------------------------------------------------------------- drive checks
+
+# Without -Drive the stick is found by its volume label, using the same call
+# that scripts\backup-to-flash.ps1 has used successfully on the owner's machine
+# since round 46. The letter may differ between PCs; the label does not.
+if (-not $Drive) {
+    $Vol = Get-Volume -FileSystemLabel 'APU_BACKUP' -ErrorAction SilentlyContinue
+    if ($null -eq $Vol -or [string]::IsNullOrEmpty($Vol.DriveLetter)) {
+        Fail 'no drive labelled APU_BACKUP is mounted. Insert the white flash drive, or pass -Drive F: explicitly.'
+    }
+    $Drive = $Vol.DriveLetter + ':'
+    Write-Output "flash found by label APU_BACKUP: $Drive"
+}
 
 $DriveLetter = ($Drive -replace '[\\:]', '')
 if ($DriveLetter.Length -ne 1) { Fail "expected a drive letter such as E: but got '$Drive'." }
