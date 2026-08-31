@@ -250,6 +250,15 @@ private fun DrawScope.tri(color: Color, x1: Float, y1: Float, x2: Float, y2: Flo
     )
 }
 
+private fun DrawScope.tri(brush: Brush, x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float) {
+    drawPath(
+        Path().apply {
+            moveTo(x1, y1); lineTo(x2, y2); lineTo(x3, y3); close()
+        },
+        brush,
+    )
+}
+
 private fun DrawScope.arcStroke(color: Color, x1: Float, y1: Float, cx: Float, cy: Float, x2: Float, y2: Float, sw: Float) {
     drawPath(
         Path().apply {
