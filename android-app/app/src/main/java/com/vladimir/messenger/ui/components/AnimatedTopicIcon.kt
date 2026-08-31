@@ -283,7 +283,7 @@ private fun DrawScope.drawStar(t: Float) {
                 val rad = if (i % 2 == 0) r else r * 0.45f
                 val px = cx + cosF(angle * PI2 / 360f) * rad
                 val py = cy + sinF(angle * PI2 / 360f) * rad
-                if (i == 0) moveTo(Offset(px, py)) else lineTo(Offset(px, py))
+                if (i == 0) moveTo(px, py) else lineTo(px, py)
             }
             close()
         }
