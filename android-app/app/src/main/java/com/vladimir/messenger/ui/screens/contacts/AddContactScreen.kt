@@ -131,14 +131,14 @@ fun AddContactScreen(
                     ) {
                         Text("Ссылка-приглашение", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Вставьте ссылку, которую вам прислал собеседник, или его отпечаток.",
+                            "Вставьте ссылку, которую вам прислал собеседник.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         OutlinedTextField(
                             value = uiState.inviteLink,
                             onValueChange = viewModel::onInviteLinkChanged,
-                            label = { Text("Ссылка или отпечаток") },
+                            label = { Text("Ссылка") },
                             placeholder = { Text("p2pmessenger://add?... или pk_...") },
                             modifier = Modifier.fillMaxWidth(),
                             supportingText = { uiState.error?.let { Text(it) } },
@@ -147,7 +147,7 @@ fun AddContactScreen(
                             value = uiState.displayName,
                             onValueChange = viewModel::onDisplayNameChanged,
                             label = { Text("Имя контакта (необязательно)") },
-                            placeholder = { Text("Анна, Стас, ...") },
+                            placeholder = { Text("имя контакта") },
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Button(
