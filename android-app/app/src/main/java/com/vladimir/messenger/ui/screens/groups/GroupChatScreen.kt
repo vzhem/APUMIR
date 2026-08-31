@@ -74,8 +74,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.ui.components.AnimatedTopicIcon
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.ImagePreview
+import com.vladimir.messenger.ui.components.TopicIconCatalog
+import com.vladimir.messenger.ui.components.TopicIconView
 import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -543,10 +546,9 @@ private fun TopicRailIcon(topic: TopicSummary, selected: Boolean) {
             .background(Color(0xFFE8EEF5)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            if (topic.iconEmoji.isNotBlank()) topic.iconEmoji else topic.name.take(1).uppercase(),
-            fontSize = 20.sp,
-            color = Color(0xFF1E2430),
+        TopicIconView(
+            topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
+            30.dp,
         )
     }
 }
@@ -596,9 +598,9 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                     .background(Color(0xFFE8EEF5)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    if (topic.iconEmoji.isNotBlank()) topic.iconEmoji else "#",
-                    fontSize = 20.sp,
+                TopicIconView(
+                    topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
+                    30.dp,
                 )
             }
             Spacer(Modifier.width(10.dp))
@@ -724,7 +726,7 @@ private fun MessageBubble(
 @Composable
 private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
-    var icon by remember { mutableStateOf(TopicIcons.DEFAULT) }
+    var icon by remember { mutableStateOf(TopicIconCatalog.DEFAULT) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Новая тема") },
@@ -744,44 +746,50 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(icon, fontSize = 26.sp)
+                    TopicIconView(icon, 34.dp)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Значок темы",
+                        "Значок темы: " + (TopicIconCatalog.labels[icon] ?: ""),
                         style = MaterialTheme.typography.titleSmall,
                         color = Color(0xFF5A6472),
                     )
                 }
-                // Общий список значков, как на скриншоте владельца: сетка
-                // эмодзи, выбранный обведён золотым на светлом.
-                TopicIcons.all.chunked(8).forEach { rowIcons ->
+                // Живые значки: каждый анимирован прямо в сетке выбора,
+                // выбранный обведён золотым на светлом.
+                TopicIconCatalog.kinds.chunked(4).forEach { rowKinds ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        rowIcons.forEach { em ->
-                            val selected = em == icon
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .then(
-                                        if (selected) {
-                                            Modifier
-                                                .background(Color(0xFFE8EEF5))
-                                                .border(
-                                                    1.dp,
+                        rowKinds.forEach { kind ->
+                            val selected = kind == icon
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFFE8EEF5))
+                                        .then(
+                                            if (selected) {
+                                                Modifier.border(
+                                                    2.dp,
                                                     MaterialTheme.colorScheme.primary,
-                                                    RoundedCornerShape(10.dp),
+                                                    RoundedCornerShape(12.dp),
                                                 )
-                                        } else {
-                                            Modifier
-                                        }
-                                    )
-                                    .clickable { icon = em },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(em, fontSize = 22.sp)
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                        .clickable { icon = kind },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    AnimatedTopicIcon(kind, Modifier.size(34.dp))
+                                }
+                                Text(
+                                    TopicIconCatalog.labels[kind].orEmpty(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF5A6472),
+                                )
                             }
                         }
                     }
@@ -795,27 +803,5 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
             ) { Text("Создать") }
         },
         dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
-    )
-}
-
-/**
- * Общий набор значков тем: системные эмодзи, один список без разделов
- * (владелец разрешил простой вариант). 96 штук, как на скриншоте.
- */
-private object TopicIcons {
-    const val DEFAULT = "💬"
-val all = listOf(
-        "💬", "⚡", "🎙", "🗣", "🆒", "❗", "✏", "📅",
-        "📂", "🔍", "📣", "🔥", "❤", "❓", "📈", "📉",
-        "💎", "💰", "💸", "🥈", "💱", "⁉", "🎮", "💻",
-        "📱", "🚗", "🏠", "💘", "🎉", "‼", "🏆", "🏁",
-        "🎬", "🎵", "🔞", "📚", "👑", "⚽", "🏀", "📺",
-        "👀", "👄", "🍓", "💄", "👠", "✈", "🧳", "🏝",
-        "🌦", "🦄", "🛍", "👜", "🛒", "🚂", "⛵", "🏔",
-        "🏕", "🤖", "🪩", "🎟", "🏴", "🗳", "🎓", "🔭",
-        "🔬", "🎶", "🎤", "🕺", "💃", "🪖", "💼", "🧪",
-        "👪", "👶", "🤰", "💅", "🏛", "🧮", "🖨", "👮",
-        "🩺", "💊", "💉", "🧼", "🪪", "🍽", "🐟", "🎨",
-        "🎭", "🎩", "🔮", "🎂", "☕", "🍣", "🍕", "🌈",
     )
 }
