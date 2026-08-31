@@ -380,4 +380,39 @@ class GroupWireTest {
     fun avatarRejectsBlankData() {
         assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_AVAT}|owner| |5|0"))
     }
+
+    /** Значок темы доходит до получателя шестым полем конверта. */
+    @Test
+    fun topicCreatedCarriesIcon() {
+        val parsed = GroupWire.parse(GroupWire.buildTopicCreated("g", "t", "Флуд", "🔥"))
+        assertTrue(parsed is GroupWire.Packet.TopicCreated)
+        assertEquals("🔥", (parsed as GroupWire.Packet.TopicCreated).iconEmoji)
+    }
+
+    /** Конверты старого образца (5 частей) принимаются со пустым значком. */
+    @Test
+    fun legacyTopicWithoutIconStillParses() {
+        val name = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("Старая тема".toByteArray(Charsets.UTF_8))
+        val parsed = GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_TOPIC}|g|t|$name")
+        assertTrue(parsed is GroupWire.Packet.TopicCreated)
+        assertEquals("", (parsed as GroupWire.Packet.TopicCreated).iconEmoji)
+    }
+
+    /** Список тем: строки со значком и без него в одном конверте. */
+    @Test
+    fun topicsListCarriesIconsAndLegacyRows() {
+        val envelope = GroupWire.buildTopics(
+            "g",
+            listOf(
+                GroupWire.TopicEntry("t1", "Общий", "💬"),
+                GroupWire.TopicEntry("t2", "Флуд"),
+            ),
+        )
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Topics)
+        val topics = (parsed as GroupWire.Packet.Topics).entries
+        assertEquals("💬", topics[0].iconEmoji)
+        assertEquals("", topics[1].iconEmoji)
+    }
 }

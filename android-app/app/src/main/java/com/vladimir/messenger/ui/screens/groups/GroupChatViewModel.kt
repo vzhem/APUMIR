@@ -168,9 +168,9 @@ class GroupChatViewModel @Inject constructor(
         observePinned(topicId)
     }
 
-    fun createTopic(name: String) {
+    fun createTopic(name: String, iconEmoji: String) {
         viewModelScope.launch {
-            groupRepository.createTopic(groupId, name)
+            groupRepository.createTopic(groupId, name, iconEmoji)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }

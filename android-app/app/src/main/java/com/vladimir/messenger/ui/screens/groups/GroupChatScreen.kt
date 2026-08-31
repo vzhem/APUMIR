@@ -385,8 +385,8 @@ fun GroupChatScreen(
     if (showNewTopic) {
         NewTopicDialog(
             onDismiss = { showNewTopic = false },
-            onCreate = { name ->
-                viewModel.createTopic(name)
+            onCreate = { name, icon ->
+                viewModel.createTopic(name, icon)
                 showNewTopic = false
             },
         )
@@ -722,17 +722,100 @@ private fun MessageBubble(
 }
 
 @Composable
-private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
+    var icon by remember { mutableStateOf(TopicIcons.DEFAULT) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Новая тема") },
         text = {
-            OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Название темы") }, singleLine = true)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 430.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Название темы") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(icon, fontSize = 26.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Значок темы",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color(0xFF5A6472),
+                    )
+                }
+                // Общий список значков, как на скриншоте владельца: сетка
+                // эмодзи, выбранный обведён золотым на светлом.
+                TopicIcons.all.chunked(8).forEach { rowIcons ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        rowIcons.forEach { em ->
+                            val selected = em == icon
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .then(
+                                        if (selected) {
+                                            Modifier
+                                                .background(Color(0xFFE8EEF5))
+                                                .border(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.primary,
+                                                    RoundedCornerShape(10.dp),
+                                                )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .clickable { icon = em },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(em, fontSize = 22.sp)
+                            }
+                        }
+                    }
+                }
+            }
         },
         confirmButton = {
-            TextButton(enabled = name.isNotBlank(), onClick = { onCreate(name) }) { Text("Создать") }
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = { onCreate(name, icon) },
+            ) { Text("Создать") }
         },
         dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
+    )
+}
+
+/**
+ * Общий набор значков тем: системные эмодзи, один список без разделов
+ * (владелец разрешил простой вариант). 96 штук, как на скриншоте.
+ */
+private object TopicIcons {
+    const val DEFAULT = "💬"
+val all = listOf(
+        "💬", "⚡", "🎙", "🗣", "🆒", "❗", "✏", "📅",
+        "📂", "🔍", "📣", "🔥", "❤", "❓", "📈", "📉",
+        "💎", "💰", "💸", "🥈", "💱", "⁉", "🎮", "💻",
+        "📱", "🚗", "🏠", "💘", "🎉", "‼", "🏆", "🏁",
+        "🎬", "🎵", "🔞", "📚", "👑", "⚽", "🏀", "📺",
+        "👀", "👄", "🍓", "💄", "👠", "✈", "🧳", "🏝",
+        "🌦", "🦄", "🛍", "👜", "🛒", "🚂", "⛵", "🏔",
+        "🏕", "🤖", "🪩", "🎟", "🏴", "🗳", "🎓", "🔭",
+        "🔬", "🎶", "🎤", "🕺", "💃", "🪖", "💼", "🧪",
+        "👪", "👶", "🤰", "💅", "🏛", "🧮", "🖨", "👮",
+        "🩺", "💊", "💉", "🧼", "🪪", "🍽", "🐟", "🎨",
+        "🎭", "🎩", "🔮", "🎂", "☕", "🍣", "🍕", "🌈",
     )
 }

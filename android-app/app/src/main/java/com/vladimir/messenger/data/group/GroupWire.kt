@@ -79,6 +79,8 @@ object GroupWire {
             val groupId: String,
             val topicId: String,
             val name: String,
+            /** Значок темы (эмодзи). Старые конверты приходили без него. */
+            val iconEmoji: String = "",
         ) : Packet()
 
         data class JoinRequest(
@@ -205,7 +207,7 @@ object GroupWire {
 
     data class RosterEntry(val nodeId: String, val displayName: String, val role: String)
 
-    data class TopicEntry(val topicId: String, val name: String)
+    data class TopicEntry(val topicId: String, val name: String, val iconEmoji: String = "")
 
     fun isGroupPacket(text: String?): Boolean =
         text != null && text.length <= MAX_ENVELOPE_BYTES && text.startsWith("$PREFIX|")
@@ -251,8 +253,14 @@ object GroupWire {
     fun buildAvatar(ownerId: String, dataB64: String, updatedAtMs: Long, hops: Int): String =
         "$PREFIX|$KIND_AVAT|$ownerId|$dataB64|$updatedAtMs|$hops"
 
-    fun buildTopicCreated(groupId: String, topicId: String, name: String): String =
-        "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}"
+    fun buildTopicCreated(
+        groupId: String,
+        topicId: String,
+        name: String,
+        iconEmoji: String = "",
+    ): String =
+        "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}" +
+            if (iconEmoji.isNotEmpty()) "|${encode(iconEmoji)}" else ""
 
     fun buildJoinRequest(
         groupId: String,
@@ -280,10 +288,11 @@ object GroupWire {
         return "$PREFIX|$KIND_ROSTER|$groupId|$csv"
     }
 
-    /** Список тем: строки "topicId,name" через ';'. */
+    /** Список тем: строки "topicId,name[,iconEmoji]" через ';'. */
     fun buildTopics(groupId: String, entries: List<TopicEntry>): String {
         val csv = entries.joinToString(";") {
-            "${encode(it.topicId)},${encode(it.name)}"
+            "${encode(it.topicId)},${encode(it.name)}" +
+                if (it.iconEmoji.isNotEmpty()) ",${encode(it.iconEmoji)}" else ""
         }
         return "$PREFIX|$KIND_TOPICS|$groupId|$csv"
     }
@@ -338,9 +347,15 @@ object GroupWire {
                 null
             }
 
-            KIND_TOPIC -> if (parts.size == 5) {
+            KIND_TOPIC -> if (parts.size == 5 || parts.size == 6) {
                 val name = decode(parts[4]) ?: return null
-                if (name.isBlank()) null else Packet.TopicCreated(groupId, parts[3], name)
+                // Конверты старого образца приходили без значка темы.
+                val icon = if (parts.size == 6) decode(parts[5]).orEmpty() else ""
+                if (name.isBlank()) {
+                    null
+                } else {
+                    Packet.TopicCreated(groupId, parts[3], name, icon)
+                }
             } else {
                 null
             }
@@ -509,11 +524,13 @@ object GroupWire {
         for (row in csv.split(';')) {
             if (row.isBlank()) continue
             val cells = row.split(',')
-            if (cells.size != 2) return null
+            // Строки старого образца - две ячейки, без значка темы.
+            if (cells.size != 2 && cells.size != 3) return null
             val topicId = decode(cells[0]) ?: return null
             val name = decode(cells[1]) ?: return null
             if (topicId.isBlank()) return null
-            out.add(TopicEntry(topicId, name))
+            val icon = if (cells.size == 3) decode(cells[2]).orEmpty() else ""
+            out.add(TopicEntry(topicId, name, icon))
         }
         return out
     }

@@ -453,7 +453,11 @@ class GroupRepository(
                 createdAtMs = now,
             )
         )
-        broadcast(groupId, GroupWire.buildTopicCreated(groupId, topicId, clean), excludeSelf = true)
+        broadcast(
+            groupId,
+            GroupWire.buildTopicCreated(groupId, topicId, clean, iconEmoji),
+            excludeSelf = true,
+        )
         return runCatching { toTopicSummary(groupDao.getTopicById(topicId) ?: error("topic vanished")) }
     }
 
@@ -626,6 +630,7 @@ class GroupRepository(
                         name = packet.name,
                         ownerId = senderId,
                         ownerName = groupDao.getMember(packet.groupId, senderId)?.displayName.orEmpty(),
+                        iconEmoji = packet.iconEmoji,
                         createdAtMs = clock(),
                     )
                 )
@@ -812,6 +817,7 @@ class GroupRepository(
                                 ownerId = senderId,
                                 ownerName = groupDao.getMember(packet.groupId, senderId)
                                     ?.displayName.orEmpty(),
+                                iconEmoji = entry.iconEmoji,
                                 createdAtMs = now,
                             )
                         )
@@ -1533,7 +1539,7 @@ class GroupRepository(
             groupId,
             GroupWire.buildTopics(
                 groupId,
-                topics.map { GroupWire.TopicEntry(it.id, it.name) },
+                topics.map { GroupWire.TopicEntry(it.id, it.name, it.iconEmoji) },
             ),
             listOf(nodeId),
         )
