@@ -38,15 +38,16 @@ APUMIR / APU (`com.vladimir.messenger`) — мессенджер для Android 
 
 ## Текущее состояние
 
-> **ВНИМАНИЕ (обновлено 2026-08-29).** Точка входа для нового чата —
+> **ВНИМАНИЕ (обновлено 2026-08-30).** Точка входа для нового чата —
 > `docs/START_HERE.md`. Абзац ниже описывает состояние на 2026-08-27 и
-> УСТАРЕЛ: Latest тогда был v11.19.0, сейчас — **v11.23.0** (тег `v11.23.0`,
-> объект `b294964` -> коммит `374c72d`; проверено `/releases/latest`:
-> draft=false, prerelease=false, app-release.apk 36 249 434 байт). Коммиты
-> `e7dc9f8` и `36ded17` уже ВНУТРЬ v11.23.0 (проверено
-> `git merge-base --is-ancestor`). Кончик arena-ветки в origin — `39d4557`.
-> Резервная копия на белой флешке (метка `APU_BACKUP`) обновлена, правило
-> обновления — в `docs/PC_TRANSFER.md`.
+> УСТАРЕЛ. Сейчас Latest — **v11.26.0** (тег `v11.26.0`, объект `88db45d3`
+> -> коммит `9f00541`; `/releases/latest`: draft=false, prerelease=false,
+> app-release.apk 36 265 818 байт, sha256 `17976f17…`). Кончик `main` и
+> arena-ветки в origin — один коммит, брать из
+> `git ls-remote origin refs/heads/main`, а не из этого файла.
+> Резервная копия на белой флешке (метка `APU_BACKUP`); правило обновления —
+> в `docs/START_HERE.md` раздел 3, переезд на новый ПК — `docs/PC_TRANSFER.md`
+> и `docs/RESTORE_ON_NEW_PC.md`.
 
 ### Историческая справка (на 2026-08-27)
 
