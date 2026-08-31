@@ -187,14 +187,25 @@ fun GroupChatScreen(
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             Row(modifier = Modifier.fillMaxSize()) {
 
-            // ── Левая колонка: значки своих групп и каналов, у каждого —
-            // сколько сообщений не прочитано. Выбранная обведена золотым.
-            GroupRail(
-                groups = uiState.allGroups,
-                currentGroupId = uiState.groupId,
-                onGroupClick = onSwitchGroup,
-                onChannelClick = onSwitchChannel,
-            )
+            // ── Левая колонка. В списке тем — значки групп и каналов,
+            // а внутри открытой темы — значки тем текущей группы.
+            // Если тем нет, колонки тоже нет: просто чат на всю ширину.
+            if (hasTopics) {
+                if (showTopicsList) {
+                    GroupRail(
+                        groups = uiState.allGroups,
+                        currentGroupId = uiState.groupId,
+                        onGroupClick = onSwitchGroup,
+                        onChannelClick = onSwitchChannel,
+                    )
+                } else {
+                    TopicRail(
+                        topics = uiState.topics,
+                        currentTopicId = uiState.selectedTopicId,
+                        onTopicClick = { viewModel.selectTopic(it) },
+                    )
+                }
+            }
 
             // ── Правая часть: список тем пузырями либо лента выбранной темы.
             Column(modifier = Modifier.weight(1f).fillMaxSize()) {
@@ -474,6 +485,69 @@ private fun GroupRailAvatar(
                 fontWeight = FontWeight.Bold,
             )
         }
+    }
+}
+
+// =============================================================================
+// Левая колонка внутри открытой темы: значки тем текущей группы
+// =============================================================================
+
+@Composable
+private fun TopicRail(
+    topics: List<TopicSummary>,
+    currentTopicId: String?,
+    onTopicClick: (String) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .width(76.dp)
+            .fillMaxHeight()
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.55f)),
+        contentPadding = PaddingValues(vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        items(topics, key = { it.id }) { topic ->
+            val selected = topic.id == currentTopicId
+            Box(
+                modifier = Modifier.clickable {
+                    if (!selected) onTopicClick(topic.id)
+                },
+            ) {
+                TopicRailIcon(topic = topic, selected = selected)
+                if (topic.unreadCount > 0) {
+                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                        UnreadBadge(topic.unreadCount)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Кружок темы: её эмодзи, открытая тема обведена золотым. */
+@Composable
+private fun TopicRailIcon(topic: TopicSummary, selected: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .then(
+                if (selected) {
+                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                } else {
+                    Modifier
+                }
+            )
+            .padding(2.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFE8EEF5)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (topic.iconEmoji.isNotBlank()) topic.iconEmoji else topic.name.take(1).uppercase(),
+            fontSize = 20.sp,
+            color = Color(0xFF1E2430),
+        )
     }
 }
 
