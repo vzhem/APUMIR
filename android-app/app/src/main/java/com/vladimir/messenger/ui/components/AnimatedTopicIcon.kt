@@ -29,6 +29,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.cos
@@ -109,6 +112,17 @@ private val PI2 = (2.0 * Math.PI).toFloat()
 private fun sinF(x: Float): Float = sin(x.toDouble()).toFloat()
 private fun cosF(x: Float): Float = cos(x.toDouble()).toFloat()
 
+/** drawOval в удобных координатах лево/верх/право/низ. */
+private fun DrawScope.oval(
+    color: Color,
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float,
+) {
+    drawOval(color, Offset(left, top), Size(right - left, bottom - top))
+}
+
 private val GOLD = Color(0xFFE0A32E)
 private val DARK = Color(0xFF1E2430)
 private val RED = Color(0xFFE04B3A)
@@ -156,10 +170,12 @@ private fun DrawScope.drawBall(t: Float) {
         r * (0.8f + 0.5f * (1f - bounce)),
         Offset(w / 2, h * 0.84f),
     )
-    drawOval(
+    oval(
         ORANGE,
-        Offset(w / 2 - r / squash, y - r * squash),
-        Offset(w / 2 + r / squash, y + r * squash),
+        w / 2 - r / squash,
+        y - r * squash,
+        w / 2 + r / squash,
+        y + r * squash,
     )
 }
 
@@ -213,11 +229,7 @@ private fun DrawScope.drawFish(t: Float) {
         }
         drawPath(tail, ORANGE)
     }
-    drawOval(
-        ORANGE,
-        Offset(cx - w * 0.20f, cy - h * 0.15f),
-        Offset(cx + w * 0.26f, cy + h * 0.15f),
-    )
+    oval(ORANGE, cx - w * 0.20f, cy - h * 0.15f, cx + w * 0.26f, cy + h * 0.15f)
     // плавник
     val fin = Path().apply {
         moveTo(cx - w * 0.02f, cy - h * 0.13f)
@@ -308,11 +320,7 @@ private fun DrawScope.drawBalloon(t: Float) {
     val h = size.height
     val sway = sinF(PI2 * t) * w * 0.08f
     val bx = w / 2 + sway
-    drawOval(
-        PINK,
-        Offset(bx - w * 0.15f, h * 0.12f),
-        Offset(bx + w * 0.15f, h * 0.48f),
-    )
+    oval(PINK, bx - w * 0.15f, h * 0.12f, bx + w * 0.15f, h * 0.48f)
     val knot = Path().apply {
         moveTo(bx - w * 0.04f, h * 0.48f)
         lineTo(bx + w * 0.04f, h * 0.48f)
@@ -320,13 +328,11 @@ private fun DrawScope.drawBalloon(t: Float) {
         close()
     }
     drawPath(knot, PINK)
-    drawQuad(
-        GRAY,
-        Offset(bx, h * 0.54f),
-        Offset(w / 2 - sway, h * 0.72f),
-        Offset(w / 2, h * 0.88f),
-        strokeWidth = w * 0.02f,
-    )
+    val string = Path().apply {
+        moveTo(bx, h * 0.54f)
+        quadraticBezierTo(w / 2 - sway, h * 0.72f, w / 2, h * 0.88f)
+    }
+    drawPath(string, GRAY, style = Stroke(width = w * 0.02f))
 }
 
 /** Нота подпрыгивает. */
