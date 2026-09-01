@@ -64,8 +64,24 @@ class ChatDetailViewModel @Inject constructor(
     init {
         refreshAttachmentRights()
         loadMessages()
+        observeContactPresence()
         observeTransfers()
         markAsRead()
+    }
+
+    /**
+     * Шапка лички раньше навсегда рисовала «не в сети»: статус в uiState
+     * никем не обновлялся, а peer_discovered писал только в таблицу contacts.
+     * Слушаем строку чата в БД — peer_discovered/peer_lost её же и обновляют.
+     */
+    private fun observeContactPresence() {
+        viewModelScope.launch {
+            chatRepository.observeChat(chatId).collect { chat ->
+                if (chat != null) {
+                    _uiState.update { it.copy(isContactOnline = chat.isContactOnline) }
+                }
+            }
+        }
     }
 
     /**

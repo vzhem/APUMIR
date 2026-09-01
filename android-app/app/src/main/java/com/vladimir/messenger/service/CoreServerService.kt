@@ -98,6 +98,14 @@ class CoreServerService : Service() {
         // ================================================================
         serviceScope.launch {
             try {
+                // Холодный старт: peer_lost не доезжал, пока нас не было —
+                // гасим устаревшие «в сети», живых тут же включит peer_discovered.
+                try {
+                    contactRepository.setAllOffline()
+                    chatRepository.setAllContactsOffline()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Presence reset failed: ${e.message}")
+                }
                 // Ждём пока RustBridge инициализируется
                 var attempts = 0
                 while (RustBridge.nodeId() == null && attempts < 30) {
@@ -596,6 +604,8 @@ class CoreServerService : Service() {
                     if (existing != null) {
                         // Контакт существует — обновляем online status
                         contactRepository.updateOnlineStatus(peerId, true)
+                        // И в чаты: шапка лички и точка в списке читают таблицу chats
+                        try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (_: Exception) {}
                         if (existing.displayName != peerName && peerName.isNotBlank() && peerName != "Unknown" && peerName != "Anonymous" && (existing.displayName.startsWith("Contact ") || existing.displayName == "Anonymous")) {
                             contactRepository.updateDisplayName(existing.id, peerName)
                             chatRepository.updateContactName(peerId, peerName)
@@ -630,6 +640,7 @@ class CoreServerService : Service() {
                 val peerId = event.peerId ?: return
                 Log.i(TAG, "Peer lost: $peerId")
                 try { contactRepository.updateOnlineStatus(peerId, false) } catch (_: Exception) {}
+                try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (_: Exception) {}
             }
 
             "network_status_changed" -> {

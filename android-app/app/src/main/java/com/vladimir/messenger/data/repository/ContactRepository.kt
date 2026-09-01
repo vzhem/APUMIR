@@ -59,6 +59,8 @@ class ContactRepository @Inject constructor(
         contactDao.updateOnlineStatus(contactId, isOnline)
     }
 
+    suspend fun setAllOffline() = contactDao.setAllOffline()
+
     suspend fun updateDisplayName(contactId: String, name: String) {
         contactDao.updateDisplayName(contactId, name)
     }

@@ -33,6 +33,16 @@ class ChatRepository @Inject constructor(
     fun observeChats(): Flow<List<Chat>> =
         chatDao.observeAllChats().map { it.map { e -> e.toDomain() } }
 
+    /** Живой поток ОДНОГО чата: шапка переписки подписывается на онлайн. */
+    fun observeChat(chatId: String): Flow<ChatEntity?> = chatDao.observeChat(chatId)
+
+    /** Холодный старт: старые точки онлайна из прошлого запуска гасим. */
+    suspend fun setAllContactsOffline() = chatDao.setAllOffline()
+
+    /** Онлайн-статус контакта в чатовой таблице (точка в списке чатов и шапка лички). */
+    suspend fun updateContactOnlineStatus(contactId: String, isOnline: Boolean) =
+        chatDao.updateContactOnline(contactId, isOnline)
+
     /** Contact IDs of every chat; used by the file HELLO sweep to bootstrap missing pins. */
     suspend fun getAllContactIds(): List<String> =
         chatDao.getAllChats().map { it.contactId }.filter { it.isNotBlank() }.distinct()

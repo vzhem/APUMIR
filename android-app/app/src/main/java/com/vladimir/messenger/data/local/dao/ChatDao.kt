@@ -15,6 +15,10 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE id = :chatId")
     suspend fun getChatById(chatId: String): ChatEntity?
 
+    /** Живой поток чата — шапка лички слушает онлайн-статус через него. */
+    @Query("SELECT * FROM chats WHERE id = :chatId")
+    fun observeChat(chatId: String): Flow<ChatEntity?>
+
     @Query("SELECT * FROM chats WHERE contactId = :contactId LIMIT 1")
     suspend fun getChatByContactId(contactId: String): ChatEntity?
 
@@ -35,4 +39,11 @@ interface ChatDao {
 
     @Query("UPDATE chats SET contactName = :name WHERE contactId = :contactId")
     suspend fun updateContactName(contactId: String, name: String)
+
+    @Query("UPDATE chats SET isContactOnline = :isOnline WHERE contactId = :contactId")
+    suspend fun updateContactOnline(contactId: String, isOnline: Boolean)
+
+    /** Холодный старт: гасим все точки онлайна, peer_discovered включит живых. */
+    @Query("UPDATE chats SET isContactOnline = 0")
+    suspend fun setAllOffline()
 }

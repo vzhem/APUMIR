@@ -30,6 +30,10 @@ interface ContactDao {
     @Query("UPDATE contacts SET isOnline = :isOnline WHERE id = :contactId")
     suspend fun updateOnlineStatus(contactId: String, isOnline: Boolean)
 
+    /** Холодный старт: все статусы гасим, пока peer_discovered не включит живых. */
+    @Query("UPDATE contacts SET isOnline = 0")
+    suspend fun setAllOffline()
+
     @Query("UPDATE contacts SET displayName = :name WHERE id = :contactId")
     suspend fun updateDisplayName(contactId: String, name: String)
 
