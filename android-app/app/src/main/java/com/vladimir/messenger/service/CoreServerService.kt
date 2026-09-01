@@ -56,6 +56,7 @@ class CoreServerService : Service() {
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
+    @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
@@ -518,6 +519,19 @@ class CoreServerService : Service() {
                             Log.i(TAG, "Referral packet ACK sent for msgId=$messageId")
                         } catch (e: Exception) {
                             Log.w(TAG, "Referral packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Звонки: APUCALL1-конверты разбираются здесь же, ДО
+                    // авто-создания контакта, — иначе сигнализация звонка
+                    // превратилась бы в мусорное сообщение личного чата.
+                    if (callManager.routeIncoming(senderId, chatId, messageId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                            Log.i(TAG, "Call packet ACK sent for msgId=$messageId")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Call packet ACK failed: " + e.message)
                         }
                         return
                     }

@@ -17,6 +17,13 @@
     <!-- WakeLock -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Звонки: микрофон, звуковой фокус, полноэкранный входящий -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
     <!-- Батарея -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
@@ -113,6 +120,13 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Сервис идущего звонка: держатель типа microphone для микрофона в фоне -->
+        <service
+            android:name=".service.CallService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
 
         <receiver
