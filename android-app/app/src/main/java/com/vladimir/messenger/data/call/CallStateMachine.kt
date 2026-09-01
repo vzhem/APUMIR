@@ -66,6 +66,16 @@ class CallStateMachine(
     private var phaseChangedAtMs = startedAtMs
     private var lastMediaAtMs = 0L
 
+    /**
+     * Часы-сторож темпа кадров: «хоть один кадр» — не жизнь. Просроченные
+     * всплески из relay и запись в полудохлый TCP-сокет давали ложные признаки
+     * жизни: голос давно умер, а звонок висел с таймером (приёмка 2026-09-01).
+     * Живой звонок — это ≥ FRAME_RATE_MIN_WINDOW кадров в скользящем окне 3 с;
+     * просадка дольше RATE_DEATH_MS приравнивается к обрыву.
+     */
+    private val frameTimesMs = ArrayDeque<Long>()
+    private var starvedSinceMs = 0L
+
     /** Время входа в текущую фазу (для таймаутов). */
     fun phaseChangedAt(): Long = phaseChangedAtMs
 
@@ -150,12 +160,21 @@ class CallStateMachine(
     fun mediaFrame(nowMs: Long): List<Effect> {
         lastMediaAtMs = nowMs
         recovering = false
+        frameTimesMs.addLast(nowMs)
+        trimFrameWindow(nowMs)
         if (phase == Phase.CONNECTING) {
             connectedAtMs = nowMs
             moveTo(Phase.ACTIVE, nowMs)
             return listOf(Effect.MarkMediaUp)
         }
         return emptyList()
+    }
+
+    private fun trimFrameWindow(nowMs: Long) {
+        val cutoff = nowMs - FRAME_RATE_WINDOW_MS
+        while (frameTimesMs.isNotEmpty() && frameTimesMs.first() < cutoff) {
+            frameTimesMs.removeFirst()
+        }
     }
 
     // ── Таймер (менеджер зовёт периодически) ───────────────────────────────
@@ -196,7 +215,19 @@ class CallStateMachine(
                 if (silenceMs >= ACTIVE_DEATH_SILENCE_MS) {
                     return endWith(CallWire.BYE_FAILED, nowMs, stopMedia = true, notifyBye = true)
                 }
-                recovering = silenceMs >= ACTIVE_RECOVER_SILENCE_MS
+                // Темп кадров: окно из последних 3 с должно держать ≥45 кадров.
+                // Старт звонка (первые 5 с) не судим: канал ещё раскачивается.
+                trimFrameWindow(nowMs)
+                val warm = nowMs - connectedAtMs >= RATE_GRACE_MS
+                if (warm && frameTimesMs.size < FRAME_RATE_MIN_WINDOW) {
+                    if (starvedSinceMs == 0L) starvedSinceMs = nowMs
+                    if (nowMs - starvedSinceMs >= RATE_DEATH_MS) {
+                        return endWith(CallWire.BYE_FAILED, nowMs, stopMedia = true, notifyBye = true)
+                    }
+                } else {
+                    starvedSinceMs = 0L
+                }
+                recovering = silenceMs >= ACTIVE_RECOVER_SILENCE_MS || starvedSinceMs != 0L
             }
 
             else -> Unit
@@ -240,5 +271,12 @@ class CallStateMachine(
         const val CONNECT_TIMEOUT_MS = 20_000L
         const val ACTIVE_RECOVER_SILENCE_MS = 5_000L
         const val ACTIVE_DEATH_SILENCE_MS = 20_000L
+        /** Окно подсчёта темпа кадров (мс) и сколько кадров в нём = «жив». */
+        const val FRAME_RATE_WINDOW_MS = 3_000L
+        const val FRAME_RATE_MIN_WINDOW = 45
+        /** Сколько темп может сидеть ниже минимума, прежде чем звонок хороним. */
+        const val RATE_DEATH_MS = 12_000L
+        /** Первые секунды после ACTIVE темп не судим (канал раскачивается). */
+        const val RATE_GRACE_MS = 5_000L
     }
 }

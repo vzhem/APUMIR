@@ -176,6 +176,43 @@ class CallStateMachineTest {
         assertTrue(death.any { it is Effect.SendBye })
     }
 
+    // ── Сторож темпа кадров (приёмка 2026-09-01: зомби-звонок при смене сети) ──
+
+    @Test
+    fun activeDiesOnFrameStarvationNotJustSilence() {
+        val sm = callee()
+        sm.userAccept(t0)
+        sm.mediaFrame(t0 + 1000) // ACTIVE
+        // Умирающий канал: одинокие кадры каплями раз в 4 с — полной тишины
+        // (20 с подряд) никогда нет, но и жизни нет. Звонок обязан закрыться.
+        var t = t0 + 1000
+        var ended = false
+        repeat(20) {
+            t += 4000
+            sm.mediaFrame(t)
+            sm.tick(t)
+            if (sm.phase == Phase.ENDED) ended = true
+        }
+        assertTrue(ended)
+        assertEquals(CallWire.BYE_FAILED, sm.endReason)
+    }
+
+    @Test
+    fun activeSurvivesHealthyFrameRate() {
+        val sm = callee()
+        sm.userAccept(t0)
+        sm.mediaFrame(t0 + 1000)
+        var t = t0 + 1000
+        // Здоровый темп ~60 кадров/с на протяжении 20 с: живём, не в «восстановлении».
+        repeat(40) {
+            t += 500
+            repeat(30) { sm.mediaFrame(t) }
+            sm.tick(t)
+        }
+        assertEquals(Phase.ACTIVE, sm.phase)
+        assertFalse(sm.recovering)
+    }
+
     // ── Защита от мусора ────────────────────────────────────────────────────
 
     @Test
