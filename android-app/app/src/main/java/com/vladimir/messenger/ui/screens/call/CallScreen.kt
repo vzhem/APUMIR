@@ -84,7 +84,14 @@ fun CallScreen(
 
     // Конец: показываем причину русским текстом и уходим. Если за эти полторы
     // секунды начался НОВЫЙ звонок (быстрый перезвон), экран не сворачиваем.
-    LaunchedEffect(state.phase, state.endText) {
+    // Отдельная ловушка рассинхрона: машину уже снесли, а экран остался —
+    // тогда уходим сразу, кнопкой «завершить» дорываться не придётся.
+    val entryCallId = remember { state.callId }
+    LaunchedEffect(state.phase, state.endText, state.callId) {
+        if (entryCallId != null && state.callId == null) {
+            onLeaveCall()
+            return@LaunchedEffect
+        }
         if (state.phase == CallStateMachine.Phase.ENDED) {
             delay(1500)
             if (viewModel.uiState.value.phase == CallStateMachine.Phase.ENDED) {
@@ -189,7 +196,13 @@ fun CallScreen(
                             micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     },
-                    onRed = viewModel::hangupOrReject,
+                    // Красная трубка ВСЕГДА уводит с экрана: если машина звонка
+                    // уже мертва, менеджер повторно ничего не делает, а экран
+                    // обязан закрыться сам (приёмка: «залип кружок, кнопка мертва»).
+                    onRed = {
+                        viewModel.hangupOrReject()
+                        onLeaveCall()
+                    },
                     onMute = viewModel::toggleMute,
                     onSpeaker = viewModel::toggleSpeaker,
                 )

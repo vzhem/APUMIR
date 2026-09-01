@@ -370,6 +370,7 @@ class CallManager @Inject constructor(
                     // accept дублируем: его потеря = оборванный звонок.
                     sendSignal(sm.peerId, CallWire.acceptMessageId(sm.callId, 1), text)
                     sendSignal(sm.peerId, CallWire.acceptMessageId(sm.callId, 2), text)
+                    scheduleAcceptResends(sm.callId, sm.peerId, text)
                 }
 
                 is CallStateMachine.Effect.SendReject ->
@@ -394,9 +395,38 @@ class CallManager @Inject constructor(
     /** Сигналы едут двумя путями: durable relay (messageId детерминирован) + прямой QUIC. */
     private fun sendSignal(peerId: String, messageId: String, text: String) {
         scope.launch {
-            runCatching { RustBridge.sendDirectPayload(peerId, text) }
+            sendQuic(peerId, text)
             runCatching { RustBridge.sendMessage(messageId, "direct", peerId, text) }
         }
+    }
+
+    /**
+     * Прямой QUIC с рубильником: пока он мёртв, каждая попытка стоит до 5 с
+     * блокировки потока (приёмка 2026-09-01 22:23: весь вечер QUIC не поднялся,
+     * сигналы плелись 8-25 с). После 2 промахов подряд — 45 с шлём только по
+     * брокерному крюку, затем пробуем QUIC снова.
+     */
+    private var quicFailStreak = 0
+    @Volatile private var quicOpenUntilMs = 0L
+
+    private fun sendQuic(peerId: String, payload: String): Boolean {
+        if (nowMs() < quicOpenUntilMs) return false
+        val ok = runCatching { RustBridge.sendDirectPayload(peerId, payload) }.getOrDefault(false)
+        if (ok) {
+            quicFailStreak = 0
+        } else {
+            quicFailStreak++
+            if (quicFailStreak >= 2) {
+                quicFailsToLog()
+                quicFailStreak = 0
+            }
+        }
+        return ok
+    }
+
+    private fun quicFailsToLog() {
+        quicOpenUntilMs = nowMs() + QUIC_BREAKER_MS
+        Log.i(TAG, "QUIC breaker open ${QUIC_BREAKER_MS / 1000}s: сигналы/голос — только брокер")
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -440,6 +470,29 @@ class CallManager @Inject constructor(
         audioEngine = engine
         startFramesPump(sm)
         establishMediaChannel(sm)
+    }
+
+    /**
+     * Принимающий: accept утонул в очереди = звонящий висит в «звонок» мимо
+     * факта. Пока звонок в CONNECTING и голос не пошёл, досылаем accept каждые
+     * 2.5 с (до 5 раз). Звонящий смашиной дубли глотает (он уже в CONNECTING).
+     */
+    private fun scheduleAcceptResends(callId: String, peerId: String, acceptText: String) {
+        scope.launch {
+            var attempt = 3
+            while (attempt <= 7) {
+                delay(ACCEPT_RESEND_MS)
+                val m = synchronized(this@CallManager) { machine }
+                if (m == null || m.callId != callId || m.outgoing ||
+                    m.phase != CallStateMachine.Phase.CONNECTING
+                ) {
+                    return@launch
+                }
+                Log.i(TAG, "accept resend #$attempt for ${callId.take(8)}")
+                sendSignal(peerId, CallWire.acceptMessageId(callId, attempt), acceptText)
+                attempt++
+            }
+        }
     }
 
     /** Выбор транспорта голоса: LAN-сокет по endpoint из сигналов, иначе текстовый фолбэк. */
@@ -499,8 +552,7 @@ class CallManager @Inject constructor(
                     continue
                 }
                 val single = CallWire.buildAudio(current.callId, frame.seq, frame.ptsMs, frame.cipher)
-                val direct = runCatching { RustBridge.sendDirectPayload(current.peerId, single) }
-                    .getOrDefault(false)
+                val direct = sendQuic(current.peerId, single)
                 if (direct) continue
                 // Бандаж: дотягиваем до 8 кадров (или 120 мс), чтобы не душить брокер.
                 val batch = ArrayList<CallWire.Packet.Audio>(CallWire.AUDIO_BATCH_MAX_FRAMES)
@@ -734,5 +786,8 @@ class CallManager @Inject constructor(
         private const val CALL_REQUEST_CODE = 77
         private const val TICK_MS = 500L
         private const val ENDED_VISIBLE_MS = 2500L
+        /** Пауза между досылками accept и длинна отключения мёртвого QUIC. */
+        private const val ACCEPT_RESEND_MS = 2_500L
+        private const val QUIC_BREAKER_MS = 45_000L
     }
 }
