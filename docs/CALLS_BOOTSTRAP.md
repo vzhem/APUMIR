@@ -129,16 +129,38 @@
 
 ---
 
-## 8. Дизайн звонков (предложение 2026-09-01, статус: ждёт «да» владельца)
+## 8. Дизайн звонков (**принят владельцем 2026-09-01**, аудио-only)
 
-**Код по этому разделу писать ТОЛЬКО после согласования.** Проверено по коду
-2026-09-01 (main `df6b2cc`, тег v11.29.0 = `e33d261`): звонков нет нигде,
-кнопка `Icons.Default.Call` в шапке `ChatDetailScreen` уже висит с
-`TODO: звонок`, входящие тексты разбираются цепочкой в
-`CoreServerService.handleEvent` (`message_received`): `fileTransferRouter` →
-`groupRouter` → `referralAttributionRouter` → сохранение в чат. Маршрутизатор
-звонков встаёт четвёртым, до сохранения в чат, и так же шлёт
-`RustBridge.sendDeliveryAck` (чистит копию на relay).
+Владелец подтвердил все 4 пункта 8.8: формат `APUCALL1` ок, фаза 1 без правок
+Rust ок, relay-голос как best-effort ок, сейчас только аудио.
+
+**Реализовано (шаги 1–3 плана 8.7, в main 2026-09-01):**
+- `data/call/CallWire.kt` — формат APUCALL1 (8.2) + крипто кадров
+  `CallMediaCrypto.kt` (AES-128-GCM, nonce из seq, AAD) + машина
+  `CallStateMachine.kt`; unit-тесты `CallWireTest`, `CallMediaCryptoTest`,
+  `CallStateMachineTest`; в гейте строка `--tests '...data.call.*'`.
+- `data/call/CallManager.kt` — оркестратор: routeIncoming в цепочке
+  `CoreServerService` (после referral, до чата), offer повторяется каждые 3 с
+  до 30 с, сигналы идут по двум путям (relay + прямой QUIC), входящее
+  уведомление с full-screen, рингтон, вибрация.
+- `data/call/CallAudioChannel.kt` — сокет голоса 42109 (handshake APUCALLHS1);
+  `data/call/CallAudioEngine.kt` — VOICE_COMMUNICATION 16 кГц PCM, AEC/NS/AGC,
+  джиттер-буфер; `service/CallService.kt` — FGS типа microphone.
+- UI: `ui/screens/call/CallScreen.kt` + `CallViewModel`, маршрут `call` в
+  NavGraph, входящий звонок сам открывает экран, кнопка в шапке чата активна
+  у контактов с pk_. Манифест: RECORD_AUDIO, FGS_MICROPHONE,
+  USE_FULL_SCREEN_INTENT, VIBRATE, MODIFY_AUDIO_SETTINGS.
+- Приёмка вечером: гейт на ПК → install на двух телефонах: дозвон, гудки,
+  принять/отклонить/завершить, таймауты, голос по общей Wi-Fi (в обе стороны),
+  обрыв. Проверено в песочнице ЛЕКСЕРОМ — компиляция и тесты только на ПК.
+
+**Не сделано (следующие шаги):** «пропущенный звонок» строкой в чат,
+Opus-кодек для узких путей (в формате зарезервирован codec=2), UDP
+(`proto=udp1` зарезервирован), WebRTC/STUN — только по отдельному «да».
+
+Проверено по коду 2026-09-01 (main `df6b2cc` на старте звонков): маршрутизатор
+звонков встаёт в `CoreServerService.handleEvent` четвёртым, до сохранения в
+чат, и так же шлёт `RustBridge.sendDeliveryAck` (чистит копию на relay).
 
 ### 8.1 Точки интеграции (где что встанет)
 

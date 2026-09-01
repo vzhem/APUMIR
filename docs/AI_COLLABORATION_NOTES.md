@@ -7172,3 +7172,50 @@ LAN-сокет 42109 → прямой QUIC → relay best-effort (публичн
 AEC/NS), UI в ЕДИНОМ СТИЛЕ APU, план из 6 шагов с гейтами. Фаза 1 — без правок
 Rust/FFI. Код НЕ пишется до «да» владельца — отправлены 4 вопроса на
 согласование (раздел 8.8).
+
+## 2026-09-01 — звонки: дизайн принят, реализованы шаги 1–3 (гейт вечером)
+
+Владелец принял дизайн целиком (формат APUCALL1, фаза 1 без Rust, relay
+best-effort, только аудио) и разрешил делать всё, что можно, до вечера (ПК и
+телефоны появятся вечером).
+
+Сделано в песочнице (проверка — только лексером, компиляция на ПК вечером):
+
+- `data/call/CallWire.kt`: конверты APUCALL1 (offer с именем/LAN/key, ring,
+  accept с LAN/обратным ключом, reject decline|busy, bye end|cancel|timeout|
+  failed, au-кадры фолбэка), строгий разбор → null, base64url как у GroupWire,
+  детерминированные messageId. `CallMediaCrypto.kt`: AES-128-GCM на направление
+  (ключ 16 Б в offer/accept, nonce=seq, AAD) — голос закрыт и на LAN-сокете.
+  `CallStateMachine.kt`: чистая JVM-машина (OFFERING→RINGING→CONNECTING→ACTIVE,
+  INCOMING→…; таймауты: offer 30 c, гудки 60 c, входящий 45 c, соединение 12 c,
+  тишина 5/20 c). 20 unit-тестов; в гейт добавлен `--tests '...data.call.*'`.
+- `CallManager` (синглтон): диспетчер APUCALL1 в CoreServerService после
+  referral-роутера (до авто-создания чата), ACK relay-копий, сигналы дублем
+  relay+direct QUIC, offer retry 3 c, enter-уведомление full-screen с рингтоном
+  и вибрацией, отдельный канал уведомлений «Звонки APU».
+- Медиа: `CallAudioChannel` (TCP 42109, handshake APUCALLHS1, duplex кадры
+  [u32 len][u16 codec][u32 seq][u64 pts][payload]); `CallAudioEngine` (PCM 16 кГц,
+  VOICE_COMMUNICATION, AEC/NS/AGC, джиттер ≤8 кадров, мьют = нулевые кадры —
+  keepalive не глохнет); `CallService` — FGS microphone. Транспорт голоса:
+  LAN-сокет → au поверх прямого QUIC → au поверх relay (best-effort,
+  публичные брокеры ~999 Б/с не тянут — в UI статус «медленный канал»).
+- UI: `CallScreen` в ЕДИНОМ СТИЛЕ (ChatWallpaper, белая полосочка имени,
+  золото, русские статусы «Вызов…/Гудки…/Соединение…/мм:сс», кнопки: входящий
+  — принять/отклонить, активный — мьют/громкая/завершить) + автопереход на
+  экран при входящем (наблюдатель в NavGraph) + запрос RECORD_AUDIO. Кнопка
+  звонка в шапке чата активна у контактов с pk_.
+- Манифест: RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, VIBRATE, USE_FULL_SCREEN_INTENT,
+  FOREGROUND_SERVICE_MICROPHONE; сервис CallService (microphone).
+
+Коммиты: dbc0997 (wire+крипто+машина+тесты), 07e05b8 (менеджер+медиа+диспетчер),
+8b17c66 (UI). main синхронизирован после каждого.
+
+Грабли в этой правке сам себе поймал до гейта: (1) parseHost `String??` —
+невалидный Kotlin, заменён на parseEndpoint-пару; (2) executor.post не
+существует — только execute; (3) в playback-потоке накапливающий счётчик
+ломал условие выхода — переписан на свежий результат write.
+
+Вечером по плану: гейт на ПК (3 шага), установка на Аню + второй телефон,
+приёмка: дозвон/гудки/принять/отклонить/таймауты/голос по общей Wi-Fi в обе
+стороны/обрыв. Если ПК-гейт красный — чинить по выводу (возможен 1–2 круга на
+новых Compose-API).
