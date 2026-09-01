@@ -7155,3 +7155,20 @@ Latest переключился после второго прогона draft-�
 сработал, как и с v11.28.0). LIVE: /releases/latest = v11.29.0,
 app-release.apk 36 436 834 Б,
 sha256:533b49f22ce3ba8f5d72deadcf81e2dd8cca72a3e0244c97e80ec7feead4f7d0.
+
+## 2026-09-01 — дизайн звонков: сигнализация APUCALL1 согласуется ДО кода
+
+Новый чат открыт по `docs/CALLS_BOOTSTRAP.md`. Проверено по коду, не по
+памяти: main = `df6b2cc`, тег v11.29.0 = `e33d261`; звонков нет нигде, кнопка
+`Icons.Default.Call` в шапке `ChatDetailScreen` висит с TODO; входящие тексты
+разбирает цепочка `fileTransferRouter → groupRouter → referralAttributionRouter →
+chat` в `CoreServerService.handleEvent`.
+
+Составлен и внесён в `CALLS_BOOTSTRAP.md` (раздел 8) дизайн: проводной формат
+`APUCALL1` (offer/ring/accept/reject/bye + au-кадры фолбэка, поля lanIp/порт,
+proto, mediaKey для AES-GCM кадров), машина состояний с таймаутами, медиа-план
+LAN-сокет 42109 → прямой QUIC → relay best-effort (публичные брокеры ~999 Б/с
+голос не тянут — честно объявлено), аудио-стек (RECORD_AUDIO, FGS microphone,
+AEC/NS), UI в ЕДИНОМ СТИЛЕ APU, план из 6 шагов с гейтами. Фаза 1 — без правок
+Rust/FFI. Код НЕ пишется до «да» владельца — отправлены 4 вопроса на
+согласование (раздел 8.8).
