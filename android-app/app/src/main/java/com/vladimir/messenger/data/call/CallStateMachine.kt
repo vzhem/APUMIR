@@ -229,9 +229,6 @@ class CallStateMachine(
         if (phase == next) return
         phase = next
         phaseChangedAtMs = nowMs
-        if (next == Phase.CONNECTING && !startMediaRequested) {
-            startMediaRequested = true
-        }
         if (next == Phase.ACTIVE) recovering = false
     }
 
