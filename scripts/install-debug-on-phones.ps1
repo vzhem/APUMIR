@@ -3,6 +3,12 @@ param(
     [string[]]$Serials = @('11567254BK001192', 'AUYF6R5923006121')
 )
 
+# powershell.exe -File binding quirk (hit 2026-09-01): "-Serials A,B" arrives as
+# ONE element 'A,B', and a bare second token after it lands in $ApkPath
+# ('debug apk not found: 3B665800EES00000'). Normalize: accept a quoted
+# comma-separated string, split it here; never two bare tokens.
+$Serials = @($Serials | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+
 # ============================================================================
 # install-debug-on-phones.ps1 - put the freshly built DEBUG apk on named phones
 # and open the app. ASCII only on purpose: PowerShell 5.1 misreads UTF-8 no-BOM.
