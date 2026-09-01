@@ -16,6 +16,8 @@
 | `SECURE_FILE_TRANSFER.md` | архитектура файлов (F4-срезы), верхний CURRENT OVERRIDE | действующий |
 | `VERSION_STATISTICS.md` | статистика версий | **обрывается на v11.17.1** |
 | `RELEASE_PUBLICATION_POLICY.md` | каким должно быть публичное описание релиза | действующий |
+| `CALLS_BOOTSTRAP.md` | вход для чата про звонки: суть проекта, конвейер, карта кода, план | действующий |
+| `WALLPAPER_ICONS.md` | каталог 109 значков фирменных обоев | действующий |
 | `PC_TRANSFER.md`, `RESTORE_ON_NEW_PC.md`, `FLASH_BACKUP_RUNBOOK.md`, `BACKUP_AND_CLEAN_PC_RECOVERY.md`, `NEXT_AI_CHAT_BOOTSTRAP.md` | — | заглушки, заменены |
 
 Правило картотеки: факт живёт в одном документе. Нашёл противоречие между двумя
