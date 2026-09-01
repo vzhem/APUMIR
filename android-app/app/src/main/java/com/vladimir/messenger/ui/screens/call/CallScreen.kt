@@ -82,11 +82,14 @@ fun CallScreen(
     }
     LaunchedEffect(Unit) { viewModel.ensureStarted() }
 
-    // Конец: показываем причину русским текстом и уходим.
+    // Конец: показываем причину русским текстом и уходим. Если за эти полторы
+    // секунды начался НОВЫЙ звонок (быстрый перезвон), экран не сворачиваем.
     LaunchedEffect(state.phase, state.endText) {
         if (state.phase == CallStateMachine.Phase.ENDED) {
             delay(1500)
-            onLeaveCall()
+            if (viewModel.uiState.value.phase == CallStateMachine.Phase.ENDED) {
+                onLeaveCall()
+            }
         }
     }
 

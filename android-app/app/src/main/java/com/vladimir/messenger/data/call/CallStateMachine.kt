@@ -237,7 +237,7 @@ class CallStateMachine(
         const val OFFER_TOTAL_TIMEOUT_MS = 30_000L
         const val RING_TIMEOUT_MS = 60_000L
         const val INCOMING_USER_WAIT_MS = 45_000L
-        const val CONNECT_TIMEOUT_MS = 12_000L
+        const val CONNECT_TIMEOUT_MS = 20_000L
         const val ACTIVE_RECOVER_SILENCE_MS = 5_000L
         const val ACTIVE_DEATH_SILENCE_MS = 20_000L
     }

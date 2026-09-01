@@ -87,6 +87,9 @@ class CallManager @Inject constructor(
     private var endedResetJob: Job? = null
     private var endTextOverride: String? = null
 
+    /** Недавно завершённые звонки: поздний offer-дубль не должен воскрешать их на экране. */
+    private val recentlyEnded = LinkedHashMap<String, Long>()
+
     /** Очередь исходящих голосовых кадров: поток микрофона не ждёт сеть. */
     private val frameOutQueue = java.util.concurrent.ArrayBlockingQueue<OutgoingFrame>(128)
     @Volatile private var framesPumpStarted = false
@@ -105,14 +108,19 @@ class CallManager @Inject constructor(
         }
         when (packet) {
             is CallWire.Packet.Offer -> onOfferPacket(senderId, packet)
-            is CallWire.Packet.Ring -> feedMachine { it.onRing(nowMs()) }
-            is CallWire.Packet.Accept -> onAcceptPacket(senderId, packet)
-            is CallWire.Packet.Reject -> feedMachine { it.onReject(packet.reason, nowMs()) }
-            is CallWire.Packet.Bye -> feedMachine { it.onBye(packet.reason, nowMs()) }
+            // Страж по callId: ring/reject/bye применяются ТОЛЬКО к текущему звонку —
+            // бродячие пакеты соседнего/просроченного звонка машину не трогают.
+            is CallWire.Packet.Ring -> if (matchesCall(packet.callId)) feedMachine { it.onRing(nowMs()) }
+            is CallWire.Packet.Accept -> onAcceptPacket(senderId, packet) // сам сверяет callId
+            is CallWire.Packet.Reject -> if (matchesCall(packet.callId)) feedMachine { it.onReject(packet.reason, nowMs()) }
+            is CallWire.Packet.Bye -> if (matchesCall(packet.callId)) feedMachine { it.onBye(packet.reason, nowMs()) }
             is CallWire.Packet.Audio -> onAudioPacket(senderId, packet)
         }
         return true
     }
+
+    private fun matchesCall(callId: String): Boolean =
+        machine?.callId == callId
 
     private suspend fun onOfferPacket(senderId: String, offer: CallWire.Packet.Offer) {
         val now = nowMs()
@@ -121,10 +129,35 @@ class CallManager @Inject constructor(
             Log.i(TAG, "stale offer ignored (missed call) from $senderId")
             return
         }
-        val busy: Boolean
+        var ringResend = false
         synchronized(this) {
-            busy = machine != null && machine!!.phase != CallStateMachine.Phase.IDLE &&
-                machine!!.phase != CallStateMachine.Phase.ENDED
+            val current = machine
+            // ДУБЛЬ offer ТЕКУЩЕГО звонка (ретрай звонящего каждые 3 с или повтор
+            // из relay): никогда не «занято» — это ОН и есть. Если ещё звоним —
+            // шлём ring повторно, в остальных фазах молча глотаем.
+            if (current != null && current.callId == offer.callId) {
+                if (!current.outgoing && current.phase == CallStateMachine.Phase.INCOMING) {
+                    ringResend = true
+                } else {
+                    Log.d(TAG, "duplicate offer for own active call ${offer.callId.take(8)} ignored")
+                    return
+                }
+            } else if (recentlyEnded.containsKey(offer.callId)) {
+                // Offer для звонка, который У НАС только что завершился (поздний
+                // повтор): не воскрешать звонок на экране.
+                Log.i(TAG, "offer for recently-ended call ${offer.callId.take(8)} ignored")
+                return
+            }
+            val busy = !ringResend && current != null &&
+                current.phase != CallStateMachine.Phase.IDLE &&
+                current.phase != CallStateMachine.Phase.ENDED
+            if (ringResend) {
+                scope.launch {
+                    sendSignal(senderId, CallWire.ringMessageId(offer.callId), CallWire.buildRing(offer.callId))
+                }
+                Log.i(TAG, "duplicate offer for ringing call ${offer.callId.take(8)}: ring re-sent")
+                return
+            }
             if (busy) {
                 scope.launch { sendSignal(senderId, CallWire.rejectMessageId(offer.callId), CallWire.buildReject(offer.callId, CallWire.REJECT_BUSY)) }
                 Log.i(TAG, "busy: rejected incoming offer from $senderId")
@@ -595,9 +628,15 @@ class CallManager @Inject constructor(
         endedResetJob = scope.launch {
             delay(ENDED_VISIBLE_MS)
             synchronized(this@CallManager) {
-                if (machine?.phase == CallStateMachine.Phase.ENDED) {
+                val finished = machine
+                if (finished?.phase == CallStateMachine.Phase.ENDED) {
                     machine = null
                     _uiState.value = CallUiState()
+                    recentlyEnded[finished.callId] = nowMs()
+                    while (recentlyEnded.size > 32) {
+                        val eldest = recentlyEnded.keys.iterator()
+                        if (eldest.hasNext()) { eldest.next(); eldest.remove() } else break
+                    }
                 }
             }
         }
