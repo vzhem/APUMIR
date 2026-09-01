@@ -196,7 +196,8 @@ object CallWire {
                 null
             }
 
-            KIND_ACCEPT -> if (parts.size == 8) {
+            // Полей 7: префикс, вид, callId, host, port, proto, ключ.
+            KIND_ACCEPT -> if (parts.size == 7) {
                 val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
                 val (lanHost, lanPort) = parseEndpoint(parts[3], parts[4]) ?: return null
                 val proto = parts[5]
