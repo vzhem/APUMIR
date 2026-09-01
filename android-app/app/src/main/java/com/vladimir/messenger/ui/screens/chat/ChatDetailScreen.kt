@@ -60,6 +60,7 @@ fun ChatDetailScreen(
     contactId: String = "",
     onBackClick: () -> Unit,
     onRenameClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
+    onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -165,11 +166,19 @@ fun ChatDetailScreen(
                             )
                         }
                     }
-                    IconButton(onClick = { /* TODO: звонок */ }) {
+                    // Аудиозвонок: активен только у контакта с node id (pk_…).
+                    IconButton(
+                        onClick = { onCallClick(contactId, contactName) },
+                        enabled = contactId.startsWith("pk_"),
+                    ) {
                         Icon(
                             Icons.Default.Call,
-                            contentDescription = "Звонок",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            contentDescription = "Позвонить",
+                            tint = if (contactId.startsWith("pk_")) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color(0xFF9AA3AF)
+                            },
                         )
                     }
                 },

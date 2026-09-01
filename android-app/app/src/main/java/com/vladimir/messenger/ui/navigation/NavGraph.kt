@@ -50,6 +50,15 @@ import com.vladimir.messenger.ui.screens.groups.GroupAdminScreen
 import com.vladimir.messenger.ui.screens.channels.ChannelScreen
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.util.InviteLinkParser
+import com.vladimir.messenger.data.call.CallManager
+import com.vladimir.messenger.data.call.CallStateMachine
+import com.vladimir.messenger.ui.screens.call.CallScreen
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 // =============================================================================
 // РњРђР РЁР РЈРўР«
@@ -148,6 +157,22 @@ sealed class Screen(val route: String) {
         fun createRoute(groupId: String): String =
             "group_admin/" + java.net.URLEncoder.encode(groupId, "UTF-8")
     }
+
+    // Экран звонка: peerId заполнен = исходящий, пустой = нас позвали на входящий.
+    data object Call : Screen("call?peerId={peerId}&peerName={peerName}") {
+        const val incoming: String = "call"
+
+        fun createOutgoing(peerId: String, peerName: String): String =
+            "call?peerId=" + java.net.URLEncoder.encode(peerId, "UTF-8") +
+                "&peerName=" + java.net.URLEncoder.encode(peerName, "UTF-8")
+    }
+}
+
+/** Доступ к синглтону звонков из навигации (входящий звонок → экран звонка сам). */
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface NavCallEntryPoint {
+    fun callManager(): CallManager
 }
 
 // =============================================================================
@@ -173,6 +198,24 @@ fun MessengerNavGraph(
         val link = initialGroupInvite
         if (!link.isNullOrBlank()) {
             navController.navigate(Screen.Groups.createJoinRoute(link))
+        }
+    }
+
+    // Входящий звонок: экран звонка показывается сам, где бы ни был пользователь.
+    // Звонок глобальный (CallManager-синглтон), уведомление из фона возвращает
+    // в MainActivity — этот эффект доводит до экрана.
+    val navAppContext = LocalContext.current.applicationContext
+    val callManager = remember {
+        EntryPointAccessors.fromApplication(navAppContext, NavCallEntryPoint::class.java)
+            .callManager()
+    }
+    val callUiState by callManager.uiState.collectAsStateWithLifecycle()
+    val currentBackStack by navController.currentBackStackEntryAsState()
+    LaunchedEffect(callUiState.phase, callUiState.callId) {
+        if (callUiState.phase == CallStateMachine.Phase.INCOMING &&
+            currentBackStack?.destination?.route != Screen.Call.route
+        ) {
+            navController.navigate(Screen.Call.incoming) { launchSingleTop = true }
         }
     }
 
@@ -309,7 +352,33 @@ fun MessengerNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onRenameClick = { cId, cName ->
                     navController.navigate(Screen.RenameContact.createRoute(cId, cName))
+                },
+                onCallClick = { cId, cName ->
+                    navController.navigate(Screen.Call.createOutgoing(cId, cName))
                 }
+            )
+        }
+
+        // ------------------------------------------------------------------
+        // ЗВОНОК (исходящий и входящий — один экран)
+        // ------------------------------------------------------------------
+        composable(
+            route = Screen.Call.route,
+            arguments = listOf(
+                navArgument("peerId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = ""
+                },
+                navArgument("peerName") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = ""
+                },
+            ),
+        ) {
+            CallScreen(
+                onLeaveCall = { navController.popBackStack() },
             )
         }
 
