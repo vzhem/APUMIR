@@ -115,6 +115,8 @@ class CallManager @Inject constructor(
             is CallWire.Packet.Reject -> if (matchesCall(packet.callId)) feedMachine { it.onReject(packet.reason, nowMs()) }
             is CallWire.Packet.Bye -> if (matchesCall(packet.callId)) feedMachine { it.onBye(packet.reason, nowMs()) }
             is CallWire.Packet.Audio -> onAudioPacket(senderId, packet)
+            is CallWire.Packet.AudioBatch ->
+                packet.frames.forEach { onAudioPacket(senderId, it) }
         }
         return true
     }
@@ -474,7 +476,13 @@ class CallManager @Inject constructor(
         }
     }
 
-    /** Разносит кадры транспорту: живой сокет → сокет, иначе au-текст (QUIC, потом relay). */
+    /**
+     * Разносит кадры транспорту, три пояса по скорости:
+     * живой LAN-сокет → прямой QUIC одиночным кадром → БРОКЕР (любая сеть:
+     * мобильная/чужой NAT/спутник) одной ab-строкой на пачку. Кадры, которые
+     * не ушли и в брокер, просто теряем — копить их в durable-очередь значит
+     * вывалить на собеседника простыню из прошлого; дыру добьёт сторож темпа.
+     */
     private fun startFramesPump(sm: CallStateMachine) {
         if (framesPumpStarted) return
         framesPumpStarted = true
@@ -490,19 +498,24 @@ class CallManager @Inject constructor(
                 if (audioChannel.isOpen() && audioChannel.sendFrame(frame.seq, frame.ptsMs, frame.cipher)) {
                     continue
                 }
-                val text = CallWire.buildAudio(current.callId, frame.seq, frame.ptsMs, frame.cipher)
-                val direct = runCatching { RustBridge.sendDirectPayload(current.peerId, text) }
+                val single = CallWire.buildAudio(current.callId, frame.seq, frame.ptsMs, frame.cipher)
+                val direct = runCatching { RustBridge.sendDirectPayload(current.peerId, single) }
                     .getOrDefault(false)
-                if (!direct) {
-                    runCatching {
-                        RustBridge.sendMessage(
-                            CallWire.audioMessageId(current.callId, frame.seq),
-                            "direct",
-                            current.peerId,
-                            text,
-                        )
-                    }
+                if (direct) continue
+                // Бандаж: дотягиваем до 8 кадров (или 120 мс), чтобы не душить брокер.
+                val batch = ArrayList<CallWire.Packet.Audio>(CallWire.AUDIO_BATCH_MAX_FRAMES)
+                batch += CallWire.Packet.Audio(current.callId, frame.seq, frame.ptsMs, frame.cipher)
+                val deadline = android.os.SystemClock.uptimeMillis() + 120
+                while (batch.size < CallWire.AUDIO_BATCH_MAX_FRAMES &&
+                    android.os.SystemClock.uptimeMillis() < deadline
+                ) {
+                    val next = frameOutQueue.poll(20, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        ?: break
+                    batch += CallWire.Packet.Audio(current.callId, next.seq, next.ptsMs, next.cipher)
                 }
+                val text = runCatching { CallWire.buildAudioBatch(current.callId, batch) }
+                    .getOrNull() ?: continue
+                runCatching { RustBridge.sendMessageMqtt(current.peerId, text) }
             }
         }
     }

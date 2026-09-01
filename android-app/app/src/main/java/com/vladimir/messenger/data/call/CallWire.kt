@@ -34,6 +34,16 @@ object CallWire {
     const val KIND_BYE = "bye"
     const val KIND_AUDIO = "au"
 
+    /**
+     * Бандаж голосовых кадров одной строкой: звонок через брокер (любая сеть —
+     * мобильная, чужой NAT, спутник) не может позволить 50 публикаций в секунду.
+     * Старые сборки неизвестный kind отбросят молча (парсер ниже).
+     */
+    const val KIND_AUDIO_BATCH = "ab"
+
+    /** Сколько кадров максимум упаковываем в одну ab-строку. */
+    const val AUDIO_BATCH_MAX_FRAMES = 8
+
     /** Версия голосового канала: v1 — выделенный TCP-сокет 42109 (udp1 добавится позже). */
     const val PROTO_TCP1 = "tcp1"
 
@@ -93,6 +103,12 @@ object CallWire {
             val seq: Long,
             val tsMs: Long,
             val payload: ByteArray,
+        ) : Packet()
+
+        /** Бандаж кадров для брокер-пути (любая сеть): n × (seq|ts|payload). */
+        data class AudioBatch(
+            val callId: String,
+            val frames: List<Audio>,
         ) : Packet()
     }
 
@@ -156,6 +172,27 @@ object CallWire {
             "Audio payload out of bounds"
         }
         return "$PREFIX|$KIND_AUDIO|$callId|$seq|$tsMs|${encodeBytes(payload)}"
+    }
+
+    /** Бандаж из 1..AUDIO_BATCH_MAX_FRAMES кадров; проверки те же, что у одиночного. */
+    fun buildAudioBatch(callId: String, frames: List<Packet.Audio>): String {
+        requireValidCallId(callId)
+        require(frames.isNotEmpty() && frames.size <= AUDIO_BATCH_MAX_FRAMES) {
+            "Audio batch out of bounds"
+        }
+        val sb = StringBuilder("$PREFIX|$KIND_AUDIO_BATCH|$callId|${frames.size}")
+        frames.forEach { f ->
+            require(f.callId == callId) { "Mixed callIds in batch" }
+            require(f.seq >= 0) { "Negative audio seq" }
+            require(f.payload.isNotEmpty() && f.payload.size <= MAX_AUDIO_PAYLOAD_BYTES) {
+                "Audio payload out of bounds"
+            }
+            sb.append('|').append(f.seq).append('|').append(f.tsMs).append('|')
+                .append(encodeBytes(f.payload))
+        }
+        val s = sb.toString()
+        require(s.length <= MAX_ENVELOPE_CHARS) { "Audio batch exceeds envelope" }
+        return s
     }
 
     // ── Детерминированные messageId для транспортной дедупликации ──────────
@@ -236,6 +273,27 @@ object CallWire {
                 val payload = decodeBytes(parts[5]) ?: return null
                 if (payload.isEmpty() || payload.size > MAX_AUDIO_PAYLOAD_BYTES) return null
                 Packet.Audio(callId, seq, tsMs, payload)
+            } else {
+                null
+            }
+
+            KIND_AUDIO_BATCH -> if (parts.size >= 7) {
+                val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
+                val n = parts[3].toIntOrNull() ?: return null
+                if (n <= 0 || n > AUDIO_BATCH_MAX_FRAMES) return null
+                if (parts.size != 4 + 3 * n) return null
+                val frames = ArrayList<Packet.Audio>(n)
+                var i = 4
+                repeat(n) {
+                    val seq = parts[i].toLongOrNull() ?: return null
+                    val tsMs = parts[i + 1].toLongOrNull() ?: return null
+                    if (seq < 0 || tsMs <= 0) return null
+                    val payload = decodeBytes(parts[i + 2]) ?: return null
+                    if (payload.isEmpty() || payload.size > MAX_AUDIO_PAYLOAD_BYTES) return null
+                    frames += Packet.Audio(callId, seq, tsMs, payload)
+                    i += 3
+                }
+                Packet.AudioBatch(callId, frames)
             } else {
                 null
             }

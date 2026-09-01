@@ -69,6 +69,16 @@ class CoreServerService : Service() {
     private var lastNotificationText: String = ""
     private val knownPeers = mutableMapOf<String, Long>()  // peerId -> lastSeenMs
     private val PEER_DEDUP_MS = 30000L  // 60 сек дедупликация
+
+    /**
+     * Heartbeat-присутствие: ядро шлёт peer_discovered ~каждые 30 с по MQTT
+     * (и ~каждые 15 с по mDNS в LAN), а peer_lost практически НЕ генерирует —
+     * самолётный режим у собеседника никакого события не даёт. Поэтому «в сети»
+     * = «живая метка свежее TTL»: который peers мы зажгли, тех сами и гасятся.
+     */
+    private val onlineMarked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val PRESENCE_TTL_MS = 100_000L    // ~3 пропущенных MQTT-пульса
+    private val PRESENCE_SWEEP_MS = 20_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
 
@@ -106,6 +116,7 @@ class CoreServerService : Service() {
                 } catch (e: Exception) {
                     Log.w(TAG, "Presence reset failed: ${e.message}")
                 }
+                startPresenceReaper()
                 // Ждём пока RustBridge инициализируется
                 var attempts = 0
                 while (RustBridge.nodeId() == null && attempts < 30) {
@@ -594,18 +605,22 @@ class CoreServerService : Service() {
                 val peerName = event.displayName?.takeIf { it.isNotBlank() } ?: "Anonymous"
                 val now = System.currentTimeMillis()
                 val lastSeen = knownPeers[peerId] ?: 0L
-                if (now - lastSeen < PEER_DEDUP_MS) return  // дедупликация
-                knownPeers[peerId] = now
-                Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
+                knownPeers[peerId] = now  // свежесть ДО дедупа: пульс = жизнь
+                val lightTouch = now - lastSeen < PEER_DEDUP_MS
 
                 // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
                 try {
                     val existing = contactRepository.getContactByFingerprint(peerId)
                     if (existing != null) {
-                        // Контакт существует — обновляем online status
-                        contactRepository.updateOnlineStatus(peerId, true)
-                        // И в чаты: шапка лички и точка в списке читают таблицу chats
-                        try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (_: Exception) {}
+                        // «В сети» — при КАЖДОМ живом пульсе (переходы дёшевы).
+                        if (onlineMarked.add(peerId)) {
+                            contactRepository.updateOnlineStatus(peerId, true)
+                            // И в чаты: шапка лички и точка в списке читают таблицу chats
+                            try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (_: Exception) {}
+                            Log.i(TAG, "🟢 ONLINE: $peerName")
+                        }
+                        if (lightTouch) return  // пульс учли, тяжёлую синхру не дёргаем
+                        Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
                         if (existing.displayName != peerName && peerName.isNotBlank() && peerName != "Unknown" && peerName != "Anonymous" && (existing.displayName.startsWith("Contact ") || existing.displayName == "Anonymous")) {
                             contactRepository.updateDisplayName(existing.id, peerName)
                             chatRepository.updateContactName(peerId, peerName)
@@ -628,7 +643,8 @@ class CoreServerService : Service() {
                         }
                     } else {
                         // Контакт НЕ существует — игнорируем
-                        Log.i(TAG, "ℹ Peer не в контактах: $peerName ($peerId) — нужен invite link")
+                        if (!lightTouch) Log.i(TAG, "ℹ Peer не в контактах: $peerName ($peerId) — нужен invite link")
+                        if (lightTouch) return
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Update contact failed", e)
@@ -639,6 +655,8 @@ class CoreServerService : Service() {
             "peer_lost" -> {
                 val peerId = event.peerId ?: return
                 Log.i(TAG, "Peer lost: $peerId")
+                onlineMarked.remove(peerId)
+                knownPeers.remove(peerId)
                 try { contactRepository.updateOnlineStatus(peerId, false) } catch (_: Exception) {}
                 try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (_: Exception) {}
             }
@@ -706,6 +724,31 @@ class CoreServerService : Service() {
             .setOngoing(true)
             .setSilent(true)
             .build()
+    }
+
+    /**
+     * Караул присутствия: метка онлайна без свежих пульсов дольше TTL → «не в сети».
+     * Самолётный режим у Жени = пульсы пропали, события peer_lost ядро не даёт.
+     */
+    private fun startPresenceReaper() {
+        serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(PRESENCE_SWEEP_MS)
+                val now = System.currentTimeMillis()
+                val staleIds = synchronized(onlineMarked) {
+                    onlineMarked.filter { pid ->
+                        now - (knownPeers[pid] ?: 0L) > PRESENCE_TTL_MS
+                    }
+                }
+                for (pid in staleIds) {
+                    onlineMarked.remove(pid)
+                    knownPeers.remove(pid)
+                    Log.i(TAG, "⚫ OFFLINE (TTL): $pid")
+                    try { contactRepository.updateOnlineStatus(pid, false) } catch (_: Exception) {}
+                    try { chatRepository.updateContactOnlineStatus(pid, false) } catch (_: Exception) {}
+                }
+            }
+        }
     }
 
     private fun updateNotification(status: String) {

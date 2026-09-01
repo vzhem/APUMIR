@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class CallWireTest {
@@ -129,5 +130,39 @@ class CallWireTest {
     @Test(expected = IllegalArgumentException::class)
     fun buildingWithBadCallIdFails() {
         CallWire.buildRing("short")
+    }
+
+    // ── Бандаж кадров для брокер-пути (любая сеть) ───────────────────────────
+
+    @Test
+    fun audioBatchRoundTrip() {
+        val frames = (0 until 5).map { i ->
+            CallWire.Packet.Audio("call42", 100L + i, 1_700_000_000_000L + i * 20, byteArrayOf(i.toByte(), 9, 8))
+        }
+        val text = CallWire.buildAudioBatch("call42", frames)
+        val parsed = CallWire.parse(text)
+        assertTrue(parsed is CallWire.Packet.AudioBatch)
+        parsed as CallWire.Packet.AudioBatch
+        assertEquals("call42", parsed.callId)
+        assertEquals(5, parsed.frames.size)
+        frames.forEachIndexed { i, f ->
+            assertEquals(f.seq, parsed.frames[i].seq)
+            assertEquals(f.tsMs, parsed.frames[i].tsMs)
+            assertTrue(f.payload.contentEquals(parsed.frames[i].payload))
+        }
+    }
+
+    @Test
+    fun audioBatchRejectsGarbage() {
+        // Полей меньше, чем заявлено n=3.
+        assertNull(CallWire.parse("APUCALL1|ab|call42|3|1|2|AA=="))
+        // n=0 и слишком большое n запрещены.
+        assertNull(CallWire.parse("APUCALL1|ab|call42|0|"))
+        assertNull(CallWire.parse("APUCALL1|ab|call42|99|1|2|AA=="))
+        // Пустой список строить нельзя.
+        try {
+            CallWire.buildAudioBatch("call42", emptyList())
+            fail("empty batch must throw")
+        } catch (_: IllegalArgumentException) {}
     }
 }
