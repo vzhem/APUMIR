@@ -65,9 +65,8 @@ class ContactRepository @Inject constructor(
         contactDao.updateDisplayName(contactId, name)
     }
 
-    suspend fun updateUsername(contactId: String, username: String) {
-        contactDao.updateUsername(contactId, username)
-    }
+    // updateUsername уже есть ниже, рядом с renameContact - второй такой же
+    // метод не нужен.
 
     /**
      * Имя-заглушка вида «Contact a1b2c3d4»: такое можно молча заменить настоящим,
