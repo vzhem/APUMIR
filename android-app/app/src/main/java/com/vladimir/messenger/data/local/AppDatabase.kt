@@ -14,6 +14,7 @@ import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
+import com.vladimir.messenger.data.local.dao.SavedItemDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
@@ -30,6 +31,7 @@ import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import com.vladimir.messenger.data.local.entity.AvatarEntity
 import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
+import com.vladimir.messenger.data.local.entity.SavedItemEntity
 
 @Database(
     entities = [
@@ -49,8 +51,9 @@ import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
         DirectoryEntity::class,
         NicknameEntity::class,
         AvatarEntity::class,
+        SavedItemEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -64,6 +67,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun directoryDao(): DirectoryDao
     abstract fun nicknameDao(): NicknameDao
     abstract fun avatarDao(): AvatarDao
+    abstract fun savedItemDao(): SavedItemDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -348,6 +352,32 @@ abstract class AppDatabase : RoomDatabase() {
                         "`dataB64` TEXT NOT NULL, " +
                         "`updatedAtMs` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`ownerId`))"
+                )
+            }
+        }
+
+        /**
+         * v13: «Избранное» - личное хранилище абонента. Операция добавочная,
+         * существующие чаты, сообщения и файлы не трогает.
+         */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `saved_items` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, " +
+                        "`text` TEXT NOT NULL, " +
+                        "`transferId` TEXT, " +
+                        "`fileName` TEXT NOT NULL, " +
+                        "`mediaType` TEXT NOT NULL, " +
+                        "`sizeBytes` INTEGER NOT NULL, " +
+                        "`sourceTitle` TEXT NOT NULL, " +
+                        "`savedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_saved_items_savedAtMs` " +
+                        "ON `saved_items` (`savedAtMs`)"
                 )
             }
         }

@@ -300,6 +300,11 @@ fun ChatDetailScreen(
                                     } else {
                                         null
                                     },
+                                    onSaveToFavorites = if (transfer.state == "COMPLETE") {
+                                        { viewModel.saveToFavorites(transfer, contactName) }
+                                    } else {
+                                        null
+                                    },
                                 )
                             } else {
                                 val message = row.message!!
@@ -353,8 +358,14 @@ fun ChatDetailScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showCopyDialog = null }) {
-                    Text("Отмена")
+                // Пересылка себе живёт рядом с копированием: человек открывает
+                // это же окно, когда хочет что-то сделать с сообщением.
+                TextButton(onClick = {
+                    viewModel.saveTextToFavorites(message.content, contactName)
+                    showCopyDialog = null
+                    resetSelection()
+                }) {
+                    Text("В избранное")
                 }
             }
         )

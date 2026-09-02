@@ -38,6 +38,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
@@ -335,6 +339,7 @@ fun GroupChatScreen(
                             ?: "Участник " + message.senderId.takeLast(4),
                         canPin = uiState.canPin,
                         onTogglePin = { viewModel.togglePin(message.id, !message.isPinned) },
+                        onSaveToFavorites = { viewModel.saveToFavorites(message.content) },
                     )
                 }
             }
@@ -673,6 +678,7 @@ private fun isSameDay(a: Long, b: Long): Boolean {
         ca.get(java.util.Calendar.DAY_OF_YEAR) == cb.get(java.util.Calendar.DAY_OF_YEAR)
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
     // Картинки и гифки в темах показываем так же, как в личном чате.
@@ -680,7 +686,11 @@ private fun MessageBubble(
     senderName: String,
     canPin: Boolean,
     onTogglePin: () -> Unit,
+    onSaveToFavorites: () -> Unit = {},
 ) {
+    // Долгое нажатие - «В избранное»: у сообщения темы нет своего меню, а
+    // отдельная кнопка у каждого пузыря засорила бы ленту.
+    var showMenu by remember { mutableStateOf(false) }
     val time = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
@@ -688,7 +698,15 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
     ) {
-        Card(modifier = Modifier.widthIn(max = 300.dp)) {
+        Box {
+        Card(
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { showMenu = true },
+                ),
+        ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {
                     Text(senderName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
@@ -713,6 +731,16 @@ private fun MessageBubble(
                     }
                 }
             }
+        }
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(
+                text = { Text("В избранное") },
+                onClick = {
+                    showMenu = false
+                    onSaveToFavorites()
+                },
+            )
+        }
         }
         if (canPin) {
             IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {

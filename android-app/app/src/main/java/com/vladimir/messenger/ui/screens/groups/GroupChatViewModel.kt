@@ -41,6 +41,7 @@ data class GroupChatUiState(
 class GroupChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val groupRepository: GroupRepository,
+    private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
 ) : ViewModel() {
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
@@ -190,6 +191,15 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.setPinned(groupId, messageId, pinned)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Переслать сообщение темы себе в «Избранное». */
+    fun saveToFavorites(text: String) {
+        val source = _uiState.value.group?.title.orEmpty()
+        viewModelScope.launch {
+            savedItems.saveText(text, if (source.isBlank()) "" else "Группа " + source)
+            _uiState.update { it.copy(error = "Добавлено в избранное") }
         }
     }
 

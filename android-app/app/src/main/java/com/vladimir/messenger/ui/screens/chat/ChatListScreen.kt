@@ -76,6 +76,7 @@ fun ChatListScreen(
     onScanQrClick: () -> Unit = {},
     onShowMyQrClick: () -> Unit = {},
     onRankClick: () -> Unit = {},
+    onSavedClick: () -> Unit = {},
     onContactsClick: () -> Unit = {},
     onGroupsClick: () -> Unit = {},
     onGroupClick: (groupId: String) -> Unit = {},
@@ -190,6 +191,14 @@ fun ChatListScreen(
                                         onClick = {
                                             menuOpen = false
                                             onShowMyQrClick()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Избранное") },
+                                        leadingIcon = { Icon(Icons.Default.Bookmark, null) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onSavedClick()
                                         },
                                     )
                                     DropdownMenuItem(

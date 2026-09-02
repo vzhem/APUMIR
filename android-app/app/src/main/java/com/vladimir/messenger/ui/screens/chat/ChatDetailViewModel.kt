@@ -52,6 +52,7 @@ class ChatDetailViewModel @Inject constructor(
     private val filePreparation: OutgoingFilePreparationService,
     private val fileTransferDao: FileTransferDao,
     private val fileTransferRouter: FileTransferRouter,
+    private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -281,6 +282,37 @@ class ChatDetailViewModel @Inject constructor(
      * Received-file export: the SAF picker (launched by the screen) returns a user-chosen Uri;
      * the plaintext is streamed out of the app-private verified storage into it.
      */
+    /**
+     * Переслать себе в «Избранное».
+     *
+     * Копия файла не делается: избранное ссылается на эту же принятую передачу.
+     */
+    fun saveToFavorites(transfer: FileTransferEntity, sourceTitle: String) {
+        viewModelScope.launch {
+            val result = savedItems.saveFile(transfer, sourceTitle)
+            _uiState.update {
+                it.copy(
+                    error = when (result) {
+                        com.vladimir.messenger.data.repository.SaveResult.Saved ->
+                            "Добавлено в избранное"
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved ->
+                            "Уже в избранном"
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady ->
+                            "Файл ещё не получен полностью"
+                    },
+                )
+            }
+        }
+    }
+
+    /** Переслать текст сообщения себе в «Избранное». */
+    fun saveTextToFavorites(text: String, sourceTitle: String) {
+        viewModelScope.launch {
+            savedItems.saveText(text, sourceTitle)
+            _uiState.update { it.copy(error = "Добавлено в избранное") }
+        }
+    }
+
     fun requestSaveReceivedFile(transfer: FileTransferEntity) {
         if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return
         _uiState.update { it.copy(pendingSave = transfer) }

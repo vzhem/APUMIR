@@ -33,6 +33,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
+import com.vladimir.messenger.ui.screens.saved.SavedScreen
 import com.vladimir.messenger.ui.screens.onboarding.OnboardingScreen
 import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
@@ -96,6 +97,9 @@ sealed class Screen(val route: String) {
     data object MtProxy : Screen("mtproxy")
 
     data object RankBenefits : Screen("rank_benefits")
+
+    // Избранное - личное хранилище абонента
+    data object Saved : Screen("saved")
 
     // Поделиться профилем
     data object ShareProfile : Screen("share_profile")
@@ -291,6 +295,9 @@ fun MessengerNavGraph(
                 onRankClick = {
                     navController.navigate(Screen.RankBenefits.route)
                 },
+                onSavedClick = {
+                    navController.navigate(Screen.Saved.route)
+                },
                 onContactsClick = {
                     navController.navigate(Screen.Contacts.route)
                 },
@@ -437,6 +444,13 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         // MTPROTO ПРОКСИ
         // ------------------------------------------------------------------
+        // ------------------------------------------------------------------
+        // ИЗБРАННОЕ
+        // ------------------------------------------------------------------
+        composable(route = Screen.Saved.route) {
+            SavedScreen(onBackClick = { navController.popBackStack() })
+        }
+
         composable(route = Screen.MtProxy.route) {
             MtProxyListScreen(
                 onBackClick = { navController.popBackStack() }

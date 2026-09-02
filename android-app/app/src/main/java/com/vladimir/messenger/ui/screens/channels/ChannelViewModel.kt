@@ -48,6 +48,7 @@ class ChannelViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val groupRepository: GroupRepository,
     private val messageDao: MessageDao,
+    private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
 ) : ViewModel() {
 
     private val channelId: String = savedStateHandle.get<String>("channelId").orEmpty()
@@ -137,6 +138,16 @@ class ChannelViewModel @Inject constructor(
                         it.copy(creating = false, error = e.message ?: "Не удалось создать пост")
                     }
                 }
+        }
+    }
+
+    /** Переслать пост канала себе в «Избранное». */
+    fun savePostToFavorites(post: ChannelPost) {
+        val source = _uiState.value.channel?.title.orEmpty()
+        val body = if (post.title.isBlank()) post.text else post.title + "\n\n" + post.text
+        viewModelScope.launch {
+            savedItems.saveText(body, if (source.isBlank()) "" else "Канал " + source)
+            _uiState.update { it.copy(error = "Добавлено в избранное") }
         }
     }
 

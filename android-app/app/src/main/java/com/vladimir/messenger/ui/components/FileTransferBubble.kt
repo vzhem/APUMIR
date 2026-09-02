@@ -51,6 +51,8 @@ fun FileTransferBubble(
     previewFile: java.io.File? = null,
     /** Раунд 44: «Поделиться» из меню картинки. */
     onShareClick: (() -> Unit)? = null,
+    /** Переслать файл себе в «Избранное». Доступно для принятых файлов. */
+    onSaveToFavorites: (() -> Unit)? = null,
 ) {
     val background = if (isFromMe) {
         MaterialTheme.colorScheme.primary
@@ -154,6 +156,15 @@ fun FileTransferBubble(
                                     },
                                 )
                             }
+                            if (onSaveToFavorites != null) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("В избранное") },
+                                    onClick = {
+                                        imageMenuOpen.value = false
+                                        onSaveToFavorites()
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -226,6 +237,19 @@ fun FileTransferBubble(
                     ),
                 ) {
                     Text("Сохранить в папку", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            // У документов и видео превью нет, меню картинки тоже - поэтому
+            // «В избранное» выносим отдельной кнопкой.
+            if (!(previewBitmap != null && isImage) && onSaveToFavorites != null) {
+                TextButton(
+                    onClick = onSaveToFavorites,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 0.dp,
+                        vertical = 0.dp,
+                    ),
+                ) {
+                    Text("В избранное", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

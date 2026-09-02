@@ -11,6 +11,7 @@ package com.vladimir.messenger.ui.screens.channels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -168,6 +169,7 @@ fun ChannelScreen(
                         PostCard(
                             post = post,
                             onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
+                            onSaveToFavorites = { viewModel.savePostToFavorites(post) },
                         )
                     }
                 }
@@ -205,6 +207,7 @@ fun ChannelScreen(
 private fun PostCard(
     post: ChannelPost,
     onOpenComments: () -> Unit,
+    onSaveToFavorites: () -> Unit = {},
 ) {
     val time = remember(post.timeMs) {
         SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date(post.timeMs))
@@ -238,14 +241,24 @@ private fun PostCard(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(top = 10.dp))
-            TextButton(onClick = onOpenComments) {
-                Text(
-                    if (post.comments > 0) {
-                        "Комментарии (${post.comments})"
-                    } else {
-                        "Оставить комментарий"
-                    },
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = onOpenComments,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        if (post.comments > 0) {
+                            "Комментарии (${post.comments})"
+                        } else {
+                            "Оставить комментарий"
+                        },
+                    )
+                }
+                // Пост сохраняется себе одним нажатием - так человек забирает
+                // нужное из канала, не переписывая текст вручную.
+                TextButton(onClick = onSaveToFavorites) {
+                    Text("В избранное")
+                }
             }
         }
     }
