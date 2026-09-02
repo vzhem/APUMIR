@@ -29,11 +29,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,7 +59,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
+import com.vladimir.messenger.ui.components.ApuBubble
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.AvatarPickerDialog
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -127,13 +131,38 @@ fun GroupAdminScreen(
             )
         },
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        // Вкладки кабинета листаются пальцем так же, как разделы на главной.
+        val swipePx = with(LocalDensity.current) { 56.dp.toPx() }
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .pointerInput(visibleTabs, tab) {
+                    var dragged = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragged = 0f },
+                        onDragCancel = { dragged = 0f },
+                        onDragEnd = {
+                            val index = visibleTabs.indexOf(tab)
+                            if (index >= 0 && kotlin.math.abs(dragged) >= swipePx) {
+                                val next = if (dragged < 0) index + 1 else index - 1
+                                visibleTabs.getOrNull(next)?.let { tab = it }
+                            }
+                            dragged = 0f
+                        },
+                    ) { _, amount -> dragged += amount }
+                },
+        ) {
 
             uiState.error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp))
+                ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
             }
             uiState.notice?.let {
-                Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(12.dp))
+                ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text(it, color = MaterialTheme.colorScheme.primary)
+                }
             }
 
             ScrollableTabRow(
@@ -251,9 +280,22 @@ private fun OverviewTab(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // Каждый блок настроек - в своём светлом пузыре: экран рисуется поверх
+        // обоев, и голый текст на тёмной подложке не читался.
+        ApuBubble {
         if (canChangeInfo) {
-            OutlinedTextField(value = titleDraft, onValueChange = { titleDraft = it }, label = { Text("Название") })
-            OutlinedTextField(value = aboutDraft, onValueChange = { aboutDraft = it }, label = { Text("Описание") })
+            OutlinedTextField(
+                value = titleDraft,
+                onValueChange = { titleDraft = it },
+                label = { Text("Название") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = aboutDraft,
+                onValueChange = { aboutDraft = it },
+                label = { Text("Описание") },
+                modifier = Modifier.fillMaxWidth(),
+            )
             TextButton(onClick = { onSave(titleDraft, aboutDraft) }) { Text("Сохранить") }
         } else {
             // Без права менять информацию показываем только текст: поля и
@@ -266,12 +308,14 @@ private fun OverviewTab(
             Text(
                 "Название и описание меняют администраторы.",
                 style = MaterialTheme.typography.bodySmall,
+                color = ApuBubbleMutedColor,
             )
+        }
         }
 
         // Аватар группы/канала: меняют те же, кто название и описание.
         if (canChangeInfo) {
-            HorizontalDivider()
+            ApuBubble {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (groupAvatarBitmap != null) {
                     Image(
@@ -294,38 +338,43 @@ private fun OverviewTab(
                     Text(
                         "Видят участники и Ваши контакты в списке чатов",
                         style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
                     )
                 }
                 TextButton(onClick = { showAvatarPicker = true }) { Text("Сменить") }
             }
+            }
         }
 
-        HorizontalDivider()
+        ApuBubble {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Публичная группа", fontWeight = FontWeight.Medium)
+                    Text(
+                        if (isPublic) "Вход по ссылке без одобрения" else "Вход только по одобрению заявки",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
+                if (canChangeVisibility) {
+                    Switch(checked = isPublic, onCheckedChange = onTogglePublic)
+                }
+            }
+        }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Публичная группа", fontWeight = FontWeight.Medium)
+        ApuBubble {
+            TextButton(onClick = { showLeaveConfirm = true }) { Text("Покинуть группу") }
+
+            if (isOwner) {
+                HorizontalDivider()
                 Text(
-                    if (isPublic) "Вход по ссылке без одобрения" else "Вход только по одобрению заявки",
+                    "Удаление стирает группу, её темы и сообщения у всех участников.",
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
-            }
-            if (canChangeVisibility) {
-                Switch(checked = isPublic, onCheckedChange = onTogglePublic)
-            }
-        }
-
-        HorizontalDivider()
-        TextButton(onClick = { showLeaveConfirm = true }) { Text("Покинуть группу") }
-
-        if (isOwner) {
-            Text(
-                "Удаление стирает группу, её темы и сообщения у всех участников.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = { showDeleteConfirm = true }) {
-                Text("Удалить группу", color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { showDeleteConfirm = true }) {
+                    Text("Удалить группу", color = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }
@@ -430,21 +479,25 @@ private fun AdminsTab(
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Text(
-                "Назначить администратора можно во вкладке «Участники».",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            ApuBubble {
+                Text(
+                    "Назначить администратора можно во вкладке «Участники».",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+            }
         }
         if (admins.isEmpty()) {
-            item { Text("Администраторов пока нет") }
+            item { ApuBubble { Text("Администраторов пока нет") } }
         }
         items(admins, key = { it.nodeId }) { admin ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
+            ApuBubble {
+                Column {
                     Text(admin.displayName.ifBlank { admin.nodeId }, fontWeight = FontWeight.Medium)
                     Text(
                         if (admin.role == GroupRole.OWNER) "Владелец — все права безусловно" else "Администратор",
                         style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
                     )
                     if (admin.role == GroupRole.ADMIN) {
                         // Разрешения занимают пол-экрана, поэтому список сворачивается:
@@ -472,7 +525,11 @@ private fun AdminsTab(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(entry.title)
-                                        Text(entry.hint, style = MaterialTheme.typography.bodySmall)
+                                        Text(
+                                            entry.hint,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = ApuBubbleMutedColor,
+                                        )
                                     }
                                     Switch(
                                         checked = GroupPermissions.has(admin.permissions, entry.flag),
@@ -509,8 +566,10 @@ private fun MembersTab(
         // Кнопка рассылает карточку группы, темы и состав заново.
         // Обычному участнику не показываем: рассылка - дело администратора.
         if (isAdmin) {
-            TextButton(onClick = onResync) {
-                Text("Разослать темы и состав заново")
+            ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                TextButton(onClick = onResync) {
+                    Text("Разослать темы и состав заново")
+                }
             }
         }
         OutlinedTextField(
@@ -546,8 +605,8 @@ private fun MemberRow(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-        Column(modifier = Modifier.padding(12.dp)) {
+    ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(member.displayName.ifBlank { member.nodeId }, fontWeight = FontWeight.Medium)
@@ -558,6 +617,7 @@ private fun MemberRow(
                             else -> "Участник"
                         },
                         style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
                     )
                 }
                 // Управление участниками видно только администраторам:
@@ -575,7 +635,11 @@ private fun MemberRow(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(entry.title)
-                            Text(entry.hint, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                entry.hint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
                         }
                         Switch(
                             checked = GroupPermissions.has(member.permissions, entry.flag),
@@ -597,17 +661,21 @@ private fun MemberRow(
 private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, Boolean) -> Unit) {
     if (requests.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Новых заявок нет")
+            ApuBubble(modifier = Modifier.padding(24.dp)) { Text("Новых заявок нет") }
         }
         return
     }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(requests, key = { it.nodeId }) { request ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
+            ApuBubble {
+                Column {
                     Text(request.displayName.ifBlank { request.nodeId }, fontWeight = FontWeight.Medium)
                     if (request.note.isNotBlank()) {
-                        Text(request.note, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            request.note,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = { onDecide(request.nodeId, true) }) { Text("Одобрить") }
@@ -631,6 +699,7 @@ private fun InvitesTab(
 ) {
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
+            ApuBubble {
             if (canManage) {
                 // Одна ссылка и один понятный переключатель.
                 //
@@ -649,6 +718,7 @@ private fun InvitesTab(
                                 "По ссылке человек входит сразу"
                             },
                             style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
                         )
                     }
                     Switch(checked = needsApproval, onCheckedChange = { needsApproval = it })
@@ -659,13 +729,16 @@ private fun InvitesTab(
                     "Ссылки создают и отзывают администраторы. Попросите ссылку у них " +
                         "или воспользуйтесь QR-кодом группы.",
                     style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
                 )
             }
             if (!isPublic) {
                 Text(
                     "Группа частная: даже по ссылке участник попадёт в заявки.",
                     style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
                 )
+            }
             }
         }
         items(invites, key = { it.slug }) { invite ->
@@ -697,8 +770,8 @@ private fun InviteCard(
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
+    ApuBubble {
+        Column {
             Row {
                 Column(modifier = Modifier.weight(1f)) {
                     // SelectionContainer делает текст выделяемым: без него
@@ -715,6 +788,7 @@ private fun InviteCard(
                             if (invite.revoked) append(" • отозвана")
                         },
                         style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
                     )
                 }
                 Spacer(Modifier.width(12.dp))
@@ -725,7 +799,11 @@ private fun InviteCard(
                         modifier = Modifier.size(120.dp),
                     )
                 } else {
-                    Text("QR недоступен", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "QR недоступен",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -754,7 +832,9 @@ private fun InviteCard(
 private fun StatsTab(stats: GroupStats?, topics: List<TopicSummary>) {
     if (stats == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Статистика доступна администраторам")
+            ApuBubble(modifier = Modifier.padding(24.dp)) {
+                Text("Статистика доступна администраторам")
+            }
         }
         return
     }
@@ -762,23 +842,30 @@ private fun StatsTab(stats: GroupStats?, topics: List<TopicSummary>) {
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        StatRow("Участников", stats.memberCount.toString())
-        StatRow("Администраторов", stats.adminCount.toString())
-        StatRow("Тем", stats.topicCount.toString())
-        StatRow("Заявок в ожидании", stats.pendingRequests.toString())
-        StatRow("Сообщений всего", stats.totalMessages.toString())
+        ApuBubble {
+            StatRow("Участников", stats.memberCount.toString())
+            StatRow("Администраторов", stats.adminCount.toString())
+            StatRow("Тем", stats.topicCount.toString())
+            StatRow("Заявок в ожидании", stats.pendingRequests.toString())
+            StatRow("Сообщений всего", stats.totalMessages.toString())
+        }
 
-        HorizontalDivider()
+        ApuBubble {
         Text("Сообщения за 7 дней", fontWeight = FontWeight.Medium)
         if (stats.last7Days.isEmpty()) {
-            Text("Пока нет данных", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Пока нет данных",
+                style = MaterialTheme.typography.bodySmall,
+                color = ApuBubbleMutedColor,
+            )
         } else {
             stats.last7Days.forEach { day ->
                 StatRow(day.dayKey, "${day.messageCount} сообщ., ${day.senderCount} отправ.")
             }
         }
+        }
 
-        HorizontalDivider()
+        ApuBubble {
         Text("Сообщения по темам", fontWeight = FontWeight.Medium)
         // Идентификатор темы человеку ничего не говорит — показываем её имя.
         stats.perTopic.forEach { (topicId, count) ->
@@ -787,6 +874,7 @@ private fun StatsTab(stats: GroupStats?, topics: List<TopicSummary>) {
                 ?.takeIf { it.isNotBlank() }
                 ?: if (topicId.isBlank()) "Без темы" else topicId.take(8)
             StatRow(name, count.toString())
+        }
         }
     }
 }
@@ -804,24 +892,32 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
     ) {
-        Text("Разрешения для участников", fontWeight = FontWeight.Medium)
-        Text(
-            "Применяются ко всем обычным участникам. Администраторы и владелец не ограничиваются.",
-            style = MaterialTheme.typography.bodySmall,
-        )
+        ApuBubble {
+            Text("Разрешения для участников", fontWeight = FontWeight.Medium)
+            Text(
+                "Применяются ко всем обычным участникам. Администраторы и владелец не ограничиваются.",
+                style = MaterialTheme.typography.bodySmall,
+                color = ApuBubbleMutedColor,
+            )
+        }
         Spacer(Modifier.height(8.dp))
         GroupPermissions.Member.entries.forEach { entry ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(entry.title)
-                    Text(entry.hint, style = MaterialTheme.typography.bodySmall)
+            ApuBubble(modifier = Modifier.padding(vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(entry.title)
+                        Text(
+                            entry.hint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                    Switch(
+                        checked = GroupPermissions.has(mask, entry.flag),
+                        onCheckedChange = { onToggle(entry.flag, it) },
+                    )
                 }
-                Switch(
-                    checked = GroupPermissions.has(mask, entry.flag),
-                    onCheckedChange = { onToggle(entry.flag, it) },
-                )
             }
-            HorizontalDivider()
         }
     }
 }
