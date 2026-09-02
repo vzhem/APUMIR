@@ -29,7 +29,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
@@ -40,12 +39,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -53,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.CircleShape
@@ -60,10 +61,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import com.vladimir.messenger.ui.components.ApuBubble
+import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.AvatarPickerDialog
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -116,6 +116,24 @@ fun GroupAdminScreen(
         if (tab !in visibleTabs) tab = AdminTab.Overview
     }
 
+    // Выбранная вкладка и страница листалки ходят парой: тап по вкладке листает
+    // страницу анимацией, а остановившаяся страница выбирает вкладку.
+    val pagerState = rememberPagerState(
+        initialPage = visibleTabs.indexOf(tab).coerceAtLeast(0),
+        pageCount = { visibleTabs.size.coerceAtLeast(1) },
+    )
+    LaunchedEffect(tab, visibleTabs) {
+        val target = visibleTabs.indexOf(tab)
+        if (target >= 0 && target != pagerState.currentPage) {
+            pagerState.animateScrollToPage(target)
+        }
+    }
+    LaunchedEffect(pagerState, visibleTabs) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            visibleTabs.getOrNull(page)?.let { if (it != tab) tab = it }
+        }
+    }
+
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
@@ -131,27 +149,10 @@ fun GroupAdminScreen(
             )
         },
     ) { padding ->
-        // Вкладки кабинета листаются пальцем так же, как разделы на главной.
-        val swipePx = with(LocalDensity.current) { 56.dp.toPx() }
         Column(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize()
-                .pointerInput(visibleTabs, tab) {
-                    var dragged = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { dragged = 0f },
-                        onDragCancel = { dragged = 0f },
-                        onDragEnd = {
-                            val index = visibleTabs.indexOf(tab)
-                            if (index >= 0 && kotlin.math.abs(dragged) >= swipePx) {
-                                val next = if (dragged < 0) index + 1 else index - 1
-                                visibleTabs.getOrNull(next)?.let { tab = it }
-                            }
-                            dragged = 0f
-                        },
-                    ) { _, amount -> dragged += amount }
-                },
+                .fillMaxSize(),
         ) {
 
             uiState.error?.let {
@@ -165,20 +166,23 @@ fun GroupAdminScreen(
                 }
             }
 
-            ScrollableTabRow(
-                selectedTabIndex = visibleTabs.indexOf(tab).coerceAtLeast(0),
-                edgePadding = 8.dp,
-            ) {
-                visibleTabs.forEach { item ->
-                    Tab(
-                        selected = tab == item,
-                        onClick = { tab = item },
-                        text = { Text(item.title) },
-                    )
-                }
-            }
+            ApuTabBar(
+                titles = visibleTabs.map { it.title },
+                selectedIndex = pagerState.currentPage,
+                offsetFraction = pagerState.currentPageOffsetFraction,
+                onSelect = { index -> visibleTabs.getOrNull(index)?.let { tab = it } },
+            )
 
-            when (tab) {
+            // Вкладки листаются пальцем так же, как разделы на главной:
+            // страницы едут за пальцем, в движении видно сразу две.
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                key = { page -> visibleTabs.getOrNull(page)?.name ?: page.toString() },
+                pageSize = PageSize.Fill,
+                beyondViewportPageCount = 1,
+            ) { page ->
+            when (visibleTabs.getOrNull(page) ?: AdminTab.Overview) {
                 AdminTab.Overview -> OverviewTab(
                     groupId = uiState.groupId,
                     title = uiState.group?.title.orEmpty(),
@@ -229,6 +233,7 @@ fun GroupAdminScreen(
                     mask = uiState.memberPermissions,
                     onToggle = viewModel::setMemberPermission,
                 )
+            }
             }
         }
     }

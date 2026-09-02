@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.data.group.GroupRole
@@ -37,13 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
@@ -252,11 +246,13 @@ fun ChatListScreen(
 
                 // Полоска разделов: во всю ширину экрана и пролистывается
                 // пальцем вбок - разделов может стать больше, чем влезает.
-                SectionChips(
-                    sections = uiState.sections,
+                ApuTabBar(
+                    titles = uiState.sections.map { it.title },
                     selectedIndex = pagerState.currentPage,
                     offsetFraction = pagerState.currentPageOffsetFraction,
-                    onSelect = viewModel::onSectionSelected,
+                    onSelect = { index ->
+                        uiState.sections.getOrNull(index)?.let(viewModel::onSectionSelected)
+                    },
                 )
             }
         },
@@ -736,128 +732,6 @@ private fun EmptyChatList(
 // =============================================================================
 // ПОЛОСКА РАЗДЕЛОВ И СТРОКА ГРУППЫ
 // =============================================================================
-
-/**
- * Полоска разделов главного экрана: один общий пузырь на все разделы.
- *
- * Метка (золотая плашка) не перещёлкивается, а переезжает вместе со
- * страницами: её положение считается от `selectedIndex + offsetFraction`
- * листалки. Остановили палец посередине - метка тоже стоит посередине между
- * двумя разделами, ровно как и содержимое страниц.
- *
- * Ширина у разделов разная, поэтому положение и ширину метки берём из
- * реальных замеров каждой надписи и смешиваем между соседями.
- */
-@Composable
-private fun SectionChips(
-    sections: List<InboxSection>,
-    selectedIndex: Int,
-    offsetFraction: Float,
-    onSelect: (InboxSection) -> Unit,
-) {
-    if (sections.isEmpty()) return
-
-    val density = LocalDensity.current
-    val scrollState = rememberScrollState()
-
-    // Замеры надписей: слева направо, в пикселях. Пересобираются, если список
-    // разделов поменялся (например, телефон стал админом группы).
-    var bounds by remember(sections) {
-        mutableStateOf(List(sections.size) { 0 to 0 })
-    }
-
-    // Непрерывная позиция метки: 1.5 значит ровно между вторым и третьим.
-    val position = (selectedIndex + offsetFraction)
-        .coerceIn(0f, (sections.size - 1).toFloat())
-    val left = position.toInt().coerceAtMost(sections.size - 1)
-    val right = (left + 1).coerceAtMost(sections.size - 1)
-    val blend = position - left
-
-    val leftBounds = bounds.getOrElse(left) { 0 to 0 }
-    val rightBounds = bounds.getOrElse(right) { 0 to 0 }
-    val markerX = leftBounds.first + (rightBounds.first - leftBounds.first) * blend
-    val markerWidth = leftBounds.second + (rightBounds.second - leftBounds.second) * blend
-
-    // Полоска сама едет за меткой: разделов может быть больше, чем влезает.
-    LaunchedEffect(markerX, markerWidth, scrollState.viewportSize, scrollState.maxValue) {
-        val viewport = scrollState.viewportSize
-        if (viewport > 0 && markerWidth > 0f) {
-            val target = (markerX + markerWidth / 2f - viewport / 2f)
-                .toInt()
-                .coerceIn(0, scrollState.maxValue)
-            runCatching { scrollState.scrollTo(target) }
-        }
-    }
-
-    // Общий пузырь на все разделы - тот же рецепт, что у карточек списка.
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            ),
-    ) {
-        Box(
-            modifier = Modifier
-                .horizontalScroll(scrollState)
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-        ) {
-            // Метка едет под надписями.
-            if (markerWidth > 0f) {
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(markerX.toInt(), 0) }
-                        .width(with(density) { markerWidth.toDp() })
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                sections.forEachIndexed { index, section ->
-                    // Чем ближе метка, тем светлее текст: посередине жеста обе
-                    // надписи выглядят наполовину выбранными.
-                    val nearness = (1f - kotlin.math.abs(position - index)).coerceIn(0f, 1f)
-                    Box(
-                        modifier = Modifier
-                            .onGloballyPositioned { coords ->
-                                val x = coords.positionInParent().x.toInt()
-                                val w = coords.size.width
-                                val current = bounds.getOrNull(index)
-                                if (current == null || current.first != x || current.second != w) {
-                                    bounds = bounds.toMutableList().also { list ->
-                                        while (list.size <= index) list.add(0 to 0)
-                                        list[index] = x to w
-                                    }
-                                }
-                            }
-                            .height(34.dp)
-                            .clip(RoundedCornerShape(17.dp))
-                            .clickable { onSelect(section) }
-                            .padding(horizontal = 14.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = section.title,
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = lerp(
-                                HintBubbleTextColor,
-                                MaterialTheme.colorScheme.onPrimary,
-                                nearness,
-                            ),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 /** Строка группы в общем списке: аватар, название, предпросмотр, счётчик. */
 @Composable
