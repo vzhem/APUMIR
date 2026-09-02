@@ -149,7 +149,8 @@ private fun EnterNameStep(
             value    = displayName,
             onValueChange = onNameChanged,
             label    = { Text("Ваше имя") },
-            placeholder = { Text("Например: Владимир") },
+            // Подсказка - образец формата, а не чьё-то конкретное имя.
+            placeholder = { Text("Имя Фамилия") },
             singleLine = true,
             isError  = nameError != null,
             supportingText = {
@@ -266,10 +267,10 @@ private fun GeneratingStep() {
 
         // Описание процесса
         val steps = listOf(
-            "Генерация Ed25519 ключа подписи...",
-            "Генерация X25519 ключа обмена...",
-            "Создание идентичности узла...",
-            "Сохранение в защищённое хранилище...",
+            "Создаём ключ подписи...",
+            "Создаём ключ обмена...",
+            "Готовим ваш узел сети...",
+            "Сохраняем в защищённое хранилище...",
         )
         var currentStep by remember { mutableIntStateOf(0) }
         LaunchedEffect(Unit) {
