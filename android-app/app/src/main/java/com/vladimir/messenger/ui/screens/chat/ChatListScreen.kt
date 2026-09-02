@@ -38,7 +38,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -242,10 +246,30 @@ fun ChatListScreen(
             }
         },
     ) { paddingValues ->
+        // Листание разделов пальцем: справа налево - следующий раздел,
+        // слева направо - предыдущий. Кнопки-чипсы работают как и работали.
+        val swipeThresholdPx = with(LocalDensity.current) { 56.dp.toPx() }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(paddingValues)
+                .pointerInput(uiState.sections, uiState.section) {
+                    var dragged = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragged = 0f },
+                        onDragCancel = { dragged = 0f },
+                        onDragEnd = {
+                            val sections = uiState.sections
+                            val index = sections.indexOf(uiState.section)
+                            if (index >= 0 && kotlin.math.abs(dragged) >= swipeThresholdPx) {
+                                // Палец влево - следующая вкладка, вправо - предыдущая.
+                                val next = if (dragged < 0) index + 1 else index - 1
+                                sections.getOrNull(next)?.let(viewModel::onSectionSelected)
+                            }
+                            dragged = 0f
+                        },
+                    ) { _, amount -> dragged += amount }
+                },
         ) {
             DropdownMenu(
                 expanded = fabMenuExpanded,
@@ -676,7 +700,15 @@ private fun SectionChips(
     selected: InboxSection,
     onSelect: (InboxSection) -> Unit,
 ) {
+    // Полоска сама доезжает до выбранного раздела: при листании пальцем
+    // выбранная вкладка может оказаться за краем экрана.
+    val rowState = rememberLazyListState()
+    LaunchedEffect(selected, sections) {
+        val index = sections.indexOf(selected)
+        if (index >= 0) runCatching { rowState.animateScrollToItem(index) }
+    }
     LazyRow(
+        state = rowState,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
