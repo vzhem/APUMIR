@@ -172,15 +172,24 @@ class ChatListViewModel @Inject constructor(
      * Личные чаты и группы сортируются вместе - по времени последнего
      * сообщения, как в Телеграме.
      */
-    private fun ChatListUiState.withItems(): ChatListUiState {
+    private fun ChatListUiState.withItems(): ChatListUiState = copy(items = itemsFor(section))
+
+    /**
+     * Список ЛЮБОГО раздела, не только выбранного.
+     *
+     * Нужен листалке главного экрана: во время движения пальцем на экране видны
+     * сразу две страницы, поэтому соседний раздел обязан уметь построить свой
+     * список независимо от того, какой раздел сейчас выбран.
+     */
+    private fun ChatListUiState.itemsFor(target: InboxSection): List<InboxItem> {
         val query = searchQuery.trim()
         val personal = filterChats(chats, query).map {
             InboxItem.Personal(it, it.lastMessageTime ?: 0L)
         }
-        val adminOnly = section == InboxSection.AdminGroups ||
-            section == InboxSection.AdminChannels
+        val adminOnly = target == InboxSection.AdminGroups ||
+            target == InboxSection.AdminChannels
         val groupRows = groups.filter { row ->
-            when (section) {
+            when (target) {
                 InboxSection.All -> true
                 InboxSection.Groups, InboxSection.AdminGroups -> !row.isChannel
                 InboxSection.Channels, InboxSection.AdminChannels -> row.isChannel
@@ -194,14 +203,22 @@ class ChatListViewModel @Inject constructor(
                 row.preview?.contains(query, ignoreCase = true) == true
         }.map { InboxItem.Group(it, it.timeMs ?: 0L) }
 
-        val items = when (section) {
+        return when (target) {
             InboxSection.Chats -> personal
             InboxSection.All -> personal + groupRows
             else -> groupRows
         }.sortedByDescending { it.sortKey }
-
-        return copy(items = items)
     }
+
+    /**
+     * Список конкретного раздела для страницы листалки.
+     *
+     * Считается от переданного состояния, а не от `_uiState.value`: страница
+     * читает `uiState` из композиции, поэтому новое сообщение или удалённый чат
+     * перерисовывают её сразу.
+     */
+    fun itemsOf(state: ChatListUiState, section: InboxSection): List<InboxItem> =
+        state.itemsFor(section)
 
     /** Видный бейдж ранга на главном экране: имя ранга + число квалифицированных друзей. */
     private fun refreshRankBadge() {

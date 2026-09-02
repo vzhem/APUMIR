@@ -38,11 +38,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -102,6 +102,28 @@ fun ChatListScreen(
     var confirmDeleteChat by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var confirmClearChat by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var confirmGroup by remember { mutableStateOf<InboxGroup?>(null) }
+
+    // Листалка разделов. Страницы едут за пальцем, поэтому выбранный раздел и
+    // страница обязаны ходить парой: тап по чипсу листает страницу, а
+    // остановившаяся страница выбирает раздел.
+    val sectionCount = uiState.sections.size.coerceAtLeast(1)
+    val pagerState = rememberPagerState(
+        initialPage = uiState.sections.indexOf(uiState.section).coerceAtLeast(0),
+        pageCount = { sectionCount },
+    )
+    LaunchedEffect(uiState.section, uiState.sections) {
+        val target = uiState.sections.indexOf(uiState.section)
+        if (target >= 0 && target != pagerState.currentPage) {
+            pagerState.animateScrollToPage(target)
+        }
+    }
+    LaunchedEffect(pagerState, uiState.sections) {
+        snapshotFlow { pagerState.currentPage }.collect { page ->
+            uiState.sections.getOrNull(page)?.let { section ->
+                if (section != uiState.section) viewModel.onSectionSelected(section)
+            }
+        }
+    }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
@@ -246,30 +268,10 @@ fun ChatListScreen(
             }
         },
     ) { paddingValues ->
-        // Листание разделов пальцем: справа налево - следующий раздел,
-        // слева направо - предыдущий. Кнопки-чипсы работают как и работали.
-        val swipeThresholdPx = with(LocalDensity.current) { 56.dp.toPx() }
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .pointerInput(uiState.sections, uiState.section) {
-                    var dragged = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { dragged = 0f },
-                        onDragCancel = { dragged = 0f },
-                        onDragEnd = {
-                            val sections = uiState.sections
-                            val index = sections.indexOf(uiState.section)
-                            if (index >= 0 && kotlin.math.abs(dragged) >= swipeThresholdPx) {
-                                // Палец влево - следующая вкладка, вправо - предыдущая.
-                                val next = if (dragged < 0) index + 1 else index - 1
-                                sections.getOrNull(next)?.let(viewModel::onSectionSelected)
-                            }
-                            dragged = 0f
-                        },
-                    ) { _, amount -> dragged += amount }
-                },
+                .padding(paddingValues),
         ) {
             DropdownMenu(
                 expanded = fabMenuExpanded,
@@ -303,179 +305,38 @@ fun ChatListScreen(
                     },
                 )
             }
-            when {
-                // Загрузка
-                uiState.isLoading -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.Center)
-                    )
-                }
-
-                // В разделе каналов пусто - объясняем, где их взять.
-                // Раунд 48: подсказка в белом пузыре HintBubble, потому что
-                // голый Text брал цвет из темы и на тёмной подложке/обоях
-                // не читался вовсе.
-                uiState.items.isEmpty() &&
-                    uiState.section == InboxSection.Channels -> {
-                    HintBubble(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(24.dp),
-                    ) {
-                        Text(
-                            "Каналов пока нет. Создайте свой в разделе «Группы» " +
-                                "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
-                            textAlign = TextAlign.Center,
-                            style     = MaterialTheme.typography.bodyMedium,
-                            color     = HintBubbleTextColor,
-                        )
-                    }
-                }
-
-                // Список пуст
-                uiState.items.isEmpty() -> {
-                    EmptyChatList(
+            // Плавная листалка: страницы едут за пальцем, в движении видно
+            // сразу две вкладки, и чем быстрее движение, тем дальше долистает.
+            if (uiState.isLoading) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    key = { page -> uiState.sections.getOrNull(page)?.name ?: page.toString() },
+                    // Пролистываем по одной вкладке за жест, как в Телеграме.
+                    pageSize = PageSize.Fill,
+                    beyondViewportPageCount = 1,
+                ) { page ->
+                    val section = uiState.sections.getOrNull(page) ?: return@HorizontalPager
+                    SectionPage(
+                        section = section,
+                        items = remember(uiState, section) {
+                            viewModel.itemsOf(uiState, section)
+                        },
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
-                        onAddContact   = onAddContactClick,
-                        modifier       = Modifier.align(Alignment.Center),
+                        onChatClick = onChatClick,
+                        onAddContactClick = onAddContactClick,
+                        onCallClick = onCallClick,
+                        onGroupClick = onGroupClick,
+                        onGroupAdminClick = onGroupAdminClick,
+                        onChannelClick = onChannelClick,
+                        onMarkChatRead = viewModel::markChatRead,
+                        onMarkGroupRead = viewModel::markGroupRead,
+                        onClearChat = { confirmClearChat = it },
+                        onDeleteChat = { confirmDeleteChat = it },
+                        onGroupLeaveOrDelete = { confirmGroup = it },
                     )
-                }
-
-                // Общий список: личные чаты и группы вместе
-                else -> {
-                    LazyColumn(
-                        modifier       = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 4.dp),
-                    ) {
-                        items(
-                            items = uiState.items,
-                            key   = { item ->
-                                when (item) {
-                                    is InboxItem.Personal -> "chat:" + item.chat.id
-                                    is InboxItem.Group -> "group:" + item.group.id
-                                }
-                            },
-                        ) { item ->
-                            when (item) {
-                                is InboxItem.Personal -> ContactCard(
-                                    chat    = item.chat,
-                                    kind    = BubbleKind.Personal,
-                                    onClick = {
-                                        onChatClick(
-                                            item.chat.id,
-                                            item.chat.contactName,
-                                            item.chat.contactId,
-                                        )
-                                    },
-                                    menuActions = listOf(
-                                        BubbleMenuAction(
-                                            title = "Открыть чат",
-                                            icon = Icons.Default.Forum,
-                                            onClick = {
-                                                onChatClick(
-                                                    item.chat.id,
-                                                    item.chat.contactName,
-                                                    item.chat.contactId,
-                                                )
-                                            },
-                                        ),
-                                        BubbleMenuAction(
-                                            title = "Позвонить",
-                                            icon = Icons.Default.Call,
-                                            onClick = {
-                                                onCallClick(
-                                                    item.chat.contactId,
-                                                    item.chat.contactName,
-                                                )
-                                            },
-                                        ),
-                                        BubbleMenuAction(
-                                            title = "Отметить прочитанным",
-                                            icon = Icons.Default.DoneAll,
-                                            onClick = { viewModel.markChatRead(item.chat.id) },
-                                        ),
-                                        BubbleMenuAction(
-                                            title = "Очистить переписку",
-                                            icon = Icons.Default.CleaningServices,
-                                            onClick = { confirmClearChat = item.chat },
-                                        ),
-                                        BubbleMenuAction(
-                                            title = "Удалить чат",
-                                            icon = Icons.Default.Delete,
-                                            destructive = true,
-                                            onClick = { confirmDeleteChat = item.chat },
-                                        ),
-                                    ),
-                                )
-
-                                // В админ-разделах тап открывает сразу
-                                // админ-кабинет. В остальных канал открывается
-                                // лентой постов, группа - общим чатом.
-                                is InboxItem.Group -> GroupCard(
-                                    group   = item.group,
-                                    menuActions = buildList {
-                                        add(
-                                            BubbleMenuAction(
-                                                title = if (item.group.isChannel) "Открыть канал" else "Открыть группу",
-                                                icon = Icons.Default.Forum,
-                                                onClick = {
-                                                    if (item.group.isChannel) {
-                                                        onChannelClick(item.group.id)
-                                                    } else {
-                                                        onGroupClick(item.group.id)
-                                                    }
-                                                },
-                                            )
-                                        )
-                                        if (item.group.myRole == GroupRole.OWNER ||
-                                            item.group.myRole == GroupRole.ADMIN
-                                        ) {
-                                            add(
-                                                BubbleMenuAction(
-                                                    title = "Управление",
-                                                    icon = Icons.Default.Settings,
-                                                    onClick = { onGroupAdminClick(item.group.id) },
-                                                )
-                                            )
-                                        }
-                                        add(
-                                            BubbleMenuAction(
-                                                title = "Отметить прочитанным",
-                                                icon = Icons.Default.DoneAll,
-                                                onClick = { viewModel.markGroupRead(item.group.id) },
-                                            )
-                                        )
-                                        add(
-                                            BubbleMenuAction(
-                                                title = if (item.group.myRole == GroupRole.OWNER) {
-                                                    if (item.group.isChannel) "Удалить канал" else "Удалить группу"
-                                                } else {
-                                                    "Выйти"
-                                                },
-                                                icon = Icons.Default.Delete,
-                                                destructive = true,
-                                                onClick = { confirmGroup = item.group },
-                                            )
-                                        )
-                                    },
-                                    openAdmin = uiState.section == InboxSection.AdminGroups ||
-                                        uiState.section == InboxSection.AdminChannels,
-                                    onClick = {
-                                        when {
-                                            uiState.section == InboxSection.AdminGroups ||
-                                                uiState.section == InboxSection.AdminChannels ->
-                                                onGroupAdminClick(item.group.id)
-
-                                            item.group.isChannel -> onChannelClick(item.group.id)
-
-                                            else -> onGroupClick(item.group.id)
-                                        }
-                                    },
-                                )
-                            }
-                            // Вместо разделителей - отдельные полосочки карточек.
-                        }
-                    }
                 }
             }
         }
@@ -595,6 +456,190 @@ fun ChatListScreen(
                 TextButton(onClick = { showConnectDialog = false }) { Text("тмена") }
             },
         )
+    }
+}
+
+/**
+ * Одна страница листалки: список выбранного раздела либо объяснение пустоты.
+ *
+ * Вынесена отдельно, потому что во время движения пальцем на экране живут сразу
+ * две страницы, и каждая рисует свой раздел независимо от выбранного.
+ */
+@Composable
+private fun SectionPage(
+    section: InboxSection,
+    items: List<InboxItem>,
+    isSearchActive: Boolean,
+    onChatClick: (chatId: String, contactName: String, contactId: String) -> Unit,
+    onAddContactClick: () -> Unit,
+    onCallClick: (contactId: String, contactName: String) -> Unit,
+    onGroupClick: (groupId: String) -> Unit,
+    onGroupAdminClick: (groupId: String) -> Unit,
+    onChannelClick: (channelId: String) -> Unit,
+    onMarkChatRead: (String) -> Unit,
+    onMarkGroupRead: (String) -> Unit,
+    onClearChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
+    onDeleteChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
+    onGroupLeaveOrDelete: (InboxGroup) -> Unit,
+) {
+    val openAdmin = section == InboxSection.AdminGroups ||
+        section == InboxSection.AdminChannels
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        when {
+            // В разделе каналов пусто - объясняем, где их взять.
+            items.isEmpty() && section == InboxSection.Channels -> {
+                HintBubble(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
+                ) {
+                    Text(
+                        "Каналов пока нет. Создайте свой в разделе «Группы» " +
+                            "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
+                        textAlign = TextAlign.Center,
+                        style     = MaterialTheme.typography.bodyMedium,
+                        color     = HintBubbleTextColor,
+                    )
+                }
+            }
+
+            items.isEmpty() -> {
+                EmptyChatList(
+                    isSearchActive = isSearchActive,
+                    onAddContact   = onAddContactClick,
+                    modifier       = Modifier.align(Alignment.Center),
+                )
+            }
+
+            else -> {
+                LazyColumn(
+                    modifier       = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                ) {
+                    items(
+                        items = items,
+                        key   = { item ->
+                            when (item) {
+                                is InboxItem.Personal -> "chat:" + item.chat.id
+                                is InboxItem.Group -> "group:" + item.group.id
+                            }
+                        },
+                    ) { item ->
+                        when (item) {
+                            is InboxItem.Personal -> ContactCard(
+                                chat    = item.chat,
+                                kind    = BubbleKind.Personal,
+                                onClick = {
+                                    onChatClick(
+                                        item.chat.id,
+                                        item.chat.contactName,
+                                        item.chat.contactId,
+                                    )
+                                },
+                                menuActions = listOf(
+                                    BubbleMenuAction(
+                                        title = "Открыть чат",
+                                        icon = Icons.Default.Forum,
+                                        onClick = {
+                                            onChatClick(
+                                                item.chat.id,
+                                                item.chat.contactName,
+                                                item.chat.contactId,
+                                            )
+                                        },
+                                    ),
+                                    BubbleMenuAction(
+                                        title = "Позвонить",
+                                        icon = Icons.Default.Call,
+                                        onClick = {
+                                            onCallClick(
+                                                item.chat.contactId,
+                                                item.chat.contactName,
+                                            )
+                                        },
+                                    ),
+                                    BubbleMenuAction(
+                                        title = "Отметить прочитанным",
+                                        icon = Icons.Default.DoneAll,
+                                        onClick = { onMarkChatRead(item.chat.id) },
+                                    ),
+                                    BubbleMenuAction(
+                                        title = "Очистить переписку",
+                                        icon = Icons.Default.CleaningServices,
+                                        onClick = { onClearChat(item.chat) },
+                                    ),
+                                    BubbleMenuAction(
+                                        title = "Удалить чат",
+                                        icon = Icons.Default.Delete,
+                                        destructive = true,
+                                        onClick = { onDeleteChat(item.chat) },
+                                    ),
+                                ),
+                            )
+
+                            // В админ-разделах тап открывает сразу админ-кабинет.
+                            is InboxItem.Group -> GroupCard(
+                                group   = item.group,
+                                menuActions = buildList {
+                                    add(
+                                        BubbleMenuAction(
+                                            title = if (item.group.isChannel) "Открыть канал" else "Открыть группу",
+                                            icon = Icons.Default.Forum,
+                                            onClick = {
+                                                if (item.group.isChannel) {
+                                                    onChannelClick(item.group.id)
+                                                } else {
+                                                    onGroupClick(item.group.id)
+                                                }
+                                            },
+                                        )
+                                    )
+                                    if (item.group.myRole == GroupRole.OWNER ||
+                                        item.group.myRole == GroupRole.ADMIN
+                                    ) {
+                                        add(
+                                            BubbleMenuAction(
+                                                title = "Управление",
+                                                icon = Icons.Default.Settings,
+                                                onClick = { onGroupAdminClick(item.group.id) },
+                                            )
+                                        )
+                                    }
+                                    add(
+                                        BubbleMenuAction(
+                                            title = "Отметить прочитанным",
+                                            icon = Icons.Default.DoneAll,
+                                            onClick = { onMarkGroupRead(item.group.id) },
+                                        )
+                                    )
+                                    add(
+                                        BubbleMenuAction(
+                                            title = if (item.group.myRole == GroupRole.OWNER) {
+                                                if (item.group.isChannel) "Удалить канал" else "Удалить группу"
+                                            } else {
+                                                "Выйти"
+                                            },
+                                            icon = Icons.Default.Delete,
+                                            destructive = true,
+                                            onClick = { onGroupLeaveOrDelete(item.group) },
+                                        )
+                                    )
+                                },
+                                openAdmin = openAdmin,
+                                onClick = {
+                                    when {
+                                        openAdmin -> onGroupAdminClick(item.group.id)
+                                        item.group.isChannel -> onChannelClick(item.group.id)
+                                        else -> onGroupClick(item.group.id)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
