@@ -66,11 +66,11 @@ class RenameContactViewModel @Inject constructor(
         val contactId = _uiState.value.contactId
 
         if (newName.isBlank()) {
-            _uiState.update { it.copy(error = "Name cannot be empty") }
+            _uiState.update { it.copy(error = "Имя не может быть пустым") }
             return
         }
         if (contactId.isBlank()) {
-            _uiState.update { it.copy(error = "Contact ID is missing") }
+            _uiState.update { it.copy(error = "Не найден идентификатор контакта") }
             return
         }
 
@@ -92,7 +92,7 @@ class RenameContactViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     Log.e(TAG, "Rename failed", e)
-                    _uiState.update { it.copy(isLoading = false, error = e.message ?: "Rename failed") }
+                    _uiState.update { it.copy(isLoading = false, error = e.message ?: "Не удалось переименовать") }
                 }
         }
     }

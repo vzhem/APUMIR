@@ -59,10 +59,10 @@ fun RenameContactScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Rename contact") },
+                title = { Text("Переименовать контакт") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 },
             )
@@ -94,7 +94,7 @@ private fun Content(
         verticalArrangement = Arrangement.Top,
     ) {
         Text(
-            text = "Current name: ${uiState.currentName}",
+            text = "Текущее имя: ${uiState.currentName}",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -104,8 +104,8 @@ private fun Content(
         OutlinedTextField(
             value = uiState.newName,
             onValueChange = onNewNameChanged,
-            label = { Text("New name") },
-            placeholder = { Text("Enter new name") },
+            label = { Text("Новое имя") },
+            placeholder = { Text("Введите новое имя") },
             modifier = Modifier.fillMaxWidth(),
             supportingText = {
                 uiState.error?.let { Text(it) }
@@ -119,7 +119,7 @@ private fun Content(
             value = uiState.newUsername,
             onValueChange = onNewUsernameChanged,
             label = { Text("@никнейм") },
-            placeholder = { Text("nickname") },
+            placeholder = { Text("никнейм") },
             prefix = { Text("@") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
@@ -140,7 +140,7 @@ private fun Content(
             } else {
                 Icon(Icons.Default.Check, contentDescription = null)
                 Spacer(modifier = Modifier.height(0.dp))
-                Text("Save")
+                Text("Сохранить")
             }
         }
     }

@@ -93,7 +93,7 @@ class MessengerApplication : Application() {
                 "Служба APU",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Keeps P2P connection alive"
+                description = "Держит связь APU включённой"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)

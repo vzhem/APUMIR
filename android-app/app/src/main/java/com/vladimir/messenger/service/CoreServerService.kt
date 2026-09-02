@@ -146,7 +146,7 @@ class CoreServerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "CoreServerService started")
-        startForeground(NOTIFICATION_ID, buildNotification("Connecting..."))
+        startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
 
         // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
         if (!gossipStarted) {
@@ -350,10 +350,10 @@ class CoreServerService : Service() {
                         .apply()
                 }
 
-                updateNotification("P2P Active - ${nodeId?.take(8) ?: ""}...")
+                updateNotification("Сеть APU работает")
                 startEventPolling()
             } else {
-                updateNotification("Connection failed")
+                updateNotification("Не удалось подключиться")
                 stopServiceSafely()
             }
         }
@@ -462,7 +462,7 @@ class CoreServerService : Service() {
                     events.forEach { event -> handleEvent(event) }
                     val status = RustBridge.networkStatus()
                     val peers = RustBridge.connectedPeers()
-                    updateNotification("$status - $peers peers")
+                    updateNotification(notificationText(status, peers))
                 } catch (ex: Exception) {
                     Log.e(TAG, "Event polling error", ex)
                 }
@@ -664,7 +664,7 @@ class CoreServerService : Service() {
             "network_status_changed" -> {
                 val status = event.status ?: "unknown"
                 Log.i(TAG, "Network status: $status")
-                updateNotification("$status - ${RustBridge.connectedPeers()} peers")
+                updateNotification(notificationText(status, RustBridge.connectedPeers()))
 
                 if (status == "connected") {
                     try {
@@ -749,6 +749,36 @@ class CoreServerService : Service() {
                 }
             }
         }
+    }
+
+    /**
+     * Русский текст постоянного уведомления.
+     *
+     * Ядро отдаёт статус словами offline/connecting/connected/relayed, а число
+     * собеседников - цифрой. В шторке владелец хочет видеть родную речь, а не
+     * «connected - 2 peers».
+     */
+    private fun notificationText(status: String, peers: Long): String {
+        val head = when (status.lowercase()) {
+            "connected" -> "На связи"
+            "relayed" -> "На связи через ретранслятор"
+            "connecting" -> "Подключение..."
+            "offline" -> "Нет соединения"
+            else -> "Сеть APU"
+        }
+        return if (peers > 0) "$head - рядом ${peersWord(peers)}" else head
+    }
+
+    /** «1 собеседник», «2 собеседника», «5 собеседников». */
+    private fun peersWord(peers: Long): String {
+        val n = (peers % 100).toInt()
+        val word = when {
+            n in 11..14 -> "собеседников"
+            n % 10 == 1 -> "собеседник"
+            n % 10 in 2..4 -> "собеседника"
+            else -> "собеседников"
+        }
+        return "$peers $word"
     }
 
     private fun updateNotification(status: String) {
