@@ -21,6 +21,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.domain.model.MtProtoProxy
+import com.vladimir.messenger.ui.components.ApuBubble
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -44,10 +47,18 @@ fun MtProxyListScreen(
         }
     }
 
+    // Подложка на весь экран, в том числе под верхней панелью - как в
+    // остальных разделах APU.
+    Box(modifier = Modifier.fillMaxSize()) {
+    ChatWallpaper()
     Scaffold(
+        containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                ),
                 title = { Text("MTProto прокси", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
@@ -90,23 +101,28 @@ fun MtProxyListScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.CloudOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "Нет прокси",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        "Добавьте вручную или импортируйте из буфера",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                ApuBubble(modifier = Modifier.padding(32.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            Icons.Default.CloudOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = ApuBubbleMutedColor,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "Нет прокси",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            "Добавьте вручную или импортируйте из буфера",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
                 }
             }
         } else {
@@ -125,6 +141,8 @@ fun MtProxyListScreen(
                 }
             }
         }
+    }
+
     }
 
     if (showAddDialog) {
@@ -160,7 +178,7 @@ private fun MtProxyCard(
     val statusColor = when {
         proxy.isActive -> MaterialTheme.colorScheme.primary
         proxy.failCount >= 3 -> Color.Red.copy(alpha = 0.7f)
-        proxy.lastCheck == 0L -> MaterialTheme.colorScheme.onSurfaceVariant
+        proxy.lastCheck == 0L -> ApuBubbleMutedColor
         else -> MaterialTheme.colorScheme.tertiary
     }
 
@@ -171,14 +189,11 @@ private fun MtProxyCard(
         else -> "✓ Рабочий (${proxy.successCount})"
     }
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    ApuBubble {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onSetActive() }
-                .padding(16.dp),
+                .clickable { onSetActive() },
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Status indicator
@@ -205,7 +220,7 @@ private fun MtProxyCard(
                 Text(
                     "Источник: ${proxy.source} | ${formatDate(proxy.addedAt)}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = ApuBubbleMutedColor,
                 )
             }
 

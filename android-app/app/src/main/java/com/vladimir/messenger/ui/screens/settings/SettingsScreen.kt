@@ -483,13 +483,18 @@ private fun SettingsTabContent(
             .padding(paddingValues),
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
+        // Прокси - такой же пузырь, как остальные разделы настроек: голый
+        // ListItem во всю ширину выбивался из ряда и не читался на обоях.
+        item { SettingsSectionTitle("Прокси") }
         item {
-            ListItem(
-                headlineContent = { Text("MTProto прокси") },
-                supportingContent = { Text("Управление прокси для Telegram relay") },
-                leadingContent = { Icon(Icons.Default.VpnKey, contentDescription = null) },
-                modifier = Modifier.clickable { onMtProxyClick() },
-            )
+            SettingsCard {
+                SettingsItem(
+                    icon = Icons.Default.VpnKey,
+                    title = "MTProto прокси",
+                    subtitle = "Управление прокси для Telegram relay",
+                    onClick = onMtProxyClick,
+                )
+            }
         }
 
         // ----------------------------------------------------------------
