@@ -153,6 +153,11 @@ class CoreServerService : Service() {
             gossipStarted = true
             serviceScope.launch {
                 kotlinx.coroutines.delay(3000)
+                // Сверка «Контакты» = главная: у каждого контакта ровно один
+                // чат, дубли схлопнуты. Разово при старте, чтобы разошедшиеся
+                // за прошлые версии списки сошлись сами.
+                runCatching { contactRepository.reconcileChats() }
+                    .onFailure { Log.w(TAG, "reconcileChats: " + it.message) }
                 runCatching { groupRepository.publishMyNickname() }
                 runCatching { groupRepository.publishMyDirectory() }
                 // Аватары: сначала поднять присланные из базы в витрину,
@@ -570,6 +575,11 @@ class CoreServerService : Service() {
                                 return
                             }
                             chat = chatRepository.getOrCreateChat(senderId, autoName)
+                            // Тот же собеседник мог уже завести чат другим путём
+                            // (обмен QR, приглашение): сводим в один, иначе в
+                            // списке висят две одинаковые строки.
+                            val merged = chatRepository.mergeDuplicateChats(senderId)
+                            if (merged != null) chat = merged
                             Log.i(TAG, "Auto-created chat " + chat.id + " for " + senderId)
                         } catch (e: Exception) {
                             Log.e(TAG, "Auto-create failed", e)
@@ -621,7 +631,15 @@ class CoreServerService : Service() {
                         }
                         if (lightTouch) return  // пульс учли, тяжёлую синхру не дёргаем
                         Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
-                        if (existing.displayName != peerName && peerName.isNotBlank() && peerName != "Unknown" && peerName != "Anonymous" && (existing.displayName.startsWith("Contact ") || existing.displayName == "Anonymous")) {
+                        // Настоящее имя из presence подменяет заглушку. Раньше
+                        // условие требовало, чтобы старое имя начиналось с
+                        // «Contact » ИЛИ было ровно «Anonymous», а имя из QR
+                        // сохранялось как «Contact a1b2c3d4» лишь иногда - на
+                        // части телефонов заглушка так и не заменялась.
+                        if (existing.displayName != peerName &&
+                            contactRepository.isRealName(peerName) &&
+                            contactRepository.isPlaceholderName(existing.displayName)
+                        ) {
                             contactRepository.updateDisplayName(existing.id, peerName)
                             chatRepository.updateContactName(peerId, peerName)
                         }

@@ -1040,7 +1040,11 @@ self.runtime = Some(runtime);
         // Event loop (poll every 1s, presence every 30s)
         let mut tick: u32 = 0;
         // === GOSSIP PROTOCOL: peer exchange state ===
-        let mut known_peers: std::collections::HashMap<String, (String, std::time::Instant)> = std::collections::HashMap::new();
+        // Значение: имя, когда видели, подтверждён ли узел ЛИЧНО.
+        // «Лично» = его собственный presence, mDNS или входящее соединение.
+        // Узлы, о которых мы знаем только с чужих слов, помечены false и
+        // дальше не пересказываются - иначе список ходит по кругу.
+        let mut known_peers: std::collections::HashMap<String, (String, std::time::Instant, bool)> = std::collections::HashMap::new();
         let mut seen_gossip: std::collections::VecDeque<String> = std::collections::VecDeque::new();
         const MAX_GOSSIP_CACHE: usize = 500;
         /// Узел считается исчезнувшим, если не присылал presence столько секунд.
@@ -1396,7 +1400,7 @@ self.runtime = Some(runtime);
                             is_local: false,
                         });
                         // === GOSSIP: record in known_peers ===
-                        known_peers.insert(peer_id.to_string(), (display_name.to_string(), std::time::Instant::now()));
+                        known_peers.insert(peer_id.to_string(), (display_name.to_string(), std::time::Instant::now(), true));
                     }
                 } else if evt.topic.starts_with("p2pm2/gossip/broadcast") {
                     // === GOSSIP: receive peer list from other nodes ===
@@ -1420,7 +1424,7 @@ self.runtime = Some(runtime);
                         i += 2;
                         if peer_id == node_id { continue; }
                         if !known_peers.contains_key(peer_id) {
-                            known_peers.insert(peer_id.to_string(), (peer_name.to_string(), std::time::Instant::now()));
+                            known_peers.insert(peer_id.to_string(), (peer_name.to_string(), std::time::Instant::now(), false));
                             tracing::info!("Gossip: learned about peer {} ({})", peer_name, peer_id);
                             events.emit(CoreEvent::PeerDiscovered {
                                 peer_id: peer_id.to_string(),
@@ -2032,7 +2036,7 @@ self.runtime = Some(runtime);
                 // получателя для файлов.
                 let stale_cutoff = std::time::Duration::from_secs(PEER_STALE_SECS);
                 let before = known_peers.len();
-                known_peers.retain(|_, (_, seen_at)| seen_at.elapsed() < stale_cutoff);
+                known_peers.retain(|_, (_, seen_at, _)| seen_at.elapsed() < stale_cutoff);
                 let removed = before.saturating_sub(known_peers.len());
 
                 // Общий список чистим по возрасту записи, а не по списку из
@@ -2085,12 +2089,19 @@ self.runtime = Some(runtime);
                         node_id.clone(),
                         msg_uuid,
                     ];
-                    let count = std::cmp::min(known_peers.len(), 30);
-                    for (i, (pid, (pname, _))) in known_peers.iter().enumerate() {
-                        if i >= count { break; }
+                    // Пересказываем ТОЛЬКО тех, кого подтвердили лично. Иначе
+                    // список ходит по кругу: телефон A узнаёт призрака от B,
+                    // у B запись протухает и он узнаёт её обратно от A. Именно
+                    // так число «подключённых» гуляло между телефонами.
+                    let mut count = 0usize;
+                    for (pid, (pname, _, confirmed)) in known_peers.iter() {
+                        if !*confirmed { continue; }
+                        if count >= 30 { break; }
                         gossip_parts.push(pid.clone());
                         gossip_parts.push(pname.clone());
+                        count += 1;
                     }
+                    if count == 0 { continue; }
                     let gossip_payload = gossip_parts.join("|");
                     match transport.publish_gossip(&gossip_payload).await {
                         Ok(_) => tracing::info!("Gossip: broadcasted {} known peers", count),

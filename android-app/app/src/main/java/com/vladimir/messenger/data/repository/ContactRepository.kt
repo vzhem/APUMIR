@@ -65,9 +65,70 @@ class ContactRepository @Inject constructor(
         contactDao.updateDisplayName(contactId, name)
     }
 
+    suspend fun updateUsername(contactId: String, username: String) {
+        contactDao.updateUsername(contactId, username)
+    }
+
+    /**
+     * Имя-заглушка вида «Contact a1b2c3d4»: такое можно молча заменить настоящим,
+     * а данное владельцем вручную - нельзя.
+     */
+    fun isPlaceholderName(name: String): Boolean {
+        val clean = name.trim()
+        return clean.isEmpty() ||
+            clean == "Anonymous" ||
+            clean == "Unknown" ||
+            clean == "Без имени" ||
+            clean.startsWith("Contact ")
+    }
+
+    /** Настоящее ли это имя, то есть стоит ли им подменять заглушку. */
+    fun isRealName(name: String?): Boolean =
+        !name.isNullOrBlank() && !isPlaceholderName(name)
+
+    /**
+     * Склейка записей одной и той же трубки.
+     *
+     * Каждая переустановка приложения даёт новый node_id, и собеседник получал
+     * ещё один контакт с тем же @именем - в списке висели дубли, а чат уходил
+     * на мёртвый адрес. Связываем их по @имени: оно у человека одно и переживает
+     * переустановку. Побеждает запись, о которой слышали позже.
+     *
+     * @return идентификаторы устаревших записей, которые вызывающий должен убрать
+     *         вместе с их чатами.
+     */
+    suspend fun findStaleTwins(username: String, keepContactId: String): List<String> {
+        val clean = username.trim().trimStart('@').trim()
+        if (clean.isEmpty()) return emptyList()
+        return contactDao.getContactsByUsername(clean)
+            .map { it.id }
+            .filter { it != keepContactId }
+    }
+
+    /**
+     * Удаление контакта уносит и его чат.
+     *
+     * Раньше чат оставался: раздел «Контакты» и главная показывали разные
+     * наборы людей, а осиротевший чат писал в пустоту.
+     */
     suspend fun deleteContact(contactId: String) {
         val entity = contactDao.getContactById(contactId) ?: return
         contactDao.deleteContact(entity)
+        runCatching { chatRepository.deleteChatsOf(contactId) }
+    }
+
+    /**
+     * Свести «Контакты» и главную к одному набору людей: у каждого контакта
+     * должен быть ровно один чат. Расхождение накапливалось само - чат
+     * создавался не на всех путях добавления, а дубли не схлопывались.
+     */
+    suspend fun reconcileChats() {
+        for (contact in contactDao.observeAllContactsOnce()) {
+            runCatching {
+                chatRepository.getOrCreateChat(contact.id, contact.displayName)
+                chatRepository.mergeDuplicateChats(contact.id)
+            }
+        }
     }
 
     private fun ContactEntity.toDomain() = Contact(

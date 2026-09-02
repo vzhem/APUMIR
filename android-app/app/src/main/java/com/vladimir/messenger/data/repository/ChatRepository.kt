@@ -316,10 +316,64 @@ class ChatRepository @Inject constructor(
         return createChat(contactId, contactName)
     }
 
+    /**
+     * Свести дубли чатов с одним собеседником в один.
+     *
+     * Дубли появлялись, когда чат создавался сразу в нескольких местах (обмен
+     * QR-кодом, входящее сообщение, приглашение) - `getChatByContactId` берёт
+     * первый попавшийся, поэтому второй оставался висеть отдельной строкой с
+     * тем же именем. Оставляем чат с самой свежей перепиской, переписку из
+     * остальных переносим в него, чтобы ничего не потерялось.
+     */
+    suspend fun mergeDuplicateChats(contactId: String): Chat? {
+        if (contactId.isBlank()) return null
+        val chats = chatDao.getChatsByContactId(contactId)
+        if (chats.size < 2) return chats.firstOrNull()?.toDomain()
+
+        val keep = chats.maxByOrNull { it.lastMessageTime ?: 0L } ?: return null
+        var unread = 0
+        for (chat in chats) {
+            unread += chat.unreadCount
+            if (chat.id == keep.id) continue
+            chatDao.moveMessages(chat.id, keep.id)
+            chatDao.deleteChatById(chat.id)
+            Log.i(TAG, "mergeDuplicateChats: ${chat.id} слит в ${keep.id} для $contactId")
+        }
+        val merged = keep.copy(unreadCount = unread)
+        chatDao.updateChat(merged)
+        return merged.toDomain()
+    }
+
+    /**
+     * Перевесить переписку на новый идентификатор собеседника.
+     *
+     * Человек переустановил приложение и получил новый node_id: старый чат
+     * писал бы на мёртвый адрес. Переносим историю в чат с живым адресом,
+     * пустой старый убираем.
+     */
+    suspend fun absorbChatOf(oldContactId: String, newContactId: String) {
+        if (oldContactId.isBlank() || newContactId.isBlank()) return
+        if (oldContactId == newContactId) return
+        val target = chatDao.getChatByContactId(newContactId) ?: return
+        for (chat in chatDao.getChatsByContactId(oldContactId)) {
+            chatDao.moveMessages(chat.id, target.id)
+            chatDao.deleteChatById(chat.id)
+            Log.i(TAG, "absorbChatOf: история $oldContactId перенесена в $newContactId")
+        }
+    }
+
     /** Удалить чат вместе с историей сообщений (меню «⋮» в пузыре). */
     suspend fun deleteChat(chatId: String) {
         messageDao.deleteMessagesForChat(chatId)
         chatDao.deleteChatById(chatId)
+    }
+
+    /** Убрать все чаты с этим собеседником вместе с перепиской. */
+    suspend fun deleteChatsOf(contactId: String) {
+        for (chat in chatDao.getChatsByContactId(contactId)) {
+            messageDao.deleteMessagesForChat(chat.id)
+            chatDao.deleteChatById(chat.id)
+        }
     }
 
     /** Очистить переписку, сам чат остаётся в списке. */

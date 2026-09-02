@@ -47,6 +47,14 @@ interface ChatDao {
     @Query("DELETE FROM chats WHERE id = :chatId")
     suspend fun deleteChatById(chatId: String)
 
+    /** Все чаты с этим собеседником: их бывает больше одного после переустановки. */
+    @Query("SELECT * FROM chats WHERE contactId = :contactId")
+    suspend fun getChatsByContactId(contactId: String): List<ChatEntity>
+
+    /** Перевесить сообщения со старого чата на оставшийся при склейке дублей. */
+    @Query("UPDATE messages SET chatId = :newChatId WHERE chatId = :oldChatId")
+    suspend fun moveMessages(oldChatId: String, newChatId: String)
+
     /** Холодный старт: гасим все точки онлайна, peer_discovered включит живых. */
     @Query("UPDATE chats SET isContactOnline = 0")
     suspend fun setAllOffline()

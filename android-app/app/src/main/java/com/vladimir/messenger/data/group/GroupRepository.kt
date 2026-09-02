@@ -54,6 +54,13 @@ class GroupRepository(
     private val avatarDao: AvatarDao,
     /** Мой сжатый аватар (JPEG base64) или null, если аватара нет. */
     private val myAvatarB64: () -> String?,
+    /**
+     * Узнали настоящее @имя узла: контакт с заглушкой вместо имени должен
+     * переименоваться, а его двойники от прежних установок - схлопнуться.
+     * По умолчанию ничего не делает, чтобы JVM-тесты обходились без Android.
+     */
+    private val onNicknameLearned: suspend (ownerId: String, name: String) -> Unit =
+        { _, _ -> },
 ) {
 
     /**
@@ -304,6 +311,12 @@ class GroupRepository(
     }
 
     private suspend fun handleNick(packet: GroupWire.Packet.Nick, senderId: String) {
+        // @имя человека - самое надёжное, что о нём известно: оно приходит
+        // роевой рассылкой и переживает переустановку. Записываем его в контакт
+        // и подменяем им заглушку «Contact a1b2c3d4», из-за которой собеседник
+        // так и висел набором букв и цифр, даже когда имя уже было известно.
+        runCatching { onNicknameLearned(packet.ownerId, packet.name) }
+            .onFailure { Log.w(TAG, "nick apply failed: ${it.message}") }
         nicknameDao.upsert(
             NicknameEntity(
                 ownerId = packet.ownerId,

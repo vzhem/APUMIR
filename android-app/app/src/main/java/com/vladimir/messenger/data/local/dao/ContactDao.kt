@@ -12,6 +12,9 @@ interface ContactDao {
     @Query("SELECT id FROM contacts")
     suspend fun allIds(): List<String>
 
+    @Query("SELECT * FROM contacts")
+    suspend fun observeAllContactsOnce(): List<ContactEntity>
+
     @Query("SELECT * FROM contacts WHERE id = :contactId")
     suspend fun getContactById(contactId: String): ContactEntity?
 
@@ -39,4 +42,8 @@ interface ContactDao {
 
     @Query("UPDATE contacts SET username = :username WHERE id = :contactId")
     suspend fun updateUsername(contactId: String, username: String)
+
+    /** Контакты с этим @именем: разные установки одной трубки носят одно имя. */
+    @Query("SELECT * FROM contacts WHERE username != '' AND username = :username")
+    suspend fun getContactsByUsername(username: String): List<ContactEntity>
 }

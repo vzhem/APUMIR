@@ -52,6 +52,8 @@ object GroupsModule {
         contactDao: ContactDao,
         nicknameDao: NicknameDao,
         avatarDao: AvatarDao,
+        contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
+        chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -85,6 +87,16 @@ object GroupsModule {
             uri?.takeIf { it.isNotBlank() }?.let {
                 com.vladimir.messenger.util.AvatarCompress.compressUri(context.applicationContext, it)
             }
+        },
+        // Узнали настоящее @имя узла: подменяем им заглушку в контакте и
+        // схлопываем двойников от прежних установок той же трубки.
+        onNicknameLearned = { ownerId, nickname ->
+            com.vladimir.messenger.data.repository.NicknameIdentity.apply(
+                ownerId = ownerId,
+                nickname = nickname,
+                contactRepository = contactRepository,
+                chatRepository = chatRepository,
+            )
         },
         myNodeId = { RustBridge.nodeId() },
         myDisplayName = {
