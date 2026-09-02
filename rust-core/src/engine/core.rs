@@ -32,6 +32,9 @@ enum MqttOutboundCommand {
         envelope: String,
         message_id: String,
     },
+    /// Немедленно объявить себя и запросить presence остальных (кнопка
+    /// «Собрать данные об абонентах»). Обычный цикл делает это раз в 30 секунд.
+    AnnounceNow,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -516,6 +519,8 @@ impl P2PCore {
 
                 // MQTT transport (internet fallback) вЂ” separate thread (EventLoop not Send)
                 let events_mqtt = Arc::clone(&events_arc);
+                let network_mqtt = Arc::clone(&network_arc);
+                let peer_addrs_mqtt = Arc::clone(&peer_addrs_arc);
                 let node_id_mqtt = node_id.clone();
                 let display_mqtt = display_name.clone();
                 let public_addr_mqtt = Arc::clone(&public_addr_arc);
@@ -530,6 +535,8 @@ impl P2PCore {
                     rt.block_on(async move {
                         Self::run_mqtt_transport(
                             events_mqtt,
+                            network_mqtt,
+                            peer_addrs_mqtt,
                             node_id_mqtt,
                             display_mqtt,
                             public_addr_mqtt,
@@ -926,8 +933,11 @@ self.runtime = Some(runtime);
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_mqtt_transport(
         events: Arc<EventBus>,
+        network: Arc<NetworkManagerFfi>,
+        peer_addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
         node_id: String,
         display_name: String,
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
@@ -1115,6 +1125,30 @@ self.runtime = Some(runtime);
                             error
                         ),
                     },
+                    Ok(MqttOutboundCommand::AnnounceNow) => {
+                        let current_addr = {
+                            let pa = public_addr.lock().unwrap();
+                            pa.map(|a| a.to_string())
+                        };
+                        let current_is_relay = current_addr.is_some();
+                        match transport
+                            .publish_presence(
+                                &display_name,
+                                current_addr.as_deref(),
+                                current_is_relay,
+                            )
+                            .await
+                        {
+                            Ok(()) => tracing::info!(
+                                "MQTT: manual presence announce queued (addr={:?})",
+                                current_addr
+                            ),
+                            Err(error) => tracing::warn!(
+                                "MQTT: manual presence announce failed: {}",
+                                error
+                            ),
+                        }
+                    }
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
                 }
@@ -1175,11 +1209,18 @@ self.runtime = Some(runtime);
                     session_generation = next_generation;
                     session_restart_backoff_secs = 1;
                     tick = 0;
+                    // Адрес перечитываем: при восстановлении сессии (часто как раз
+                    // после смены сети) стартовое значение уже устарело.
+                    let recovered_addr = {
+                        let pa = public_addr.lock().unwrap();
+                        pa.map(|a| a.to_string())
+                    };
+                    let recovered_is_relay = recovered_addr.is_some();
                     Self::announce_mqtt_session(
                         &transport,
                         &display_name,
-                        addr_str.as_deref(),
-                        is_relay,
+                        recovered_addr.as_deref(),
+                        recovered_is_relay,
                         session_generation,
                     )
                     .await;
@@ -1205,6 +1246,38 @@ self.runtime = Some(runtime);
                         let peer_id = parts[0];
                         let display_name = parts[1];
                         tracing::info!("MQTT: peer online: {} ({})", display_name, peer_id);
+
+                        // Presence несёт публичный адрес пира (STUN), но раньше он
+                        // просто отбрасывался: peer_addrs заполнял только mDNS. Из-за
+                        // этого через интернет абоненты «не находили» друг друга -
+                        // прямая отправка не знала адреса и всё уходило в очередь.
+                        // Регистрируем адрес и самого пира так же, как это делает mDNS.
+                        let peer_public_addr = parts[2].trim();
+                        if !peer_public_addr.is_empty() {
+                            match peer_public_addr.parse::<SocketAddr>() {
+                                Ok(addr) => {
+                                    let mut addrs = peer_addrs.lock().unwrap();
+                                    addrs.insert(peer_id.to_string(), addr);
+                                    addrs.insert(format!("{}_public", peer_id), addr);
+                                    tracing::info!(
+                                        "MQTT: public addr for {} = {}",
+                                        peer_id,
+                                        addr
+                                    );
+                                }
+                                Err(e) => tracing::warn!(
+                                    "MQTT: bad public addr '{}' for {}: {}",
+                                    peer_public_addr,
+                                    peer_id,
+                                    e
+                                ),
+                            }
+                        }
+                        network.add_peer(PeerInfo::new(
+                            peer_id.to_string(),
+                            display_name.to_string(),
+                        ));
+                        network.set_status(NetworkStatus::Connected);
                         
                         // PEER ONLINE: РґРѕСЃС‚Р°РІРёС‚СЊ РЅР°РєРѕРїР»РµРЅРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
                         if let Some(ref q) = queue {
@@ -1935,8 +2008,17 @@ self.runtime = Some(runtime);
             tick += 1;
             if tick >= 30 {
                 tick = 0;
+                // Адрес перечитываем каждый раз. Раньше он брался один раз при
+                // старте - через 3 секунды после запуска, когда STUN обычно ещё
+                // не ответил. Телефон навсегда объявлял себя без адреса, и
+                // остальные не могли к нему подключиться напрямую.
+                let current_addr = {
+                    let pa = public_addr.lock().unwrap();
+                    pa.map(|a| a.to_string())
+                };
+                let current_is_relay = current_addr.is_some();
                 if let Err(e) = transport
-                    .publish_presence(&display_name, addr_str.as_deref(), is_relay)
+                    .publish_presence(&display_name, current_addr.as_deref(), current_is_relay)
                     .await
                 {
                     tracing::warn!("MQTT: periodic presence request failed: {}", e);
@@ -1974,24 +2056,43 @@ self.runtime = Some(runtime);
     ) {
         use crate::network::ice::{StunClient, DEFAULT_STUN_SERVERS};
 
-        tracing::info!("STUN: discovering external address...");
+        // Повторяем периодически: одна попытка при старте часто приходится на
+        // момент, когда сети ещё нет, а внешний адрес меняется при переходе
+        // Wi-Fi <-> мобильный интернет. Без обновления телефон остаётся
+        // недостижимым до перезапуска приложения.
+        let mut backoff_secs = 15u64;
+        loop {
+            tracing::info!("STUN: discovering external address...");
 
-        let result = tokio::task::spawn_blocking(|| {
-            StunClient::get_external_address_from_any(DEFAULT_STUN_SERVERS)
-        })
-        .await;
+            let result = tokio::task::spawn_blocking(|| {
+                StunClient::get_external_address_from_any(DEFAULT_STUN_SERVERS)
+            })
+            .await;
 
-        match result {
-            Ok(Ok(addr)) => {
-                tracing::info!("STUN: my external address = {}", addr);
-                *public_addr.lock().unwrap() = Some(addr);
+            match result {
+                Ok(Ok(addr)) => {
+                    let changed = {
+                        let mut guard = public_addr.lock().unwrap();
+                        let changed = *guard != Some(addr);
+                        *guard = Some(addr);
+                        changed
+                    };
+                    if changed {
+                        tracing::info!("STUN: my external address = {}", addr);
+                    }
+                    backoff_secs = 120;
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("STUN: all servers failed: {}", e);
+                    backoff_secs = std::cmp::min(backoff_secs.saturating_mul(2), 120);
+                }
+                Err(e) => {
+                    tracing::warn!("STUN: task panicked: {}", e);
+                    backoff_secs = std::cmp::min(backoff_secs.saturating_mul(2), 120);
+                }
             }
-            Ok(Err(e)) => {
-                tracing::warn!("STUN: all servers failed: {}", e);
-            }
-            Err(e) => {
-                tracing::warn!("STUN: task panicked: {}", e);
-            }
+
+            tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
         }
     }
     /// Send message via MQTT (internet fallback)
@@ -2163,11 +2264,30 @@ self.runtime = Some(runtime);
         self.network.peer_count()
     }
 
-    /// ринудительно запустить Gossip broadcast (вызывается из UI)
+    /// Принудительно объявить себя и запросить присутствие остальных.
+    /// Кнопка «Собрать данные об абонентах» раньше была заглушкой: она писала
+    /// строку в лог и возвращала true, ничего не отправляя.
     pub fn trigger_gossip_discovery(&self) -> bool {
-        tracing::info!("Gossip: manual trigger requested");
-        // TODO: реализовать через канал связи с MQTT loop
-        true
+        if !self.state.is_running() {
+            tracing::warn!("Gossip: manual trigger ignored, engine is not running");
+            return false;
+        }
+        match self.mqtt_outbound_tx.as_ref() {
+            Some(sender) => match sender.try_send(MqttOutboundCommand::AnnounceNow) {
+                Ok(()) => {
+                    tracing::info!("Gossip: manual announce command accepted");
+                    true
+                }
+                Err(error) => {
+                    tracing::warn!("Gossip: manual announce command rejected: {}", error);
+                    false
+                }
+            },
+            None => {
+                tracing::warn!("Gossip: MQTT outbound channel unavailable");
+                false
+            }
+        }
     }
 
     /// Параллельный QUIC-поток для файлов: отправка НАПРЯМУЮ получателю по QUIC,
