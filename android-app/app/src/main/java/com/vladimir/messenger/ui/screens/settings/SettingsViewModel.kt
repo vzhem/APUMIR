@@ -143,6 +143,23 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Сменить своё имя. Пишем в те же p2p_prefs, откуда его берут движок,
+     * ссылка-приглашение и групповые пакеты, поэтому после перезапуска службы
+     * новое имя увидят и собеседники.
+     */
+    fun onDisplayNameChanged(newName: String) {
+        val clean = newName.trim().take(50)
+        if (clean.isEmpty()) return
+        context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putString("display_name", clean)
+            .apply()
+        _uiState.update { it.copy(displayName = clean) }
+        // Ссылка-приглашение несёт имя, поэтому пересобираем её сразу.
+        loadSettings()
+    }
+
     fun onRestartEngine() {
         viewModelScope.launch {
             RustBridge.onNetworkAvailable()

@@ -46,7 +46,7 @@ fun UsernameConflictDialog() {
                     value = usernameValue,
                     onValueChange = { usernameValue = it },
                     label = { Text("никнейм") },
-                    placeholder = { Text("nickname") },
+                    placeholder = { Text("никнейм") },
                     prefix = { Text("@") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),

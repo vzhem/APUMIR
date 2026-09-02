@@ -66,6 +66,7 @@ fun SettingsScreen(
     var showBackupDialog by remember { mutableStateOf(false) }
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
+    var showNameDialog by remember { mutableStateOf(false) }
     // Профиль вынесен в отдельную вкладку.
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -112,6 +113,7 @@ fun SettingsScreen(
                     onMyQr = { showMyQrDialog = true },
                     onCopyLink = { clipboardManager.setText(AnnotatedString(uiState.inviteLink)) },
                     onUsername = { showUsernameDialog = true },
+                    onEditName = { showNameDialog = true },
                     onShareProfile = onShareProfileClick,
                     onRankBenefits = onRankBenefitsClick,
                 )
@@ -127,6 +129,40 @@ fun SettingsScreen(
         }
     }
 
+    // Своё имя: то самое, что видят собеседники в списке чатов и в шапке лички.
+    if (showNameDialog) {
+        var nameValue by remember(uiState.displayName) {
+            mutableStateOf(uiState.displayName.takeIf { it != "Anonymous" }.orEmpty())
+        }
+        AlertDialog(
+            onDismissRequest = { showNameDialog = false },
+            title = { Text("Ваше имя") },
+            text = {
+                OutlinedTextField(
+                    value = nameValue,
+                    onValueChange = { nameValue = it.take(50) },
+                    label = { Text("Имя") },
+                    placeholder = { Text("Имя Фамилия") },
+                    singleLine = true,
+                    supportingText = { Text("${nameValue.trim().length}/50") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = nameValue.trim().length >= 2,
+                    onClick = {
+                        viewModel.onDisplayNameChanged(nameValue)
+                        showNameDialog = false
+                    },
+                ) { Text("Сохранить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNameDialog = false }) { Text("Отмена") }
+            },
+        )
+    }
+
     // Свой @никнейм: хранится без собаки и уезжает в ссылку профиля (u=).
     if (showUsernameDialog) {
         val usernameContext = LocalContext.current
@@ -140,7 +176,7 @@ fun SettingsScreen(
                     value = usernameValue,
                     onValueChange = { usernameValue = it },
                     label = { Text("никнейм") },
-                    placeholder = { Text("nickname") },
+                    placeholder = { Text("никнейм") },
                     prefix = { Text("@") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -224,6 +260,7 @@ private fun ProfileTabContent(
     onMyQr: () -> Unit,
     onCopyLink: () -> Unit,
     onUsername: () -> Unit,
+    onEditName: () -> Unit,
     onShareProfile: () -> Unit,
     onRankBenefits: () -> Unit,
 ) {
@@ -270,11 +307,25 @@ private fun ProfileTabContent(
                         modifier = Modifier.size(96.dp),
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        uiState.displayName,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    // Имя правится прямо отсюда: тап по строке (или по
+                    // карандашу) открывает диалог.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { onEditName() },
+                    ) {
+                        Text(
+                            uiState.displayName,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Изменить имя",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         if (myUsername.isNullOrBlank()) {
@@ -331,9 +382,11 @@ private fun ProfileTabContent(
                         onClick  = onUsername,
                         modifier = Modifier.weight(1f),
                     ) {
+                        // Собака уже нарисована иконкой - в подписи её быть не
+                        // должно, иначе на кнопке видно две «@».
                         Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("@никнейм", maxLines = 1)
+                        Text("Никнейм", maxLines = 1)
                     }
                     OutlinedButton(
                         onClick  = { showAvatarPicker = true },
@@ -342,6 +395,22 @@ private fun ProfileTabContent(
                         Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Аватар", maxLines = 1)
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick  = onEditName,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Изменить имя", maxLines = 1)
                     }
                 }
                 if (avatarUri != null) {
