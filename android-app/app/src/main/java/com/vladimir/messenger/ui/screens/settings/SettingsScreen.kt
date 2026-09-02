@@ -172,15 +172,25 @@ fun SettingsScreen(
             onDismissRequest = { showUsernameDialog = false },
             title = { Text("Ваш @никнейм") },
             text = {
-                OutlinedTextField(
-                    value = usernameValue,
-                    onValueChange = { usernameValue = it },
-                    label = { Text("никнейм") },
-                    placeholder = { Text("никнейм") },
-                    prefix = { Text("@") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column {
+                    OutlinedTextField(
+                        value = usernameValue,
+                        // Чистим прямо при наборе: недопустимый знак не
+                        // появляется в поле, а не отвергается после «Сохранить».
+                        onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
+                        label = { Text("никнейм") },
+                        placeholder = { Text("никнейм") },
+                        prefix = { Text("@") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Латинские буквы, цифры и подчёркивание. " +
+                            "Короткое имя даёт короткую ссылку и крупный QR-код.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -188,7 +198,7 @@ fun SettingsScreen(
                     UsernameHolder.set(usernameContext, usernameValue)
                     UsernameHolder.clearConflict(usernameContext)
                     showUsernameDialog = false
-                }) { Text("Сохранить") }
+                }, enabled = UsernameHolder.isValid(usernameValue)) { Text("Сохранить") }
             },
             dismissButton = {
                 TextButton(onClick = { showUsernameDialog = false }) { Text("Отмена") }

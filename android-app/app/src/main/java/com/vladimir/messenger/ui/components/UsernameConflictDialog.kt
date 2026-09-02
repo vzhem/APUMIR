@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,20 +45,32 @@ fun UsernameConflictDialog() {
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = usernameValue,
-                    onValueChange = { usernameValue = it },
+                    // Чистим прямо при наборе: недопустимый знак не появляется
+                    // в поле, а не отвергается после «Сохранить».
+                    onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
                     label = { Text("никнейм") },
                     placeholder = { Text("никнейм") },
                     prefix = { Text("@") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Латинские буквы, цифры и подчёркивание.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                UsernameHolder.set(context, usernameValue)
-                UsernameHolder.clearConflict(context)
-            }) { Text("Сохранить") }
+            TextButton(
+                onClick = {
+                    UsernameHolder.set(context, usernameValue)
+                    UsernameHolder.clearConflict(context)
+                },
+                // Диалог обязателен, поэтому пустое или негодное имя не
+                // должно закрывать его молча.
+                enabled = UsernameHolder.isValid(usernameValue),
+            ) { Text("Сохранить") }
         },
     )
 }
