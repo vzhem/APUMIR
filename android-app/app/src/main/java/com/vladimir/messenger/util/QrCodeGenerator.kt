@@ -10,7 +10,8 @@ object QrCodeGenerator {
      * профиля, «Мой QR-код» и шаг регистрации рисуют код здесь, поэтому
      * плотность и поля у них одинаковые.
      *
-     * Уровень коррекции L. Ссылка-приглашение несёт подписанный токен и
+     * Уровень коррекции L и своя тихая зона в 4 модуля. Ссылка-приглашение
+     * несёт подписанный токен и
      * занимает 426 символов вместо прежних 77, поэтому код стал заметно плотнее.
      * Измерено на реальной ссылке (segno, те же байты): при H 105x105 модулей,
      * при Q 93, при M 81, при L 73; с полями ZXing MARGIN=1 это 107 / 95 / 83 /
@@ -33,28 +34,50 @@ object QrCodeGenerator {
                 com.google.zxing.EncodeHintType.ERROR_CORRECTION to
                     com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.L,
                 com.google.zxing.EncodeHintType.CHARACTER_SET to "UTF-8",
-                com.google.zxing.EncodeHintType.MARGIN to 1
+                // Тихая зона обязана быть 4 модуля: так требует стандарт, и
+                // именно её нехватка (было MARGIN=1) заставляла камеры телефонов
+                // подолгу ловить код. Считаем её сами при отрисовке, поэтому
+                // ZXing просим не добавлять свою.
+                com.google.zxing.EncodeHintType.MARGIN to 0,
             )
 
-            val writer = com.google.zxing.qrcode.QRCodeWriter()
-            val bitMatrix = writer.encode(
+            // Кодируем в «сырую» матрицу модулей, без растягивания под размер.
+            // Раньше QRCodeWriter сам подгонял матрицу под 1024 px: 1024 не
+            // делится на число модулей нацело, поэтому одни модули выходили на
+            // пиксель шире других, границы «плыли» и код читался тяжело.
+            val encoded = com.google.zxing.qrcode.encoder.Encoder.encode(
                 content,
-                com.google.zxing.BarcodeFormat.QR_CODE,
-                size,
-                size,
-                hints
+                com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.L,
+                hints,
             )
+            val matrix = encoded.matrix ?: return null
+            val modules = matrix.width
+            if (modules <= 0) return null
 
-            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
-            for (x in 0 until size) {
-                for (y in 0 until size) {
-                    bitmap.setPixel(
-                        x, y,
-                        if (bitMatrix[x, y]) Color.BLACK else Color.WHITE
-                    )
+            val quietZone = 4
+            val total = modules + quietZone * 2
+            // Целое число пикселей на модуль: края модулей остаются резкими при
+            // любом размере на экране, потому что картинка потом только
+            // уменьшается, а не растягивается дробно.
+            val scale = (size / total).coerceAtLeast(1)
+            val side = total * scale
+
+            val pixels = IntArray(side * side) { Color.WHITE }
+            for (my in 0 until modules) {
+                for (mx in 0 until modules) {
+                    if (matrix.get(mx, my).toInt() != 1) continue
+                    val left = (mx + quietZone) * scale
+                    val top = (my + quietZone) * scale
+                    for (y in top until top + scale) {
+                        val row = y * side
+                        for (x in left until left + scale) {
+                            pixels[row + x] = Color.BLACK
+                        }
+                    }
                 }
             }
-            bitmap
+
+            Bitmap.createBitmap(pixels, side, side, Bitmap.Config.RGB_565)
         } catch (e: Exception) {
             null
         }
