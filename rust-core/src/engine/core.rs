@@ -635,6 +635,7 @@ self.runtime = Some(runtime);
                                             sender_id.clone(),
                                             "Unknown".into(),
                                         ));
+                                        network2.touch_peer(&sender_id);
                                         network2.set_status(NetworkStatus::Connected);
 
                                         events2.emit(CoreEvent::MessageReceived {
@@ -782,6 +783,10 @@ self.runtime = Some(runtime);
                         }
 
                         network.add_peer(PeerInfo::new(peer_id.clone(), peer_name.clone()));
+                        // Метка времени обязательна: уборка мёртвых узлов
+                        // ориентируется на неё, а mDNS-соседи присылают
+                        // presence не всегда.
+                        network.touch_peer(&peer_id);
 
                         // Save public address for internet connectivity
                         if let Some(ref pa) = node.public_addr {
@@ -1038,6 +1043,13 @@ self.runtime = Some(runtime);
         let mut known_peers: std::collections::HashMap<String, (String, std::time::Instant)> = std::collections::HashMap::new();
         let mut seen_gossip: std::collections::VecDeque<String> = std::collections::VecDeque::new();
         const MAX_GOSSIP_CACHE: usize = 500;
+        /// Узел считается исчезнувшим, если не присылал presence столько секунд.
+        /// Presence уходит раз в 30 секунд, поэтому три пропуска подряд - потеря.
+        const PEER_STALE_SECS: u64 = 100;
+        /// Узлы, чей адрес пришёл из MQTT presence: только их адреса подлежат
+        /// уборке. Адреса от mDNS живут по своим правилам.
+        let mut seen_via_presence: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         // Mesh gossip budgets: прототип не должен превращать тысячи presence-событий
         // в безлимитную рассылку. Полная пагинация/Bloom summaries будет в hardening.
@@ -1252,6 +1264,7 @@ self.runtime = Some(runtime);
                         // этого через интернет абоненты «не находили» друг друга -
                         // прямая отправка не знала адреса и всё уходило в очередь.
                         // Регистрируем адрес и самого пира так же, как это делает mDNS.
+                        seen_via_presence.insert(peer_id.to_string());
                         let peer_public_addr = parts[2].trim();
                         if !peer_public_addr.is_empty() {
                             match peer_public_addr.parse::<SocketAddr>() {
@@ -1277,6 +1290,7 @@ self.runtime = Some(runtime);
                             peer_id.to_string(),
                             display_name.to_string(),
                         ));
+                        network.touch_peer(peer_id);
                         network.set_status(NetworkStatus::Connected);
                         
                         // PEER ONLINE: РґРѕСЃС‚Р°РІРёС‚СЊ РЅР°РєРѕРїР»РµРЅРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
@@ -1413,11 +1427,13 @@ self.runtime = Some(runtime);
                                 display_name: peer_name.to_string(),
                                 is_local: false,
                             });
-                        } else {
-                            if let Some(entry) = known_peers.get_mut(peer_id) {
-                                entry.1 = std::time::Instant::now();
-                            }
                         }
+                        // Слух НЕ продлевает жизнь узла. Раньше здесь
+                        // обновлялось время последней встречи, и мёртвые узлы
+                        // становились бессмертными: телефоны пересказывали
+                        // друг другу один и тот же устаревший список, взаимно
+                        // подтверждая давно удалённые установки. Живым узел
+                        // делает только его собственный presence.
                     }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
                     // ACK: "ack|messageId" — подтверждение обычной прямой доставки.
@@ -2008,6 +2024,39 @@ self.runtime = Some(runtime);
             tick += 1;
             if tick >= 30 {
                 tick = 0;
+
+                // Уборка мёртвых узлов. Presence приходит раз в 30 секунд;
+                // всё, о чём не слышали PEER_STALE_SECS, считаем исчезнувшим.
+                // Без этого список рос копиями одной и той же трубки (каждая
+                // переустановка = новый node_id) и мешал выбирать живого
+                // получателя для файлов.
+                let stale_cutoff = std::time::Duration::from_secs(PEER_STALE_SECS);
+                let before = known_peers.len();
+                known_peers.retain(|_, (_, seen_at)| seen_at.elapsed() < stale_cutoff);
+                let removed = before.saturating_sub(known_peers.len());
+
+                // Общий список чистим по возрасту записи, а не по списку из
+                // MQTT: соседей по Wi-Fi добавляет mDNS, и они бы вылетали на
+                // каждом круге уборки.
+                let dropped_from_network =
+                    network.drop_peers_older_than((PEER_STALE_SECS * 1000) as i64);
+                if removed > 0 || dropped_from_network > 0 {
+                    tracing::info!(
+                        "PEERS: dropped {} stale presence entries (network list -{}), {} alive",
+                        removed,
+                        dropped_from_network,
+                        known_peers.len()
+                    );
+                    let alive: std::collections::HashSet<&str> =
+                        known_peers.keys().map(|k| k.as_str()).collect();
+                    let mut addrs = peer_addrs.lock().unwrap();
+                    addrs.retain(|key, _| {
+                        let base = key.strip_suffix("_public").unwrap_or(key.as_str());
+                        // Адреса из mDNS не трогаем: их владельцы могут не
+                        // присылать presence, оставаясь достижимыми по Wi-Fi.
+                        alive.contains(base) || !seen_via_presence.contains(base)
+                    });
+                }
                 // Адрес перечитываем каждый раз. Раньше он брался один раз при
                 // старте - через 3 секунды после запуска, когда STUN обычно ещё
                 // не ответил. Телефон навсегда объявлял себя без адреса, и

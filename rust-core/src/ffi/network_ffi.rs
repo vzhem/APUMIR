@@ -61,7 +61,9 @@ impl PeerInfo {
             peer_id,
             display_name,
             status: "online".into(),
-            last_seen_ms: 0,
+            // Отметка времени обязательна: по ней вычищаются мёртвые узлы.
+            // Раньше здесь стоял 0, и «когда видели последний раз» никто не знал.
+            last_seen_ms: crate::storage::models::now_ms(),
             is_direct: false,
         }
     }
@@ -178,6 +180,29 @@ impl NetworkManagerFfi {
     /// Удалить peer
     pub fn remove_peer(&self, peer_id: &str) {
         self.peers.lock().unwrap().remove(peer_id);
+    }
+
+    /// Убрать узлы, о которых давно ничего не слышно.
+    ///
+    /// Нужно, чтобы список не копил «мёртвые» записи: одна и та же трубка
+    /// после переустановки получает новый node_id, и старые иначе висели бы
+    /// вечно, мешая выбирать живого получателя для файлов.
+    ///
+    /// Отбор именно по возрасту записи, а не по списку живых из MQTT: соседей
+    /// по Wi-Fi находит mDNS, и они бы вычищались на каждом круге уборки.
+    pub fn drop_peers_older_than(&self, max_age_ms: i64) -> usize {
+        let now = crate::storage::models::now_ms();
+        let mut peers = self.peers.lock().unwrap();
+        let before = peers.len();
+        peers.retain(|_, info| now.saturating_sub(info.last_seen_ms) <= max_age_ms);
+        before.saturating_sub(peers.len())
+    }
+
+    /// Отметить, что узел только что дал о себе знать.
+    pub fn touch_peer(&self, peer_id: &str) {
+        if let Some(info) = self.peers.lock().unwrap().get_mut(peer_id) {
+            info.last_seen_ms = crate::storage::models::now_ms();
+        }
     }
 
     /// Получить список peer

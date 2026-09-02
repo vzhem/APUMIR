@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
 
-use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, QoS};
+use rumqttc::{AsyncClient, Event, EventLoop, LastWill, MqttOptions, Packet, QoS};
 use tokio::sync::{mpsc, oneshot, Mutex, OwnedSemaphorePermit};
 
 use crate::network::mqtt_backpressure::{await_mqtt_request, MqttRequestError};
@@ -377,6 +377,16 @@ impl MqttTransport {
         let mut opts = MqttOptions::new(&client_id, &host, port);
         opts.set_keep_alive(Duration::from_secs(60));
         opts.set_clean_session(true);
+        // Last Will: брокер сам сотрёт retained presence, когда телефон пропадёт
+        // без корректного отключения (закрыли приложение, сел аккумулятор,
+        // упала сеть). Без этого каждая переустановка оставляла вечную запись
+        // "я онлайн", и список пиров рос мёртвыми копиями одного телефона.
+        opts.set_last_will(LastWill::new(
+            format!("p2pm2/presence/{}", node_id),
+            Vec::new(),
+            QoS::AtLeastOnce,
+            true,
+        ));
 
         let (client, eventloop) = AsyncClient::new(opts, MQTT_CLIENT_REQUEST_BUFFER);
         let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
@@ -400,6 +410,12 @@ impl MqttTransport {
                 MqttOptions::new(secondary_client_id, &secondary_host, secondary_port);
             secondary_options.set_keep_alive(Duration::from_secs(60));
             secondary_options.set_clean_session(true);
+            secondary_options.set_last_will(LastWill::new(
+                format!("p2pm2/presence/{}", node_id),
+                Vec::new(),
+                QoS::AtLeastOnce,
+                true,
+            ));
             let (secondary_client, secondary_eventloop) =
                 AsyncClient::new(secondary_options, MQTT_CLIENT_REQUEST_BUFFER);
             tracing::info!(
