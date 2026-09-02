@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.referral
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,6 +23,7 @@ import javax.inject.Singleton
 @Singleton
 class ReferralAttributionRouter @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val attributionSender: ReferralAttributionSender,
 ) {
 
     fun routeIncoming(
@@ -43,6 +45,41 @@ class ReferralAttributionRouter @Inject constructor(
                 // накрутку чужим идентификатором. Поглощаем, но не зачисляем.
                 Log.i(TAG, "unsigned referral from $senderId ignored")
                 recordRejection(app, senderId, "unsigned envelope is not credited", nowMs)
+            }
+
+            is ReferralWire.Packet.TokenRequest -> {
+                // Нас пригласили по короткой ссылке, и приглашённый просит
+                // подпись. Отвечаем тем же токеном, что раньше ехал в ссылке.
+                val token = IdentitySigningKeyStore.createSignedReferralToken(app)
+                if (token == null) {
+                    Log.w(TAG, "token request from $senderId: подпись недоступна")
+                } else {
+                    val reply = ReferralWire.buildTokenReply(
+                        ReferralWire.canonicalNodeId(RustBridge.nodeId()).orEmpty(),
+                        token,
+                    )
+                    if (reply != null) {
+                        RustBridge.sendMessage(
+                            java.util.UUID.randomUUID().toString(),
+                            "referral",
+                            senderId,
+                            reply,
+                        )
+                        Log.i(TAG, "token reply sent to $senderId")
+                    }
+                }
+            }
+
+            is ReferralWire.Packet.TokenReply -> {
+                // Пригласивший прислал подпись: сохраняем и отправляем обычную
+                // атрибуцию тем же путём, что и раньше.
+                val token = ReferralWire.decode(packet.tokenB64)
+                if (token == null) {
+                    Log.w(TAG, "token reply from $senderId: битая подпись")
+                } else if (attributionSender.rememberInviter(senderId, packet.fromNodeId, token)) {
+                    Log.i(TAG, "token reply from $senderId принят, отправляем атрибуцию")
+                    attributionSender.sendPending("referral", senderId)
+                }
             }
 
             is ReferralWire.Packet.SignedAttribution -> {

@@ -29,6 +29,18 @@ object ReferralWire {
 
     const val PREFIX = "APUREF1"
     const val KIND_ATTRIBUTION = "attr"
+
+    /**
+     * Запрос токена приглашения и ответ на него.
+     *
+     * Короткая ссылка `apu://` намеренно не несёт подписанный токен: он занимал
+     * 427 символов из 589 и делал QR-код густой сеткой. Вместо этого
+     * приглашённый, добавив контакт, спрашивает токен у пригласившего по уже
+     * установленной связи, а тот отвечает тем же подписанным токеном, который
+     * раньше ехал в ссылке. Проверка подписи и начисление ранга не изменились.
+     */
+    const val KIND_TOKEN_REQUEST = "tokq"
+    const val KIND_TOKEN_REPLY = "tokr"
     const val VERSION_SIGNED = "2"
     const val VERSION_UNSIGNED = "1"
 
@@ -64,6 +76,12 @@ object ReferralWire {
          * Прежняя атрибуция без подписи. Разбирается только для того, чтобы
          * приёмник поглотил её, а не положил в чат как текст.
          */
+        /** «Пришли токен»: приглашённый просит подпись у пригласившего. */
+        data class TokenRequest(val fromNodeId: String) : Packet()
+
+        /** Ответ с подписанным токеном приглашения. */
+        data class TokenReply(val fromNodeId: String, val tokenB64: String) : Packet()
+
         data class UnsignedAttribution(
             val inviteeNodeId: String,
             val inviterNodeId: String,
@@ -97,6 +115,21 @@ object ReferralWire {
         return envelope.takeIf { it.length <= MAX_ENVELOPE_CHARS }
     }
 
+    /** «Пришли мне свой токен приглашения»: конверт без полезной нагрузки. */
+    fun buildTokenRequest(fromNodeId: String): String? {
+        val from = canonicalNodeId(fromNodeId) ?: return null
+        return listOf(PREFIX, KIND_TOKEN_REQUEST, VERSION_SIGNED, from).joinToString("|")
+    }
+
+    /** Ответ пригласившего: тот же подписанный токен, что раньше ехал в ссылке. */
+    fun buildTokenReply(fromNodeId: String, token: ByteArray): String? {
+        val from = canonicalNodeId(fromNodeId) ?: return null
+        if (token.isEmpty() || token.size > ReferralReceipt.MAX_TOKEN_BYTES) return null
+        val envelope = listOf(PREFIX, KIND_TOKEN_REPLY, VERSION_SIGNED, from, encode(token))
+            .joinToString("|")
+        return envelope.takeIf { it.length <= MAX_ENVELOPE_CHARS }
+    }
+
     /** Дешёвая проверка префикса для приёмника: вызывать до тяжёлого разбора. */
     fun isReferralPacket(text: String?): Boolean {
         val value = text ?: return false
@@ -109,7 +142,22 @@ object ReferralWire {
         if (!value.startsWith("$PREFIX|")) return null
 
         val fields = value.split('|')
-        if (fields.size < 2 || fields[1] != KIND_ATTRIBUTION) return null
+        if (fields.size < 3) return null
+        when (fields[1]) {
+            KIND_TOKEN_REQUEST -> {
+                if (fields.size != 4) return null
+                val from = canonicalNodeId(fields[3]) ?: return null
+                return Packet.TokenRequest(from)
+            }
+            KIND_TOKEN_REPLY -> {
+                if (fields.size != 5) return null
+                val from = canonicalNodeId(fields[3]) ?: return null
+                val tokenB64 = fields[4]
+                if (!isBoundedBase64(tokenB64, ReferralReceipt.MAX_TOKEN_BYTES)) return null
+                return Packet.TokenReply(from, tokenB64)
+            }
+        }
+        if (fields[1] != KIND_ATTRIBUTION) return null
         return when (fields[2]) {
             VERSION_SIGNED -> parseSigned(fields)
             VERSION_UNSIGNED -> parseUnsigned(fields)

@@ -55,6 +55,20 @@ object InviteLinkParser {
             return Invite(nodeId = text, source = Source.APP_LINK, original = text)
         }
 
+        // Короткая ссылка apu:// - основной вид с версии 11.38. Разбираем её
+        // раньше остальных: она самая частая и самая дешёвая в проверке.
+        ApuLink.parse(text)?.let { short ->
+            if (short.nodeId != null) {
+                return Invite(
+                    nodeId = short.nodeId,
+                    displayName = short.nickname,
+                    username = short.nickname,
+                    source = Source.APP_LINK,
+                    original = text,
+                )
+            }
+        }
+
         return try {
             val uri = URI(text)
             when (uri.scheme?.lowercase()) {

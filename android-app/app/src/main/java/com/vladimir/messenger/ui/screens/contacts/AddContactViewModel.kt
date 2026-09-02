@@ -157,6 +157,7 @@ class AddContactViewModel @Inject constructor(
                     // атрибуцию. Если транспорта нет, отправка повторится на
                     // первом же сообщении (см. ChatRepository.sendMessage).
                     rememberReferral(parsedInvite, fingerprint, chat.id)
+                    requestReferralToken(parsedInvite, fingerprint)
                     _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                 }
                 .onFailure { error ->
@@ -207,5 +208,31 @@ class AddContactViewModel @Inject constructor(
         if (referralAttribution.rememberInviter(fingerprint, verified.inviterNodeId, verified.token)) {
             referralAttribution.sendPending(chatId, fingerprint)
         }
+    }
+
+    /**
+     * Короткая ссылка `apu://` не несёт подписанный токен - он занимал 427
+     * символов из 589 и делал QR густой сеткой. Поэтому сразу после добавления
+     * контакта просим токен у пригласившего по уже установленной связи: он
+     * ответит подписью, и ранг начислится ровно как раньше.
+     *
+     * Для длинной ссылки с токеном запрос не нужен.
+     */
+    private fun requestReferralToken(
+        parsedInvite: InviteLinkParser.Invite?,
+        fingerprint: String,
+    ) {
+        if (!parsedInvite?.referralToken.isNullOrBlank()) return
+        val me = ReferralWire.canonicalNodeId(RustBridge.nodeId()) ?: return
+        if (me.equals(fingerprint, ignoreCase = true)) return
+        val request = ReferralWire.buildTokenRequest(me) ?: return
+        runCatching {
+            RustBridge.sendMessage(
+                java.util.UUID.randomUUID().toString(),
+                "referral",
+                fingerprint,
+                request,
+            )
+        }.onFailure { Log.w(TAG, "token request failed: ${it.message}") }
     }
 }

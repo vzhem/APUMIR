@@ -52,6 +52,11 @@ object OwnInvite {
         // Подписанный токен превращает обычную ссылку в приглашение: по нему
         // пригласивший потом зачтёт друга (см. data/referral). Если подпись
         // недоступна, ссылка остаётся рабочей, просто без начисления ранга.
+        // Короткая ссылка - основной вид с версии 11.38. Токен по ней не едет:
+        // приглашённый спросит его по связи (ReferralWire.tokq/tokr), поэтому
+        // ранг начисляется как раньше, а QR становится втрое реже.
+        ApuLink.build(nodeId, username(app))?.let { return it }
+        // Узел непривычного вида - откатываемся на прежнюю длинную ссылку.
         val token = signedToken(app, nodeId)?.let { ReferralWire.encode(it) }
         return buildLink(nodeId, displayName(app), username(app), token)
     }

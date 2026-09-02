@@ -100,6 +100,17 @@
                       android:host="add" />
             </intent-filter>
 
+            <!-- Короткая ссылка-приглашение: apu://a/<узел>/<никнейм>.
+                 Основной вид с версии 11.38: втрое короче прежней, поэтому
+                 QR-код выходит крупноклеточным и читается быстрее. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="apu" android:host="a" />
+                <data android:scheme="apu" android:host="u" />
+            </intent-filter>
+
             <!-- Ссылка-приглашение в группу: p2pmessenger://group?slug=... -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
