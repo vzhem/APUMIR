@@ -315,6 +315,9 @@ fun MessengerNavGraph(
                 onChannelClick = { channelId ->
                     navController.navigate(Screen.Channel.createRoute(channelId))
                 },
+                onCallClick = { cId, cName ->
+                    navController.navigate(Screen.Call.createOutgoing(cId, cName))
+                },
             )
         }
 
@@ -456,6 +459,12 @@ fun MessengerNavGraph(
                             contactId = contact.id,
                         )
                     )
+                },
+                onRenameContactClick = { cId, cName ->
+                    navController.navigate(Screen.RenameContact.createRoute(cId, cName))
+                },
+                onCallContactClick = { cId, cName ->
+                    navController.navigate(Screen.Call.createOutgoing(cId, cName))
                 },
             )
         }

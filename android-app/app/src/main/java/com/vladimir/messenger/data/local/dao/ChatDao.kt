@@ -43,6 +43,10 @@ interface ChatDao {
     @Query("UPDATE chats SET isContactOnline = :isOnline WHERE contactId = :contactId")
     suspend fun updateContactOnline(contactId: String, isOnline: Boolean)
 
+    /** Удалить чат по идентификатору (меню «⋮» в пузыре чата). */
+    @Query("DELETE FROM chats WHERE id = :chatId")
+    suspend fun deleteChatById(chatId: String)
+
     /** Холодный старт: гасим все точки онлайна, peer_discovered включит живых. */
     @Query("UPDATE chats SET isContactOnline = 0")
     suspend fun setAllOffline()

@@ -45,6 +45,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.ui.components.BubbleKind
+import com.vladimir.messenger.ui.components.BubbleMenuAction
+import com.vladimir.messenger.ui.components.BubbleOverflowMenu
 import com.vladimir.messenger.ui.components.ContactCard
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
@@ -75,6 +78,7 @@ fun ChatListScreen(
     onGroupClick: (groupId: String) -> Unit = {},
     onGroupAdminClick: (groupId: String) -> Unit = {},
     onChannelClick: (channelId: String) -> Unit = {},
+    onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -89,6 +93,11 @@ fun ChatListScreen(
 
     // Меню создания у кнопки-карандаша: чат, группа, канал.
     var fabMenuExpanded by remember { mutableStateOf(false) }
+
+    // Подтверждения опасных действий из меню «⋮» в пузырях.
+    var confirmDeleteChat by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
+    var confirmClearChat by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
+    var confirmGroup by remember { mutableStateOf<InboxGroup?>(null) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
@@ -326,6 +335,7 @@ fun ChatListScreen(
                             when (item) {
                                 is InboxItem.Personal -> ContactCard(
                                     chat    = item.chat,
+                                    kind    = BubbleKind.Personal,
                                     onClick = {
                                         onChatClick(
                                             item.chat.id,
@@ -333,6 +343,45 @@ fun ChatListScreen(
                                             item.chat.contactId,
                                         )
                                     },
+                                    menuActions = listOf(
+                                        BubbleMenuAction(
+                                            title = "Открыть чат",
+                                            icon = Icons.Default.Forum,
+                                            onClick = {
+                                                onChatClick(
+                                                    item.chat.id,
+                                                    item.chat.contactName,
+                                                    item.chat.contactId,
+                                                )
+                                            },
+                                        ),
+                                        BubbleMenuAction(
+                                            title = "Позвонить",
+                                            icon = Icons.Default.Call,
+                                            onClick = {
+                                                onCallClick(
+                                                    item.chat.contactId,
+                                                    item.chat.contactName,
+                                                )
+                                            },
+                                        ),
+                                        BubbleMenuAction(
+                                            title = "Отметить прочитанным",
+                                            icon = Icons.Default.DoneAll,
+                                            onClick = { viewModel.markChatRead(item.chat.id) },
+                                        ),
+                                        BubbleMenuAction(
+                                            title = "Очистить переписку",
+                                            icon = Icons.Default.CleaningServices,
+                                            onClick = { confirmClearChat = item.chat },
+                                        ),
+                                        BubbleMenuAction(
+                                            title = "Удалить чат",
+                                            icon = Icons.Default.Delete,
+                                            destructive = true,
+                                            onClick = { confirmDeleteChat = item.chat },
+                                        ),
+                                    ),
                                 )
 
                                 // В админ-разделах тап открывает сразу
@@ -340,6 +389,51 @@ fun ChatListScreen(
                                 // лентой постов, группа - общим чатом.
                                 is InboxItem.Group -> GroupCard(
                                     group   = item.group,
+                                    menuActions = buildList {
+                                        add(
+                                            BubbleMenuAction(
+                                                title = if (item.group.isChannel) "Открыть канал" else "Открыть группу",
+                                                icon = Icons.Default.Forum,
+                                                onClick = {
+                                                    if (item.group.isChannel) {
+                                                        onChannelClick(item.group.id)
+                                                    } else {
+                                                        onGroupClick(item.group.id)
+                                                    }
+                                                },
+                                            )
+                                        )
+                                        if (item.group.myRole == GroupRole.OWNER ||
+                                            item.group.myRole == GroupRole.ADMIN
+                                        ) {
+                                            add(
+                                                BubbleMenuAction(
+                                                    title = "Управление",
+                                                    icon = Icons.Default.Settings,
+                                                    onClick = { onGroupAdminClick(item.group.id) },
+                                                )
+                                            )
+                                        }
+                                        add(
+                                            BubbleMenuAction(
+                                                title = "Отметить прочитанным",
+                                                icon = Icons.Default.DoneAll,
+                                                onClick = { viewModel.markGroupRead(item.group.id) },
+                                            )
+                                        )
+                                        add(
+                                            BubbleMenuAction(
+                                                title = if (item.group.myRole == GroupRole.OWNER) {
+                                                    if (item.group.isChannel) "Удалить канал" else "Удалить группу"
+                                                } else {
+                                                    "Выйти"
+                                                },
+                                                icon = Icons.Default.Delete,
+                                                destructive = true,
+                                                onClick = { confirmGroup = item.group },
+                                            )
+                                        )
+                                    },
                                     openAdmin = uiState.section == InboxSection.AdminGroups ||
                                         uiState.section == InboxSection.AdminChannels,
                                     onClick = {
@@ -362,6 +456,70 @@ fun ChatListScreen(
             }
         }
     }
+    }
+
+    // Подтверждение удаления чата.
+    confirmDeleteChat?.let { chat ->
+        AlertDialog(
+            onDismissRequest = { confirmDeleteChat = null },
+            title = { Text("Удалить чат?") },
+            text = { Text("Чат с «${chat.contactName}» и вся переписка будут удалены на этом телефоне.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteChat(chat.id)
+                    confirmDeleteChat = null
+                }) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteChat = null }) { Text("Отмена") }
+            },
+        )
+    }
+
+    // Подтверждение очистки переписки.
+    confirmClearChat?.let { chat ->
+        AlertDialog(
+            onDismissRequest = { confirmClearChat = null },
+            title = { Text("Очистить переписку?") },
+            text = { Text("Сообщения чата с «${chat.contactName}» будут удалены, сам чат останется.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearChatHistory(chat.id)
+                    confirmClearChat = null
+                }) { Text("Очистить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearChat = null }) { Text("Отмена") }
+            },
+        )
+    }
+
+    // Подтверждение выхода/удаления группы или канала.
+    confirmGroup?.let { group ->
+        val owner = group.myRole == GroupRole.OWNER
+        val what = if (group.isChannel) "канал" else "группу"
+        AlertDialog(
+            onDismissRequest = { confirmGroup = null },
+            title = { Text(if (owner) "Удалить $what?" else "Выйти из $what?") },
+            text = {
+                Text(
+                    if (owner) {
+                        "«${group.title}» будет удалён у всех участников."
+                    } else {
+                        "Вы перестанете получать сообщения «${group.title}»."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
+                    confirmGroup = null
+                }) { Text(if (owner) "Удалить" else "Выйти") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmGroup = null }) { Text("Отмена") }
+            },
+        )
     }
 
     // Invite dialog
@@ -540,6 +698,7 @@ private fun GroupCard(
     openAdmin: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    menuActions: List<BubbleMenuAction> = emptyList(),
 ) {
     // Раунд 42: светлая полосочка со скруглениями и тонкой золотой рамкой -
     // тёмный текст виден на любой подложке и в день, и в ночь.
@@ -595,14 +754,6 @@ private fun GroupCard(
                 )
                 // Пометка, что это своя группа: в разделе «Админ группы» тап
                 // открывает админ-кабинет.
-                if (group.isChannel) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "канал",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
                 if (openAdmin) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
@@ -612,6 +763,13 @@ private fun GroupCard(
                     )
                 }
             }
+            // Подпись пузыря — как у личных чатов: сразу видно, что это.
+            Text(
+                text = if (group.isChannel) BubbleKind.Channel.label else BubbleKind.Group.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF8A93A2),
+                maxLines = 1,
+            )
             Text(
                 text = group.preview ?: if (group.isPublic) {
                     "Публичная группа - ${group.memberCount} уч."
@@ -650,6 +808,8 @@ private fun GroupCard(
                 }
             }
         }
+
+        BubbleOverflowMenu(actions = menuActions)
     }
 }
 

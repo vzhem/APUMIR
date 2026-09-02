@@ -85,6 +85,8 @@ class ChatListViewModel @Inject constructor(
     private val getChatsUseCase: GetChatsUseCase,
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
     private val groupDao: GroupDao,
+    private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -246,6 +248,38 @@ class ChatListViewModel @Inject constructor(
                 filteredChats = filterChats(state.chats, query)
             ).withItems()
         }
+    }
+
+    // ── Действия меню «⋮» в пузырях ───────────────────────────────────────
+
+    /** Удалить личный чат вместе с историей (только на этом телефоне). */
+    fun deleteChat(chatId: String) {
+        viewModelScope.launch { chatRepository.deleteChat(chatId) }
+    }
+
+    /** Очистить переписку, сам чат остаётся. */
+    fun clearChatHistory(chatId: String) {
+        viewModelScope.launch { chatRepository.clearHistory(chatId) }
+    }
+
+    /** Сбросить счётчик непрочитанных личного чата. */
+    fun markChatRead(chatId: String) {
+        viewModelScope.launch { chatRepository.markAsRead(chatId) }
+    }
+
+    /** Сбросить счётчик непрочитанных группы или канала. */
+    fun markGroupRead(groupId: String) {
+        viewModelScope.launch { groupDao.markGroupRead(groupId) }
+    }
+
+    /** Выйти из группы или канала (не владельцу). */
+    fun leaveGroup(groupId: String) {
+        viewModelScope.launch { groupRepository.leaveGroup(groupId) }
+    }
+
+    /** Удалить свою группу или канал у всех участников (только владельцу). */
+    fun deleteGroup(groupId: String) {
+        viewModelScope.launch { groupRepository.deleteGroup(groupId) }
     }
 
     private fun filterChats(chats: List<Chat>, query: String): List<Chat> {

@@ -6,6 +6,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -23,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.domain.model.Contact
 import com.vladimir.messenger.domain.model.Chat
+import com.vladimir.messenger.ui.components.BubbleKind
+import com.vladimir.messenger.ui.components.BubbleMenuAction
 import com.vladimir.messenger.ui.components.ContactCard
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
@@ -33,10 +39,14 @@ fun ContactsScreen(
     onNavigateBack: () -> Unit,
     onContactClick: (Contact) -> Unit,
     onAddContactClick: () -> Unit,
+    onRenameContactClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
+    onCallContactClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     viewModel: ContactsViewModel = hiltViewModel()
 ) {
     val contacts by viewModel.contacts.collectAsState()
     val context = LocalContext.current
+    // Подтверждение удаления контакта из меню «⋮» в пузыре.
+    var confirmDelete by remember { mutableStateOf<Contact?>(null) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
@@ -154,17 +164,8 @@ fun ContactsScreen(
                 ) { contact ->
                     // ContactCard expects Chat, create a minimal Chat from Contact
                     val ctx = LocalContext.current
-                    ContactCard(
-                        chat = Chat(
-                            id = contact.id,
-                            contactId = contact.id,
-                            contactName = contact.displayName,
-                            isContactOnline = contact.isOnline,
-                        ),
-                        onClick = { onContactClick(contact) },
-                        username = contact.username,
-                        onShareClick = {
-                            try {
+                    val shareContact = {
+                        try {
                                 val link = ContactShareLink.build(contact.id, contact.displayName)
                                 val send = Intent().apply {
                                     action = Intent.ACTION_SEND
@@ -177,12 +178,76 @@ fun ContactsScreen(
                                 ctx.startActivity(Intent.createChooser(send, "Поделиться контактом"))
                             } catch (_: Exception) {
                             }
-                        },
+                        Unit
+                    }
+                    // Пузырь контакта — тот же ContactCard, что на главной:
+                    // владелец просил, чтобы списки выглядели одинаково.
+                    ContactCard(
+                        chat = Chat(
+                            id = contact.id,
+                            contactId = contact.id,
+                            contactName = contact.displayName,
+                            isContactOnline = contact.isOnline,
+                        ),
+                        onClick = { onContactClick(contact) },
+                        username = contact.username,
+                        kind = BubbleKind.Personal,
+                        onShareClick = shareContact,
+                        menuActions = listOf(
+                            BubbleMenuAction(
+                                title = "Написать",
+                                icon = Icons.Default.Forum,
+                                onClick = { onContactClick(contact) },
+                            ),
+                            BubbleMenuAction(
+                                title = "Позвонить",
+                                icon = Icons.Default.Call,
+                                onClick = {
+                                    onCallContactClick(contact.id, contact.displayName)
+                                },
+                            ),
+                            BubbleMenuAction(
+                                title = "Переименовать",
+                                icon = Icons.Default.Edit,
+                                onClick = {
+                                    onRenameContactClick(contact.id, contact.displayName)
+                                },
+                            ),
+                            BubbleMenuAction(
+                                title = "Поделиться контактом",
+                                icon = Icons.Default.Share,
+                                onClick = { shareContact() },
+                            ),
+                            BubbleMenuAction(
+                                title = "Удалить контакт",
+                                icon = Icons.Default.Delete,
+                                destructive = true,
+                                onClick = { confirmDelete = contact },
+                            ),
+                        ),
                     )
                 }
             }
         }
         }
     }
+    }
+
+    // Подтверждение удаления контакта.
+    confirmDelete?.let { contact ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Удалить контакт?") },
+            text = { Text("«${contact.displayName}» будет удалён из списка контактов.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteContact(contact.id)
+                    confirmDelete = null
+                }) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = null }) { Text("Отмена") }
+            },
+        )
     }
 }

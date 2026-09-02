@@ -55,6 +55,10 @@ fun ContactCard(
     onShareClick: (() -> Unit)? = null,
     /** Оригинальное имя через собаку, например @nickname. */
     username: String = "",
+    /** Подпись под именем: личный чат / группа / канал. */
+    kind: BubbleKind = BubbleKind.Personal,
+    /** Пункты меню «⋮» справа в пузыре. Пусто - кнопки нет. */
+    menuActions: List<BubbleMenuAction> = emptyList(),
 ) {
     // Присланный аватар из роевого реестра (если есть) - иначе инициалы.
     val avatars by AvatarStore.avatars.collectAsState()
@@ -121,20 +125,6 @@ fun ContactCard(
         // ------------------------------------------------------------------
         // ТЕКСТОВАЯ ИНФОРМАЦИЯ
         // ------------------------------------------------------------------
-        if (onShareClick != null) {
-            IconButton(
-                onClick = onShareClick,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Icon(
-                    Icons.Default.Share,
-                    contentDescription = "Поделиться контактом",
-                    tint = Color(0xFF5A6472),
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-
         Column(modifier = Modifier.weight(1f)) {
             // Имя контакта
             Text(
@@ -157,6 +147,15 @@ fun ContactCard(
                 )
             }
 
+            // Подпись пузыря: личный чат / группа / канал. Владелец просил,
+            // чтобы в списке было сразу видно, что это за пузырь.
+            Text(
+                text     = kind.label,
+                style    = MaterialTheme.typography.labelSmall,
+                color    = Color(0xFF8A93A2),
+                maxLines = 1,
+            )
+
             Spacer(modifier = Modifier.height(2.dp))
 
             // Превью последнего сообщения
@@ -174,6 +173,20 @@ fun ContactCard(
         // ------------------------------------------------------------------
         // ПРАВАЯ КОЛОНКА: время + счётчик
         // ------------------------------------------------------------------
+        if (onShareClick != null) {
+            IconButton(
+                onClick = onShareClick,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = "Поделиться контактом",
+                    tint = Color(0xFF5A6472),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+
         Column(
             horizontalAlignment = Alignment.End,
         ) {
@@ -211,6 +224,9 @@ fun ContactCard(
                 }
             }
         }
+
+        // Меню «три вертикальные точки» — крайним справа в пузыре.
+        BubbleOverflowMenu(actions = menuActions)
     }
 }
 

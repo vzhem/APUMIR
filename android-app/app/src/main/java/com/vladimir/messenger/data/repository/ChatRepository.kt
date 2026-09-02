@@ -316,6 +316,19 @@ class ChatRepository @Inject constructor(
         return createChat(contactId, contactName)
     }
 
+    /** Удалить чат вместе с историей сообщений (меню «⋮» в пузыре). */
+    suspend fun deleteChat(chatId: String) {
+        messageDao.deleteMessagesForChat(chatId)
+        chatDao.deleteChatById(chatId)
+    }
+
+    /** Очистить переписку, сам чат остаётся в списке. */
+    suspend fun clearHistory(chatId: String) {
+        messageDao.deleteMessagesForChat(chatId)
+        val chat = chatDao.getChatById(chatId) ?: return
+        chatDao.updateChat(chat.copy(lastMessage = null, lastMessageTime = null, unreadCount = 0))
+    }
+
     suspend fun markAsRead(chatId: String) {
         chatDao.markAsRead(chatId)
     }
