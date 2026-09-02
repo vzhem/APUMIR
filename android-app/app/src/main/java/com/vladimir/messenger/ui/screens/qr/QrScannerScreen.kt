@@ -221,10 +221,12 @@ private fun MyCodePane() {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
-    val link = remember { OwnInvite.link(context) }
+    // Ссылка может быть ещё не готова на первом запуске (ключи создаются),
+    // поэтому держим её отдельным nullable и разворачиваем один раз ниже.
+    val maybeLink = remember { OwnInvite.link(context) }
     val displayName = remember { OwnInvite.displayName(context) }
     val username = remember { OwnInvite.username(context) }
-    val bitmap = remember(link) { link?.let { QrCodeGenerator.generateQrCode(it) } }
+    val bitmap = remember(maybeLink) { maybeLink?.let { QrCodeGenerator.generateQrCode(it) } }
 
     Column(
         modifier = Modifier
@@ -234,7 +236,7 @@ private fun MyCodePane() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (bitmap == null) {
+        if (maybeLink == null || bitmap == null) {
             ApuBubble {
                 Text(
                     "Код появится, когда профиль будет готов. Откройте приложение " +
@@ -247,6 +249,8 @@ private fun MyCodePane() {
 
         // Код на белом поле и во всю ширину: чем крупнее модули, тем быстрее
         // его ловит камера другого телефона.
+        val link = maybeLink
+
         Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = "Мой QR-код",
