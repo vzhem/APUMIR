@@ -67,14 +67,16 @@ class UpdateChecker @Inject constructor(
                 // Берём только APK с ожидаемым именем. GitHub не гарантирует порядок
                 // assets, поэтому "первый .apk" может оказаться ручной/устаревшей сборкой.
                 val assets = json.getJSONArray("assets")
-                val canonicalName = "P2P-Messenger-$latestVersion.apk"
+                val canonicalName = "APU-$latestVersion.apk"
+                val oldCanonicalName = "P2P-Messenger-$latestVersion.apk"
                 var canonicalUrl: String? = null
                 var legacyUrl: String? = null
                 for (i in 0 until assets.length()) {
                     val asset = assets.getJSONObject(i)
                     val name = asset.getString("name")
                     when {
-                        name.equals(canonicalName, ignoreCase = true) -> {
+                        name.equals(canonicalName, ignoreCase = true) ||
+                            name.equals(oldCanonicalName, ignoreCase = true) -> {
                             canonicalUrl = asset.getString("browser_download_url")
                         }
                         name.equals("app-release.apk", ignoreCase = true) -> {
@@ -112,10 +114,13 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     fun downloadApk(releaseInfo: ReleaseInfo): Long {
-        val fileName = "P2P-Messenger-${releaseInfo.version}.apk"
+        // Имя файла и заголовок уведомления - "APU v11.33.0", а не техническое
+        // "P2P-Messenger-...": владелец видит в шторке именно эту строку.
+        val version = releaseInfo.version.removePrefix("v")
+        val fileName = "APU-v$version.apk"
         val request = DownloadManager.Request(Uri.parse(releaseInfo.downloadUrl)).apply {
-            setTitle(fileName)
-            setDescription("Скачивание версии ${releaseInfo.version}")
+            setTitle("APU v$version")
+            setDescription("Скачивание обновления APU")
             setMimeType("application/vnd.android.package-archive")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
@@ -180,7 +185,7 @@ class UpdateChecker @Inject constructor(
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             setRequestProperty("Accept", "application/vnd.github.v3+json")
-            setRequestProperty("User-Agent", "P2P-Messenger-Update-Checker")
+            setRequestProperty("User-Agent", "APU-Update-Checker")
             connectTimeout = HTTP_TIMEOUT
             readTimeout = HTTP_TIMEOUT
         }

@@ -428,23 +428,28 @@ private fun ProfileTabContent(
             }
         }
 
+        // Каждая строка - свой пузырь: голые ListItem во всю ширину выбивались
+        // из ряда и плохо читались на обоях.
         item {
-            ListItem(
-                headlineContent = { Text("Поделиться профилем") },
-                supportingContent = { Text("Отправить ссылку для добавления в контакты") },
-                leadingContent = { Icon(Icons.Default.Share, contentDescription = null) },
-                modifier = Modifier.clickable { onShareProfile() },
-            )
-            HorizontalDivider()
+            SettingsCard {
+                SettingsItem(
+                    icon = Icons.Default.Share,
+                    title = "Поделиться профилем",
+                    subtitle = "Отправить ссылку для добавления в контакты",
+                    onClick = onShareProfile,
+                )
+            }
         }
 
         item {
-            ListItem(
-                headlineContent = { Text("Ранги и возможности") },
-                supportingContent = { Text("Что открывается за подтверждённые приглашения") },
-                leadingContent = { Icon(Icons.Default.EmojiEvents, contentDescription = null) },
-                modifier = Modifier.clickable { onRankBenefits() },
-            )
+            SettingsCard {
+                SettingsItem(
+                    icon = Icons.Default.EmojiEvents,
+                    title = "Ранги и возможности",
+                    subtitle = "Что открывается за подтверждённые приглашения",
+                    onClick = onRankBenefits,
+                )
+            }
         }
     }
 
