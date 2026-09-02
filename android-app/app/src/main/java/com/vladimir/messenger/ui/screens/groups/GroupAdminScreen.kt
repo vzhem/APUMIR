@@ -52,8 +52,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.CircleShape
@@ -122,15 +124,19 @@ fun GroupAdminScreen(
         initialPage = visibleTabs.indexOf(tab).coerceAtLeast(0),
         pageCount = { visibleTabs.size.coerceAtLeast(1) },
     )
-    LaunchedEffect(tab, visibleTabs) {
-        val target = visibleTabs.indexOf(tab)
-        if (target >= 0 && target != pagerState.currentPage) {
-            pagerState.animateScrollToPage(target)
+    // Листание по тапу запускается из обработчика нажатия, а не отсюда: иначе
+    // смена страницы на середине анимации перезапускала бы этот эффект и
+    // отменяла его же анимацию - метка застревала между вкладками.
+    val pagerScope = rememberCoroutineScope()
+    LaunchedEffect(pagerState, visibleTabs) {
+        snapshotFlow { pagerState.settledPage }.collect { page ->
+            visibleTabs.getOrNull(page)?.let { if (it != tab) tab = it }
         }
     }
-    LaunchedEffect(pagerState, visibleTabs) {
-        snapshotFlow { pagerState.currentPage }.collect { page ->
-            visibleTabs.getOrNull(page)?.let { if (it != tab) tab = it }
+    LaunchedEffect(tab, visibleTabs) {
+        val target = visibleTabs.indexOf(tab)
+        if (target >= 0 && target != pagerState.currentPage && !pagerState.isScrollInProgress) {
+            pagerState.scrollToPage(target)
         }
     }
 
@@ -170,7 +176,7 @@ fun GroupAdminScreen(
                 titles = visibleTabs.map { it.title },
                 selectedIndex = pagerState.currentPage,
                 offsetFraction = pagerState.currentPageOffsetFraction,
-                onSelect = { index -> visibleTabs.getOrNull(index)?.let { tab = it } },
+                onSelect = { index -> pagerScope.launch { pagerState.animateScrollToPage(index) } },
             )
 
             // Вкладки листаются пальцем так же, как разделы на главной:

@@ -42,6 +42,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -111,17 +112,26 @@ fun ChatListScreen(
         initialPage = uiState.sections.indexOf(uiState.section).coerceAtLeast(0),
         pageCount = { sectionCount },
     )
-    LaunchedEffect(uiState.section, uiState.sections) {
-        val target = uiState.sections.indexOf(uiState.section)
-        if (target >= 0 && target != pagerState.currentPage) {
-            pagerState.animateScrollToPage(target)
-        }
-    }
+    // Листание запускается из обработчика нажатия, а НЕ из LaunchedEffect по
+    // разделу. Раньше на середине анимации страница успевала смениться, это
+    // меняло раздел, LaunchedEffect перезапускался и отменял свою же
+    // анимацию - метка застревала между вкладками.
+    val pagerScope = rememberCoroutineScope()
+    // Раздел выбирает только ОСТАНОВИВШАЯСЯ страница (settledPage): пока палец
+    // ведёт, промежуточные значения не должны трогать состояние экрана.
     LaunchedEffect(pagerState, uiState.sections) {
-        snapshotFlow { pagerState.currentPage }.collect { page ->
+        snapshotFlow { pagerState.settledPage }.collect { page ->
             uiState.sections.getOrNull(page)?.let { section ->
                 if (section != uiState.section) viewModel.onSectionSelected(section)
             }
+        }
+    }
+    // Раздел могли сменить не жестом (например, экран открылся заново) -
+    // подтягиваем страницу, но только когда листалка стоит.
+    LaunchedEffect(uiState.section, uiState.sections) {
+        val target = uiState.sections.indexOf(uiState.section)
+        if (target >= 0 && target != pagerState.currentPage && !pagerState.isScrollInProgress) {
+            pagerState.scrollToPage(target)
         }
     }
 
@@ -260,7 +270,7 @@ fun ChatListScreen(
                     selectedIndex = pagerState.currentPage,
                     offsetFraction = pagerState.currentPageOffsetFraction,
                     onSelect = { index ->
-                        uiState.sections.getOrNull(index)?.let(viewModel::onSectionSelected)
+                        pagerScope.launch { pagerState.animateScrollToPage(index) }
                     },
                 )
             }

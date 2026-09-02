@@ -321,14 +321,12 @@ fun ChatDetailScreen(
                                             activeMessage = message
                                         }
                                     },
+                                    // Долгое нажатие открывает действия сразу -
+                                    // как в группе. Раньше требовалось нажать
+                                    // дважды, и «В избранное» никто не находил.
                                     onLongClick = {
-                                        if (activeMessage?.id == message.id) {
-                                            // Long press на выделенное → показать AlertDialog
-                                            showCopyDialog = message
-                                        } else {
-                                            // Long press → включить выделение
-                                            activeMessage = message
-                                        }
+                                        activeMessage = message
+                                        showCopyDialog = message
                                     }
                                 )
                             }
@@ -339,35 +337,50 @@ fun ChatDetailScreen(
         }
     }
 
-    // AlertDialog для копирования сообщения
+    // Окно действий над сообщением. Раньше оно называлось «Копировать
+    // сообщение?» и «В избранное» пряталось на месте кнопки «Отмена» - её там
+    // никто не искал. Теперь это список действий, а отмена закрывает окно.
     showCopyDialog?.let { message ->
         AlertDialog(
             onDismissRequest = { showCopyDialog = null },
-            title = { Text("Копировать сообщение?") },
-            text = { Text(message.content.take(100) + if (message.content.length > 100) "..." else "") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = ClipData.newPlainText("Сообщение", message.content)
-                    clipboard.setPrimaryClip(clip)
-                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                    showCopyDialog = null
-                    resetSelection()
-                }) {
-                    Text("Копировать")
+            title = { Text("Действия с сообщением") },
+            text = {
+                Column {
+                    Text(
+                        message.content.take(100) +
+                            if (message.content.length > 100) "..." else "",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TextButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                                as ClipboardManager
+                            val clip = ClipData.newPlainText("Сообщение", message.content)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                            showCopyDialog = null
+                            resetSelection()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Копировать текст", modifier = Modifier.fillMaxWidth())
+                    }
+                    TextButton(
+                        onClick = {
+                            viewModel.saveTextToFavorites(message.content, contactName)
+                            showCopyDialog = null
+                            resetSelection()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("В избранное", modifier = Modifier.fillMaxWidth())
+                    }
                 }
             },
-            dismissButton = {
-                // Пересылка себе живёт рядом с копированием: человек открывает
-                // это же окно, когда хочет что-то сделать с сообщением.
-                TextButton(onClick = {
-                    viewModel.saveTextToFavorites(message.content, contactName)
-                    showCopyDialog = null
-                    resetSelection()
-                }) {
-                    Text("В избранное")
-                }
-            }
+            confirmButton = {
+                TextButton(onClick = { showCopyDialog = null }) { Text("Закрыть") }
+            },
         )
     }
     }
