@@ -40,6 +40,8 @@ data class ChatDetailUiState(
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
     val canSendAttachments: Boolean = true,
     val attachmentsLockedHint: String = "",
+    /** Реакции по сообщениям: ключ - id сообщения. */
+    val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
 )
 
 @HiltViewModel
@@ -53,6 +55,7 @@ class ChatDetailViewModel @Inject constructor(
     private val fileTransferDao: FileTransferDao,
     private val fileTransferRouter: FileTransferRouter,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
+    private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -67,7 +70,22 @@ class ChatDetailViewModel @Inject constructor(
         loadMessages()
         observeContactPresence()
         observeTransfers()
+        observeReactions()
         markAsRead()
+    }
+
+    /** Реакции чата: поток уже уведён на IO внутри репозитория. */
+    private fun observeReactions() {
+        viewModelScope.launch {
+            reactionRepository.observeChat(chatId).collect { map ->
+                _uiState.update { it.copy(reactions = map) }
+            }
+        }
+    }
+
+    /** Поставить или снять реакцию на сообщение. */
+    fun toggleReaction(messageId: String, emoji: String) {
+        viewModelScope.launch { reactionRepository.toggle(chatId, messageId, emoji) }
     }
 
     /**

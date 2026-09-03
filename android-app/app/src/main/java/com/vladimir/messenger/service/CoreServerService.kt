@@ -57,6 +57,7 @@ class CoreServerService : Service() {
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
+    @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
     private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
@@ -529,6 +530,18 @@ class CoreServerService : Service() {
                             Log.i(TAG, "Group packet ACK sent for msgId=$messageId")
                         } catch (e: Exception) {
                             Log.w(TAG, "Group packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Реакции на сообщения: APUREACT1-конверт разбирается здесь
+                    // же, до авто-создания контакта, иначе значок превратился бы
+                    // в мусорную строку в чате.
+                    if (reactionRepository.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Reaction packet ACK failed: " + e.message)
                         }
                         return
                     }

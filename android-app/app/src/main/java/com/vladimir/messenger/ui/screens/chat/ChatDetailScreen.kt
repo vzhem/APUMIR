@@ -67,6 +67,8 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
     var activeMessage by remember { mutableStateOf<Message?>(null) }
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
+    // Сообщение, для которого открыт выбор реакции.
+    var reactionFor by remember { mutableStateOf<String?>(null) }
 
     // Сброс выделения и диалога копирования
     fun resetSelection() {
@@ -308,6 +310,14 @@ fun ChatDetailScreen(
                                 )
                             } else {
                                 val message = row.message!!
+                                Column(
+                                    horizontalAlignment = if (message.isFromMe) {
+                                        Alignment.End
+                                    } else {
+                                        Alignment.Start
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
                                 MessageBubble(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
@@ -329,6 +339,16 @@ fun ChatDetailScreen(
                                         showCopyDialog = message
                                     }
                                 )
+                                // Реакции живут отдельной строкой под пузырём -
+                                // внутрь его класть нельзя, там своя ширина.
+                                com.vladimir.messenger.ui.components.ReactionRow(
+                                    reactions = uiState.reactions[message.id].orEmpty(),
+                                    onToggle = { emoji ->
+                                        viewModel.toggleReaction(message.id, emoji)
+                                    },
+                                    modifier = Modifier.padding(horizontal = 14.dp),
+                                )
+                                }
                             }
                         }
                     }
@@ -376,10 +396,30 @@ fun ChatDetailScreen(
                     ) {
                         Text("В избранное", modifier = Modifier.fillMaxWidth())
                     }
+                    TextButton(
+                        onClick = {
+                            showCopyDialog = null
+                            reactionFor = message.id
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Поставить реакцию", modifier = Modifier.fillMaxWidth())
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showCopyDialog = null }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    reactionFor?.let { messageId ->
+        com.vladimir.messenger.ui.components.ReactionPickerDialog(
+            onDismiss = { reactionFor = null },
+            onPick = { emoji ->
+                viewModel.toggleReaction(messageId, emoji)
+                reactionFor = null
+                resetSelection()
             },
         )
     }

@@ -8092,3 +8092,20 @@ Compose, ничего не грузит и не перезапускается, 
 `sendMessage` текстом `AppShare.groupsInviteText`, всё на `Dispatchers.IO`) и
 «Другим приложением» (прежний `ACTION_SEND` для тех, у кого APU ещё нет).
 Итог отправки показывается Toast'ом через `ContactsViewModel.toast`.
+
+## Зависание в «Группы», тексты канала и реакции (2026-09-03)
+
+1. ANR при вводе названия канала: `GroupRepository.observeGroups/observeGroup/
+   observeChannels/observeTopics/observeMembers/observeJoinRequests` делали
+   `map { toSummary(...) }` — а `toSummary` ходит в базу. Холодный поток
+   исполняется на потоке СОБИРАТЕЛЯ, то есть на главном. Всем добавлен
+   `flowOn(Dispatchers.IO)`. В `GroupsViewModel` `canCreateGroupsNow`,
+   `repairOwnerMemberships`, `publishMyDirectory`, `createGroup` и `joinByLink`
+   переведены на `Dispatchers.IO`.
+2. В диалоге создания канала подписи говорили «группа» — теперь по `isChannel`.
+3. Реакции: таблица `message_reactions` (схема 13 → 14, MIGRATION_13_14),
+   `MessageReactionDao`, конверт `ReactionWire` (`APUREACT1|chat|msg|emoji|1/0|ts`),
+   `ReactionRepository` (одна точка для личных чатов, групп и каналов; приём
+   подключён в `CoreServerService` до авто-создания контакта). UI —
+   `ui/components/MessageReactions.kt`: `ReactionRow` под пузырём/постом и
+   `ReactionPickerDialog` из меню долгого нажатия.

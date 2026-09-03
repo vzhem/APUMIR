@@ -6,7 +6,9 @@ import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.JoinOutcome
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,12 +48,17 @@ class GroupsViewModel @Inject constructor(
     private var latestDirectory: List<DirectoryEntity> = emptyList()
 
     init {
-        _uiState.update { it.copy(canCreate = groupRepository.canCreateGroupsNow()) }
+        // Всё, что читает диск, - только в фоне: `viewModelScope.launch` без
+        // диспетчера исполняется на ГЛАВНОМ потоке и подвешивает экран.
+        viewModelScope.launch {
+            val can = withContext(Dispatchers.IO) { groupRepository.canCreateGroupsNow() }
+            _uiState.update { it.copy(canCreate = can) }
+        }
         // Возвращаем владельцу его строку участника, если её стёрла авария с
         // перезаписью группы: иначе группа есть в списке, но ничего не даёт.
-        viewModelScope.launch { groupRepository.repairOwnerMemberships() }
+        viewModelScope.launch(Dispatchers.IO) { groupRepository.repairOwnerMemberships() }
         // Делимся своими публичными группами/каналами с контактами (каталог).
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             delay(2000)
             runCatching { groupRepository.publishMyDirectory() }
         }
@@ -109,13 +116,13 @@ class GroupsViewModel @Inject constructor(
     ) {
         _uiState.update { it.copy(creating = true, createError = null) }
         viewModelScope.launch {
-            val result = groupRepository.createGroup(
+            val result = withContext(Dispatchers.IO) { groupRepository.createGroup(
                 title = title,
                 about = about,
                 isPublic = isPublic,
                 topicsEnabled = topicsEnabled,
                 isChannel = isChannel,
-            )
+            ) }
             result.onSuccess { group ->
                 _uiState.update { it.copy(creating = false, createError = null) }
                 onCreated(group.id)
@@ -143,7 +150,7 @@ class GroupsViewModel @Inject constructor(
         if (raw.isBlank() || _uiState.value.joining) return
         viewModelScope.launch {
             _uiState.update { it.copy(joining = true, joinMessage = null, joinedGroupId = null) }
-            val outcome = groupRepository.joinByLink(raw)
+            val outcome = withContext(Dispatchers.IO) { groupRepository.joinByLink(raw) }
             when (outcome) {
                 is JoinOutcome.Joined -> _uiState.update {
                     val what = if (outcome.isChannel) "канал" else "группу"

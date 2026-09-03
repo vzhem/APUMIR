@@ -39,6 +39,7 @@ object AppModule {
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
+                AppDatabase.MIGRATION_13_14,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -52,6 +53,11 @@ object AppModule {
 
     @Provides @Singleton
     fun provideMessageDao(db: AppDatabase): MessageDao = db.messageDao()
+
+    @Provides @Singleton
+    fun provideMessageReactionDao(
+        db: AppDatabase,
+    ): com.vladimir.messenger.data.local.dao.MessageReactionDao = db.messageReactionDao()
 
     @Provides @Singleton
     fun provideMtProtoProxyDao(db: AppDatabase): MtProtoProxyDao = db.mtProtoProxyDao()

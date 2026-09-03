@@ -120,7 +120,7 @@ fun GroupsScreen(
             FloatingActionButton(onClick = {
                 if (uiState.canCreate) showCreate = true else showRankHint = true
             }) {
-                Icon(Icons.Filled.Add, contentDescription = "Создать группу")
+                Icon(Icons.Filled.Add, contentDescription = "Создать группу или канал")
             }
         },
     ) { padding ->
@@ -341,19 +341,26 @@ private fun CreateGroupDialog(
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Название") },
+                    label = { Text(if (isChannel) "Название канала" else "Название") },
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = about,
                     onValueChange = { about = it },
-                    label = { Text("Описание") },
+                    label = { Text(if (isChannel) "Описание канала" else "Описание") },
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Публичная группа", fontWeight = FontWeight.Medium)
                         Text(
-                            "Вход по ссылке без одобрения",
+                            if (isChannel) "Публичный канал" else "Публичная группа",
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            if (isChannel) {
+                                "Подписка по ссылке без одобрения"
+                            } else {
+                                "Вход по ссылке без одобрения"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }

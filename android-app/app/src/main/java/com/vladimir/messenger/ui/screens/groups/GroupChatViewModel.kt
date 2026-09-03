@@ -35,6 +35,8 @@ data class GroupChatUiState(
     val sending: Boolean = false,
     /** Открыты с темой из канала (комментарии): сразу лента, не список тем. */
     val startInTopic: Boolean = false,
+    /** Реакции по сообщениям: ключ - id сообщения. */
+    val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
 )
 
 @HiltViewModel
@@ -42,6 +44,7 @@ class GroupChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val groupRepository: GroupRepository,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
+    private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
 ) : ViewModel() {
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
@@ -65,6 +68,7 @@ class GroupChatViewModel @Inject constructor(
         observeTopics()
         // Вступивший позже не застал создание тем - просим список у владельца.
         viewModelScope.launch { groupRepository.requestTopics(groupId) }
+        observeReactions()
         // Закрепы подписываем на выбранную тему, а не на всю группу:
         // observePinned(topicId) стартует вместе с лентой сообщений.
     }
@@ -205,5 +209,19 @@ class GroupChatViewModel @Inject constructor(
 
     fun dismissError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    /** Реакции всей группы: поток уже уведён на IO внутри репозитория. */
+    private fun observeReactions() {
+        viewModelScope.launch {
+            reactionRepository.observeChat(groupId).collect { map ->
+                _uiState.update { it.copy(reactions = map) }
+            }
+        }
+    }
+
+    /** Поставить или снять реакцию на сообщение группы или канала. */
+    fun toggleReaction(messageId: String, emoji: String) {
+        viewModelScope.launch { reactionRepository.toggle(groupId, messageId, emoji) }
     }
 }

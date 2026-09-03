@@ -170,6 +170,10 @@ fun ChannelScreen(
                             post = post,
                             onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
                             onSaveToFavorites = { viewModel.savePostToFavorites(post) },
+                            reactions = uiState.reactions[post.messageId].orEmpty(),
+                            onToggleReaction = { emoji ->
+                                viewModel.toggleReaction(post.messageId, emoji)
+                            },
                         )
                     }
                 }
@@ -208,7 +212,10 @@ private fun PostCard(
     post: ChannelPost,
     onOpenComments: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
+    reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
+    onToggleReaction: (String) -> Unit = {},
 ) {
+    var showReactions by remember { mutableStateOf(false) }
     val time = remember(post.timeMs) {
         SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date(post.timeMs))
     }
@@ -240,8 +247,17 @@ private fun PostCard(
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
+            // Поставленные реакции - прямо под текстом поста, как в привычных
+            // каналах: значок с числом, свой обведён золотом.
+            com.vladimir.messenger.ui.components.ReactionRow(
+                reactions = reactions,
+                onToggle = onToggleReaction,
+            )
             HorizontalDivider(modifier = Modifier.padding(top = 10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showReactions = true }) {
+                    Text("Реакция")
+                }
                 TextButton(
                     onClick = onOpenComments,
                     modifier = Modifier.weight(1f),
@@ -261,6 +277,15 @@ private fun PostCard(
                 }
             }
         }
+    }
+    if (showReactions) {
+        com.vladimir.messenger.ui.components.ReactionPickerDialog(
+            onDismiss = { showReactions = false },
+            onPick = { emoji ->
+                showReactions = false
+                onToggleReaction(emoji)
+            },
+        )
     }
 }
 

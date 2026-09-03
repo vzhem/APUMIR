@@ -13,6 +13,7 @@ import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
 import com.vladimir.messenger.data.local.dao.SavedItemDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
@@ -23,6 +24,7 @@ import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.local.entity.FileExchangePeerEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.local.entity.MessageReactionEntity
 import com.vladimir.messenger.data.local.entity.GroupEntity
 import com.vladimir.messenger.data.local.entity.GroupInviteEntity
 import com.vladimir.messenger.data.local.entity.GroupJoinRequestEntity
@@ -38,6 +40,7 @@ import com.vladimir.messenger.data.local.entity.SavedItemEntity
         MtProtoProxyEntity::class,
         ChatEntity::class,
         MessageEntity::class,
+        MessageReactionEntity::class,
         ContactEntity::class,
         FileTransferEntity::class,
         FileTransferChunkEntity::class,
@@ -53,12 +56,13 @@ import com.vladimir.messenger.data.local.entity.SavedItemEntity
         AvatarEntity::class,
         SavedItemEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun messageDao(): MessageDao
+    abstract fun messageReactionDao(): MessageReactionDao
     abstract fun mtProtoProxyDao(): MtProtoProxyDao
     abstract fun contactDao(): ContactDao
     abstract fun fileTransferDao(): FileTransferDao
@@ -378,6 +382,29 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_saved_items_savedAtMs` " +
                         "ON `saved_items` (`savedAtMs`)"
+                )
+            }
+        }
+
+        /** Реакции на сообщения: новая таблица, ничего существующего не трогаем. */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `message_reactions` (" +
+                        "`messageId` TEXT NOT NULL, " +
+                        "`nodeId` TEXT NOT NULL, " +
+                        "`chatId` TEXT NOT NULL, " +
+                        "`emoji` TEXT NOT NULL, " +
+                        "`atMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`messageId`, `nodeId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_message_reactions_messageId` " +
+                        "ON `message_reactions` (`messageId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_message_reactions_chatId` " +
+                        "ON `message_reactions` (`chatId`)"
                 )
             }
         }

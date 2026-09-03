@@ -340,6 +340,8 @@ fun GroupChatScreen(
                         canPin = uiState.canPin,
                         onTogglePin = { viewModel.togglePin(message.id, !message.isPinned) },
                         onSaveToFavorites = { viewModel.saveToFavorites(message.content) },
+                        reactions = uiState.reactions[message.id].orEmpty(),
+                        onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                     )
                 }
             }
@@ -687,10 +689,13 @@ private fun MessageBubble(
     canPin: Boolean,
     onTogglePin: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
+    reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
+    onToggleReaction: (String) -> Unit = {},
 ) {
-    // Долгое нажатие - «В избранное»: у сообщения темы нет своего меню, а
-    // отдельная кнопка у каждого пузыря засорила бы ленту.
+    // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
+    // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
     var showMenu by remember { mutableStateOf(false) }
+    var showReactions by remember { mutableStateOf(false) }
     val time = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
@@ -730,14 +735,34 @@ private fun MessageBubble(
                         Icon(Icons.Filled.PushPin, contentDescription = "Закреплено", modifier = Modifier.size(12.dp))
                     }
                 }
+                com.vladimir.messenger.ui.components.ReactionRow(
+                    reactions = reactions,
+                    onToggle = onToggleReaction,
+                )
             }
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(
+                text = { Text("Поставить реакцию") },
+                onClick = {
+                    showMenu = false
+                    showReactions = true
+                },
+            )
             DropdownMenuItem(
                 text = { Text("В избранное") },
                 onClick = {
                     showMenu = false
                     onSaveToFavorites()
+                },
+            )
+        }
+        if (showReactions) {
+            com.vladimir.messenger.ui.components.ReactionPickerDialog(
+                onDismiss = { showReactions = false },
+                onPick = { emoji ->
+                    showReactions = false
+                    onToggleReaction(emoji)
                 },
             )
         }

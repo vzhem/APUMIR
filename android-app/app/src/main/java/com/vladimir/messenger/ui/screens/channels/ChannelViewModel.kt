@@ -25,6 +25,8 @@ import javax.inject.Inject
  */
 data class ChannelPost(
     val topicId: String,
+    /** id самого сообщения-поста: к нему привязываются реакции. */
+    val messageId: String,
     val title: String,
     val text: String,
     val authorName: String,
@@ -41,6 +43,8 @@ data class ChannelUiState(
     val isLoading: Boolean = true,
     val creating: Boolean = false,
     val error: String? = null,
+    /** Реакции по сообщениям канала: ключ - id сообщения-поста. */
+    val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
 )
 
 @HiltViewModel
@@ -49,6 +53,7 @@ class ChannelViewModel @Inject constructor(
     private val groupRepository: GroupRepository,
     private val messageDao: MessageDao,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
+    private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
 ) : ViewModel() {
 
     private val channelId: String = savedStateHandle.get<String>("channelId").orEmpty()
@@ -58,6 +63,21 @@ class ChannelViewModel @Inject constructor(
 
     init {
         observe()
+        observeReactions()
+    }
+
+    /** Реакции канала: поток уже уведён на IO внутри репозитория. */
+    private fun observeReactions() {
+        viewModelScope.launch {
+            reactionRepository.observeChat(channelId).collect { map ->
+                _uiState.update { it.copy(reactions = map) }
+            }
+        }
+    }
+
+    /** Поставить или снять реакцию на пост. */
+    fun toggleReaction(messageId: String, emoji: String) {
+        viewModelScope.launch { reactionRepository.toggle(channelId, messageId, emoji) }
     }
 
     private fun observe() {
@@ -76,6 +96,7 @@ class ChannelViewModel @Inject constructor(
                     val first = thread.firstOrNull() ?: return@mapNotNull null
                     ChannelPost(
                         topicId = topic.id,
+                        messageId = first.id,
                         title = topic.name,
                         text = first.content,
                         authorName = names[first.senderId]?.takeIf { it.isNotBlank() }

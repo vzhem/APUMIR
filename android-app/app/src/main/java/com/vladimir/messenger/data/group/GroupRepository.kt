@@ -17,7 +17,9 @@ import com.vladimir.messenger.data.local.entity.GroupMemberEntity
 import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.time.Instant
 import java.time.ZoneOffset
@@ -167,11 +169,19 @@ class GroupRepository(
 
     // ── Список групп ──────────────────────────────────────────────────────────
 
+    // ВАЖНО: `map` у холодного потока исполняется на потоке СОБИРАТЕЛЯ, а
+    // toSummary ходит в базу (участник, счётчик заявок). Без flowOn это чтение
+    // с диска происходило на главном потоке и подвешивало экран - тот же класс
+    // аварии, что и в ObserveNetworkStatusUseCase.
     fun observeGroups(): Flow<List<GroupSummary>> =
-        groupDao.observeGroups().map { list -> list.map { toSummary(it) } }
+        groupDao.observeGroups()
+            .map { list -> list.map { toSummary(it) } }
+            .flowOn(Dispatchers.IO)
 
     fun observeGroup(groupId: String): Flow<GroupSummary?> =
-        groupDao.observeGroup(groupId).map { it?.let { g -> toSummary(g) } }
+        groupDao.observeGroup(groupId)
+            .map { it?.let { g -> toSummary(g) } }
+            .flowOn(Dispatchers.IO)
 
     suspend fun summary(groupId: String): GroupSummary? =
         groupDao.getGroupById(groupId)?.let { toSummary(it) }
@@ -181,7 +191,9 @@ class GroupRepository(
 
     /** Каналы этого телефона - для раздела «Каналы» на главном экране. */
     fun observeChannels(): Flow<List<GroupSummary>> =
-        groupDao.observeChannels().map { list -> list.map { toSummary(it) } }
+        groupDao.observeChannels()
+            .map { list -> list.map { toSummary(it) } }
+            .flowOn(Dispatchers.IO)
 
     /** Сетевой каталог: чужие публичные группы и каналы для поиска. */
     fun observeDirectory(): Flow<List<DirectoryEntity>> = directoryDao.observeAll()
@@ -415,7 +427,9 @@ class GroupRepository(
     // ── Темы ──────────────────────────────────────────────────────────────────
 
     fun observeTopics(groupId: String): Flow<List<TopicSummary>> =
-        groupDao.observeTopics(groupId).map { list -> list.map { toTopicSummary(it) } }
+        groupDao.observeTopics(groupId)
+            .map { list -> list.map { toTopicSummary(it) } }
+            .flowOn(Dispatchers.IO)
 
     private fun toTopicSummary(t: GroupTopicEntity) = TopicSummary(
         id = t.id,
@@ -935,7 +949,7 @@ class GroupRepository(
     fun observeJoinRequests(groupId: String): Flow<List<JoinRequestSummary>> =
         groupDao.observePendingRequests(groupId).map { list ->
             list.map { JoinRequestSummary(it.groupId, it.nodeId, it.displayName, it.note, it.requestedAtMs) }
-        }
+        }.flowOn(Dispatchers.IO)
 
     /** Шаг 1 для частного вступления: заявка уходит администраторам группы. */
     suspend fun sendJoinRequest(groupId: String, note: String): Result<Unit> {
@@ -1191,7 +1205,9 @@ class GroupRepository(
     // ── Участники: поиск, роли, права, баны ───────────────────────────────────
 
     fun observeMembers(groupId: String): Flow<List<MemberSummary>> =
-        groupDao.observeMembers(groupId).map { list -> list.map { toMemberSummary(it) } }
+        groupDao.observeMembers(groupId)
+            .map { list -> list.map { toMemberSummary(it) } }
+            .flowOn(Dispatchers.IO)
 
     private suspend fun toMemberSummary(m: GroupMemberEntity) = MemberSummary(
         nodeId = m.nodeId,
