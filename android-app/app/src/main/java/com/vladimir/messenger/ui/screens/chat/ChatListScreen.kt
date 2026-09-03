@@ -19,6 +19,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,6 +43,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -350,6 +352,7 @@ fun ChatListScreen(
                         onClearChat = { confirmClearChat = it },
                         onDeleteChat = { confirmDeleteChat = it },
                         onGroupLeaveOrDelete = { confirmGroup = it },
+                        onLoadMore = viewModel::loadMore,
                     )
                 }
             }
@@ -482,6 +485,8 @@ private fun SectionPage(
     onClearChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
     onDeleteChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
     onGroupLeaveOrDelete: (InboxGroup) -> Unit,
+    /** Прокрутка подошла к концу загруженного - пора досыпать страницу. */
+    onLoadMore: () -> Unit = {},
 ) {
     val openAdmin = section == InboxSection.AdminGroups ||
         section == InboxSection.AdminChannels
@@ -514,7 +519,21 @@ private fun SectionPage(
             }
 
             else -> {
+                val listState = rememberLazyListState()
+                // Догрузка по прокрутке: как только до конца загруженного
+                // остаётся меньше страницы, просим следующую. snapshotFlow
+                // не дёргает пересборку экрана на каждый сдвиг пальца.
+                LaunchedEffect(listState, items.size) {
+                    snapshotFlow {
+                        val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        last >= items.size - LOAD_MORE_THRESHOLD
+                    }
+                        .distinctUntilChanged()
+                        .collect { near -> if (near && items.isNotEmpty()) onLoadMore() }
+                }
+
                 LazyColumn(
+                    state          = listState,
                     modifier       = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(vertical = 4.dp),
                 ) {
@@ -868,3 +887,9 @@ private fun formatGroupTime(timestamp: Long): String {
         SimpleDateFormat("dd.MM", Locale.getDefault()).format(Date(timestamp))
     }
 }
+
+/**
+ * За сколько строк до конца загруженного просить следующую страницу.
+ * Запас нужен, чтобы список догрузился ДО того, как человек упрётся в конец.
+ */
+private const val LOAD_MORE_THRESHOLD = 10

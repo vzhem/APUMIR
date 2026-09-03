@@ -28,6 +28,30 @@ interface GroupDao {
     @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 ORDER BY lastMessageAtMs DESC")
     fun observeChannels(): Flow<List<GroupEntity>>
 
+    // ── Окна для главного экрана ──────────────────────────────────────────
+    // Главный экран берёт верхушку списка и досыпает по мере прокрутки,
+    // поэтому в память не попадает больше, чем видно.
+
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 " +
+            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+    )
+    fun observeGroupsWindow(limit: Int): Flow<List<GroupEntity>>
+
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 " +
+            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+    )
+    fun observeChannelsWindow(limit: Int): Flow<List<GroupEntity>>
+
+    /** Поиск по всей таблице, а не по загруженному окну. */
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND (" +
+            "title LIKE '%' || :query || '%' OR lastMessagePreview LIKE '%' || :query || '%') " +
+            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+    )
+    fun searchGroups(query: String, limit: Int): Flow<List<GroupEntity>>
+
     /** Мои группы и каналы со ссылкой - их каталог рассылает контактам. */
     @Query("SELECT * FROM groups WHERE ownerId = :ownerId AND isLeft = 0 AND inviteSlug != ''")
     suspend fun getOwnPublishable(ownerId: String): List<GroupEntity>

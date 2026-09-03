@@ -58,6 +58,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.group.GroupSummary
+import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
@@ -91,9 +92,18 @@ fun GroupsScreen(
         }
     }
 
+    // Обои APU лежат подложкой под всем экраном, как в «Контактах»: сам
+    // Scaffold и шапка прозрачные, иначе они закрасили бы картину сплошным
+    // цветом темы.
+    Box(modifier = Modifier.fillMaxSize()) {
+    ChatWallpaper()
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
             TopAppBar(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                ),
                 title = { Text("Группы") },
                 navigationIcon = {
                     TextButton(onClick = onBackClick) { Text("Назад") }
@@ -188,6 +198,7 @@ fun GroupsScreen(
                 }
             }
         }
+    }
     }
 
     val joinMessage = uiState.joinMessage

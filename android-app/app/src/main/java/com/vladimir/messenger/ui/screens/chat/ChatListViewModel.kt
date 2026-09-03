@@ -3,7 +3,6 @@ package com.vladimir.messenger.ui.screens.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.domain.model.Chat
-import com.vladimir.messenger.domain.usecase.GetChatsUseCase
 import com.vladimir.messenger.domain.usecase.ObserveNetworkStatusUseCase
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.local.dao.GroupDao
@@ -18,6 +17,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -94,12 +94,16 @@ data class ChatListUiState(
      * готовое.
      */
     val itemsBySection: Map<InboxSection, List<InboxItem>> = emptyMap(),
+    /** Сколько строк сейчас загружено с диска (окно). */
+    val loadedWindow: Int = 50,
+    /** Есть ли ещё строки за пределами окна - список досыпается на прокрутке. */
+    val canLoadMore: Boolean = false,
 )
 
 @kotlinx.coroutines.FlowPreview
+@kotlinx.coroutines.ExperimentalCoroutinesApi
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
-    private val getChatsUseCase: GetChatsUseCase,
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
     private val groupDao: GroupDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
@@ -113,6 +117,15 @@ class ChatListViewModel @Inject constructor(
     /** Выбранный раздел и строка поиска - отдельными потоками. */
     private val section = MutableStateFlow(InboxSection.All)
     private val searchQuery = MutableStateFlow("")
+
+    /**
+     * Размер загруженного окна.
+     *
+     * С диска читается не вся переписка, а верхушка списка. Когда прокрутка
+     * подходит к концу загруженного, окно растёт на страницу - и запрос к базе
+     * перезапускается сам, потому что окно участвует в потоке данных.
+     */
+    private val windowSize = MutableStateFlow(PAGE_SIZE)
 
     /**
      * Мой идентификатор узла. Спрашиваем ядро ОДИН раз за жизнь экрана.
@@ -151,25 +164,42 @@ class ChatListViewModel @Inject constructor(
      * больше не пересобирает список на каждую букву.
      */
     private fun observeInbox() {
-        val groupsFlow = combine(
-            groupDao.observeGroups(),
-            groupDao.observeChannels(),
-        ) { groups, channels -> groups + channels }
-            .map { entities -> toInboxGroups(entities) }
-            .flowOn(Dispatchers.Default)
-
         val queryFlow = searchQuery
             .debounce { if (it.isBlank()) 0L else SEARCH_DEBOUNCE_MS }
             .distinctUntilChanged()
 
+        // Окно и строка поиска вместе решают, ЧТО спросить у базы. При пустом
+        // поиске - верхушка списка длиной в окно; при поиске - совпадения по
+        // всей таблице, тоже ограниченные окном. Меняется окно или запрос -
+        // подписка на базу пересоздаётся, и приходит уже нужный кусок.
+        val sourcesFlow = combine(windowSize, queryFlow) { window, query -> window to query }
+            .distinctUntilChanged()
+            .flatMapLatest { (window, query) ->
+                val chats = if (query.isBlank()) {
+                    chatRepository.observeChatsWindow(window)
+                } else {
+                    chatRepository.searchChats(query.trim(), window)
+                }
+                val groups = if (query.isBlank()) {
+                    combine(
+                        groupDao.observeGroupsWindow(window),
+                        groupDao.observeChannelsWindow(window),
+                    ) { g, c -> g + c }
+                } else {
+                    groupDao.searchGroups(query.trim(), window)
+                }
+                combine(chats, groups, chatRepository.observeChatCount()) { c, g, total ->
+                    Sources(c, g, query, window, total)
+                }
+            }
+            .flowOn(Dispatchers.IO)
+
         viewModelScope.launch {
             combine(
-                getChatsUseCase(),
-                groupsFlow,
-                queryFlow,
+                sourcesFlow,
                 section,
-            ) { chats, groups, query, current ->
-                Snapshot(chats, groups, query, current)
+            ) { src, current ->
+                Snapshot(src.chats, toInboxGroups(src.groups), src.query, current, src.window, src.total)
             }
                 // Сборка разделов, поиск и сортировка - на рабочем потоке.
                 // Главный поток получает готовые списки и только рисует их.
@@ -189,6 +219,8 @@ class ChatListViewModel @Inject constructor(
                             // к уже стёртым буквам.
                             items = built.items,
                             itemsBySection = built.itemsBySection,
+                            loadedWindow = built.window,
+                            canLoadMore = built.canLoadMore,
                             isLoading = false,
                             error = null,
                         )
@@ -203,6 +235,17 @@ class ChatListViewModel @Inject constructor(
         val groups: List<InboxGroup>,
         val query: String,
         val section: InboxSection,
+        val window: Int,
+        val totalChats: Int,
+    )
+
+    /** То, что пришло из базы за один заход. */
+    private data class Sources(
+        val chats: List<Chat>,
+        val groups: List<com.vladimir.messenger.data.local.entity.GroupEntity>,
+        val query: String,
+        val window: Int,
+        val total: Int,
     )
 
     /** Готовый результат пересчёта - всё, что нужно экрану. */
@@ -215,6 +258,8 @@ class ChatListViewModel @Inject constructor(
         val query: String,
         val items: List<InboxItem>,
         val itemsBySection: Map<InboxSection, List<InboxItem>>,
+        val window: Int,
+        val canLoadMore: Boolean,
     )
 
     /** Роли считаем один раз на пересчёт, а не на каждую строку списка. */
@@ -286,6 +331,12 @@ class ChatListViewModel @Inject constructor(
             }
         }
 
+        // Досыпать есть что, если база вернула полное окно (значит за ним
+        // что-то осталось) или всего чатов больше, чем в окне.
+        val canLoadMore = snap.chats.size >= snap.window ||
+            snap.groups.size >= snap.window ||
+            snap.totalChats > snap.chats.size
+
         return Built(
             chats = snap.chats,
             filtered = filteredChats,
@@ -295,6 +346,8 @@ class ChatListViewModel @Inject constructor(
             query = snap.query,
             items = bySection[section].orEmpty(),
             itemsBySection = bySection,
+            window = snap.window,
+            canLoadMore = canLoadMore,
         )
     }
 
@@ -430,8 +483,35 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    private companion object {
+    /**
+     * Прокрутка подошла к концу загруженного - досыпаем следующую страницу.
+     *
+     * Вызывается из списка. Повторные вызовы безопасны: окно растёт только
+     * если есть что грузить, а сама дозагрузка идёт запросом к базе, не
+     * трогая уже показанные строки.
+     */
+    fun loadMore() {
+        if (!_uiState.value.canLoadMore) return
+        val current = windowSize.value
+        if (current >= MAX_WINDOW) return
+        windowSize.value = (current + PAGE_SIZE).coerceAtMost(MAX_WINDOW)
+    }
+
+    companion object {
         /** Пауза в наборе, после которой пересчитывается поиск. */
-        const val SEARCH_DEBOUNCE_MS = 200L
+        private const val SEARCH_DEBOUNCE_MS = 200L
+
+        /**
+         * Страница загрузки. Экран показывает около десятка строк, поэтому
+         * полсотни хватает и на первый экран, и на запас под быструю прокрутку.
+         */
+        const val PAGE_SIZE = 50
+
+        /**
+         * Предел окна. Даже при десятках тысяч чатов в памяти не окажется
+         * больше этого числа строк: дальше прокрутка идёт по уже загруженному,
+         * а глубже человек ищет поиском, который спрашивает всю таблицу.
+         */
+        const val MAX_WINDOW = 3000
     }
 }

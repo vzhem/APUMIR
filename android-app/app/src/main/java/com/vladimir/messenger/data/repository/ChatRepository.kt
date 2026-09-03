@@ -33,6 +33,17 @@ class ChatRepository @Inject constructor(
     fun observeChats(): Flow<List<Chat>> =
         chatDao.observeAllChats().map { it.map { e -> e.toDomain() } }
 
+    /** Верхушка списка чатов: ровно [limit] самых свежих. */
+    fun observeChatsWindow(limit: Int): Flow<List<Chat>> =
+        chatDao.observeChatsWindow(limit).map { it.map { e -> e.toDomain() } }
+
+    /** Поиск по всей таблице чатов, а не по загруженному окну. */
+    fun searchChats(query: String, limit: Int): Flow<List<Chat>> =
+        chatDao.searchChats(query, limit).map { it.map { e -> e.toDomain() } }
+
+    /** Сколько всего чатов - чтобы знать, есть ли что досыпать. */
+    fun observeChatCount(): Flow<Int> = chatDao.observeChatCount()
+
     /** Живой поток ОДНОГО чата: шапка переписки подписывается на онлайн. */
     fun observeChat(chatId: String): Flow<ChatEntity?> = chatDao.observeChat(chatId)
 

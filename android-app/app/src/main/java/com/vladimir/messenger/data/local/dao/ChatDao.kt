@@ -9,6 +9,30 @@ interface ChatDao {
     @Query("SELECT * FROM chats ORDER BY lastMessageTime DESC")
     fun observeAllChats(): Flow<List<ChatEntity>>
 
+    /**
+     * Окно списка чатов: только свежие :limit строк.
+     *
+     * Главный экран не грузит переписку целиком - берёт верхушку по времени и
+     * досыпает по мере прокрутки. Порядок тот же, поэтому верхние :limit строк
+     * окна совпадают с верхними строками полного списка.
+     */
+    @Query("SELECT * FROM chats ORDER BY lastMessageTime DESC LIMIT :limit")
+    fun observeChatsWindow(limit: Int): Flow<List<ChatEntity>>
+
+    /**
+     * Поиск идёт в базу, а не по загруженному окну: иначе нашлось бы только
+     * то, что уже подгружено.
+     */
+    @Query(
+        "SELECT * FROM chats WHERE contactName LIKE '%' || :query || '%' " +
+            "OR lastMessage LIKE '%' || :query || '%' " +
+            "ORDER BY lastMessageTime DESC LIMIT :limit"
+    )
+    fun searchChats(query: String, limit: Int): Flow<List<ChatEntity>>
+
+    @Query("SELECT COUNT(*) FROM chats")
+    fun observeChatCount(): Flow<Int>
+
     @Query("SELECT * FROM chats ORDER BY lastMessageTime DESC")
     suspend fun getAllChats(): List<ChatEntity>
 
