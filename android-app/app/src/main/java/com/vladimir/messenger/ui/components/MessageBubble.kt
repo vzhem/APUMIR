@@ -7,7 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
@@ -16,13 +16,18 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
@@ -102,23 +107,44 @@ fun MessageBubble(
                         )
                     }
                 } else {
-                    // Обычный режим — ClickableText для кликабельных URL
-                    ClickableText(
+                    // Обычный режим. Раньше здесь стоял ClickableText, и он
+                    // ПОГЛОЩАЛ нажатие: до пузыря оно не доходило, сообщение не
+                    // выделялось, а значит не появлялись ни выделение текста,
+                    // ни окно с «Копировать» и «В избранное». Ссылку по-прежнему
+                    // открываем по нажатию на неё, но всё остальное нажатие
+                    // теперь честно передаём пузырю.
+                    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+                    Text(
                         text = annotatedText,
                         style = MaterialTheme.typography.bodyMedium.copy(color = textColor),
-                        onClick = { offset ->
-                            val annotations = annotatedText.getStringAnnotations("URL", offset, offset)
-                            if (annotations.isNotEmpty()) {
-                                val url = annotations.first().item
-                                try {
-                                    val uri = if (url.startsWith("http")) Uri.parse(url) else Uri.parse("https://$url")
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                                    android.util.Log.i("MessageBubble", "Opening URL: $url")
-                                } catch (e: Exception) {
-                                    android.util.Log.e("MessageBubble", "Failed to open URL: $url", e)
-                                }
-                            }
-                        }
+                        onTextLayout = { layout = it },
+                        modifier = Modifier.pointerInput(annotatedText) {
+                            detectTapGestures(
+                                onLongPress = { onLongClick?.invoke() },
+                                onTap = { position ->
+                                    val offset = layout?.getOffsetForPosition(position)
+                                    val url = offset?.let {
+                                        annotatedText.getStringAnnotations("URL", it, it)
+                                            .firstOrNull()
+                                            ?.item
+                                    }
+                                    if (url == null) {
+                                        // Нажали мимо ссылки - обычное нажатие
+                                        // по сообщению: выделить и показать действия.
+                                        onTap()
+                                    } else {
+                                        try {
+                                            val uri = if (url.startsWith("http")) Uri.parse(url)
+                                            else Uri.parse("https://" + url)
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                            android.util.Log.i("MessageBubble", "Opening URL: " + url)
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("MessageBubble", "Failed to open URL: " + url, e)
+                                        }
+                                    }
+                                },
+                            )
+                        },
                     )
                 }
 

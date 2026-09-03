@@ -57,6 +57,7 @@ import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.NetworkStatusBar
+import com.vladimir.messenger.ui.components.ShimmerIcon
 import com.vladimir.messenger.data.RustBridge
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Link
@@ -89,10 +90,8 @@ fun ChatListScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var isSearchVisible by remember { mutableStateOf(false) }
-    var showInviteDialog by remember { mutableStateOf(false) }
+
     var showConnectDialog by remember { mutableStateOf(false) }
-    var inviteLink by remember { mutableStateOf("") }
-    var inviteName by remember { mutableStateOf("") }
     var connectLink by remember { mutableStateOf("") }
     val context = LocalContext.current
 
@@ -195,25 +194,20 @@ fun ChatListScreen(
                                 DropdownMenu(
                                     expanded = menuOpen,
                                     onDismissRequest = { menuOpen = false },
+                                    // Скруглённый пузырь и чуть больше воздуха:
+                                    // меню в одном стиле с остальными пузырями APU.
+                                    shape = RoundedCornerShape(20.dp),
+                                    tonalElevation = 3.dp,
+                                    shadowElevation = 8.dp,
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Мой QR-код") },
-                                        onClick = {
-                                            menuOpen = false
-                                            onShowMyQrClick()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Избранное") },
-                                        leadingIcon = { Icon(Icons.Default.Bookmark, null) },
-                                        onClick = {
-                                            menuOpen = false
-                                            onSavedClick()
-                                        },
-                                    )
+                                    // «Мой QR-код» и «Поделиться приглашением»
+                                    // убраны: раздел QR (значок в шапке) уже
+                                    // показывает свой код, копирует ссылку и
+                                    // делится ею. Три пункта на одно действие
+                                    // только запутывали.
                                     DropdownMenuItem(
                                         text = { Text("Контакты") },
-                                        leadingIcon = { Icon(Icons.Default.People, null) },
+                                        leadingIcon = { ShimmerIcon(Icons.Default.People) },
                                         onClick = {
                                             menuOpen = false
                                             onContactsClick()
@@ -221,29 +215,26 @@ fun ChatListScreen(
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Группы") },
-                                        leadingIcon = { Icon(Icons.Filled.Groups, null) },
+                                        leadingIcon = { ShimmerIcon(Icons.Filled.Groups) },
                                         onClick = {
                                             menuOpen = false
                                             onGroupsClick()
                                         },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Поделиться приглашением") },
-                                        leadingIcon = { Icon(Icons.Default.Share, null) },
+                                        text = { Text("Избранное") },
+                                        leadingIcon = { ShimmerIcon(Icons.Default.Bookmark) },
                                         onClick = {
                                             menuOpen = false
-                                            // Одна и та же ссылка во всём приложении.
-                                            // RustBridge.generateInvite() остаётся запасным
-                                            // путём: он отдаёт p2pm://connect со вшитым IP,
-                                            // который устареет, и без имени владельца.
-                                            inviteLink = OwnInvite.link(context)
-                                                ?: RustBridge.generateInvite()
-                                            inviteName = OwnInvite.displayName(context)
-                                            showInviteDialog = true
+                                            onSavedClick()
                                         },
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Подключиться по ссылке") },
+                                        leadingIcon = { ShimmerIcon(Icons.Default.Link) },
                                         onClick = {
                                             menuOpen = false
                                             showConnectDialog = true
@@ -251,6 +242,7 @@ fun ChatListScreen(
                                     )
                                     DropdownMenuItem(
                                         text = { Text("Настройки") },
+                                        leadingIcon = { ShimmerIcon(Icons.Default.Settings) },
                                         onClick = {
                                             menuOpen = false
                                             onSettingsClick()
@@ -428,27 +420,9 @@ fun ChatListScreen(
         )
     }
 
-    // Invite dialog
-    if (showInviteDialog) {
-        AlertDialog(
-            onDismissRequest = { showInviteDialog = false },
-            // Текст здесь был побит: «ой адрес», «тправьте», «опировать», «оделиться».
-            title = { Text("Мой адрес для подключения") },
-            text = {
-                Column {
-                    Text(
-                        "Отправьте эту ссылку собеседнику или покажите ему QR-код:",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    InviteShareCard(link = inviteLink, displayName = inviteName)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showInviteDialog = false }) { Text("Закрыть") }
-            },
-        )
-    }
+    // Диалог «Мой адрес для подключения» убран вместе с пунктом меню:
+    // раздел QR (значок в шапке) показывает свой код, копирует ссылку и
+    // делится ею — одно место вместо трёх.
 
     // Connect dialog
     if (showConnectDialog) {
