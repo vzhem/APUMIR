@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import android.content.Intent
@@ -269,13 +270,33 @@ fun ContactsScreen(
             contactName = contact.displayName,
             groups = viewModel.invitableGroups.collectAsState().value,
             onDismiss = { inviteFor = null },
-            onConfirm = { ids ->
+            // Отправить прямо в APU: сообщением в чат с этим контактом.
+            onSendInApp = { ids ->
+                inviteFor = null
+                viewModel.sendGroupInvites(contact.id, contact.displayName, ids)
+            },
+            // Через другие приложения: тем, у кого APU ещё не стоит.
+            onShare = { ids ->
                 inviteFor = null
                 viewModel.buildGroupInvites(ids) { invites ->
                     AppShare.shareGroupInvites(context, invites)
                 }
             },
         )
+    }
+
+    // Короткий отчёт об отправке приглашения.
+    val toast by viewModel.toast.collectAsState()
+    LaunchedEffect(toast) {
+        val message = toast
+        if (message != null) {
+            android.widget.Toast.makeText(
+                context,
+                message,
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            viewModel.consumeToast()
+        }
     }
 }
 
@@ -289,7 +310,8 @@ private fun InviteToGroupsDialog(
     contactName: String,
     groups: List<InvitableGroup>,
     onDismiss: () -> Unit,
-    onConfirm: (List<String>) -> Unit,
+    onSendInApp: (List<String>) -> Unit,
+    onShare: (List<String>) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     val selected = remember { mutableStateListOf<String>() }
@@ -366,10 +388,24 @@ private fun InviteToGroupsDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onConfirm(selected.toList()) },
-                enabled = selected.isNotEmpty(),
-            ) { Text("Пригласить") }
+            Column(horizontalAlignment = Alignment.End) {
+                Button(
+                    onClick = { onSendInApp(selected.toList()) },
+                    enabled = selected.isNotEmpty(),
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Отправить в APU")
+                }
+                TextButton(
+                    onClick = { onShare(selected.toList()) },
+                    enabled = selected.isNotEmpty(),
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Другим приложением")
+                }
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }

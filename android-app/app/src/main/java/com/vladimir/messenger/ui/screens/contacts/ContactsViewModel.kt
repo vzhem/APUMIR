@@ -29,7 +29,14 @@ data class InvitableGroup(
 class ContactsViewModel @Inject constructor(
     private val contactRepository: ContactRepository,
     private val groupDao: GroupDao,
+    private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
 ) : ViewModel() {
+
+    /** Короткий отчёт для всплывающей подсказки после отправки. */
+    private val _toast = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val toast: kotlinx.coroutines.flow.StateFlow<String?> = _toast
+
+    fun consumeToast() { _toast.value = null }
 
     val contacts: StateFlow<List<Contact>> = contactRepository
         .observeContacts()
@@ -88,6 +95,41 @@ class ContactsViewModel @Inject constructor(
                 }
             }
             if (invites.isNotEmpty()) onReady(invites)
+        }
+    }
+
+    /**
+     * Отправить приглашения прямо в APU: сообщением в личный чат с этим
+     * контактом. Системное меню «Поделиться» остаётся отдельной кнопкой -
+     * оно нужно только тем, у кого APU ещё не стоит.
+     */
+    fun sendGroupInvites(contactId: String, contactName: String, groupIds: Collection<String>) {
+        if (groupIds.isEmpty() || contactId.isBlank()) return
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                val invites = groupIds.mapNotNull { id ->
+                    val group = runCatching { groupDao.getGroupById(id) }.getOrNull()
+                        ?: return@mapNotNull null
+                    val slug = group.inviteSlug
+                    if (slug.isBlank()) return@mapNotNull null
+                    group.title to GroupInviteLinks.build(
+                        slug = slug,
+                        groupId = group.id,
+                        ownerId = group.ownerId,
+                        isChannel = group.isChannel,
+                        requestApproval = !group.isPublic,
+                    )
+                }
+                if (invites.isEmpty()) return@withContext false
+                val text = com.vladimir.messenger.util.AppShare.groupsInviteText(invites)
+                val chat = chatRepository.getOrCreateChat(contactId, contactName)
+                chatRepository.sendMessage(chat.id, contactId, text).isSuccess
+            }
+            _toast.value = if (ok) {
+                "Приглашение отправлено"
+            } else {
+                "Не удалось отправить приглашение"
+            }
         }
     }
 

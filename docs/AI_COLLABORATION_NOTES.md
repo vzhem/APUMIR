@@ -8083,3 +8083,12 @@ Compose, ничего не грузит и не перезапускается, 
 `ContactsViewModel.buildGroupInvites`, текст — `AppShare.groupsInviteText`
 (на одну группу используется прежний `groupInviteText`). Выборка групп —
 `GroupDao.observeInvitable()`, поток уведён на `Dispatchers.IO` через `flowOn`.
+
+## Приглашение в группу отправляется прямо в APU (2026-09-03)
+
+Владелец: в системном меню «Поделиться» нет самого APU, приглашение приходилось
+копировать вручную. В диалоге выбора групп теперь две кнопки: «Отправить в APU»
+(`ContactsViewModel.sendGroupInvites` — `chatRepository.getOrCreateChat` +
+`sendMessage` текстом `AppShare.groupsInviteText`, всё на `Dispatchers.IO`) и
+«Другим приложением» (прежний `ACTION_SEND` для тех, у кого APU ещё нет).
+Итог отправки показывается Toast'ом через `ContactsViewModel.toast`.
