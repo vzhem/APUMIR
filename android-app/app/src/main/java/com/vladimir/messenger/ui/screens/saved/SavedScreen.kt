@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -84,6 +85,8 @@ import java.util.Locale
 @Composable
 fun SavedScreen(
     onBackClick: () -> Unit,
+    /** Открыть оригинал: личный чат, группу с темой или ленту канала. */
+    onOpenOrigin: (item: SavedItemEntity) -> Unit = {},
     viewModel: SavedViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -176,6 +179,11 @@ fun SavedScreen(
                             onShare = { viewModel.share(item) },
                             onExport = { viewModel.requestExport(item) },
                             onDelete = { confirmDelete = item },
+                            onOpenOrigin = if (item.originId.isNotBlank()) {
+                                { onOpenOrigin(item) }
+                            } else {
+                                null
+                            },
                         )
                     }
                 }
@@ -228,6 +236,8 @@ private fun SavedItemBubble(
     onShare: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
+    /** Есть куда вернуться - показываем «Перейти к оригиналу». */
+    onOpenOrigin: (() -> Unit)? = null,
 ) {
     val time = remember(item.savedAtMs) {
         SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.savedAtMs))
@@ -316,6 +326,15 @@ private fun SavedItemBubble(
                     Icon(
                         Icons.Default.Share,
                         contentDescription = "Поделиться",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            if (onOpenOrigin != null) {
+                IconButton(onClick = onOpenOrigin, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        Icons.Default.OpenInNew,
+                        contentDescription = "Перейти к оригиналу",
                         modifier = Modifier.size(18.dp),
                     )
                 }

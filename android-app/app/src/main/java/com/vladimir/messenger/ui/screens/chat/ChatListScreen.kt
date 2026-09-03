@@ -518,6 +518,46 @@ private fun SectionPage(
                 }
             }
 
+            // В разделе групп пусто - подсказка должна быть про группы, а не
+            // про чаты и контакты: иначе человек ищет не там.
+            items.isEmpty() && !isSearchActive &&
+                (section == InboxSection.Groups || section == InboxSection.AdminGroups) -> {
+                HintBubble(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.Groups,
+                            contentDescription = null,
+                            modifier = Modifier.size(72.dp),
+                            tint = HintBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            if (section == InboxSection.AdminGroups) {
+                                "Вы пока не создали ни одной группы"
+                            } else {
+                                "Групп пока нет"
+                            },
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = HintBubbleTextColor,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Создайте свою кнопкой с карандашом внизу справа " +
+                                "или войдите в чужую по ссылке-приглашению",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = HintBubbleMutedColor,
+                        )
+                    }
+                }
+            }
+
             items.isEmpty() -> {
                 EmptyChatList(
                     isSearchActive = isSearchActive,

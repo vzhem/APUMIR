@@ -71,31 +71,50 @@ fun ReactionRow(
     }
 }
 
-/** Окно выбора значка: восемь привычных реакций в одну строку. */
+/**
+ * Пузырь выбора значка: восемь привычных реакций в одну строку.
+ *
+ * Уже поставленный значок обведён золотом, и рядом появляется «Убрать
+ * реакцию»: менять и снимать нужно там же, где ставил, - отдельного меню для
+ * этого человек не ищет.
+ */
 @Composable
 fun ReactionPickerDialog(
     onDismiss: () -> Unit,
     onPick: (String) -> Unit,
+    /** Значок, который этот телефон уже поставил (null - реакции ещё нет). */
+    myEmoji: String? = null,
+    onRemove: (() -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Реакция") },
         text = {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 for (emoji in ReactionPalette.EMOJI) {
                     Text(
                         emoji,
                         fontSize = 26.sp,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
+                            .border(
+                                width = if (emoji == myEmoji) 1.5.dp else 0.dp,
+                                color = if (emoji == myEmoji) GoldBorder else Color.Transparent,
+                                shape = RoundedCornerShape(12.dp),
+                            )
                             .clickable { onPick(emoji) }
-                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                            .padding(horizontal = 3.dp, vertical = 4.dp),
                     )
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Закрыть") }
+        },
+        dismissButton = if (myEmoji != null && onRemove != null) {
+            { TextButton(onClick = onRemove) { Text("Убрать реакцию") } }
+        } else {
+            null
         },
     )
 }

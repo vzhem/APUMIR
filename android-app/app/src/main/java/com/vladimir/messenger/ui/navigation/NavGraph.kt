@@ -448,7 +448,27 @@ fun MessengerNavGraph(
         // ИЗБРАННОЕ
         // ------------------------------------------------------------------
         composable(route = Screen.Saved.route) {
-            SavedScreen(onBackClick = { navController.popBackStack() })
+            SavedScreen(
+                onBackClick = { navController.popBackStack() },
+                // Возврат к оригиналу: личный чат, тема группы или лента канала.
+                onOpenOrigin = { item ->
+                    val route = when (item.originKind) {
+                        "CHAT" -> Screen.ChatDetail.createRoute(
+                            item.originId,
+                            item.originName,
+                            item.originContactId,
+                        )
+                        "GROUP" -> if (item.originTopicId.isNotBlank()) {
+                            Screen.GroupChat.createTopicRoute(item.originId, item.originTopicId)
+                        } else {
+                            Screen.GroupChat.createRoute(item.originId)
+                        }
+                        "CHANNEL" -> Screen.Channel.createRoute(item.originId)
+                        else -> null
+                    }
+                    if (route != null) navController.navigate(route)
+                },
+            )
         }
 
         composable(route = Screen.MtProxy.route) {

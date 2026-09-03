@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -31,4 +32,23 @@ data class SavedItemEntity(
     /** Откуда сохранено: имя группы, канала или собеседника. Пусто - своя заметка. */
     val sourceTitle: String = "",
     val savedAtMs: Long,
+    // ── Обратная ссылка на оригинал (схема 14 → 15) ──────────────────────────
+    // Нужна, чтобы из «Избранного» открыть то самое место, откуда сохранено.
+    // Пустые значения означают старую запись или свою заметку - тогда переход
+    // просто не предлагается.
+    /** CHAT | GROUP | CHANNEL, пусто - перехода нет. */
+    @ColumnInfo(defaultValue = "")
+    val originKind: String = "",
+    /** chatId личного чата, groupId группы или channelId канала. */
+    @ColumnInfo(defaultValue = "")
+    val originId: String = "",
+    /** Тема группы или пост канала - чтобы открыть именно её. */
+    @ColumnInfo(defaultValue = "")
+    val originTopicId: String = "",
+    /** Имя собеседника: нужно маршруту личного чата. */
+    @ColumnInfo(defaultValue = "")
+    val originName: String = "",
+    /** Адрес собеседника: тоже часть маршрута личного чата. */
+    @ColumnInfo(defaultValue = "")
+    val originContactId: String = "",
 )

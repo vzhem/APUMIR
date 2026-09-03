@@ -201,8 +201,17 @@ class GroupChatViewModel @Inject constructor(
     /** Переслать сообщение темы себе в «Избранное». */
     fun saveToFavorites(text: String) {
         val source = _uiState.value.group?.title.orEmpty()
+        val topicId = _uiState.value.selectedTopicId.orEmpty()
         viewModelScope.launch {
-            savedItems.saveText(text, if (source.isBlank()) "" else "Группа " + source)
+            savedItems.saveText(
+                text,
+                if (source.isBlank()) "" else "Группа " + source,
+                com.vladimir.messenger.data.repository.SavedOrigin(
+                    kind = com.vladimir.messenger.data.repository.SavedOrigin.GROUP,
+                    id = groupId,
+                    topicId = topicId,
+                ),
+            )
             _uiState.update { it.copy(error = "Добавлено в избранное") }
         }
     }
@@ -223,5 +232,10 @@ class GroupChatViewModel @Inject constructor(
     /** Поставить или снять реакцию на сообщение группы или канала. */
     fun toggleReaction(messageId: String, emoji: String) {
         viewModelScope.launch { reactionRepository.toggle(groupId, messageId, emoji) }
+    }
+
+    /** Убрать свою реакцию, какой бы она ни была. */
+    fun removeReaction(messageId: String) {
+        viewModelScope.launch { reactionRepository.removeMine(groupId, messageId) }
     }
 }

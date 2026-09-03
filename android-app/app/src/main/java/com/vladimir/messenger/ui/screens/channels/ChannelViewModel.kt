@@ -22,6 +22,9 @@ import javax.inject.Inject
  * Канал устроен на тех же таблицах, что и группа: пост - это тема, а первое
  * сообщение темы и есть текст поста. Остальные сообщения темы - комментарии,
  * поэтому их число считается как «всего сообщений минус один».
+ *
+ * Порядок ленты - от старых к новым, как в переписке: свежий пост всегда
+ * внизу, и экран при открытии прокручивается туда.
  */
 data class ChannelPost(
     val topicId: String,
@@ -29,6 +32,8 @@ data class ChannelPost(
     val messageId: String,
     val title: String,
     val text: String,
+    /** Прикреплённая к посту картинка (jpeg в base64) или null. */
+    val imageB64: String? = null,
     val authorName: String,
     val timeMs: Long,
     val comments: Int,
@@ -80,6 +85,31 @@ class ChannelViewModel @Inject constructor(
         viewModelScope.launch { reactionRepository.toggle(channelId, messageId, emoji) }
     }
 
+    /**
+     * Сжать выбранную картинку в фоне и вернуть строку для поста.
+     * Пустой результат означает, что картинка не читается или не влезла.
+     */
+    fun prepareImage(
+        context: android.content.Context,
+        uri: android.net.Uri,
+        onReady: (String?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val encoded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.vladimir.messenger.util.InlineImage.compressUri(context, uri)
+            }
+            if (encoded == null) {
+                _uiState.update { it.copy(error = "Картинку не удалось прикрепить") }
+            }
+            onReady(encoded)
+        }
+    }
+
+    /** Убрать свою реакцию с поста. */
+    fun removeReaction(messageId: String) {
+        viewModelScope.launch { reactionRepository.removeMine(channelId, messageId) }
+    }
+
     private fun observe() {
         viewModelScope.launch {
             combine(
@@ -98,13 +128,14 @@ class ChannelViewModel @Inject constructor(
                         topicId = topic.id,
                         messageId = first.id,
                         title = topic.name,
-                        text = first.content,
+                        text = com.vladimir.messenger.util.InlineImage.stripImage(first.content),
+                        imageB64 = com.vladimir.messenger.util.InlineImage.extractB64(first.content),
                         authorName = names[first.senderId]?.takeIf { it.isNotBlank() }
                             ?: "Участник " + first.senderId.takeLast(4),
                         timeMs = first.timestamp,
                         comments = (thread.size - 1).coerceAtLeast(0),
                     )
-                }.sortedByDescending { it.timeMs }
+                }.sortedBy { it.timeMs }
 
                 ChannelSnapshot(
                     channel = channel,
@@ -137,12 +168,18 @@ class ChannelViewModel @Inject constructor(
      * Тема нужна, чтобы у поста было своё место для комментариев - ровно как
      * обсуждение под постом в Телеграме.
      */
-    fun createPost(text: String) {
-        val body = text.trim()
+    fun createPost(text: String, imageB64: String? = null) {
+        val stripped = text.trim()
+        val body = if (imageB64.isNullOrBlank()) {
+            stripped
+        } else {
+            com.vladimir.messenger.util.InlineImage.attach(stripped, imageB64)
+        }
         if (body.isEmpty()) return
         _uiState.update { it.copy(creating = true, error = null) }
         viewModelScope.launch {
-            val title = body.lineSequence().firstOrNull().orEmpty().trim().take(40)
+            // Заголовок берём из ТЕКСТА, а не из служебной строки картинки.
+            val title = stripped.lineSequence().firstOrNull().orEmpty().trim().take(40)
                 .ifBlank { "Пост" }
             groupRepository.createTopic(channelId, title)
                 .onSuccess { topic ->
@@ -167,7 +204,15 @@ class ChannelViewModel @Inject constructor(
         val source = _uiState.value.channel?.title.orEmpty()
         val body = if (post.title.isBlank()) post.text else post.title + "\n\n" + post.text
         viewModelScope.launch {
-            savedItems.saveText(body, if (source.isBlank()) "" else "Канал " + source)
+            savedItems.saveText(
+                body,
+                if (source.isBlank()) "" else "Канал " + source,
+                com.vladimir.messenger.data.repository.SavedOrigin(
+                    kind = com.vladimir.messenger.data.repository.SavedOrigin.CHANNEL,
+                    id = channelId,
+                    topicId = post.topicId,
+                ),
+            )
             _uiState.update { it.copy(error = "Добавлено в избранное") }
         }
     }

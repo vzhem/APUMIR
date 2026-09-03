@@ -69,6 +69,8 @@ fun ChatDetailScreen(
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
     // Сообщение, для которого открыт выбор реакции.
     var reactionFor by remember { mutableStateOf<String?>(null) }
+    // Текст, открытый в окне выделения части.
+    var selectTextOf by remember { mutableStateOf<String?>(null) }
 
     // Сброс выделения и диалога копирования
     fun resetSelection() {
@@ -322,15 +324,10 @@ fun ChatDetailScreen(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
                                     linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
-                                    onTap = {
-                                        if (activeMessage?.id == message.id) {
-                                            // Клик на уже выделенное → показать AlertDialog
-                                            showCopyDialog = message
-                                        } else {
-                                            // Клик на другое сообщение → сбросить и выделить
-                                            activeMessage = message
-                                        }
-                                    },
+                                    // Одно нажатие - сразу пузырь с реакциями:
+                                    // владелец просил ставить их в один тап.
+                                    // Остальные действия - долгое нажатие.
+                                    onTap = { reactionFor = message.id },
                                     // Долгое нажатие открывает действия сразу -
                                     // как в группе. Раньше требовалось нажать
                                     // дважды, и «В избранное» никто не находил.
@@ -343,9 +340,9 @@ fun ChatDetailScreen(
                                 // внутрь его класть нельзя, там своя ширина.
                                 com.vladimir.messenger.ui.components.ReactionRow(
                                     reactions = uiState.reactions[message.id].orEmpty(),
-                                    onToggle = { emoji ->
-                                        viewModel.toggleReaction(message.id, emoji)
-                                    },
+                                    // Нажатие на сам значок открывает тот же
+                                    // пузырь: там и меняют, и убирают.
+                                    onToggle = { reactionFor = message.id },
                                     modifier = Modifier.padding(horizontal = 14.dp),
                                 )
                                 }
@@ -384,7 +381,16 @@ fun ChatDetailScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Копировать текст", modifier = Modifier.fillMaxWidth())
+                        Text("Копировать всё", modifier = Modifier.fillMaxWidth())
+                    }
+                    TextButton(
+                        onClick = {
+                            showCopyDialog = null
+                            selectTextOf = message.content
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Выделить часть текста", modifier = Modifier.fillMaxWidth())
                     }
                     TextButton(
                         onClick = {
@@ -413,9 +419,27 @@ fun ChatDetailScreen(
         )
     }
 
+    selectTextOf?.let { body ->
+        com.vladimir.messenger.ui.components.SelectTextDialog(
+            text = body,
+            onDismiss = {
+                selectTextOf = null
+                resetSelection()
+            },
+        )
+    }
+
     reactionFor?.let { messageId ->
+        val mine = uiState.reactions[messageId].orEmpty()
+            .firstOrNull { it.mine }?.emoji
         com.vladimir.messenger.ui.components.ReactionPickerDialog(
             onDismiss = { reactionFor = null },
+            myEmoji = mine,
+            onRemove = {
+                viewModel.removeReaction(messageId)
+                reactionFor = null
+                resetSelection()
+            },
             onPick = { emoji ->
                 viewModel.toggleReaction(messageId, emoji)
                 reactionFor = null

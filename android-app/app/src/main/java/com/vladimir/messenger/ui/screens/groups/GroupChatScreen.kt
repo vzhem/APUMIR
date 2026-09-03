@@ -342,6 +342,7 @@ fun GroupChatScreen(
                         onSaveToFavorites = { viewModel.saveToFavorites(message.content) },
                         reactions = uiState.reactions[message.id].orEmpty(),
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
+                        onRemoveReaction = { viewModel.removeReaction(message.id) },
                     )
                 }
             }
@@ -691,6 +692,7 @@ private fun MessageBubble(
     onSaveToFavorites: () -> Unit = {},
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
+    onRemoveReaction: () -> Unit = {},
 ) {
     // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
@@ -708,7 +710,8 @@ private fun MessageBubble(
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .combinedClickable(
-                    onClick = {},
+                    // Одно нажатие - пузырь с реакциями, долгое - меню действий.
+                    onClick = { showReactions = true },
                     onLongClick = { showMenu = true },
                 ),
         ) {
@@ -737,7 +740,7 @@ private fun MessageBubble(
                 }
                 com.vladimir.messenger.ui.components.ReactionRow(
                     reactions = reactions,
-                    onToggle = onToggleReaction,
+                    onToggle = { showReactions = true },
                 )
             }
         }
@@ -758,8 +761,14 @@ private fun MessageBubble(
             )
         }
         if (showReactions) {
+            val mine = reactions.firstOrNull { it.mine }?.emoji
             com.vladimir.messenger.ui.components.ReactionPickerDialog(
                 onDismiss = { showReactions = false },
+                myEmoji = mine,
+                onRemove = {
+                    showReactions = false
+                    onRemoveReaction()
+                },
                 onPick = { emoji ->
                     showReactions = false
                     onToggleReaction(emoji)

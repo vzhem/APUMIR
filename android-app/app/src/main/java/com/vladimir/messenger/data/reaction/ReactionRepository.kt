@@ -83,6 +83,21 @@ class ReactionRepository @Inject constructor(
         }
     }
 
+    /** Снять свою реакцию, какой бы она ни была. */
+    suspend fun removeMine(chatId: String, messageId: String) {
+        withContext(Dispatchers.IO) {
+            val existing = reactionDao.get(messageId, SELF) ?: return@withContext
+            reactionDao.remove(messageId, SELF)
+            runCatching {
+                broadcast(chatId, messageId, existing.emoji, false, System.currentTimeMillis())
+            }.onFailure { Log.w(TAG, "reaction remove send failed: " + it.message) }
+        }
+    }
+
+    /** Мой значок на этом сообщении или null. */
+    suspend fun myEmoji(messageId: String): String? =
+        withContext(Dispatchers.IO) { reactionDao.get(messageId, SELF)?.emoji }
+
     /** Разослать реакцию: в группе - всем участникам, в личном чате - собеседнику. */
     private suspend fun broadcast(
         chatId: String,

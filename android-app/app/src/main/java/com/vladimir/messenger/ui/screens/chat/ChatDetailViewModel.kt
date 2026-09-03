@@ -88,6 +88,11 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch { reactionRepository.toggle(chatId, messageId, emoji) }
     }
 
+    /** Убрать свою реакцию, какой бы она ни была. */
+    fun removeReaction(messageId: String) {
+        viewModelScope.launch { reactionRepository.removeMine(chatId, messageId) }
+    }
+
     /**
      * Шапка лички раньше навсегда рисовала «не в сети»: статус в uiState
      * никем не обновлялся, а peer_discovered писал только в таблицу contacts.
@@ -326,7 +331,20 @@ class ChatDetailViewModel @Inject constructor(
     /** Переслать текст сообщения себе в «Избранное». */
     fun saveTextToFavorites(text: String, sourceTitle: String) {
         viewModelScope.launch {
-            savedItems.saveText(text, sourceTitle)
+            // Запоминаем, откуда взято, чтобы из «Избранного» вернуться сюда.
+            val chat = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { chatRepository.getChatById(chatId) }.getOrNull()
+            }
+            savedItems.saveText(
+                text,
+                sourceTitle,
+                com.vladimir.messenger.data.repository.SavedOrigin(
+                    kind = com.vladimir.messenger.data.repository.SavedOrigin.CHAT,
+                    id = chatId,
+                    name = chat?.contactName.orEmpty().ifBlank { sourceTitle },
+                    contactId = chat?.contactId.orEmpty(),
+                ),
+            )
             _uiState.update { it.copy(error = "Добавлено в избранное") }
         }
     }

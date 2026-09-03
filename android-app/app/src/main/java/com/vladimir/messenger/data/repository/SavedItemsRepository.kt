@@ -19,6 +19,26 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Откуда взята сохранённая запись: по ней «Избранное» открывает оригинал.
+ *
+ * `kind` - CHAT, GROUP или CHANNEL. Для личного чата нужны ещё имя и адрес
+ * собеседника: без них маршрут чата не собрать.
+ */
+data class SavedOrigin(
+    val kind: String,
+    val id: String,
+    val topicId: String = "",
+    val name: String = "",
+    val contactId: String = "",
+) {
+    companion object {
+        const val CHAT = "CHAT"
+        const val GROUP = "GROUP"
+        const val CHANNEL = "CHANNEL"
+    }
+}
+
 /** Что получилось при сохранении - экраны показывают это человеку. */
 enum class SaveResult {
     Saved,
@@ -36,7 +56,12 @@ class SavedItemsRepository @Inject constructor(
     fun observeCount(): Flow<Int> = dao.observeCount()
 
     /** Сохранить текст: заметку, пост канала или сообщение из группы. */
-    suspend fun saveText(text: String, sourceTitle: String = ""): SaveResult {
+    suspend fun saveText(
+        text: String,
+        sourceTitle: String = "",
+        /** Откуда сохранено, чтобы потом вернуться к оригиналу. */
+        origin: SavedOrigin? = null,
+    ): SaveResult {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return SaveResult.FileNotReady
         dao.upsert(
@@ -46,6 +71,11 @@ class SavedItemsRepository @Inject constructor(
                 text = trimmed,
                 sourceTitle = sourceTitle,
                 savedAtMs = System.currentTimeMillis(),
+                originKind = origin?.kind.orEmpty(),
+                originId = origin?.id.orEmpty(),
+                originTopicId = origin?.topicId.orEmpty(),
+                originName = origin?.name.orEmpty(),
+                originContactId = origin?.contactId.orEmpty(),
             )
         )
         return SaveResult.Saved

@@ -56,7 +56,7 @@ import com.vladimir.messenger.data.local.entity.SavedItemEntity
         AvatarEntity::class,
         SavedItemEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -406,6 +406,24 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_message_reactions_chatId` " +
                         "ON `message_reactions` (`chatId`)"
                 )
+            }
+        }
+
+        /** Обратная ссылка из «Избранного» на оригинал: пять новых колонок. */
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (column in listOf(
+                    "originKind",
+                    "originId",
+                    "originTopicId",
+                    "originName",
+                    "originContactId",
+                )) {
+                    db.execSQL(
+                        "ALTER TABLE `saved_items` ADD COLUMN `" + column +
+                            "` TEXT NOT NULL DEFAULT ''"
+                    )
+                }
             }
         }
 
