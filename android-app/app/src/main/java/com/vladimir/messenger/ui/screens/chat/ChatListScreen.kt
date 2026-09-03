@@ -441,7 +441,12 @@ fun ChatListScreen(
             confirmButton = {
                 TextButton(onClick = {
                     if (connectLink.isNotBlank()) {
-                        RustBridge.connectViaInvite(connectLink)
+                        // Подключение идёт в ядро по сети: на главном потоке
+                        // это задерживало бы отрисовку, поэтому в фон.
+                        val link = connectLink
+                        pagerScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            RustBridge.connectViaInvite(link)
+                        }
                         connectLink = ""
                         showConnectDialog = false
                     }

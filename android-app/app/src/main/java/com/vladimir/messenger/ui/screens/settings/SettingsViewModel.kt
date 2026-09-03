@@ -77,20 +77,30 @@ class SettingsViewModel @Inject constructor(
             if (enabled) {
                 runCatching { proxyAutopilot.cycle() }
             } else {
-                RustBridge.clearMqttSocks5Proxy()
+                withContext(Dispatchers.IO) { RustBridge.clearMqttSocks5Proxy() }
             }
         }
     }
 
     private fun loadSettings() {
         viewModelScope.launch {
-            val nodeId = RustBridge.nodeId() ?: "unknown"
-            val pubKey = RustBridge.publicKey() ?: "unknown"
+            // Каждый вызов уходит в Rust-ядро и ждёт его внутренний замок.
+            // Пока движок занят (раздача присутствия, старт), вызов подвисает,
+            // а на главном потоке это приводит к «Приложение не отвечает».
+            val core = withContext(Dispatchers.IO) {
+                Triple(
+                    RustBridge.nodeId() ?: "unknown",
+                    RustBridge.publicKey() ?: "unknown",
+                    RustBridge.networkStatus(),
+                )
+            }
+            val nodeId = core.first
+            val pubKey = core.second
             val shortFingerprint = if (pubKey.length > 8)
                 pubKey.chunked(4).take(8).joinToString(" ")
             else pubKey
 
-            val statusStr = RustBridge.networkStatus()
+            val statusStr = core.third
             val networkStatus = when (statusStr.lowercase()) {
                 "connected"    -> NetworkStatus.Connected
                 "connecting"   -> NetworkStatus.Connecting
@@ -118,10 +128,16 @@ class SettingsViewModel @Inject constructor(
                 }.getOrNull()
             }
 
-            // Load display name from SharedPreferences
-            val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
-            val savedName = prefs.getString("display_name", null)
+            // Чтение настроек и сборка ссылки трогают диск - тоже в фон.
+            val savedName = withContext(Dispatchers.IO) {
+                context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                    .getString("display_name", null)
+            }
             val displayName = savedName?.takeIf { it.isNotBlank() } ?: "Anonymous"
+            val invite = withContext(Dispatchers.IO) {
+                OwnInvite.link(context) ?: "p2p://invite/$pubKey"
+            }
+            val peers = withContext(Dispatchers.IO) { RustBridge.connectedPeers().toInt() }
 
             _uiState.update {
                 it.copy(
@@ -131,9 +147,9 @@ class SettingsViewModel @Inject constructor(
                     // подписанный токен, поэтому QR-код из настроек поднимает
                     // ранг так же, как ссылка из раздела рангов. p2p://invite/
                     // остаётся запасным путём, пока узел не создан.
-                    inviteLink       = OwnInvite.link(context) ?: "p2p://invite/$pubKey",
+                    inviteLink       = invite,
                     connectionStatus = networkStatus,
-                    connectedPeers   = RustBridge.connectedPeers().toInt(),
+                    connectedPeers   = peers,
                     connectionMode   = "P2P / QUIC",
                     appVersion       = appVersion,
                     rustCoreVersion  = "Rust Core",
@@ -151,18 +167,20 @@ class SettingsViewModel @Inject constructor(
     fun onDisplayNameChanged(newName: String) {
         val clean = newName.trim().take(50)
         if (clean.isEmpty()) return
-        context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
-            .edit()
-            .putString("display_name", clean)
-            .apply()
         _uiState.update { it.copy(displayName = clean) }
+        viewModelScope.launch(Dispatchers.IO) {
+            context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("display_name", clean)
+                .apply()
+        }
         // Ссылка-приглашение несёт имя, поэтому пересобираем её сразу.
         loadSettings()
     }
 
     fun onRestartEngine() {
         viewModelScope.launch {
-            RustBridge.onNetworkAvailable()
+            withContext(Dispatchers.IO) { RustBridge.onNetworkAvailable() }
             loadSettings()
         }
     }
@@ -182,7 +200,7 @@ class SettingsViewModel @Inject constructor(
         Toast.makeText(context, "Собираю данные об абонентах...", Toast.LENGTH_SHORT).show()
         
         viewModelScope.launch {
-            val ok = RustBridge.triggerGossipDiscovery()
+            val ok = withContext(Dispatchers.IO) { RustBridge.triggerGossipDiscovery() }
             android.util.Log.i("SettingsVM", "Gossip trigger result: $ok")
             if (ok) {
                 Toast.makeText(context, "Gossip запущен", Toast.LENGTH_SHORT).show()

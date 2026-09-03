@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 
 /**
@@ -113,11 +115,19 @@ class ChatListViewModel @Inject constructor(
             combine(groupDao.observeGroups(), groupDao.observeChannels()) { groups, channels ->
                 groups + channels
             }.collect { entities ->
-                val me = com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+                // Опрос ядра и чтение ролей - строго не на главном потоке.
+                // nodeId() уходит в Rust через FFI и ждёт внутренний замок
+                // движка: пока движок занят раздачей присутствия, вызов
+                // подвисает. На главном потоке это и есть «не отвечает».
+                val me = withContext(Dispatchers.IO) {
+                    com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+                }
                 val roles = if (me.isBlank()) {
                     emptyMap()
                 } else {
-                    groupDao.getMyMemberships(me).associate { it.groupId to it.role }
+                    withContext(Dispatchers.IO) {
+                        groupDao.getMyMemberships(me).associate { it.groupId to it.role }
+                    }
                 }
                 val groups = entities.filter { !it.isLeft }.map { g ->
                     InboxGroup(
@@ -222,12 +232,19 @@ class ChatListViewModel @Inject constructor(
 
     /** Видный бейдж ранга на главном экране: имя ранга + число квалифицированных друзей. */
     private fun refreshRankBadge() {
-        val qualified = com.vladimir.messenger.data.referral.ReferralRankStore
-            .qualifiedDirectCount(appContext)
-        val rank = com.vladimir.messenger.data.file.FileTransferRankPolicy
-            .entitlement(qualified)
-        _uiState.update { state ->
-            state.copy(rankBadge = "🎖 ${rank.rankName}")
+        // Ранг лежит в SharedPreferences: первое чтение открывает файл с диска,
+        // а это блокирующая работа. На главном потоке она задерживает первую
+        // отрисовку списка, поэтому уводим её в фон.
+        viewModelScope.launch {
+            val rank = withContext(Dispatchers.IO) {
+                val qualified = com.vladimir.messenger.data.referral.ReferralRankStore
+                    .qualifiedDirectCount(appContext)
+                com.vladimir.messenger.data.file.FileTransferRankPolicy
+                    .entitlement(qualified)
+            }
+            _uiState.update { state ->
+                state.copy(rankBadge = "🎖 ${rank.rankName}")
+            }
         }
     }
 
