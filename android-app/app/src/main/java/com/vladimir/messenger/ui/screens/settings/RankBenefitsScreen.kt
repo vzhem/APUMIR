@@ -197,7 +197,9 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                     message = null
                 },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Например, APU-START-2026") },
+                // Подсказка НЕ показывает настоящий код: пример выдал бы
+                // рабочий промокод любому, кто просто открыл раздел.
+                placeholder = { Text("Введите промокод") },
                 singleLine = true,
             )
             Button(

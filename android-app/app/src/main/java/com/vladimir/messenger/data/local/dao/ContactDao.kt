@@ -51,4 +51,16 @@ interface ContactDao {
      */
     @Query("SELECT * FROM contacts WHERE username != '' AND username = :username COLLATE NOCASE")
     suspend fun getContactsByUsername(username: String): List<ContactEntity>
+
+    /**
+     * Двойники по ВИДИМОМУ имени, тоже без учёта регистра.
+     *
+     * Одного сравнения по @имени мало: поле username заполняется только когда
+     * от человека прилетел пакет с именем. Записи, созданные раньше - по QR,
+     * по ссылке, по первому сообщению - остаются с пустым username, и «Server5»
+     * с «server5» висят двумя строками, хотя это один человек. Здесь сверяем
+     * то, что видно в списке.
+     */
+    @Query("SELECT * FROM contacts WHERE displayName != '' AND displayName = :name COLLATE NOCASE")
+    suspend fun getContactsByDisplayName(name: String): List<ContactEntity>
 }

@@ -62,16 +62,8 @@ fun ContactCard(
 ) {
     // Присланный аватар из роевого реестра (если есть) - иначе инициалы.
     val avatars by AvatarStore.avatars.collectAsState()
-    val avatarBitmap = remember(avatars[chat.contactId]) {
-        avatars[chat.contactId]?.let { b64 ->
-            try {
-                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (e: Exception) {
-                null
-            }
-        }
-    }
+    // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
+    val avatarBitmap = AvatarBitmaps.rememberAvatar(avatars[chat.contactId])
 
     Row(
         modifier = modifier

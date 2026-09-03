@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.repository
 
+import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.entity.ContactEntity
@@ -99,8 +100,15 @@ class ContactRepository @Inject constructor(
     suspend fun findStaleTwins(username: String, keepContactId: String): List<String> {
         val clean = username.trim().trimStart('@').trim()
         if (clean.isEmpty()) return emptyList()
-        return contactDao.getContactsByUsername(clean)
+        // Двойник ловится двумя способами: по @имени и по видимому имени.
+        // Одного @имени мало - оно есть только у тех, от кого прилетал пакет с
+        // именем, а записи из QR и первых сообщений остаются с пустым полем.
+        // Именно поэтому «Server5» и «server5» не склеивались.
+        val byUsername = contactDao.getContactsByUsername(clean)
+        val byDisplayName = contactDao.getContactsByDisplayName(clean)
+        return (byUsername + byDisplayName)
             .map { it.id }
+            .distinct()
             .filter { it != keepContactId }
     }
 
@@ -122,6 +130,7 @@ class ContactRepository @Inject constructor(
      * создавался не на всех путях добавления, а дубли не схлопывались.
      */
     suspend fun reconcileChats() {
+        mergeDuplicateContacts()
         for (contact in contactDao.observeAllContactsOnce()) {
             runCatching {
                 // Сначала смотрим, есть ли вообще что чинить. Прежняя версия
@@ -135,6 +144,58 @@ class ContactRepository @Inject constructor(
                     chats > 1 -> chatRepository.mergeDuplicateChats(contact.id)
                 }
             }
+        }
+    }
+
+    /**
+     * Схлопнуть записи, отличающиеся только регистром имени.
+     *
+     * Склейка по прилетевшему @имени лечит будущее, но уже накопившихся
+     * двойников - «Server5» и «server5» - не трогает: пакет с именем может и
+     * не прийти, а пара так и висит в списке. Поэтому разово при запуске
+     * сверяем список сами.
+     *
+     * Осторожность как в reconcileChats: сначала ЧИТАЕМ и ищем расхождение,
+     * пишем только при настоящем дубле. Иначе сверка на каждом запуске снова
+     * будила бы список чатов и вернула бы «Приложение не отвечает».
+     */
+    private suspend fun mergeDuplicateContacts() {
+        val all = contactDao.observeAllContactsOnce()
+        if (all.size < 2) return
+
+        // Группируем по видимому имени без учёта регистра. Пустые имена
+        // пропускаем: они не примета человека, а отсутствие приметы.
+        val groups = all
+            .filter { it.displayName.isBlank().not() && !isPlaceholderName(it.displayName) }
+            .groupBy { it.displayName.trim().lowercase() }
+
+        for ((_, twins) in groups) {
+            if (twins.size < 2) continue
+
+            // Побеждает запись с живым чатом и историей: терять переписку
+            // нельзя. lastSeen хранится строкой и для сравнения не годится,
+            // поэтому смотрим на то, что важно человеку - есть ли сообщения.
+            val keep = twins.maxByOrNull { twin ->
+                runCatching { chatRepository.chatCountOf(twin.id) }.getOrDefault(0)
+            } ?: continue
+            // Перенос истории возможен только в существующий чат, поэтому у
+            // выжившей записи он должен быть. Если чата нет - создаём, иначе
+            // переписка двойника осталась бы висеть сиротой.
+            runCatching { chatRepository.getOrCreateChat(keep.id, keep.displayName) }
+
+            for (dup in twins) {
+                if (dup.id == keep.id) continue
+                runCatching {
+                    // Переписку не теряем - переносим на живую запись.
+                    chatRepository.absorbChatOf(dup.id, keep.id)
+                    // Подчищаем всё, что могло остаться от двойника: иначе в
+                    // списке останется чат, пишущий на мёртвый адрес.
+                    chatRepository.deleteChatsOf(dup.id)
+                    contactDao.deleteContact(dup)
+                    Log.i("ContactRepository", "двойник склеен по имени")
+                }
+            }
+            runCatching { chatRepository.mergeDuplicateChats(keep.id) }
         }
     }
 

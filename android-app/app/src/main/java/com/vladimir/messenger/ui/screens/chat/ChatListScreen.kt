@@ -763,16 +763,9 @@ private fun GroupCard(
     // Раунд 42: светлая полосочка со скруглениями и тонкой золотой рамкой -
     // тёмный текст виден на любой подложке и в день, и в ночь.
     val storeAvatars by AvatarStore.avatars.collectAsState()
-    val groupAvatarBitmap = remember(storeAvatars["g:" + group.id]) {
-        storeAvatars["g:" + group.id]?.let { b64 ->
-            try {
-                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (e: Exception) {
-                null
-            }
-        }
-    }
+    // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
+    val groupAvatarBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
+        .rememberAvatar(storeAvatars["g:" + group.id])
     Row(
         modifier = modifier
             .fillMaxWidth()
