@@ -43,9 +43,11 @@ fun ChatWallpaper() {
     }
 
     androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
-        if (customBitmap != null) {
+        // Локальная копия ради умного приведения к non-null (см. MyAvatar).
+        val shown = customBitmap
+        if (shown != null) {
             Image(
-                bitmap = customBitmap.asImageBitmap(),
+                bitmap = shown.asImageBitmap(),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,

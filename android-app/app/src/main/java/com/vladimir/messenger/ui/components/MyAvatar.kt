@@ -45,9 +45,12 @@ fun MyAvatar(
         }
     }
 
-    if (bitmap != null) {
+    // Локальная копия: у делегата (var ... by) умного приведения к non-null
+    // не бывает, поэтому обращение к .asImageBitmap() без неё не собирается.
+    val shown = bitmap
+    if (shown != null) {
         Image(
-            bitmap = bitmap.asImageBitmap(),
+            bitmap = shown.asImageBitmap(),
             contentDescription = "Аватар",
             modifier = modifier.clip(CircleShape),
             contentScale = ContentScale.Crop,

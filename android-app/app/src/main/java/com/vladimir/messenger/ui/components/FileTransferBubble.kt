@@ -98,13 +98,16 @@ fun FileTransferBubble(
             var imageMenuOpen = androidx.compose.runtime.remember {
                 androidx.compose.runtime.mutableStateOf(false)
             }
-            if (previewBitmap != null && isImage) {
+            // Локальная копия ради умного приведения к non-null: у делегата
+            // (var ... by) его не бывает.
+            val shownPreview = previewBitmap
+            if (shownPreview != null && isImage) {
                 // Раунд 44: картинка показывается полноценно, без имени файла и
                 // размера. Действия (сохранить/поделиться) - в меню: три точки в
                 // правом верхнем углу или удержание пальца.
                 Box {
                     androidx.compose.foundation.Image(
-                        bitmap = previewBitmap.asImageBitmap(),
+                        bitmap = shownPreview.asImageBitmap(),
                         contentDescription = transfer.displayName,
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                         modifier = Modifier

@@ -263,9 +263,11 @@ private fun SavedItemBubble(
                         .loadFile(previewPath)
                 }
             }
-            if (bitmap != null) {
+            // Локальная копия ради умного приведения к non-null.
+            val shownBitmap = bitmap
+            if (shownBitmap != null) {
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = shownBitmap.asImageBitmap(),
                     contentDescription = item.fileName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
