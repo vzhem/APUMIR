@@ -104,6 +104,8 @@ object PromoCodes {
             // ссылку на тот же объект, и правка на месте не сохранилась бы.
             .putStringSet(KEY_USED, used + code)
             .commit()
+        // Ранг вырос - экраны должны показать новый, не дожидаясь перезапуска.
+        ReferralRankStore.notifyChanged()
         return Result.APPLIED
     }
 }

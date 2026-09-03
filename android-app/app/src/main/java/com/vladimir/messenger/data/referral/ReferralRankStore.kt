@@ -5,6 +5,23 @@ import com.vladimir.messenger.BuildConfig
 
 /** Local read boundary for qualified-direct-referral entitlements. */
 object ReferralRankStore {
+
+    /**
+     * Счётчик изменений ранга.
+     *
+     * Значок ранга на главном экране читался ОДИН раз при создании экрана, и
+     * промокод его не обновлял: пока список чатов жив, экран не пересоздаётся,
+     * и на главной так и висел «Гость», хотя возможности уже открылись.
+     * Экраны подписываются на этот поток и перечитывают ранг, когда он реально
+     * поменялся - постоянного опроса нет.
+     */
+    private val _changes = kotlinx.coroutines.flow.MutableStateFlow(0)
+    val changes: kotlinx.coroutines.flow.StateFlow<Int> = _changes
+
+    /** Сообщить экранам, что ранг мог измениться. */
+    fun notifyChanged() {
+        _changes.value = _changes.value + 1
+    }
     private const val REAL_PREFS = "apu_referral_qualification"
     private const val REAL_COUNT = "qualified_direct_count_v1"
     private const val TEST_PREFS = "apu_test_entitlements"
@@ -59,6 +76,7 @@ object ReferralRankStore {
         val next = (current + by).coerceIn(0, MAX_SUPPORTED_COUNT)
         if (next == current) return current
         prefs.edit().putInt(REAL_COUNT, next).commit()
+        notifyChanged()
         return next
     }
 

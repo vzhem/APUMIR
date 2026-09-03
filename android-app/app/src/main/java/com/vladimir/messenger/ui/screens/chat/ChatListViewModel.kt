@@ -415,15 +415,21 @@ class ChatListViewModel @Inject constructor(
         // Ранг лежит в SharedPreferences: первое чтение открывает файл с диска,
         // а это блокирующая работа. На главном потоке она задерживает первую
         // отрисовку списка, поэтому уводим её в фон.
+        //
+        // Подписка вместо разового чтения: промокод поднимает ранг, пока экран
+        // уже открыт, и раньше на главной так и висел прежний ранг до
+        // перезапуска приложения.
         viewModelScope.launch {
-            val rank = withContext(Dispatchers.IO) {
-                val qualified = com.vladimir.messenger.data.referral.ReferralRankStore
-                    .qualifiedDirectCount(appContext)
-                com.vladimir.messenger.data.file.FileTransferRankPolicy
-                    .entitlement(qualified)
-            }
-            _uiState.update { state ->
-                state.copy(rankBadge = "🎖 ${rank.rankName}")
+            com.vladimir.messenger.data.referral.ReferralRankStore.changes.collect {
+                val rank = withContext(Dispatchers.IO) {
+                    val qualified = com.vladimir.messenger.data.referral.ReferralRankStore
+                        .qualifiedDirectCount(appContext)
+                    com.vladimir.messenger.data.file.FileTransferRankPolicy
+                        .entitlement(qualified)
+                }
+                _uiState.update { state ->
+                    state.copy(rankBadge = "🎖 ${rank.rankName}")
+                }
             }
         }
     }
@@ -468,6 +474,35 @@ class ChatListViewModel @Inject constructor(
     /** Выйти из группы или канала (не владельцу). */
     fun leaveGroup(groupId: String) {
         viewModelScope.launch(Dispatchers.IO) { groupRepository.leaveGroup(groupId) }
+    }
+
+    /**
+     * Позвать в группу: готовим ссылку и отдаём её системному «Поделиться».
+     *
+     * Одна ссылка работает в обе стороны. У кого APU уже стоит - откроет её и
+     * сразу попадёт в группу. У кого нет - увидит в том же сообщении, откуда
+     * скачать приложение, поставит и войдёт по той же ссылке. Поэтому
+     * отдельного пункта «для своих» и «для чужих» не нужно.
+     */
+    fun shareGroupInvite(groupId: String, onReady: (title: String, link: String) -> Unit) {
+        viewModelScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                val group = runCatching { groupDao.getGroupById(groupId) }.getOrNull()
+                    ?: return@withContext null
+                val slug = group.inviteSlug
+                if (slug.isBlank()) return@withContext null
+                group.title to com.vladimir.messenger.data.group.GroupInviteLinks.build(
+                    slug = slug,
+                    groupId = group.id,
+                    ownerId = group.ownerId,
+                    isChannel = group.isChannel,
+                    // Частная группа принимает по заявке - вступающий телефон
+                    // должен честно написать «заявка отправлена».
+                    requestApproval = !group.isPublic,
+                )
+            }
+            if (prepared != null) onReady(prepared.first, prepared.second)
+        }
     }
 
     /** Удалить свою группу или канал у всех участников (только владельцу). */

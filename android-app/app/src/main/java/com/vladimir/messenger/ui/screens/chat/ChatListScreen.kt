@@ -352,6 +352,12 @@ fun ChatListScreen(
                         onClearChat = { confirmClearChat = it },
                         onDeleteChat = { confirmDeleteChat = it },
                         onGroupLeaveOrDelete = { confirmGroup = it },
+                        onInviteToGroup = { group ->
+                            viewModel.shareGroupInvite(group.id) { title, link ->
+                                com.vladimir.messenger.util.AppShare
+                                    .shareGroupInvite(context, title, link)
+                            }
+                        },
                         onLoadMore = viewModel::loadMore,
                     )
                 }
@@ -485,6 +491,8 @@ private fun SectionPage(
     onClearChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
     onDeleteChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
     onGroupLeaveOrDelete: (InboxGroup) -> Unit,
+    /** Позвать людей в группу или канал. */
+    onInviteToGroup: (InboxGroup) -> Unit = {},
     /** Прокрутка подошла к концу загруженного - пора досыпать страницу. */
     onLoadMore: () -> Unit = {},
 ) {
@@ -613,6 +621,17 @@ private fun SectionPage(
                                                     onGroupClick(item.group.id)
                                                 }
                                             },
+                                        )
+                                    )
+                                    add(
+                                        BubbleMenuAction(
+                                            title = if (item.group.isChannel) {
+                                                "Пригласить в канал"
+                                            } else {
+                                                "Пригласить в группу"
+                                            },
+                                            icon = Icons.Default.PersonAdd,
+                                            onClick = { onInviteToGroup(item.group) },
                                         )
                                     )
                                     if (item.group.myRole == GroupRole.OWNER ||
