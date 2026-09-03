@@ -12,6 +12,13 @@ object ReferralRankStore {
     private const val TEST_PREFS_PREFIX = "apu_referral_qualification_test_"
     const val MAX_SUPPORTED_COUNT = 1_000
 
+    /**
+     * Число, по которому считается ранг: подтверждённые друзья плюс промо-бонус.
+     *
+     * Промокод хранится ОТДЕЛЬНО и сюда только прибавляется. Счётчик реальных
+     * приглашений он не трогает, поэтому учёт приглашений остаётся честным, а
+     * ранг при этом растёт - как и обещано за код.
+     */
     fun qualifiedDirectCount(context: Context): Int {
         val app = context.applicationContext
         if (BuildConfig.DEBUG) {
@@ -19,8 +26,14 @@ object ReferralRankStore {
                 .getInt(TEST_OVERRIDE, -1)
             if (override >= 0) return override.coerceAtMost(MAX_SUPPORTED_COUNT)
         }
-        return qualifiedDirectCountIn(context, REAL_PREFS)
+        val earned = qualifiedDirectCountIn(context, REAL_PREFS)
+        val promo = PromoCodes.bonus(context)
+        return (earned + promo).coerceIn(0, MAX_SUPPORTED_COUNT)
     }
+
+    /** Только настоящие приглашения, без промо-бонуса - для честной статистики. */
+    fun earnedDirectCount(context: Context): Int =
+        qualifiedDirectCountIn(context, REAL_PREFS)
 
     /**
      * Единственный production-писатель настоящего счётчика.
