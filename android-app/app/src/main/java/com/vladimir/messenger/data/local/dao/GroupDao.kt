@@ -56,6 +56,17 @@ interface GroupDao {
     @Query("SELECT * FROM groups WHERE ownerId = :ownerId AND isLeft = 0 AND inviteSlug != ''")
     suspend fun getOwnPublishable(ownerId: String): List<GroupEntity>
 
+    /**
+     * Группы и каналы, в которые можно позвать человека: телефон в них состоит
+     * и у записи есть пригласительный slug. Сортировка по названию - список
+     * показывается человеку с поиском, а не по времени сообщений.
+     */
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND inviteSlug != '' " +
+            "ORDER BY title COLLATE NOCASE ASC"
+    )
+    fun observeInvitable(): Flow<List<GroupEntity>>
+
     @Query("SELECT * FROM groups WHERE id = :groupId")
     suspend fun getGroupById(groupId: String): GroupEntity?
 

@@ -57,6 +57,30 @@ object AppShare {
             INSTALL_LINK
     }
 
+    /**
+     * Текст приглашения сразу в несколько групп или каналов: по строке на
+     * каждую ссылку, ссылка всегда с начала строки - иначе мессенджеры делают
+     * кликабельной только её часть.
+     */
+    fun groupsInviteText(invites: List<Pair<String, String>>): String {
+        if (invites.size == 1) {
+            return groupInviteText(invites[0].first, invites[0].second)
+        }
+        val sb = StringBuilder("Присоединяйся к моим группам в APU.\n")
+        for (item in invites) {
+            val title = item.first.trim().ifBlank { "Группа" }
+            sb.append("\n").append(title).append(":\n").append(item.second).append("\n")
+        }
+        sb.append("\nСкачать APU:\n").append(INSTALL_LINK)
+        return sb.toString()
+    }
+
+    /** Поделиться приглашениями сразу в несколько групп или каналов. */
+    fun shareGroupInvites(context: Context, invites: List<Pair<String, String>>) {
+        if (invites.isEmpty()) return
+        shareText(context, groupsInviteText(invites), "Пригласить в группу")
+    }
+
     /** Поделиться приглашением в группу. */
     fun shareGroupInvite(context: Context, groupTitle: String, link: String) {
         shareText(context, groupInviteText(groupTitle, link), "Пригласить в группу")

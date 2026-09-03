@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -32,6 +33,10 @@ import com.vladimir.messenger.ui.components.BubbleMenuAction
 import com.vladimir.messenger.ui.components.ContactCard
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.draw.clip
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,6 +52,8 @@ fun ContactsScreen(
     val context = LocalContext.current
     // Подтверждение удаления контакта из меню «⋮» в пузыре.
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
+    // Контакт, которого приглашаем в группы: не null - открыт выбор групп.
+    var inviteFor by remember { mutableStateOf<Contact?>(null) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
@@ -214,6 +221,11 @@ fun ContactsScreen(
                                 },
                             ),
                             BubbleMenuAction(
+                                title = "Пригласить в группу",
+                                icon = Icons.Default.GroupAdd,
+                                onClick = { inviteFor = contact },
+                            ),
+                            BubbleMenuAction(
                                 title = "Поделиться контактом",
                                 icon = Icons.Default.Share,
                                 onClick = { shareContact() },
@@ -250,4 +262,117 @@ fun ContactsScreen(
             },
         )
     }
+
+    // Выбор групп для приглашения: список с поиском, можно отметить несколько.
+    inviteFor?.let { contact ->
+        InviteToGroupsDialog(
+            contactName = contact.displayName,
+            groups = viewModel.invitableGroups.collectAsState().value,
+            onDismiss = { inviteFor = null },
+            onConfirm = { ids ->
+                inviteFor = null
+                viewModel.buildGroupInvites(ids) { invites ->
+                    AppShare.shareGroupInvites(context, invites)
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Диалог «Пригласить в группу»: свои группы и каналы, поиск по названию,
+ * отметки на нескольких сразу. Одна ссылка годится и тем, у кого APU уже
+ * стоит, и тем, кому его ещё ставить - в тексте есть ссылка на установку.
+ */
+@Composable
+private fun InviteToGroupsDialog(
+    contactName: String,
+    groups: List<InvitableGroup>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<String>) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val selected = remember { mutableStateListOf<String>() }
+    val shown = remember(groups, query) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) groups else groups.filter { it.title.lowercase().contains(q) }
+    }
+    val listState = rememberLazyListState()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Пригласить $contactName") },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Поиск группы или канала") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (groups.isEmpty()) {
+                    Text(
+                        "Пока нет групп со ссылкой-приглашением",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else if (shown.isEmpty()) {
+                    Text(
+                        "Ничего не нашли по запросу «$query»",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                    ) {
+                        items(items = shown, key = { it.id }) { group ->
+                            val checked = selected.contains(group.id)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        if (checked) selected.remove(group.id)
+                                        else selected.add(group.id)
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(checked = checked, onCheckedChange = {
+                                    if (checked) selected.remove(group.id)
+                                    else selected.add(group.id)
+                                })
+                                Spacer(Modifier.width(4.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        group.title.ifBlank {
+                                            if (group.isChannel) "Канал" else "Группа"
+                                        },
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                    Text(
+                                        (if (group.isChannel) "Канал" else "Группа") +
+                                            " • участников: ${group.memberCount}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(selected.toList()) },
+                enabled = selected.isNotEmpty(),
+            ) { Text("Пригласить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
 }
