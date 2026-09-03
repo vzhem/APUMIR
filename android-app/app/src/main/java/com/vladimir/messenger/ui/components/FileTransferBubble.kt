@@ -30,6 +30,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -77,14 +79,17 @@ fun FileTransferBubble(
         ) {
             // Превью картинки: исходящее доступно сразу, входящее - после
             // приёма (COMPLETE).
-            val previewBitmap = androidx.compose.runtime.remember(previewFile) {
-                previewFile?.let { f ->
-                    runCatching {
-                        val opts = android.graphics.BitmapFactory.Options().apply {
-                            inSampleSize = 2
-                        }
-                        android.graphics.BitmapFactory.decodeFile(f.absolutePath, opts)
-                    }.getOrNull()
+            // Чтение файла - в фоне: на главном потоке каждое превью
+            // задерживало отрисовку переписки.
+            val previewPath = previewFile?.absolutePath
+            var previewBitmap by androidx.compose.runtime.remember(previewPath) {
+                androidx.compose.runtime.mutableStateOf(
+                    AvatarBitmaps.cachedFile(previewPath, sampleSize = 2)
+                )
+            }
+            androidx.compose.runtime.LaunchedEffect(previewPath) {
+                if (previewBitmap == null && previewPath != null) {
+                    previewBitmap = AvatarBitmaps.loadFile(previewPath, sampleSize = 2)
                 }
             }
             val isImage = transfer.mediaType.startsWith("image/")

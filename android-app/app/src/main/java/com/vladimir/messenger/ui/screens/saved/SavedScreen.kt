@@ -250,10 +250,17 @@ private fun SavedItemBubble(
             val preview by produceState<java.io.File?>(initialValue = null, item.id) {
                 value = previewProvider()
             }
-            val bitmap = remember(preview) {
-                preview?.takeIf { it.isFile }?.let {
-                    runCatching { android.graphics.BitmapFactory.decodeFile(it.absolutePath) }
-                        .getOrNull()
+            // Разбор картинки - в фоне и через общий кэш.
+            val previewPath = preview?.takeIf { it.isFile }?.absolutePath
+            var bitmap by remember(previewPath) {
+                mutableStateOf(
+                    com.vladimir.messenger.ui.components.AvatarBitmaps.cachedFile(previewPath)
+                )
+            }
+            LaunchedEffect(previewPath) {
+                if (bitmap == null && previewPath != null) {
+                    bitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
+                        .loadFile(previewPath)
                 }
             }
             if (bitmap != null) {

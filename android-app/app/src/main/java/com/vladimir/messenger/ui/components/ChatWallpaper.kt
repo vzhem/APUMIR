@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -27,17 +30,15 @@ import com.vladimir.messenger.ui.theme.WallpaperHolder
 fun ChatWallpaper() {
     val customUri by WallpaperHolder.uri.collectAsState()
     val context = LocalContext.current
-    val customBitmap = remember(customUri) {
-        if (customUri == null) {
-            null
-        } else {
-            try {
-                context.contentResolver.openInputStream(Uri.parse(customUri))?.use {
-                    BitmapFactory.decodeStream(it)
-                }
-            } catch (e: Exception) {
-                null
-            }
+    // Свои обои читаются с диска и разбираются в картинку. Подложка стоит на
+    // КАЖДОМ экране, поэтому на главном потоке это било по всему приложению:
+    // каждый переход и каждая смена вкладки заново открывали файл.
+    var customBitmap by remember(customUri) {
+        mutableStateOf(AvatarBitmaps.cachedUri(customUri))
+    }
+    LaunchedEffect(customUri) {
+        if (customBitmap == null && customUri != null) {
+            customBitmap = AvatarBitmaps.loadUri(context, customUri)
         }
     }
 

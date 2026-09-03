@@ -58,6 +58,58 @@ object AvatarBitmaps {
         null
     }
 
+    /** Готовая картинка по адресу файла, если её уже читали. */
+    fun cachedUri(uri: String?): Bitmap? =
+        uri?.takeIf { it.isNotBlank() }?.let { cached("uri:" + it) }
+
+    /**
+     * Прочитать картинку по адресу файла вне главного потока.
+     *
+     * Своё изображение (аватар, обои) хранится не строкой, а ссылкой на файл.
+     * Открытие файла - блокирующая работа, поэтому в отрисовке ей не место.
+     */
+    suspend fun loadUri(context: android.content.Context, uri: String?): Bitmap? {
+        val clean = uri?.takeIf { it.isNotBlank() } ?: return null
+        val key = "uri:" + clean
+        cached(key)?.let { return it }
+        val decoded = withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver
+                    .openInputStream(android.net.Uri.parse(clean))
+                    ?.use { BitmapFactory.decodeStream(it) }
+            } catch (e: Exception) {
+                null
+            }
+        }
+        if (decoded != null) store(key, decoded)
+        return decoded
+    }
+
+    /**
+     * Прочитать картинку файла вне главного потока.
+     *
+     * @param sampleSize 2 - уменьшать вдвое при чтении (для превью).
+     */
+    suspend fun loadFile(path: String?, sampleSize: Int = 1): Bitmap? {
+        val clean = path?.takeIf { it.isNotBlank() } ?: return null
+        val key = "file:" + clean + "@" + sampleSize
+        cached(key)?.let { return it }
+        val decoded = withContext(Dispatchers.IO) {
+            try {
+                val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                BitmapFactory.decodeFile(clean, opts)
+            } catch (e: Exception) {
+                null
+            }
+        }
+        if (decoded != null) store(key, decoded)
+        return decoded
+    }
+
+    /** Готовая картинка файла, если её уже читали. */
+    fun cachedFile(path: String?, sampleSize: Int = 1): Bitmap? =
+        path?.takeIf { it.isNotBlank() }?.let { cached("file:" + it + "@" + sampleSize) }
+
     /**
      * Картинка аватара для строки списка.
      *

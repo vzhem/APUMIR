@@ -498,20 +498,6 @@ private fun SettingsTabContent(
             .padding(paddingValues),
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
-        // Прокси - такой же пузырь, как остальные разделы настроек: голый
-        // ListItem во всю ширину выбивался из ряда и не читался на обоях.
-        item { SettingsSectionTitle("Прокси") }
-        item {
-            SettingsCard {
-                SettingsItem(
-                    icon = Icons.Default.VpnKey,
-                    title = "MTProto прокси",
-                    subtitle = "Управление прокси для Telegram relay",
-                    onClick = onMtProxyClick,
-                )
-            }
-        }
-
         // ----------------------------------------------------------------
         // ОФОРМЛЕНИЕ: день / ночь / авто + обои
         // ----------------------------------------------------------------
@@ -618,12 +604,6 @@ private fun SettingsTabContent(
                 )
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                 SettingsItem(
-                    icon     = Icons.Default.Router,
-                    title    = "Режим подключения",
-                    subtitle = uiState.connectionMode,
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
                     icon  = Icons.Default.RestartAlt,
                     title = "Перезапустить сетевой движок",
                     subtitle = "Пересоединиться со всеми пирами",
@@ -647,6 +627,16 @@ private fun SettingsTabContent(
                             onCheckedChange = viewModel::onProxyTunnelToggle,
                         )
                     },
+                )
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                // Настройка прокси стоит рядом с выключателем прокси, а не
+                // отдельным разделом: раньше два прокси-пункта жили в разных
+                // концах экрана.
+                SettingsItem(
+                    icon = Icons.Default.Dns,
+                    title = "Настроить прокси вручную",
+                    subtitle = "Свои серверы MTProto",
+                    onClick = onMtProxyClick,
                 )
             }
         }
@@ -685,12 +675,6 @@ private fun SettingsTabContent(
                     subtitle = "Экспорт ключей для восстановления",
                     onClick  = onBackup,
                 )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon     = Icons.Default.Security,
-                    title    = "Протокол шифрования",
-                    subtitle = "Ed25519 + X25519 + ChaCha20-Poly1305",
-                )
             }
         }
 
@@ -704,12 +688,6 @@ private fun SettingsTabContent(
                     icon     = Icons.Default.Info,
                     title    = "Версия",
                     subtitle = "APU ${uiState.appVersion}",
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon     = Icons.Default.Code,
-                    title    = "Rust Core",
-                    subtitle = uiState.rustCoreVersion,
                 )
             }
         }
@@ -760,11 +738,11 @@ private fun SettingsItem(
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector        = icon,
-            contentDescription = null,
-            tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier           = Modifier.size(22.dp),
+        // Переливающийся значок, как в меню списка чатов: раздел настроек
+        // выглядит с ним заодно с остальным приложением.
+        com.vladimir.messenger.ui.components.ShimmerIcon(
+            imageVector = icon,
+            size = 22.dp,
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
