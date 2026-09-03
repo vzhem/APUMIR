@@ -334,9 +334,10 @@ fun ChatListScreen(
                     val section = uiState.sections.getOrNull(page) ?: return@HorizontalPager
                     SectionPage(
                         section = section,
-                        items = remember(uiState, section) {
-                            viewModel.itemsOf(uiState, section)
-                        },
+                        // Готовый список раздела, посчитанный в фоне. Раньше
+                        // здесь шёл пересчёт прямо во время отрисовки - при
+                        // сотнях чатов это подвешивало жест листания.
+                        items = uiState.itemsBySection[section].orEmpty(),
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
                         onChatClick = onChatClick,
                         onAddContactClick = onAddContactClick,

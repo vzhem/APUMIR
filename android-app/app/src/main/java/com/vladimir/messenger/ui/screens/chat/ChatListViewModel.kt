@@ -12,11 +12,16 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 
 /**
@@ -80,8 +85,18 @@ data class ChatListUiState(
     ),
     /** Готовый список выбранного раздела, уже отфильтрованный поиском. */
     val items: List<InboxItem>   = emptyList(),
+    /**
+     * Готовые списки ВСЕХ разделов, посчитанные один раз в фоне.
+     *
+     * Листалка во время жеста показывает две страницы сразу, и раньше соседняя
+     * страница пересчитывала свой список прямо во время отрисовки. Теперь все
+     * разделы считаются разом при изменении данных, а страница только берёт
+     * готовое.
+     */
+    val itemsBySection: Map<InboxSection, List<InboxItem>> = emptyMap(),
 )
 
+@kotlinx.coroutines.FlowPreview
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
     private val getChatsUseCase: GetChatsUseCase,
@@ -95,62 +110,212 @@ class ChatListViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatListUiState())
     val uiState: StateFlow<ChatListUiState> = _uiState.asStateFlow()
 
+    /** Выбранный раздел и строка поиска - отдельными потоками. */
+    private val section = MutableStateFlow(InboxSection.All)
+    private val searchQuery = MutableStateFlow("")
+
+    /**
+     * Мой идентификатор узла. Спрашиваем ядро ОДИН раз за жизнь экрана.
+     *
+     * Раньше его дёргали на каждое обновление списка групп. Вызов уходит в
+     * ядро и ждёт его внутренний замок, поэтому при частых обновлениях экран
+     * замирал. Идентификатор за время работы не меняется - незачем спрашивать
+     * повторно.
+     */
+    private val myNodeId = CompletableDeferred<String>()
+
     init {
-        loadChats()
-        observeGroups()
+        viewModelScope.launch {
+            myNodeId.complete(
+                withContext(Dispatchers.IO) {
+                    com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+                }
+            )
+        }
+        observeInbox()
         observeNetworkStatus()
         refreshRankBadge()
     }
 
     /**
-     * Группы для разделов «Группы» и «Админ группы».
+     * Единый конвейер главного экрана.
      *
-     * Отдельный поток: список чатов (таблица chats) групп не содержит, у групп
-     * своя таблица со своим предпросмотром и счётчиком непрочитанных.
+     * Раньше список чатов и список групп жили двумя независимыми потоками, и
+     * каждый сам себе перекладывал состояние. Любое изменение перестраивало всё
+     * заново, а тяжёлая часть - разбор по разделам, поиск и сортировка -
+     * выполнялась дважды и в неудачный момент.
+     *
+     * Теперь источники сведены в один поток. Тяжёлая часть считается на
+     * рабочем потоке (`Dispatchers.Default`), главному потоку достаётся только
+     * готовый результат. Поиск ждёт паузы в наборе, поэтому набор строки
+     * больше не пересобирает список на каждую букву.
      */
-    private fun observeGroups() {
+    private fun observeInbox() {
+        val groupsFlow = combine(
+            groupDao.observeGroups(),
+            groupDao.observeChannels(),
+        ) { groups, channels -> groups + channels }
+            .map { entities -> toInboxGroups(entities) }
+            .flowOn(Dispatchers.Default)
+
+        val queryFlow = searchQuery
+            .debounce { if (it.isBlank()) 0L else SEARCH_DEBOUNCE_MS }
+            .distinctUntilChanged()
+
         viewModelScope.launch {
-            // Группы и каналы лежат в одной таблице, но выборки разные: в
-            // разделе «Группы» каналы не показываются и наоборот.
-            combine(groupDao.observeGroups(), groupDao.observeChannels()) { groups, channels ->
-                groups + channels
-            }.collect { entities ->
-                // Опрос ядра и чтение ролей - строго не на главном потоке.
-                // nodeId() уходит в Rust через FFI и ждёт внутренний замок
-                // движка: пока движок занят раздачей присутствия, вызов
-                // подвисает. На главном потоке это и есть «не отвечает».
-                val me = withContext(Dispatchers.IO) {
-                    com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
-                }
-                val roles = if (me.isBlank()) {
-                    emptyMap()
-                } else {
-                    withContext(Dispatchers.IO) {
-                        groupDao.getMyMemberships(me).associate { it.groupId to it.role }
+            combine(
+                getChatsUseCase(),
+                groupsFlow,
+                queryFlow,
+                section,
+            ) { chats, groups, query, current ->
+                Snapshot(chats, groups, query, current)
+            }
+                // Сборка разделов, поиск и сортировка - на рабочем потоке.
+                // Главный поток получает готовые списки и только рисует их.
+                .map { snap -> buildState(snap) }
+                .flowOn(Dispatchers.Default)
+                .collect { built ->
+                    _uiState.update { state ->
+                        state.copy(
+                            chats = built.chats,
+                            filteredChats = built.filtered,
+                            groups = built.groups,
+                            sections = built.sections,
+                            section = built.section,
+                            // searchQuery НЕ трогаем: поле ввода принадлежит
+                            // набору текста. Пересчёт отстаёт от набора на паузу,
+                            // и запись отставшего значения возвращала бы курсор
+                            // к уже стёртым буквам.
+                            items = built.items,
+                            itemsBySection = built.itemsBySection,
+                            isLoading = false,
+                            error = null,
+                        )
                     }
                 }
-                val groups = entities.filter { !it.isLeft }.map { g ->
-                    InboxGroup(
-                        id = g.id,
-                        title = g.title,
-                        preview = g.lastMessagePreview,
-                        timeMs = g.lastMessageAtMs,
-                        unreadCount = g.unreadCount,
-                        memberCount = g.memberCount,
-                        isPublic = g.isPublic,
-                        myRole = if (g.ownerId == me) GroupRole.OWNER else roles[g.id] ?: GroupRole.MEMBER,
-                        isChannel = g.isChannel,
-                    )
-                }
-                _uiState.update { state ->
-                    state.copy(
-                        groups = groups,
-                        sections = sectionsFor(groups),
-                        isLoading = false,
-                    ).withItems()
-                }
+        }
+    }
+
+    /** Сырые источники одного пересчёта. */
+    private data class Snapshot(
+        val chats: List<Chat>,
+        val groups: List<InboxGroup>,
+        val query: String,
+        val section: InboxSection,
+    )
+
+    /** Готовый результат пересчёта - всё, что нужно экрану. */
+    private data class Built(
+        val chats: List<Chat>,
+        val filtered: List<Chat>,
+        val groups: List<InboxGroup>,
+        val sections: List<InboxSection>,
+        val section: InboxSection,
+        val query: String,
+        val items: List<InboxItem>,
+        val itemsBySection: Map<InboxSection, List<InboxItem>>,
+    )
+
+    /** Роли считаем один раз на пересчёт, а не на каждую строку списка. */
+    private suspend fun toInboxGroups(entities: List<com.vladimir.messenger.data.local.entity.GroupEntity>): List<InboxGroup> {
+        val me = myNodeId.await()
+        val roles = if (me.isBlank()) {
+            emptyMap()
+        } else {
+            withContext(Dispatchers.IO) {
+                groupDao.getMyMemberships(me).associate { it.groupId to it.role }
             }
         }
+        return entities.filter { !it.isLeft }.map { g ->
+            InboxGroup(
+                id = g.id,
+                title = g.title,
+                preview = g.lastMessagePreview,
+                timeMs = g.lastMessageAtMs,
+                unreadCount = g.unreadCount,
+                memberCount = g.memberCount,
+                isPublic = g.isPublic,
+                myRole = if (g.ownerId == me) GroupRole.OWNER else roles[g.id] ?: GroupRole.MEMBER,
+                isChannel = g.isChannel,
+            )
+        }
+    }
+
+    /**
+     * Один проход по данным вместо прохода на каждый раздел.
+     *
+     * Личные чаты и группы фильтруются поиском ровно один раз, затем
+     * раскладываются по разделам. Сортировка тоже одна: общий список уже
+     * упорядочен, разделы наследуют порядок.
+     */
+    private fun buildState(snap: Snapshot): Built {
+        val query = snap.query.trim()
+        val sections = sectionsFor(snap.groups)
+        val section = if (snap.section in sections) snap.section else InboxSection.All
+
+        val filteredChats = filterChats(snap.chats, query)
+        val filteredGroups = snap.groups.filter { row ->
+            query.isBlank() ||
+                row.title.contains(query, ignoreCase = true) ||
+                row.preview?.contains(query, ignoreCase = true) == true
+        }
+
+        val personal = filteredChats
+            .map { InboxItem.Personal(it, it.lastMessageTime ?: 0L) }
+            .sortedByDescending { it.sortKey }
+        val groupItems = filteredGroups
+            .map { InboxItem.Group(it, it.timeMs ?: 0L) }
+            .sortedByDescending { it.sortKey }
+
+        val manages = { row: InboxGroup ->
+            row.myRole == GroupRole.OWNER || row.myRole == GroupRole.ADMIN
+        }
+        val plainGroups = groupItems.filter { !it.group.isChannel }
+        val channels = groupItems.filter { it.group.isChannel }
+
+        val bySection = mutableMapOf<InboxSection, List<InboxItem>>()
+        for (target in sections) {
+            bySection[target] = when (target) {
+                InboxSection.All -> merge(personal, groupItems)
+                InboxSection.Chats -> personal
+                InboxSection.Groups -> plainGroups
+                InboxSection.Channels -> channels
+                InboxSection.AdminGroups -> plainGroups.filter { manages(it.group) }
+                InboxSection.AdminChannels -> channels.filter { manages(it.group) }
+            }
+        }
+
+        return Built(
+            chats = snap.chats,
+            filtered = filteredChats,
+            groups = snap.groups,
+            sections = sections,
+            section = section,
+            query = snap.query,
+            items = bySection[section].orEmpty(),
+            itemsBySection = bySection,
+        )
+    }
+
+    /**
+     * Слияние двух уже упорядоченных списков.
+     *
+     * Общая сортировка склеенного списка - лишняя работа: обе половины уже
+     * стоят по времени. Идём по ним разом и берём тот, что свежее.
+     */
+    private fun merge(a: List<InboxItem>, b: List<InboxItem>): List<InboxItem> {
+        if (a.isEmpty()) return b
+        if (b.isEmpty()) return a
+        val out = ArrayList<InboxItem>(a.size + b.size)
+        var i = 0
+        var j = 0
+        while (i < a.size && j < b.size) {
+            if (a[i].sortKey >= b[j].sortKey) out.add(a[i++]) else out.add(b[j++])
+        }
+        while (i < a.size) out.add(a[i++])
+        while (j < b.size) out.add(b[j++])
+        return out
     }
 
     /** Админские разделы - только тому, у кого есть своя группа или канал. */
@@ -172,63 +337,25 @@ class ChatListViewModel @Inject constructor(
     }
 
     /** Переключение раздела полоской под рангом. */
-    fun onSectionSelected(section: InboxSection) {
-        _uiState.update { state -> state.copy(section = section).withItems() }
-    }
-
-    /**
-     * Собирает список выбранного раздела из чатов и групп.
-     *
-     * Личные чаты и группы сортируются вместе - по времени последнего
-     * сообщения, как в Телеграме.
-     */
-    private fun ChatListUiState.withItems(): ChatListUiState = copy(items = itemsFor(section))
-
-    /**
-     * Список ЛЮБОГО раздела, не только выбранного.
-     *
-     * Нужен листалке главного экрана: во время движения пальцем на экране видны
-     * сразу две страницы, поэтому соседний раздел обязан уметь построить свой
-     * список независимо от того, какой раздел сейчас выбран.
-     */
-    private fun ChatListUiState.itemsFor(target: InboxSection): List<InboxItem> {
-        val query = searchQuery.trim()
-        val personal = filterChats(chats, query).map {
-            InboxItem.Personal(it, it.lastMessageTime ?: 0L)
+    fun onSectionSelected(target: InboxSection) {
+        // Списки всех разделов уже готовы, поэтому переключение мгновенное:
+        // берём посчитанное, ничего не пересобирая.
+        section.value = target
+        _uiState.update { state ->
+            state.copy(
+                section = target,
+                items = state.itemsBySection[target].orEmpty(),
+            )
         }
-        val adminOnly = target == InboxSection.AdminGroups ||
-            target == InboxSection.AdminChannels
-        val groupRows = groups.filter { row ->
-            when (target) {
-                InboxSection.All -> true
-                InboxSection.Groups, InboxSection.AdminGroups -> !row.isChannel
-                InboxSection.Channels, InboxSection.AdminChannels -> row.isChannel
-                InboxSection.Chats -> false
-            }
-        }.filter { row ->
-            !adminOnly || row.myRole == GroupRole.OWNER || row.myRole == GroupRole.ADMIN
-        }.filter { row ->
-            query.isBlank() ||
-                row.title.contains(query, ignoreCase = true) ||
-                row.preview?.contains(query, ignoreCase = true) == true
-        }.map { InboxItem.Group(it, it.timeMs ?: 0L) }
-
-        return when (target) {
-            InboxSection.Chats -> personal
-            InboxSection.All -> personal + groupRows
-            else -> groupRows
-        }.sortedByDescending { it.sortKey }
     }
 
     /**
      * Список конкретного раздела для страницы листалки.
      *
-     * Считается от переданного состояния, а не от `_uiState.value`: страница
-     * читает `uiState` из композиции, поэтому новое сообщение или удалённый чат
-     * перерисовывают её сразу.
+     * Ничего не считает - отдаёт готовое, посчитанное в фоне.
      */
-    fun itemsOf(state: ChatListUiState, section: InboxSection): List<InboxItem> =
-        state.itemsFor(section)
+    fun itemsOf(state: ChatListUiState, target: InboxSection): List<InboxItem> =
+        state.itemsBySection[target].orEmpty()
 
     /** Видный бейдж ранга на главном экране: имя ранга + число квалифицированных друзей. */
     private fun refreshRankBadge() {
@@ -248,24 +375,6 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    private fun loadChats() {
-        viewModelScope.launch {
-            // Подписываемся на Flow — экран автоматически обновляется
-            // при появлении новых сообщений
-            getChatsUseCase()
-                .collect { chats ->
-                    _uiState.update { state ->
-                        state.copy(
-                            chats         = chats,
-                            filteredChats = filterChats(chats, state.searchQuery),
-                            isLoading     = false,
-                            error         = null
-                        ).withItems()
-                    }
-                }
-        }
-    }
-
     private fun observeNetworkStatus() {
         viewModelScope.launch {
             observeNetworkStatusUseCase()
@@ -276,44 +385,41 @@ class ChatListViewModel @Inject constructor(
     }
 
     fun onSearchQueryChanged(query: String) {
-        _uiState.update { state ->
-            state.copy(
-                searchQuery   = query,
-                filteredChats = filterChats(state.chats, query)
-            ).withItems()
-        }
+        // Поле ввода откликается сразу, а пересчёт списка ждёт паузы в наборе.
+        _uiState.update { it.copy(searchQuery = query) }
+        searchQuery.value = query
     }
 
     // ── Действия меню «⋮» в пузырях ───────────────────────────────────────
 
     /** Удалить личный чат вместе с историей (только на этом телефоне). */
     fun deleteChat(chatId: String) {
-        viewModelScope.launch { chatRepository.deleteChat(chatId) }
+        viewModelScope.launch(Dispatchers.IO) { chatRepository.deleteChat(chatId) }
     }
 
     /** Очистить переписку, сам чат остаётся. */
     fun clearChatHistory(chatId: String) {
-        viewModelScope.launch { chatRepository.clearHistory(chatId) }
+        viewModelScope.launch(Dispatchers.IO) { chatRepository.clearHistory(chatId) }
     }
 
     /** Сбросить счётчик непрочитанных личного чата. */
     fun markChatRead(chatId: String) {
-        viewModelScope.launch { chatRepository.markAsRead(chatId) }
+        viewModelScope.launch(Dispatchers.IO) { chatRepository.markAsRead(chatId) }
     }
 
     /** Сбросить счётчик непрочитанных группы или канала. */
     fun markGroupRead(groupId: String) {
-        viewModelScope.launch { groupDao.markGroupRead(groupId) }
+        viewModelScope.launch(Dispatchers.IO) { groupDao.markGroupRead(groupId) }
     }
 
     /** Выйти из группы или канала (не владельцу). */
     fun leaveGroup(groupId: String) {
-        viewModelScope.launch { groupRepository.leaveGroup(groupId) }
+        viewModelScope.launch(Dispatchers.IO) { groupRepository.leaveGroup(groupId) }
     }
 
     /** Удалить свою группу или канал у всех участников (только владельцу). */
     fun deleteGroup(groupId: String) {
-        viewModelScope.launch { groupRepository.deleteGroup(groupId) }
+        viewModelScope.launch(Dispatchers.IO) { groupRepository.deleteGroup(groupId) }
     }
 
     private fun filterChats(chats: List<Chat>, query: String): List<Chat> {
@@ -322,5 +428,10 @@ class ChatListViewModel @Inject constructor(
             it.contactName.contains(query, ignoreCase = true) ||
             it.lastMessage?.contains(query, ignoreCase = true) == true
         }
+    }
+
+    private companion object {
+        /** Пауза в наборе, после которой пересчитывается поиск. */
+        const val SEARCH_DEBOUNCE_MS = 200L
     }
 }
