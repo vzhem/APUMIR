@@ -124,8 +124,16 @@ class ContactRepository @Inject constructor(
     suspend fun reconcileChats() {
         for (contact in contactDao.observeAllContactsOnce()) {
             runCatching {
-                chatRepository.getOrCreateChat(contact.id, contact.displayName)
-                chatRepository.mergeDuplicateChats(contact.id)
+                // Сначала смотрим, есть ли вообще что чинить. Прежняя версия
+                // на каждом контакте звала getOrCreateChat и слияние, а каждая
+                // запись в базу будит поток списка чатов: на десятках контактов
+                // это давало шторм перерисовок и приложение переставало
+                // отвечать. Теперь при исправном списке записей нет вовсе.
+                val chats = chatRepository.chatCountOf(contact.id)
+                when {
+                    chats == 0 -> chatRepository.getOrCreateChat(contact.id, contact.displayName)
+                    chats > 1 -> chatRepository.mergeDuplicateChats(contact.id)
+                }
             }
         }
     }

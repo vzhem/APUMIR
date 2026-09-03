@@ -27,6 +27,17 @@ object NicknameIdentity {
     private const val TAG = "NicknameIdentity"
 
     /**
+     * Уже применённые пары «узел - @имя».
+     *
+     * Пакеты с именами ходят по рою эпидемией: каждый телефон пересказывает их
+     * соседям, поэтому одно и то же имя прилетает снова и снова. Без этой
+     * памяти каждый такой пакет запускал обход базы и запись в неё, список
+     * чатов пересобирался без остановки и приложение переставало отвечать.
+     * Повтор теперь стоит одну проверку в памяти.
+     */
+    private val applied = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /**
      * Применить узнанное @имя к контактам.
      *
      * @param ownerId узел, который объявил это имя (живой).
@@ -41,6 +52,10 @@ object NicknameIdentity {
         val clean = nickname.trim().trimStart('@').trim()
         if (ownerId.isBlank() || clean.isEmpty()) return
 
+        // Тот же узел с тем же именем уже разобран - выходим сразу.
+        // Ключ в нижнем регистре: «Server5» и «server5» - одно имя.
+        if (!applied.add(ownerId + "|" + clean.lowercase())) return
+
         val contact = contactRepository.getContactByFingerprint(ownerId)
         if (contact != null) {
             // Заглушку заменяем настоящим именем; имя, данное владельцем вручную,
@@ -50,7 +65,7 @@ object NicknameIdentity {
                 chatRepository.updateContactName(ownerId, clean)
                 Log.i(TAG, "контакт $ownerId переименован в @$clean")
             }
-            if (contact.username != clean) {
+            if (!contact.username.equals(clean, ignoreCase = true)) {
                 contactRepository.updateUsername(contact.id, clean)
             }
         }
@@ -67,7 +82,10 @@ object NicknameIdentity {
         }
 
         // Дубли чатов с одним и тем же узлом - следствие того, что чат
-        // создаётся сразу в нескольких местах.
-        chatRepository.mergeDuplicateChats(ownerId)
+        // создаётся сразу в нескольких местах. Трогаем базу, только если этот
+        // человек нам вообще знаком: для чужих имён из роя работы нет.
+        if (contact != null || stale.isNotEmpty()) {
+            chatRepository.mergeDuplicateChats(ownerId)
+        }
     }
 }

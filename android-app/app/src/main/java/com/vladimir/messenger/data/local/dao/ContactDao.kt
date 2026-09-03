@@ -43,7 +43,12 @@ interface ContactDao {
     @Query("UPDATE contacts SET username = :username WHERE id = :contactId")
     suspend fun updateUsername(contactId: String, username: String)
 
-    /** Контакты с этим @именем: разные установки одной трубки носят одно имя. */
-    @Query("SELECT * FROM contacts WHERE username != '' AND username = :username")
+    /**
+     * Контакты с этим @именем: разные установки одной трубки носят одно имя.
+     *
+     * Сравнение без учёта регистра (COLLATE NOCASE): «server5» и «Server5» -
+     * один и тот же человек, а до этого они оставались двумя записями.
+     */
+    @Query("SELECT * FROM contacts WHERE username != '' AND username = :username COLLATE NOCASE")
     suspend fun getContactsByUsername(username: String): List<ContactEntity>
 }

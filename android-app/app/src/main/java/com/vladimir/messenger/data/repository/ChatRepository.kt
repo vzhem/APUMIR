@@ -368,6 +368,10 @@ class ChatRepository @Inject constructor(
         chatDao.deleteChatById(chatId)
     }
 
+    /** Сколько чатов заведено с этим собеседником: 0, 1 или больше при дублях. */
+    suspend fun chatCountOf(contactId: String): Int =
+        if (contactId.isBlank()) 0 else chatDao.getChatsByContactId(contactId).size
+
     /** Убрать все чаты с этим собеседником вместе с перепиской. */
     suspend fun deleteChatsOf(contactId: String) {
         for (chat in chatDao.getChatsByContactId(contactId)) {
