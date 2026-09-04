@@ -3,9 +3,11 @@ package com.vladimir.messenger.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
@@ -17,22 +19,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 
 /**
  * Бегунок прокрутки справа от списка.
  *
- * Родного бегунка у `LazyColumn` нет, поэтому он рисуется сам. Положение и
- * длина считаются по СРЕДНЕЙ высоте видимых строк: точной высоты всего списка
- * ленивый список не знает, а карточки чатов почти одинаковые, так что оценка
- * получается ровной и не прыгает.
+ * Родного бегунка у `LazyColumn` нет, поэтому он рисуется сам. Длина и
+ * положение считаются по СРЕДНЕЙ высоте видимых строк: точной высоты всего
+ * списка ленивый список не знает, а карточки почти одинаковые, так что оценка
+ * получается ровной.
  *
- * Бегунок видно только во время прокрутки и он гаснет, когда список стоит,
- * чтобы не закрывать содержимое.
+ * Высота дорожки берётся из `BoxWithConstraints`. Раньше сдвиг считался внутри
+ * модификатора, стоявшего ПОСЛЕ `fillMaxHeight`, — там уже приходили
+ * constraints самого бегунка, свободного места оставалось ноль, и он стоял на
+ * месте.
  *
- * Ставить ВНУТРЬ того же `Box`, что и список, после него.
+ * Ставить ВНУТРЬ того же `Box`, что и список, сразу после него.
  */
 @Composable
 fun BoxScope.ApuScrollbar(
@@ -49,6 +51,7 @@ fun BoxScope.ApuScrollbar(
     if (viewport <= 0f) return
 
     val averageItem = visible.sumOf { it.size }.toFloat() / visible.size
+    if (averageItem <= 0f) return
     val contentHeight = averageItem * total
     if (contentHeight <= viewport) return
 
@@ -58,42 +61,35 @@ fun BoxScope.ApuScrollbar(
     val maxScroll = (contentHeight - viewport).coerceAtLeast(1f)
     val progress = (scrolled / maxScroll).coerceIn(0f, 1f)
     // Не даём бегунку выродиться в точку на очень длинных списках.
-    val thumbFraction = (viewport / contentHeight).coerceIn(0.08f, 1f)
+    val thumbFraction = (viewport / contentHeight).coerceIn(0.10f, 1f)
 
+    // Виден во время прокрутки и ещё немного после, чтобы палец успел
+    // заметить, куда он приехал. В покое гаснет и не закрывает содержимое.
     val alpha by animateFloatAsState(
-        targetValue = if (state.isScrollInProgress) 0.55f else 0f,
-        animationSpec = tween(durationMillis = if (state.isScrollInProgress) 120 else 600),
+        targetValue = if (state.isScrollInProgress) 0.6f else 0f,
+        animationSpec = tween(durationMillis = if (state.isScrollInProgress) 120 else 900),
         label = "apu-scrollbar-alpha",
     )
     if (alpha <= 0.01f) return
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .align(Alignment.TopEnd)
             .fillMaxHeight()
-            .padding(vertical = 4.dp, horizontal = 2.dp)
-            .width(4.dp)
-            // Полоса занимает всю высоту, а внутри неё дорожка нужной длины
-            // сдвигается вниз: так не нужно знать высоту в dp заранее.
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                layout(placeable.width, placeable.height) {
-                    placeable.placeRelative(0, 0)
-                }
-            },
+            .padding(vertical = 6.dp, horizontal = 2.dp)
+            .width(5.dp),
     ) {
-        Box(
+        val trackHeight = maxHeight
+        val thumbHeight = trackHeight * thumbFraction
+        // Свободный ход = дорожка минус сам бегунок.
+        val travel = trackHeight - thumbHeight
+
+        androidx.compose.foundation.layout.Box(
             modifier = Modifier
-                .fillMaxHeight(thumbFraction)
-                .width(4.dp)
-                .layout { measurable, constraints ->
-                    val placeable = measurable.measure(constraints)
-                    val free = (constraints.maxHeight - placeable.height).coerceAtLeast(0)
-                    layout(placeable.width, constraints.maxHeight) {
-                        placeable.placeRelative(0, (free * progress).roundToInt())
-                    }
-                }
-                .clip(RoundedCornerShape(2.dp))
+                .offset(y = travel * progress)
+                .height(thumbHeight)
+                .width(5.dp)
+                .clip(RoundedCornerShape(3.dp))
                 .alpha(alpha)
                 .background(MaterialTheme.colorScheme.primary),
         )

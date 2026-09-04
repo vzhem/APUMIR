@@ -11,6 +11,8 @@ package com.vladimir.messenger.ui.screens.saved
 // папки) и «Поделиться».
 // =============================================================================
 
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -176,24 +178,32 @@ fun SavedScreen(
                     }
                 }
 
-                else -> LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(vertical = 8.dp, horizontal = 2.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    items(uiState.items, key = { it.id }) { item ->
-                        SavedItemBubble(
-                            item = item,
-                            previewProvider = { viewModel.previewFor(item) },
-                            onShare = { viewModel.share(item) },
-                            onExport = { viewModel.requestExport(item) },
-                            onDelete = { confirmDelete = item },
-                            onOpenOrigin = if (item.originId.isNotBlank()) {
-                                { onOpenOrigin(item) }
-                            } else {
-                                null
-                            },
-                        )
+                else -> {
+                    // Бегунок справа: видно, где мы в длинном списке.
+                    val scrollState = rememberLazyListState()
+                    Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = scrollState,
+                        modifier = Modifier.fillMaxSize().padding(padding),
+                        contentPadding = PaddingValues(vertical = 8.dp, horizontal = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(uiState.items, key = { it.id }) { item ->
+                            SavedItemBubble(
+                                item = item,
+                                previewProvider = { viewModel.previewFor(item) },
+                                onShare = { viewModel.share(item) },
+                                onExport = { viewModel.requestExport(item) },
+                                onDelete = { confirmDelete = item },
+                                onOpenOrigin = if (item.originId.isNotBlank()) {
+                                    { onOpenOrigin(item) }
+                                } else {
+                                    null
+                                },
+                            )
+                        }
+                    }
+                    ApuScrollbar(state = scrollState)
                     }
                 }
             }

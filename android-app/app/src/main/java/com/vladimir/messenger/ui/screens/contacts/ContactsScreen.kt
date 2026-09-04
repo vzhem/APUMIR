@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -172,84 +175,90 @@ fun ContactsScreen(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(
-                    items = shown,
-                    key = { it.id }
-                ) { contact ->
-                    // ContactCard expects Chat, create a minimal Chat from Contact
-                    val ctx = LocalContext.current
-                    val shareContact = {
-                        try {
-                                val link = ContactShareLink.build(contact.id, contact.displayName)
-                                val send = Intent().apply {
-                                    action = Intent.ACTION_SEND
-                                    putExtra(
-                                        Intent.EXTRA_TEXT,
-                                        "Мой контакт ${'$'}{contact.displayName} в APU. Открой ссылку для добавления:\n${'$'}{link}",
-                                    )
-                                    type = "text/plain"
+            // Бегунок справа: в длинном списке видно, где мы находимся.
+            val scrollState = rememberLazyListState()
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = scrollState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    items(
+                        items = shown,
+                        key = { it.id }
+                    ) { contact ->
+                        // ContactCard expects Chat, create a minimal Chat from Contact
+                        val ctx = LocalContext.current
+                        val shareContact = {
+                            try {
+                                    val link = ContactShareLink.build(contact.id, contact.displayName)
+                                    val send = Intent().apply {
+                                        action = Intent.ACTION_SEND
+                                        putExtra(
+                                            Intent.EXTRA_TEXT,
+                                            "Мой контакт ${'$'}{contact.displayName} в APU. Открой ссылку для добавления:\n${'$'}{link}",
+                                        )
+                                        type = "text/plain"
+                                    }
+                                    ctx.startActivity(Intent.createChooser(send, "Поделиться контактом"))
+                                } catch (_: Exception) {
                                 }
-                                ctx.startActivity(Intent.createChooser(send, "Поделиться контактом"))
-                            } catch (_: Exception) {
-                            }
-                        Unit
+                            Unit
+                        }
+                        // Пузырь контакта — тот же ContactCard, что на главной:
+                        // владелец просил, чтобы списки выглядели одинаково.
+                        ContactCard(
+                            chat = Chat(
+                                id = contact.id,
+                                contactId = contact.id,
+                                contactName = contact.displayName,
+                                isContactOnline = contact.isOnline,
+                            ),
+                            onClick = { onContactClick(contact) },
+                            username = contact.username,
+                            kind = BubbleKind.Personal,
+                            onShareClick = shareContact,
+                            menuActions = listOf(
+                                BubbleMenuAction(
+                                    title = "Написать",
+                                    icon = Icons.Default.Forum,
+                                    onClick = { onContactClick(contact) },
+                                ),
+                                BubbleMenuAction(
+                                    title = "Позвонить",
+                                    icon = Icons.Default.Call,
+                                    onClick = {
+                                        onCallContactClick(contact.id, contact.displayName)
+                                    },
+                                ),
+                                BubbleMenuAction(
+                                    title = "Переименовать",
+                                    icon = Icons.Default.Edit,
+                                    onClick = {
+                                        onRenameContactClick(contact.id, contact.displayName)
+                                    },
+                                ),
+                                BubbleMenuAction(
+                                    title = "Пригласить в группу",
+                                    icon = Icons.Default.GroupAdd,
+                                    onClick = { inviteFor = contact },
+                                ),
+                                BubbleMenuAction(
+                                    title = "Поделиться контактом",
+                                    icon = Icons.Default.Share,
+                                    onClick = { shareContact() },
+                                ),
+                                BubbleMenuAction(
+                                    title = "Удалить контакт",
+                                    icon = Icons.Default.Delete,
+                                    destructive = true,
+                                    onClick = { confirmDelete = contact },
+                                ),
+                            ),
+                        )
                     }
-                    // Пузырь контакта — тот же ContactCard, что на главной:
-                    // владелец просил, чтобы списки выглядели одинаково.
-                    ContactCard(
-                        chat = Chat(
-                            id = contact.id,
-                            contactId = contact.id,
-                            contactName = contact.displayName,
-                            isContactOnline = contact.isOnline,
-                        ),
-                        onClick = { onContactClick(contact) },
-                        username = contact.username,
-                        kind = BubbleKind.Personal,
-                        onShareClick = shareContact,
-                        menuActions = listOf(
-                            BubbleMenuAction(
-                                title = "Написать",
-                                icon = Icons.Default.Forum,
-                                onClick = { onContactClick(contact) },
-                            ),
-                            BubbleMenuAction(
-                                title = "Позвонить",
-                                icon = Icons.Default.Call,
-                                onClick = {
-                                    onCallContactClick(contact.id, contact.displayName)
-                                },
-                            ),
-                            BubbleMenuAction(
-                                title = "Переименовать",
-                                icon = Icons.Default.Edit,
-                                onClick = {
-                                    onRenameContactClick(contact.id, contact.displayName)
-                                },
-                            ),
-                            BubbleMenuAction(
-                                title = "Пригласить в группу",
-                                icon = Icons.Default.GroupAdd,
-                                onClick = { inviteFor = contact },
-                            ),
-                            BubbleMenuAction(
-                                title = "Поделиться контактом",
-                                icon = Icons.Default.Share,
-                                onClick = { shareContact() },
-                            ),
-                            BubbleMenuAction(
-                                title = "Удалить контакт",
-                                icon = Icons.Default.Delete,
-                                destructive = true,
-                                onClick = { confirmDelete = contact },
-                            ),
-                        ),
-                    )
                 }
+                ApuScrollbar(state = scrollState)
             }
         }
         }

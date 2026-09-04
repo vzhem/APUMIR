@@ -4,6 +4,8 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Группы»: список групп и создание новой
 // =============================================================================
 
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -187,50 +189,60 @@ fun GroupsScreen(
                     }
                 }
 
-                else -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
-                    // Свои группы и каналы - тоже раздельно: это разные вещи,
-                    // и в поиске их надо различать с одного взгляда.
-                    val myGroups = uiState.filtered.filter { !it.isChannel }
-                    val myChannels = uiState.filtered.filter { it.isChannel }
-                    if (myGroups.isNotEmpty()) {
-                        item { DirectoryHeader("Мои группы") }
-                        items(myGroups, key = { it.id }) { group ->
-                            GroupRow(group = group, onClick = { onGroupClick(group.id) })
-                            HorizontalDivider()
+                else -> {
+                    // Бегунок справа: видно, где мы в длинном списке.
+                    val scrollState = rememberLazyListState()
+                    Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = scrollState,
+                        contentPadding = PaddingValues(bottom = 96.dp),
+                    ) {
+                        // Свои группы и каналы - тоже раздельно: это разные вещи,
+                        // и в поиске их надо различать с одного взгляда.
+                        val myGroups = uiState.filtered.filter { !it.isChannel }
+                        val myChannels = uiState.filtered.filter { it.isChannel }
+                        if (myGroups.isNotEmpty()) {
+                            item { DirectoryHeader("Мои группы") }
+                            items(myGroups, key = { it.id }) { group ->
+                                GroupRow(group = group, onClick = { onGroupClick(group.id) })
+                                HorizontalDivider()
+                            }
+                        }
+                        if (myChannels.isNotEmpty()) {
+                            item { DirectoryHeader("Мои каналы") }
+                            items(myChannels, key = { it.id }) { group ->
+                                // Канал открывается лентой постов, группа - чатом.
+                                GroupRow(group = group, onClick = { onChannelClick(group.id) })
+                                HorizontalDivider()
+                            }
+                        }
+                        // Поиск по сетевому каталогу. Группы и каналы разнесены по
+                        // своим заголовкам: в общей куче непонятно, куда вступаешь.
+                        val foundGroups = uiState.directoryMatches.filter { !it.isChannel }
+                        val foundChannels = uiState.directoryMatches.filter { it.isChannel }
+                        val browsing = uiState.searchQuery.isBlank()
+                        if (foundGroups.isNotEmpty()) {
+                            item {
+                                DirectoryHeader(
+                                    if (browsing) "Открытые группы сети" else "Группы в сети"
+                                )
+                            }
+                            items(foundGroups, key = { it.groupId }) { entry ->
+                                DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
+                            }
+                        }
+                        if (foundChannels.isNotEmpty()) {
+                            item {
+                                DirectoryHeader(
+                                    if (browsing) "Открытые каналы сети" else "Каналы в сети"
+                                )
+                            }
+                            items(foundChannels, key = { it.groupId }) { entry ->
+                                DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
+                            }
                         }
                     }
-                    if (myChannels.isNotEmpty()) {
-                        item { DirectoryHeader("Мои каналы") }
-                        items(myChannels, key = { it.id }) { group ->
-                            // Канал открывается лентой постов, группа - чатом.
-                            GroupRow(group = group, onClick = { onChannelClick(group.id) })
-                            HorizontalDivider()
-                        }
-                    }
-                    // Поиск по сетевому каталогу. Группы и каналы разнесены по
-                    // своим заголовкам: в общей куче непонятно, куда вступаешь.
-                    val foundGroups = uiState.directoryMatches.filter { !it.isChannel }
-                    val foundChannels = uiState.directoryMatches.filter { it.isChannel }
-                    val browsing = uiState.searchQuery.isBlank()
-                    if (foundGroups.isNotEmpty()) {
-                        item {
-                            DirectoryHeader(
-                                if (browsing) "Открытые группы сети" else "Группы в сети"
-                            )
-                        }
-                        items(foundGroups, key = { it.groupId }) { entry ->
-                            DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
-                        }
-                    }
-                    if (foundChannels.isNotEmpty()) {
-                        item {
-                            DirectoryHeader(
-                                if (browsing) "Открытые каналы сети" else "Каналы в сети"
-                            )
-                        }
-                        items(foundChannels, key = { it.groupId }) { entry ->
-                            DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
-                        }
+                    ApuScrollbar(state = scrollState)
                     }
                 }
             }

@@ -8,6 +8,7 @@ package com.vladimir.messenger.ui.screens.channels
 // тема, первое сообщение темы это текст поста, остальные - комментарии.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -179,24 +180,28 @@ fun ChannelScreen(
                         listState.scrollToItem(uiState.posts.lastIndex)
                     }
                 }
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    items(uiState.posts, key = { it.topicId }) { post ->
-                        PostCard(
-                            post = post,
-                            onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
-                            onSaveToFavorites = { viewModel.savePostToFavorites(post) },
-                            reactions = uiState.reactions[post.messageId].orEmpty(),
-                            onToggleReaction = { emoji ->
-                                viewModel.toggleReaction(post.messageId, emoji)
-                            },
-                            onRemoveReaction = { viewModel.removeReaction(post.messageId) },
-                        )
+                // Бегунок справа: в длинном списке видно, где мы находимся.
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(uiState.posts, key = { it.topicId }) { post ->
+                            PostCard(
+                                post = post,
+                                onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
+                                onSaveToFavorites = { viewModel.savePostToFavorites(post) },
+                                reactions = uiState.reactions[post.messageId].orEmpty(),
+                                onToggleReaction = { emoji ->
+                                    viewModel.toggleReaction(post.messageId, emoji)
+                                },
+                                onRemoveReaction = { viewModel.removeReaction(post.messageId) },
+                            )
+                        }
                     }
+                    ApuScrollbar(state = listState)
                 }
                 }
             }
