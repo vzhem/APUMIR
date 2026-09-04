@@ -27,6 +27,7 @@ import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ApuMainTabBar
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.SearchOrb
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -197,9 +198,9 @@ fun ChatListScreen(
                         // Разгрузка панели: частые действия остаются иконками (поиск, скан QR),
                         // остальное уходит в меню «⋮». Заголовок + бейдж ранга помещаются целиком.
                         if (!isSearchVisible) {
-                            IconButton(onClick = { isSearchVisible = true }) {
-                                Icon(Icons.Default.Search, "Поиск")
-                            }
+                            // Объёмный шарик вместо плоского значка: поиск
+                            // здесь главное действие и должен быть заметен.
+                            SearchOrb(onClick = { isSearchVisible = true })
                             IconButton(onClick = onScanQrClick) {
                                 Icon(Icons.Default.QrCodeScanner, "Сканировать QR")
                             }
@@ -730,7 +731,7 @@ private fun SearchTextField(
     TextField(
         value       = query,
         onValueChange = onQueryChanged,
-        placeholder = { Text("Поиск по чатам...") },
+        placeholder = { Text("Поиск: чаты, группы, каналы") },
         singleLine  = true,
         colors = TextFieldDefaults.colors(
             focusedContainerColor   = MaterialTheme.colorScheme.surface,

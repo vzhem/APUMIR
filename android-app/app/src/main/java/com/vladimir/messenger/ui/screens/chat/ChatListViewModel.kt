@@ -307,7 +307,14 @@ class ChatListViewModel @Inject constructor(
     private fun buildState(snap: Snapshot): Built {
         val query = snap.query.trim()
         val sections = sectionsFor(snap.groups)
-        val section = if (snap.section in sections) snap.section else InboxSection.All
+        // Во время поиска показываем «Все»: человек ищет собеседника, а не
+        // раздел, и находка в группах не должна прятаться только потому, что
+        // открыта вкладка «Чаты».
+        val section = when {
+            query.isNotBlank() -> InboxSection.All
+            snap.section in sections -> snap.section
+            else -> InboxSection.All
+        }
 
         val filteredChats = filterChats(snap.chats, query)
         val filteredGroups = snap.groups.filter { row ->
