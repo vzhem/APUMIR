@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +60,12 @@ fun SettingsScreen(
     onShareProfileClick: () -> Unit = {},
     onMtProxyClick: () -> Unit = {},
     onRankBenefitsClick: () -> Unit = {},
+    /**
+     * Нижняя панель разделов. Приходит снаружи, из навигации: экран не знает
+     * маршрутов и не должен их знать. Пустая по умолчанию, чтобы превью и
+     * тесты обходились без навигации.
+     */
+    bottomBar: @Composable () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -75,6 +82,7 @@ fun SettingsScreen(
         ChatWallpaper()
         Scaffold(
             containerColor = Color.Transparent,
+            bottomBar = bottomBar,
             topBar = {
                 Column {
                     TopAppBar(

@@ -43,6 +43,8 @@ data class ApuBottomItem(
     val icon: ImageVector,
     /** Число на значке: 0 - ничего не показывать. */
     val badge: Int = 0,
+    /** Раздел, который открыт прямо сейчас: подсвечиваем кнопку. */
+    val selected: Boolean = false,
     val onClick: () -> Unit,
 )
 
@@ -101,9 +103,16 @@ private fun BottomButton(item: ApuBottomItem) {
         label = "apu-bottom-press",
     )
 
+    // Открытый раздел подсвечен заливкой: без неё в пузыре не видно, где ты.
+    val highlight = if (item.selected) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+    } else {
+        Color.Transparent
+    }
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
+            .background(highlight)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -123,7 +132,11 @@ private fun BottomButton(item: ApuBottomItem) {
             Icon(
                 item.icon,
                 contentDescription = item.title,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = if (item.selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                },
                 modifier = Modifier.size(24.dp),
             )
         }

@@ -87,6 +87,12 @@ fun SavedScreen(
     onBackClick: () -> Unit,
     /** Открыть оригинал: личный чат, группу с темой или ленту канала. */
     onOpenOrigin: (item: SavedItemEntity) -> Unit = {},
+    /**
+     * Нижняя панель разделов. Приходит снаружи, из навигации: экран не знает
+     * маршрутов и не должен их знать. Пустая по умолчанию, чтобы превью и
+     * тесты обходились без навигации.
+     */
+    bottomBar: @Composable () -> Unit = {},
     viewModel: SavedViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -113,6 +119,7 @@ fun SavedScreen(
         ChatWallpaper()
         Scaffold(
             containerColor = Color.Transparent,
+            bottomBar = bottomBar,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(

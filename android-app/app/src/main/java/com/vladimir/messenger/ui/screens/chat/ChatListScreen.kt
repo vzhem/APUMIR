@@ -25,8 +25,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
-import com.vladimir.messenger.ui.components.ApuBottomBar
-import com.vladimir.messenger.ui.components.ApuBottomItem
+import com.vladimir.messenger.ui.components.ApuMainTabBar
+import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ApuTab
+import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
@@ -251,30 +253,15 @@ fun ChatListScreen(
             }
         },
         bottomBar = {
-            // Нижняя панель в том же пузыре, что и полоска разделов сверху:
-            // частые разделы под большим пальцем, а не спрятаны в меню «⋮».
-            ApuBottomBar(
-                items = listOf(
-                    ApuBottomItem(
-                        title = "Контакты",
-                        icon = Icons.Default.People,
-                        onClick = onContactsClick,
-                    ),
-                    ApuBottomItem(
-                        title = "Группы",
-                        icon = Icons.Filled.Groups,
-                        onClick = onGroupsClick,
-                    ),
-                    ApuBottomItem(
-                        title = "Избранное",
-                        icon = Icons.Default.Bookmark,
-                        onClick = onSavedClick,
-                    ),
-                    ApuBottomItem(
-                        title = "Настройки",
-                        icon = Icons.Default.Settings,
-                        onClick = onSettingsClick,
-                    ),
+            // Один и тот же пузырь на всех разделах: с главного экрана видно,
+            // куда можно уйти, и панель не пропадает после перехода.
+            ApuMainTabBar(
+                current = ApuTab.Chats,
+                actions = ApuTabActions(
+                    onContacts = onContactsClick,
+                    onGroups = onGroupsClick,
+                    onSaved = onSavedClick,
+                    onSettings = onSettingsClick,
                 ),
             )
         },
@@ -726,6 +713,8 @@ private fun SectionPage(
                         }
                     }
                 }
+                // Бегунок справа: показывает, где мы в длинном списке.
+                ApuScrollbar(state = listState)
             }
         }
     }

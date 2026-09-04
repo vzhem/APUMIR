@@ -100,8 +100,19 @@ foreach ($Serial in $Targets) {
         # -r keep data, -t allow test build, -d allow same-or-lower version code.
         $Out = Invoke-Adb @('-s', $Serial, 'install', '-r', '-t', '-d', $ApkPath)
         $Out | ForEach-Object { Write-Output $_ }
-        if (($Out -join ' ') -notmatch 'Success') {
+        $Joined = ($Out -join ' ')
+        if ($Joined -notmatch 'Success') {
             Write-Output "WARNING: install did not report Success on $Serial"
+            if ($Joined -match 'INSTALL_FAILED_UPDATE_INCOMPATIBLE') {
+                # The phone holds a RELEASE build; a debug apk is signed with a
+                # different key and Android refuses to replace one with the
+                # other. Uninstalling would take the chats with it, so the
+                # decision is left to a human.
+                Write-Output 'CAUSE: a release build is installed and it is signed with another key.'
+                Write-Output 'Either update that phone through the in-app updater (keeps the data),'
+                Write-Output 'or uninstall first - which DELETES its chats:'
+                Write-Output ("  adb -s {0} uninstall {1}" -f $Serial, $Package)
+            }
         }
     }
 

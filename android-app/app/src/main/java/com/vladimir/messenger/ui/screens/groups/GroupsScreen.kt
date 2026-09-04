@@ -73,6 +73,12 @@ fun GroupsScreen(
     joinLink: String? = null,
     /** Из меню кнопки-карандаша: "group" или "channel" - сразу открыть создание. */
     create: String? = null,
+    /**
+     * Нижняя панель разделов. Приходит снаружи, из навигации: экран не знает
+     * маршрутов и не должен их знать. Пустая по умолчанию, чтобы превью и
+     * тесты обходились без навигации.
+     */
+    bottomBar: @Composable () -> Unit = {},
     viewModel: GroupsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -99,6 +105,7 @@ fun GroupsScreen(
     ChatWallpaper()
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        bottomBar = bottomBar,
         topBar = {
             TopAppBar(
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(

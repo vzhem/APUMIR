@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import android.content.Intent
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.util.AppShare
@@ -47,6 +48,12 @@ fun ContactsScreen(
     onAddContactClick: () -> Unit,
     onRenameContactClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
     onCallContactClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
+    /**
+     * Нижняя панель разделов. Приходит снаружи, из навигации: экран не знает
+     * маршрутов и не должен их знать. Пустая по умолчанию, чтобы превью и
+     * тесты обходились без навигации.
+     */
+    bottomBar: @Composable () -> Unit = {},
     viewModel: ContactsViewModel = hiltViewModel()
 ) {
     val contacts by viewModel.contacts.collectAsState()
@@ -61,6 +68,7 @@ fun ContactsScreen(
         ChatWallpaper()
         Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        bottomBar = bottomBar,
         topBar = {
             TopAppBar(
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(

@@ -38,6 +38,9 @@ import com.vladimir.messenger.ui.screens.onboarding.OnboardingScreen
 import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
+import com.vladimir.messenger.ui.components.ApuMainTabBar
+import com.vladimir.messenger.ui.components.ApuTab
+import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
 import com.vladimir.messenger.ui.screens.contacts.RenameContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
@@ -430,6 +433,9 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         composable(route = Screen.Settings.route) {
             SettingsScreen(
+                bottomBar = {
+                    ApuMainTabBar(ApuTab.Settings, mainTabActions(navController))
+                },
                 onBackClick = { navController.popBackStack() },
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
@@ -449,6 +455,9 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         composable(route = Screen.Saved.route) {
             SavedScreen(
+                bottomBar = {
+                    ApuMainTabBar(ApuTab.Saved, mainTabActions(navController))
+                },
                 onBackClick = { navController.popBackStack() },
                 // Возврат к оригиналу: личный чат, тема группы или лента канала.
                 onOpenOrigin = { item ->
@@ -483,6 +492,9 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         composable(route = Screen.Contacts.route) {
             ContactsScreen(
+                bottomBar = {
+                    ApuMainTabBar(ApuTab.Contacts, mainTabActions(navController))
+                },
                 onNavigateBack = { navController.popBackStack() },
                 onAddContactClick = { navController.navigate(Screen.AddContact.createRoute()) },
                 onContactClick = { contact ->
@@ -543,6 +555,9 @@ fun MessengerNavGraph(
             ),
         ) { entry ->
             GroupsScreen(
+                bottomBar = {
+                    ApuMainTabBar(ApuTab.Groups, mainTabActions(navController))
+                },
                 onGroupClick = { groupId ->
                     navController.navigate(Screen.GroupChat.createRoute(groupId))
                 },
@@ -653,3 +668,29 @@ fun MessengerNavGraph(
         }
     }
 }
+
+/**
+ * Куда ведут кнопки нижней панели разделов.
+ *
+ * Собрано в одном месте: панель обязана вести себя одинаково на всех экранах,
+ * а маршруты знает только навигация. `launchSingleTop` не даёт накапливать
+ * копии одного раздела при перескоках туда-обратно; чаты - корень, поэтому на
+ * них возвращаемся, а не кладём сверху ещё один экран.
+ */
+private fun mainTabActions(navController: NavHostController) = ApuTabActions(
+    onChats = {
+        navController.popBackStack(Screen.ChatList.route, inclusive = false)
+    },
+    onContacts = {
+        navController.navigate(Screen.Contacts.route) { launchSingleTop = true }
+    },
+    onGroups = {
+        navController.navigate(Screen.Groups.plain) { launchSingleTop = true }
+    },
+    onSaved = {
+        navController.navigate(Screen.Saved.route) { launchSingleTop = true }
+    },
+    onSettings = {
+        navController.navigate(Screen.Settings.route) { launchSingleTop = true }
+    },
+)
