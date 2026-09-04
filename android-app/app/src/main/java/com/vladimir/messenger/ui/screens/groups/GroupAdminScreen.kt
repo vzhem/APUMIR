@@ -278,16 +278,9 @@ private fun OverviewTab(
     ) { uri -> uri?.let(onSetAvatar) }
     val groupAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
         .collectAsState()
-    val groupAvatarBitmap = remember(groupAvatars["g:$groupId"]) {
-        groupAvatars["g:$groupId"]?.let { b64 ->
-            try {
-                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (e: Exception) {
-                null
-            }
-        }
-    }
+    // Общий кэш вместо разбора в отрисовке: base64 раскодируется в фоне.
+    val groupAvatarBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
+        .rememberAvatar(groupAvatars["g:$groupId"])
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),

@@ -146,14 +146,12 @@ fun GroupChatScreen(
                             val storeAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
                                 .collectAsState()
                             val gid = uiState.group?.id.orEmpty()
-                            val bmp = remember(storeAvatars["g:$gid"]) {
-                                storeAvatars["g:$gid"]?.let { b64 ->
-                                    try {
-                                        val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                    } catch (e: Exception) { null }
-                                }
-                            }
+                            // Через общий кэш: разбор base64 идёт в фоне и
+                            // результат переиспользуется. Раньше картинка
+                            // раскодировалась ПРЯМО В ОТРИСОВКЕ на главном
+                            // потоке - на входе в группу это давало зависание.
+                            val bmp = com.vladimir.messenger.ui.components.AvatarBitmaps
+                                .rememberAvatar(storeAvatars["g:$gid"])
                             if (bmp != null) {
                                 Image(
                                     bitmap = bmp.asImageBitmap(),
@@ -464,14 +462,10 @@ private fun GroupRailAvatar(
     avatarB64: String?,
     selected: Boolean,
 ) {
-    val bmp = remember(avatarB64) {
-        avatarB64?.let { b64 ->
-            try {
-                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (e: Exception) { null }
-        }
-    }
+    // Колонка показывает ВСЕ группы разом, поэтому раскодировать картинки в
+    // отрисовке нельзя: десяток аватаров подряд подвешивал главный поток на
+    // входе в группу и на возврате назад.
+    val bmp = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(avatarB64)
     Box(
         modifier = Modifier
             .size(52.dp)

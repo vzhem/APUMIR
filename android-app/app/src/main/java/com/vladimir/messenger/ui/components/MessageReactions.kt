@@ -38,8 +38,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vladimir.messenger.data.reaction.ReactionPalette
@@ -107,22 +106,21 @@ private fun ReactionChip(
         )
     }
 
-    // Где значок находится на экране: отсюда стартует полёт, чтобы ракета
-    // уходила вверх ИМЕННО от этого сообщения, а не из середины экрана.
-    // Координаты переводим в доли экрана - слой полёта живёт отдельно и о
-    // списке ничего не знает.
-    val screen = screenSizePx()
-    var spot by remember { mutableStateOf(0.5f to 0.72f) }
+    // Где значок находится на ЭКРАНЕ: отсюда стартует полёт, чтобы ракета
+    // уходила вверх ИМЕННО от этого сообщения.
+    val view = LocalView.current
+    var spot by remember { mutableStateOf(0f to 0f) }
 
     Row(
         modifier = Modifier
             .scale(bounce.value)
             .onGloballyPositioned { coords ->
-                if (screen.first > 0f && screen.second > 0f) {
-                    val at = coords.positionInWindow()
-                    spot = ((at.x + coords.size.width / 2f) / screen.first) to
-                        ((at.y + coords.size.height / 2f) / screen.second)
-                }
+                val at = coords.positionInWindow()
+                spot = toScreenSpot(
+                    view,
+                    at.x + coords.size.width / 2f,
+                    at.y + coords.size.height / 2f,
+                )
             }
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFFF1F3F7))
@@ -134,7 +132,9 @@ private fun ReactionChip(
             .clickable {
                 // Полёт запускаем, только когда СТАВИМ реакцию. При снятии
                 // ничего не взлетает: это было бы прощальным салютом.
-                if (!item.mine) {
+                // spot == 0 значит замер ещё не прошёл - полёт пропускаем,
+                // чтобы значок не стартовал из угла экрана.
+                if (!item.mine && spot.second > 0f) {
                     ReactionFlight.launch(item.emoji, spot.first, spot.second)
                 }
                 onToggle(item.emoji)
@@ -207,8 +207,9 @@ private fun PickerEmoji(
     orderIndex: Int,
     onPick: (String) -> Unit,
 ) {
-    val screen = screenSizePx()
-    var spot by remember { mutableStateOf(0.5f to 0.72f) }
+    // Пузырь выбора - отдельное окно, поэтому положение переводим в экранное.
+    val view = LocalView.current
+    var spot by remember { mutableStateOf(0f to 0f) }
     val appear = remember(emoji) { Animatable(0f) }
     LaunchedEffect(emoji) {
         // Волна: 20 значков за примерно четверть секунды, дальше анимации нет.
@@ -256,29 +257,20 @@ private fun PickerEmoji(
                 shape = RoundedCornerShape(12.dp),
             )
             .onGloballyPositioned { coords ->
-                if (screen.first > 0f && screen.second > 0f) {
-                    val at = coords.positionInWindow()
-                    spot = ((at.x + coords.size.width / 2f) / screen.first) to
-                        ((at.y + coords.size.height / 2f) / screen.second)
-                }
+                val at = coords.positionInWindow()
+                spot = toScreenSpot(
+                    view,
+                    at.x + coords.size.width / 2f,
+                    at.y + coords.size.height / 2f,
+                )
             }
             .clickable {
                 // Значок вылетает из пузыря выбора и уходит вверх мимо него.
-                ReactionFlight.launch(emoji, spot.first, spot.second)
+                if (spot.second > 0f) {
+                    ReactionFlight.launch(emoji, spot.first, spot.second)
+                }
                 onPick(emoji)
             }
             .padding(horizontal = 4.dp, vertical = 5.dp),
     )
-}
-
-/** Ширина и высота экрана в пикселях - для перевода координат в доли. */
-@Composable
-private fun screenSizePx(): Pair<Float, Float> {
-    val config = LocalConfiguration.current
-    val density = LocalDensity.current
-    return remember(config.screenWidthDp, config.screenHeightDp, density.density) {
-        with(density) {
-            config.screenWidthDp.dp.toPx() to config.screenHeightDp.dp.toPx()
-        }
-    }
 }

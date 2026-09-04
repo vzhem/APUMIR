@@ -6,12 +6,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import android.view.View
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,12 +38,12 @@ import kotlin.math.sin
  */
 object ReactionFlight {
 
-    /** Один полёт: что летит и откуда стартовало (доля ширины/высоты экрана). */
+    /** Один полёт: что летит и откуда стартовало (пиксели ЭКРАНА). */
     data class Flight(
         val id: Long,
         val emoji: String,
-        val startXFraction: Float,
-        val startYFraction: Float,
+        val startXPx: Float,
+        val startYPx: Float,
     )
 
     private val _current = MutableStateFlow<Flight?>(null)
@@ -52,21 +54,26 @@ object ReactionFlight {
     /**
      * Запустить полёт значка.
      *
-     * [startXFraction]/[startYFraction] - откуда стартовать, в долях экрана.
-     * По умолчанию из нижней трети середины: туда обычно и нажимают.
+     * Координаты - в пикселях ЭКРАНА (см. [toScreenSpot]). Именно
+     * экрана, а не окна: пузырь выбора реакции - отдельное окно со своим
+     * началом координат, и его «внутренние» пиксели не совпадают с окном
+     * приложения, поверх которого рисуется полёт. Раньше сюда передавались
+     * доли экрана из настроек устройства - в них нет строки состояния и
+     * выреза, поэтому значок улетал в верхнюю часть экрана.
      */
     fun launch(
         emoji: String,
-        startXFraction: Float = 0.5f,
-        startYFraction: Float = 0.72f,
+        startXPx: Float,
+        startYPx: Float,
     ) {
         if (emoji.isBlank()) return
+        if (startYPx <= 0f) return
         counter += 1
         _current.value = Flight(
             id = counter,
             emoji = emoji,
-            startXFraction = startXFraction.coerceIn(0.05f, 0.95f),
-            startYFraction = startYFraction.coerceIn(0.05f, 0.95f),
+            startXPx = startXPx,
+            startYPx = startYPx,
         )
     }
 
@@ -82,12 +89,12 @@ object ReactionFlight {
      * вверх языком, праздник разлетается. Остальные всплывают спокойно.
      */
     fun styleFor(emoji: String): FlightStyle = when (emoji) {
-        "\uD83D\uDE80" -> FlightStyle(riseFraction = 0.95f, durationMs = 1100, swayDp = 6f, spinDegrees = -18f, growTo = 1.7f)
-        "\u2764\uFE0F", "\uD83D\uDE0D" -> FlightStyle(riseFraction = 0.62f, durationMs = 1500, swayDp = 34f, spinDegrees = 10f, growTo = 1.9f)
-        "\uD83D\uDD25" -> FlightStyle(riseFraction = 0.5f, durationMs = 1100, swayDp = 18f, spinDegrees = 12f, growTo = 2.1f)
-        "\uD83C\uDF89", "\u2B50", "\uD83C\uDF1F" -> FlightStyle(riseFraction = 0.55f, durationMs = 1300, swayDp = 26f, spinDegrees = 200f, growTo = 1.8f)
-        "\uD83D\uDC4D", "\uD83D\uDC4F", "\uD83D\uDCAA" -> FlightStyle(riseFraction = 0.45f, durationMs = 1000, swayDp = 10f, spinDegrees = -14f, growTo = 1.7f)
-        else -> FlightStyle(riseFraction = 0.5f, durationMs = 1200, swayDp = 20f, spinDegrees = 8f, growTo = 1.8f)
+        "\uD83D\uDE80" -> FlightStyle(riseFraction = 0.85f, durationMs = 2000, swayDp = 8f, spinDegrees = -14f, growTo = 1.8f)
+        "\u2764\uFE0F", "\uD83D\uDE0D" -> FlightStyle(riseFraction = 0.55f, durationMs = 2400, swayDp = 34f, spinDegrees = 10f, growTo = 2.0f)
+        "\uD83D\uDD25" -> FlightStyle(riseFraction = 0.45f, durationMs = 2000, swayDp = 18f, spinDegrees = 12f, growTo = 2.2f)
+        "\uD83C\uDF89", "\u2B50", "\uD83C\uDF1F" -> FlightStyle(riseFraction = 0.5f, durationMs = 2200, swayDp = 26f, spinDegrees = 200f, growTo = 1.9f)
+        "\uD83D\uDC4D", "\uD83D\uDC4F", "\uD83D\uDCAA" -> FlightStyle(riseFraction = 0.4f, durationMs = 1800, swayDp = 12f, spinDegrees = -14f, growTo = 1.8f)
+        else -> FlightStyle(riseFraction = 0.45f, durationMs = 2000, swayDp = 20f, spinDegrees = 8f, growTo = 1.9f)
     }
 
     /** Насколько высоко, как долго, как качает и как крутит. */
@@ -98,6 +105,19 @@ object ReactionFlight {
         val spinDegrees: Float,
         val growTo: Float,
     )
+}
+
+/**
+ * Перевести положение внутри окна в положение на ЭКРАНЕ.
+ *
+ * `positionInWindow` даёт координаты внутри своего окна, а окон у нас два:
+ * приложение и диалог выбора реакции. Смещение окна на экране берём у
+ * системного `View` - после этого обе точки живут в одной системе координат.
+ */
+fun toScreenSpot(view: View, xInWindow: Float, yInWindow: Float): Pair<Float, Float> {
+    val origin = IntArray(2)
+    view.getLocationOnScreen(origin)
+    return (origin[0] + xInWindow) to (origin[1] + yInWindow)
 }
 
 /**
@@ -125,12 +145,18 @@ fun ReactionFlightOverlay() {
 
     val t = progress.value
 
-    // BoxWithConstraints даёт размер САМОГО слоя (весь экран). Внутри
-    // graphicsLayer `size` - это размер летящего значка, а не экрана, поэтому
-    // отсчитывать полёт от него нельзя.
+    // BoxWithConstraints даёт высоту слоя - она нужна, чтобы «подняться на
+    // половину экрана» считалось от экрана, а не от размера значка.
+    // Слой сам живёт в окне приложения, поэтому экранную точку старта
+    // переводим обратно в координаты этого окна.
+    val view = LocalView.current
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val screenW = with(LocalDensity.current) { maxWidth.toPx() }
         val screenH = with(LocalDensity.current) { maxHeight.toPx() }
+        val origin = remember(shown.id) {
+            IntArray(2).also { view.getLocationOnScreen(it) }
+        }
+        val startX = shown.startXPx - origin[0]
+        val startY = shown.startYPx - origin[1]
         Text(
             text = shown.emoji,
             fontSize = 34.sp,
@@ -141,8 +167,8 @@ fun ReactionFlightOverlay() {
                     // а не равномерным сдвигом картинки.
                     val eased = 1f - (1f - t) * (1f - t)
                     val sway = style.swayDp.dp.toPx() * sin(t * 6.2831855f)
-                    translationX = screenW * shown.startXFraction - size.width / 2f + sway
-                    translationY = screenH * shown.startYFraction -
+                    translationX = startX - size.width / 2f + sway
+                    translationY = startY -
                         screenH * style.riseFraction * eased -
                         size.height / 2f
                     // Растёт на взлёте и держит размер до конца.
@@ -150,8 +176,9 @@ fun ReactionFlightOverlay() {
                     scaleX = grow
                     scaleY = grow
                     rotationZ = style.spinDegrees * t
-                    // Гаснет только во второй половине пути.
-                    alpha = if (t < 0.55f) 1f else 1f - (t - 0.55f) / 0.45f
+                    // Гаснет только на последней четверти пути: значок должен
+                    // быть виден почти весь полёт, а не мигнуть и исчезнуть.
+                    alpha = if (t < 0.75f) 1f else 1f - (t - 0.75f) / 0.25f
                 },
         )
     }

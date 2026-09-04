@@ -79,6 +79,26 @@ class GroupRepository(
 ) {
 
     /**
+     * Мой идентификатор, спрошенный у ядра ОДИН раз.
+     *
+     * `myNodeId()` уходит в ядро и ждёт его внутренний замок. Он вызывается в
+     * горячих местах: `toSummary` зовёт его для КАЖДОЙ группы при каждом
+     * обновлении списка, а левая колонка на экране группы показывает все
+     * группы разом. На входе в группу это давало пачку вызовов в ядро подряд
+     * и «Приложение не отвечает». Идентификатор за время работы не меняется,
+     * поэтому первое ненулевое значение запоминаем навсегда.
+     */
+    @Volatile
+    private var cachedNodeId: String? = null
+
+    private fun myId(): String? {
+        cachedNodeId?.let { return it }
+        val fresh = myNodeId()?.takeIf { it.isNotBlank() }
+        if (fresh != null) cachedNodeId = fresh
+        return fresh
+    }
+
+    /**
      * Узлы, для которых состав уже запрашивали: повторно не спрашиваем,
      * чтобы одно неизвестное имя не породило поток запросов.
      */
@@ -122,7 +142,7 @@ class GroupRepository(
                 IllegalStateException("Создание групп доступно с ранга «Проводник»")
             )
         }
-        val me = myNodeId()
+        val me = myId()
             ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
 
         val cleanTitle = title.trim()
@@ -241,7 +261,7 @@ class GroupRepository(
             Log.i(TAG, "dir publish skipped: too soon")
             return
         }
-        val me = myNodeId() ?: return
+        val me = myId() ?: return
         val ids = contactIds()
         if (ids.isEmpty()) return
         for (g in groupDao.getOwnPublishable(me)) {
@@ -268,7 +288,7 @@ class GroupRepository(
      */
     suspend fun publishMyNickname(force: Boolean = false) {
         if (!force && !dueNow(lastNicknamePublishMs, GOSSIP_MIN_INTERVAL_MS)) return
-        val me = myNodeId() ?: return
+        val me = myId() ?: return
         val name = myUsername() ?: return
         val ids = contactIds()
         if (ids.isEmpty()) return
@@ -289,7 +309,7 @@ class GroupRepository(
      */
     suspend fun publishMyAvatar(force: Boolean = false) {
         if (!force && !dueNow(lastAvatarPublishMs, GOSSIP_MIN_INTERVAL_MS)) return
-        val me = myNodeId() ?: return
+        val me = myId() ?: return
         val b64 = myAvatarB64() ?: return
         val ids = contactIds()
         if (ids.isEmpty()) return
@@ -315,7 +335,7 @@ class GroupRepository(
     }
 
     private suspend fun handleAvatar(packet: GroupWire.Packet.Avatar, senderId: String) {
-        if (packet.ownerId == myNodeId()) return // свой из сети не храним
+        if (packet.ownerId == myId()) return // свой из сети не храним
         if (packet.dataB64.length > 40_000) return // защита от мусора
         val older = avatarDao.byOwner(packet.ownerId)
         if (older == null || packet.updatedAtMs >= older.updatedAtMs) {
@@ -383,7 +403,7 @@ class GroupRepository(
         )
         // Спор об имени: такое же имя у чужого владельца. Прав тот, у кого
         // регистрация раньше (при равенстве времени - тот, у кого id меньше).
-        val me = myNodeId() ?: return
+        val me = myId() ?: return
         val mine = myUsername() ?: return
         if (packet.ownerId != me && packet.name.equals(mine, ignoreCase = true)) {
             val myAt = myRegisteredAt()
@@ -411,7 +431,7 @@ class GroupRepository(
 
     private suspend fun handleDirectory(packet: GroupWire.Packet.Directory, senderId: String) {
         if (packet.groupId.isBlank() || packet.title.isBlank()) return
-        if (packet.ownerId == myNodeId()) return // своё не храним
+        if (packet.ownerId == myId()) return // своё не храним
         directoryDao.upsert(
             DirectoryEntity(
                 groupId = packet.groupId,
@@ -445,7 +465,7 @@ class GroupRepository(
     }
 
     private suspend fun toSummary(g: GroupEntity): GroupSummary {
-        val me = myNodeId().orEmpty()
+        val me = myId().orEmpty()
         val mine = groupDao.getMember(g.id, me)
         return GroupSummary(
             id = g.id,
@@ -505,7 +525,7 @@ class GroupRepository(
         if (clean.length > MAX_TOPIC_CHARS) {
             return Result.failure(IllegalArgumentException("Название темы длиннее $MAX_TOPIC_CHARS символов"))
         }
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupPermissions.canManageTopics(member.role, member.permissions)) {
@@ -555,7 +575,7 @@ class GroupRepository(
     ): Result<Unit> {
         val topic = groupDao.getTopicById(topicId)
             ?: return Result.failure(IllegalStateException("Тема не найдена"))
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(topic.groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupPermissions.canManageTopics(member.role, member.permissions)) {
@@ -572,7 +592,7 @@ class GroupRepository(
         if (body.length > MAX_MESSAGE_CHARS) {
             return Result.failure(IllegalArgumentException("Сообщение длиннее $MAX_MESSAGE_CHARS символов"))
         }
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val group = groupDao.getGroupById(groupId)
             ?: return Result.failure(IllegalStateException("Группа не найдена"))
         val member = groupDao.getMember(groupId, me)
@@ -654,7 +674,7 @@ class GroupRepository(
     // ── Приём групповых событий ───────────────────────────────────────────────
 
     suspend fun handleIncoming(senderId: String, packet: GroupWire.Packet, messageId: String) {
-        val me = myNodeId().orEmpty()
+        val me = myId().orEmpty()
         when (packet) {
             is GroupWire.Packet.Message -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return
@@ -935,7 +955,7 @@ class GroupRepository(
         messageId: String,
         pinned: Boolean,
     ): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupPermissions.canPinMessages(member.role, member.permissions)) {
@@ -998,7 +1018,7 @@ class GroupRepository(
 
     /** Шаг 1 для частного вступления: заявка уходит администраторам группы. */
     suspend fun sendJoinRequest(groupId: String, note: String): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val admins = groupDao.getAdmins(groupId)
         if (admins.isEmpty()) return Result.failure(IllegalStateException("В группе нет администраторов"))
         val envelope = GroupWire.buildJoinRequest(
@@ -1016,7 +1036,7 @@ class GroupRepository(
         nodeId: String,
         approve: Boolean,
     ): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupPermissions.canInvite(member.role, member.permissions, 0L)) {
@@ -1083,7 +1103,7 @@ class GroupRepository(
         maxUses: Int = 0,
         requestApproval: Boolean? = null,
     ): Result<InviteSummary> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         val group = groupDao.getGroupById(groupId)
@@ -1108,7 +1128,7 @@ class GroupRepository(
     }
 
     suspend fun revokeInvite(groupId: String, slug: String): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         val group = groupDao.getGroupById(groupId)
@@ -1128,7 +1148,7 @@ class GroupRepository(
      * а владельцу нужно ещё и очистить список от мертвых строк.
      */
     suspend fun deleteInvite(groupId: String, slug: String): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         val group = groupDao.getGroupById(groupId)
@@ -1155,7 +1175,7 @@ class GroupRepository(
     suspend fun joinByLink(raw: String, note: String = ""): JoinOutcome {
         val target = GroupInviteLinks.parseTarget(raw)
             ?: return JoinOutcome.Failed("Это не ссылка-приглашение в группу")
-        val me = myNodeId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
+        val me = myId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
 
         // Уже в группе — не шлём повторную заявку.
         val known = target.groupId?.let { groupDao.getGroupById(it) }
@@ -1199,7 +1219,7 @@ class GroupRepository(
      * там работает [joinByLink].
      */
     suspend fun joinBySlug(slug: String, note: String = ""): JoinOutcome {
-        val me = myNodeId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
+        val me = myId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
         val invite = groupDao.getInviteBySlug(slug)
             ?: return JoinOutcome.Failed("Приглашение не найдено на этом телефоне")
         if (invite.revoked) return JoinOutcome.Failed("Приглашение отозвано")
@@ -1262,7 +1282,7 @@ class GroupRepository(
         permissions = m.permissions,
         customTitle = m.customTitle,
         isBanned = m.isBanned,
-        isMe = m.nodeId == myNodeId(),
+        isMe = m.nodeId == myId(),
     )
 
     /** Поиск участников по имени или идентификатору узла. */
@@ -1273,7 +1293,7 @@ class GroupRepository(
     }
 
     suspend fun setAdminRole(groupId: String, nodeId: String, admin: Boolean): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val actor = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupPermissions.canAddAdmins(actor.role, actor.permissions)) {
@@ -1295,7 +1315,7 @@ class GroupRepository(
     }
 
     suspend fun setAdminPermissions(groupId: String, nodeId: String, mask: Long): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val actor = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupPermissions.canAddAdmins(actor.role, actor.permissions)) {
@@ -1313,7 +1333,7 @@ class GroupRepository(
 
     /** Разрешения для участников — общая политика группы. */
     suspend fun setMemberPermissions(groupId: String, mask: Long): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val actor = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         // Смена разрешений участников — это изменение информации о группе,
@@ -1331,7 +1351,7 @@ class GroupRepository(
     }
 
     suspend fun setMemberBlocked(groupId: String, nodeId: String, banned: Boolean): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val actor = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupPermissions.canBan(actor.role, actor.permissions)) {
@@ -1363,7 +1383,7 @@ class GroupRepository(
     // ── Публичная / частная группа ────────────────────────────────────────────
 
     suspend fun setPublic(groupId: String, isPublic: Boolean): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         val group = groupDao.getGroupById(groupId)
@@ -1378,7 +1398,7 @@ class GroupRepository(
     suspend fun updateProfile(groupId: String, title: String, about: String): Result<Unit> {
         val clean = title.trim()
         if (clean.isEmpty()) return Result.failure(IllegalArgumentException("Пустое название"))
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         val group = groupDao.getGroupById(groupId)
@@ -1391,7 +1411,7 @@ class GroupRepository(
     }
 
     suspend fun leaveGroup(groupId: String): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (member.role == GroupRole.OWNER) {
@@ -1410,7 +1430,7 @@ class GroupRepository(
      * пакет GroupDeleted, и они стирают свою копию.
      */
     suspend fun deleteGroup(groupId: String): Result<Unit> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val group = groupDao.getGroupById(groupId)
             ?: return Result.failure(IllegalStateException("Группа не найдена"))
         if (group.ownerId != me) {
@@ -1429,7 +1449,7 @@ class GroupRepository(
     }
 
     suspend fun stats(groupId: String, days: Int = 7): Result<GroupStats> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupRole.isAdminOrOwner(member.role)) {
@@ -1535,7 +1555,7 @@ class GroupRepository(
      * группу - пакет маленький, а приёмник добавляет только отсутствующие темы.
      */
     suspend fun requestTopics(groupId: String) {
-        val me = myNodeId() ?: return
+        val me = myId() ?: return
         val group = groupDao.getGroupById(groupId) ?: return
         if (group.ownerId == me) return
         if (groupDao.getMember(groupId, me) == null) return
@@ -1554,7 +1574,7 @@ class GroupRepository(
      * возвращает, но группа снова становится управляемой.
      */
     suspend fun repairOwnerMemberships(): Int {
-        val me = myNodeId() ?: return 0
+        val me = myId() ?: return 0
         var repaired = 0
         groupDao.getGroups().forEach { group ->
             if (group.ownerId != me) return@forEach
@@ -1584,7 +1604,7 @@ class GroupRepository(
      * добавляет только отсутствующие строки.
      */
     suspend fun resyncMembers(groupId: String): Result<Int> {
-        val me = myNodeId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val actor = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (!GroupRole.isAdminOrOwner(actor.role)) {
@@ -1638,7 +1658,7 @@ class GroupRepository(
     }
 
     private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
-        val me = myNodeId().orEmpty()
+        val me = myId().orEmpty()
         val recipients = groupDao.getMembers(groupId)
             .filter { !it.isBanned }
             .map { it.nodeId }
