@@ -69,7 +69,9 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
+                    containerColor = Color.Transparent,
+                    // Прокрутка НЕ должна красить панель: под ней обои APU.
+                    scrolledContainerColor = Color.Transparent,
                 ),
                 title = { Text("Ранги и возможности") },
                 navigationIcon = {

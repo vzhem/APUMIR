@@ -123,7 +123,9 @@ fun GroupChatScreen(
         topBar = {
             TopAppBar(
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
+                    containerColor = Color.Transparent,
+                    // Прокрутка НЕ должна красить панель: под ней обои APU.
+                    scrolledContainerColor = Color.Transparent,
                 ),
                 title = {
                     // Название группы на белой полосочке со скруглениями и

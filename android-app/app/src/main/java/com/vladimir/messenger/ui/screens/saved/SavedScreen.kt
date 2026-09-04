@@ -118,6 +118,8 @@ fun SavedScreen(
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
+                    // Прокрутка НЕ должна красить панель: под ней обои APU.
+                    scrolledContainerColor = Color.Transparent,
                     ),
                     title = { Text("Избранное", fontWeight = FontWeight.Bold) },
                     navigationIcon = {

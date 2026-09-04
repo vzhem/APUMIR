@@ -8129,3 +8129,16 @@ Compose, ничего не грузит и не перезапускается, 
 6. «Избранное» → оригинал: в `saved_items` добавлены `originKind/originId/
    originTopicId/originName/originContactId` (схема 14 → 15, ALTER с DEFAULT '').
    Значок «Перейти к оригиналу» есть только у записей с origin.
+
+## Подложка при прокрутке и полоска соединения (2026-09-04)
+
+`TopAppBarDefaults.topAppBarColors(containerColor = Transparent)` задаёт только
+цвет ДО прокрутки: при `pinnedScrollBehavior`/`enterAlways` Material подставляет
+`scrolledContainerColor` (по умолчанию surfaceContainer) — панель закрашивалась
+и обои пропадали. Во всех 14 экранах с прозрачной панелью добавлен
+`scrolledContainerColor = Color.Transparent`.
+
+`NetworkStatusBar` заливалась сплошным цветом статуса поверх обоев. Теперь
+внутри неё `Box` с `ChatWallpaper()` через `matchParentSize()` (не
+`fillMaxSize()` — иначе подложка растянет полоску на весь экран), а цвет
+статуса лежит сверху с alpha 0.72.

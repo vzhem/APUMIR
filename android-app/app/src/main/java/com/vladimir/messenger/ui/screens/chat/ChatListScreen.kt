@@ -148,7 +148,11 @@ fun ChatListScreen(
                 NetworkStatusBar(status = uiState.networkStatus)
 
                 TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        // Прокрутка НЕ должна красить панель: под ней обои APU.
+                        scrolledContainerColor = Color.Transparent,
+                    ),
                     title = {
                         if (isSearchVisible) {
                             // Поиск по чатам

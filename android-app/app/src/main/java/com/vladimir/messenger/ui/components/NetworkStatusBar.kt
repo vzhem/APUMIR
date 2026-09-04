@@ -68,15 +68,23 @@ fun NetworkStatusBar(
             )
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(backgroundColor)
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment    = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
+        // Полоска стоит над обоями APU: сплошная заливка выглядела чужой
+        // заплаткой поверх картины. Поэтому цвет статуса кладём полупрозрачным
+        // слоем ПОВЕРХ тех же обоев - подложка остаётся видна, а смысл цвета
+        // (жёлтый - подключаемся, красный - нет связи) сохраняется.
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // matchParentSize, а не fillMaxSize: иначе подложка растянула бы
+            // саму полоску на весь экран - её высоту задаёт строка с текстом.
+            Box(modifier = Modifier.matchParentSize()) { ChatWallpaper() }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(backgroundColor.copy(alpha = 0.72f))
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment    = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
             Icon(
                 imageVector        = icon,
                 contentDescription = null,
@@ -93,6 +101,7 @@ fun NetworkStatusBar(
             // Анимированные точки для "Подключение..."
             if (status == NetworkStatus.Connecting) {
                 AnimatedDots()
+            }
             }
         }
     }

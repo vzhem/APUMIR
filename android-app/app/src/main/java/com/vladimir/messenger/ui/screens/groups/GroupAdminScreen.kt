@@ -148,7 +148,9 @@ fun GroupAdminScreen(
         topBar = {
             TopAppBar(
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    // Прокрутка НЕ должна красить панель: под ней обои APU.
+                    scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = { Text(uiState.group?.title ?: "Группа") },
                 navigationIcon = { TextButton(onClick = onBackClick) { Text("Назад") } },

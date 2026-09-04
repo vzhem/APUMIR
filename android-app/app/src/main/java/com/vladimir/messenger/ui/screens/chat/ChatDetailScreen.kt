@@ -123,7 +123,11 @@ fun ChatDetailScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    // Прокрутка НЕ должна красить панель: под ней обои APU.
+                    scrolledContainerColor = Color.Transparent,
+                ),
                 title = {
                     // Раунд 41: имя контакта/группы на белой полосочке со
                     // скруглениями и золотой рамкой - читается на любой подложке.

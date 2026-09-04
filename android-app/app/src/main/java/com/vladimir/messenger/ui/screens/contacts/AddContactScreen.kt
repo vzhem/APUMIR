@@ -104,7 +104,9 @@ fun AddContactScreen(
             topBar = {
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent
+                        containerColor = Color.Transparent,
+                    // Прокрутка НЕ должна красить панель: под ней обои APU.
+                    scrolledContainerColor = Color.Transparent,
                     ),
                     title = { Text("Добавить контакт", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
