@@ -1319,20 +1319,31 @@ self.runtime = Some(runtime);
                             );
                             continue;
                         }
-                        if let Some(sent_at) = parts
+                        // Объявление без даты - из старой сборки. Проверить
+                        // его свежесть нечем, а именно такие записи и копились
+                        // у брокера годами. В список попадают только те, кто
+                        // прислал дату и она не протухла.
+                        let sent_at = match parts
                             .get(5)
                             .and_then(|v| v.trim().parse::<i64>().ok())
                         {
-                            let age_ms = crate::storage::models::now_ms()
-                                .saturating_sub(sent_at);
-                            if age_ms > crate::config::defaults::PRESENCE_MAX_AGE_MS {
+                            Some(value) => value,
+                            None => {
                                 tracing::info!(
-                                    "PRESENCE: ignored {} - announcement is {}s old",
-                                    peer_id,
-                                    age_ms / 1000
+                                    "PRESENCE: ignored {} - announcement has no date",
+                                    peer_id
                                 );
                                 continue;
                             }
+                        };
+                        let age_ms = crate::storage::models::now_ms().saturating_sub(sent_at);
+                        if age_ms > crate::config::defaults::PRESENCE_MAX_AGE_MS {
+                            tracing::info!(
+                                "PRESENCE: ignored {} - announcement is {}h old",
+                                peer_id,
+                                age_ms / 3_600_000
+                            );
+                            continue;
                         }
 
                         tracing::info!("MQTT: peer online: {} ({})", display_name, peer_id);
