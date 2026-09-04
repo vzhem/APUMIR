@@ -141,7 +141,17 @@ class ChatListViewModel @Inject constructor(
         viewModelScope.launch {
             myNodeId.complete(
                 withContext(Dispatchers.IO) {
-                    com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+                    // Сначала спрашиваем сохранённый идентификатор, и только
+                    // если его нет - ядро. Раньше список чатов ЖДАЛ ответа
+                    // ядра: пока движок поднимается (а он ждёт сеть), главный
+                    // экран показывал пустоту с крутилкой. Идентификатор не
+                    // меняется, он лежит в настройках с первого запуска -
+                    // читать его с диска мгновенно и сети не требует.
+                    val saved = appContext
+                        .getSharedPreferences("p2p_prefs", android.content.Context.MODE_PRIVATE)
+                        .getString("node_id", null)
+                    saved?.takeIf { it.isNotBlank() }
+                        ?: com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
                 }
             )
         }

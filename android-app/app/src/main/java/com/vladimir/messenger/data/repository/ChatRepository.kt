@@ -25,7 +25,9 @@ class ChatRepository @Inject constructor(
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
     private val lastFullSyncTime = mutableMapOf<String, Long>()
-    private val FULL_SYNC_COOLDOWN_MS = 300_000L  // 30 секунд
+    // Полная досылка неподтверждённого - вещь дорогая (до 50 сообщений разом),
+    // поэтому одному собеседнику не чаще раза в 5 минут.
+    private val FULL_SYNC_COOLDOWN_MS = 300_000L
     companion object {
         private const val TAG = "ChatRepository"
     }
@@ -170,7 +172,7 @@ class ChatRepository @Inject constructor(
 
         // ШАГ 2: FULL SYNC - отправить последние 50 сообщений этому peer
         try {
-            // Проверка cooldown: не делать FULL SYNC чаще чем раз в 30 секунд для одного peer
+            // Проверка паузы: не досылать всё подряд одному и тому же собеседнику чаще, чем раз в 5 минут.
             val now = System.currentTimeMillis()
             val lastSync = lastFullSyncTime[peerId] ?: 0L
             val timeSinceLastSync = now - lastSync

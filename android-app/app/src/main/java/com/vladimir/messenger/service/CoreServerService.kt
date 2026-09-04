@@ -78,8 +78,11 @@ class CoreServerService : Service() {
      * = «живая метка свежее TTL»: который peers мы зажгли, тех сами и гасятся.
      */
     private val onlineMarked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    private val PRESENCE_TTL_MS = 100_000L    // ~3 пропущенных MQTT-пульса
-    private val PRESENCE_SWEEP_MS = 20_000L
+    // Ядро объявляет о себе раз в минуту (было раз в 30 секунд), поэтому
+    // «пропал» = три пропуска подряд = 200 секунд. Уборка тоже реже: она
+    // будит процесс, а быстрее гасить «в сети» смысла нет.
+    private val PRESENCE_TTL_MS = 200_000L    // ~3 пропущенных MQTT-пульса
+    private val PRESENCE_SWEEP_MS = 60_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
 
@@ -131,9 +134,27 @@ class CoreServerService : Service() {
                 val myName = prefs.getString("display_name", null) ?: "Unknown"
                 
                 if (myNodeId != null && myPubKey != null && myPubKey.isNotBlank()) {
-                    Log.i(TAG, "Registering in registry: nodeId=${myNodeId.take(16)}... name=$myName")
-                    val ok = botApi.registerMyself(myNodeId, myPubKey, myName)
-                    Log.i(TAG, "Registry registration: $ok")
+                    // Регистрация в справочнике нужна один раз: она сообщает
+                    // серверу-указателю мой ключ и имя. Раньше запрос уходил
+                    // при КАЖДОМ запуске сервиса, то есть по нескольку раз в
+                    // день на мобильном интернете. Повторяем, только если имя
+                    // изменилось или прошла неделя.
+                    val lastName = prefs.getString(REGISTRY_NAME_KEY, null)
+                    val lastAtMs = prefs.getLong(REGISTRY_AT_KEY, 0L)
+                    val weekPassed = System.currentTimeMillis() - lastAtMs > REGISTRY_REFRESH_MS
+                    if (lastName != myName || weekPassed) {
+                        Log.i(TAG, "Registering in registry: nodeId=${myNodeId.take(16)}... name=$myName")
+                        val ok = botApi.registerMyself(myNodeId, myPubKey, myName)
+                        Log.i(TAG, "Registry registration: $ok")
+                        if (ok) {
+                            prefs.edit()
+                                .putString(REGISTRY_NAME_KEY, myName)
+                                .putLong(REGISTRY_AT_KEY, System.currentTimeMillis())
+                                .apply()
+                        }
+                    } else {
+                        Log.i(TAG, "Registry registration skipped: already registered as $myName")
+                    }
                 } else {
                     Log.w(TAG, "Cannot register: nodeId=$myNodeId, pubKey=${myPubKey?.take(16) ?: "null"}")
                 }
@@ -159,6 +180,7 @@ class CoreServerService : Service() {
                 // за прошлые версии списки сошлись сами.
                 runCatching { contactRepository.reconcileChats() }
                     .onFailure { Log.w(TAG, "reconcileChats: " + it.message) }
+                // Без force: если рассылали недавно, повтор пропускается сам.
                 runCatching { groupRepository.publishMyNickname() }
                 runCatching { groupRepository.publishMyDirectory() }
                 // Аватары: сначала поднять присланные из базы в витрину,
@@ -169,13 +191,14 @@ class CoreServerService : Service() {
             serviceScope.launch {
                 com.vladimir.messenger.ui.theme.UsernameHolder.name
                     .drop(1)
-                    .collect { runCatching { groupRepository.publishMyNickname() } }
+                    // Имя сменили руками - рассылаем сразу, не дожидаясь паузы.
+                    .collect { runCatching { groupRepository.publishMyNickname(force = true) } }
             }
             // Сменил аватар - сразу разослать новый по контактам.
             serviceScope.launch {
                 com.vladimir.messenger.ui.theme.AvatarHolder.uri
                     .drop(1)
-                    .collect { runCatching { groupRepository.publishMyAvatar() } }
+                    .collect { runCatching { groupRepository.publishMyAvatar(force = true) } }
             }
         }
 
@@ -823,5 +846,11 @@ class CoreServerService : Service() {
     companion object {
         const val EXTRA_DISPLAY_NAME = "display_name"
         const val POLL_INTERVAL_MS = 5000L
+        /** Под каким именем нас уже записал справочник. */
+        private const val REGISTRY_NAME_KEY = "registry_registered_name"
+        /** Когда записал. */
+        private const val REGISTRY_AT_KEY = "registry_registered_at"
+        /** Повторяем запись не чаще раза в неделю. */
+        private const val REGISTRY_REFRESH_MS = 7L * 24 * 60 * 60 * 1000
     }
 }

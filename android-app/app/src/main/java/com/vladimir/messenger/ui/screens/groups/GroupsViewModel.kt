@@ -57,11 +57,9 @@ class GroupsViewModel @Inject constructor(
         // Возвращаем владельцу его строку участника, если её стёрла авария с
         // перезаписью группы: иначе группа есть в списке, но ничего не даёт.
         viewModelScope.launch(Dispatchers.IO) { groupRepository.repairOwnerMemberships() }
-        // Делимся своими публичными группами/каналами с контактами (каталог).
-        viewModelScope.launch(Dispatchers.IO) {
-            delay(2000)
-            runCatching { groupRepository.publishMyDirectory() }
-        }
+        // Каталог рассылается сам по расписанию (не чаще раза в 6 часов) и
+        // сразу при создании публичной группы. Открытие раздела больше НЕ
+        // тянет сеть: раньше каждый заход слал рассылку всем контактам.
         observe()
     }
 

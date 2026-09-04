@@ -17,7 +17,10 @@ import com.vladimir.messenger.data.local.entity.GroupMemberEntity
 import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -63,6 +66,16 @@ class GroupRepository(
      */
     private val onNicknameLearned: suspend (ownerId: String, name: String) -> Unit =
         { _, _ -> },
+    /**
+     * Куда уходят фоновые рассылки (каталог, @имя, аватар).
+     *
+     * Раньше создание группы ЖДАЛО, пока каталог разойдётся по всем контактам:
+     * на слабой сети это десятки секунд с крутилкой на экране, хотя сама
+     * группа уже была записана в базу. Теперь рассылка живёт своей жизнью, а
+     * экран открывается сразу.
+     */
+    private val backgroundScope: CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
 
     /**
@@ -71,6 +84,20 @@ class GroupRepository(
      */
     private val rosterAsked: MutableSet<String> =
         java.util.Collections.synchronizedSet(mutableSetOf())
+
+    /**
+     * Когда последний раз рассылали каталог, @имя и аватар.
+     *
+     * Эти три рассылки ничего не решают в переписке: они лишь помогают
+     * знакомым увидеть мои публичные группы, моё @имя и мою картинку. Раньше
+     * каталог уходил при КАЖДОМ открытии раздела «Группы», то есть по десятку
+     * раз за вечер и всегда по мобильному интернету. Теперь между рассылками
+     * выдерживается пауза, а важные события (создал группу, сменил имя или
+     * аватар) шлют сразу через force = true.
+     */
+    private var lastDirectoryPublishMs: Long = 0L
+    private var lastNicknamePublishMs: Long = 0L
+    private var lastAvatarPublishMs: Long = 0L
 
     /** Для экранов: доступно ли текущему рангу создание групп. */
     fun canCreateGroupsNow(): Boolean = canCreateGroups()
@@ -162,8 +189,13 @@ class GroupRepository(
         }
 
         Log.i(TAG, "group created id=$groupId public=$isPublic topics=$topicsEnabled")
-        runCatching { publishMyDirectory() }
-            .onFailure { Log.w(TAG, "directory publish failed: ${it.message}") }
+        // Рассылка каталога - в фон. Группа уже в базе, ждать сеть незачем.
+        if (isPublic) {
+            backgroundScope.launch {
+                runCatching { publishMyDirectory(force = true) }
+                    .onFailure { Log.w(TAG, "directory publish failed: ${it.message}") }
+            }
+        }
         return runCatching { requireSummary(groupId) }
     }
 
@@ -204,7 +236,11 @@ class GroupRepository(
      * больше [MAX_DIR_HOPS) - так поиск находит созданное другими людьми без
      * центрального сервера.
      */
-    suspend fun publishMyDirectory() {
+    suspend fun publishMyDirectory(force: Boolean = false) {
+        if (!force && !dueNow(lastDirectoryPublishMs, GOSSIP_MIN_INTERVAL_MS)) {
+            Log.i(TAG, "dir publish skipped: too soon")
+            return
+        }
         val me = myNodeId() ?: return
         val ids = contactIds()
         if (ids.isEmpty()) return
@@ -223,13 +259,15 @@ class GroupRepository(
             runCatching { delivery.deliver(g.id, envelope, ids) }
                 .onFailure { Log.w(TAG, "dir publish failed: ${it.message}") }
         }
+        lastDirectoryPublishMs = clock()
     }
 
     /**
      * Роевая публикация моего @имени: контакты сохраняют в реестр и передают
      * дальше, поэтому сеть знает, кто и когда зарегистрировал имя.
      */
-    suspend fun publishMyNickname() {
+    suspend fun publishMyNickname(force: Boolean = false) {
+        if (!force && !dueNow(lastNicknamePublishMs, GOSSIP_MIN_INTERVAL_MS)) return
         val me = myNodeId() ?: return
         val name = myUsername() ?: return
         val ids = contactIds()
@@ -242,13 +280,15 @@ class GroupRepository(
         )
         runCatching { delivery.deliver("nicknames", envelope, ids) }
             .onFailure { Log.w(TAG, "nick publish failed: ${it.message}") }
+        lastNicknamePublishMs = clock()
     }
 
     /**
      * Роевая публикация моего аватара: контакты сохраняют и показывают вместо
      * инициалов. Маленький JPEG, отправляем нечасто.
      */
-    suspend fun publishMyAvatar() {
+    suspend fun publishMyAvatar(force: Boolean = false) {
+        if (!force && !dueNow(lastAvatarPublishMs, GOSSIP_MIN_INTERVAL_MS)) return
         val me = myNodeId() ?: return
         val b64 = myAvatarB64() ?: return
         val ids = contactIds()
@@ -261,7 +301,12 @@ class GroupRepository(
         )
         runCatching { delivery.deliver("avatars", envelope, ids) }
             .onFailure { Log.w(TAG, "avatar publish failed: ${it.message}") }
+        lastAvatarPublishMs = clock()
     }
+
+    /** Пора ли повторять фоновую рассылку. */
+    private fun dueNow(lastMs: Long, minIntervalMs: Long): Boolean =
+        lastMs == 0L || clock() - lastMs >= minIntervalMs
 
     /** Аватары из базы - в витрину для экранов. */
     suspend fun loadAvatars() {
@@ -1667,6 +1712,12 @@ class GroupRepository(
         /** Дальность эпидемии каталога: владелец -> контакты -> их контакты. */
         private const val MAX_DIR_HOPS = 2
         private const val DAY_MS = 24L * 60 * 60 * 1000
+        /**
+         * Не чаще раза в 6 часов повторяем фоновые рассылки каталога, @имени и
+         * аватара. Это справочные данные: они не меняются по несколько раз в
+         * день, а трафик на слабой сети экономят заметно.
+         */
+        private const val GOSSIP_MIN_INTERVAL_MS = 6L * 60 * 60 * 1000
         private const val TAG = "GroupRepository"
     }
 }

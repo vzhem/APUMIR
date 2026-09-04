@@ -33,7 +33,7 @@ enum MqttOutboundCommand {
         message_id: String,
     },
     /// Немедленно объявить себя и запросить presence остальных (кнопка
-    /// «Собрать данные об абонентах»). Обычный цикл делает это раз в 30 секунд.
+    /// «Собрать данные об абонентах»). Обычный цикл делает это раз в минуту.
     AnnounceNow,
 }
 
@@ -807,7 +807,10 @@ self.runtime = Some(runtime);
                 }
             }
 
-            tokio::time::sleep(Duration::from_secs(10)).await;
+            // Было 10 секунд. Опрос локальной сети не тратит мобильный
+            // интернет, но будит Wi-Fi и радио каждые десять секунд. Соседи по
+            // Wi-Fi никуда не убегают за полминуты.
+            tokio::time::sleep(Duration::from_secs(30)).await;
         }
     }
 
@@ -1037,8 +1040,23 @@ self.runtime = Some(runtime);
         )
         .await;
 
-        // Event loop (poll every 1s, presence every 30s)
+        // Event loop: один оборот примерно раз в секунду (poll_event ждёт не
+        // дольше секунды). Счётчик оборотов задаёт периодические задачи.
         let mut tick: u32 = 0;
+        /// Как часто объявляем о себе и убираем пропавших.
+        ///
+        /// Было 30 секунд. Presence - это публикация в общий эфир, её получают
+        /// ВСЕ телефоны сети, поэтому цена не «один пакет», а «один пакет
+        /// умножить на всех». Минута даёт ту же живость списка (потеря
+        /// фиксируется по трём пропускам подряд), но вдвое меньше трафика.
+        const PRESENCE_EVERY_TICKS: u32 = 60;
+        /// Как часто пересказываем сети список знакомых узлов.
+        ///
+        /// Было тоже 30 секунд, и это была самая дорогая рассылка: до 30 имён
+        /// в общий эфир, который читают все. Состав знакомых меняется редко,
+        /// поэтому раз в пять минут достаточно, а трафика в десять раз меньше.
+        const GOSSIP_EVERY_TICKS: u32 = 300;
+        let mut gossip_tick: u32 = 0;
         // === GOSSIP PROTOCOL: peer exchange state ===
         // Значение: имя, когда видели, подтверждён ли узел ЛИЧНО.
         // «Лично» = его собственный presence, mDNS или входящее соединение.
@@ -1048,8 +1066,8 @@ self.runtime = Some(runtime);
         let mut seen_gossip: std::collections::VecDeque<String> = std::collections::VecDeque::new();
         const MAX_GOSSIP_CACHE: usize = 500;
         /// Узел считается исчезнувшим, если не присылал presence столько секунд.
-        /// Presence уходит раз в 30 секунд, поэтому три пропуска подряд - потеря.
-        const PEER_STALE_SECS: u64 = 100;
+        /// Presence уходит раз в минуту, поэтому три пропуска подряд - потеря.
+        const PEER_STALE_SECS: u64 = 200;
         /// Узлы, чей адрес пришёл из MQTT presence: только их адреса подлежат
         /// уборке. Адреса от mDNS живут по своим правилам.
         let mut seen_via_presence: std::collections::HashSet<String> =
@@ -2026,10 +2044,11 @@ self.runtime = Some(runtime);
                 }
             }
             tick += 1;
-            if tick >= 30 {
+            gossip_tick += 1;
+            if tick >= PRESENCE_EVERY_TICKS {
                 tick = 0;
 
-                // Уборка мёртвых узлов. Presence приходит раз в 30 секунд;
+                // Уборка мёртвых узлов. Presence приходит раз в минуту;
                 // всё, о чём не слышали PEER_STALE_SECS, считаем исчезнувшим.
                 // Без этого список рос копиями одной и той же трубки (каждая
                 // переустановка = новый node_id) и мешал выбирать живого
@@ -2077,6 +2096,11 @@ self.runtime = Some(runtime);
                     tracing::warn!("MQTT: periodic presence request failed: {}", e);
                 }
                 // === GOSSIP: broadcast known peers to the network ===
+                // Реже, чем presence: список знакомых меняется медленно.
+                if gossip_tick < GOSSIP_EVERY_TICKS {
+                    continue;
+                }
+                gossip_tick = 0;
                 if !known_peers.is_empty() {
                     let ts = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
