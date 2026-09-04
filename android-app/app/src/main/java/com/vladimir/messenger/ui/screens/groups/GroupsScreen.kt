@@ -131,7 +131,7 @@ fun GroupsScreen(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::onSearchQueryChanged,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("Поиск группы") },
+                placeholder = { Text("Поиск групп и каналов") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 singleLine = true,
             )
@@ -155,12 +155,20 @@ fun GroupsScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Групп пока нет",
+                                if (uiState.searchQuery.isBlank()) {
+                                    "Групп и каналов пока нет"
+                                } else {
+                                    "Ничего не нашлось"
+                                },
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = HintBubbleTextColor,
                             )
                             Text(
-                                "Создайте первую или войдите по ссылке-приглашению",
+                                if (uiState.searchQuery.isBlank()) {
+                                    "Создайте свою или войдите по ссылке-приглашению"
+                                } else {
+                                    "Попробуйте другое название или войдите по ссылке"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = HintBubbleMutedColor,
                             )
@@ -173,27 +181,38 @@ fun GroupsScreen(
                 }
 
                 else -> LazyColumn(contentPadding = PaddingValues(bottom = 96.dp)) {
-                    items(uiState.filtered, key = { it.id }) { group ->
-                        GroupRow(
-                            group = group,
-                            onClick = {
-                                // Канал открывается лентой постов, группа - чатом.
-                                if (group.isChannel) onChannelClick(group.id) else onGroupClick(group.id)
-                            },
-                        )
-                        HorizontalDivider()
-                    }
-                    // Поиск по сетевому каталогу: чужие публичные группы и каналы.
-                    if (uiState.directoryMatches.isNotEmpty()) {
-                        item {
-                            Text(
-                                "Найдено в сети",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
+                    // Свои группы и каналы - тоже раздельно: это разные вещи,
+                    // и в поиске их надо различать с одного взгляда.
+                    val myGroups = uiState.filtered.filter { !it.isChannel }
+                    val myChannels = uiState.filtered.filter { it.isChannel }
+                    if (myGroups.isNotEmpty()) {
+                        item { DirectoryHeader("Мои группы") }
+                        items(myGroups, key = { it.id }) { group ->
+                            GroupRow(group = group, onClick = { onGroupClick(group.id) })
+                            HorizontalDivider()
                         }
-                        items(uiState.directoryMatches, key = { it.groupId }) { entry ->
+                    }
+                    if (myChannels.isNotEmpty()) {
+                        item { DirectoryHeader("Мои каналы") }
+                        items(myChannels, key = { it.id }) { group ->
+                            // Канал открывается лентой постов, группа - чатом.
+                            GroupRow(group = group, onClick = { onChannelClick(group.id) })
+                            HorizontalDivider()
+                        }
+                    }
+                    // Поиск по сетевому каталогу. Группы и каналы разнесены по
+                    // своим заголовкам: в общей куче непонятно, куда вступаешь.
+                    val foundGroups = uiState.directoryMatches.filter { !it.isChannel }
+                    val foundChannels = uiState.directoryMatches.filter { it.isChannel }
+                    if (foundGroups.isNotEmpty()) {
+                        item { DirectoryHeader("Группы в сети") }
+                        items(foundGroups, key = { it.groupId }) { entry ->
+                            DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
+                        }
+                    }
+                    if (foundChannels.isNotEmpty()) {
+                        item { DirectoryHeader("Каналы в сети") }
+                        items(foundChannels, key = { it.groupId }) { entry ->
                             DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
                         }
                     }
@@ -291,13 +310,25 @@ private fun GroupRow(group: GroupSummary, onClick: () -> Unit) {
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                if (group.isPublic) Icons.Filled.Public else Icons.Filled.Lock,
-                contentDescription = if (group.isPublic) "Публичная" else "Частная",
+            com.vladimir.messenger.ui.components.GroupAvatar(
+                groupId = group.id,
+                title = group.title,
+                size = 44.dp,
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(group.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                // Что это - канал или группа - должно быть видно СРАЗУ, иначе
+                // в общем списке они неразличимы.
+                Text(
+                    buildString {
+                        append(if (group.isChannel) "Канал" else "Группа")
+                        append(if (group.isPublic) " · публичная" else " · частная")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                )
                 Text(
                     buildString {
                         append(group.memberCount)
@@ -465,6 +496,17 @@ private fun JoinByLinkDialog(
     )
 }
 
+/** Заголовок раздела найденного в сети. */
+@Composable
+private fun DirectoryHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
 /** Строка найденного в сетевом каталоге: чужая публичная группа или канал. */
 @Composable
 private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
@@ -472,15 +514,27 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        com.vladimir.messenger.ui.components.GroupAvatar(
+            groupId = entry.groupId,
+            title = entry.title,
+            size = 40.dp,
+        )
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 entry.title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
-                (if (entry.isChannel) "Канал" else "Группа") +
-                    (if (entry.needsApproval) " · по заявке" else " · вход сразу"),
+                if (entry.isChannel) "Канал" else "Группа",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                if (entry.needsApproval) "Вход по заявке" else "Вход сразу",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
