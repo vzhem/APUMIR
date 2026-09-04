@@ -61,6 +61,15 @@ fun SettingsScreen(
     onMtProxyClick: () -> Unit = {},
     onRankBenefitsClick: () -> Unit = {},
     /**
+     * Открыть сразу профиль, а не список настроек.
+     *
+     * Один экран на две записи в навигации: «Профиль» из нижней панели и
+     * «Настройки». Разводить их в два файла незачем - содержимое общее.
+     */
+    showProfile: Boolean = false,
+    /** Переход к профилю из списка настроек. */
+    onProfileClick: () -> Unit = {},
+    /**
      * Нижняя панель разделов. Приходит снаружи, из навигации: экран не знает
      * маршрутов и не должен их знать. Пустая по умолчанию, чтобы превью и
      * тесты обходились без навигации.
@@ -74,8 +83,9 @@ fun SettingsScreen(
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
-    // Профиль вынесен в отдельную вкладку.
-    var selectedTab by remember { mutableStateOf(0) }
+    // Вкладок больше нет: профиль - отдельный пункт в списке настроек и
+    // отдельная кнопка в нижней панели. Вкладка сверху дублировала их и
+    // мешала: список настроек начинался не с начала.
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
@@ -91,32 +101,22 @@ fun SettingsScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                         ),
-                        title = { Text("Настройки", fontWeight = FontWeight.Bold) },
+                        title = {
+                            Text(
+                                if (showProfile) "Профиль" else "Настройки",
+                                fontWeight = FontWeight.Bold,
+                            )
+                        },
                         navigationIcon = {
                             IconButton(onClick = onBackClick) {
                                 Icon(Icons.Default.ArrowBack, "Назад")
                             }
                         },
                     )
-                    TabRow(
-                        selectedTabIndex = selectedTab,
-                        containerColor = Color.Transparent,
-                    ) {
-                        Tab(
-                            selected = selectedTab == 0,
-                            onClick = { selectedTab = 0 },
-                            text = { Text("Профиль") },
-                        )
-                        Tab(
-                            selected = selectedTab == 1,
-                            onClick = { selectedTab = 1 },
-                            text = { Text("Настройки") },
-                        )
-                    }
                 }
             },
         ) { paddingValues ->
-            if (selectedTab == 0) {
+            if (showProfile) {
                 ProfileTabContent(
                     paddingValues = paddingValues,
                     uiState = uiState,
@@ -134,6 +134,7 @@ fun SettingsScreen(
                     viewModel = viewModel,
                     onMtProxyClick = onMtProxyClick,
                     onBackup = { showBackupDialog = true },
+                    onProfileClick = onProfileClick,
                 )
             }
         }
@@ -501,6 +502,7 @@ private fun SettingsTabContent(
     viewModel: SettingsViewModel,
     onMtProxyClick: () -> Unit,
     onBackup: () -> Unit,
+    onProfileClick: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier
@@ -508,6 +510,41 @@ private fun SettingsTabContent(
             .padding(paddingValues),
         contentPadding = PaddingValues(bottom = 32.dp),
     ) {
+        // Профиль первым пунктом: имя, @никнейм и свой QR нужны чаще
+        // остального, а раньше они прятались за вкладкой сверху.
+        item { SettingsSectionTitle("Мой профиль") }
+        item {
+            SettingsCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onProfileClick)
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Профиль", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Имя, никнейм, мой QR-код и приглашения",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
         // ----------------------------------------------------------------
         // ОФОРМЛЕНИЕ: день / ночь / авто + обои
         // ----------------------------------------------------------------

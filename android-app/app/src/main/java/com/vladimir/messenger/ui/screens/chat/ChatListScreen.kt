@@ -87,6 +87,8 @@ fun ChatListScreen(
     onShowMyQrClick: () -> Unit = {},
     onRankClick: () -> Unit = {},
     onSavedClick: () -> Unit = {},
+    /** Профиль из нижней панели: отдельный экран, не список настроек. */
+    onProfileClick: () -> Unit = {},
     onContactsClick: () -> Unit = {},
     onGroupsClick: () -> Unit = {},
     onGroupClick: (groupId: String) -> Unit = {},
@@ -223,9 +225,20 @@ fun ChatListScreen(
                                     // показывает свой код, копирует ссылку и
                                     // делится ею. Три пункта на одно действие
                                     // только запутывали.
-                                    // Контакты, Группы, Избранное и Настройки
-                                    // переехали в нижнюю панель - под большой
-                                    // палец. Дублировать их здесь незачем.
+                                    // Контакты, Группы, Профиль и Настройки
+                                    // живут в нижней панели - под большим
+                                    // пальцем. Дублировать их здесь незачем.
+                                    // «Избранное» больше не в нижней панели -
+                                    // её место занял «Профиль», поэтому пункт
+                                    // вернулся сюда.
+                                    DropdownMenuItem(
+                                        text = { Text("Избранное") },
+                                        leadingIcon = { ShimmerIcon(Icons.Default.Bookmark) },
+                                        onClick = {
+                                            menuOpen = false
+                                            onSavedClick()
+                                        },
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("Подключиться по ссылке") },
                                         leadingIcon = { ShimmerIcon(Icons.Default.Link) },
@@ -261,7 +274,7 @@ fun ChatListScreen(
                 actions = ApuTabActions(
                     onContacts = onContactsClick,
                     onGroups = onGroupsClick,
-                    onSaved = onSavedClick,
+                    onProfile = onProfileClick,
                     onSettings = onSettingsClick,
                 ),
             )

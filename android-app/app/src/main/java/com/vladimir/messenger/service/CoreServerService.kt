@@ -678,6 +678,12 @@ class CoreServerService : Service() {
                         ) {
                             contactRepository.updateDisplayName(existing.id, peerName)
                             chatRepository.updateContactName(peerId, peerName)
+                        } else if (contactRepository.isRealName(existing.displayName)) {
+                            // Отдельная подстраховка для таблицы чатов: имя в
+                            // контакте могли уже поправить вручную, а в шапке
+                            // переписки так и осталось техническое - там своя
+                            // копия имени. Дёшево и только при полном пульсе.
+                            chatRepository.updateContactName(peerId, existing.displayName)
                         }
                         Log.i(TAG, "✅ Обновлён существующий контакт: $peerName")
                         

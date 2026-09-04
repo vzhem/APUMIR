@@ -16,8 +16,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import com.vladimir.messenger.ui.components.PeerProfileSheet
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.content.MediaType
@@ -115,6 +117,41 @@ fun ChatDetailScreen(
         }
     }
 
+    // Карточка собеседника: открывается тапом по имени в шапке.
+    var showPeerProfile by remember { mutableStateOf(false) }
+
+    // Карточка собеседника поверх переписки.
+    if (showPeerProfile) {
+        PeerProfileSheet(
+            name = contactName,
+            contactId = contactId,
+            isOnline = uiState.isContactOnline,
+            onDismiss = { showPeerProfile = false },
+            onRename = if (contactId.isNotBlank()) {
+                {
+                    showPeerProfile = false
+                    onRenameClick(contactId, contactName)
+                }
+            } else {
+                null
+            },
+            onCall = if (contactId.startsWith("pk_")) {
+                {
+                    showPeerProfile = false
+                    onCallClick(contactId, contactName)
+                }
+            } else {
+                null
+            },
+            onCopyId = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Узел", contactId))
+                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
+
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
@@ -140,6 +177,8 @@ fun ChatDetailScreen(
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                                 RoundedCornerShape(18.dp),
                             )
+                            // Тап по имени открывает карточку собеседника.
+                            .clickable { showPeerProfile = true }
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                     ) {
                         Column {

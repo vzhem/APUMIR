@@ -79,7 +79,31 @@ class ContactRepository @Inject constructor(
             clean == "Anonymous" ||
             clean == "Unknown" ||
             clean == "Без имени" ||
-            clean.startsWith("Contact ")
+            clean.startsWith("Contact ") ||
+            looksTechnical(clean)
+    }
+
+    /**
+     * Похоже ли имя на технический идентификатор, а не на имя человека.
+     *
+     * После обмена по QR в чат иногда попадал кусок node_id («pk_ae8962d8…»
+     * или просто набор букв и цифр): чат создаётся сразу, а настоящее имя
+     * приходит позже с presence. Такое имя не считалось заглушкой, и присланное
+     * настоящее его уже не подменяло - на телефоне навсегда оставались
+     * «буквыцифры».
+     *
+     * Признаём техническим: начинается с «pk_», либо это одно длинное слово из
+     * латиницы и цифр, в котором есть и то и другое. Обычное имя так не
+     * выглядит: в нём есть пробел, кириллица или нет цифр вовсе.
+     */
+    fun looksTechnical(name: String): Boolean {
+        val clean = name.trim()
+        if (clean.startsWith("pk_")) return true
+        if (clean.length < 12 || clean.contains(' ')) return false
+        if (!clean.all { it.isLetterOrDigit() }) return false
+        // Только латиница: имя «Александр2000» техническим считать нельзя.
+        if (clean.any { it.code > 127 }) return false
+        return clean.any { it.isDigit() } && clean.any { it.isLetter() }
     }
 
     /** Настоящее ли это имя, то есть стоит ли им подменять заглушку. */

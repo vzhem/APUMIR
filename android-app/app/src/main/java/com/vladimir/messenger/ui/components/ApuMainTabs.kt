@@ -1,16 +1,16 @@
 package com.vladimir.messenger.ui.components
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /** Разделы, между которыми ходит нижняя панель. */
-enum class ApuTab { Chats, Contacts, Groups, Saved, Settings }
+enum class ApuTab { Chats, Contacts, Groups, Profile, Settings }
 
 /**
  * Куда ведут кнопки нижней панели.
@@ -23,7 +23,7 @@ data class ApuTabActions(
     val onChats: () -> Unit = {},
     val onContacts: () -> Unit = {},
     val onGroups: () -> Unit = {},
-    val onSaved: () -> Unit = {},
+    val onProfile: () -> Unit = {},
     val onSettings: () -> Unit = {},
 )
 
@@ -66,10 +66,10 @@ fun ApuMainTabBar(
                 onClick = { if (current != ApuTab.Groups) actions.onGroups() },
             ),
             ApuBottomItem(
-                title = "Избранное",
-                icon = Icons.Filled.Bookmark,
-                selected = current == ApuTab.Saved,
-                onClick = { if (current != ApuTab.Saved) actions.onSaved() },
+                title = "Профиль",
+                icon = Icons.Filled.Person,
+                selected = current == ApuTab.Profile,
+                onClick = { if (current != ApuTab.Profile) actions.onProfile() },
             ),
             ApuBottomItem(
                 title = "Настройки",

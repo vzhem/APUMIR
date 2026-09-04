@@ -96,6 +96,12 @@ sealed class Screen(val route: String) {
     // РќР°СЃС‚СЂРѕР№РєРё
     data object Settings : Screen("settings")
 
+    /**
+     * Профиль. Отдельный маршрут, а не вкладка внутри настроек: на него ведёт
+     * кнопка нижней панели, и «Назад» должен возвращать туда, откуда пришли.
+     */
+    data object Profile : Screen("profile")
+
     // MTProto прокси
     data object MtProxy : Screen("mtproxy")
 
@@ -301,6 +307,9 @@ fun MessengerNavGraph(
                 onSavedClick = {
                     navController.navigate(Screen.Saved.route)
                 },
+                onProfileClick = {
+                    navController.navigate(Screen.Profile.route)
+                },
                 onContactsClick = {
                     navController.navigate(Screen.Contacts.route)
                 },
@@ -436,10 +445,25 @@ fun MessengerNavGraph(
                 bottomBar = {
                     ApuMainTabBar(ApuTab.Settings, mainTabActions(navController))
                 },
+                onProfileClick = { navController.navigate(Screen.Profile.route) },
                 onBackClick = { navController.popBackStack() },
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) }
+            )
+        }
+
+        // Профиль: тот же экран, открытый сразу на профиле.
+        composable(route = Screen.Profile.route) {
+            SettingsScreen(
+                bottomBar = {
+                    ApuMainTabBar(ApuTab.Profile, mainTabActions(navController))
+                },
+                showProfile = true,
+                onBackClick = { navController.popBackStack() },
+                onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
+                onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
+                onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
             )
         }
 
@@ -456,7 +480,9 @@ fun MessengerNavGraph(
         composable(route = Screen.Saved.route) {
             SavedScreen(
                 bottomBar = {
-                    ApuMainTabBar(ApuTab.Saved, mainTabActions(navController))
+                    // «Избранное» больше не кнопка панели, поэтому ни один
+                    // раздел здесь не подсвечен - панель работает как переход.
+                    ApuMainTabBar(ApuTab.Chats, mainTabActions(navController))
                 },
                 onBackClick = { navController.popBackStack() },
                 // Возврат к оригиналу: личный чат, тема группы или лента канала.
@@ -687,8 +713,8 @@ private fun mainTabActions(navController: NavHostController) = ApuTabActions(
     onGroups = {
         navController.navigate(Screen.Groups.plain) { launchSingleTop = true }
     },
-    onSaved = {
-        navController.navigate(Screen.Saved.route) { launchSingleTop = true }
+    onProfile = {
+        navController.navigate(Screen.Profile.route) { launchSingleTop = true }
     },
     onSettings = {
         navController.navigate(Screen.Settings.route) { launchSingleTop = true }
