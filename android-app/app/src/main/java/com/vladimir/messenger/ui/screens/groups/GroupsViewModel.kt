@@ -96,12 +96,23 @@ class GroupsViewModel @Inject constructor(
         }
     }
 
-    /** Ищем в каталоге то, чего ещё нет в своих группах. */
+    /**
+     * Ищем в каталоге то, чего ещё нет в своих группах.
+     *
+     * При ПУСТОМ запросе показываем подсказки: самое свежее из того, что сеть
+     * успела рассказать. Раньше пустой поиск не показывал ничего, и человек не
+     * догадывался, что в APU вообще есть чужие публичные группы и каналы.
+     */
     private fun matchDirectory(query: String, groups: List<GroupSummary>): List<DirectoryEntity> {
         val q = query.trim().lowercase()
-        if (q.isEmpty()) return emptyList()
         val mine = groups.map { it.id }.toSet()
-        return latestDirectory.filter { it.groupId !in mine && it.title.lowercase().contains(q) }
+        val available = latestDirectory.filter { it.groupId !in mine }
+        if (q.isEmpty()) {
+            return available
+                .sortedByDescending { it.updatedAtMs }
+                .take(SUGGESTION_LIMIT)
+        }
+        return available.filter { it.title.lowercase().contains(q) }
     }
 
     fun createGroup(
@@ -188,5 +199,10 @@ class GroupsViewModel @Inject constructor(
     private fun filter(groups: List<GroupSummary>, query: String): List<GroupSummary> {
         if (query.isBlank()) return groups
         return groups.filter { it.title.contains(query, ignoreCase = true) }
+    }
+
+    companion object {
+        /** Сколько подсказок показываем при пустом поиске. */
+        private const val SUGGESTION_LIMIT = 12
     }
 }

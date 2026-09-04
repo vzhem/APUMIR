@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
+import com.vladimir.messenger.ui.components.ApuBottomBar
+import com.vladimir.messenger.ui.components.ApuBottomItem
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
@@ -218,47 +220,15 @@ fun ChatListScreen(
                                     // показывает свой код, копирует ссылку и
                                     // делится ею. Три пункта на одно действие
                                     // только запутывали.
-                                    DropdownMenuItem(
-                                        text = { Text("Контакты") },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.People) },
-                                        onClick = {
-                                            menuOpen = false
-                                            onContactsClick()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Группы") },
-                                        leadingIcon = { ShimmerIcon(Icons.Filled.Groups) },
-                                        onClick = {
-                                            menuOpen = false
-                                            onGroupsClick()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Избранное") },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.Bookmark) },
-                                        onClick = {
-                                            menuOpen = false
-                                            onSavedClick()
-                                        },
-                                    )
-                                    HorizontalDivider(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                                    )
+                                    // Контакты, Группы, Избранное и Настройки
+                                    // переехали в нижнюю панель - под большой
+                                    // палец. Дублировать их здесь незачем.
                                     DropdownMenuItem(
                                         text = { Text("Подключиться по ссылке") },
                                         leadingIcon = { ShimmerIcon(Icons.Default.Link) },
                                         onClick = {
                                             menuOpen = false
                                             showConnectDialog = true
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Настройки") },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.Settings) },
-                                        onClick = {
-                                            menuOpen = false
-                                            onSettingsClick()
                                         },
                                     )
                                 }
@@ -279,6 +249,34 @@ fun ChatListScreen(
                     },
                 )
             }
+        },
+        bottomBar = {
+            // Нижняя панель в том же пузыре, что и полоска разделов сверху:
+            // частые разделы под большим пальцем, а не спрятаны в меню «⋮».
+            ApuBottomBar(
+                items = listOf(
+                    ApuBottomItem(
+                        title = "Контакты",
+                        icon = Icons.Default.People,
+                        onClick = onContactsClick,
+                    ),
+                    ApuBottomItem(
+                        title = "Группы",
+                        icon = Icons.Filled.Groups,
+                        onClick = onGroupsClick,
+                    ),
+                    ApuBottomItem(
+                        title = "Избранное",
+                        icon = Icons.Default.Bookmark,
+                        onClick = onSavedClick,
+                    ),
+                    ApuBottomItem(
+                        title = "Настройки",
+                        icon = Icons.Default.Settings,
+                        onClick = onSettingsClick,
+                    ),
+                ),
+            )
         },
         floatingActionButton = {
             // FAB-карандаш: открывает меню создания чата, группы и канала.

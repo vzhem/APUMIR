@@ -204,14 +204,23 @@ fun GroupsScreen(
                     // своим заголовкам: в общей куче непонятно, куда вступаешь.
                     val foundGroups = uiState.directoryMatches.filter { !it.isChannel }
                     val foundChannels = uiState.directoryMatches.filter { it.isChannel }
+                    val browsing = uiState.searchQuery.isBlank()
                     if (foundGroups.isNotEmpty()) {
-                        item { DirectoryHeader("Группы в сети") }
+                        item {
+                            DirectoryHeader(
+                                if (browsing) "Открытые группы сети" else "Группы в сети"
+                            )
+                        }
                         items(foundGroups, key = { it.groupId }) { entry ->
                             DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
                         }
                     }
                     if (foundChannels.isNotEmpty()) {
-                        item { DirectoryHeader("Каналы в сети") }
+                        item {
+                            DirectoryHeader(
+                                if (browsing) "Открытые каналы сети" else "Каналы в сети"
+                            )
+                        }
                         items(foundChannels, key = { it.groupId }) { entry ->
                             DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
                         }
