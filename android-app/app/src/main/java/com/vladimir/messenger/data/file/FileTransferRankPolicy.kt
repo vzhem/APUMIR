@@ -59,6 +59,13 @@ object FileTransferRankPolicy {
         Entitlement(1000, "Создатель сети"),
     )
 
+    /**
+     * Следующая ступень после текущей или null, если ранг уже наивысший.
+     * Нужна экрану рангов, чтобы честно сказать, что откроется дальше.
+     */
+    fun nextTier(qualifiedDirectReferrals: Int): Entitlement? =
+        tiers.firstOrNull { qualifiedDirectReferrals < it.minimumQualifiedReferrals }
+
     fun entitlement(qualifiedDirectReferrals: Int): Entitlement {
         require(qualifiedDirectReferrals >= 0)
         return tiers.last { qualifiedDirectReferrals >= it.minimumQualifiedReferrals }
