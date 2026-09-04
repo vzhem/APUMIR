@@ -118,6 +118,8 @@ class GroupRepository(
     private var lastDirectoryPublishMs: Long = 0L
     private var lastNicknamePublishMs: Long = 0L
     private var lastAvatarPublishMs: Long = 0L
+    /** Когда последний раз просили конкретный узел представиться. */
+    private val lastWhoIsAskedMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** Для экранов: доступно ли текущему рангу создание групп. */
     fun canCreateGroupsNow(): Boolean = canCreateGroups()
@@ -322,6 +324,52 @@ class GroupRepository(
         runCatching { delivery.deliver("avatars", envelope, ids) }
             .onFailure { Log.w(TAG, "avatar publish failed: ${it.message}") }
         lastAvatarPublishMs = clock()
+    }
+
+    /**
+     * Попросить узел представиться: прислать @имя и аватар.
+     *
+     * Зовём, когда собеседник показан техническим именем. Один запрос на узел
+     * не чаще [WHOIS_MIN_INTERVAL_MS], чтобы переписка не превращалась в поток
+     * служебных пакетов.
+     */
+    suspend fun requestIdentity(peerId: String) {
+        if (peerId.isBlank()) return
+        val me = myId() ?: return
+        if (peerId == me) return
+        val last = lastWhoIsAskedMs[peerId] ?: 0L
+        if (last != 0L && clock() - last < WHOIS_MIN_INTERVAL_MS) return
+        lastWhoIsAskedMs[peerId] = clock()
+        val envelope = GroupWire.buildWhoIs(me)
+        runCatching { delivery.deliver("whois", envelope, listOf(peerId)) }
+            .onFailure { Log.w(TAG, "whois send failed: ${it.message}") }
+        Log.i(TAG, "whois asked peer=$peerId")
+    }
+
+    /** Адресный ответ на «представься»: моё @имя и мой аватар. */
+    private suspend fun sendMyIdentityTo(peerId: String) {
+        if (peerId.isBlank()) return
+        val me = myId() ?: return
+        myUsername()?.let { name ->
+            val envelope = GroupWire.buildNick(
+                ownerId = me,
+                name = name,
+                registeredAtMs = myRegisteredAt(),
+                hops = 0,
+            )
+            runCatching { delivery.deliver("nicknames", envelope, listOf(peerId)) }
+                .onFailure { Log.w(TAG, "whois nick reply failed: ${it.message}") }
+        }
+        myAvatarB64()?.let { b64 ->
+            val envelope = GroupWire.buildAvatar(
+                ownerId = me,
+                dataB64 = b64,
+                updatedAtMs = clock(),
+                hops = 0,
+            )
+            runCatching { delivery.deliver("avatars", envelope, listOf(peerId)) }
+                .onFailure { Log.w(TAG, "whois avatar reply failed: ${it.message}") }
+        }
     }
 
     /** Пора ли повторять фоновую рассылку. */
@@ -882,6 +930,13 @@ class GroupRepository(
             is GroupWire.Packet.Directory -> handleDirectory(packet, senderId)
 
             is GroupWire.Packet.Nick -> handleNick(packet, senderId)
+
+            is GroupWire.Packet.WhoIs -> {
+                // У собеседника вместо нашего имени набор букв и цифр.
+                // Отвечаем адресно и сразу, не дожидаясь роевой рассылки.
+                sendMyIdentityTo(senderId)
+                Log.i(TAG, "whois answered to=$senderId")
+            }
 
             is GroupWire.Packet.Avatar -> handleAvatar(packet, senderId)
 
@@ -1738,6 +1793,12 @@ class GroupRepository(
          * день, а трафик на слабой сети экономят заметно.
          */
         private const val GOSSIP_MIN_INTERVAL_MS = 6L * 60 * 60 * 1000
+        /**
+         * Не чаще раза в 10 минут повторяем адресный запрос «представься» к
+         * одному и тому же узлу. Имя нужно один раз: как только оно пришло,
+         * запрос больше не отправляется вовсе.
+         */
+        private const val WHOIS_MIN_INTERVAL_MS = 10L * 60 * 1000
         private const val TAG = "GroupRepository"
     }
 }

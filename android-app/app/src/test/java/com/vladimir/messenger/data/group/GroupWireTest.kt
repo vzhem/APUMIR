@@ -415,4 +415,13 @@ class GroupWireTest {
         assertEquals("💬", topics[0].iconEmoji)
         assertEquals("", topics[1].iconEmoji)
     }
+
+    /** «Представься»: конверт собирается и разбирается обратно. */
+    @Test
+    fun whoIsRoundTrip() {
+        val envelope = GroupWire.buildWhoIs("pk_abc")
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.WhoIs)
+        assertEquals("pk_abc", (parsed as GroupWire.Packet.WhoIs).requesterId)
+    }
 }

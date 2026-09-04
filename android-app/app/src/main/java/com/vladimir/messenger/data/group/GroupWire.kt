@@ -44,6 +44,14 @@ object GroupWire {
     const val KIND_KICK = "kick"
     const val KIND_DIRECTORY = "dir"
     const val KIND_NICK = "nick"
+    /**
+     * «Представься»: адресный запрос имени и аватара.
+     *
+     * Нужен, когда собеседник показан набором букв и цифр. Ждать роевую
+     * рассылку @имени можно часами - она уходит раз в несколько часов, а
+     * запрос решает вопрос за один круг.
+     */
+    const val KIND_WHOIS = "who"
     /** Аватар участника: маленький JPEG в base64. */
     const val KIND_AVAT = "avat"
 
@@ -146,6 +154,9 @@ object GroupWire {
 
         data class RosterRequest(val groupId: String) : Packet()
 
+        /** «Представься»: [requesterId] просит прислать ему имя и аватар. */
+        data class WhoIs(val requesterId: String) : Packet()
+
         /**
          * Участника исключили или ограничили. Без этого пакета он так и видит
          * группу у себя: состав обновляется рассылкой, а самого исключённого
@@ -228,6 +239,9 @@ object GroupWire {
         val withId = "$base|${encode(messageId)}"
         return if (senderName.isBlank()) withId else "$withId|${encode(senderName)}"
     }
+
+    /** «Представься» - адресный запрос имени и аватара. */
+    fun buildWhoIs(requesterId: String): String = "$PREFIX|$KIND_WHOIS|$requesterId"
 
     /** «Пришлите состав группы» - лечит неизвестные имена у отправителя. */
     fun buildRosterRequest(groupId: String): String = "$PREFIX|$KIND_ROSTER_REQUEST|$groupId"
@@ -337,6 +351,12 @@ object GroupWire {
                 val senderMessageId = if (parts.size >= 6) decode(parts[5]).orEmpty() else ""
                 val senderName = if (parts.size >= 7) decode(parts[6]).orEmpty() else ""
                 Packet.Message(groupId, parts[3], body, senderMessageId, senderName)
+            } else {
+                null
+            }
+
+            KIND_WHOIS -> if (parts.size == 3) {
+                Packet.WhoIs(groupId)
             } else {
                 null
             }

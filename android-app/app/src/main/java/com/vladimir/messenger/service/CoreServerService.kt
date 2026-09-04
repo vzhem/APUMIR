@@ -678,6 +678,17 @@ class CoreServerService : Service() {
                         ) {
                             contactRepository.updateDisplayName(existing.id, peerName)
                             chatRepository.updateContactName(peerId, peerName)
+                            // Имя пришло с presence - просить нечего.
+                        } else if (!contactRepository.isRealName(peerName) &&
+                            !contactRepository.isRealName(existing.displayName)
+                        ) {
+                            // И в контакте, и в presence - «буквыцифры».
+                            // Ждать роевую рассылку @имени можно часами,
+                            // поэтому просим узел представиться адресно.
+                            serviceScope.launch {
+                                runCatching { groupRepository.requestIdentity(peerId) }
+                                    .onFailure { Log.w(TAG, "whois failed: ${it.message}") }
+                            }
                         } else if (contactRepository.isRealName(existing.displayName)) {
                             // Отдельная подстраховка для таблицы чатов: имя в
                             // контакте могли уже поправить вручную, а в шапке
