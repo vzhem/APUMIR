@@ -591,6 +591,9 @@ fun MessengerNavGraph(
                     navController.navigate(Screen.Channel.createRoute(channelId))
                 },
                 onBackClick = { navController.popBackStack() },
+                onGroupAdminClick = { groupId ->
+                    navController.navigate(Screen.GroupAdmin.createRoute(groupId))
+                },
                 joinLink = entry.arguments?.getString("joinLink"),
                 create = entry.arguments?.getString("create"),
             )

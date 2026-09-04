@@ -4,6 +4,16 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Группы»: список групп и создание новой
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.BubbleOverflowMenu
+import com.vladimir.messenger.ui.components.BubbleMenuAction
+import com.vladimir.messenger.util.AppShare
+import com.vladimir.messenger.data.group.GroupRole
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
@@ -78,6 +88,8 @@ fun GroupsScreen(
     onGroupClick: (groupId: String) -> Unit,
     onChannelClick: (channelId: String) -> Unit = { onGroupClick(it) },
     onBackClick: () -> Unit,
+    /** Управление группой: тот же экран, что и из меню на главной. */
+    onGroupAdminClick: (groupId: String) -> Unit = {},
     /** Ссылка-приглашение из QR или из внешнего открытия: сразу пробуем войти. */
     joinLink: String? = null,
     /** Из меню кнопки-карандаша: "group" или "channel" - сразу открыть создание. */
@@ -103,6 +115,9 @@ fun GroupsScreen(
     // Что создаём из меню «⋮»: группу или канал. Диалог умеет и то и другое,
     // но открывать его сразу на нужном виде удобнее, чем щёлкать переключатель.
     var createAsChannel by remember { mutableStateOf(create == "channel") }
+    // Выход из группы и удаление - через подтверждение: это необратимо.
+    var confirmLeave by remember { mutableStateOf<GroupSummary?>(null) }
+    val context = LocalContext.current
     var showJoin by remember { mutableStateOf(false) }
 
     LaunchedEffect(joinLink) {
@@ -273,7 +288,22 @@ fun GroupsScreen(
                         if (myGroups.isNotEmpty()) {
                             item { DirectoryHeader("Мои группы") }
                             items(myGroups, key = { it.id }) { group ->
-                                GroupRow(group = group, onClick = { onGroupClick(group.id) })
+                                GroupRow(
+                                    group = group,
+                                    onClick = { onGroupClick(group.id) },
+                                    menuActions = groupMenuActions(
+                                        group = group,
+                                        onOpen = { onGroupClick(group.id) },
+                                        onAdmin = { onGroupAdminClick(group.id) },
+                                        onInvite = {
+                                            viewModel.shareInvite(group.id) { title, link ->
+                                                AppShare.shareGroupInvite(context, title, link)
+                                            }
+                                        },
+                                        onMarkRead = { viewModel.markGroupRead(group.id) },
+                                        onLeaveOrDelete = { confirmLeave = group },
+                                    ),
+                                )
                                 HorizontalDivider()
                             }
                         }
@@ -281,7 +311,22 @@ fun GroupsScreen(
                             item { DirectoryHeader("Мои каналы") }
                             items(myChannels, key = { it.id }) { group ->
                                 // Канал открывается лентой постов, группа - чатом.
-                                GroupRow(group = group, onClick = { onChannelClick(group.id) })
+                                GroupRow(
+                                    group = group,
+                                    onClick = { onChannelClick(group.id) },
+                                    menuActions = groupMenuActions(
+                                        group = group,
+                                        onOpen = { onChannelClick(group.id) },
+                                        onAdmin = { onGroupAdminClick(group.id) },
+                                        onInvite = {
+                                            viewModel.shareInvite(group.id) { title, link ->
+                                                AppShare.shareGroupInvite(context, title, link)
+                                            }
+                                        },
+                                        onMarkRead = { viewModel.markGroupRead(group.id) },
+                                        onLeaveOrDelete = { confirmLeave = group },
+                                    ),
+                                )
                                 HorizontalDivider()
                             }
                         }
@@ -383,6 +428,34 @@ fun GroupsScreen(
         )
     }
 
+    // Подтверждение выхода или удаления.
+    confirmLeave?.let { group ->
+        val owner = group.myRole == GroupRole.OWNER
+        val what = if (group.isChannel) "канал" else "группу"
+        AlertDialog(
+            onDismissRequest = { confirmLeave = null },
+            title = { Text(if (owner) "Удалить $what?" else "Выйти из группы?") },
+            text = {
+                Text(
+                    if (owner) {
+                        "«${group.title}» и вся переписка будут удалены у всех участников."
+                    } else {
+                        "Вы перестанете получать сообщения группы «${group.title}»."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.leaveOrDelete(group)
+                    confirmLeave = null
+                }) { Text(if (owner) "Удалить" else "Выйти") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLeave = null }) { Text("Отмена") }
+            },
+        )
+    }
+
     if (showRankHint) {
         AlertDialog(
             onDismissRequest = { showRankHint = false },
@@ -399,7 +472,12 @@ fun GroupsScreen(
 }
 
 @Composable
-private fun GroupRow(group: GroupSummary, onClick: () -> Unit) {
+private fun GroupRow(
+    group: GroupSummary,
+    onClick: () -> Unit,
+    /** Пункты меню «⋮» справа. Пустой список - кнопки нет (каталог сети). */
+    menuActions: List<BubbleMenuAction> = emptyList(),
+) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
@@ -445,6 +523,9 @@ private fun GroupRow(group: GroupSummary, onClick: () -> Unit) {
             if (group.unreadCount > 0) {
                 Badge { Text(group.unreadCount.toString()) }
             }
+            // Меню «⋮» - как в пузырях главного экрана: списки должны
+            // выглядеть и вести себя одинаково.
+            BubbleOverflowMenu(actions = menuActions)
         }
     }
 }
@@ -649,4 +730,62 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
         }) { Text("Вступить") }
     }
     HorizontalDivider()
+}
+
+/**
+ * Пункты меню «⋮» в пузыре группы или канала.
+ *
+ * Набор тот же, что на главном экране: списки обязаны вести себя одинаково,
+ * иначе владелец ищет привычное действие и не находит.
+ */
+private fun groupMenuActions(
+    group: GroupSummary,
+    onOpen: () -> Unit,
+    onAdmin: () -> Unit,
+    onInvite: () -> Unit,
+    onMarkRead: () -> Unit,
+    onLeaveOrDelete: () -> Unit,
+): List<BubbleMenuAction> = buildList {
+    add(
+        BubbleMenuAction(
+            title = if (group.isChannel) "Открыть канал" else "Открыть группу",
+            icon = Icons.Filled.Forum,
+            onClick = onOpen,
+        )
+    )
+    add(
+        BubbleMenuAction(
+            title = if (group.isChannel) "Пригласить в канал" else "Пригласить в группу",
+            icon = Icons.Filled.PersonAdd,
+            onClick = onInvite,
+        )
+    )
+    if (GroupRole.isAdminOrOwner(group.myRole)) {
+        add(
+            BubbleMenuAction(
+                title = "Управление",
+                icon = Icons.Filled.Settings,
+                onClick = onAdmin,
+            )
+        )
+    }
+    add(
+        BubbleMenuAction(
+            title = "Отметить прочитанным",
+            icon = Icons.Filled.DoneAll,
+            onClick = onMarkRead,
+        )
+    )
+    add(
+        BubbleMenuAction(
+            title = if (group.myRole == GroupRole.OWNER) {
+                if (group.isChannel) "Удалить канал" else "Удалить группу"
+            } else {
+                "Выйти"
+            },
+            icon = Icons.Filled.Delete,
+            destructive = true,
+            onClick = onLeaveOrDelete,
+        )
+    )
 }

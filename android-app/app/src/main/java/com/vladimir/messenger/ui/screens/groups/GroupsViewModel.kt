@@ -158,6 +158,39 @@ class GroupsViewModel @Inject constructor(
         }
     }
 
+    /** Отметить группу прочитанной - пункт меню в её пузыре. */
+    fun markGroupRead(groupId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.markGroupRead(groupId) }
+        }
+    }
+
+    /**
+     * Выйти из группы, а владельцу - удалить её. Решение принимается по роли,
+     * поэтому экран не может случайно удалить чужую группу.
+     */
+    fun leaveOrDelete(group: GroupSummary) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                if (group.myRole == com.vladimir.messenger.data.group.GroupRole.OWNER) {
+                    groupRepository.deleteGroup(group.id)
+                } else {
+                    groupRepository.leaveGroup(group.id)
+                }
+            }
+        }
+    }
+
+    /** Ссылка-приглашение в группу: готовим и отдаём экрану для «Поделиться». */
+    fun shareInvite(groupId: String, onReady: (title: String, link: String) -> Unit) {
+        viewModelScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.inviteLinkFor(groupId) }.getOrNull()
+            }
+            if (prepared != null) onReady(prepared.first, prepared.second)
+        }
+    }
+
     fun dismissCreateError() {
         _uiState.update { it.copy(createError = null) }
     }

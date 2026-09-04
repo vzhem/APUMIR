@@ -1465,6 +1465,30 @@ class GroupRepository(
         return Result.success(Unit)
     }
 
+    /** Снять счётчик непрочитанного - пункт меню в пузыре группы. */
+    suspend fun markGroupRead(groupId: String) {
+        groupDao.markGroupRead(groupId)
+    }
+
+    /**
+     * Ссылка-приглашение в группу и её название: то же, что готовит главный
+     * экран, но доступное и из раздела «Группы».
+     */
+    suspend fun inviteLinkFor(groupId: String): Pair<String, String>? {
+        val group = groupDao.getGroupById(groupId) ?: return null
+        val slug = group.inviteSlug
+        if (slug.isBlank()) return null
+        return group.title to GroupInviteLinks.build(
+            slug = slug,
+            groupId = group.id,
+            ownerId = group.ownerId,
+            isChannel = group.isChannel,
+            // Частная группа принимает по заявке: вступающий телефон должен
+            // честно написать «заявка отправлена».
+            requestApproval = !group.isPublic,
+        )
+    }
+
     suspend fun leaveGroup(groupId: String): Result<Unit> {
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
