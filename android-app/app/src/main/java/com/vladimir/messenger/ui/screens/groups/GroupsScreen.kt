@@ -104,13 +104,6 @@ fun GroupsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
-    // Из меню кнопки-карандаша сразу открываем диалог создания группы/канала.
-    LaunchedEffect(create) {
-        if (!create.isNullOrBlank() && uiState.canCreate) {
-            createAsChannel = create == "channel"
-            showCreate = true
-        }
-    }
     var showRankHint by remember { mutableStateOf(false) }
     // Что создаём из меню «⋮»: группу или канал. Диалог умеет и то и другое,
     // но открывать его сразу на нужном виде удобнее, чем щёлкать переключатель.
@@ -118,6 +111,13 @@ fun GroupsScreen(
     // Выход из группы и удаление - через подтверждение: это необратимо.
     var confirmLeave by remember { mutableStateOf<GroupSummary?>(null) }
     val context = LocalContext.current
+    // Из меню кнопки-карандаша сразу открываем диалог создания группы/канала.
+    LaunchedEffect(create) {
+        if (!create.isNullOrBlank() && uiState.canCreate) {
+            createAsChannel = create == "channel"
+            showCreate = true
+        }
+    }
     var showJoin by remember { mutableStateOf(false) }
 
     LaunchedEffect(joinLink) {
