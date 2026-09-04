@@ -214,6 +214,8 @@ class MainActivity : ComponentActivity() {
                 if (usernameConflict) {
                     UsernameConflictDialog()
                 }
+                // Слой полёта реакций рисуется в самом конце (см. ниже), чтобы
+                // значок летел ПОВЕРХ списка и пузырей, а не обрезался ими.
                 if (showSplash) {
                     AppSplash(onFinished = { showSplash = false })
                 } else {
@@ -331,6 +333,11 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 }
+                // Полёт реакции - самым верхним слоем приложения. Внутри
+                // списка значок обрезался бы краем пузыря, а здесь он
+                // свободно уходит вверх через весь экран. Слой прозрачен для
+                // касаний и появляется только на время полёта.
+                com.vladimir.messenger.ui.components.ReactionFlightOverlay()
             }
         }
     }
