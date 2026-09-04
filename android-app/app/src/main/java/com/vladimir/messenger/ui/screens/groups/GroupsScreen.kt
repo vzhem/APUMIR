@@ -4,6 +4,12 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Группы»: список групп и создание новой
 // =============================================================================
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.MoreVert
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
@@ -88,9 +94,15 @@ fun GroupsScreen(
     var showCreate by remember { mutableStateOf(false) }
     // Из меню кнопки-карандаша сразу открываем диалог создания группы/канала.
     LaunchedEffect(create) {
-        if (!create.isNullOrBlank() && uiState.canCreate) showCreate = true
+        if (!create.isNullOrBlank() && uiState.canCreate) {
+            createAsChannel = create == "channel"
+            showCreate = true
+        }
     }
     var showRankHint by remember { mutableStateOf(false) }
+    // Что создаём из меню «⋮»: группу или канал. Диалог умеет и то и другое,
+    // но открывать его сразу на нужном виде удобнее, чем щёлкать переключатель.
+    var createAsChannel by remember { mutableStateOf(create == "channel") }
     var showJoin by remember { mutableStateOf(false) }
 
     LaunchedEffect(joinLink) {
@@ -130,11 +142,62 @@ fun GroupsScreen(
                     IconButton(onClick = { showJoin = true }) {
                         Icon(Icons.Filled.Link, contentDescription = "Войти по ссылке")
                     }
+                    // Меню «⋮» - как на главном экране: редкие действия не
+                    // занимают панель, но и не спрятаны.
+                    Box {
+                        var menuOpen by remember { mutableStateOf(false) }
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                            shape = RoundedCornerShape(20.dp),
+                            tonalElevation = 3.dp,
+                            shadowElevation = 8.dp,
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Новая группа") },
+                                leadingIcon = { Icon(Icons.Filled.Groups, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    createAsChannel = false
+                                    if (uiState.canCreate) showCreate = true else showRankHint = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Новый канал") },
+                                leadingIcon = { Icon(Icons.Filled.Campaign, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    createAsChannel = true
+                                    if (uiState.canCreate) showCreate = true else showRankHint = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Войти по ссылке") },
+                                leadingIcon = { Icon(Icons.Filled.Link, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    showJoin = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Обновить список") },
+                                leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.refreshDirectory()
+                                },
+                            )
+                        }
+                    }
                 },
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = {
+                createAsChannel = false
                 if (uiState.canCreate) showCreate = true else showRankHint = true
             }) {
                 Icon(Icons.Filled.Add, contentDescription = "Создать группу или канал")
@@ -299,7 +362,7 @@ fun GroupsScreen(
         CreateGroupDialog(
             creating = uiState.creating,
             error = uiState.createError,
-            initialIsChannel = create == "channel",
+            initialIsChannel = createAsChannel,
             onDismiss = {
                 showCreate = false
                 viewModel.dismissCreateError()

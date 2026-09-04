@@ -147,6 +147,17 @@ class GroupsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Пункт меню «Обновить список»: рассылаем свой каталог принудительно и
+     * просим контакты прислать свой. Обычно это происходит само раз в шесть
+     * часов - здесь владелец делает это руками, когда ждать не хочет.
+     */
+    fun refreshDirectory() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.publishMyDirectory(force = true) }
+        }
+    }
+
     fun dismissCreateError() {
         _uiState.update { it.copy(createError = null) }
     }
