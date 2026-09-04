@@ -20,6 +20,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
@@ -40,6 +42,9 @@ fun SearchOrb(
     size: Dp = 40.dp,
     contentDescription: String = "Поиск",
 ) {
+    // Отдельная переменная: внутри semantics имя contentDescription занято
+    // свойством области видимости, и присваивание себе же не читалось бы.
+    val label = contentDescription
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     // Нажатие проседает — клавиша ощущается настоящей.
@@ -61,8 +66,10 @@ fun SearchOrb(
             .clickable(
                 interactionSource = interaction,
                 indication = null,
+                onClickLabel = label,
                 onClick = onClick,
-            ),
+            )
+            .semantics { this.contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         Canvas(modifier = Modifier.size(size)) {
@@ -142,20 +149,7 @@ fun SearchOrb(
                 style = Stroke(width = line * 0.5f, cap = StrokeCap.Round),
             )
         }
-        // Значка Material здесь нет: лупа нарисована выше. Описание нужно
-        // чтению с экрана, поэтому вешаем его пустым узлом поверх.
-        Box(
-            modifier = Modifier
-                .size(size)
-                .semanticsLabel(contentDescription),
-        )
+        // Значка Material здесь нет: лупа нарисована выше. Описание для
+        // чтения с экрана вешаем на саму кнопку.
     }
 }
-
-/** Подпись для чтения с экрана: рисованная кнопка иначе была бы безымянной. */
-private fun Modifier.semanticsLabel(label: String): Modifier =
-    this.then(
-        androidx.compose.ui.semantics.semantics {
-            androidx.compose.ui.semantics.contentDescription = label
-        }
-    )
