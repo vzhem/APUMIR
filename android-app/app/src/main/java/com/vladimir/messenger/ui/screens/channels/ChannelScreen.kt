@@ -8,6 +8,7 @@ package com.vladimir.messenger.ui.screens.channels
 // тема, первое сообщение темы это текст поста, остальные - комментарии.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,7 +80,12 @@ fun ChannelScreen(
     val context = LocalContext.current
 
     // Подложка на весь экран, в том числе под верхней панелью.
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Смахивание вправо работает как «Назад».
+            .swipeBack(onBack = onBackClick),
+    ) {
         ChatWallpaper()
         Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,

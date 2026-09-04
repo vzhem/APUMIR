@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.*
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import androidx.compose.foundation.lazy.LazyColumn
@@ -153,7 +154,12 @@ fun ChatDetailScreen(
     }
 
     // Подложка на весь экран, в том числе под верхней панелью.
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Смахивание вправо работает как «Назад».
+            .swipeBack(onBack = onBackClick),
+    ) {
         ChatWallpaper()
         Scaffold(
         containerColor = Color.Transparent,

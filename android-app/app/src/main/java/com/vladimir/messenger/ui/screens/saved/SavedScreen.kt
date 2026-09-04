@@ -11,6 +11,7 @@ package com.vladimir.messenger.ui.screens.saved
 // папки) и «Поделиться».
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -117,7 +118,12 @@ fun SavedScreen(
         uiState.pendingExport?.let { exportPicker.launch(it.displayName) }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Смахивание вправо работает как «Назад».
+            .swipeBack(onBack = onBackClick),
+    ) {
         ChatWallpaper()
         Scaffold(
             containerColor = Color.Transparent,

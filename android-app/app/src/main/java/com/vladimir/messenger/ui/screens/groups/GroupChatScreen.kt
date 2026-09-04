@@ -12,9 +12,8 @@ package com.vladimir.messenger.ui.screens.groups
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -200,31 +199,11 @@ fun GroupChatScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                // Смахивание вправо внутри темы = «Назад» к списку тем.
-                // Порог в пикселях, а не в долях экрана: короткий уверенный
-                // жест должен срабатывать и на широком телефоне. Ставим здесь,
-                // на всём содержимом: вертикальная прокрутка ленты не мешает,
-                // Compose отдаёт жест тому, кто первым распознал направление.
-                .then(
-                    if (hasTopics && showFeed) {
-                        Modifier.pointerInput(Unit) {
-                            var travelled = 0f
-                            detectHorizontalDragGestures(
-                                onDragStart = { travelled = 0f },
-                                onDragEnd = {
-                                    if (travelled > SWIPE_BACK_THRESHOLD_PX) showFeed = false
-                                },
-                            ) { change, dragAmount ->
-                                travelled += dragAmount
-                                // Гасим только явное движение вправо, чтобы
-                                // не отбирать жесты у горизонтальных списков.
-                                if (dragAmount > 0f) change.consume()
-                            }
-                        }
-                    } else {
-                        Modifier
-                    }
-                ),
+                // Смахивание вправо: внутри темы - назад к списку тем,
+                // в списке тем и в группе без тем - назад к группам.
+                .swipeBack {
+                    if (hasTopics && showFeed) showFeed = false else onBackClick()
+                },
         ) {
             Row(modifier = Modifier.fillMaxSize()) {
 
@@ -893,11 +872,3 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
         dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
     )
 }
-
-/**
- * Насколько далеко надо увести палец вправо, чтобы это считалось «назад».
- *
- * В пикселях: доля ширины экрана на планшете требовала бы неудобно длинного
- * движения, а случайный сдвиг на десяток пикселей не должен закрывать тему.
- */
-private const val SWIPE_BACK_THRESHOLD_PX = 140f

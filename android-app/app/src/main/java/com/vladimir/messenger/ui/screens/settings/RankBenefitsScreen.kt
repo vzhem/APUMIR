@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -63,7 +66,12 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
     val next = FileTransferRankPolicy.nextTier(qualified)
 
     // Обои APU подложкой, как на остальных экранах: каркас и шапка прозрачные.
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Смахивание вправо работает как «Назад».
+            .swipeBack(onBack = onBackClick),
+    ) {
     ChatWallpaper()
     Scaffold(
         containerColor = Color.Transparent,
@@ -83,134 +91,140 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
             )
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                // Ранг растёт только от приглашённых, поэтому кнопка «позвать друга»
-                // стоит прямо здесь, а не спрятана в настройках.
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Ранг растёт от приглашённых друзей", fontWeight = FontWeight.Medium)
-                        Text(
-                            "Отправьте ссылку другу. Приглашение засчитается, когда он добавит " +
-                                "вас в контакты и вы обменяетесь сообщениями.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Button(
-                            onClick = {
-                                OwnInvite.link(context)?.let { link ->
-                                    AppShare.shareInvite(context, OwnInvite.displayName(context), link)
-                                }
-                            },
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Пригласить друга")
+        // Бегунок справа: видно, где мы в длинном списке.
+        val scrollState = rememberLazyListState()
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = scrollState,
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    // Ранг растёт только от приглашённых, поэтому кнопка «позвать друга»
+                    // стоит прямо здесь, а не спрятана в настройках.
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Ранг растёт от приглашённых друзей", fontWeight = FontWeight.Medium)
+                            Text(
+                                "Отправьте ссылку другу. Приглашение засчитается, когда он добавит " +
+                                    "вас в контакты и вы обменяетесь сообщениями.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Button(
+                                onClick = {
+                                    OwnInvite.link(context)?.let { link ->
+                                        AppShare.shareInvite(context, OwnInvite.displayName(context), link)
+                                    }
+                                },
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Пригласить друга")
+                            }
                         }
                     }
                 }
-            }
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // Та же медаль, что и на главной: значок ранга должен
-                        // узнаваться в обоих местах.
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            com.vladimir.messenger.ui.components.RankMedal(size = 40.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                current.rankName,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        Text("Подтверждённых друзей: $earned")
-                        if (promoBonus > 0) {
-                            // Видно, что пришло от друзей, а что от промокода -
-                            // иначе число выглядело бы взявшимся из ниоткуда.
-                            Text("Бонус по промокоду: +$promoBonus")
-                            Text("Всего к рангу: $qualified", fontWeight = FontWeight.Medium)
-                        }
-                        Spacer(Modifier.height(2.dp))
-                        // Описание строится от РЕАЛЬНОГО ранга, а не от нулевого:
-                        // ранг, полученный по промокоду, работает так же, как
-                        // заработанный приглашениями.
-                        Text("Что вам уже доступно:", fontWeight = FontWeight.Medium)
-                        current.unlockedFeatureSummary().forEach { feature ->
-                            Text("• $feature", style = MaterialTheme.typography.bodySmall)
-                        }
-                        val ahead = next
-                        if (ahead != null) {
-                            Spacer(Modifier.height(2.dp))
-                            val needed = ahead.minimumQualifiedReferrals - qualified
-                            Text(
-                                "До ранга «${ahead.rankName}» осталось приглашений: $needed",
-                                fontWeight = FontWeight.Medium,
-                            )
-                            val newFeatures = ahead.unlockedFeatureSummary()
-                                .filterNot { it in current.unlockedFeatureSummary() }
-                            if (newFeatures.isNotEmpty()) {
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Та же медаль, что и на главной: значок ранга должен
+                            // узнаваться в обоих местах.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                com.vladimir.messenger.ui.components.RankMedal(size = 40.dp)
+                                Spacer(Modifier.width(10.dp))
                                 Text(
-                                    "Откроется: " + newFeatures.joinToString(", ").lowercase(),
+                                    current.rankName,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            Text("Подтверждённых друзей: $earned")
+                            if (promoBonus > 0) {
+                                // Видно, что пришло от друзей, а что от промокода -
+                                // иначе число выглядело бы взявшимся из ниоткуда.
+                                Text("Бонус по промокоду: +$promoBonus")
+                                Text("Всего к рангу: $qualified", fontWeight = FontWeight.Medium)
+                            }
+                            Spacer(Modifier.height(2.dp))
+                            // Описание строится от РЕАЛЬНОГО ранга, а не от нулевого:
+                            // ранг, полученный по промокоду, работает так же, как
+                            // заработанный приглашениями.
+                            Text("Что вам уже доступно:", fontWeight = FontWeight.Medium)
+                            current.unlockedFeatureSummary().forEach { feature ->
+                                Text("• $feature", style = MaterialTheme.typography.bodySmall)
+                            }
+                            val ahead = next
+                            if (ahead != null) {
+                                Spacer(Modifier.height(2.dp))
+                                val needed = ahead.minimumQualifiedReferrals - qualified
+                                Text(
+                                    "До ранга «${ahead.rankName}» осталось приглашений: $needed",
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                val newFeatures = ahead.unlockedFeatureSummary()
+                                    .filterNot { it in current.unlockedFeatureSummary() }
+                                if (newFeatures.isNotEmpty()) {
+                                    Text(
+                                        "Откроется: " + newFeatures.joinToString(", ").lowercase(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    "Это наивысший ранг: открыты все возможности приложения.",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
-                        } else {
+                            Spacer(Modifier.height(2.dp))
                             Text(
-                                "Это наивысший ранг: открыты все возможности приложения.",
+                                "Приглашение засчитывается, когда друг установил приложение по " +
+                                    "вашей ссылке, добавил вас в контакты и ваши сообщения дошли " +
+                                    "друг до друга. Засчитываются только те, кого вы позвали сами. " +
+                                    "Ранг, полученный по промокоду, действует наравне с " +
+                                    "заработанным.",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            "Приглашение засчитывается, когда друг установил приложение по " +
-                                "вашей ссылке, добавил вас в контакты и ваши сообщения дошли " +
-                                "друг до друга. Засчитываются только те, кого вы позвали сами. " +
-                                "Ранг, полученный по промокоду, действует наравне с " +
-                                "заработанным.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
                     }
                 }
-            }
-            items(FileTransferRankPolicy.tiers, key = { it.minimumQualifiedReferrals }) { tier ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        val isCurrent = tier == current
-                        val reached = qualified >= tier.minimumQualifiedReferrals
-                        Text(
-                            buildString {
-                                append("${tier.minimumQualifiedReferrals} — ${tier.rankName}")
-                                if (isCurrent) append("  (ваш ранг)")
-                            },
-                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                        )
-                        if (!reached) {
+                items(FileTransferRankPolicy.tiers, key = { it.minimumQualifiedReferrals }) { tier ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            val isCurrent = tier == current
+                            val reached = qualified >= tier.minimumQualifiedReferrals
                             Text(
-                                "Нужно приглашений: ${tier.minimumQualifiedReferrals}",
-                                style = MaterialTheme.typography.bodySmall,
+                                buildString {
+                                    append("${tier.minimumQualifiedReferrals} — ${tier.rankName}")
+                                    if (isCurrent) append("  (ваш ранг)")
+                                },
+                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                             )
+                            if (!reached) {
+                                Text(
+                                    "Нужно приглашений: ${tier.minimumQualifiedReferrals}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            tier.unlockedFeatureSummary().forEach { feature -> Text("• $feature") }
                         }
-                        tier.unlockedFeatureSummary().forEach { feature -> Text("• $feature") }
                     }
                 }
+                item {
+                    Text(
+                        "Приложение не задаёт лимит размера файла. Фактическая передача зависит от " +
+                            "свободного места, возможностей устройства и доступной сети.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                // Пузырь с промокодом - в самом низу раздела.
+                item {
+                    PromoCodeCard(
+                        onRedeemed = { refresh++ },
+                    )
+                }
             }
-            item {
-                Text(
-                    "Приложение не задаёт лимит размера файла. Фактическая передача зависит от " +
-                        "свободного места, возможностей устройства и доступной сети.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            // Пузырь с промокодом - в самом низу раздела.
-            item {
-                PromoCodeCard(
-                    onRedeemed = { refresh++ },
-                )
-            }
+            ApuScrollbar(state = scrollState)
         }
     }
     }

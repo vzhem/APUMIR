@@ -8,6 +8,11 @@ package com.vladimir.messenger.ui.screens.settings
 //   - «Настройки»: оформление, сеть, передача файлов, безопасность, о программе.
 // =============================================================================
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.swipeBack
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -88,7 +93,12 @@ fun SettingsScreen(
     // мешала: список настроек начинался не с начала.
 
     // Подложка на весь экран, в том числе под верхней панелью.
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Смахивание вправо работает как «Назад».
+            .swipeBack(onBack = onBackClick),
+    ) {
         ChatWallpaper()
         Scaffold(
             containerColor = Color.Transparent,
@@ -304,174 +314,180 @@ private fun ProfileTabContent(
         }
     }
 
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(paddingValues),
-        contentPadding = PaddingValues(bottom = 32.dp),
-    ) {
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-            ) {
-                Column(
+    // Бегунок справа: видно, где мы в длинном списке.
+    val profileScrollState = rememberLazyListState()
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = profileScrollState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentPadding = PaddingValues(bottom = 32.dp),
+        ) {
+            item {
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    // Свой аватар: картинка из галереи либо инициалы.
-                    MyAvatar(
-                        displayName = uiState.displayName,
-                        modifier = Modifier.size(96.dp),
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    // Имя правится прямо отсюда: тап по строке (или по
-                    // карандашу) открывает диалог.
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { onEditName() },
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
+                        // Свой аватар: картинка из галереи либо инициалы.
+                        MyAvatar(
+                            displayName = uiState.displayName,
+                            modifier = Modifier.size(96.dp),
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        // Имя правится прямо отсюда: тап по строке (или по
+                        // карандашу) открывает диалог.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { onEditName() },
+                        ) {
+                            Text(
+                                uiState.displayName,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Изменить имя",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            uiState.displayName,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
+                            if (myUsername.isNullOrBlank()) {
+                                "@никнейм не задан"
+                            } else {
+                                "@$myUsername"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = "Изменить имя",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.primary,
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            uiState.fingerprint,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        if (myUsername.isNullOrBlank()) {
-                            "@никнейм не задан"
-                        } else {
-                            "@$myUsername"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        uiState.fingerprint,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
 
-                // Кнопки в два ряда: текст целиком умещается.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick  = onMyQr,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Мой QR", maxLines = 1)
-                    }
-                    OutlinedButton(
-                        onClick  = onCopyLink,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Ссылка", maxLines = 1)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick  = onUsername,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        // Собака уже нарисована иконкой - в подписи её быть не
-                        // должно, иначе на кнопке видно две «@».
-                        Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Никнейм", maxLines = 1)
-                    }
-                    OutlinedButton(
-                        onClick  = { showAvatarPicker = true },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Аватар", maxLines = 1)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick  = onEditName,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Изменить имя", maxLines = 1)
-                    }
-                }
-                if (avatarUri != null) {
+                    // Кнопки в два ряда: текст целиком умещается.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        TextButton(onClick = { AvatarHolder.set(context, null) }) {
-                            Text("Убрать аватар")
+                        OutlinedButton(
+                            onClick  = onMyQr,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Мой QR", maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick  = onCopyLink,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Ссылка", maxLines = 1)
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick  = onUsername,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            // Собака уже нарисована иконкой - в подписи её быть не
+                            // должно, иначе на кнопке видно две «@».
+                            Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Никнейм", maxLines = 1)
+                        }
+                        OutlinedButton(
+                            onClick  = { showAvatarPicker = true },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Аватар", maxLines = 1)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick  = onEditName,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Изменить имя", maxLines = 1)
+                        }
+                    }
+                    if (avatarUri != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                        ) {
+                            TextButton(onClick = { AvatarHolder.set(context, null) }) {
+                                Text("Убрать аватар")
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
-                Spacer(modifier = Modifier.height(8.dp))
             }
-        }
 
-        // Каждая строка - свой пузырь: голые ListItem во всю ширину выбивались
-        // из ряда и плохо читались на обоях.
-        item {
-            SettingsCard {
-                SettingsItem(
-                    icon = Icons.Default.Share,
-                    title = "Поделиться профилем",
-                    subtitle = "Отправить ссылку для добавления в контакты",
-                    onClick = onShareProfile,
-                )
+            // Каждая строка - свой пузырь: голые ListItem во всю ширину выбивались
+            // из ряда и плохо читались на обоях.
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon = Icons.Default.Share,
+                        title = "Поделиться профилем",
+                        subtitle = "Отправить ссылку для добавления в контакты",
+                        onClick = onShareProfile,
+                    )
+                }
             }
-        }
 
-        item {
-            SettingsCard {
-                SettingsItem(
-                    icon = Icons.Default.EmojiEvents,
-                    title = "Ранги и возможности",
-                    subtitle = "Что открывается за подтверждённые приглашения",
-                    onClick = onRankBenefits,
-                )
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon = Icons.Default.EmojiEvents,
+                        title = "Ранги и возможности",
+                        subtitle = "Что открывается за подтверждённые приглашения",
+                        onClick = onRankBenefits,
+                    )
+                }
             }
         }
+        ApuScrollbar(state = profileScrollState)
     }
 
     // Диалог выбора аватара: стандартный набор из 50 или картинка из галереи.
@@ -504,240 +520,246 @@ private fun SettingsTabContent(
     onBackup: () -> Unit,
     onProfileClick: () -> Unit = {},
 ) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(paddingValues),
-        contentPadding = PaddingValues(bottom = 32.dp),
-    ) {
-        // Профиль первым пунктом: имя, @никнейм и свой QR нужны чаще
-        // остального, а раньше они прятались за вкладкой сверху.
-        item { SettingsSectionTitle("Мой профиль") }
-        item {
-            SettingsCard {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onProfileClick)
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Default.Person,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Профиль", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Имя, никнейм, мой QR-код и приглашения",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Icon(
-                        Icons.Default.ChevronRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
-        // ----------------------------------------------------------------
-        // ОФОРМЛЕНИЕ: день / ночь / авто + обои
-        // ----------------------------------------------------------------
-        item { SettingsSectionTitle("Оформление") }
-        item {
-            SettingsCard {
-                val context = LocalContext.current
-                val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
-                ThemeMode.entries.forEach { mode ->
+    // Бегунок справа: видно, где мы в длинном списке.
+    val settingsScrollState = rememberLazyListState()
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = settingsScrollState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            contentPadding = PaddingValues(bottom = 32.dp),
+        ) {
+            // Профиль первым пунктом: имя, @никнейм и свой QR нужны чаще
+            // остального, а раньше они прятались за вкладкой сверху.
+            item { SettingsSectionTitle("Мой профиль") }
+            item {
+                SettingsCard {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { ThemeModeHolder.set(context, mode) }
+                            .clickable(onClick = onProfileClick)
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Профиль", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Имя, никнейм, мой QR-код и приглашения",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // ОФОРМЛЕНИЕ: день / ночь / авто + обои
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Оформление") }
+            item {
+                SettingsCard {
+                    val context = LocalContext.current
+                    val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
+                    ThemeMode.entries.forEach { mode ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { ThemeModeHolder.set(context, mode) }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = themeMode == mode,
+                                onClick = { ThemeModeHolder.set(context, mode) },
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(mode.title, style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+
+                    // Свои обои: из галереи или стандартные в тон теме.
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    val customWallpaper by WallpaperHolder.uri.collectAsStateWithLifecycle()
+                    val wallpaperPicker = rememberLauncherForActivityResult(
+                        ActivityResultContracts.GetContent()
+                    ) { uri ->
+                        if (uri != null) {
+                            try {
+                                context.contentResolver.takePersistableUriPermission(
+                                    uri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                )
+                            } catch (_: Exception) {
+                            }
+                            WallpaperHolder.set(context, uri.toString())
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(
-                            selected = themeMode == mode,
-                            onClick = { ThemeModeHolder.set(context, mode) },
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(mode.title, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-
-                // Свои обои: из галереи или стандартные в тон теме.
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                val customWallpaper by WallpaperHolder.uri.collectAsStateWithLifecycle()
-                val wallpaperPicker = rememberLauncherForActivityResult(
-                    ActivityResultContracts.GetContent()
-                ) { uri ->
-                    if (uri != null) {
-                        try {
-                            context.contentResolver.takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Обои (подложка)", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (customWallpaper != null) {
+                                    "Своя картинка из галереи"
+                                } else {
+                                    "Стандартные, в тон теме"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        } catch (_: Exception) {
                         }
-                        WallpaperHolder.set(context, uri.toString())
+                        TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
+                            Text("Из галереи")
+                        }
                     }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Обои (подложка)", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            if (customWallpaper != null) {
-                                "Своя картинка из галереи"
-                            } else {
-                                "Стандартные, в тон теме"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
-                        Text("Из галереи")
-                    }
-                }
-                if (customWallpaper != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 2.dp),
-                    ) {
-                        TextButton(onClick = { WallpaperHolder.set(context, null) }) {
-                            Text("Вернуть стандартные")
+                    if (customWallpaper != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 2.dp),
+                        ) {
+                            TextButton(onClick = { WallpaperHolder.set(context, null) }) {
+                                Text("Вернуть стандартные")
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // ----------------------------------------------------------------
-        // СТАТУС СЕТИ
-        // ----------------------------------------------------------------
-        item { SettingsSectionTitle("Сеть") }
-        item {
-            SettingsCard {
-                SettingsItem(
-                    icon  = Icons.Default.Hub,
-                    title = "Статус соединения",
-                    subtitle = uiState.connectionStatus.displayName,
-                    trailingContent = {
-                        StatusDot(status = uiState.connectionStatus)
-                    }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon     = Icons.Default.People,
-                    title    = "Подключено пиров",
-                    subtitle = "${uiState.connectedPeers} устройств",
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon     = Icons.Default.Public,
-                    title    = "Публичный IP",
-                    subtitle = uiState.publicIp ?: "Не удалось определить (нет сети?)",
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon  = Icons.Default.RestartAlt,
-                    title = "Перезапустить сетевой движок",
-                    subtitle = "Пересоединиться со всеми пирами",
-                    onClick = viewModel::onRestartEngine,
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon  = Icons.Default.Refresh,
-                    title = "Собрать данные об абонентах",
-                    subtitle = "Запустить поиск пиров по сети",
-                    onClick = viewModel::onTriggerGossipDiscovery,
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon     = Icons.Default.VpnKey,
-                    title    = "Туннель через прокси",
-                    subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
-                    trailingContent = {
-                        Switch(
-                            checked = uiState.proxyTunnelEnabled,
-                            onCheckedChange = viewModel::onProxyTunnelToggle,
-                        )
-                    },
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                // Настройка прокси стоит рядом с выключателем прокси, а не
-                // отдельным разделом: раньше два прокси-пункта жили в разных
-                // концах экрана.
-                SettingsItem(
-                    icon = Icons.Default.Dns,
-                    title = "Настроить прокси вручную",
-                    subtitle = "Свои серверы MTProto",
-                    onClick = onMtProxyClick,
-                )
+            // ----------------------------------------------------------------
+            // СТАТУС СЕТИ
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Сеть") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon  = Icons.Default.Hub,
+                        title = "Статус соединения",
+                        subtitle = uiState.connectionStatus.displayName,
+                        trailingContent = {
+                            StatusDot(status = uiState.connectionStatus)
+                        }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon     = Icons.Default.People,
+                        title    = "Подключено пиров",
+                        subtitle = "${uiState.connectedPeers} устройств",
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon     = Icons.Default.Public,
+                        title    = "Публичный IP",
+                        subtitle = uiState.publicIp ?: "Не удалось определить (нет сети?)",
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon  = Icons.Default.RestartAlt,
+                        title = "Перезапустить сетевой движок",
+                        subtitle = "Пересоединиться со всеми пирами",
+                        onClick = viewModel::onRestartEngine,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon  = Icons.Default.Refresh,
+                        title = "Собрать данные об абонентах",
+                        subtitle = "Запустить поиск пиров по сети",
+                        onClick = viewModel::onTriggerGossipDiscovery,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon     = Icons.Default.VpnKey,
+                        title    = "Туннель через прокси",
+                        subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.proxyTunnelEnabled,
+                                onCheckedChange = viewModel::onProxyTunnelToggle,
+                            )
+                        },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    // Настройка прокси стоит рядом с выключателем прокси, а не
+                    // отдельным разделом: раньше два прокси-пункта жили в разных
+                    // концах экрана.
+                    SettingsItem(
+                        icon = Icons.Default.Dns,
+                        title = "Настроить прокси вручную",
+                        subtitle = "Свои серверы MTProto",
+                        onClick = onMtProxyClick,
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // ПЕРЕДАЧА ФАЙЛОВ
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Передача файлов") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Delete,
+                        title    = "Остановить зависшие отправки",
+                        subtitle = "Отменяет незавершённые отправки и чистит их очереди",
+                        onClick  = viewModel::onCancelStalledTransfers,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon     = Icons.Default.CleaningServices,
+                        title    = "Очистить завершённые",
+                        subtitle = "Освобождает место; сохранённые файлы остаются у вас",
+                        onClick  = viewModel::onPurgeCompletedTransfers,
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // БЕЗОПАСНОСТЬ
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Безопасность") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Backup,
+                        title    = "Резервная копия ключей",
+                        subtitle = "Экспорт ключей для восстановления",
+                        onClick  = onBackup,
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // О ПРИЛОЖЕНИИ
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("О приложении") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Info,
+                        title    = "Версия",
+                        subtitle = "APU ${uiState.appVersion}",
+                    )
+                }
             }
         }
-
-        // ----------------------------------------------------------------
-        // ПЕРЕДАЧА ФАЙЛОВ
-        // ----------------------------------------------------------------
-        item { SettingsSectionTitle("Передача файлов") }
-        item {
-            SettingsCard {
-                SettingsItem(
-                    icon     = Icons.Default.Delete,
-                    title    = "Остановить зависшие отправки",
-                    subtitle = "Отменяет незавершённые отправки и чистит их очереди",
-                    onClick  = viewModel::onCancelStalledTransfers,
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsItem(
-                    icon     = Icons.Default.CleaningServices,
-                    title    = "Очистить завершённые",
-                    subtitle = "Освобождает место; сохранённые файлы остаются у вас",
-                    onClick  = viewModel::onPurgeCompletedTransfers,
-                )
-            }
-        }
-
-        // ----------------------------------------------------------------
-        // БЕЗОПАСНОСТЬ
-        // ----------------------------------------------------------------
-        item { SettingsSectionTitle("Безопасность") }
-        item {
-            SettingsCard {
-                SettingsItem(
-                    icon     = Icons.Default.Backup,
-                    title    = "Резервная копия ключей",
-                    subtitle = "Экспорт ключей для восстановления",
-                    onClick  = onBackup,
-                )
-            }
-        }
-
-        // ----------------------------------------------------------------
-        // О ПРИЛОЖЕНИИ
-        // ----------------------------------------------------------------
-        item { SettingsSectionTitle("О приложении") }
-        item {
-            SettingsCard {
-                SettingsItem(
-                    icon     = Icons.Default.Info,
-                    title    = "Версия",
-                    subtitle = "APU ${uiState.appVersion}",
-                )
-            }
-        }
+        ApuScrollbar(state = settingsScrollState)
     }
 }
 

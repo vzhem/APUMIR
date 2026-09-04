@@ -4,6 +4,7 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Группы»: список групп и создание новой
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.clickable
@@ -103,7 +104,12 @@ fun GroupsScreen(
     // Обои APU лежат подложкой под всем экраном, как в «Контактах»: сам
     // Scaffold и шапка прозрачные, иначе они закрасили бы картину сплошным
     // цветом темы.
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Смахивание вправо работает как «Назад».
+            .swipeBack(onBack = onBackClick),
+    ) {
     ChatWallpaper()
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
