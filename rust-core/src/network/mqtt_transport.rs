@@ -654,10 +654,16 @@ impl MqttTransport {
     pub async fn publish_presence(
         &self, display_name: &str, public_addr: Option<&str>, is_relay: bool,
     ) -> Result<(), String> {
-        let payload = format!("{}|{}|{}|{}",
+        // Поля 5 и 6 добавлены поверх старого формата, поэтому прежние сборки
+        // читают первые четыре и не ломаются. Версия позволяет отбрасывать
+        // сведения от слишком старых узлов, отметка времени - протухшие
+        // объявления, которые брокер хранит вечно.
+        let payload = format!("{}|{}|{}|{}|{}|{}",
             self.node_id, display_name,
             public_addr.unwrap_or(""),
-            if is_relay { "relay" } else { "client" }
+            if is_relay { "relay" } else { "client" },
+            crate::config::defaults::PRESENCE_VERSION,
+            crate::storage::models::now_ms()
         );
         let topic = format!("p2pm2/presence/{}", self.node_id);
         self.enqueue_publish(

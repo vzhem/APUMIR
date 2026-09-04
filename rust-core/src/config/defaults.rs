@@ -12,6 +12,23 @@ pub const PROTOCOL_VERSION: u8 = 1;
 /// Версия приложения.
 pub const APP_VERSION: &str = "0.1.0";
 
+/// Версия формата presence и списка знакомых узлов.
+///
+/// Растёт, когда меняется состав полей. Записи от узлов, отставших больше
+/// чем на [PRESENCE_VERSION_TOLERANCE], игнорируются: их представление о том,
+/// кто в сети, всё равно устарело и только копит мусор.
+pub const PRESENCE_VERSION: u32 = 2;
+
+/// На сколько версий разрешено отставать источнику списка узлов.
+pub const PRESENCE_VERSION_TOLERANCE: u32 = 3;
+
+/// Presence считается протухшим, если он старше этого срока.
+///
+/// Брокер отдаёт последнее объявление каждого узла даже спустя месяцы после
+/// того, как телефон исчез. Без проверки возраста список «подключённых» рос
+/// призраками давно удалённых установок.
+pub const PRESENCE_MAX_AGE_MS: i64 = 10 * 60 * 1000;
+
 // ═══════════════════════════════════════════════════════════════════
 // СЕТЕВЫЕ КОНСТАНТЫ
 // ═══════════════════════════════════════════════════════════════════
@@ -212,5 +229,29 @@ mod tests {
             "✅ Интервалы polling корректны: активный={}с, фон={}с-{}с",
             POLLING_ACTIVE_SECS, POLLING_BACKGROUND_MIN_SECS, POLLING_BACKGROUND_MAX_SECS
         );
+    }
+
+    /// Правило отбраковки по версии: отставание на три и больше версий -
+    /// сведения не берём. Ровно та же арифметика, что и в обработчике presence.
+    fn presence_version_accepted(peer_version: u32) -> bool {
+        peer_version + PRESENCE_VERSION_TOLERANCE > PRESENCE_VERSION
+    }
+
+    #[test]
+    fn test_presence_version_filter() {
+        assert!(presence_version_accepted(PRESENCE_VERSION));
+        assert!(presence_version_accepted(1));
+        assert!(!presence_version_accepted(0));
+        assert!(!presence_version_accepted(
+            PRESENCE_VERSION.saturating_sub(PRESENCE_VERSION_TOLERANCE)
+        ));
+        println!("✅ Фильтр версий presence работает");
+    }
+
+    #[test]
+    fn test_presence_max_age_is_a_few_minutes() {
+        assert!(PRESENCE_MAX_AGE_MS >= 60_000);
+        assert!(PRESENCE_MAX_AGE_MS <= 60 * 60 * 1000);
+        println!("✅ Срок годности presence: {} мин", PRESENCE_MAX_AGE_MS / 60_000);
     }
 }

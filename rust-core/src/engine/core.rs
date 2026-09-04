@@ -1068,10 +1068,17 @@ self.runtime = Some(runtime);
         /// Узел считается исчезнувшим, если не присылал presence столько секунд.
         /// Presence уходит раз в минуту, поэтому три пропуска подряд - потеря.
         const PEER_STALE_SECS: u64 = 200;
+        /// Срок для узлов, о которых известно только с чужих слов.
+        /// Короче обычного: такие записи никто не подтверждает, и без
+        /// отдельного срока они висели бы вровень с живыми телефонами.
+        const HEARSAY_STALE_SECS: u64 = 90;
         /// Узлы, чей адрес пришёл из MQTT presence: только их адреса подлежат
         /// уборке. Адреса от mDNS живут по своим правилам.
         let mut seen_via_presence: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+        // Когда последний раз видели собственное объявление, вернувшееся из
+        // брокера. Пустое значение означает, что нас в общем списке нет.
+        let mut self_presence_seen_at: Option<std::time::Instant> = None;
 
         // Mesh gossip budgets: прототип не должен превращать тысячи presence-событий
         // в безлимитную рассылку. Полная пагинация/Bloom summaries будет в hardening.
@@ -1275,10 +1282,59 @@ self.runtime = Some(runtime);
                     }
                 } else if evt.topic.starts_with("p2pm2/presence/") {
                     if evt.payload.is_empty() { continue; }  // Skip empty (retained clear)
-                    let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
+                    let parts: Vec<&str> = evt.payload.split('|').collect();
+
+                    // Своё же объявление, вернувшееся из брокера: ставим метку
+                    // «я был в сети с этим адресом». По ней видно, что наша
+                    // запись свежая, и её не нужно чистить вместе с чужими.
+                    if parts.len() >= 4 && parts[0] == node_id {
+                        self_presence_seen_at = Some(std::time::Instant::now());
+                        let own_addr = parts[2].trim();
+                        if !own_addr.is_empty() {
+                            tracing::info!("PRESENCE: self online, addr {}", own_addr);
+                        }
+                        continue;
+                    }
+
                     if parts.len() >= 4 && parts[0] != node_id {
                         let peer_id = parts[0];
                         let display_name = parts[1];
+
+                        // Фильтр устаревших сведений. Брокер хранит последнее
+                        // объявление вечно, поэтому без этих двух проверок в
+                        // списке копились телефоны, которых давно нет.
+                        let peer_presence_version: u32 = parts
+                            .get(4)
+                            .and_then(|v| v.trim().parse().ok())
+                            .unwrap_or(1);
+                        if peer_presence_version
+                            + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                            <= crate::config::defaults::PRESENCE_VERSION
+                        {
+                            tracing::info!(
+                                "PRESENCE: ignored {} - version {} is too old (ours {})",
+                                peer_id,
+                                peer_presence_version,
+                                crate::config::defaults::PRESENCE_VERSION
+                            );
+                            continue;
+                        }
+                        if let Some(sent_at) = parts
+                            .get(5)
+                            .and_then(|v| v.trim().parse::<i64>().ok())
+                        {
+                            let age_ms = crate::storage::models::now_ms()
+                                .saturating_sub(sent_at);
+                            if age_ms > crate::config::defaults::PRESENCE_MAX_AGE_MS {
+                                tracing::info!(
+                                    "PRESENCE: ignored {} - announcement is {}s old",
+                                    peer_id,
+                                    age_ms / 1000
+                                );
+                                continue;
+                            }
+                        }
+
                         tracing::info!("MQTT: peer online: {} ({})", display_name, peer_id);
 
                         // Presence несёт публичный адрес пира (STUN), но раньше он
@@ -1428,6 +1484,22 @@ self.runtime = Some(runtime);
                     let sender = parts[1];
                     let msg_uuid = parts[2];
                     if sender == node_id { continue; }
+                    // Список от слишком старой сборки не берём: там нет
+                    // проверки свежести, поэтому он полон призраков.
+                    let sender_version: u32 = msg_uuid
+                        .rsplit_once('v')
+                        .and_then(|(_, v)| v.parse().ok())
+                        .unwrap_or(1);
+                    if sender_version + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                        <= crate::config::defaults::PRESENCE_VERSION
+                    {
+                        tracing::info!(
+                            "Gossip: ignored list from {} - version {} is too old",
+                            sender,
+                            sender_version
+                        );
+                        continue;
+                    }
                     if seen_gossip.contains(&msg_uuid.to_string()) { continue; }
                     
                     seen_gossip.push_back(msg_uuid.to_string());
@@ -2054,8 +2126,16 @@ self.runtime = Some(runtime);
                 // переустановка = новый node_id) и мешал выбирать живого
                 // получателя для файлов.
                 let stale_cutoff = std::time::Duration::from_secs(PEER_STALE_SECS);
+                let hearsay_cutoff = std::time::Duration::from_secs(HEARSAY_STALE_SECS);
                 let before = known_peers.len();
-                known_peers.retain(|_, (_, seen_at, _)| seen_at.elapsed() < stale_cutoff);
+                // Кого подтвердили лично - живёт полный срок. О ком знаем
+                // только с чужих слов - вылетает быстрее: такие записи и есть
+                // главный источник мусора в списке. Понадобится - узел сам
+                // объявится, когда снова окажется в сети.
+                known_peers.retain(|_, (_, seen_at, confirmed)| {
+                    let limit = if *confirmed { stale_cutoff } else { hearsay_cutoff };
+                    seen_at.elapsed() < limit
+                });
                 let removed = before.saturating_sub(known_peers.len());
 
                 // Общий список чистим по возрасту записи, а не по списку из
@@ -2095,6 +2175,22 @@ self.runtime = Some(runtime);
                 {
                     tracing::warn!("MQTT: periodic presence request failed: {}", e);
                 }
+                // Себя в общем списке тоже отмечаем. Если наше объявление не
+                // возвращается из брокера дольше срока протухания, значит нас
+                // для сети нет - пишем в лог, чтобы это было видно в отчёте.
+                match self_presence_seen_at {
+                    Some(seen_at) if seen_at.elapsed().as_secs() <= PEER_STALE_SECS => {
+                        tracing::info!(
+                            "PRESENCE: self is listed online, addr {}",
+                            current_addr.as_deref().unwrap_or("unknown")
+                        );
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "PRESENCE: self is missing from the shared list, re-announcing"
+                        );
+                    }
+                }
                 // === GOSSIP: broadcast known peers to the network ===
                 // Реже, чем presence: список знакомых меняется медленно.
                 if gossip_tick < GOSSIP_EVERY_TICKS {
@@ -2111,7 +2207,14 @@ self.runtime = Some(runtime);
                     let mut gossip_parts: Vec<String> = vec![
                         "gossip".to_string(),
                         node_id.clone(),
-                        msg_uuid,
+                        // Версию приписываем к идентификатору пакета: старые
+                        // сборки читают его как непрозрачную строку, а новые
+                        // видят, насколько свеж источник списка.
+                        format!(
+                            "{}v{}",
+                            msg_uuid,
+                            crate::config::defaults::PRESENCE_VERSION
+                        ),
                     ];
                     // Пересказываем ТОЛЬКО тех, кого подтвердили лично. Иначе
                     // список ходит по кругу: телефон A узнаёт призрака от B,
