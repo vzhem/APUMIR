@@ -37,7 +37,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.BarcodeCallback
@@ -62,7 +66,11 @@ fun QrScannerScreen(
     onBackClick: () -> Unit,
     onQrScanned: (String) -> Unit,
 ) {
-    var mode by remember { mutableStateOf(QrMode.Scan) }
+    // Листалка: вкладки переключаются и кнопками, и пальцем. Состояние одно на
+    // оба способа, поэтому кнопки и жест не спорят друг с другом.
+    val pagerState = rememberPagerState(pageCount = { QrMode.entries.size })
+    val scope = rememberCoroutineScope()
+    val mode = QrMode.entries[pagerState.currentPage]
 
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
@@ -98,7 +106,9 @@ fun QrScannerScreen(
                     QrMode.entries.forEachIndexed { index, item ->
                         SegmentedButton(
                             selected = mode == item,
-                            onClick = { mode = item },
+                            onClick = {
+                                scope.launch { pagerState.animateScrollToPage(index) }
+                            },
                             shape = SegmentedButtonDefaults.itemShape(index, QrMode.entries.size),
                             icon = {
                                 Icon(
@@ -115,12 +125,20 @@ fun QrScannerScreen(
                     }
                 }
 
-                when (mode) {
-                    // Камера живёт только во вкладке сканера: при переходе на
-                    // «Мой код» AndroidView уходит из композиции и камера
-                    // освобождается сама.
-                    QrMode.Scan -> ScanPane(onQrScanned = onQrScanned)
-                    QrMode.Mine -> MyCodePane()
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    // Соседнюю страницу заранее НЕ готовим: иначе камера
+                    // запускалась бы, пока открыт «Мой код», и наоборот.
+                    beyondViewportPageCount = 0,
+                ) { page ->
+                    when (QrMode.entries[page]) {
+                        // Камера живёт только во вкладке сканера: при переходе
+                        // на «Мой код» AndroidView уходит из композиции и
+                        // камера освобождается сама.
+                        QrMode.Scan -> ScanPane(onQrScanned = onQrScanned)
+                        QrMode.Mine -> MyCodePane()
+                    }
                 }
             }
         }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -172,13 +173,19 @@ fun ChatListScreen(
                             // заголовок - это сразу бейдж ранга, тап по нему
                             // открывает, что уже доступно и как расти дальше.
                             if (uiState.rankBadge.isNotBlank()) {
-                                Text(
-                                    uiState.rankBadge,
+                                Row(
                                     modifier = Modifier.clickable(onClick = onRankClick),
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    RankMedal(size = 26.dp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        uiState.rankBadge,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                         }
                     },

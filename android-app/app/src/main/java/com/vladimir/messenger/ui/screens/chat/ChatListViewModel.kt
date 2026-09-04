@@ -438,7 +438,10 @@ class ChatListViewModel @Inject constructor(
                         .entitlement(qualified)
                 }
                 _uiState.update { state ->
-                    state.copy(rankBadge = "🎖 ${rank.rankName}")
+                    // Только название: медаль рисует отдельный значок
+                    // RankMedal - объёмный и анимированный, эмодзи такого не
+                    // умеет и выглядит по-разному на разных прошивках.
+                    state.copy(rankBadge = rank.rankName)
                 }
             }
         }

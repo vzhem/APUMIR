@@ -116,7 +116,17 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(current.rankName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        // Та же медаль, что и на главной: значок ранга должен
+                        // узнаваться в обоих местах.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.vladimir.messenger.ui.components.RankMedal(size = 40.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                current.rankName,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                         Text("Подтверждённых друзей: $earned")
                         if (promoBonus > 0) {
                             // Видно, что пришло от друзей, а что от промокода -
