@@ -212,7 +212,4 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun onExportKeys(password: String) {
-        // Phase 3 - stub
-    }
 }

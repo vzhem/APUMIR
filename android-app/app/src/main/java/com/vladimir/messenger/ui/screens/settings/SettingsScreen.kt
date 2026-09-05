@@ -84,7 +84,6 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
-    var showBackupDialog by remember { mutableStateOf(false) }
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -143,7 +142,6 @@ fun SettingsScreen(
                     uiState = uiState,
                     viewModel = viewModel,
                     onMtProxyClick = onMtProxyClick,
-                    onBackup = { showBackupDialog = true },
                     onProfileClick = onProfileClick,
                 )
             }
@@ -268,16 +266,6 @@ fun SettingsScreen(
         )
     }
 
-    // Диалог резервного копирования.
-    if (showBackupDialog) {
-        BackupDialog(
-            onDismiss = { showBackupDialog = false },
-            onExport  = { password ->
-                viewModel.onExportKeys(password)
-                showBackupDialog = false
-            }
-        )
-    }
 }
 
 // =============================================================================
@@ -517,7 +505,6 @@ private fun SettingsTabContent(
     uiState: SettingsUiState,
     viewModel: SettingsViewModel,
     onMtProxyClick: () -> Unit,
-    onBackup: () -> Unit,
     onProfileClick: () -> Unit = {},
 ) {
     // Бегунок справа: видно, где мы в длинном списке.
@@ -730,20 +717,9 @@ private fun SettingsTabContent(
                 }
             }
 
-            // ----------------------------------------------------------------
-            // БЕЗОПАСНОСТЬ
-            // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Безопасность") }
-            item {
-                SettingsCard {
-                    SettingsItem(
-                        icon     = Icons.Default.Backup,
-                        title    = "Резервная копия ключей",
-                        subtitle = "Экспорт ключей для восстановления",
-                        onClick  = onBackup,
-                    )
-                }
-            }
+            // Раздел «Безопасность» с экспортом ключей убран: кнопка вела к
+            // незавершённой выгрузке, которая ничего не сохраняла. Появится
+            // снова, когда восстановление ключей будет работать целиком.
 
             // ----------------------------------------------------------------
             // О ПРИЛОЖЕНИИ
@@ -848,58 +824,6 @@ private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStat
         shape    = RoundedCornerShape(50),
         color    = color,
     ) {}
-}
-
-@Composable
-private fun BackupDialog(
-    onDismiss: () -> Unit,
-    onExport: (password: String) -> Unit,
-) {
-    var password by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title   = { Text("Экспорт ключей") },
-        text    = {
-            Column {
-                Text(
-                    "Введите пароль для шифрования резервной копии. Без этого пароля восстановить ключи будет невозможно.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value         = password,
-                    onValueChange = { password = it },
-                    label         = { Text("Пароль") },
-                    singleLine    = true,
-                    visualTransformation = if (passwordVisible)
-                        androidx.compose.ui.text.input.VisualTransformation.None
-                    else
-                        androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                            )
-                        }
-                    },
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick  = { onExport(password) },
-                enabled  = password.length >= 8,
-            ) {
-                Text("Экспорт")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
-        },
-    )
 }
 
 // Расширение для отображения статуса
