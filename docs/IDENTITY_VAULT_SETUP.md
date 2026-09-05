@@ -74,7 +74,7 @@
 Первая команда должна ответить `success : True`:
 
 ```powershell
-powershell -NoProfile -Command "$b = @{shelf='0000000000000000000000000000000000000000000000000000000000000001'; vault='dGVzdA=='} | ConvertTo-Json; Invoke-RestMethod -Method Post -Uri 'https://p2p-relay.1985vzhem.workers.dev/vault/put' -ContentType 'application/json' -Body $b"
+powershell -NoProfile -Command "Invoke-RestMethod -Method Post -Uri 'https://p2p-relay.1985vzhem.workers.dev/vault/put' -ContentType 'application/json' -Body (@{shelf='0000000000000000000000000000000000000000000000000000000000000001';vault='dGVzdA=='} | ConvertTo-Json -Compress)"
 ```
 
 Вторая должна вернуть `vault : dGVzdA==`:
@@ -83,12 +83,21 @@ powershell -NoProfile -Command "$b = @{shelf='0000000000000000000000000000000000
 powershell -NoProfile -Command "Invoke-RestMethod -Uri 'https://p2p-relay.1985vzhem.workers.dev/vault/get?shelf=0000000000000000000000000000000000000000000000000000000000000001'"
 ```
 
-> Тело запроса собирается через `ConvertTo-Json`, а не пишется строкой с
-> экранированными кавычками: PowerShell такие кавычки съедает, и на сервер
-> уходит не JSON. Ответ `{"error":"bad json"}` означает именно это — worker при
-> этом работает исправно.
+Если обе ответили так — всё готово, можно проверять на телефонах.
 
-Если обе команды ответили как указано — всё готово, можно проверять на телефонах.
+### Как читать ответы
+
+| Ответ | Что означает |
+|---|---|
+| `success : True` / `vault : dGVzdA==` | всё работает |
+| `{"error":"not found"}` на `/vault/get` | путь работает, привязка есть, полка пока пуста — так и должно быть до первой записи |
+| `{"error":"bad json"}` | тело запроса испорчено оболочкой, сам worker исправен |
+| `{"error":"..."}` со словом `APU_VAULT` | не выполнен шаг 2 — нет привязки хранилища |
+| `not found` с полем `path` | не выполнен шаг 3 — код не опубликован |
+
+> В командах намеренно нет переменных со знаком `$`: при запуске через
+> `powershell -Command "..."` внешняя оболочка подставляет их до запуска, и
+> команда разваливается. Тело собирается прямо в параметре `-Body`.
 
 ## Что если сервер недоступен
 
