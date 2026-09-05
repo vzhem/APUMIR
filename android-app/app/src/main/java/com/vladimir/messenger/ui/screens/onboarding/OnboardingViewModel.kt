@@ -267,10 +267,16 @@ class OnboardingViewModel @Inject constructor(
                     if (!vaultOk) {
                         Log.w("OnboardingVM", "identity vault not stored: $saved")
                     }
+                    // Ссылку пересобираем ЗДЕСЬ, а не берём из identity:
+                    // та строилась до сохранения никнейма и получалась без
+                    // него. QR с регистрации отличался от QR с главной, и
+                    // отсканировавший не узнавал @имя собеседника.
+                    val inviteWithNick = com.vladimir.messenger.util.OwnInvite.link(appContext)
+                        ?: identity.inviteLink
                     _uiState.update { it.copy(
                         step            = OnboardingStep.ShowInvite,
                         isLoading       = false,
-                        createdInviteLink = identity.inviteLink,
+                        createdInviteLink = inviteWithNick,
                         fingerprint     = identity.fingerprint,
                     )}
                 }
