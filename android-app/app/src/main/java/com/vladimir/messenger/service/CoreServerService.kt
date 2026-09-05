@@ -55,6 +55,7 @@ class CoreServerService : Service() {
     @Inject lateinit var notificationHelper: NotificationHelper
     @Inject lateinit var botApi: BotApi
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
+    @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
@@ -250,6 +251,13 @@ class CoreServerService : Service() {
             // исходящие успеют уйти открытыми.
             RustBridge.attachContext(applicationContext)
             serviceScope.launch { fileTransferRouter.warmSealingKeys() }
+            // Досылка сундука личности: человек мог задать пароль без сети.
+            // Пока конверт не на сервере, восстановиться можно только с этого
+            // телефона, поэтому пробуем при каждом старте.
+            serviceScope.launch {
+                runCatching { identityBackup.flushPending(applicationContext) }
+                    .onFailure { Log.w(TAG, "Досылка сундука не удалась: ${it.message}") }
+            }
 
             val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")

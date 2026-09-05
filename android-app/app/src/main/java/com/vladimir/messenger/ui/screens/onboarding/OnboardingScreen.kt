@@ -204,10 +204,11 @@ private fun EnterNameStep(
             value    = state.nickname,
             onValueChange = onNicknameChanged,
             label    = { Text("Никнейм") },
-            placeholder = { Text("например anna_k") },
+            placeholder = { Text("ваш_никнейм") },
             singleLine = true,
             isError  = state.nicknameError != null,
-            prefix   = { Text("@") },
+            // Собачку рисует только значок слева. Текстовый префикс давал
+            // вторую - в поле было «@@».
             supportingText = {
                 Text(
                     state.nicknameError ?: "Латиница, цифры и подчёркивание, минимум 3 знака",

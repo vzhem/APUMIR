@@ -57,11 +57,18 @@ class IdentityBackupViewModel @Inject constructor(
                 IdentityBackup.SaveResult.BadInput -> fail(
                     "Проверьте никнейм и пароль: пароль не короче ${IdentityBackupMin.PASSWORD} знаков."
                 )
+                IdentityBackup.SaveResult.SavedLocally -> _uiState.update {
+                    it.copy(
+                        busy = false,
+                        protectedNickname = backup.protectedNickname(context),
+                        // Не ошибка: пароль уже работает, просто вход с ДРУГОГО
+                        // устройства станет возможен после досылки.
+                        message = "Сохранено на телефоне. Связи с сервером нет - отправим позже сами.",
+                        failed = false,
+                    )
+                }
                 IdentityBackup.SaveResult.NoIdentity -> fail(
                     "Личность ещё не создана - сначала завершите регистрацию."
-                )
-                IdentityBackup.SaveResult.NetworkFailed -> fail(
-                    "Нет связи с сервером. Личность не сохранена, попробуйте позже."
                 )
             }
         }

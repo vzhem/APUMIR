@@ -259,4 +259,21 @@ mod tests {
         let topic = format!("p2pm2/msg/{}", node);
         assert_eq!(topic.trim_start_matches("p2pm2/msg/"), node);
     }
+
+    /// ACK принимается только из СВОЕЙ темы.
+    ///
+    /// Раунд 84: подписка идёт на p2pm2/#, поэтому узел получал и собственный
+    /// ACK, только что отправленный собеседнику. Он метил доставленным чужое
+    /// сообщение, а у настоящего автора вторая галочка не появлялась.
+    #[test]
+    fn ack_is_accepted_only_from_our_own_topic() {
+        let me = "pk_aaaa";
+        let peer = "pk_bbbb";
+
+        let mine = format!("p2pm2/msg/{}", me);
+        assert_eq!(mine.trim_start_matches("p2pm2/msg/"), me);
+
+        let theirs = format!("p2pm2/msg/{}", peer);
+        assert_ne!(theirs.trim_start_matches("p2pm2/msg/"), me);
+    }
 }

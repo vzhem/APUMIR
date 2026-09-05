@@ -28,13 +28,23 @@ class IdentityBackup @Inject constructor(
         /** Отметка, что человек уже завёл пароль: экран настроек показывает состояние. */
         private const val KEY_PROTECTED_NICK = "identity_backup_nickname"
         private const val KEY_PROTECTED_AT = "identity_backup_saved_at"
+
+        /** Готовый конверт, который ещё не приняли на сервере. */
+        private const val KEY_PENDING_SHELF = "identity_backup_pending_shelf"
+        private const val KEY_PENDING_VAULT = "identity_backup_pending_vault"
     }
 
     sealed interface SaveResult {
+        /** Сундук заперт и уже лежит на сервере. */
         data object Success : SaveResult
+        /**
+         * Сундук заперт и сохранён на телефоне, но до сервера пока не дошёл.
+         * Это НЕ ошибка: восстановление с другого устройства заработает, как
+         * только связь появится - досылка идёт сама.
+         */
+        data object SavedLocally : SaveResult
         data object NoIdentity : SaveResult
         data object BadInput : SaveResult
-        data object NetworkFailed : SaveResult
     }
 
     sealed interface RestoreResult {
@@ -78,19 +88,56 @@ class IdentityBackup @Inject constructor(
         )
         val sealed = IdentityVault.seal(identity, nick, password) ?: return SaveResult.BadInput
         val shelf = IdentityVault.shelfFor(nick) ?: return SaveResult.BadInput
+        val payload = Base64.encodeToString(sealed, Base64.NO_WRAP)
 
-        val stored = botApi.storeIdentityVault(
-            shelf = shelf,
-            sealedBase64 = Base64.encodeToString(sealed, Base64.NO_WRAP),
-        )
-        if (!stored) return SaveResult.NetworkFailed
-
+        // Сначала записываем на телефон: человек нажал «Сохранить» и должен
+        // получить результат сразу, не дожидаясь сети. С сервером свяжемся,
+        // когда получится - для этого держим готовый конверт и метку «не
+        // отправлено».
         prefs.edit()
             .putString(KEY_PROTECTED_NICK, nick)
             .putLong(KEY_PROTECTED_AT, System.currentTimeMillis())
+            .putString(KEY_PENDING_SHELF, shelf)
+            .putString(KEY_PENDING_VAULT, payload)
             .apply()
+
+        val stored = botApi.storeIdentityVault(shelf = shelf, sealedBase64 = payload)
+        if (!stored) {
+            Log.i(TAG, "Личность @$nick сохранена локально, досылка на сервер отложена")
+            return SaveResult.SavedLocally
+        }
+        clearPending(context)
         Log.i(TAG, "Личность защищена под @$nick")
         return SaveResult.Success
+    }
+
+    /**
+     * Досылка отложенного сундука.
+     *
+     * Вызывается на старте и при появлении сети. Пока конверт не ушёл,
+     * восстановиться можно только на этом телефоне, поэтому пытаемся регулярно.
+     */
+    suspend fun flushPending(context: Context): Boolean {
+        val prefs = prefs(context)
+        val shelf = prefs.getString(KEY_PENDING_SHELF, null) ?: return false
+        val payload = prefs.getString(KEY_PENDING_VAULT, null) ?: return false
+        val stored = runCatching { botApi.storeIdentityVault(shelf, payload) }.getOrDefault(false)
+        if (stored) {
+            clearPending(context)
+            Log.i(TAG, "Отложенный сундук личности дослан на сервер")
+        }
+        return stored
+    }
+
+    /** Ждёт ли сундук отправки: экран настроек показывает это честно. */
+    fun hasPendingUpload(context: Context): Boolean =
+        prefs(context).getString(KEY_PENDING_SHELF, null) != null
+
+    private fun clearPending(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_PENDING_SHELF)
+            .remove(KEY_PENDING_VAULT)
+            .apply()
     }
 
     /**

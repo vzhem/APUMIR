@@ -1542,9 +1542,18 @@ self.runtime = Some(runtime);
                     }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
                     // ACK: "ack|messageId" — подтверждение обычной прямой доставки.
+                    //
+                    // Проверка адресата обязательна: подписка идёт на p2pm2/#,
+                    // то есть приходят и чужие темы. Без неё узел принимал
+                    // СВОЙ же ACK, только что отправленный собеседнику, и метил
+                    // доставленным чужое сообщение, а у настоящего автора
+                    // вторая галочка так и не появлялась.
                     if let Some(rest) = evt.payload.strip_prefix("ack|") {
+                        let ack_recipient = evt.topic.trim_start_matches("p2pm2/msg/");
                         let mid = rest.trim();
-                        if !mid.is_empty() {
+                        if ack_recipient != node_id {
+                            tracing::trace!("MQTT: ACK for another node ignored");
+                        } else if !mid.is_empty() {
                             tracing::info!("MQTT: delivery ACK received for {}", mid);
                             events.emit(CoreEvent::MessageDelivered {
                                 message_id: mid.to_string(),

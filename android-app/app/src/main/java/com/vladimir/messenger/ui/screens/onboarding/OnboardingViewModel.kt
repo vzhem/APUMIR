@@ -260,7 +260,11 @@ class OnboardingViewModel @Inject constructor(
                     val saved = runCatching {
                         identityBackup.save(appContext, nick, state.password)
                     }.getOrNull()
-                    if (saved != com.vladimir.messenger.data.security.IdentityBackup.SaveResult.Success) {
+                    // SavedLocally - штатный исход без сети: пароль уже
+                    // действует, конверт дошлётся сам.
+                    val vaultOk = saved == com.vladimir.messenger.data.security.IdentityBackup.SaveResult.Success ||
+                        saved == com.vladimir.messenger.data.security.IdentityBackup.SaveResult.SavedLocally
+                    if (!vaultOk) {
                         Log.w("OnboardingVM", "identity vault not stored: $saved")
                     }
                     _uiState.update { it.copy(
