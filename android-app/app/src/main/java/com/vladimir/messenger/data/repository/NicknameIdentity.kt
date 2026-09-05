@@ -59,14 +59,23 @@ object NicknameIdentity {
         val contact = contactRepository.getContactByFingerprint(ownerId)
         if (contact != null) {
             // Заглушку заменяем настоящим именем; имя, данное владельцем вручную,
-            // остаётся как есть.
+            // остаётся как есть. updateDisplayName сам правит и таблицу чатов.
             if (contactRepository.isPlaceholderName(contact.displayName)) {
                 contactRepository.updateDisplayName(contact.id, clean)
-                chatRepository.updateContactName(ownerId, clean)
                 Log.i(TAG, "контакт $ownerId переименован в @$clean")
             }
             if (!contact.username.equals(clean, ignoreCase = true)) {
                 contactRepository.updateUsername(contact.id, clean)
+            }
+        } else {
+            // Контакта нет, а чат может уже быть: он заводится при первом
+            // входящем сообщении отдельно от списка контактов. Без этой ветки
+            // такая переписка навсегда оставалась под техническим именем,
+            // и на двух экранах один человек выглядел как два разных.
+            val chat = chatRepository.getChatByContactId(ownerId)
+            if (chat != null && contactRepository.isPlaceholderName(chat.contactName)) {
+                chatRepository.updateContactName(ownerId, clean)
+                Log.i(TAG, "чат с $ownerId переименован в @$clean (контакта нет)")
             }
         }
 

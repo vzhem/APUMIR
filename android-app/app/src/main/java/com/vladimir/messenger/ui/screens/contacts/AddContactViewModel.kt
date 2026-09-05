@@ -38,6 +38,7 @@ class AddContactViewModel @Inject constructor(
     private val nicknameDao: NicknameDao,
     private val referralAttribution: ReferralAttributionSender,
     private val exchangePeerStore: com.vladimir.messenger.data.file.FileExchangePeerStore,
+    private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     @dagger.hilt.android.qualifiers.ApplicationContext
     private val appContext: android.content.Context,
 ) : ViewModel() {
@@ -185,6 +186,11 @@ class AddContactViewModel @Inject constructor(
                                 }
                             }
                             .onFailure { Log.w(TAG, "Pin reset failed: ${it.message}") }
+                        // Свой ключ отдаём сразу же. Обе стороны пересканируют
+                        // QR и обе сбрасывают пин - если каждая будет только
+                        // ждать чужой ключ, переписка не поднимется вовсе.
+                        runCatching { fileTransferRouter.announceMyKeyTo(fingerprint) }
+                            .onFailure { Log.w(TAG, "Key announce failed: ${it.message}") }
                         val existing = contactRepository.getContactByFingerprint(fingerprint)
                         if (existing != null) {
                             // роверяем есть ли уже чат, если нет — создаём

@@ -62,8 +62,20 @@ class ContactRepository @Inject constructor(
 
     suspend fun setAllOffline() = contactDao.setAllOffline()
 
+    /**
+     * Переименовать контакт СРАЗУ в обеих таблицах.
+     *
+     * Имя собеседника хранится дважды: в `contacts` (экран «Контакты») и
+     * копией в `chats` (главный экран и шапка переписки). Раньше этот метод
+     * менял только первую, а вторую вызывающий должен был помнить обновить
+     * сам - и обновляли не везде. Из-за этого один и тот же человек
+     * назывался по-разному на двух экранах и выглядел как два разных.
+     *
+     * Держим обе таблицы в согласии здесь, чтобы забыть об этом было нельзя.
+     */
     suspend fun updateDisplayName(contactId: String, name: String) {
         contactDao.updateDisplayName(contactId, name)
+        chatRepository.updateContactName(contactId, name)
     }
 
     // updateUsername уже есть ниже, рядом с renameContact - второй такой же
