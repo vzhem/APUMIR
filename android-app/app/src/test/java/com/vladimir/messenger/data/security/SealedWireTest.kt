@@ -101,6 +101,19 @@ class SealedWireTest {
     }
 
     @Test
+    fun `bootstrap protocols must stay distinguishable from envelopes`() {
+        // Эти два разбираются транспортом ДО расшифровки, поэтому обязаны
+        // уходить открытыми и не опознаваться как конверт:
+        //   apu-file-hello1 - несёт сам ключ шифрования;
+        //   APULAN1         - адрес для поднятия прямого канала.
+        // Раунд 81: APULAN1 запечатывался, прямой канал не поднимался, и связь
+        // работала только в одну сторону.
+        assertFalse(SealedWire.isSealed("apu-file-hello1|AAAA"))
+        assertFalse(SealedWire.isSealed("APULAN1|req|192.168.1.5|48610"))
+        assertFalse(SealedWire.isSealed("APULAN1|offer|192.168.1.5|48610"))
+    }
+
+    @Test
     fun `prefix is stable`() {
         // Смена префикса рассинхронизирует телефоны — фиксируем значение.
         assertEquals("APUSEAL1|", SealedWire.PREFIX)

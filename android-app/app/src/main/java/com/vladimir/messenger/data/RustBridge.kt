@@ -3,6 +3,7 @@ package com.vladimir.messenger.data
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.file.FileTransferWire
+import com.vladimir.messenger.data.file.LanDirectChannel
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
 import uniffi.p2p_core.ChatFfi
@@ -238,6 +239,12 @@ object RustBridge {
         // первый обмен ключами заклинит - шифровать нечем, пока ключ не пришёл.
         // Секрета в нём нет, это открытая часть подписанной привязки.
         if (text.startsWith(FileTransferWire.HELLO_PREFIX)) return text
+        // APULAN1 - служебный сигнал «где ты в локальной сети»: адрес и порт,
+        // которыми поднимается ПРЯМОЙ канал. Его разбирает транспортный слой
+        // ДО расшифровки, поэтому запечатанный сигнал просто не опознаётся:
+        // канал не поднимается, и связь скатывается в одну сторону.
+        // Секрета в нём нет - это адрес в локальной сети.
+        if (LanDirectChannel.isLanSignalText(text)) return text
         val context = appContext ?: return text
         val sealed = MessageSealer.seal(context, recipientId, text)
         if (sealed == null) {
