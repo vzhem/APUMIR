@@ -67,6 +67,8 @@ fun SettingsScreen(
     onRankBenefitsClick: () -> Unit = {},
     /** Подробности о том, через какие узлы идут данные. */
     onPeerRatingClick: () -> Unit = {},
+    /** Никнейм и пароль, которыми личность возвращается после переустановки. */
+    onIdentityBackupClick: () -> Unit = {},
     /**
      * Открыть сразу профиль, а не список настроек.
      *
@@ -145,6 +147,7 @@ fun SettingsScreen(
                     viewModel = viewModel,
                     onMtProxyClick = onMtProxyClick,
                     onPeerRatingClick = onPeerRatingClick,
+                    onIdentityBackupClick = onIdentityBackupClick,
                     onProfileClick = onProfileClick,
                 )
             }
@@ -509,6 +512,7 @@ private fun SettingsTabContent(
     viewModel: SettingsViewModel,
     onMtProxyClick: () -> Unit,
     onPeerRatingClick: () -> Unit = {},
+    onIdentityBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
 ) {
     // Бегунок справа: видно, где мы в длинном списке.
@@ -637,6 +641,21 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // СТАТУС СЕТИ
             // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Безопасность") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Shield,
+                        title    = "Защита личности",
+                        // Самая дорогая потеря в мессенджере - оказаться для
+                        // всех новым человеком после переустановки. Поэтому
+                        // строка честно говорит, защищён человек или нет.
+                        subtitle = "Никнейм и пароль, чтобы вернуть себя после переустановки",
+                        onClick  = onIdentityBackupClick,
+                    )
+                }
+            }
+
             item { SettingsSectionTitle("Сеть") }
             item {
                 SettingsCard {

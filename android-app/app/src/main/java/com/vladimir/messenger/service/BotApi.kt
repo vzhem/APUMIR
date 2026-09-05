@@ -96,6 +96,55 @@ class BotApi @Inject constructor(
     }
 
     /**
+     * Положить запертый сундук личности на полку.
+     *
+     * Наружу уходят только непрозрачные байты: ключ и пароль зашифрованы на
+     * телефоне ([com.vladimir.messenger.data.security.IdentityVault]), сервер
+     * не может их прочитать и хранит запись как есть.
+     *
+     * Полка адресуется отпечатком никнейма, поэтому по ней нельзя понять, чей
+     * это сундук.
+     */
+    suspend fun storeIdentityVault(shelf: String, sealedBase64: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = JSONObject().apply {
+                    put("shelf", shelf)
+                    put("vault", sealedBase64)
+                }
+                val response = postJson("$REGISTRY_URL/vault/put", body.toString())
+                    ?: return@withContext false
+                val ok = JSONObject(response).optBoolean("success", false)
+                Log.i(TAG, "Vault store: success=$ok")
+                ok
+            } catch (e: Exception) {
+                Log.e(TAG, "Vault store failed", e)
+                false
+            }
+        }
+
+    /**
+     * Забрать сундук с полки. Открыть его сможет только тот, кто знает пароль.
+     *
+     * @return содержимое сундука в base64 или null, если полка пуста либо
+     *         сервер недоступен.
+     */
+    suspend fun fetchIdentityVault(shelf: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val response = getJson("$REGISTRY_URL/vault/get?shelf=$shelf") ?: return@withContext null
+            val json = JSONObject(response)
+            if (json.has("error")) {
+                Log.i(TAG, "Vault fetch: ${json.optString("error")}")
+                return@withContext null
+            }
+            json.optString("vault", "").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Vault fetch failed", e)
+            null
+        }
+    }
+
+    /**
      * Сгенерировать share link для текущего пользователя.
      */
     fun generateShareLink(nodeId: String): String {

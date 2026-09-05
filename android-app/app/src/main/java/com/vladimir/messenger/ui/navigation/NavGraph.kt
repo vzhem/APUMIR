@@ -44,6 +44,7 @@ import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
 import com.vladimir.messenger.ui.screens.contacts.RenameContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
+import com.vladimir.messenger.ui.screens.settings.IdentityBackupScreen
 import com.vladimir.messenger.ui.screens.settings.PeerRatingScreen
 import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
@@ -108,6 +109,7 @@ sealed class Screen(val route: String) {
 
     data object RankBenefits : Screen("rank_benefits")
     data object PeerRating : Screen("peer_rating")
+    data object IdentityBackup : Screen("identity_backup")
 
     // Избранное - личное хранилище абонента
     data object Saved : Screen("saved")
@@ -453,6 +455,7 @@ fun MessengerNavGraph(
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
                 onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
+                onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
             )
         }
 
@@ -468,9 +471,13 @@ fun MessengerNavGraph(
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
                 onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
+                onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
             )
         }
 
+        composable(route = Screen.IdentityBackup.route) {
+            IdentityBackupScreen(onBackClick = { navController.popBackStack() })
+        }
         composable(route = Screen.PeerRating.route) {
             PeerRatingScreen(onBackClick = { navController.popBackStack() })
         }
