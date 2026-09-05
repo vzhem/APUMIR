@@ -331,15 +331,26 @@ class CoreServerService : Service() {
                                     val contact = contactRepository.getContactById(senderId)
                                     val contactName = contact?.displayName ?: senderId.take(16)
                                     val chat = chatRepository.getOrCreateChat(senderId, contactName)
-                                    chatRepository.saveIncomingMessage(
-                                        chatId = chat.id,
-                                        senderId = senderId,
-                                        messageId = messageId,
-                                        content = parsed.content,
-                                        timestamp = parsed.timestamp,
-                                        channel = MessageChannel.CF,
-                                    )
-                                    Log.i(TAG, "CF message saved to chat ${chat.id}: ${parsed.content.take(30)}")
+                                    // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
+                                    // расшифровки здесь в чат попал бы конверт как текст.
+                                    val cfContent = if (SealedWire.isSealed(parsed.content)) {
+                                        MessageSealer.open(applicationContext, parsed.content)
+                                    } else {
+                                        parsed.content
+                                    }
+                                    if (cfContent == null) {
+                                        Log.w(TAG, "CF sealed envelope not opened msgId=$messageId; skipped")
+                                    } else {
+                                        chatRepository.saveIncomingMessage(
+                                            chatId = chat.id,
+                                            senderId = senderId,
+                                            messageId = messageId,
+                                            content = cfContent,
+                                            timestamp = parsed.timestamp,
+                                            channel = MessageChannel.CF,
+                                        )
+                                    }
+                                    Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
                                 }
                                 // G1 fix: отправить ACK обратно отправителю через relay
                                 // (отправитель узнаёт о доставке, даже если был офлайн в момент приёма).

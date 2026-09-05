@@ -27,6 +27,7 @@ class FileTransferRouter @Inject constructor(
     private val transferDao: FileTransferDao,
     private val peerStore: FileExchangePeerStore,
     private val chatRepository: ChatRepository,
+    private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
 ) {
     private val appContext: Context
     private val sender: FileTransferSender
@@ -374,7 +375,14 @@ class FileTransferRouter @Inject constructor(
     private suspend fun sendHelloHandshakes() {
         val myBinding = FileExchangeKeyStore.publicBinding(appContext) ?: return
         val now = System.currentTimeMillis()
-        val contacts = runCatching { chatRepository.getAllContactIds() }.getOrDefault(emptyList())
+        // Раунд 81: раньше брались только собеседники, у которых УЖЕ есть чат.
+        // Контакт, добавленный по QR, чата ещё не имеет, поэтому ключами с ним
+        // никто не обменивался: первое личное сообщение уходило незашифрованным,
+        // а имя не приходило вовсе. Берём объединение чатов и контактов.
+        val fromChats = runCatching { chatRepository.getAllContactIds() }.getOrDefault(emptyList())
+        val fromContacts = runCatching { contactDao.observeAllContactsOnce().map { it.id } }
+            .getOrDefault(emptyList())
+        val contacts = (fromChats + fromContacts).distinct()
         for (contactId in contacts) {
             if (!contactId.startsWith("pk_")) continue
             val pinned = runCatching { peerStore.bindingFor(contactId) != null }.getOrDefault(true)
