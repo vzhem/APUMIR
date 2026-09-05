@@ -182,6 +182,52 @@ try {
         }
     }
 
+    # Step 0c: does the committed core binary actually contain the current code?
+    #
+    # The .so files under jniLibs are committed artefacts and a LOCAL build
+    # packages them as-is - it never compiles Rust. CI rebuilds the core on every
+    # release but does not commit the result, so after any Rust change the
+    # committed binary is stale and a debug apk silently ships the OLD core.
+    # Round 86 lost a day of phone testing to this: fix after fix appeared to do
+    # nothing because none of them were in the apk.
+    #
+    # Comparing commit dates is useless here (any commit that touches the file
+    # refreshes them), so look INSIDE the binary for a marker string that the
+    # current sources contain. Warning only - a stale binary is expected between
+    # a Rust change and the next release and must not block UI work.
+    Write-Output ''
+    Write-Output '===== step 0c: core binary vs rust sources ====='
+    try {
+        $CoreSo = Join-Path $RepoRoot 'android-app\app\src\main\jniLibs\arm64-v8a\libp2p_core.so'
+        $CoreRs = Join-Path $RepoRoot 'rust-core\src\engine\core.rs'
+        # Marker: a log line present in today's sources. Update it whenever the
+        # line is reworded, otherwise this check silently always warns.
+        $Marker = 'ACK for another node ignored'
+
+        if ((Test-Path -LiteralPath $CoreSo) -and (Test-Path -LiteralPath $CoreRs)) {
+            $InSource = Select-String -LiteralPath $CoreRs -SimpleMatch -Pattern $Marker -Quiet
+            if (-not $InSource) {
+                Write-Output "NOTE: marker '$Marker' is no longer in the sources - update it in this script."
+            } else {
+                $Bytes = [IO.File]::ReadAllBytes($CoreSo)
+                $Text = [Text.Encoding]::ASCII.GetString($Bytes)
+                if ($Text.Contains($Marker)) {
+                    Write-Output 'core binary contains the current code'
+                } else {
+                    Write-Output 'NOTE: the committed core binary predates the current rust sources.'
+                    Write-Output '      A local debug apk will contain the OLD core, so Rust-side fixes'
+                    Write-Output '      (message parsing, delivery ACK, discovery) will NOT reach the phone.'
+                    Write-Output '      Kotlin and UI changes are unaffected and test normally.'
+                    Write-Output '      Publish a release to get core fixes onto phones - CI builds Rust from source.'
+                }
+            }
+        } else {
+            Write-Output 'core binary or rust sources not found - skipped'
+        }
+    } catch {
+        Write-Output "core/source comparison skipped: $($_.Exception.Message)"
+    }
+
     # Step 1: JVM unit tests. Groups plus the areas this branch touched outside
     # that package: the rank policy that now gates attachments, the link parsers
     # the QR scanner routes through, and the referral attribution added in
