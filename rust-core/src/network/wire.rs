@@ -227,4 +227,36 @@ mod tests {
         let s = format!("{}\n", build_receipt("m1", "pk_b", 1));
         assert!(parse(&s).is_some());
     }
+
+    /// Тело обычного сообщения: РОВНО четыре поля, текст - последнее.
+    ///
+    /// Раунд 82: MQTT-приёмник разбирал его на пять полей и ждал адресата
+    /// четвёртым. Никто пятое поле не слал, поэтому "получателем" становился
+    /// кусок текста ("APUSEAL1", "apu-file-hello1"), проверка адресата
+    /// проваливалась и сообщение молча пропадало. Прямой путь по Wi-Fi
+    /// разбирал четыре поля и работал - отсюда односторонняя связь.
+    #[test]
+    fn plain_message_body_keeps_text_with_pipes_intact() {
+        let sender = "pk_aaaa";
+        let msg_id = "m1";
+        let chat_id = "c1";
+        // Текст СОДЕРЖИТ разделители: конверт шифрования и HELLO выглядят так.
+        let text = "APUSEAL1|key==|iv==|cipher==";
+        let body = format!("{}|{}|{}|{}", sender, msg_id, chat_id, text);
+
+        let parts: Vec<&str> = body.splitn(4, '|').collect();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0], sender);
+        assert_eq!(parts[1], msg_id);
+        assert_eq!(parts[2], chat_id);
+        assert_eq!(parts[3], text, "текст обязан дойти целиком");
+    }
+
+    /// Адресат берётся из темы, а не из тела.
+    #[test]
+    fn recipient_comes_from_the_topic() {
+        let node = "pk_bbbb";
+        let topic = format!("p2pm2/msg/{}", node);
+        assert_eq!(topic.trim_start_matches("p2pm2/msg/"), node);
+    }
 }

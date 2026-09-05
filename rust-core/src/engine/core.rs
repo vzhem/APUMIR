@@ -2097,14 +2097,27 @@ self.runtime = Some(runtime);
                             }
                         }
                     } else {
-                        // Обычный формат: senderId|messageId|chatId|recipientId|text.
-                        let parts: Vec<&str> = evt.payload.splitn(5, '|').collect();
-                        if parts.len() == 5 && parts[0] != node_id {  // Skip own messages
+                        // Формат тела: senderId|messageId|chatId|text - ровно то,
+                        // что строит отправитель (см. send_message/legacy_payload).
+                        //
+                        // Раньше здесь ждали ПЯТОЕ поле recipientId, которого никто
+                        // никогда не слал. Из-за splitn(5) четвёртым полем
+                        // становился кусок самого текста: у HELLO это был
+                        // "apu-file-hello1", у запечатанного конверта - "APUSEAL1".
+                        // Сравнение с node_id проваливалось, и сообщение молча
+                        // отбрасывалось. Прямой путь по Wi-Fi разбирает splitn(4)
+                        // и потому работал - отсюда "по Wi-Fi есть, через интернет нет".
+                        //
+                        // Кому адресовано, берём из темы p2pm2/msg/<получатель>:
+                        // подписка идёт на p2pm2/#, то есть чужие сообщения тоже
+                        // приходят, и проверка адресата обязательна.
+                        let recipient_id = evt.topic.trim_start_matches("p2pm2/msg/");
+                        let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
+                        if parts.len() == 4 && parts[0] != node_id {  // Skip own messages
                             let sender_id = parts[0];
                             let message_id = parts[1];
                             let chat_id = parts[2];
-                            let recipient_id = parts[3];
-                            let text = parts[4];
+                            let text = parts[3];
 
                             // Получаем и показываем только адресованные этому телефону сообщения.
                             if recipient_id == node_id {
