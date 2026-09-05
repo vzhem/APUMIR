@@ -45,6 +45,13 @@ class PerMemberFanoutDelivery(
     override val name: String = "per-member-fanout",
     private val maxConcurrent: Int = 8,
     private val send: suspend (groupId: String, recipientId: String, envelope: String) -> Boolean,
+    /**
+     * Порядок обхода получателей: лучшие узлы первыми.
+     *
+     * По умолчанию порядок не меняется - так веер остаётся проверяемым
+     * обычным JVM-тестом, без Android и без накопленной статистики.
+     */
+    private val order: (List<String>) -> List<String> = { it },
 ) : GroupDelivery {
 
     override suspend fun deliver(
@@ -53,7 +60,9 @@ class PerMemberFanoutDelivery(
         recipients: List<String>,
     ): DeliveryReport =
         coroutineScope {
-            val targets = recipients.filter { it.isNotBlank() }.distinct()
+            // Сначала те, кто чаще в сети и быстрее принимает: при обрыве
+            // связи на середине веера данные успеют уйти хотя бы надёжным.
+            val targets = order(recipients.filter { it.isNotBlank() }.distinct())
             if (targets.isEmpty()) return@coroutineScope DeliveryReport(0, 0, emptyList())
 
             val width = maxConcurrent.coerceAtLeast(1)

@@ -65,6 +65,8 @@ fun SettingsScreen(
     onShareProfileClick: () -> Unit = {},
     onMtProxyClick: () -> Unit = {},
     onRankBenefitsClick: () -> Unit = {},
+    /** Подробности о том, через какие узлы идут данные. */
+    onPeerRatingClick: () -> Unit = {},
     /**
      * Открыть сразу профиль, а не список настроек.
      *
@@ -142,6 +144,7 @@ fun SettingsScreen(
                     uiState = uiState,
                     viewModel = viewModel,
                     onMtProxyClick = onMtProxyClick,
+                    onPeerRatingClick = onPeerRatingClick,
                     onProfileClick = onProfileClick,
                 )
             }
@@ -505,6 +508,7 @@ private fun SettingsTabContent(
     uiState: SettingsUiState,
     viewModel: SettingsViewModel,
     onMtProxyClick: () -> Unit,
+    onPeerRatingClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
 ) {
     // Бегунок справа: видно, где мы в длинном списке.
@@ -647,8 +651,12 @@ private fun SettingsTabContent(
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(
                         icon     = Icons.Default.People,
-                        title    = "Подключено пиров",
-                        subtitle = "${uiState.connectedPeers} устройств",
+                        // Было «Подключено пиров» - слово из документации, а не
+                        // из речи. Теперь это вход в подробности: кто держит
+                        // сеть и через кого данные идут первыми.
+                        title    = "Узлы сети",
+                        subtitle = "${uiState.connectedPeers} на связи - открыть оценку",
+                        onClick  = onPeerRatingClick,
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(

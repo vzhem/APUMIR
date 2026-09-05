@@ -650,6 +650,16 @@ class CoreServerService : Service() {
                 if (!peerId.startsWith("pk_")) return  // Skip mDNS duplicates
                 val peerName = event.displayName?.takeIf { it.isNotBlank() } ?: "Anonymous"
                 val now = System.currentTimeMillis()
+                // Рейтинг узлов: отмечаем, что он был на месте. Из таких
+                // наблюдений и складывается «кому слать в первую очередь».
+                runCatching {
+                    com.vladimir.messenger.data.peer.PeerRatingStore.recordSighting(
+                        context = applicationContext,
+                        peerId = peerId,
+                        address = event.status,
+                        nowMs = now,
+                    )
+                }
                 val lastSeen = knownPeers[peerId] ?: 0L
                 knownPeers[peerId] = now  // свежесть ДО дедупа: пульс = жизнь
                 val lightTouch = now - lastSeen < PEER_DEDUP_MS
@@ -814,6 +824,11 @@ class CoreServerService : Service() {
                 for (pid in staleIds) {
                     onlineMarked.remove(pid)
                     knownPeers.remove(pid)
+                    // Пропущенный круг - минус к доступности в рейтинге.
+                    runCatching {
+                        com.vladimir.messenger.data.peer.PeerRatingStore
+                            .recordMiss(applicationContext, pid)
+                    }
                     Log.i(TAG, "⚫ OFFLINE (TTL): $pid")
                     try { contactRepository.updateOnlineStatus(pid, false) } catch (_: Exception) {}
                     try { chatRepository.updateContactOnlineStatus(pid, false) } catch (_: Exception) {}

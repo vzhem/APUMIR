@@ -27,6 +27,13 @@ class FileTransferSender(
     private val nowMs: () -> Long = System::currentTimeMillis,
     /** Параллельный QUIC-поток: (recipientId, payload) -> true если доставлено напрямую. */
     val directTransport: ((String, String) -> Boolean)? = null,
+    /**
+     * Наблюдение для рейтинга узлов: сколько байт ушло напрямую и за сколько
+     * времени, и удалась ли попытка. По умолчанию ничего не делает, чтобы
+     * JVM-тесты обходились без Android.
+     */
+    private val onDirectSend: (peerId: String, bytes: Long, millis: Long, ok: Boolean) -> Unit =
+        { _, _, _, _ -> },
 ) {
     /** Получатель офлайн — файл ждёт когда он появится (только прямая доставка). */
     class RecipientOfflineException(val transferId: String) : Exception("Recipient offline")
@@ -170,7 +177,18 @@ class FileTransferSender(
             // блокировки текстовой очереди); если получатель недоступен напрямую —
             // обычный sendMessage (durable relay, медленно но надёжно).
             if (directTransport != null) {
+                val startedAt = nowMs()
                 val directOk = directTransport.invoke(transfer.peerNodeId, text)
+                // Скорость и надёжность узла берём из настоящей отправки:
+                // объявить себя быстрым нельзя, можно только им быть.
+                runCatching {
+                    onDirectSend(
+                        transfer.peerNodeId,
+                        text.length.toLong(),
+                        (nowMs() - startedAt).coerceAtLeast(1),
+                        directOk,
+                    )
+                }
                 if (!directOk) {
                     Log.i(TAG, "Recipient not directly reachable — pausing transfer")
                     throw RecipientOfflineException(transfer.transferId)

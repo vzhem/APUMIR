@@ -44,6 +44,7 @@ import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
 import com.vladimir.messenger.ui.screens.contacts.RenameContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
+import com.vladimir.messenger.ui.screens.settings.PeerRatingScreen
 import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
@@ -106,6 +107,7 @@ sealed class Screen(val route: String) {
     data object MtProxy : Screen("mtproxy")
 
     data object RankBenefits : Screen("rank_benefits")
+    data object PeerRating : Screen("peer_rating")
 
     // Избранное - личное хранилище абонента
     data object Saved : Screen("saved")
@@ -449,7 +451,8 @@ fun MessengerNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
-                onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) }
+                onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
+                onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
             )
         }
 
@@ -464,7 +467,12 @@ fun MessengerNavGraph(
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
+                onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
             )
+        }
+
+        composable(route = Screen.PeerRating.route) {
+            PeerRatingScreen(onBackClick = { navController.popBackStack() })
         }
 
         composable(route = Screen.RankBenefits.route) {

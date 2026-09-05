@@ -36,9 +36,19 @@ object GroupsModule {
      */
     @Provides
     @Singleton
-    fun provideGroupDelivery(): GroupDelivery = PerMemberFanoutDelivery(
+    fun provideGroupDelivery(
+        @ApplicationContext context: Context,
+    ): GroupDelivery = PerMemberFanoutDelivery(
         send = { groupId, recipientId, envelope ->
             RustBridge.sendMessage(UUID.randomUUID().toString(), groupId, recipientId, envelope)
+        },
+        // Рейтинг решает очередь: надёжные и быстрые узлы получают конверт
+        // первыми, остальные - следом.
+        order = { ids ->
+            runCatching {
+                com.vladimir.messenger.data.peer.PeerRatingStore
+                    .preferredOrder(context.applicationContext, ids)
+            }.getOrDefault(ids)
         },
     )
 

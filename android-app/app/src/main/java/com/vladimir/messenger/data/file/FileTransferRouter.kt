@@ -72,6 +72,23 @@ class FileTransferRouter @Inject constructor(
             chunkStore = chunkStore,
             transport = switchingTransport,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
+            // Наблюдения для рейтинга узлов: скорость прямой отдачи и то,
+            // дошло ли вообще. Узел, который стабильно берёт данные быстро,
+            // поднимется в очереди на отправку.
+            onDirectSend = { peerId, bytes, millis, ok ->
+                runCatching {
+                    com.vladimir.messenger.data.peer.PeerRatingStore
+                        .recordTransfer(appContext, peerId, bytes, millis)
+                    com.vladimir.messenger.data.peer.PeerRatingStore
+                        .recordDelivery(appContext, peerId, ok)
+                    if (ok) {
+                        // Дошло напрямую - значит узел действительно
+                        // достижим извне, а не только через ретранслятор.
+                        com.vladimir.messenger.data.peer.PeerRatingStore
+                            .recordDirectReach(appContext, peerId)
+                    }
+                }
+            },
             directTransport = { recipientId, payload ->
                 // F4-F: LAN direct channel first (phone-to-phone TCP over shared
                 // Wi-Fi). Falls back to the QUIC direct path when LAN is not
