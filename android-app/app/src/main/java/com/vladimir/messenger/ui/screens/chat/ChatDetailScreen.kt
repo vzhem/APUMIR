@@ -127,6 +127,7 @@ fun ChatDetailScreen(
             name = contactName,
             contactId = contactId,
             isOnline = uiState.isContactOnline,
+            username = uiState.contactUsername,
             onDismiss = { showPeerProfile = false },
             onRename = if (contactId.isNotBlank()) {
                 {

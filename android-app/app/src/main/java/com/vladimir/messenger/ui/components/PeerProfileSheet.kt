@@ -27,6 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -124,50 +127,65 @@ fun PeerProfileSheet(
 
                 Spacer(Modifier.height(14.dp))
 
-                // Узел в сети. Длинный, поэтому в пузыре и в две строки: его
-                // копируют, когда разбираются с доставкой.
+                // Адрес узла спрятан за строкой «Показать».
+                //
+                // Человеку он не нужен: собеседника добавляют по QR или ссылке,
+                // а не переписыванием сорока символов. При этом длинный набор
+                // букв и цифр занимал половину карточки и выглядел как
+                // техническая ошибка. Оставляем возможность раскрыть его -
+                // адрес нужен, когда разбираются, почему сообщения не идут.
                 if (contactId.isNotBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                            .border(
-                                width = 1.dp,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                                shape = RoundedCornerShape(14.dp),
+                    var idShown by remember { mutableStateOf(false) }
+                    if (!idShown) {
+                        TextButton(onClick = { idShown = true }) {
+                            Text(
+                                "Показать адрес узла",
+                                style = MaterialTheme.typography.labelMedium,
                             )
-                            .then(
-                                if (onCopyId != null) {
-                                    Modifier.clickable(onClick = onCopyId)
-                                } else {
-                                    Modifier
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+                                    shape = RoundedCornerShape(14.dp),
+                                )
+                                .then(
+                                    if (onCopyId != null) {
+                                        Modifier.clickable(onClick = onCopyId)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Адрес узла - нужен только для разбора неполадок",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF5A6472),
+                                    )
+                                    Text(
+                                        contactId,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF1E2430),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
-                            )
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Узел в сети",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF5A6472),
-                                )
-                                Text(
-                                    contactId,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF1E2430),
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            if (onCopyId != null) {
-                                Icon(
-                                    Icons.Default.ContentCopy,
-                                    contentDescription = "Скопировать",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp),
-                                )
+                                if (onCopyId != null) {
+                                    Icon(
+                                        Icons.Default.ContentCopy,
+                                        contentDescription = "Скопировать",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
                             }
                         }
                     }

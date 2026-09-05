@@ -35,6 +35,8 @@ data class ChatDetailUiState(
     val isPreparingFile: Boolean = false,
     val error: String?          = null,
     val isContactOnline: Boolean = false,
+    /** @никнейм собеседника: показывает карточка профиля. */
+    val contactUsername: String = "",
     val scrollToBottom: Boolean = false,
     val pendingSave: FileTransferEntity? = null,
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
@@ -56,6 +58,7 @@ class ChatDetailViewModel @Inject constructor(
     private val fileTransferRouter: FileTransferRouter,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
+    private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -102,7 +105,15 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.observeChat(chatId).collect { chat ->
                 if (chat != null) {
-                    _uiState.update { it.copy(isContactOnline = chat.isContactOnline) }
+                    // Заодно подтягиваем @никнейм: он живёт в таблице контактов
+                    // и нужен карточке профиля. В списке чатов его намеренно
+                    // нет - там только имя.
+                    val nick = runCatching {
+                        contactDao.getContactById(chat.contactId)?.username.orEmpty()
+                    }.getOrDefault("")
+                    _uiState.update {
+                        it.copy(isContactOnline = chat.isContactOnline, contactUsername = nick)
+                    }
                 }
             }
         }
