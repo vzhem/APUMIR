@@ -143,13 +143,27 @@ try {
 
     # Step 0b: rust core tests. The core is compiled by CI, never by this gate,
     # so a broken Rust change stayed invisible here and only failed ~13 minutes
-    # later on the release runner. cargo test is cheap and catches it now.
-    # Skipped (not failed) when cargo is missing: the Kotlin gate must stay
-    # usable on a machine without the Rust toolchain.
-    if ($null -eq (Get-Command cargo -ErrorAction SilentlyContinue)) {
+    # later on the release runner. cargo test is cheap and catches it.
+    #
+    # Requires BOTH cargo and a C toolchain: the core pulls in ring and
+    # aws-lc-sys, which compile C and need MSVC cl.exe on Windows. Round 79
+    # had cargo installed but no Visual Studio build tools, so this step failed
+    # with "cl.exe not found" and blocked an otherwise good build. That is a
+    # missing local tool, never a defect in the code, so it must SKIP, not fail.
+    # CI builds the core from source on every release and remains the real gate.
+    # Note 201/202: host C builds (MSVC) previously crashed this machine, so
+    # installing a C toolchain here is deliberately NOT recommended.
+    $CargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+    $CCompiler = Get-Command cl.exe -ErrorAction SilentlyContinue
+    if ($null -eq $CCompiler -and $env:CC) { $CCompiler = Get-Command $env:CC -ErrorAction SilentlyContinue }
+    if ($null -eq $CargoCmd -or $null -eq $CCompiler) {
+        $Missing = if ($null -eq $CargoCmd) { 'cargo' } else { 'a C compiler (MSVC cl.exe)' }
         Write-Output ''
-        Write-Output '===== step 0b: rust core tests - SKIPPED (cargo not installed) ====='
-        Write-Output 'NOTE: install Rust to catch core errors here instead of on the release runner.'
+        Write-Output "===== step 0b: rust core tests - SKIPPED ($Missing not found) ====="
+        Write-Output 'The core needs ring/aws-lc-sys, which compile C on the host. This is a'
+        Write-Output 'local convenience step only: CI builds the core from source on every'
+        Write-Output 'release and stays the real check. Do NOT install MSVC just for this -'
+        Write-Output 'note 201/202 records host C builds causing crashes on this machine.'
     } else {
         Write-Output ''
         Write-Output '===== step 0b: rust core tests ====='
