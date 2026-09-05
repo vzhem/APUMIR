@@ -61,7 +61,12 @@ object InviteLinkParser {
             if (short.nodeId != null) {
                 return Invite(
                     nodeId = short.nodeId,
-                    displayName = short.nickname,
+                    // Видимое имя из ссылки НЕ берём: там едет @никнейм, а
+                    // настоящее имя приходит следом с presence. Раньше в поле
+                    // имени оказывался то ник, то имя - и строка в списке
+                    // чатов мигала между ними. Ник сохраняем отдельным полем:
+                    // он виден в профиле собеседника.
+                    displayName = null,
                     username = short.nickname,
                     source = Source.APP_LINK,
                     original = text,

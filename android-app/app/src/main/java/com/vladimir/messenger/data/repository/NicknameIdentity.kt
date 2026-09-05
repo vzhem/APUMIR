@@ -58,14 +58,16 @@ object NicknameIdentity {
 
         val contact = contactRepository.getContactByFingerprint(ownerId)
         if (contact != null) {
-            // Заглушку заменяем настоящим именем; имя, данное владельцем вручную,
-            // остаётся как есть. updateDisplayName сам правит и таблицу чатов.
-            if (contactRepository.isPlaceholderName(contact.displayName)) {
-                contactRepository.updateDisplayName(contact.id, clean)
-                Log.i(TAG, "контакт $ownerId переименован в @$clean")
-            }
+            // @никнейм кладём в СВОЁ поле - его показывает профиль собеседника.
             if (!contact.username.equals(clean, ignoreCase = true)) {
                 contactRepository.updateUsername(contact.id, clean)
+            }
+            // Видимым именем ник становится только пока настоящего нет вовсе.
+            // Раньше он подменял заглушку всегда, а presence следом возвращал
+            // настоящее имя - строка в списке чатов мигала между ними.
+            if (contactRepository.isPlaceholderName(contact.displayName)) {
+                contactRepository.updateDisplayName(contact.id, clean)
+                Log.i(TAG, "контакт $ownerId временно показан как @$clean")
             }
         } else {
             // Контакта нет, а чат может уже быть: он заводится при первом
