@@ -37,6 +37,9 @@ class AddContactViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val nicknameDao: NicknameDao,
     private val referralAttribution: ReferralAttributionSender,
+    private val exchangePeerStore: com.vladimir.messenger.data.file.FileExchangePeerStore,
+    @dagger.hilt.android.qualifiers.ApplicationContext
+    private val appContext: android.content.Context,
 ) : ViewModel() {
 
     companion object {
@@ -166,6 +169,22 @@ class AddContactViewModel @Inject constructor(
                         Log.i(TAG, "Contact already exists, finding existing chat")
                         // Всё равно регистрируем peer в Rust
                         try { RustBridge.connectViaInvite(raw) } catch (_: Exception) {}
+                        // Пересканирование QR уже известного контакта = явное
+                        // подтверждение личности. Только здесь снимаем
+                        // закреплённый ключ: после переустановки у собеседника
+                        // новый ключ, старый закреплён навсегда, и обмен
+                        // ключами заклинивает - переписка идёт лишь в одну
+                        // сторону. Сами, без участия человека, мы этого не
+                        // делаем: так подмену ключа не отличить от переустановки.
+                        runCatching { exchangePeerStore.forgetPin(fingerprint) }
+                            .onSuccess { removed ->
+                                if (removed) {
+                                    com.vladimir.messenger.data.security.MessageSealer
+                                        .forget(appContext, fingerprint)
+                                    Log.i(TAG, "Exchange pin reset for rescanned contact")
+                                }
+                            }
+                            .onFailure { Log.w(TAG, "Pin reset failed: ${it.message}") }
                         val existing = contactRepository.getContactByFingerprint(fingerprint)
                         if (existing != null) {
                             // роверяем есть ли уже чат, если нет — создаём

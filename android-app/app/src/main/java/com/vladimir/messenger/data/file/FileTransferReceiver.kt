@@ -93,7 +93,22 @@ class FileTransferReceiver(
                 )
                 return if (newlyPinned) HelloResult.PINNED_NEW else HelloResult.PINNED_ALREADY
             } catch (error: Exception) {
-                Log.w(TAG, "File HELLO from $senderId rejected: ${error.message}")
+                // Самый частый случай - собеседник переустановил приложение и
+                // прислал НОВЫЙ ключ, а у нас закреплён старый. Пин намеренно
+                // не сбрасывается сам: так подмену ключа не отличить от
+                // переустановки. Лечится пересканированием QR собеседника,
+                // поэтому подсказка пишется прямо здесь.
+                val changed = error.message?.contains("key changed") == true
+                if (changed) {
+                    Log.w(
+                        TAG,
+                        "File HELLO from $senderId REJECTED: exchange key changed " +
+                            "(peer reinstalled?). Messages to this peer cannot be sealed " +
+                            "until the QR code is scanned again.",
+                    )
+                } else {
+                    Log.w(TAG, "File HELLO from $senderId rejected: ${error.message}")
+                }
                 return HelloResult.REJECTED
             }
         }

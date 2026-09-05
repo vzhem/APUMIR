@@ -53,6 +53,24 @@ class FileExchangePeerStore @Inject constructor(
         return PinResult(nodeId, hash, entity.trustState, newlyPinned = true)
     }
 
+    /**
+     * Забыть закреплённый ключ собеседника, чтобы принять новый.
+     *
+     * Зачем: ключ живёт до переустановки приложения. После переустановки у
+     * собеседника новый ключ, а у нас закреплён старый - `pinFirstSeen` такой
+     * HELLO отвергает, и обмен ключами заклинивает НАВСЕГДА. Снаружи это
+     * выглядит как «в одну сторону доходит, обратно нет»: тот, у кого ключ
+     * собеседника уже есть, шифровать может, а обратная сторона - нет.
+     *
+     * Отличить переустановку от подмены автоматически нельзя, поэтому сброс
+     * никогда не происходит сам: его запрашивает пользователь, заново
+     * отсканировав QR собеседника. Это осознанное подтверждение личности.
+     */
+    suspend fun forgetPin(nodeId: String): Boolean {
+        require(nodeId.matches(Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$")))
+        return dao.deleteForContact(nodeId) > 0
+    }
+
     suspend fun bindingFor(nodeId: String): ByteArray? {
         require(nodeId.matches(Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$")))
         val entity = dao.get(nodeId) ?: return null
