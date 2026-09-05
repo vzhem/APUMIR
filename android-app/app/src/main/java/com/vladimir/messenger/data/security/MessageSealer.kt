@@ -96,7 +96,7 @@ object MessageSealer {
      * @return строка для транспорта или null, если ключ собеседника ещё не
      * известен. Null — не ошибка, а сигнал: сначала обменяться ключами.
      */
-    fun seal(context: Context, myNodeId: String, peerId: String, plaintext: String): String? {
+    fun seal(context: Context, peerId: String, plaintext: String): String? {
         val app = context.applicationContext
         val body = plaintext.toByteArray(Charsets.UTF_8)
         if (body.isEmpty() || body.size > MAX_PLAINTEXT_BYTES) return null
@@ -119,10 +119,9 @@ object MessageSealer {
                 throw error
             }
 
-            // Манифест привязывает ключ к этому конкретному шифротексту и к
-            // этой паре узлов: подменить тело или переадресовать конверт
-            // другому получателю не выйдет, ядро проверит манифест при вскрытии.
-            val manifest = manifest(myNodeId, peerId, ciphertext)
+            // Манифест привязывает ключ к этому конкретному шифротексту:
+            // подменить тело не выйдет, ядро сверит манифест при вскрытии.
+            val manifest = manifest(ciphertext)
             val keyEnvelope = FileExchangeKeyStore.withExistingSecret(app) { secret ->
                 createFileKeyEnvelope(myBinding, recipientBinding, secret, manifest, messageKey)
             }
@@ -137,13 +136,13 @@ object MessageSealer {
      *
      * @return открытый текст или null, если конверт не для нас либо повреждён.
      */
-    fun open(context: Context, myNodeId: String, senderId: String, wire: String): String? {
+    fun open(context: Context, wire: String): String? {
         val app = context.applicationContext
         val parts = SealedWire.decode(wire) ?: return null
         val myBinding = FileExchangeKeyStore.publicBinding(app) ?: return null
 
         return runCatching {
-            val manifest = manifest(senderId, myNodeId, parts.ciphertext)
+            val manifest = manifest(parts.ciphertext)
             val messageKey = FileExchangeKeyStore.withExistingSecret(app) { secret ->
                 openFileKeyEnvelope(parts.keyEnvelope, myBinding, secret, manifest)
             }
@@ -163,12 +162,22 @@ object MessageSealer {
     }
 
     /**
-     * Манифест обеих сторон должен совпадать байт в байт, иначе ядро не
-     * отдаст ключ. Порядок всегда «отправитель, получатель».
+     * Манифест обеих сторон обязан совпадать байт в байт, иначе ядро не отдаст
+     * ключ и сообщение молча не откроется.
+     *
+     * Поэтому в манифесте ТОЛЬКО отпечаток шифротекста и никаких имён узлов.
+     * Раунд 80: узел может называться и 32-, и 64-символьным видом одного и
+     * того же ключа (`is_legacy_routing_node_id` допускает оба), а на разных
+     * путях доставки приходит разный вид. Из-за этого сообщения через
+     * ретранслятор не открывались, хотя по Wi-Fi всё работало.
+     *
+     * Безопасность от этого не страдает: подлинность обеих сторон уже
+     * проверяется подписанными привязками внутри самого конверта, а привязка
+     * ключа к телу сообщения сохраняется отпечатком.
      */
-    private fun manifest(senderId: String, recipientId: String, ciphertext: ByteArray): ByteArray {
+    private fun manifest(ciphertext: ByteArray): ByteArray {
         val digest = MessageDigest.getInstance("SHA-256").digest(ciphertext)
-        return ("apu-msg-v1|$senderId|$recipientId|" + digest.toHex()).toByteArray(Charsets.UTF_8)
+        return ("apu-msg-v1|" + digest.toHex()).toByteArray(Charsets.UTF_8)
     }
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }

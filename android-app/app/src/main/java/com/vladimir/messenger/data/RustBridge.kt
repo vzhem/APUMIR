@@ -239,8 +239,7 @@ object RustBridge {
         // Секрета в нём нет, это открытая часть подписанной привязки.
         if (text.startsWith(FileTransferWire.HELLO_PREFIX)) return text
         val context = appContext ?: return text
-        val myNodeId = nodeId() ?: return text
-        val sealed = MessageSealer.seal(context, myNodeId, recipientId, text)
+        val sealed = MessageSealer.seal(context, recipientId, text)
         if (sealed == null) {
             Log.w(TAG, "No key yet for ${recipientId.takeLast(8)}; sending unsealed")
             return text

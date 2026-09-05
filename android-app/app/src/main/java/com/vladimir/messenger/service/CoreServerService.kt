@@ -539,16 +539,24 @@ class CoreServerService : Service() {
 
                 // ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков, иначе
                 // групповые, файловые и служебные пакеты не будут узнаны.
-                // Не вскрывшийся конверт нас не касается: он адресован другому
-                // узлу, мы лишь ретранслятор — молча пропускаем.
+                //
+                // Не вскрывшийся конверт чаще всего адресован не нам (мы лишь
+                // ретранслятор) - это нормально и не ошибка. Но ровно так же
+                // выглядит и настоящая поломка, поэтому пишем WARN с приметами:
+                // раунд 80 стоил дня поисков именно потому, что сообщение
+                // исчезало бесследно.
                 val sealed = SealedWire.isSealed(rawText)
                 val text = if (sealed) {
-                    val myNodeId = RustBridge.nodeId()
-                    val opened = myNodeId?.let {
-                        MessageSealer.open(applicationContext, it, senderId, rawText)
-                    }
+                    val opened = MessageSealer.open(applicationContext, rawText)
                     if (opened == null) {
-                        Log.i(TAG, "Sealed envelope not for us msgId=$messageId; ignored")
+                        val known = MessageSealer.canSeal(applicationContext, senderId)
+                        Log.w(
+                            TAG,
+                            "Sealed envelope NOT opened msgId=$messageId " +
+                                "sender=${senderId.takeLast(8)} senderKeyKnown=$known " +
+                                "bytes=${rawText.length} - relaying for another node, " +
+                                "or our key does not match",
+                        )
                         return
                     }
                     opened
