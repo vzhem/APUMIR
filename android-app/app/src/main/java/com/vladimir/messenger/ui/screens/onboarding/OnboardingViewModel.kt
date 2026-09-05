@@ -32,14 +32,41 @@ data class OnboardingUiState(
     val step: OnboardingStep   = OnboardingStep.EnterName,
     val displayName: String    = "",
     val nameError: String?     = null,
+    /** @никнейм: главное имя человека, по нему же он и восстанавливается. */
+    val nickname: String       = "",
+    val nicknameError: String? = null,
+    val password: String       = "",
+    val passwordRepeat: String = "",
+    val passwordError: String? = null,
+    /** Вкладка «Я уже зарегистрирован»: вход по никнейму и паролю. */
+    val restoreMode: Boolean   = false,
     val isLoading: Boolean     = false,
     val createdInviteLink: String? = null,
     val fingerprint: String?   = null,
     val error: String?         = null,
-)
+) {
+    /**
+     * Готова ли форма. Экран показывает это подсказками под полями, а не
+     * молча тёмной кнопкой: раньше человек видел неактивную кнопку и не
+     * понимал, чего от него хотят.
+     */
+    val canSubmit: Boolean
+        get() = if (restoreMode) {
+            nickname.isNotBlank() && password.isNotEmpty() && !isLoading
+        } else {
+            displayName.trim().length >= 2 &&
+                nickname.isNotBlank() &&
+                password.length >= MIN_PASSWORD_LENGTH &&
+                password == passwordRepeat &&
+                !isLoading
+        }
+}
+
+/** Столько знаков минимум в пароле - короче слишком легко подобрать. */
+const val MIN_PASSWORD_LENGTH = 8
 
 enum class OnboardingStep {
-    EnterName,      // Ввод имени
+    EnterName,      // Ввод имени, никнейма и пароля
     Generating,     // Генерация ключей (анимация)
     ShowInvite,     // Показ QR-кода / invite-ссылки
 }
@@ -49,41 +76,31 @@ class OnboardingViewModel @Inject constructor(
     private val createIdentityUseCase: CreateIdentityUseCase,
     private val checkIdentityUseCase: CheckIdentityUseCase,
     private val nicknameDao: NicknameDao,
+    private val identityBackup: com.vladimir.messenger.data.security.IdentityBackup,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
-    companion object {
-        // Короткие «космические» слова для случайных @имён при регистрации.
-        private val NICK_WORDS = listOf(
-            "astrid", "vega", "altair", "sirius", "lyra", "orion", "draco",
-            "persei", "foton", "kvazar", "pulsar", "neon", "argon", "krypton",
-            "xenon", "radon", "cobalt", "titan", "zircon", "osmium", "iridium",
-            "hafnium", "photon", "quasar", "nova", "comet", "meteor", "orbit",
-            "sputnik", "vostok",
-        )
+    /**
+     * Закрепить выбранный человеком @никнейм.
+     *
+     * Никнейм теперь задаётся при регистрации и служит именем, по которому
+     * человек возвращает себя после переустановки, поэтому случайный больше
+     * не назначается.
+     */
+    private suspend fun claimUsername(me: String, nick: String) {
+        val now = System.currentTimeMillis()
+        nicknameDao.upsert(NicknameEntity(ownerId = me, name = nick, registeredAtMs = now))
+        appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putString("my_username", nick)
+            .putLong("my_nick_registered_at", now)
+            .apply()
+        UsernameHolder.set(appContext, nick)
     }
 
-    /**
-     * Случайное свободное @имя: проверяем роевой реестр, чтобы в системе не
-     * было двух одинаковых ников. Своё сразу регистрируем в реестре.
-     */
-    private suspend fun assignRandomUsername(me: String) {
-        val now = System.currentTimeMillis()
-        repeat(25) {
-            val name = NICK_WORDS.random() + (200..999).random()
-            val taken = nicknameDao.byName(name).any { it.ownerId != me }
-            if (!taken) {
-                nicknameDao.upsert(NicknameEntity(ownerId = me, name = name, registeredAtMs = now))
-                appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
-                    .edit()
-                    .putString("my_username", name)
-                    .putLong("my_nick_registered_at", now)
-                    .apply()
-                UsernameHolder.set(appContext, name)
-                return
-            }
-        }
-    }
+    /** Занят ли никнейм кем-то другим в известной части сети. */
+    suspend fun isNicknameTaken(nick: String, me: String): Boolean =
+        runCatching { nicknameDao.byName(nick).any { it.ownerId != me } }.getOrDefault(false)
 
     private val _uiState = MutableStateFlow(OnboardingUiState())
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
@@ -100,11 +117,86 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
+    /** Никнейм чистим на лету: только буквы, цифры и подчёркивание. */
+    fun onNicknameChanged(value: String) {
+        val clean = value.trimStart('@').filter { it.isLetterOrDigit() || it == '_' }.take(32)
+        _uiState.update { it.copy(nickname = clean, nicknameError = null, error = null) }
+    }
+
+    fun onPasswordChanged(value: String) {
+        _uiState.update { it.copy(password = value, passwordError = null, error = null) }
+    }
+
+    fun onPasswordRepeatChanged(value: String) {
+        _uiState.update { it.copy(passwordRepeat = value, passwordError = null, error = null) }
+    }
+
+    /** Переключение между «Новый профиль» и «Я уже зарегистрирован». */
+    fun onRestoreModeChanged(restore: Boolean) {
+        _uiState.update {
+            it.copy(
+                restoreMode = restore,
+                nameError = null,
+                nicknameError = null,
+                passwordError = null,
+                error = null,
+            )
+        }
+    }
+
+    /**
+     * Вход по никнейму и паролю для тех, кто уже зарегистрирован.
+     *
+     * Возвращает ПРЕЖНЮЮ личность: тот же адрес, ранг и приглашения. Для
+     * собеседников человек не менялся, поэтому ничего склеивать не нужно.
+     */
+    fun onRestoreClicked() {
+        val state = _uiState.value
+        val nick = state.nickname.trim().trimStart('@')
+        if (nick.isBlank()) {
+            _uiState.update { it.copy(nicknameError = "Введите свой никнейм") }
+            return
+        }
+        if (state.password.isEmpty()) {
+            _uiState.update { it.copy(passwordError = "Введите пароль") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            when (val result = identityBackup.restore(appContext, nick, state.password)) {
+                is com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.Success -> {
+                    UsernameHolder.set(appContext, nick)
+                    _uiState.update {
+                        it.copy(
+                            step = OnboardingStep.ShowInvite,
+                            isLoading = false,
+                            fingerprint = result.nodeId,
+                            createdInviteLink = com.vladimir.messenger.util.OwnInvite.link(appContext)
+                                ?: "p2p://invite/${result.nodeId}",
+                        )
+                    }
+                }
+                com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.NotFound ->
+                    fail("Под этим никнеймом ничего не сохранено. Проверьте написание.")
+                com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.WrongPassword ->
+                    fail("Никнейм или пароль не подошли.")
+                com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.NetworkFailed ->
+                    fail("Нет связи с сервером. Попробуйте позже.")
+            }
+        }
+    }
+
+    private fun fail(text: String) {
+        _uiState.update { it.copy(isLoading = false, error = text) }
+    }
+
     // ------------------------------------------------------------------
     // Нажата кнопка "Создать профиль"
     // ------------------------------------------------------------------
     fun onCreateProfileClicked() {
-        val name = _uiState.value.displayName.trim()
+        val state = _uiState.value
+        val name = state.displayName.trim()
+        val nick = state.nickname.trim().trimStart('@')
 
         // Валидация
         if (name.length < 2) {
@@ -113,6 +205,20 @@ class OnboardingViewModel @Inject constructor(
         }
         if (name.length > 50) {
             _uiState.update { it.copy(nameError = "Имя не должно превышать 50 символов") }
+            return
+        }
+        if (nick.length < 3) {
+            _uiState.update { it.copy(nicknameError = "Никнейм минимум 3 знака") }
+            return
+        }
+        if (state.password.length < MIN_PASSWORD_LENGTH) {
+            _uiState.update {
+                it.copy(passwordError = "Пароль минимум $MIN_PASSWORD_LENGTH знаков")
+            }
+            return
+        }
+        if (state.password != state.passwordRepeat) {
+            _uiState.update { it.copy(passwordError = "Пароли не совпадают") }
             return
         }
 
@@ -127,13 +233,35 @@ class OnboardingViewModel @Inject constructor(
             // Создаём идентичность (генерация Ed25519/X25519 ключей в Rust)
             createIdentityUseCase(name)
                 .onSuccess { identity ->
-                    // Регистрация: автоматически присваиваем случайное свободное @имя.
-                    viewModelScope.launch {
-                        try {
-                            assignRandomUsername(identity.fingerprint)
-                        } catch (e: Exception) {
-                            Log.e("OnboardingVM", "username assign failed", e)
+                    // Занятость проверяем ПОСЛЕ создания ключей: до этого нет
+                    // своего адреса, а чужой владелец того же имени определяется
+                    // именно сравнением с ним.
+                    if (isNicknameTaken(nick, identity.fingerprint)) {
+                        _uiState.update {
+                            it.copy(
+                                step = OnboardingStep.EnterName,
+                                isLoading = false,
+                                nicknameError = "Этот никнейм уже занят, выберите другой",
+                            )
                         }
+                        return@onSuccess
+                    }
+                    // Никнейм человек выбрал сам - он же служит именем для
+                    // восстановления, поэтому случайный больше не назначаем.
+                    try {
+                        claimUsername(identity.fingerprint, nick)
+                    } catch (e: Exception) {
+                        Log.e("OnboardingVM", "username claim failed", e)
+                    }
+                    // Запираем личность сразу: если отложить, человек рискует
+                    // потерять себя при первой же переустановке. Сбой сети не
+                    // должен мешать регистрации - пароль можно задать позже
+                    // в «Настройки - Безопасность».
+                    val saved = runCatching {
+                        identityBackup.save(appContext, nick, state.password)
+                    }.getOrNull()
+                    if (saved != com.vladimir.messenger.data.security.IdentityBackup.SaveResult.Success) {
+                        Log.w("OnboardingVM", "identity vault not stored: $saved")
                     }
                     _uiState.update { it.copy(
                         step            = OnboardingStep.ShowInvite,

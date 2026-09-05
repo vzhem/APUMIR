@@ -184,6 +184,24 @@ fun IdentityBackupScreen(
                                 label = { Text("Пароль") },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
+                                isError = password.isNotEmpty() && password.length < MIN_PASSWORD,
+                                // Раньше кнопка просто оставалась тёмной, и было
+                                // непонятно, чего не хватает. Теперь требование
+                                // написано прямо под полем.
+                                supportingText = {
+                                    Text(
+                                        if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
+                                            "Ещё ${MIN_PASSWORD - password.length} знак(ов)"
+                                        } else {
+                                            "Минимум $MIN_PASSWORD знаков"
+                                        },
+                                        color = if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Spacer(Modifier.height(8.dp))
@@ -197,6 +215,14 @@ fun IdentityBackupScreen(
                                 // обнаружил бы только при восстановлении, когда
                                 // исправить уже нечем.
                                 isError = repeat.isNotEmpty() && repeat != password,
+                                supportingText = {
+                                    if (repeat.isNotEmpty() && repeat != password) {
+                                        Text(
+                                            "Пароли не совпадают",
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Spacer(Modifier.height(12.dp))
@@ -217,6 +243,22 @@ fun IdentityBackupScreen(
                                 } else {
                                     Text("Сохранить")
                                 }
+                            }
+                            // Явно называем недостающее: тёмная кнопка без
+                            // объяснения выглядит как поломка приложения.
+                            val blocker = when {
+                                nickname.isBlank() -> "Введите никнейм"
+                                password.length < MIN_PASSWORD -> "Пароль минимум $MIN_PASSWORD знаков"
+                                password != repeat -> "Повторите пароль без ошибок"
+                                else -> null
+                            }
+                            if (blocker != null) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    blocker,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
                             }
                         }
                     }

@@ -32,6 +32,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,10 +83,14 @@ fun OnboardingScreen(
                 when (step) {
                     OnboardingStep.EnterName ->
                         EnterNameStep(
-                            displayName    = uiState.displayName,
-                            nameError      = uiState.nameError,
-                            onNameChanged  = viewModel::onDisplayNameChanged,
-                            onCreateClick  = viewModel::onCreateProfileClicked,
+                            state                   = uiState,
+                            onNameChanged           = viewModel::onDisplayNameChanged,
+                            onNicknameChanged       = viewModel::onNicknameChanged,
+                            onPasswordChanged       = viewModel::onPasswordChanged,
+                            onPasswordRepeatChanged = viewModel::onPasswordRepeatChanged,
+                            onRestoreModeChanged    = viewModel::onRestoreModeChanged,
+                            onCreateClick           = viewModel::onCreateProfileClicked,
+                            onRestoreClick          = viewModel::onRestoreClicked,
                         )
                     OnboardingStep.Generating ->
                         GeneratingStep()
@@ -105,27 +111,31 @@ fun OnboardingScreen(
 // =============================================================================
 @Composable
 private fun EnterNameStep(
-    displayName: String,
-    nameError: String?,
+    state: OnboardingUiState,
     onNameChanged: (String) -> Unit,
+    onNicknameChanged: (String) -> Unit,
+    onPasswordChanged: (String) -> Unit,
+    onPasswordRepeatChanged: (String) -> Unit,
+    onRestoreModeChanged: (Boolean) -> Unit,
     onCreateClick: () -> Unit,
+    onRestoreClick: () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .verticalScroll(scrollState)
+            .padding(horizontal = 28.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
     ) {
-        // Логотип / иконка
         Icon(
             imageVector        = Icons.Default.Hub,
             contentDescription = null,
-            modifier           = Modifier.size(80.dp),
+            modifier           = Modifier.size(64.dp),
             tint               = MaterialTheme.colorScheme.primary,
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
         Text(
             text      = "APU",
@@ -133,52 +143,152 @@ private fun EnterNameStep(
             fontWeight = FontWeight.Bold,
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Две вкладки: новичок и тот, кто уже был зарегистрирован.
+        TabRow(selectedTabIndex = if (state.restoreMode) 1 else 0) {
+            Tab(
+                selected = !state.restoreMode,
+                onClick  = { onRestoreModeChanged(false) },
+                text     = { Text("Новый профиль") },
+            )
+            Tab(
+                selected = state.restoreMode,
+                onClick  = { onRestoreModeChanged(true) },
+                text     = { Text("Я уже зарегистрирован") },
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text      = "Децентрализованный мессенджер.\nБез серверов. Только вы и ваши контакты.",
+            text = if (state.restoreMode) {
+                "Введите никнейм и пароль, которые задавали раньше — вернётся ваш прежний профиль со всеми контактами и рангом."
+            } else {
+                "Никнейм и пароль понадобятся, чтобы вернуть себя после переустановки. Запомните их."
+            },
             style     = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color     = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        // Поле ввода имени
+        // Имя нужно только новичку: при восстановлении оно придёт из профиля.
+        if (!state.restoreMode) {
+            OutlinedTextField(
+                value    = state.displayName,
+                onValueChange = onNameChanged,
+                label    = { Text("Ваше имя") },
+                placeholder = { Text("Имя Фамилия") },
+                singleLine = true,
+                isError  = state.nameError != null,
+                supportingText = {
+                    if (state.nameError != null) {
+                        Text(state.nameError, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        Text("${state.displayName.length}/50", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words,
+                    imeAction      = ImeAction.Next,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         OutlinedTextField(
-            value    = displayName,
-            onValueChange = onNameChanged,
-            label    = { Text("Ваше имя") },
-            // Подсказка - образец формата, а не чьё-то конкретное имя.
-            placeholder = { Text("Имя Фамилия") },
+            value    = state.nickname,
+            onValueChange = onNicknameChanged,
+            label    = { Text("Никнейм") },
+            placeholder = { Text("например anna_k") },
             singleLine = true,
-            isError  = nameError != null,
+            isError  = state.nicknameError != null,
+            prefix   = { Text("@") },
             supportingText = {
-                if (nameError != null) {
-                    Text(nameError, color = MaterialTheme.colorScheme.error)
-                } else {
-                    Text("${displayName.length}/50", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                Text(
+                    state.nicknameError ?: "Латиница, цифры и подчёркивание, минимум 3 знака",
+                    color = if (state.nicknameError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
             },
-            leadingIcon = {
-                Icon(Icons.Default.Person, contentDescription = null)
+            leadingIcon = { Icon(Icons.Default.AlternateEmail, contentDescription = null) },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value    = state.password,
+            onValueChange = onPasswordChanged,
+            label    = { Text("Пароль") },
+            singleLine = true,
+            isError  = state.passwordError != null,
+            visualTransformation = PasswordVisualTransformation(),
+            supportingText = {
+                Text(
+                    state.passwordError
+                        ?: if (state.restoreMode) "Тот, что задавали раньше"
+                        else "Минимум $MIN_PASSWORD_LENGTH знаков",
+                    color = if (state.passwordError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
             },
+            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
             keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Words,
-                imeAction      = ImeAction.Done,
+                keyboardType = KeyboardType.Password,
+                imeAction    = if (state.restoreMode) ImeAction.Done else ImeAction.Next,
             ),
             keyboardActions = KeyboardActions(
-                onDone = { onCreateClick() }
+                onDone = { if (state.restoreMode && state.canSubmit) onRestoreClick() },
             ),
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        // Повтор только при регистрации: опечатку в пароле человек обнаружил
+        // бы лишь при восстановлении, когда исправить уже нечем.
+        if (!state.restoreMode) {
+            Spacer(modifier = Modifier.height(12.dp))
+            val mismatch = state.passwordRepeat.isNotEmpty() && state.passwordRepeat != state.password
+            OutlinedTextField(
+                value    = state.passwordRepeat,
+                onValueChange = onPasswordRepeatChanged,
+                label    = { Text("Подтвердите пароль") },
+                singleLine = true,
+                isError  = mismatch,
+                visualTransformation = PasswordVisualTransformation(),
+                supportingText = {
+                    if (mismatch) {
+                        Text("Пароли не совпадают", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction    = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { if (state.canSubmit) onCreateClick() },
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
-        // Кнопка создания профиля
+        Spacer(modifier = Modifier.height(20.dp))
+
         Button(
-            onClick  = onCreateClick,
-            enabled  = displayName.length >= 2,
+            onClick  = if (state.restoreMode) onRestoreClick else onCreateClick,
+            enabled  = state.canSubmit,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
@@ -187,14 +297,13 @@ private fun EnterNameStep(
             Icon(Icons.Default.Key, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                "Создать профиль",
+                if (state.restoreMode) "Войти" else "Создать профиль",
                 style = MaterialTheme.typography.titleMedium,
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Информация о безопасности
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -212,12 +321,15 @@ private fun EnterNameStep(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text  = "Ваши ключи генерируются локально на устройстве и никогда не покидают его. Никаких серверов, аккаунтов и телефонных номеров.",
+                    text  = "Пароль не покидает телефон: ключи запираются прямо здесь. " +
+                        "Ни телефонного номера, ни почты - только вы и ваши контакты.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 

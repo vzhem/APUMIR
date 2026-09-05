@@ -195,7 +195,7 @@ try {
     # reported the same 108 tests as before and gave no hint. When a new test
     # package appears, add its --tests line here in the same commit.
     Write-Output ''
-    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers, referrals, calls, peer rating, sealing) ====='
+    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers, referrals, calls, peer rating, sealing, onboarding) ====='
     & $Gradlew --console=plain :app:testDebugUnitTest `
         --tests 'com.vladimir.messenger.data.group.*' `
         --tests 'com.vladimir.messenger.data.file.FileTransferRankPolicyTest' `
@@ -203,6 +203,7 @@ try {
         --tests 'com.vladimir.messenger.data.call.*' `
         --tests 'com.vladimir.messenger.data.peer.*' `
         --tests 'com.vladimir.messenger.data.security.*' `
+        --tests 'com.vladimir.messenger.ui.screens.onboarding.*' `
         --tests 'com.vladimir.messenger.util.*'
     $TestExit = $LASTEXITCODE
     Write-Output "unit tests exit code: $TestExit"
