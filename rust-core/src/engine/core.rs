@@ -32,6 +32,16 @@ enum MqttOutboundCommand {
         envelope: String,
         message_id: String,
     },
+    /// Подтверждение доставки автору сообщения.
+    ///
+    /// Раньше ACK уходил через `send_message_mqtt`, а тот поднимает ОТДЕЛЬНОЕ
+    /// одноразовое соединение с брокером: на мобильном интернете оно часто не
+    /// успевало установиться, и вторая галочка не появлялась. Постоянное
+    /// соединение уже открыто - публикуем через него.
+    DeliveryAck {
+        recipient: String,
+        message_id: String,
+    },
     /// Немедленно объявить себя и запросить presence остальных (кнопка
     /// «Собрать данные об абонентах»). Обычный цикл делает это раз в минуту.
     AnnounceNow,
@@ -1166,6 +1176,30 @@ self.runtime = Some(runtime);
                             error
                         ),
                     },
+                    Ok(MqttOutboundCommand::DeliveryAck {
+                        recipient,
+                        message_id,
+                    }) => {
+                        let payload = format!("ack|{}", message_id);
+                        // send_mesh_relay, а НЕ send_message: второй публикует
+                        // с retain=true, и брокер хранил бы подтверждение вечно,
+                        // отдавая его каждому новому подписчику. Для разового
+                        // ACK это мусор, который к тому же оживал после
+                        // переустановки.
+                        match transport.send_mesh_relay(&recipient, &payload).await {
+                            Ok(()) => tracing::info!(
+                                "ACK: delivery ack queued for {} to {}",
+                                message_id,
+                                recipient
+                            ),
+                            Err(error) => tracing::warn!(
+                                "ACK: delivery ack failed for {} to {}: {}",
+                                message_id,
+                                recipient,
+                                error
+                            ),
+                        }
+                    }
                     Ok(MqttOutboundCommand::AnnounceNow) => {
                         let current_addr = {
                             let pa = public_addr.lock().unwrap();
@@ -2316,7 +2350,32 @@ self.runtime = Some(runtime);
         }
     }
     /// Send message via MQTT (internet fallback)
+    ///
+    /// ACK доставки («ack|<id>») уходит через ПОСТОЯННОЕ соединение, а не
+    /// через разовое подключение ниже: на мобильном интернете оно часто не
+    /// успевало установиться, и вторая галочка не появлялась. Новую функцию
+    /// FFI для этого не завести - привязки лежат в репозитории готовыми и
+    /// сборкой не перегенерируются, поэтому развилка сделана здесь.
     pub fn send_message_mqtt(&self, to_node_id: &str, payload: &str) -> bool {
+        if let Some(message_id) = payload.strip_prefix("ack|") {
+            if let Some(sender) = self.mqtt_outbound_tx.as_ref() {
+                let queued = sender
+                    .try_send(MqttOutboundCommand::DeliveryAck {
+                        recipient: to_node_id.to_string(),
+                        message_id: message_id.trim().to_string(),
+                    })
+                    .is_ok();
+                if queued {
+                    return true;
+                }
+                // Очередь переполнена или закрыта - падаем на разовый путь ниже.
+                tracing::warn!("ACK: persistent queue unavailable, using one-shot publish");
+            }
+        }
+        self.send_message_mqtt_oneshot(to_node_id, payload)
+    }
+
+    fn send_message_mqtt_oneshot(&self, to_node_id: &str, payload: &str) -> bool {
         use crate::network::mqtt_transport::MQTT_BROKERS;
         use rumqttc::{AsyncClient, MqttOptions, QoS};
 

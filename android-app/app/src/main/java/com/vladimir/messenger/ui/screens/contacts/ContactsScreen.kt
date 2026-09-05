@@ -202,7 +202,12 @@ fun ContactsScreen(
                                         action = Intent.ACTION_SEND
                                         putExtra(
                                             Intent.EXTRA_TEXT,
-                                            "Мой контакт ${'$'}{contact.displayName} в APU. Открой ссылку для добавления:\n${'$'}{link}",
+                                            // Доллар НЕ экранируем: с ${'$'} в
+                                            // сообщение уходил сам текст
+                                            // "${contact.displayName}" вместо имени,
+                                            // а вместо ссылки - "${link}".
+                                            "Мой контакт ${contact.displayName} в APU. " +
+                                                "Открой ссылку для добавления:\n$link",
                                         )
                                         type = "text/plain"
                                     }

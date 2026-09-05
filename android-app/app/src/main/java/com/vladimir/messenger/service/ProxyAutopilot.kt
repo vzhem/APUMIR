@@ -117,7 +117,7 @@ class ProxyAutopilot @Inject constructor(
                 com.vladimir.messenger.data.RustBridge.clearMqttSocks5Proxy()
             }
         } catch (e: Exception) {
-            Log.w(TAG, "applyBestProxyToEngine failed: ${'$'}{e.message}")
+            Log.w(TAG, "applyBestProxyToEngine failed: ${e.message}")
         }
     }
 
