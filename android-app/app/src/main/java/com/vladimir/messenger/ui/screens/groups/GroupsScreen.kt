@@ -755,6 +755,11 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 entry.title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
+                // Цвет задан явно: строка каталога лежит НЕ в карточке, а прямо
+                // на тёмных обоях, поэтому цвет по умолчанию брался тёмный и
+                // название сливалось с фоном. У «Моих групп» такой беды нет -
+                // там Card сам подбирает цвет текста под свою подложку.
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

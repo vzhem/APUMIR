@@ -767,6 +767,36 @@ class CoreServerService : Service() {
                                 Log.w(TAG, "File pump after peer discovery failed: ${e.message}")
                             }
                         }
+                    } else if (contactRepository.isRealName(peerName)) {
+                        // Переустановка приложения выдаёт узлу НОВЫЙ адрес, а
+                        // человек остаётся прежним. Раньше такой узел просто
+                        // игнорировался: старая запись висела с мёртвым адресом,
+                        // имя не обновлялось, сообщения уходили в пустоту - и
+                        // это выглядело как «имя не приходит» и «связь в одну
+                        // сторону». Presence несёт настоящее имя, поэтому
+                        // переселяем прежнюю запись на новый адрес вместе с
+                        // перепиской. Заглушки («Contact ab12») не трогаем:
+                        // по ним человека не опознать.
+                        val twins = runCatching {
+                            contactRepository.findStaleTwins(peerName, peerId)
+                        }.getOrDefault(emptyList())
+                        if (twins.isNotEmpty()) {
+                            runCatching {
+                                // addContact вернёт ошибку «уже есть», если
+                                // запись успели создать параллельно - это не
+                                // помеха переносу, поэтому результат не проверяем.
+                                contactRepository.addContact(peerName, peerId)
+                                chatRepository.getOrCreateChat(peerId, peerName)
+                                for (old in twins) {
+                                    chatRepository.absorbChatOf(old, peerId)
+                                    contactRepository.deleteContact(old)
+                                }
+                                Log.i(TAG, "Контакт $peerName переехал на новый адрес; перенесено записей: ${twins.size}")
+                            }.onFailure { Log.w(TAG, "Не удалось перенести контакт: ${it.message}") }
+                        } else {
+                            if (!lightTouch) Log.i(TAG, "ℹ Peer не в контактах: $peerName ($peerId) — нужен invite link")
+                            if (lightTouch) return
+                        }
                     } else {
                         // Контакт НЕ существует — игнорируем
                         if (!lightTouch) Log.i(TAG, "ℹ Peer не в контактах: $peerName ($peerId) — нужен invite link")
