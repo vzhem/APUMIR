@@ -52,51 +52,43 @@
 
 ---
 
-## Шаг 3. Вставить код
+## Шаг 3. Заменить код
+
+Проще и безопаснее заменить файл целиком, чем вставлять куски.
 
 1. На странице worker'а **p2p-relay** нажмите **Edit code** (редактировать код).
-   Откроется редактор с вашим текущим кодом.
-2. Возьмите файл `tools/worker/identity_vault_handlers.js` из репозитория.
-3. Скопируйте из него функции `handleVaultRoutes` и `json` и вставьте в самый
-   **верх** редактора, до `export default`.
-4. Найдите строку, с которой начинается обработка запросов:
+2. Откройте в репозитории файл `tools/worker/p2p_relay_worker.js`.
+3. Скопируйте его **целиком**.
+4. В редакторе Cloudflare выделите весь текущий код (`Ctrl+A`) и вставьте
+   скопированное (`Ctrl+V`).
+5. Нажмите **Deploy** (опубликовать) в правом верхнем углу.
 
-   ```js
-   export default {
-     async fetch(request, env) {
-   ```
+Ваши прежние пути `/register`, `/lookup`, `/version` и `/health` в этом файле
+сохранены и работают как раньше — добавлены только `/vault/put` и `/vault/get`.
 
-5. Сразу после неё вставьте две строки:
-
-   ```js
-       const vaultResponse = await handleVaultRoutes(request, env);
-       if (vaultResponse) return vaultResponse;
-   ```
-
-   Остальной ваш код — `/register`, `/lookup`, `/version` — трогать не нужно,
-   он продолжит работать как раньше.
-
-6. Нажмите **Deploy** (опубликовать) в правом верхнем углу.
-
----
+> Заодно исправлена ссылка на обновление в `/version`: там стояла заготовка
+> `your-username/p2p-messenger`, по которой обновление не скачалось бы.
 
 ## Шаг 4. Проверить
 
-Выполните в PowerShell — должно ответить `{"success":true}`:
+Первая команда должна ответить `success : True`:
 
 ```powershell
-powershell -NoProfile -Command "Invoke-RestMethod -Method Post -Uri 'https://p2p-relay.1985vzhem.workers.dev/vault/put' -ContentType 'application/json' -Body '{\"shelf\":\"0000000000000000000000000000000000000000000000000000000000000001\",\"vault\":\"dGVzdA==\"}'"
+powershell -NoProfile -Command "$b = @{shelf='0000000000000000000000000000000000000000000000000000000000000001'; vault='dGVzdA=='} | ConvertTo-Json; Invoke-RestMethod -Method Post -Uri 'https://p2p-relay.1985vzhem.workers.dev/vault/put' -ContentType 'application/json' -Body $b"
 ```
 
-Затем это — должно вернуть `vault : dGVzdA==`:
+Вторая должна вернуть `vault : dGVzdA==`:
 
 ```powershell
 powershell -NoProfile -Command "Invoke-RestMethod -Uri 'https://p2p-relay.1985vzhem.workers.dev/vault/get?shelf=0000000000000000000000000000000000000000000000000000000000000001'"
 ```
 
-Если оба ответа такие — всё работает, можно проверять на телефонах.
+> Тело запроса собирается через `ConvertTo-Json`, а не пишется строкой с
+> экранированными кавычками: PowerShell такие кавычки съедает, и на сервер
+> уходит не JSON. Ответ `{"error":"bad json"}` означает именно это — worker при
+> этом работает исправно.
 
----
+Если обе команды ответили как указано — всё готово, можно проверять на телефонах.
 
 ## Что если сервер недоступен
 
