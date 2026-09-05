@@ -504,6 +504,19 @@ class ChatListViewModel @Inject constructor(
      * скачать приложение, поставит и войдёт по той же ссылке. Поэтому
      * отдельного пункта «для своих» и «для чужих» не нужно.
      */
+    /**
+     * QR для личной встречи: ссылка со входом БЕЗ одобрения.
+     * Люди стоят рядом и видят друг друга, подтверждать нечего.
+     */
+    fun prepareQrGroupInvite(groupId: String, onReady: (title: String, link: String) -> Unit) {
+        viewModelScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.qrInviteLinkFor(groupId) }.getOrNull()
+            }
+            if (prepared != null) onReady(prepared.first, prepared.second)
+        }
+    }
+
     fun shareGroupInvite(groupId: String, onReady: (title: String, link: String) -> Unit) {
         viewModelScope.launch {
             val prepared = withContext(Dispatchers.IO) {

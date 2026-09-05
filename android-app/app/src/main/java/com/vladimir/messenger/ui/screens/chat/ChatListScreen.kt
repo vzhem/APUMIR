@@ -8,6 +8,9 @@ package com.vladimir.messenger.ui.screens.chat
 // FAB для добавления нового контакта.
 // =============================================================================
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -112,6 +115,9 @@ fun ChatListScreen(
     var confirmDeleteChat by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var confirmClearChat by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var confirmGroup by remember { mutableStateOf<InboxGroup?>(null) }
+    // Как приглашать: QR при личной встрече или обычная ссылка.
+    var inviteChoice by remember { mutableStateOf<InboxGroup?>(null) }
+    var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     // Листалка разделов. Страницы едут за пальцем, поэтому выбранный раздел и
     // страница обязаны ходить парой: тап по чипсу листает страницу, а
@@ -362,18 +368,71 @@ fun ChatListScreen(
                         onClearChat = { confirmClearChat = it },
                         onDeleteChat = { confirmDeleteChat = it },
                         onGroupLeaveOrDelete = { confirmGroup = it },
-                        onInviteToGroup = { group ->
-                            viewModel.shareGroupInvite(group.id) { title, link ->
-                                com.vladimir.messenger.util.AppShare
-                                    .shareGroupInvite(context, title, link)
-                            }
-                        },
+                        onInviteToGroup = { group -> inviteChoice = group },
                         onLoadMore = viewModel::loadMore,
                     )
                 }
             }
         }
     }
+    }
+
+    // Как приглашать: QR при встрече или ссылка кому угодно.
+    inviteChoice?.let { group ->
+        val what = if (group.isChannel) "канал" else "группу"
+        AlertDialog(
+            onDismissRequest = { inviteChoice = null },
+            title = { Text("Пригласить в $what") },
+            text = {
+                Text(
+                    "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
+                        "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = group
+                    inviteChoice = null
+                    viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
+                        qrInvite = title to link
+                    }
+                }) { Text("Показать QR-код") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val chosen = group
+                    inviteChoice = null
+                    viewModel.shareGroupInvite(chosen.id) { title, link ->
+                        com.vladimir.messenger.util.AppShare
+                            .shareGroupInvite(context, title, link)
+                    }
+                }) { Text("Отправить ссылку") }
+            },
+        )
+    }
+
+    qrInvite?.let { (title, link) ->
+        AlertDialog(
+            onDismissRequest = { qrInvite = null },
+            title = { Text(title) },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Пусть собеседник откроет сканер QR на главном экране " +
+                            "и наведёт камеру. Он войдёт без подтверждения.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    com.vladimir.messenger.ui.components.InviteShareCard(
+                        link = link,
+                        displayName = title,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { qrInvite = null }) { Text("Готово") }
+            },
+        )
     }
 
     // Подтверждение удаления чата.

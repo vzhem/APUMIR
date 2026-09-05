@@ -4,6 +4,7 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Группы»: список групп и создание новой
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.ui.components.BubbleOverflowMenu
 import com.vladimir.messenger.ui.components.BubbleMenuAction
 import com.vladimir.messenger.util.AppShare
@@ -110,6 +111,10 @@ fun GroupsScreen(
     var createAsChannel by remember { mutableStateOf(create == "channel") }
     // Выход из группы и удаление - через подтверждение: это необратимо.
     var confirmLeave by remember { mutableStateOf<GroupSummary?>(null) }
+    // Как приглашать: показать QR при встрече или отправить ссылку.
+    var inviteChoice by remember { mutableStateOf<GroupSummary?>(null) }
+    // Готовый QR: название группы и ссылка со входом без одобрения.
+    var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
     val context = LocalContext.current
     // Из меню кнопки-карандаша сразу открываем диалог создания группы/канала.
     LaunchedEffect(create) {
@@ -295,11 +300,7 @@ fun GroupsScreen(
                                         group = group,
                                         onOpen = { onGroupClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
-                                        onInvite = {
-                                            viewModel.shareInvite(group.id) { title, link ->
-                                                AppShare.shareGroupInvite(context, title, link)
-                                            }
-                                        },
+                                        onInvite = { inviteChoice = group },
                                         onMarkRead = { viewModel.markGroupRead(group.id) },
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
@@ -318,11 +319,7 @@ fun GroupsScreen(
                                         group = group,
                                         onOpen = { onChannelClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
-                                        onInvite = {
-                                            viewModel.shareInvite(group.id) { title, link ->
-                                                AppShare.shareGroupInvite(context, title, link)
-                                            }
-                                        },
+                                        onInvite = { inviteChoice = group },
                                         onMarkRead = { viewModel.markGroupRead(group.id) },
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
@@ -424,6 +421,61 @@ fun GroupsScreen(
                     },
                     isChannel = isChannel,
                 )
+            },
+        )
+    }
+
+    // Как приглашать: показываем QR или отправляем ссылку.
+    inviteChoice?.let { group ->
+        val what = if (group.isChannel) "канал" else "группу"
+        AlertDialog(
+            onDismissRequest = { inviteChoice = null },
+            title = { Text("Пригласить в $what") },
+            text = {
+                Text(
+                    "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
+                        "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = group
+                    inviteChoice = null
+                    viewModel.prepareQrInvite(chosen.id) { title, link ->
+                        qrInvite = title to link
+                    }
+                }) { Text("Показать QR-код") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val chosen = group
+                    inviteChoice = null
+                    viewModel.shareInvite(chosen.id) { title, link ->
+                        AppShare.shareGroupInvite(context, title, link)
+                    }
+                }) { Text("Отправить ссылку") }
+            },
+        )
+    }
+
+    // Сам QR-код для встречи лицом к лицу.
+    qrInvite?.let { (title, link) ->
+        AlertDialog(
+            onDismissRequest = { qrInvite = null },
+            title = { Text(title) },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Пусть собеседник откроет сканер QR на главном экране " +
+                            "и наведёт камеру. Он войдёт без подтверждения.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    InviteShareCard(link = link, displayName = title)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { qrInvite = null }) { Text("Готово") }
             },
         )
     }

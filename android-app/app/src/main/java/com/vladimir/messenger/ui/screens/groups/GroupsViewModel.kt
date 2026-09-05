@@ -191,6 +191,19 @@ class GroupsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * QR для личной встречи: готовим ссылку со входом без одобрения.
+     * Ссылка новая каждый раз - показанный вживую код не должен жить вечно.
+     */
+    fun prepareQrInvite(groupId: String, onReady: (title: String, link: String) -> Unit) {
+        viewModelScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.qrInviteLinkFor(groupId) }.getOrNull()
+            }
+            if (prepared != null) onReady(prepared.first, prepared.second)
+        }
+    }
+
     fun dismissCreateError() {
         _uiState.update { it.copy(createError = null) }
     }

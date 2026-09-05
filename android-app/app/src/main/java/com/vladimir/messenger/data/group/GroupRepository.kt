@@ -1489,6 +1489,20 @@ class GroupRepository(
         )
     }
 
+    /**
+     * Ссылка для QR при личной встрече: вход БЕЗ одобрения.
+     *
+     * Когда люди стоят рядом и показывают друг другу телефоны, подтверждать
+     * нечего - они уже видят, кого пускают. Поэтому создаётся отдельное
+     * приглашение с выключенным одобрением, а обычная ссылка «поделиться»
+     * остаётся строгой: её могут переслать кому угодно.
+     */
+    suspend fun qrInviteLinkFor(groupId: String): Pair<String, String>? {
+        val group = groupDao.getGroupById(groupId) ?: return null
+        val invite = createInvite(groupId, requestApproval = false).getOrNull() ?: return null
+        return group.title to invite.link
+    }
+
     suspend fun leaveGroup(groupId: String): Result<Unit> {
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
