@@ -131,7 +131,14 @@ class FileTransferRouter @Inject constructor(
             chunkStore = chunkStore,
             receivedStore = receivedStoreLocal,
             pinner = { binding, pinnedAtMs ->
-                peerStore.pinFirstSeen(binding, pinnedAtMs).newlyPinned
+                val result = peerStore.pinFirstSeen(binding, pinnedAtMs)
+                // Тот же закреплённый ключ шифрует и переписку — отдельного
+                // обмена ключами заводить не нужно.
+                runCatching {
+                    com.vladimir.messenger.data.security.MessageSealer
+                        .remember(appContext, result.nodeId, binding)
+                }
+                result.newlyPinned
             },
             crypto = crypto,
             keyVault = keyVault,
@@ -344,6 +351,24 @@ class FileTransferRouter @Inject constructor(
                 true
             }.getOrDefault(false)
         }
+    }
+
+    /**
+     * Разогреть кэш шифрования уже закреплёнными ключами.
+     *
+     * Без этого у существующих пользователей первые сообщения после
+     * обновления ушли бы открытыми: ключи лежат в базе, но кэш пуст, а точка
+     * отправки не может обращаться к базе.
+     */
+    suspend fun warmSealingKeys() {
+        runCatching {
+            val bindings = peerStore.allBindings()
+            for ((nodeId, binding) in bindings) {
+                com.vladimir.messenger.data.security.MessageSealer
+                    .remember(appContext, nodeId, binding)
+            }
+            Log.i(TAG, "Sealing keys warmed: ${bindings.size}")
+        }.onFailure { Log.w(TAG, "Sealing warm-up failed: ${it.message}") }
     }
 
     private suspend fun sendHelloHandshakes() {

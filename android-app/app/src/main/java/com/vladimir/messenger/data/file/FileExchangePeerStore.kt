@@ -63,6 +63,16 @@ class FileExchangePeerStore @Inject constructor(
         return binding
     }
 
+    /** Все закреплённые привязки — для разогрева кэша шифрования. */
+    suspend fun allBindings(): List<Pair<String, ByteArray>> = dao.getAll().mapNotNull { entity ->
+        runCatching {
+            val binding = Base64.decode(entity.bindingBase64, Base64.NO_WRAP)
+            check(binding.size <= MAX_BINDING_BYTES && verifyFileExchangeBinding(binding))
+            check(fileExchangeBindingNodeId(binding) == entity.nodeId)
+            entity.nodeId to binding
+        }.getOrNull()
+    }
+
     data class PinResult(
         val nodeId: String,
         val bindingSha256: String,

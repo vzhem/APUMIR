@@ -21,6 +21,8 @@ import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
+import com.vladimir.messenger.data.security.MessageSealer
+import com.vladimir.messenger.data.security.SealedWire
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
@@ -244,6 +246,11 @@ class CoreServerService : Service() {
             // M8-C slice 3: Android Keystore мост. Устанавливаем at-rest ключ
             // СТРОГО ДО старта движка. Недоступность ключа = честный RAM-only
             // degrade (durable custody не заявляется, файл не создаётся).
+            // ШИФРОВАНИЕ: контекст ставим до старта движка, иначе первые
+            // исходящие успеют уйти открытыми.
+            RustBridge.attachContext(applicationContext)
+            serviceScope.launch { fileTransferRouter.warmSealingKeys() }
+
             val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
 
@@ -527,10 +534,29 @@ class CoreServerService : Service() {
                 val senderId = event.senderId ?: return
                 val chatId = event.chatId ?: return
                 val messageId = event.messageId ?: return
-                val text = event.text ?: return
+                val rawText = event.text ?: return
                 val timestamp = ts
 
-                Log.i(TAG, "Message from $senderId in chat $chatId: $text")
+                // ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков, иначе
+                // групповые, файловые и служебные пакеты не будут узнаны.
+                // Не вскрывшийся конверт нас не касается: он адресован другому
+                // узлу, мы лишь ретранслятор — молча пропускаем.
+                val sealed = SealedWire.isSealed(rawText)
+                val text = if (sealed) {
+                    val myNodeId = RustBridge.nodeId()
+                    val opened = myNodeId?.let {
+                        MessageSealer.open(applicationContext, it, senderId, rawText)
+                    }
+                    if (opened == null) {
+                        Log.i(TAG, "Sealed envelope not for us msgId=$messageId; ignored")
+                        return
+                    }
+                    opened
+                } else {
+                    rawText
+                }
+
+                Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
                 try {
                     // F3: file packets ride the same durable transport but must never be stored
                     // as chat text. Relay cleanup still happens through the per-message ACK below.

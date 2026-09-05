@@ -141,6 +141,33 @@ try {
         }
     }
 
+    # Step 0b: rust core tests. The core is compiled by CI, never by this gate,
+    # so a broken Rust change stayed invisible here and only failed ~13 minutes
+    # later on the release runner. cargo test is cheap and catches it now.
+    # Skipped (not failed) when cargo is missing: the Kotlin gate must stay
+    # usable on a machine without the Rust toolchain.
+    if ($null -eq (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Output ''
+        Write-Output '===== step 0b: rust core tests - SKIPPED (cargo not installed) ====='
+        Write-Output 'NOTE: install Rust to catch core errors here instead of on the release runner.'
+    } else {
+        Write-Output ''
+        Write-Output '===== step 0b: rust core tests ====='
+        $CargoExit = 0
+        Push-Location (Join-Path $RepoRoot 'rust-core')
+        try {
+            & cargo test --lib
+            $CargoExit = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        Write-Output "rust core tests exit code: $CargoExit"
+        if ($CargoExit -ne 0) {
+            Write-Output 'RESULT: RUST CORE TESTS FAILED - stop here, do not build.'
+            exit $CargoExit
+        }
+    }
+
     # Step 1: JVM unit tests. Groups plus the areas this branch touched outside
     # that package: the rank policy that now gates attachments, the link parsers
     # the QR scanner routes through, and the referral attribution added in
@@ -154,13 +181,14 @@ try {
     # reported the same 108 tests as before and gave no hint. When a new test
     # package appears, add its --tests line here in the same commit.
     Write-Output ''
-    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers, referrals, calls, peer rating) ====='
+    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers, referrals, calls, peer rating, sealing) ====='
     & $Gradlew --console=plain :app:testDebugUnitTest `
         --tests 'com.vladimir.messenger.data.group.*' `
         --tests 'com.vladimir.messenger.data.file.FileTransferRankPolicyTest' `
         --tests 'com.vladimir.messenger.data.referral.*' `
         --tests 'com.vladimir.messenger.data.call.*' `
         --tests 'com.vladimir.messenger.data.peer.*' `
+        --tests 'com.vladimir.messenger.data.security.*' `
         --tests 'com.vladimir.messenger.util.*'
     $TestExit = $LASTEXITCODE
     Write-Output "unit tests exit code: $TestExit"

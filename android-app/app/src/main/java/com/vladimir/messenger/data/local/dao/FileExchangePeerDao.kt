@@ -11,6 +11,10 @@ interface FileExchangePeerDao {
     @Query("SELECT * FROM file_exchange_peers WHERE nodeId = :nodeId")
     suspend fun get(nodeId: String): FileExchangePeerEntity?
 
+    /** Разогрев кэша шифрования на старте: ключи уже закреплённых контактов. */
+    @Query("SELECT * FROM file_exchange_peers")
+    suspend fun getAll(): List<FileExchangePeerEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertFirstSeen(entity: FileExchangePeerEntity): Long
 

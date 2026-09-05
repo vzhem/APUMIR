@@ -1,6 +1,10 @@
 package com.vladimir.messenger.data
 
+import android.content.Context
 import android.util.Log
+import com.vladimir.messenger.data.file.FileTransferWire
+import com.vladimir.messenger.data.security.MessageSealer
+import com.vladimir.messenger.data.security.SealedWire
 import uniffi.p2p_core.ChatFfi
 import uniffi.p2p_core.CoreEventFfi
 import uniffi.p2p_core.MessageFfi
@@ -21,6 +25,18 @@ object RustBridge {
 
     @Volatile
     private var coreInitialized: Boolean = false
+
+    /**
+     * Контекст приложения для шифрования переписки. Точка отправки не suspend
+     * и вызывается из многих мест, поэтому контекст ставится один раз на
+     * старте сервиса, а не протаскивается через каждый вызов.
+     */
+    @Volatile
+    private var appContext: Context? = null
+
+    fun attachContext(context: Context) {
+        appContext = context.applicationContext
+    }
 
     /**
      * M8-C: [relayDbPath] — собственный SQLite-файл durable encrypted relay
@@ -195,13 +211,41 @@ object RustBridge {
             // Rust owns the persistent direct/offline mesh send path. A false result means the
             // message remains phone-owned QUEUED_OFFLINE; do not create a transient MQTT session
             // or claim SENT merely because a local publish request was accepted.
-            val sentDirectly = engine?.sendMessage(messageId, chatId, recipientId, text) == true
-            Log.i(TAG, "Rust send result: direct=$sentDirectly recipient=$recipientId")
+            // ШИФРОВАНИЕ: наружу уходит запечатанный конверт, а не открытый
+            // текст. Прямой QUIC защищён TLS, но путь через ретранслятор идёт
+            // по чужому брокеру, где открытый текст читается кем угодно.
+            val payload = sealOutgoing(recipientId, text)
+            val sentDirectly = engine?.sendMessage(messageId, chatId, recipientId, payload) == true
+            Log.i(TAG, "Rust send result: direct=$sentDirectly sealed=${payload !== text}")
             sentDirectly
         } catch (ex: Exception) {
             Log.e(TAG, "sendMessage error", ex)
             false
         }
+    }
+
+    /**
+     * Запечатать исходящее, если ключ собеседника известен.
+     *
+     * Уже запечатанное не трогаем. Если ключа ещё нет, возвращаем исходный
+     * текст: обмен ключами идёт пакетом HELLO и занимает секунды, а молча
+     * ронять сообщение хуже. Такое возможно только до первого обмена ключами.
+     */
+    private fun sealOutgoing(recipientId: String, text: String): String {
+        if (!recipientId.startsWith("pk_")) return text
+        if (SealedWire.isSealed(text)) return text
+        // HELLO несёт сам открытый ключ и обязан идти незапечатанным: иначе
+        // первый обмен ключами заклинит - шифровать нечем, пока ключ не пришёл.
+        // Секрета в нём нет, это открытая часть подписанной привязки.
+        if (text.startsWith(FileTransferWire.HELLO_PREFIX)) return text
+        val context = appContext ?: return text
+        val myNodeId = nodeId() ?: return text
+        val sealed = MessageSealer.seal(context, myNodeId, recipientId, text)
+        if (sealed == null) {
+            Log.w(TAG, "No key yet for ${recipientId.takeLast(8)}; sending unsealed")
+            return text
+        }
+        return sealed
     }
 
     fun receiveMessage(
@@ -322,7 +366,9 @@ object RustBridge {
     fun sendDirectPayload(recipientId: String, payload: String): Boolean = try {
         val handle = engine
         if (handle != null) {
-            handle.sendDirectPayload(recipientId, payload)
+            // Прямой путь уже под TLS 1.3, но запечатываем и его: тот же
+            // payload при смене маршрута может уйти через ретранслятор.
+            handle.sendDirectPayload(recipientId, sealOutgoing(recipientId, payload))
         } else {
             false
         }
