@@ -198,7 +198,7 @@ fun ContactsScreen(
                         val ctx = LocalContext.current
                         val shareContact = {
                             try {
-                                    val link = ContactShareLink.build(contact.id, contact.displayName)
+                                    val link = ContactShareLink.build(contact.id, contact.displayName, contact.username)
                                     val send = Intent().apply {
                                         action = Intent.ACTION_SEND
                                         putExtra(
