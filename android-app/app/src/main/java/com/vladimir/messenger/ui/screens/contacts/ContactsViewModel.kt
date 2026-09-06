@@ -38,6 +38,29 @@ class ContactsViewModel @Inject constructor(
 
     fun consumeToast() { _toast.value = null }
 
+    /**
+     * Открыть переписку с контактом.
+     *
+     * Экран контактов раньше передавал в чат идентификатор КОНТАКТА вместо
+     * идентификатора чата. Получался «другой» чат: переписка не показывалась,
+     * а отправка висела на часиках, потому что сообщения писались в
+     * несуществующую строку. Ищем настоящий чат, а если его ещё нет -
+     * заводим один раз здесь.
+     */
+    fun openChatWith(contact: Contact, onReady: (chatId: String) -> Unit) {
+        viewModelScope.launch {
+            val chatId = withContext(Dispatchers.IO) {
+                runCatching {
+                    chatRepository.getChatByContactId(contact.id)?.id
+                        ?: chatRepository.getOrCreateChat(contact.id, contact.displayName).id
+                }.getOrNull()
+            }
+            // Без чата открывать нечего: молча ничего не делаем, чтобы не
+            // повторять прежнюю поломку с пустым экраном.
+            if (chatId != null) onReady(chatId)
+        }
+    }
+
     val contacts: StateFlow<List<Contact>> = contactRepository
         .observeContacts()
         .stateIn(

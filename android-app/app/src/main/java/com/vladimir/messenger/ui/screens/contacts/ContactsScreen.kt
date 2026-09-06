@@ -48,7 +48,8 @@ import androidx.compose.ui.draw.clip
 @Composable
 fun ContactsScreen(
     onNavigateBack: () -> Unit,
-    onContactClick: (Contact) -> Unit,
+    /** Открыть переписку: chatId уже найден, contact нужен для шапки. */
+    onContactClick: (chatId: String, contact: Contact) -> Unit,
     onAddContactClick: () -> Unit,
     onRenameContactClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
     onCallContactClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
@@ -225,7 +226,10 @@ fun ContactsScreen(
                                 contactName = contact.displayName,
                                 isContactOnline = contact.isOnline,
                             ),
-                            onClick = { onContactClick(contact) },
+                            // Идём через viewModel: он находит настоящий чат.
+                            // Прямая передача contact.id открывала «другой»
+                            // чат - пустой и с вечными часиками при отправке.
+                            onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                             username = contact.username,
                             kind = BubbleKind.Personal,
                             onShareClick = shareContact,
@@ -233,7 +237,7 @@ fun ContactsScreen(
                                 BubbleMenuAction(
                                     title = "Написать",
                                     icon = Icons.Default.Forum,
-                                    onClick = { onContactClick(contact) },
+                                    onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                                 ),
                                 BubbleMenuAction(
                                     title = "Позвонить",

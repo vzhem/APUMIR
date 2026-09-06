@@ -134,11 +134,20 @@ class ReactionRepository @Inject constructor(
         if (senderId.isBlank()) return true
         withContext(Dispatchers.IO) {
             if (packet.added) {
+                // chatId из пакета - идентификатор чата ОТПРАВИТЕЛЯ, у нас он
+                // другой: личные чаты заводятся на каждом телефоне отдельно.
+                // Раньше реакция сохранялась с чужим идентификатором и не
+                // показывалась - экран ищет реакции по своему чату. Для группы
+                // идентификатор общий, поэтому он и подходит; для лички
+                // переводим в свой чат по отправителю.
+                val localChatId = groupDao.getGroupById(packet.chatId)?.let { packet.chatId }
+                    ?: chatDao.getChatByContactId(senderId)?.id
+                    ?: packet.chatId
                 reactionDao.put(
                     MessageReactionEntity(
                         messageId = packet.messageId,
                         nodeId = senderId,
-                        chatId = packet.chatId,
+                        chatId = localChatId,
                         emoji = packet.emoji,
                         atMs = packet.atMs,
                     )

@@ -83,8 +83,14 @@ sealed class Screen(val route: String) {
     // Р”РµС‚Р°Р»СЊРЅС‹Р№ СЌРєСЂР°РЅ С‡Р°С‚Р°
     // {chatId} Рё {contactName} вЂ” РїР°СЂР°РјРµС‚СЂС‹ РјР°СЂС€СЂСѓС‚Р°
     data object ChatDetail : Screen("chat/{chatId}?contactName={contactName}&contactId={contactId}") {
+        // Кодируем ВСЕ три части, а не только имя. Контакт, добавленный из
+        // вставленного целиком сообщения, получал в идентификатор перенос
+        // строки и «?» - маршрут разваливался, и приложение падало при
+        // открытии такого чата.
         fun createRoute(chatId: String, contactName: String, contactId: String) =
-            "chat/$chatId?contactName=${java.net.URLEncoder.encode(contactName, "UTF-8")}&contactId=$contactId"
+            "chat/${java.net.URLEncoder.encode(chatId, "UTF-8")}" +
+                "?contactName=${java.net.URLEncoder.encode(contactName, "UTF-8")}" +
+                "&contactId=${java.net.URLEncoder.encode(contactId, "UTF-8")}"
     }
 
     // Р”РѕР±Р°РІР»РµРЅРёРµ РєРѕРЅС‚Р°РєС‚Р°
@@ -538,10 +544,12 @@ fun MessengerNavGraph(
                 },
                 onNavigateBack = { navController.popBackStack() },
                 onAddContactClick = { navController.navigate(Screen.AddContact.createRoute()) },
-                onContactClick = { contact ->
+                onContactClick = { chatId, contact ->
                     navController.navigate(
                         Screen.ChatDetail.createRoute(
-                            chatId = contact.id,
+                            // chatId приходит найденным: раньше сюда шёл
+                            // contact.id, и открывался пустой чат-двойник.
+                            chatId = chatId,
                             contactName = contact.displayName,
                             contactId = contact.id,
                         )

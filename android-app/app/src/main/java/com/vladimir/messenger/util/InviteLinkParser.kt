@@ -47,7 +47,7 @@ object InviteLinkParser {
     }
 
     fun parse(raw: String?): Invite? {
-        val text = raw?.trim().orEmpty()
+        val text = extractLink(raw?.trim().orEmpty())
         if (text.isBlank()) return null
 
         // QR может содержать голый ключ контакта — это тоже приглашение.
@@ -201,4 +201,30 @@ object InviteLinkParser {
         URLDecoder.decode(value, StandardCharsets.UTF_8.name())
 
     private fun String.normalizeNodeId(): String = trim()
+
+    /**
+     * Выдернуть ссылку из свободного текста.
+     *
+     * Приглашение обычно приходит целым сообщением: «Мой контакт N в APU.
+     * Открой ссылку: apu://...». Раньше разбирался весь текст целиком, и в
+     * идентификатор попадало всё подряд вместе с переносами строк - контакт
+     * заводился с мусорным адресом, а открытие такого чата роняло приложение.
+     *
+     * Если ссылки в тексте нет, возвращаем исходную строку: короткие ссылки и
+     * голый ключ должны разбираться как прежде.
+     */
+    private fun extractLink(text: String): String {
+        if (text.isEmpty()) return text
+        val schemes = listOf("apu://", "p2pmessenger://", "p2p://", "https://t.me/")
+        val words = text.split(' ', '\n', '\r', '\t').filter { it.isNotBlank() }
+        // Берём ПОСЛЕДНЮЮ ссылку: в приглашении она стоит в конце, а в начале
+        // может встретиться имя, похожее на схему.
+        val link = words.lastOrNull { word ->
+            schemes.any { word.startsWith(it, ignoreCase = true) }
+        }
+        if (link != null) return link.trimEnd('.', ',', ')', ']', '>')
+        // Голый ключ тоже может быть внутри текста.
+        words.lastOrNull { it.startsWith("pk_") }?.let { return it }
+        return text
+    }
 }
