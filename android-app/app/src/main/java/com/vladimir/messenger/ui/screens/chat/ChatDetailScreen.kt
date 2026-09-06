@@ -128,6 +128,13 @@ fun ChatDetailScreen(
             contactId = contactId,
             isOnline = uiState.isContactOnline,
             username = uiState.contactUsername,
+            heartCount = uiState.heartCount,
+            heartMine = uiState.heartMine,
+            onHeartClick = if (contactId.startsWith("pk_")) {
+                { viewModel.onHeartClick(contactId) }
+            } else {
+                null
+            },
             onDismiss = { showPeerProfile = false },
             onRename = if (contactId.isNotBlank()) {
                 {

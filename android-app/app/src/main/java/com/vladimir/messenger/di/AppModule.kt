@@ -41,6 +41,7 @@ object AppModule {
                 AppDatabase.MIGRATION_12_13,
                 AppDatabase.MIGRATION_13_14,
                 AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -69,6 +70,10 @@ object AppModule {
     @Provides @Singleton
     fun provideSavedItemDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.SavedItemDao =
         db.savedItemDao()
+
+    @Provides @Singleton
+    fun provideProfileHeartDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.ProfileHeartDao =
+        db.profileHeartDao()
 
     @Provides @Singleton
     fun provideFileExchangePeerDao(db: AppDatabase): FileExchangePeerDao = db.fileExchangePeerDao()

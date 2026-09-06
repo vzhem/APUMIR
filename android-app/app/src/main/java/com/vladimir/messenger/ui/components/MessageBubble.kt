@@ -195,6 +195,9 @@ private fun buildAnnotatedMessageText(text: String, linkColor: Color): Annotated
     }
 }
 
+/** Синий «прочитано»: заметен и на золоте своего пузыря, и на светлом фоне. */
+private val ReadTickColor = Color(0xFF2E86DE)
+
 @Composable
 private fun MessageStatusIcon(status: MessageStatus, tint: Color) {
     // tint — цвет текста пузыря своих сообщений: галочки читаются и на золоте, и на синем.
@@ -203,7 +206,10 @@ private fun MessageStatusIcon(status: MessageStatus, tint: Color) {
         MessageStatus.QUEUED_OFFLINE -> Pair(Icons.Default.Schedule, tint.copy(alpha = 0.5f))
         MessageStatus.SENT           -> Pair(Icons.Default.Done, tint.copy(alpha = 0.7f))
         MessageStatus.DELIVERED      -> Pair(Icons.Default.DoneAll, tint)
-        MessageStatus.READ           -> Pair(Icons.Default.DoneAll, tint)
+        // Прочитано - синие галочки. Раньше READ рисовался тем же цветом, что
+        // и DELIVERED, и отличить прочитанное от доставленного было нельзя.
+        // Цвет задан явно: он должен читаться и на золотом пузыре, и на белом.
+        MessageStatus.READ           -> Pair(Icons.Default.DoneAll, ReadTickColor)
         MessageStatus.FAILED         -> Pair(Icons.Default.Error, Color.Red.copy(alpha = 0.8f))
     }
     Icon(

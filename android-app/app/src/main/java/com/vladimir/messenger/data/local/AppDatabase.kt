@@ -15,6 +15,7 @@ import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
+import com.vladimir.messenger.data.local.dao.ProfileHeartDao
 import com.vladimir.messenger.data.local.dao.SavedItemDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
@@ -33,6 +34,7 @@ import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import com.vladimir.messenger.data.local.entity.AvatarEntity
 import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
+import com.vladimir.messenger.data.local.entity.ProfileHeartEntity
 import com.vladimir.messenger.data.local.entity.SavedItemEntity
 
 @Database(
@@ -55,8 +57,9 @@ import com.vladimir.messenger.data.local.entity.SavedItemEntity
         NicknameEntity::class,
         AvatarEntity::class,
         SavedItemEntity::class,
+        ProfileHeartEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -72,6 +75,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun nicknameDao(): NicknameDao
     abstract fun avatarDao(): AvatarDao
     abstract fun savedItemDao(): SavedItemDao
+    abstract fun profileHeartDao(): ProfileHeartDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -410,6 +414,23 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /** Обратная ссылка из «Избранного» на оригинал: пять новых колонок. */
+        /** Сердечки профилям: рейтинг популярности. */
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `profile_hearts` (" +
+                        "`ownerId` TEXT NOT NULL, " +
+                        "`voterId` TEXT NOT NULL, " +
+                        "`atMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`ownerId`, `voterId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_profile_hearts_ownerId` " +
+                        "ON `profile_hearts` (`ownerId`)"
+                )
+            }
+        }
+
         val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 for (column in listOf(

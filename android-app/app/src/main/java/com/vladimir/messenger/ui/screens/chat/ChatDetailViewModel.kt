@@ -37,6 +37,9 @@ data class ChatDetailUiState(
     val isContactOnline: Boolean = false,
     /** @никнейм собеседника: показывает карточка профиля. */
     val contactUsername: String = "",
+    /** Сердечки профиля собеседника: рейтинг популярности. */
+    val heartCount: Int = 0,
+    val heartMine: Boolean = false,
     val scrollToBottom: Boolean = false,
     val pendingSave: FileTransferEntity? = null,
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
@@ -59,6 +62,8 @@ class ChatDetailViewModel @Inject constructor(
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
+    private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
+    private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -113,6 +118,12 @@ class ChatDetailViewModel @Inject constructor(
                     }.getOrDefault("")
                     _uiState.update {
                         it.copy(isContactOnline = chat.isContactOnline, contactUsername = nick)
+                    }
+                    // Сердечки заводим здесь: только тут точно известен адрес
+                    // собеседника (в личном чате это contactId).
+                    if (!heartsWatched && chat.contactId.isNotBlank()) {
+                        heartsWatched = true
+                        observeHearts(chat.contactId)
                     }
                 }
             }
@@ -182,9 +193,40 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Сердечки собеседника. Счётчик слушаем: голоса приходят по сети в любой
+     * момент, и карточка должна обновляться сама.
+     */
+    /** Чтобы не подписаться на счётчик дважды при каждом обновлении чата. */
+    private var heartsWatched = false
+
+    private fun observeHearts(peerId: String) {
+        if (peerId.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(heartMine = hearts.isMine(peerId)) }
+        }
+        viewModelScope.launch {
+            hearts.observeCount(peerId).collect { count ->
+                _uiState.update { it.copy(heartCount = count) }
+            }
+        }
+    }
+
+    /** Поставить или снять сердечко профилю собеседника. */
+    fun onHeartClick(peerId: String) {
+        if (peerId.isBlank()) return
+        viewModelScope.launch {
+            val mine = hearts.toggle(peerId)
+            _uiState.update { it.copy(heartMine = mine) }
+        }
+    }
+
     private fun markAsRead() {
         viewModelScope.launch {
             markAsReadUseCase(chatId)
+            // И сообщаем собеседнику: у него галочки станут синими. Сбой не
+            // должен мешать открытию чата, поэтому ошибка только в журнал.
+            runCatching { readReceipts.reportRead(chatId) }
         }
     }
 

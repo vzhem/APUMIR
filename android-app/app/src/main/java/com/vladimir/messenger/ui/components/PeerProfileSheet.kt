@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +45,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.ui.theme.AvatarStore
 
+/** Тёплый красный: сердечко должно быть заметно и на светлой карточке. */
+private val HeartColor = Color(0xFFE0245E)
+
 /**
  * Карточка профиля собеседника — открывается тапом по его имени в переписке.
  *
@@ -61,6 +66,12 @@ fun PeerProfileSheet(
     onDismiss: () -> Unit,
     /** @никнейм без собаки; пусто - строки не будет. */
     username: String = "",
+    /** Сколько человек отметили профиль сердечком. */
+    heartCount: Int = 0,
+    /** Стоит ли МОЁ сердечко: значок закрашен. */
+    heartMine: Boolean = false,
+    /** Нажатие на сердечко; null - показываем только счётчик. */
+    onHeartClick: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
     onCall: (() -> Unit)? = null,
     onCopyId: (() -> Unit)? = null,
@@ -124,6 +135,41 @@ fun PeerProfileSheet(
                         MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Сердечки: сколько людям понравился профиль. Нажатие ставит
+                // или снимает своё - один человек считается один раз.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .then(
+                            if (onHeartClick != null) {
+                                Modifier.clickable(onClick = onHeartClick)
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Icon(
+                        imageVector = if (heartMine) {
+                            Icons.Filled.Favorite
+                        } else {
+                            Icons.Filled.FavoriteBorder
+                        },
+                        contentDescription = if (heartMine) "Убрать сердечко" else "Поставить сердечко",
+                        tint = HeartColor,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        heartCount.toString(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
 
                 Spacer(Modifier.height(14.dp))
 

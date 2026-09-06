@@ -56,6 +56,8 @@ class CoreServerService : Service() {
     @Inject lateinit var botApi: BotApi
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
+    @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
+    @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
@@ -618,6 +620,29 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Reaction packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Сердечко профилю: рейтинг популярности. Разбирается до
+                    // сохранения, иначе служебный конверт лёг бы в переписку.
+                    if (hearts.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Heart packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Отчёт «прочитано»: у отправителя галочки станут синими.
+                    // Разбирается здесь же, до сохранения, иначе служебный
+                    // конверт осел бы в переписке мусорной строкой.
+                    if (readReceipts.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Read receipt ACK failed: " + e.message)
                         }
                         return
                     }

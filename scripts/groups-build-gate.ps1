@@ -116,7 +116,7 @@ try {
         if ($Python -eq 'py') { $PyArgs = @('-3') }
         $DataLocal = Join-Path $RepoRoot 'android-app\app\src\main\java\com\vladimir\messenger\data\local'
         & $Python @PyArgs (Join-Path $RepoRoot 'tools\sandbox\check_room_schema.py') `
-            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_11_12'
+            (Join-Path $DataLocal 'AppDatabase.kt') (Join-Path $DataLocal 'entity') 'MIGRATION_15_16'
         $SchemaExit = $LASTEXITCODE
         Write-Output "schema cross-check exit code: $SchemaExit"
         if ($SchemaExit -ne 0) {
@@ -241,7 +241,7 @@ try {
     # reported the same 108 tests as before and gave no hint. When a new test
     # package appears, add its --tests line here in the same commit.
     Write-Output ''
-    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers, referrals, calls, peer rating, sealing, onboarding) ====='
+    Write-Output '===== step 1: unit tests (groups, rank policy, link parsers, referrals, calls, peer rating, sealing, onboarding, receipts, hearts) ====='
     & $Gradlew --console=plain :app:testDebugUnitTest `
         --tests 'com.vladimir.messenger.data.group.*' `
         --tests 'com.vladimir.messenger.data.file.FileTransferRankPolicyTest' `
@@ -249,6 +249,8 @@ try {
         --tests 'com.vladimir.messenger.data.call.*' `
         --tests 'com.vladimir.messenger.data.peer.*' `
         --tests 'com.vladimir.messenger.data.security.*' `
+        --tests 'com.vladimir.messenger.data.receipt.*' `
+        --tests 'com.vladimir.messenger.data.heart.*' `
         --tests 'com.vladimir.messenger.ui.screens.onboarding.*' `
         --tests 'com.vladimir.messenger.util.*'
     $TestExit = $LASTEXITCODE

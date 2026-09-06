@@ -21,6 +21,23 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
 
+    /**
+     * Чужие сообщения в чате - за них отправителю уходит отчёт «прочитано».
+     * Берём последние: старые он уже видел отмеченными.
+     */
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 0 " +
+            "ORDER BY timestamp DESC LIMIT :limit"
+    )
+    suspend fun recentIncoming(chatId: String, limit: Int): List<MessageEntity>
+
+    /** Отметить свои сообщения прочитанными по отчёту собеседника. */
+    @Query(
+        "UPDATE messages SET status = 'READ' WHERE id IN (:messageIds) " +
+            "AND isFromMe = 1 AND status <> 'READ'"
+    )
+    suspend fun markReadByIds(messageIds: List<String>): Int
+
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun deleteMessagesForChat(chatId: String)
 
