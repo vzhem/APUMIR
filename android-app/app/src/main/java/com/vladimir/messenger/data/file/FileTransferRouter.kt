@@ -386,9 +386,23 @@ class FileTransferRouter @Inject constructor(
         }.onFailure { Log.w(TAG, "Sealing warm-up failed: ${it.message}") }
     }
 
+    /** Когда последний раз проверяли, со всеми ли обменялись ключами. */
+    @Volatile
+    private var lastHelloSweepAt = 0L
+
     private suspend fun sendHelloHandshakes() {
-        val myBinding = FileExchangeKeyStore.publicBinding(appContext) ?: return
         val now = System.currentTimeMillis()
+        // Насос крутится каждые 20 секунд, но перебирать все контакты и
+        // разбирать их подписанные ключи так часто незачем: когда обмен уже
+        // состоялся, работа выполняется впустую и только греет телефон.
+        // Раз в пять минут достаточно - новый контакт получит ключ и раньше,
+        // через ответ на своё же HELLO.
+        // Первый проход после запуска выполняем ВСЕГДА: иначе обмен ключами
+        // с новым контактом отложился бы на пять минут.
+        if (lastHelloSweepAt != 0L && now - lastHelloSweepAt < HELLO_SWEEP_INTERVAL_MS) return
+        lastHelloSweepAt = now
+
+        val myBinding = FileExchangeKeyStore.publicBinding(appContext) ?: return
         // Раунд 81: раньше брались только собеседники, у которых УЖЕ есть чат.
         // Контакт, добавленный по QR, чата ещё не имеет, поэтому ключами с ним
         // никто не обменивался: первое личное сообщение уходило незашифрованным,
@@ -430,6 +444,9 @@ class FileTransferRouter @Inject constructor(
     companion object {
         private const val TAG = "FileTransferRouter"
         const val HELLO_MIN_INTERVAL_MS = 60_000L
+
+        /** Как часто сверять, со всеми ли контактами обменялись ключами. */
+        const val HELLO_SWEEP_INTERVAL_MS = 5 * 60_000L
 
         fun formatPlaceholder(displayName: String, mediaType: String, totalBytes: Long): String {
             val kind = when {

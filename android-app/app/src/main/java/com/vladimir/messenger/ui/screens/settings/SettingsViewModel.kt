@@ -50,7 +50,16 @@ class SettingsViewModel @Inject constructor(
      */
     private fun observeMyHearts() {
         viewModelScope.launch {
-            val me = com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+            // nodeId() уходит в ядро и ждёт его внутренний замок: на главном
+            // потоке это подвешивает отрисовку. Свой адрес лежит в настройках
+            // с первого запуска - читаем оттуда, а к ядру идём лишь запасным
+            // путём и уже в фоне.
+            val me = withContext(Dispatchers.IO) {
+                context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                    .getString("node_id", null)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+            }
             if (me.isBlank()) return@launch
             hearts.observeCount(me).collect { count ->
                 _uiState.update { it.copy(heartCount = count) }

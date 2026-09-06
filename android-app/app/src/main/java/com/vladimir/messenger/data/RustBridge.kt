@@ -5,6 +5,7 @@ import android.util.Log
 import com.vladimir.messenger.data.file.FileTransferWire
 import com.vladimir.messenger.data.file.LanDirectChannel
 import com.vladimir.messenger.data.security.MessageSealer
+import kotlinx.coroutines.launch
 import com.vladimir.messenger.data.security.SealedWire
 import uniffi.p2p_core.ChatFfi
 import uniffi.p2p_core.CoreEventFfi
@@ -34,6 +35,11 @@ object RustBridge {
      */
     @Volatile
     private var appContext: Context? = null
+
+    /** Свой поток для подтверждений: они не должны тормозить приём. */
+    private val ackScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
+    )
 
     fun attachContext(context: Context) {
         appContext = context.applicationContext
@@ -436,15 +442,26 @@ object RustBridge {
     }
 
 
+    /**
+     * Подтверждение доставки. Уходит в ФОН и не задерживает обработку.
+     *
+     * Раньше вызов был синхронным: при недоступном брокере он удерживал поток
+     * до нескольких секунд, а очередь входящих в это время стояла. Телефон
+     * показывал «Приложение не отвечает» и грелся. Отправителю всё равно, на
+     * какой миллисекунде ушло подтверждение, поэтому ждать здесь нечего.
+     */
     fun sendDeliveryAck(messageId: String, recipientId: String): Boolean {
-        return try {
-            // Отправляем ACK через MQTT в формате: ack|messageId
-            val ackPayload = "ack|$messageId"
-            engine?.sendMessageMqtt(recipientId, ackPayload) ?: false
-        } catch (e: Exception) {
-            android.util.Log.w("RustBridge", "sendDeliveryAck failed: ${e.message}")
-            false
+        ackScope.launch {
+            try {
+                // Формат: ack|messageId. Внутри ядра он уходит через уже
+                // открытое постоянное соединение, а разовое подключение
+                // остаётся лишь запасным путём.
+                engine?.sendMessageMqtt(recipientId, "ack|$messageId")
+            } catch (e: Exception) {
+                android.util.Log.w("RustBridge", "sendDeliveryAck failed: ${e.message}")
+            }
         }
+        return true
     }
 
 }

@@ -2388,19 +2388,26 @@ self.runtime = Some(runtime);
             let topic = format!("p2pm2/msg/{}", to_node_id);
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all().build().unwrap();
+            // Бюджет ужат: раньше каждый брокер получал до 5 секунд на
+            // соединение и ещё до 5 на сброс, то есть один вызов удерживал
+            // поток до 10 секунд на двух брокерах. Этот путь блокирующий, и
+            // пока он ждёт, обработка входящих стоит - телефон показывал
+            // «Приложение не отвечает» и грелся. Полутора секунд на брокер
+            // достаточно: связь либо есть, либо запасной путь (постоянное
+            // соединение и relay-очередь) доставит позже.
             let result = rt.block_on(async {
                 // 1. Poll to establish CONNECT
-                for _ in 0..5 {
+                for _ in 0..3 {
                     let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(500), el.poll()
+                        std::time::Duration::from_millis(250), el.poll()
                     ).await;
                 }
                 // 2. Publish
                 client.publish(&topic, QoS::AtLeastOnce, false, payload.as_bytes()).await?;
                 // 3. Poll to flush PUBLISH + receive PUBACK
-                for _ in 0..5 {
+                for _ in 0..3 {
                     let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(500), el.poll()
+                        std::time::Duration::from_millis(250), el.poll()
                     ).await;
                 }
                 Ok::<(), rumqttc::ClientError>(())
