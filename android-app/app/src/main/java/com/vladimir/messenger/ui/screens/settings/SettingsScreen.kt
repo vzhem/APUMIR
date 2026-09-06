@@ -366,6 +366,36 @@ private fun ProfileTabContent(
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold,
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Сердечки: скольким людям понравился профиль. Своё
+                        // сердечко себе не поставить, поэтому здесь только
+                        // счётчик, без нажатия.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Favorite,
+                                contentDescription = null,
+                                tint = Color(0xFFE0245E),
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                uiState.heartCount.toString(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                if (uiState.heartCount == 0) {
+                                    "пока нет сердечек"
+                                } else {
+                                    "рейтинг профиля"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             uiState.fingerprint,

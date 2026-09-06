@@ -28,6 +28,8 @@ data class SettingsUiState(
     val appVersion: String = "0.1.0",
     val rustCoreVersion: String = "Loading...",
     val proxyTunnelEnabled: Boolean = true,
+    /** Сколько сердечек набрал мой профиль. */
+    val heartCount: Int = 0,
 )
 
 @HiltViewModel
@@ -35,13 +37,29 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
+    private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     private var lastGossipTrigger: Long = 0L
     val uiState = _uiState.asStateFlow()
 
+    /**
+     * Свои сердечки. Голоса приходят по сети в любой момент, поэтому счётчик
+     * слушаем, а не читаем один раз при открытии экрана.
+     */
+    private fun observeMyHearts() {
+        viewModelScope.launch {
+            val me = com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+            if (me.isBlank()) return@launch
+            hearts.observeCount(me).collect { count ->
+                _uiState.update { it.copy(heartCount = count) }
+            }
+        }
+    }
+
     init {
+        observeMyHearts()
         loadSettings()
         _uiState.update { it.copy(proxyTunnelEnabled = proxyTunnelEnabled()) }
     }
