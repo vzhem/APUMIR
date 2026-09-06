@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import java.io.ByteArrayOutputStream
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Сжатие аватара для передачи по сети: любой URI (галерея или стандартный
@@ -18,10 +20,12 @@ object AvatarCompress {
             val bmp = context.contentResolver.openInputStream(Uri.parse(uri))?.use {
                 BitmapFactory.decodeStream(it)
             } ?: return null
-            val scaled = if (bmp.width != size || bmp.height != size) {
-                Bitmap.createScaledBitmap(bmp, size, size, true)
+
+            val square = cropToSquare(bmp)
+            val scaled = if (square.width != size || square.height != size) {
+                Bitmap.createScaledBitmap(square, size, size, true)
             } else {
-                bmp
+                square
             }
             val out = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.JPEG, quality, out)
@@ -29,5 +33,25 @@ object AvatarCompress {
         } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Вырезать центральный квадрат.
+     *
+     * Раньше картинка любых пропорций ВТИСКИВАЛАСЬ в квадрат 96x96
+     * (`createScaledBitmap` тянет по обеим сторонам независимо). Широкий снимок
+     * сплющивался по горизонтали и вытягивался по вертикали, а в круглой рамке
+     * это выглядело как чёрные полосы сверху и снизу и сжатое лицо.
+     *
+     * Берём наибольший квадрат из середины: пропорции сохраняются, обрезаются
+     * только края - именно так ведут себя аватары в других мессенджерах.
+     */
+    private fun cropToSquare(source: Bitmap): Bitmap {
+        val side = min(source.width, source.height)
+        if (side <= 0 || (source.width == source.height)) return source
+        // Центрируем: у портрета срезаем верх и низ поровну, у панорамы - бока.
+        val left = max(0, (source.width - side) / 2)
+        val top = max(0, (source.height - side) / 2)
+        return Bitmap.createBitmap(source, left, top, side, side)
     }
 }
