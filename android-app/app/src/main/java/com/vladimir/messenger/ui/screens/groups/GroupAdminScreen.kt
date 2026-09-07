@@ -273,9 +273,17 @@ private fun OverviewTab(
     // Раунд 42: аватар группы/канала.
     var showAvatarPicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    // Что сейчас обрезают под аватар группы. null - окна выбора области нет.
+    var groupAvatarToCrop by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+
     val galleryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
-    ) { uri -> uri?.let(onSetAvatar) }
+    ) { uri ->
+        // Не ставим сразу: сперва человек выбирает область, как в профиле.
+        if (uri != null) {
+            groupAvatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, uri)
+        }
+    }
 
     // Снимок для аватара группы: тот же путь, что и в профиле.
     var pendingGroupPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -283,7 +291,9 @@ private fun OverviewTab(
         ActivityResultContracts.TakePicture(),
     ) { ok ->
         val shot = pendingGroupPhoto
-        if (ok && shot != null) onSetAvatar(shot)
+        if (ok && shot != null) {
+            groupAvatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, shot)
+        }
         pendingGroupPhoto = null
     }
     val groupCameraPermission = rememberLauncherForActivityResult(
@@ -460,6 +470,20 @@ private fun OverviewTab(
                 }
             },
             onDismiss = { showAvatarPicker = false },
+        )
+    }
+
+    // Выбор области для аватара группы: и для снимка, и для картинки из
+    // галереи. Раньше окно было только в профиле, а здесь кадр брался целиком.
+    groupAvatarToCrop?.let { source ->
+        com.vladimir.messenger.ui.components.AvatarCropDialog(
+            source = source,
+            onConfirm = { cropped ->
+                com.vladimir.messenger.util.AvatarFiles.saveCropped(context, cropped)
+                    ?.let { onSetAvatar(android.net.Uri.parse(it)) }
+                groupAvatarToCrop = null
+            },
+            onDismiss = { groupAvatarToCrop = null },
         )
     }
 }

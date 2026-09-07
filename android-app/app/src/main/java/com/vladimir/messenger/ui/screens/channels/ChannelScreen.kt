@@ -10,6 +10,8 @@ package com.vladimir.messenger.ui.screens.channels
 
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -242,6 +244,7 @@ fun ChannelScreen(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun PostCard(
     post: ChannelPost,
     onOpenComments: () -> Unit,
@@ -251,10 +254,36 @@ private fun PostCard(
     onRemoveReaction: () -> Unit = {},
 ) {
     var showReactions by remember { mutableStateOf(false) }
+    // Копирование текста поста: удержание открывает окно с выделением, как в
+    // переписке. Раньше текст поста нельзя было скопировать вообще.
+    var selectPostText by remember { mutableStateOf(false) }
     val time = remember(post.timeMs) {
         SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date(post.timeMs))
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
+
+    if (selectPostText) {
+        com.vladimir.messenger.ui.components.SelectTextDialog(
+            // Заголовок и текст вместе: в посте они смысловое целое, и
+            // копировать чаще нужно оба.
+            text = listOf(post.title, post.text)
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n"),
+            onDismiss = { selectPostText = false },
+        )
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = {
+                    if (post.title.isNotBlank() || post.text.isNotBlank()) {
+                        selectPostText = true
+                    }
+                },
+            ),
+    ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(
                 post.title,
