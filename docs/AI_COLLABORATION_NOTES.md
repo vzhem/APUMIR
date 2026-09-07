@@ -8453,3 +8453,18 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   Проверено без JVM: разбор ссылок портирован на Python (все старые и новые
   случаи зелёные), worker прогнан в Node по всем маршрутам.
   Открыто: публикация worker'а владельцем; ключ подписи в публичном репо.
+  Дополнение (тот же день): владелец разрешил - описание v11.69.3 заменено
+  (`gh release edit --notes-file`), релизы и теги v11.69.1/v11.69.2 удалены
+  (`gh release delete --cleanup-tag`). Про раскрытый ключ подписи владелец:
+  «если небезопасно - предложи или сделай». Сделана подготовка ротации ключа
+  (signing lineage, Android 9+; для Android 8 v1/v2 остаются старым ключом):
+  `docs/SIGNING_KEY_ROTATION.md`, `scripts/rotate-signing-key.ps1`,
+  `scripts/ci/build-release.yml` с шагом `Re-sign with the rotated release
+  key` (падает при полу-состоянии «секреты без lineage» и «lineage без
+  секретов»; логика шага прогнана в bash с заглушкой apksigner - 4 сценария),
+  `backup-to-usb.ps1` копирует `C:\APU-KEYS`. Бот не может пушить
+  `.github/workflows` (GitHub App без права `workflows`) - поэтому файл лежит в
+  `scripts/ci/`, а шаблон описания релиза исправлен там же. Сам `apksigner` в
+  песочнице недоступен (нет доступа к dl.google.com/maven), команды сверены с
+  документацией apksigner: `--rotation-min-sdk-version 28` даёт v3-блок с
+  ротацией на Android 9+, v3.1 не нужен.

@@ -185,17 +185,19 @@ function escapeHtml(text) {
 // ---- App Links ---------------------------------------------------------------
 
 /**
- * SHA-256 сертификата, которым подписан релизный APK (android-app/app/p2p-release.jks,
- * alias `p2p`). Это открытая величина: тот же отпечаток Android показывает в
- * сведениях о приложении, и он есть в каждом установленном APK.
+ * SHA-256 сертификатов, которыми подписан релизный APK. Это открытые величины:
+ * тот же отпечаток Android показывает в сведениях о приложении, и он есть в
+ * каждом установленном APK.
  *
- * Проверить на своей машине (в каталоге репозитория):
- *   keytool -list -v -keystore android-app\app\p2p-release.jks -alias p2p
- * Строка «SHA256:» должна совпасть с этой. Если ключ подписи когда-нибудь
- * сменится, отпечаток здесь нужно заменить (или добавить вторым элементом).
+ * 1) Прежний ключ: android-app/app/p2p-release.jks, alias `p2p`.
+ *    Проверить: keytool -list -v -keystore android-app\app\p2p-release.jks -alias p2p
+ * 2) После смены ключа (docs/SIGNING_KEY_ROTATION.md) сюда ДОБАВЛЯЕТСЯ
+ *    отпечаток нового ключа вторым элементом; старый остаётся - телефоны с
+ *    обновлённым приложением помнят оба.
  */
-const RELEASE_CERT_SHA256 =
-  "F8:43:CB:E7:03:32:BA:B6:7A:96:71:EB:DE:32:FE:E5:41:E8:4C:D9:04:D3:A5:08:E5:62:63:46:A1:A4:A5:F7";
+const RELEASE_CERT_SHA256S = [
+  "F8:43:CB:E7:03:32:BA:B6:7A:96:71:EB:DE:32:FE:E5:41:E8:4C:D9:04:D3:A5:08:E5:62:63:46:A1:A4:A5:F7",
+];
 
 /**
  * Ответ на проверку Android при установке APU: «ссылки этого хоста можно
@@ -209,7 +211,7 @@ function handleAssetLinks() {
       target: {
         namespace: "android_app",
         package_name: "com.vladimir.messenger",
-        sha256_cert_fingerprints: [RELEASE_CERT_SHA256],
+        sha256_cert_fingerprints: RELEASE_CERT_SHA256S,
       },
     },
   ];

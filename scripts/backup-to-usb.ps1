@@ -323,6 +323,20 @@ if (-not ($EnvFiles | Where-Object { $_ })) { Write-Output 'no .env / .dev.vars 
 Write-Output 'WARNING: the drive now holds the release keystore and any .env files.'
 Write-Output '         Keep it physically safe; do not leave it in a shared place.'
 
+# The rotated release key (docs/SIGNING_KEY_ROTATION.md) lives OUTSIDE the
+# repository on purpose: C:\APU-KEYS. It is not in git, so it is not in the
+# mirror or the bundle. Without it no future release can be signed.
+$KeyDir = 'C:\APU-KEYS'
+if (Test-Path $KeyDir) {
+    $KeyDst = Join-Path $Root 'APU-KEYS'
+    Copy-Item $KeyDir $KeyDst -Recurse -Force
+    $KeyCount = (Get-ChildItem $KeyDst -File -Recurse).Count
+    Write-Output "copied C:\APU-KEYS ($KeyCount files): the PRIVATE release signing key."
+    Write-Output 'CRITICAL: this folder is the only copy outside this PC. Losing both = no more releases.'
+} else {
+    Write-Output 'C:\APU-KEYS not found - the signing key has not been rotated yet (docs/SIGNING_KEY_ROTATION.md).'
+}
+
 # ---------------------------------------------------------------- 5. APKs
 
 Write-Step '5. built APKs (gitignored build outputs)'

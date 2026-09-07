@@ -1,0 +1,161 @@
+name: Build Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: Skip auto-build if Release already exists
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check_release.outputs.exists }}
+    steps:
+      - name: Check if Release already exists for the tag
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" --json name >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release '$TAG' already exists — skipping auto-build to preserve the manually published release."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No existing release for '$TAG' — will auto-build."
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.exists != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Install Android NDK and export ANDROID_NDK_HOME
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          test -x "$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install --locked cargo-ndk
+
+      - name: Build native core from source (all ABIs)
+        working-directory: ./rust-core
+        run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../android-app/app/src/main/jniLibs build --release --features mqtt-dual-broker
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Sync versionName with tag
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Setting versionName to $VERSION"
+          sed -i "s/versionName = .*/versionName = \"$VERSION\"/" android-app/app/build.gradle.kts
+          grep -n "versionName" android-app/app/build.gradle.kts
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./android-app/gradlew
+
+      - name: Build Release APK
+        working-directory: ./android-app
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      # ---- подпись релиза -------------------------------------------------
+      # Gradle подписывает APK прежним ключом android-app/app/p2p-release.jks.
+      # Этот ключ лежит в ПУБЛИЧНОМ репозитории, поэтому подписать APK «как APU»
+      # может кто угодно. Здесь подпись переделывается: новый ключ приходит из
+      # секретов, а файл apu-signing-lineage (родословная подписи) говорит
+      # Android, что новый ключ - законный преемник старого. Телефоны обновятся
+      # без переустановки. Порядок и команды - docs/SIGNING_KEY_ROTATION.md.
+      - name: Install build-tools (apksigner)
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;35.0.0" > /dev/null
+
+      - name: Re-sign with the rotated release key
+        env:
+          APU_KS_B64: ${{ secrets.APU_RELEASE_KEYSTORE_B64 }}
+          APU_KS_PASS: ${{ secrets.APU_RELEASE_KEYSTORE_PASSWORD }}
+          APU_KS_ALIAS: ${{ secrets.APU_RELEASE_KEY_ALIAS }}
+        run: |
+          set -e
+          APK_DIR=android-app/app/build/outputs/apk/release
+          LINEAGE=android-app/app/apu-signing-lineage
+          if [ -z "$APU_KS_B64" ]; then
+            if [ -f "$LINEAGE" ]; then
+              echo "::error::apu-signing-lineage is committed but the APU_RELEASE_* secrets are missing. An APK signed with the OLD key would be REJECTED as an update by phones that already rotated. Run scripts/rotate-signing-key.ps1 (it sets the secrets) and re-run this tag."
+              exit 1
+            fi
+            echo "::warning::APU_RELEASE_* secrets are not set - this APK is signed with the OLD key from the public repository. See docs/SIGNING_KEY_ROTATION.md."
+            exit 0
+          fi
+          if [ ! -f "$LINEAGE" ]; then
+            echo "::error::Secrets are set but android-app/app/apu-signing-lineage is not committed. scripts/rotate-signing-key.ps1 creates it; commit it and re-run."
+            exit 1
+          fi
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)"
+          echo "using $BT"
+          echo "$APU_KS_B64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/apu-release.jks"
+          printf '%s' "$APU_KS_PASS" > "$RUNNER_TEMP/apu-release.pass"
+          # Старый ключ первым: им подписываются v1/v2 для Android 8; новым -
+          # v3 для Android 9+ (rotation-min-sdk-version 28), где и живёт
+          # родословная. Старый ключ после этого обновлять приложение не может.
+          "$BT/apksigner" sign \
+            --ks android-app/app/p2p-release.jks --ks-pass pass:p2p2026release \
+            --ks-key-alias p2p --key-pass pass:p2p2026release \
+            --next-signer \
+            --ks "$RUNNER_TEMP/apu-release.jks" --ks-pass "file:$RUNNER_TEMP/apu-release.pass" \
+            --ks-key-alias "$APU_KS_ALIAS" --key-pass "file:$RUNNER_TEMP/apu-release.pass" \
+            --lineage "$LINEAGE" --rotation-min-sdk-version 28 \
+            --v4-signing-enabled false \
+            --out "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
+          "$BT/apksigner" verify --verbose --print-certs "$APK_DIR/app-release-rotated.apk"
+          mv -f "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
+          rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release.pass"
+          echo "signed with the rotated key"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android-app/app/build/outputs/apk/release/app-release.apk
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          # Заготовка. Перед публикацией promote-release.ps1 -NotesFile заменяет её
+          # текстом по docs/RELEASE_PUBLICATION_POLICY.md.
+          body: |
+            ## APU ${{ steps.get_version.outputs.VERSION }}
+
+            Автоматическая сборка из тега.
+
+            ### Установка
+            1. Скачайте app-release.apk.
+            2. Разрешите установку из неизвестных источников.
+            3. Установите поверх прежней версии — переписка сохранится.
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
