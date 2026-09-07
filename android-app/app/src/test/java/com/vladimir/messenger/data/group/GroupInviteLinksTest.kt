@@ -228,4 +228,41 @@ class GroupInviteLinksTest {
         val link = GroupInviteLinks.build(slug = "abcd1234", groupId = "g", ownerId = "o")
         assertEquals(null, GroupInviteLinks.parseTarget(link)?.postTopicId)
     }
+
+    /**
+     * Ссылка для пересылки наружу.
+     *
+     * Должна быть http(s): чужие мессенджеры подсвечивают только такие, а
+     * p2pmessenger:// оставляли мёртвым текстом - нажать было нельзя.
+     */
+    @Test
+    fun `web link is clickable and keeps the post`() {
+        val link = GroupInviteLinks.buildWebLink(
+            slug = "abcd1234",
+            groupId = "grp-1",
+            ownerId = "pk_owner",
+            isChannel = true,
+            postTopicId = "topic-77",
+        )
+        assertTrue(link.startsWith("https://"))
+
+        val parsed = GroupInviteLinks.parseTarget(link)
+        assertEquals("abcd1234", parsed?.slug)
+        assertEquals("topic-77", parsed?.postTopicId)
+        assertEquals("grp-1", parsed?.groupId)
+        assertEquals(true, parsed?.isChannel)
+    }
+
+    /** При пересылке ссылку копируют вместе с текстом - она обязана выжить. */
+    @Test
+    fun `web link survives inside a forwarded message`() {
+        val link = GroupInviteLinks.buildWebLink(
+            slug = "abcd1234",
+            groupId = "grp-1",
+            ownerId = "pk_owner",
+            postTopicId = "topic-77",
+        )
+        val pasted = GroupInviteLinks.parseTarget("Текст поста\n\nОткрыть в APU:\n$link")
+        assertEquals("topic-77", pasted?.postTopicId)
+    }
 }

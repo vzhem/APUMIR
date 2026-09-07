@@ -81,6 +81,18 @@
                       android:pathPrefix="/i" />
             </intent-filter>
 
+            <!-- Пересланная ссылка на канал или пост: её отдаёт наш сервис.
+                 Если APU установлен, Android откроет приложение сразу на
+                 записи; если нет - откроется страница с установкой. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https"
+                      android:host="p2p-relay.1985vzhem.workers.dev"
+                      android:pathPrefix="/i" />
+            </intent-filter>
+
             <!-- HTTP схема (fallback) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

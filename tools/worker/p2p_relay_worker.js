@@ -40,7 +40,9 @@ export default {
     const path = url.pathname;
 
     try {
-      if (path === "/vault/put" && request.method === "POST") {
+      if (path === "/i" && request.method === "GET") {
+        return handleInviteLanding(url);
+      } else if (path === "/vault/put" && request.method === "POST") {
         return await handleVaultPut(request, env);
       } else if (path === "/vault/get" && request.method === "GET") {
         return await handleVaultGet(url, env);
@@ -101,6 +103,58 @@ async function handleVaultGet(url, env) {
     return json({ error: "not found" }, 404);
   }
   return json({ vault });
+}
+
+// ---- страница приглашения ---------------------------------------------------
+
+/**
+ * Открывает ссылку на канал или пост.
+ *
+ * Если APU установлен, Android перехватит этот адрес и до сюда дело не дойдёт -
+ * откроется приложение сразу на нужной записи. Сюда попадают те, у кого APU
+ * ещё нет: показываем кнопку установки, а под ней ту же ссылку, чтобы после
+ * установки открыть её повторно и попасть в канал.
+ */
+function handleInviteLanding(url) {
+  const slug = url.searchParams.get("slug") || "";
+  if (!/^[A-Za-z0-9_-]{8,32}$/.test(slug)) {
+    return new Response("Ссылка неполная", {
+      status: 400,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+  // Ссылка сохраняется целиком: в ней параметры канала и поста.
+  const deepLink = "p2pmessenger://group?" + url.searchParams.toString();
+  const page = `<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Открыть в APU</title>
+<style>
+ body{font-family:system-ui,sans-serif;margin:0;padding:32px 20px;
+      background:#eef3ea;color:#1E2430;text-align:center}
+ h1{font-size:22px;margin:0 0 8px}
+ p{color:#5A6472;line-height:1.5}
+ a.btn{display:block;margin:18px auto;max-width:320px;padding:14px 20px;
+       border-radius:14px;background:#8a6d1f;color:#fff;text-decoration:none;
+       font-weight:600}
+ a.alt{color:#8a6d1f}
+ code{word-break:break-all;font-size:12px;color:#5A6472}
+</style></head><body>
+<h1>Запись в APU</h1>
+<p>Чтобы открыть её, нужен мессенджер APU.</p>
+<a class="btn" href="${deepLink}">Открыть в APU</a>
+<a class="btn" href="https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk">Установить APU</a>
+<p>После установки вернитесь сюда и нажмите «Открыть в APU».</p>
+<p><code>${deepLink}</code></p>
+<script>
+ // Если приложение уже стоит, уводим сразу - без лишнего нажатия.
+ setTimeout(function(){ location.href = ${JSON.stringify(deepLink)}; }, 400);
+</script>
+</body></html>`;
+  return new Response(page, {
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
 }
 
 // ---- реестр узлов -----------------------------------------------------------

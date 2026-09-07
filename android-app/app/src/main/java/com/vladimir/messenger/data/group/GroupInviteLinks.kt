@@ -17,6 +17,12 @@ object GroupInviteLinks {
 
     const val APP_LINK_PREFIX = "p2pmessenger://group?slug="
     const val SHORT_LINK_PREFIX = "p2p://group/"
+
+    /**
+     * Веб-адрес для пересылки наружу. Ведёт на наш сервис: он либо открывает
+     * APU, либо предлагает установить его.
+     */
+    const val WEB_LINK_PREFIX = "https://p2p-relay.1985vzhem.workers.dev/i?slug="
     const val TELEGRAM_BOT_USERNAME = "p2p_messenger_relay_bot"
     const val TELEGRAM_START_PREFIX = "grp_"
 
@@ -62,6 +68,33 @@ object GroupInviteLinks {
         // Владелец им не доверяет и проверяет всё по своей базе.
         if (isChannel) sb.append("&c=1")
         if (requestApproval) sb.append("&a=1")
+        return sb.toString()
+    }
+
+    /**
+     * Ссылка для ПЕРЕСЫЛКИ в чужие мессенджеры.
+     *
+     * Схема `p2pmessenger://` в них не кликабельна: они подсвечивают только
+     * http(s), поэтому пересланный пост выглядел мёртвым текстом. Здесь
+     * обычный веб-адрес - он подсвечивается везде.
+     *
+     * Открывает его наш же сервис: если APU установлен, Android перехватит
+     * адрес и откроет приложение сразу на посте; если нет - человек попадёт
+     * на страницу с кнопкой установки, а после установки та же ссылка
+     * доведёт его до канала и записи.
+     */
+    fun buildWebLink(
+        slug: String,
+        groupId: String? = null,
+        ownerId: String? = null,
+        isChannel: Boolean = false,
+        postTopicId: String? = null,
+    ): String {
+        val sb = StringBuilder(WEB_LINK_PREFIX).append(slug)
+        if (!groupId.isNullOrBlank()) sb.append("&g=").append(groupId)
+        if (!ownerId.isNullOrBlank()) sb.append("&o=").append(ownerId)
+        if (!postTopicId.isNullOrBlank()) sb.append("&p=").append(postTopicId)
+        if (isChannel) sb.append("&c=1")
         return sb.toString()
     }
 
@@ -154,7 +187,16 @@ object GroupInviteLinks {
                     if (!uri.host.equals("group", ignoreCase = true)) return null
                     parseQuerySlug(uri.rawQuery)
                 }
-                "https", "http" -> parseTelegramStart(uri.rawQuery)
+                "https", "http" -> {
+                    // Наш веб-адрес для пересылки: /i?slug=...
+                    if (uri.host.equals("p2p-relay.1985vzhem.workers.dev", ignoreCase = true) ||
+                        uri.host.equals("apumir.app", ignoreCase = true)
+                    ) {
+                        parseQuerySlug(uri.rawQuery)
+                    } else {
+                        parseTelegramStart(uri.rawQuery)
+                    }
+                }
                 else -> null
             } ?: return null
             InviteTarget(

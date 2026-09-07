@@ -1513,12 +1513,13 @@ class GroupRepository(
     suspend fun postLinkFor(channelId: String, topicId: String): String? {
         val channel = groupDao.getGroupById(channelId) ?: return null
         val invite = createInvite(channelId, requestApproval = false).getOrNull() ?: return null
-        return GroupInviteLinks.build(
+        // Веб-адрес, а не p2pmessenger://: чужие мессенджеры подсвечивают
+        // только http(s), поэтому пересланная ссылка была мёртвым текстом.
+        return GroupInviteLinks.buildWebLink(
             slug = invite.slug,
             groupId = channelId,
             ownerId = channel.ownerId,
             isChannel = channel.isChannel,
-            requestApproval = false,
             postTopicId = topicId,
         )
     }

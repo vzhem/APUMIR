@@ -205,7 +205,15 @@ fun ChannelScreen(
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(12.dp),
+                        // Снизу больше места: круглая кнопка «+» висит поверх
+                        // ленты и раньше накрывала «Поделиться» и «В избранное»
+                        // у последнего поста - нажать их было нельзя.
+                        contentPadding = PaddingValues(
+                            start = 12.dp,
+                            end = 12.dp,
+                            top = 12.dp,
+                            bottom = 88.dp,
+                        ),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(uiState.posts, key = { it.topicId }) { post ->
