@@ -14,11 +14,15 @@ interface PostViewDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(view: PostViewEntity)
 
-    @Query("SELECT topicId, COUNT(*) AS count FROM post_views GROUP BY topicId")
-    fun observeCounts(): Flow<List<TopicViewCount>>
-
-    @Query("SELECT COUNT(*) FROM post_views WHERE topicId = :topicId")
-    suspend fun countOf(topicId: String): Int
+    /**
+     * Все просмотры: считаем их на стороне Kotlin.
+     *
+     * Группировку с COUNT(*) в отдельный класс Room тоже умеет, но требует
+     * точного совпадения имён колонок и класса-обёртки. Строк здесь мало -
+     * по одной на пост и читателя, - поэтому надёжнее отдать список как есть.
+     */
+    @Query("SELECT * FROM post_views")
+    fun observeAll(): Flow<List<PostViewEntity>>
 
     /** Отмечал ли ЭТОТ читатель пост: по нему решаем, слать ли пакет. */
     @Query(
@@ -26,9 +30,3 @@ interface PostViewDao {
     )
     suspend fun hasView(topicId: String, viewerId: String): Int
 }
-
-/** Сколько просмотров у поста: строка выборки «тема - число». */
-data class TopicViewCount(
-    val topicId: String,
-    val count: Int,
-)

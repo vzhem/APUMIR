@@ -29,7 +29,9 @@ class PostViewRepository @Inject constructor(
 ) {
     /** Счётчики по всем постам: ключ - тема поста. */
     fun observeCounts(): Flow<Map<String, Int>> =
-        postViewDao.observeCounts().map { rows -> rows.associate { it.topicId to it.count } }
+        postViewDao.observeAll().map { rows ->
+            rows.groupingBy { it.topicId }.eachCount()
+        }
 
     /**
      * Отметить пост прочитанным и сообщить об этом остальным.
