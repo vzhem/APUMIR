@@ -68,6 +68,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -117,8 +118,14 @@ fun GroupsScreen(
     var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
     val context = LocalContext.current
     // Из меню кнопки-карандаша сразу открываем диалог создания группы/канала.
+    //
+    // Открываем РОВНО ОДИН раз за жизнь экрана: параметр остаётся в маршруте,
+    // и при возврате из созданного канала диалог всплывал снова, будто
+    // предлагая создать ещё один.
+    var createHandled by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(create) {
-        if (!create.isNullOrBlank() && uiState.canCreate) {
+        if (!createHandled && !create.isNullOrBlank() && uiState.canCreate) {
+            createHandled = true
             createAsChannel = create == "channel"
             showCreate = true
         }
