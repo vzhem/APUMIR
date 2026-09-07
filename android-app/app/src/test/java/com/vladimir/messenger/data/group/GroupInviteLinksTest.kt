@@ -207,7 +207,7 @@ class GroupInviteLinksTest {
     @Test
     fun `post link carries the topic and survives surrounding text`() {
         val link = GroupInviteLinks.build(
-            slug = "abcd1234",
+            slug = "Abcdefghijkmnopq",
             groupId = "grp-1",
             ownerId = "pk_owner",
             isChannel = true,
@@ -225,7 +225,7 @@ class GroupInviteLinksTest {
     /** Обычное приглашение в канал поста не содержит - и это не ошибка. */
     @Test
     fun `plain channel invite has no post`() {
-        val link = GroupInviteLinks.build(slug = "abcd1234", groupId = "g", ownerId = "o")
+        val link = GroupInviteLinks.build(slug = "Abcdefghijkmnopq", groupId = "g", ownerId = "o")
         assertEquals(null, GroupInviteLinks.parseTarget(link)?.postTopicId)
     }
 
@@ -238,7 +238,7 @@ class GroupInviteLinksTest {
     @Test
     fun `web link is clickable and keeps the post`() {
         val link = GroupInviteLinks.buildWebLink(
-            slug = "abcd1234",
+            slug = "Abcdefghijkmnopq",
             groupId = "grp-1",
             ownerId = "pk_owner",
             isChannel = true,
@@ -247,22 +247,62 @@ class GroupInviteLinksTest {
         assertTrue(link.startsWith("https://"))
 
         val parsed = GroupInviteLinks.parseTarget(link)
-        assertEquals("abcd1234", parsed?.slug)
+        assertEquals("Abcdefghijkmnopq", parsed?.slug)
         assertEquals("topic-77", parsed?.postTopicId)
         assertEquals("grp-1", parsed?.groupId)
         assertEquals(true, parsed?.isChannel)
     }
 
-    /** При пересылке ссылку копируют вместе с текстом - она обязана выжить. */
+    /**
+     * При пересылке ссылку копируют вместе с текстом - она обязана выжить.
+     *
+     * Это тот же путь, что и у старых ссылок (`linkIsFoundInsideMessengerMessage`):
+     * человек вставляет в «Войти по ссылке» ВСЁ сообщение, потому что MAX и
+     * подобные не дают скопировать одну ссылку. До v11.70 веб-форму регулярка
+     * поиска не знала, и весь текст отвергался как «не похоже на приглашение».
+     */
     @Test
     fun `web link survives inside a forwarded message`() {
         val link = GroupInviteLinks.buildWebLink(
-            slug = "abcd1234",
+            slug = "Abcdefghijkmnopq",
             groupId = "grp-1",
             ownerId = "pk_owner",
             postTopicId = "topic-77",
         )
         val pasted = GroupInviteLinks.parseTarget("Текст поста\n\nОткрыть в APU:\n$link")
         assertEquals("topic-77", pasted?.postTopicId)
+        assertEquals("grp-1", pasted?.groupId)
+        assertEquals("pk_owner", pasted?.ownerId)
+
+        // Мессенджер перенёс ссылку по словам и приклеил следующее слово.
+        val broken = link.replace("&o=", "\n&o=") + "\nСкачать APU: https://github.com/vzhem/APUMIR/releases/latest"
+        val glued = GroupInviteLinks.parseTarget("Открыть в APU:\n$broken")
+        assertEquals("topic-77", glued?.postTopicId)
+        assertEquals("pk_owner", glued?.ownerId)
+    }
+
+    /**
+     * Ссылка на пост живёт ровно теми же slug, что и приглашения: их выдаёт
+     * `newSlug`. Тестовый slug из «удобных» символов вроде `abcd1234` тихо
+     * отбраковывается (в алфавите нет 0, 1, I, O, l), и тест проверяет пустоту.
+     * Поэтому веб-ссылку прогоняем на настоящем slug.
+     */
+    @Test
+    fun `web link round-trips a generated slug`() {
+        val slug = GroupInviteLinks.newSlug()
+        val link = GroupInviteLinks.buildWebLink(slug, groupId = "grp-1", ownerId = "pk_owner")
+        assertTrue(link.startsWith("https://" + GroupInviteLinks.WEB_HOST + "/i?slug="))
+        val target = GroupInviteLinks.parseTarget(link)
+        assertNotNull(target)
+        assertEquals(slug, target!!.slug)
+        assertTrue(target.isRoutable)
+        assertFalse(target.isChannel)
+        assertNull(target.postTopicId)
+    }
+
+    /** Чужой https-адрес с параметром slug приглашением не считается. */
+    @Test
+    fun `foreign https host is not an invite`() {
+        assertNull(GroupInviteLinks.parseTarget("https://example.com/i?slug=Abcdefghijkmnopq&g=grp-1&o=pk_owner"))
     }
 }

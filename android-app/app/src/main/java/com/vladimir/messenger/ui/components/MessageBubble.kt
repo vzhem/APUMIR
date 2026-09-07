@@ -32,6 +32,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
 import com.vladimir.messenger.ui.theme.LocalMessengerColors
@@ -136,7 +137,15 @@ fun MessageBubble(
                                         try {
                                             val uri = if (url.startsWith("http")) Uri.parse(url)
                                             else Uri.parse("https://" + url)
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                            val open = Intent(Intent.ACTION_VIEW, uri)
+                                            // Пересланная ссылка на канал или пост
+                                            // ведёт на наш же сервис. Из своего чата
+                                            // открываем её сразу в APU, а не через
+                                            // браузер с вопросом «чем открыть».
+                                            if (GroupInviteLinks.parseTarget(url) != null) {
+                                                open.setPackage(context.packageName)
+                                            }
+                                            context.startActivity(open)
                                             android.util.Log.i("MessageBubble", "Opening URL: " + url)
                                         } catch (e: Exception) {
                                             android.util.Log.e("MessageBubble", "Failed to open URL: " + url, e)

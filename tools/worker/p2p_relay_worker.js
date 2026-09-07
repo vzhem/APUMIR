@@ -5,7 +5,18 @@
 //   /register, /lookup   — реестр узлов (как было);
 //   /version             — сведения об обновлении (как было);
 //   /health              — проверка живости;
-//   /vault/put, /vault/get — хранилище личности (новое).
+//   /vault/put, /vault/get — хранилище личности;
+//   /i                   — страница пересланной ссылки на канал или пост:
+//                          открыть в APU или установить его;
+//   /.well-known/assetlinks.json — подтверждение для Android, что ссылки
+//                          этого хоста можно открывать сразу в APU (App Links).
+//
+// Про App Links: Android 12+ открывает https-ссылку в приложении БЕЗ вопроса
+// только если хост опубликовал этот файл с отпечатком ключа подписи APK.
+// Иначе ссылка уходит в браузер, и человеку нужно лишнее нажатие «Открыть в
+// APU». Отпечаток ключа - публичная величина (он лежит в каждом APK), секрета
+// здесь нет. Порядок важен: сначала опубликовать worker, потом ставить APK -
+// Android проверяет файл в момент установки/обновления приложения.
 //
 // Про хранилище личности: сервер НЕ МОЖЕТ прочитать то, что хранит. Сундук
 // запирается паролем на телефоне, сюда приходят непрозрачные байты в base64.
@@ -42,6 +53,8 @@ export default {
     try {
       if (path === "/i" && request.method === "GET") {
         return handleInviteLanding(url);
+      } else if (path === "/.well-known/assetlinks.json" && request.method === "GET") {
+        return handleAssetLinks();
       } else if (path === "/vault/put" && request.method === "POST") {
         return await handleVaultPut(request, env);
       } else if (path === "/vault/get" && request.method === "GET") {
@@ -123,8 +136,10 @@ function handleInviteLanding(url) {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   }
-  // Ссылка сохраняется целиком: в ней параметры канала и поста.
+  // Ссылка сохраняется целиком: в ней параметры канала и поста. Параметры
+  // приходят снаружи, поэтому в страницу они попадают только экранированными.
   const deepLink = "p2pmessenger://group?" + url.searchParams.toString();
+  const safeLink = escapeHtml(deepLink);
   const page = `<!doctype html>
 <html lang="ru"><head>
 <meta charset="utf-8">
@@ -143,10 +158,10 @@ function handleInviteLanding(url) {
 </style></head><body>
 <h1>Запись в APU</h1>
 <p>Чтобы открыть её, нужен мессенджер APU.</p>
-<a class="btn" href="${deepLink}">Открыть в APU</a>
+<a class="btn" href="${safeLink}">Открыть в APU</a>
 <a class="btn" href="https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk">Установить APU</a>
 <p>После установки вернитесь сюда и нажмите «Открыть в APU».</p>
-<p><code>${deepLink}</code></p>
+<p><code>${safeLink}</code></p>
 <script>
  // Если приложение уже стоит, уводим сразу - без лишнего нажатия.
  setTimeout(function(){ location.href = ${JSON.stringify(deepLink)}; }, 400);
@@ -154,6 +169,56 @@ function handleInviteLanding(url) {
 </body></html>`;
   return new Response(page, {
     headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+}
+
+/** Спецсимволы HTML - в сущности, чтобы чужой параметр не стал разметкой. */
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// ---- App Links ---------------------------------------------------------------
+
+/**
+ * SHA-256 сертификата, которым подписан релизный APK (android-app/app/p2p-release.jks,
+ * alias `p2p`). Это открытая величина: тот же отпечаток Android показывает в
+ * сведениях о приложении, и он есть в каждом установленном APK.
+ *
+ * Проверить на своей машине (в каталоге репозитория):
+ *   keytool -list -v -keystore android-app\app\p2p-release.jks -alias p2p
+ * Строка «SHA256:» должна совпасть с этой. Если ключ подписи когда-нибудь
+ * сменится, отпечаток здесь нужно заменить (или добавить вторым элементом).
+ */
+const RELEASE_CERT_SHA256 =
+  "F8:43:CB:E7:03:32:BA:B6:7A:96:71:EB:DE:32:FE:E5:41:E8:4C:D9:04:D3:A5:08:E5:62:63:46:A1:A4:A5:F7";
+
+/**
+ * Ответ на проверку Android при установке APU: «ссылки этого хоста можно
+ * отдавать com.vladimir.messenger без вопросов». Без этого файла Android 12+
+ * открывает нашу https-ссылку в браузере, а не в приложении.
+ */
+function handleAssetLinks() {
+  const statements = [
+    {
+      relation: ["delegate_permission/common.handle_all_urls"],
+      target: {
+        namespace: "android_app",
+        package_name: "com.vladimir.messenger",
+        sha256_cert_fingerprints: [RELEASE_CERT_SHA256],
+      },
+    },
+  ];
+  return new Response(JSON.stringify(statements), {
+    headers: {
+      // Ровно application/json: с другим типом Android файл не принимает.
+      "Content-Type": "application/json",
+      "Cache-Control": "public, max-age=3600",
+    },
   });
 }
 

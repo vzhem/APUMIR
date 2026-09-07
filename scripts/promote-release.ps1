@@ -1,6 +1,12 @@
 param(
     [Parameter(Mandatory = $true)][string]$Version,
-    [int]$TimeoutMinutes = 25
+    [int]$TimeoutMinutes = 25,
+    # Public release notes (docs/RELEASE_NOTES_<version>.md). When given, the
+    # Actions placeholder text is replaced before the release is published
+    # again, so the public page never shows "automatic build from tag".
+    # Write them by docs/RELEASE_PUBLICATION_POLICY.md and show the owner the
+    # exact text first.
+    [string]$NotesFile = ''
 )
 
 # ============================================================================
@@ -8,6 +14,7 @@ param(
 # ASCII only on purpose: PowerShell 5.1 misreads UTF-8 without BOM.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\promote-release.ps1 -Version v11.20.0
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\promote-release.ps1 -Version v11.70.0 -NotesFile docs\RELEASE_NOTES_v11.70.0.md
 #
 # Why this script exists. Two things break the "download update" prompt, and
 # both were hit in real life on v11.20.0:
@@ -75,6 +82,23 @@ if ($Assets -eq 0) {
     Write-Output "FATAL: no release with an APK for $Version within $TimeoutMinutes minutes."
     Write-Output 'Check the workflow run: gh run list --limit 5'
     exit 1
+}
+
+# ---- public description ----------------------------------------------------
+# v11.69.3 went out with the Actions placeholder as its public text. Replace it
+# here, while the release is still a prerelease and invisible to phones.
+if ($NotesFile -ne '') {
+    Write-Step 'replacing the description with the public release notes'
+    if (-not (Test-Path -LiteralPath $NotesFile)) {
+        Write-Output "FATAL: notes file not found: $NotesFile"
+        exit 1
+    }
+    & gh release edit $Version --notes-file $NotesFile
+    if ($LASTEXITCODE -ne 0) { Write-Output 'RESULT: FAILED to replace the description.'; exit 1 }
+} else {
+    Write-Output ''
+    Write-Output 'NOTE: no -NotesFile given; the public page keeps the Actions placeholder text.'
+    Write-Output '      Fix later with: gh release edit <version> --notes-file docs\RELEASE_NOTES_<version>.md'
 }
 
 # ---- make it a full release, then publish it again --------------------------

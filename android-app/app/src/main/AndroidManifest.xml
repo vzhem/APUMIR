@@ -83,8 +83,15 @@
 
             <!-- Пересланная ссылка на канал или пост: её отдаёт наш сервис.
                  Если APU установлен, Android откроет приложение сразу на
-                 записи; если нет - откроется страница с установкой. -->
-            <intent-filter android:autoVerify="false">
+                 записи; если нет - откроется страница с установкой.
+
+                 autoVerify: при установке Android скачивает с этого хоста
+                 /.well-known/assetlinks.json (его отдаёт worker, см.
+                 tools/worker/p2p_relay_worker.js) и, если отпечаток ключа
+                 подписи совпал, открывает ссылку в APU БЕЗ вопроса. Без
+                 проверки Android 12+ уводит https-ссылку в браузер. Хост здесь
+                 и в GroupInviteLinks.WEB_HOST один и тот же - менять вместе. -->
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />

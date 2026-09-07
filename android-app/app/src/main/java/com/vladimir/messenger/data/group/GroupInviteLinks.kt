@@ -11,6 +11,7 @@ import java.util.regex.Pattern
  * Поддерживаемые формы (по образцу util.InviteLinkParser для личных контактов):
  *  - p2pmessenger://group?slug=<slug>
  *  - p2p://group/<slug>
+ *  - https://p2p-relay.1985vzhem.workers.dev/i?slug=<slug> (пересылка наружу)
  *  - https://t.me/p2p_messenger_relay_bot?start=grp_<slug>
  */
 object GroupInviteLinks {
@@ -19,10 +20,21 @@ object GroupInviteLinks {
     const val SHORT_LINK_PREFIX = "p2p://group/"
 
     /**
+     * Хост нашего сервиса. Он отдаёт страницу `/i` (открыть в APU или
+     * установить) и `/.well-known/assetlinks.json`, по которому Android
+     * убеждается, что ссылки этого хоста можно отдавать APU без вопросов.
+     * Тот же хост стоит в intent-filter манифеста - менять только вместе.
+     */
+    const val WEB_HOST = "p2p-relay.1985vzhem.workers.dev"
+
+    /** Официальный домен подписанных приглашений (util.ReferralInviteLink). */
+    const val OFFICIAL_HOST = "apumir.app"
+
+    /**
      * Веб-адрес для пересылки наружу. Ведёт на наш сервис: он либо открывает
      * APU, либо предлагает установить его.
      */
-    const val WEB_LINK_PREFIX = "https://p2p-relay.1985vzhem.workers.dev/i?slug="
+    const val WEB_LINK_PREFIX = "https://$WEB_HOST/i?slug="
     const val TELEGRAM_BOT_USERNAME = "p2p_messenger_relay_bot"
     const val TELEGRAM_START_PREFIX = "grp_"
 
@@ -189,9 +201,7 @@ object GroupInviteLinks {
                 }
                 "https", "http" -> {
                     // Наш веб-адрес для пересылки: /i?slug=...
-                    if (uri.host.equals("p2p-relay.1985vzhem.workers.dev", ignoreCase = true) ||
-                        uri.host.equals("apumir.app", ignoreCase = true)
-                    ) {
+                    if (isOwnWebHost(uri.host)) {
                         parseQuerySlug(uri.rawQuery)
                     } else {
                         parseTelegramStart(uri.rawQuery)
@@ -220,9 +230,17 @@ object GroupInviteLinks {
     private val LINK_PATTERN: Pattern = Pattern.compile(
         "p2pmessenger://group[?&=A-Za-z0-9_.%/-]*" +
             "|p2p://group/[A-Za-z0-9_.%/?&=-]*" +
+            // Веб-ссылка пересылки поста: её тоже копируют вместе с текстом
+            // сообщения, и без этой ветки «Войти по ссылке» не находил её.
+            "|https://(?:" + Pattern.quote(WEB_HOST) + "|" + Pattern.quote(OFFICIAL_HOST) + ")" +
+            "/i\\?[?&=A-Za-z0-9_.%/-]*" +
             "|https?://t\\.me/[A-Za-z0-9_]+\\?start=" + TELEGRAM_START_PREFIX + "[A-Za-z0-9]+",
         Pattern.CASE_INSENSITIVE,
     )
+
+    /** Ссылка на нашем хосте: её разбираем как приглашение, а не как t.me. */
+    private fun isOwnWebHost(host: String?): Boolean =
+        host.equals(WEB_HOST, ignoreCase = true) || host.equals(OFFICIAL_HOST, ignoreCase = true)
 
     /** Один параметр запроса по имени; null, если его нет или он пустой. */
     private fun queryParam(query: String?, name: String): String? {
