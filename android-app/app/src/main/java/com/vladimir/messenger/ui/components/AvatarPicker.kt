@@ -2,7 +2,12 @@ package com.vladimir.messenger.ui.components
 
 import android.content.Context
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -10,7 +15,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +41,8 @@ fun AvatarPickerDialog(
     context: Context,
     onPickUri: (String) -> Unit,
     onPickGallery: () -> Unit,
+    /** Снять новое фото камерой телефона. */
+    onTakePhoto: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val ids = remember(context) {
@@ -73,8 +84,22 @@ fun AvatarPickerDialog(
                         )
                     }
                 }
-                TextButton(onClick = onPickGallery) {
-                    Text("Из галереи")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    // Снять себя или происходящее вокруг прямо сейчас: раньше
+                    // приходилось выходить в камеру телефона и возвращаться.
+                    TextButton(onClick = onTakePhoto) {
+                        Icon(Icons.Default.PhotoCamera, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Снять фото")
+                    }
+                    TextButton(onClick = onPickGallery) {
+                        Icon(Icons.Default.Image, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Из галереи")
+                    }
                 }
             }
         },

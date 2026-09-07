@@ -276,6 +276,25 @@ private fun OverviewTab(
     val galleryPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
     ) { uri -> uri?.let(onSetAvatar) }
+
+    // Снимок для аватара группы: тот же путь, что и в профиле.
+    var pendingGroupPhoto by remember { mutableStateOf<android.net.Uri?>(null) }
+    val groupPhotoTaker = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { ok ->
+        val shot = pendingGroupPhoto
+        if (ok && shot != null) onSetAvatar(shot)
+        pendingGroupPhoto = null
+    }
+    val groupCameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            val target = com.vladimir.messenger.util.AvatarFiles.captureTarget(context)
+            pendingGroupPhoto = target
+            groupPhotoTaker.launch(target)
+        }
+    }
     val groupAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
         .collectAsState()
     // Общий кэш вместо разбора в отрисовке: base64 раскодируется в фоне.
@@ -425,6 +444,20 @@ private fun OverviewTab(
             onPickGallery = {
                 showAvatarPicker = false
                 galleryPicker.launch("image/*")
+            },
+            onTakePhoto = {
+                showAvatarPicker = false
+                val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.CAMERA,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (granted) {
+                    val target = com.vladimir.messenger.util.AvatarFiles.captureTarget(context)
+                    pendingGroupPhoto = target
+                    groupPhotoTaker.launch(target)
+                } else {
+                    groupCameraPermission.launch(android.Manifest.permission.CAMERA)
+                }
             },
             onDismiss = { showAvatarPicker = false },
         )

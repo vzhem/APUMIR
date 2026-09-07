@@ -293,6 +293,11 @@ private fun ProfileTabContent(
     val myUsername by UsernameHolder.name.collectAsStateWithLifecycle()
     val avatarUri by AvatarHolder.uri.collectAsStateWithLifecycle()
     var showAvatarPicker by remember { mutableStateOf(false) }
+    // Картинка, для которой сейчас выбирают область. null - окна обрезки нет.
+    var avatarToCrop by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    // Куда камера положит снимок: URI нужен и при запуске, и при разборе.
+    var pendingPhotoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
     val avatarPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -304,7 +309,30 @@ private fun ProfileTabContent(
                 )
             } catch (_: Exception) {
             }
-            AvatarHolder.set(context, uri.toString())
+            // Не сохраняем сразу: сперва человек выбирает область.
+            avatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, uri)
+        }
+    }
+
+    val photoTaker = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { ok ->
+        val shot = pendingPhotoUri
+        if (ok && shot != null) {
+            avatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, shot)
+        }
+        pendingPhotoUri = null
+    }
+
+    // Разрешение спрашиваем только когда человек нажал «Снять фото»: просить
+    // камеру заранее, на всякий случай, - плохая манера.
+    val cameraPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val target = com.vladimir.messenger.util.AvatarFiles.captureTarget(context)
+            pendingPhotoUri = target
+            photoTaker.launch(target)
         }
     }
 
@@ -526,7 +554,34 @@ private fun ProfileTabContent(
                 showAvatarPicker = false
                 avatarPicker.launch("image/*")
             },
+            onTakePhoto = {
+                showAvatarPicker = false
+                val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.CAMERA,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (granted) {
+                    val target = com.vladimir.messenger.util.AvatarFiles.captureTarget(context)
+                    pendingPhotoUri = target
+                    photoTaker.launch(target)
+                } else {
+                    cameraPermission.launch(android.Manifest.permission.CAMERA)
+                }
+            },
             onDismiss = { showAvatarPicker = false },
+        )
+    }
+
+    // Выбор области: и для снимка с камеры, и для картинки из галереи.
+    avatarToCrop?.let { source ->
+        com.vladimir.messenger.ui.components.AvatarCropDialog(
+            source = source,
+            onConfirm = { cropped ->
+                com.vladimir.messenger.util.AvatarFiles.saveCropped(context, cropped)
+                    ?.let { AvatarHolder.set(context, it) }
+                avatarToCrop = null
+            },
+            onDismiss = { avatarToCrop = null },
         )
     }
 }
