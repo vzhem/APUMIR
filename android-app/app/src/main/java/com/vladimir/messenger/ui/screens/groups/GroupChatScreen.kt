@@ -743,17 +743,38 @@ private fun MessageBubble(
                 if (!message.isFromMe) {
                     Text(senderName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 }
-                val imageUrl = remember(message.content) {
-                    ImageLinkDetector.directImageUrl(message.content)
+                // Вложенная картинка едет отдельной служебной строкой внутри
+                // текста. Раньше её печатали как есть, и в комментариях под
+                // постом вместо снимка тянулись экраны «букв».
+                val attachedB64 = remember(message.content) {
+                    com.vladimir.messenger.util.InlineImage.extractB64(message.content)
                 }
-                if (imageUrl != null) {
-                    ImagePreview(
+                val bodyText = remember(message.content) {
+                    com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+                }
+                val attachedBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
+                    .rememberAvatar(attachedB64)
+                val imageUrl = remember(bodyText) {
+                    ImageLinkDetector.directImageUrl(bodyText)
+                }
+                when {
+                    attachedBitmap != null -> {
+                        androidx.compose.foundation.Image(
+                            bitmap = attachedBitmap.asImageBitmap(),
+                            contentDescription = "Картинка из сообщения",
+                            contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                        )
+                        if (bodyText.isNotBlank()) {
+                            Text(bodyText, modifier = Modifier.padding(top = 6.dp))
+                        }
+                    }
+                    imageUrl != null -> ImagePreview(
                         model = imageUrl,
                         contentDescription = "Картинка из сообщения",
                         modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                     )
-                } else {
-                    Text(message.content)
+                    else -> Text(bodyText)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(time, style = MaterialTheme.typography.labelSmall)

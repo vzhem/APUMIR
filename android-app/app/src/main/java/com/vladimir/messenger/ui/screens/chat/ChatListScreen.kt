@@ -776,10 +776,15 @@ private fun SectionPage(
                                 },
                                 openAdmin = openAdmin,
                                 onClick = {
-                                    when {
-                                        openAdmin -> onGroupAdminClick(item.group.id)
-                                        item.group.isChannel -> onChannelClick(item.group.id)
-                                        else -> onGroupClick(item.group.id)
+                                    // Нажатие ВСЕГДА открывает саму группу или
+                                    // канал, даже в разделах «Админ». Раньше
+                                    // оттуда попадали сразу в управление, хотя
+                                    // чаще нужно просто зайти и почитать;
+                                    // кабинет остаётся в меню «...» и внутри.
+                                    if (item.group.isChannel) {
+                                        onChannelClick(item.group.id)
+                                    } else {
+                                        onGroupClick(item.group.id)
                                     }
                                 },
                             )

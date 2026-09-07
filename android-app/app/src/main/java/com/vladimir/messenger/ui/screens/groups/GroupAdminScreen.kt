@@ -152,7 +152,12 @@ fun GroupAdminScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
-                title = { Text(uiState.group?.title ?: "Группа") },
+                title = {
+                    Text(
+                        uiState.group?.title
+                            ?: if (uiState.group?.isChannel == true) "Канал" else "Группа"
+                    )
+                },
                 navigationIcon = { TextButton(onClick = onBackClick) { Text("Назад") } },
             )
         },
@@ -196,6 +201,7 @@ fun GroupAdminScreen(
                     title = uiState.group?.title.orEmpty(),
                     about = uiState.group?.about.orEmpty(),
                     isPublic = uiState.group?.isPublic == true,
+                    isChannel = uiState.group?.isChannel == true,
                     isOwner = uiState.isOwner,
                     canChangeInfo = uiState.canChangeInfo,
                     canChangeVisibility = uiState.isAdmin,
@@ -254,6 +260,8 @@ private fun OverviewTab(
     title: String,
     about: String,
     isPublic: Boolean,
+    /** Канал или группа: от этого зависят все подписи на экране. */
+    isChannel: Boolean,
     isOwner: Boolean,
     canChangeInfo: Boolean,
     canChangeVisibility: Boolean,
@@ -369,7 +377,10 @@ private fun OverviewTab(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Аватар группы", fontWeight = FontWeight.Medium)
+                    Text(
+                        if (isChannel) "Аватар канала" else "Аватар группы",
+                        fontWeight = FontWeight.Medium,
+                    )
                     Text(
                         "Видят участники и Ваши контакты в списке чатов",
                         style = MaterialTheme.typography.bodySmall,
@@ -384,7 +395,10 @@ private fun OverviewTab(
         ApuBubble {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Публичная группа", fontWeight = FontWeight.Medium)
+                    Text(
+                        if (isChannel) "Публичный канал" else "Публичная группа",
+                        fontWeight = FontWeight.Medium,
+                    )
                     Text(
                         if (isPublic) "Вход по ссылке без одобрения" else "Вход только по одобрению заявки",
                         style = MaterialTheme.typography.bodySmall,
@@ -398,17 +412,26 @@ private fun OverviewTab(
         }
 
         ApuBubble {
-            TextButton(onClick = { showLeaveConfirm = true }) { Text("Покинуть группу") }
+            TextButton(onClick = { showLeaveConfirm = true }) {
+                Text(if (isChannel) "Покинуть канал" else "Покинуть группу")
+            }
 
             if (isOwner) {
                 HorizontalDivider()
                 Text(
-                    "Удаление стирает группу, её темы и сообщения у всех участников.",
+                    if (isChannel) {
+                        "Удаление стирает канал, его посты и комментарии у всех подписчиков."
+                    } else {
+                        "Удаление стирает группу, её темы и сообщения у всех участников."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
                 TextButton(onClick = { showDeleteConfirm = true }) {
-                    Text("Удалить группу", color = MaterialTheme.colorScheme.error)
+                    Text(
+                        if (isChannel) "Удалить канал" else "Удалить группу",
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }
@@ -417,8 +440,16 @@ private fun OverviewTab(
     if (showLeaveConfirm) {
         AlertDialog(
             onDismissRequest = { showLeaveConfirm = false },
-            title = { Text("Покинуть группу?") },
-            text = { Text("Вы перестанете получать сообщения этой группы. Вернуться можно только по ссылке-приглашению.") },
+            title = { Text(if (isChannel) "Покинуть канал?" else "Покинуть группу?") },
+            text = {
+                Text(
+                    if (isChannel) {
+                        "Вы перестанете получать посты этого канала. Вернуться можно только по ссылке-приглашению."
+                    } else {
+                        "Вы перестанете получать сообщения этой группы. Вернуться можно только по ссылке-приглашению."
+                    }
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -436,6 +467,7 @@ private fun OverviewTab(
     if (showDeleteConfirm) {
         DeleteGroupDialog(
             expectedTitle = title,
+            isChannel = isChannel,
             onDismiss = { showDeleteConfirm = false },
             onConfirm = {
                 showDeleteConfirm = false
@@ -495,6 +527,7 @@ private fun OverviewTab(
 @Composable
 private fun DeleteGroupDialog(
     expectedTitle: String,
+    isChannel: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -503,12 +536,17 @@ private fun DeleteGroupDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Удалить группу?") },
+        title = { Text(if (isChannel) "Удалить канал?" else "Удалить группу?") },
         text = {
             Column {
                 Text(
-                    "Группа, её темы, сообщения и ссылки-приглашения будут удалены " +
-                        "у всех участников. Отменить это нельзя.",
+                    if (isChannel) {
+                        "Канал, его посты, комментарии и ссылки-приглашения будут удалены " +
+                            "у всех подписчиков. Отменить это нельзя."
+                    } else {
+                        "Группа, её темы, сообщения и ссылки-приглашения будут удалены " +
+                            "у всех участников. Отменить это нельзя."
+                    },
                 )
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(

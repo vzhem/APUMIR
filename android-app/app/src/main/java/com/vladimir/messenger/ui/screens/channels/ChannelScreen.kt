@@ -12,6 +12,7 @@ import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -303,10 +305,16 @@ private fun PostCard(
                 androidx.compose.foundation.Image(
                     bitmap = shownAttached.asImageBitmap(),
                     contentDescription = "Фото поста",
+                    // Без contentScale картинка рисовалась в своих пикселях и
+                    // висела крошечной посреди карточки: сжатие ужимает её до
+                    // нескольких сотен точек по стороне. FillWidth растягивает
+                    // на всю ширину поста, высота подстраивается сама.
+                    contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 260.dp)
-                        .padding(top = 8.dp),
+                        .heightIn(max = 320.dp)
+                        .padding(top = 8.dp)
+                        .clip(RoundedCornerShape(12.dp)),
                 )
                 if (post.text.isNotBlank()) {
                     Text(post.text, modifier = Modifier.padding(top = 8.dp))
