@@ -109,7 +109,16 @@ fun GroupChatScreen(
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
-    val hasTopics = uiState.group?.topicsEnabled == true && uiState.topics.isNotEmpty()
+    // В КАНАЛЕ список тем не показываем. Пост и комментарии к нему устроены
+    // как тема внутри, но человеку это знать незачем: он открыл комментарии к
+    // конкретному посту и должен видеть обычную переписку, а «Назад» обязано
+    // вернуть его к ленте постов. Раньше здесь всплывал список «тем» -
+    // одинаковые пузыри-оболочки постов, и выйти к ленте можно было только
+    // вторым нажатием.
+    val isChannel = uiState.group?.isChannel == true
+    val hasTopics = !isChannel &&
+        uiState.group?.topicsEnabled == true &&
+        uiState.topics.isNotEmpty()
     val showTopicsList = hasTopics && !showFeed
     val selectedTopicName = uiState.topics.firstOrNull { it.id == uiState.selectedTopicId }?.name
     val senderNames = remember(uiState.members) {
@@ -171,8 +180,17 @@ fun GroupChatScreen(
                                 color = Color(0xFF1E2430),
                             )
                             Text(
-                                (if (showFeed && selectedTopicName != null) "$selectedTopicName · " else "") +
-                                    (uiState.group?.memberCount ?: 0).toString() + " участн.",
+                                // В канале это комментарии к посту: показываем
+                                // название поста, а не число участников -
+                                // человек пришёл из ленты и должен видеть,
+                                // под чем он находится.
+                                if (isChannel) {
+                                    selectedTopicName?.let { "Комментарии - $it" }
+                                        ?: "Комментарии"
+                                } else {
+                                    (if (showFeed && selectedTopicName != null) "$selectedTopicName · " else "") +
+                                        (uiState.group?.memberCount ?: 0).toString() + " участн."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF5A6472),
                             )
