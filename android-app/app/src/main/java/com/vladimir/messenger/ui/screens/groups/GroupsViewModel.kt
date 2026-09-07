@@ -32,6 +32,8 @@ data class GroupsUiState(
     val joinMessage: String? = null,
     /** Группа, в которую удалось войти: экран откроет её чат. */
     val joinedGroupId: String? = null,
+    /** Ссылка вела к конкретному посту канала - откроем сразу его. */
+    val joinedPostTopicId: String? = null,
     /** Найдено в сети: чужие публичные группы и каналы из роевого каталога. */
     val directoryMatches: List<DirectoryEntity> = emptyList(),
 )
@@ -215,7 +217,18 @@ class GroupsViewModel @Inject constructor(
     fun joinByLink(raw: String) {
         if (raw.isBlank() || _uiState.value.joining) return
         viewModelScope.launch {
-            _uiState.update { it.copy(joining = true, joinMessage = null, joinedGroupId = null) }
+            _uiState.update {
+                it.copy(
+                    joining = true,
+                    joinMessage = null,
+                    joinedGroupId = null,
+                    joinedPostTopicId = null,
+                )
+            }
+            // Тема поста едет в самой ссылке: достаём до вступления, чтобы
+            // потом открыть нужную запись, а не начало ленты.
+            val postTopicId = com.vladimir.messenger.data.group.GroupInviteLinks
+                .parseTarget(raw)?.postTopicId
             val outcome = withContext(Dispatchers.IO) { groupRepository.joinByLink(raw) }
             when (outcome) {
                 is JoinOutcome.Joined -> _uiState.update {
@@ -223,6 +236,7 @@ class GroupsViewModel @Inject constructor(
                     it.copy(
                         joining = false,
                         joinedGroupId = outcome.groupId,
+                        joinedPostTopicId = postTopicId,
                         joinMessage = "Вы вошли в $what «" + outcome.title + "»",
                     )
                 }
@@ -250,7 +264,9 @@ class GroupsViewModel @Inject constructor(
 
     /** Экран забрал результат входа — убираем, чтобы не показать его дважды. */
     fun consumeJoinResult() {
-        _uiState.update { it.copy(joinMessage = null, joinedGroupId = null) }
+        _uiState.update {
+            it.copy(joinMessage = null, joinedGroupId = null, joinedPostTopicId = null)
+        }
     }
 
     private fun filter(groups: List<GroupSummary>, query: String): List<GroupSummary> {

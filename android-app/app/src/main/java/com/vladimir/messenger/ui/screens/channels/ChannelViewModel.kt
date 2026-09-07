@@ -37,6 +37,8 @@ data class ChannelPost(
     val authorName: String,
     val timeMs: Long,
     val comments: Int,
+    /** Сколько разных людей открыли пост. */
+    val views: Int = 0,
 )
 
 data class ChannelUiState(
@@ -59,6 +61,7 @@ class ChannelViewModel @Inject constructor(
     private val messageDao: MessageDao,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
+    private val postViews: com.vladimir.messenger.data.channel.PostViewRepository,
 ) : ViewModel() {
 
     private val channelId: String = savedStateHandle.get<String>("channelId").orEmpty()
@@ -110,6 +113,23 @@ class ChannelViewModel @Inject constructor(
         viewModelScope.launch { reactionRepository.removeMine(channelId, messageId) }
     }
 
+    /** Пост открыли: отмечаем просмотр и сообщаем остальным. */
+    fun onPostSeen(topicId: String) {
+        viewModelScope.launch {
+            runCatching { postViews.markViewed(channelId, topicId) }
+        }
+    }
+
+    /**
+     * Ссылка на конкретный пост.
+     *
+     * Ведёт в канал и сразу к нужной записи. Открывший её из чужого
+     * мессенджера попадает в APU: схема p2pmessenger:// перехватывается
+     * приложением.
+     */
+    suspend fun postLink(topicId: String): String? =
+        runCatching { groupRepository.postLinkFor(channelId, topicId) }.getOrNull()
+
     private fun observe() {
         viewModelScope.launch {
             combine(
@@ -117,7 +137,8 @@ class ChannelViewModel @Inject constructor(
                 groupRepository.observeMembers(channelId),
                 groupRepository.observeTopics(channelId),
                 messageDao.observeChatMessages(channelId),
-            ) { channel, members, topics, messages ->
+                postViews.observeCounts(),
+            ) { channel, members, topics, messages, viewCounts ->
                 val names = members.associate { it.nodeId to it.displayName }
                 val me = members.firstOrNull { it.isMe }
                 val byTopic = messages.groupBy { it.topicId.orEmpty() }
@@ -134,6 +155,7 @@ class ChannelViewModel @Inject constructor(
                             ?: "Участник " + first.senderId.takeLast(4),
                         timeMs = first.timestamp,
                         comments = (thread.size - 1).coerceAtLeast(0),
+                        views = viewCounts[topic.id] ?: 0,
                     )
                 }.sortedBy { it.timeMs }
 

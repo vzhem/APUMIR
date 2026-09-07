@@ -1503,6 +1503,26 @@ class GroupRepository(
         return group.title to invite.link
     }
 
+    /**
+     * Ссылка на конкретный пост канала.
+     *
+     * Это обычное приглашение в канал плюс тема поста: получатель подпишется
+     * и попадёт сразу на нужную запись, а не в начало ленты. Ссылку понимает
+     * и сам APU, и любой чужой мессенджер - переход вернёт человека в APU.
+     */
+    suspend fun postLinkFor(channelId: String, topicId: String): String? {
+        val channel = groupDao.getGroupById(channelId) ?: return null
+        val invite = createInvite(channelId, requestApproval = false).getOrNull() ?: return null
+        return GroupInviteLinks.build(
+            slug = invite.slug,
+            groupId = channelId,
+            ownerId = channel.ownerId,
+            isChannel = channel.isChannel,
+            requestApproval = false,
+            postTopicId = topicId,
+        )
+    }
+
     suspend fun leaveGroup(groupId: String): Result<Unit> {
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)

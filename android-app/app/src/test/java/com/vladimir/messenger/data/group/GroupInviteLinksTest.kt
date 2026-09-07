@@ -196,4 +196,36 @@ class GroupInviteLinksTest {
         assertTrue(base.copy(maxUses = 5, useCount = 4).isActive)
         assertNotEquals(base.isActive, base.copy(revoked = true).isActive)
     }
+
+    /**
+     * Ссылка на конкретный пост канала.
+     *
+     * По ней получатель подписывается и попадает СРАЗУ на нужную запись.
+     * Отдельно проверяем, что ссылка выживает внутри чужого сообщения: её
+     * пересылают в другие мессенджеры вместе с текстом.
+     */
+    @Test
+    fun `post link carries the topic and survives surrounding text`() {
+        val link = GroupInviteLinks.build(
+            slug = "abcd1234",
+            groupId = "grp-1",
+            ownerId = "pk_owner",
+            isChannel = true,
+            postTopicId = "topic-77",
+        )
+        val direct = GroupInviteLinks.parseTarget(link)
+        assertEquals("topic-77", direct?.postTopicId)
+        assertEquals(true, direct?.isChannel)
+
+        val pasted = GroupInviteLinks.parseTarget("Смотри пост в APU: $link - интересно")
+        assertEquals("topic-77", pasted?.postTopicId)
+        assertEquals("grp-1", pasted?.groupId)
+    }
+
+    /** Обычное приглашение в канал поста не содержит - и это не ошибка. */
+    @Test
+    fun `plain channel invite has no post`() {
+        val link = GroupInviteLinks.build(slug = "abcd1234", groupId = "g", ownerId = "o")
+        assertEquals(null, GroupInviteLinks.parseTarget(link)?.postTopicId)
+    }
 }

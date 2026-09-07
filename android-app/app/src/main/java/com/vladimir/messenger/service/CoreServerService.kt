@@ -58,6 +58,7 @@ class CoreServerService : Service() {
     @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
+    @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
@@ -620,6 +621,16 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Reaction packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Просмотр поста канала: счётчик под записью.
+                    if (postViews.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Post view ACK failed: " + e.message)
                         }
                         return
                     }

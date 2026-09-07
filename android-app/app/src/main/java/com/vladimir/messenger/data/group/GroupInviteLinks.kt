@@ -46,10 +46,17 @@ object GroupInviteLinks {
         ownerId: String? = null,
         isChannel: Boolean = false,
         requestApproval: Boolean = false,
+        /**
+         * Тема поста: ссылка ведёт не просто в канал, а к конкретной записи.
+         * Нужна для «поделиться постом» - получатель подписывается и сразу
+         * попадает на нужный пост, а не в начало ленты.
+         */
+        postTopicId: String? = null,
     ): String {
         val sb = StringBuilder(APP_LINK_PREFIX).append(slug)
         if (!groupId.isNullOrBlank()) sb.append("&g=").append(groupId)
         if (!ownerId.isNullOrBlank()) sb.append("&o=").append(ownerId)
+        if (!postTopicId.isNullOrBlank()) sb.append("&p=").append(postTopicId)
         // Признаки нужны вступающему телефону: по ним он пишет правду -
         // «заявка отправлена» или «входим сразу», и называет канал каналом.
         // Владелец им не доверяет и проверяет всё по своей базе.
@@ -78,6 +85,8 @@ object GroupInviteLinks {
         val isChannel: Boolean = false,
         /** Ссылка создана с одобрением: владелец должен подтвердить вход. */
         val needsApproval: Boolean = false,
+        /** Ссылка ведёт к конкретному посту канала, а не просто в канал. */
+        val postTopicId: String? = null,
     ) {
         /** Хватает ли данных, чтобы попросить группу по сети. */
         val isRoutable: Boolean
@@ -134,6 +143,7 @@ object GroupInviteLinks {
                 ownerId = queryParam(query, "o"),
                 isChannel = queryParam(query, "c") == "1",
                 needsApproval = queryParam(query, "a") == "1",
+                postTopicId = queryParam(query, "p"),
             )
         }
 
@@ -153,6 +163,7 @@ object GroupInviteLinks {
                 ownerId = queryParam(uri.rawQuery, "o"),
                 isChannel = queryParam(uri.rawQuery, "c") == "1",
                 needsApproval = queryParam(uri.rawQuery, "a") == "1",
+                postTopicId = queryParam(uri.rawQuery, "p"),
             )
         } catch (_: Exception) {
             null

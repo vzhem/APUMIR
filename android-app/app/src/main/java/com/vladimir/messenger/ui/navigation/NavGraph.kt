@@ -613,6 +613,10 @@ fun MessengerNavGraph(
                 onChannelClick = { channelId ->
                     navController.navigate(Screen.Channel.createRoute(channelId))
                 },
+                onOpenPost = { channelId, topicId ->
+                    // Ссылка вела к записи: открываем её обсуждение сразу.
+                    navController.navigate(Screen.GroupChat.createTopicRoute(channelId, topicId))
+                },
                 onBackClick = { navController.popBackStack() },
                 onGroupAdminClick = { groupId ->
                     navController.navigate(Screen.GroupAdmin.createRoute(groupId))

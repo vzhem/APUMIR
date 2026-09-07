@@ -51,12 +51,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -82,6 +84,9 @@ fun ChannelScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showNewPost by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    // Ссылку на пост создаёт репозиторий (запрос к базе), поэтому «Поделиться»
+    // работает в корутине, а не прямо в обработчике нажатия.
+    val shareScope = rememberCoroutineScope()
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -199,10 +204,35 @@ fun ChannelScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(uiState.posts, key = { it.topicId }) { post ->
+                            // Пост показался на экране - засчитываем просмотр.
+                            // Повторные открытия счётчик не двигают: считаются
+                            // разные читатели, а не показы.
+                            LaunchedEffect(post.topicId) {
+                                viewModel.onPostSeen(post.topicId)
+                            }
                             PostCard(
                                 post = post,
                                 onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
                                 onSaveToFavorites = { viewModel.savePostToFavorites(post) },
+                                onSharePost = {
+                                    shareScope.launch {
+                                        val link = viewModel.postLink(post.topicId)
+                                        if (link != null) {
+                                            val title = post.title.ifBlank { "Пост" }
+                                            val send = android.content.Intent().apply {
+                                                action = android.content.Intent.ACTION_SEND
+                                                type = "text/plain"
+                                                putExtra(
+                                                    android.content.Intent.EXTRA_TEXT,
+                                                    "$title\n\n${post.text}\n\nОткрыть в APU:\n$link",
+                                                )
+                                            }
+                                            context.startActivity(
+                                                android.content.Intent.createChooser(send, "Поделиться постом")
+                                            )
+                                        }
+                                    }
+                                },
                                 reactions = uiState.reactions[post.messageId].orEmpty(),
                                 onToggleReaction = { emoji ->
                                     viewModel.toggleReaction(post.messageId, emoji)
@@ -251,6 +281,7 @@ private fun PostCard(
     post: ChannelPost,
     onOpenComments: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
+    onSharePost: () -> Unit = {},
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
@@ -343,6 +374,41 @@ private fun PostCard(
                 reactions = reactions,
                 onToggle = { showReactions = true },
             )
+            // Просмотры и общее число реакций - как в привычных каналах:
+            // автору видно, дошёл ли пост, читателю - насколько он живой.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Icon(
+                    Icons.Default.Visibility,
+                    contentDescription = "Просмотры",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(15.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    post.views.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val totalReactions = reactions.sumOf { it.count }
+                if (totalReactions > 0) {
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        Icons.Default.Favorite,
+                        contentDescription = "Реакции",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        totalReactions.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             HorizontalDivider(modifier = Modifier.padding(top = 10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { showReactions = true }) {
@@ -360,10 +426,22 @@ private fun PostCard(
                         },
                     )
                 }
+                // Переслать пост: и внутрь APU, и в любой другой мессенджер.
+                IconButton(onClick = onSharePost) {
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = "Поделиться постом",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 // Пост сохраняется себе одним нажатием - так человек забирает
                 // нужное из канала, не переписывая текст вручную.
-                TextButton(onClick = onSaveToFavorites) {
-                    Text("В избранное")
+                IconButton(onClick = onSaveToFavorites) {
+                    Icon(
+                        Icons.Default.BookmarkBorder,
+                        contentDescription = "В избранное",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
         }

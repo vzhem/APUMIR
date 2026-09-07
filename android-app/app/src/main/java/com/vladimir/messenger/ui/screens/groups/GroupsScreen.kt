@@ -89,6 +89,8 @@ import com.vladimir.messenger.ui.components.HintBubbleTextColor
 fun GroupsScreen(
     onGroupClick: (groupId: String) -> Unit,
     onChannelClick: (channelId: String) -> Unit = { onGroupClick(it) },
+    /** Открыть конкретный пост канала: переход по ссылке на запись. */
+    onOpenPost: (channelId: String, topicId: String) -> Unit = { id, _ -> onChannelClick(id) },
     onBackClick: () -> Unit,
     /** Управление группой: тот же экран, что и из меню на главной. */
     onGroupAdminClick: (groupId: String) -> Unit = {},
@@ -386,13 +388,30 @@ fun GroupsScreen(
             },
             confirmButton = {
                 val target = uiState.joinedGroupId
+                val postTopic = uiState.joinedPostTopicId
                 TextButton(
                     enabled = !uiState.joining,
                     onClick = {
                         viewModel.consumeJoinResult()
-                        if (target != null) onGroupClick(target)
+                        if (target != null) {
+                            // Ссылка на пост открывает сам пост, а не начало
+                            // ленты: человек перешёл ради конкретной записи.
+                            if (postTopic != null) {
+                                onOpenPost(target, postTopic)
+                            } else {
+                                onGroupClick(target)
+                            }
+                        }
                     },
-                ) { Text(if (target != null) "Открыть чат" else "Готово") }
+                ) {
+                    Text(
+                        when {
+                            target == null -> "Готово"
+                            postTopic != null -> "Открыть пост"
+                            else -> "Открыть чат"
+                        }
+                    )
+                }
             },
         )
     }
