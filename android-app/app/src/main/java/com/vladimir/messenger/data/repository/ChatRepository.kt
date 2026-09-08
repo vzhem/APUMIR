@@ -105,7 +105,11 @@ class ChatRepository @Inject constructor(
             // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
             val sentDirectly = if (actualRecipientId.isNotBlank()) {
                 Log.i(TAG, "🚀 SENDING via Rust: messageId=$messageId recipient=$actualRecipientId")
-                RustBridge.sendMessage(messageId, chatId, actualRecipientId, content)
+                // В IO: вызов ядра блокирующий (QUIC до 10 с), а сюда приходят
+                // из viewModelScope, то есть с главного потока.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    RustBridge.sendMessage(messageId, chatId, actualRecipientId, content)
+                }
             } else {
                 Log.w(TAG, "❌ sendMessage: recipient id is blank for chatId=$chatId")
                 false

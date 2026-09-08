@@ -21,6 +21,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import java.util.UUID
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -39,8 +41,15 @@ object GroupsModule {
     fun provideGroupDelivery(
         @ApplicationContext context: Context,
     ): GroupDelivery = PerMemberFanoutDelivery(
+        // Всегда в IO. Вызов ядра блокирующий: прямой QUIC ждёт до 5 с на
+        // соединение и до 5 с на запись, а веер зовут из viewModelScope, то
+        // есть с главного потока, и async внутри веера наследует его. Пост в
+        // канал с фото на телефоне владельца давал «APU не отвечает» каждые
+        // пять секунд (2026-09-08): тема, потом сообщение - по 10 с каждое.
         send = { groupId, recipientId, envelope ->
-            RustBridge.sendMessage(UUID.randomUUID().toString(), groupId, recipientId, envelope)
+            withContext(Dispatchers.IO) {
+                RustBridge.sendMessage(UUID.randomUUID().toString(), groupId, recipientId, envelope)
+            }
         },
         // Рейтинг решает очередь: надёжные и быстрые узлы получают конверт
         // первыми, остальные - следом.

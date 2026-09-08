@@ -251,13 +251,16 @@ class AddContactViewModel @Inject constructor(
         val me = ReferralWire.canonicalNodeId(RustBridge.nodeId()) ?: return
         if (me.equals(fingerprint, ignoreCase = true)) return
         val request = ReferralWire.buildTokenRequest(me) ?: return
-        runCatching {
-            RustBridge.sendMessage(
-                java.util.UUID.randomUUID().toString(),
-                "referral",
-                fingerprint,
-                request,
-            )
-        }.onFailure { Log.w(TAG, "token request failed: ${it.message}") }
+        // Вызов ядра блокирующий (QUIC до 10 с) - не с главного потока.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                RustBridge.sendMessage(
+                    java.util.UUID.randomUUID().toString(),
+                    "referral",
+                    fingerprint,
+                    request,
+                )
+            }.onFailure { Log.w(TAG, "token request failed: ${it.message}") }
+        }
     }
 }

@@ -214,6 +214,12 @@ object RustBridge {
         recipientId: String,
         text: String
     ): Boolean {
+        // Вызов блокирующий: прямой QUIC ждёт до 5 с на соединение и до 5 с на
+        // запись. С главного потока это «APU не отвечает». Не падаем - лог с
+        // трассой, чтобы виновника было видно в logcat, а не угадывать.
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            Log.w(TAG, "sendMessage on the main thread (chat=$chatId)", Throwable("main-thread send"))
+        }
         return try {
             // Rust owns the persistent direct/offline mesh send path. A false result means the
             // message remains phone-owned QUEUED_OFFLINE; do not create a transient MQTT session
