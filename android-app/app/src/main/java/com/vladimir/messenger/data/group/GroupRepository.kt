@@ -693,7 +693,7 @@ class GroupRepository(
         // с фото, не дожидаясь, пока веер уйдёт по сети.
         val partRows = ArrayList<MessageEntity>()
         attached.forEachIndexed { photoIndex, b64 ->
-            InlineImage.splitPhoto(photoIndex + 1, b64).forEachIndexed { i, partText ->
+            InlineImage.splitPhoto(photoIndex + 1, b64).forEach { partText ->
                 val row = MessageEntity(
                     id = idFactory(),
                     chatId = groupId,
