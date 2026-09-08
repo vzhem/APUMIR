@@ -477,13 +477,22 @@ fun ChatListScreen(
         val what = if (group.isChannel) "канал" else "группу"
         AlertDialog(
             onDismissRequest = { confirmGroup = null },
-            title = { Text(if (owner) "Удалить $what?" else "Выйти из $what?") },
+            title = {
+                Text(
+                    when {
+                        owner -> "Удалить $what?"
+                        group.isChannel -> "Отписаться от канала?"
+                        else -> "Выйти из группы?"
+                    }
+                )
+            },
             text = {
                 Text(
-                    if (owner) {
-                        "«${group.title}» будет удалён у всех участников."
-                    } else {
-                        "Вы перестанете получать сообщения «${group.title}»."
+                    when {
+                        owner && group.isChannel -> "«${group.title}» будет удалён у всех подписчиков."
+                        owner -> "«${group.title}» будет удалён у всех участников."
+                        group.isChannel -> "Вы перестанете получать посты канала «${group.title}»."
+                        else -> "Вы перестанете получать сообщения «${group.title}»."
                     }
                 )
             },
@@ -491,7 +500,15 @@ fun ChatListScreen(
                 TextButton(onClick = {
                     if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
                     confirmGroup = null
-                }) { Text(if (owner) "Удалить" else "Выйти") }
+                }) {
+                    Text(
+                        when {
+                            owner -> "Удалить"
+                            group.isChannel -> "Отписаться"
+                            else -> "Выйти"
+                        }
+                    )
+                }
             },
             dismissButton = {
                 TextButton(onClick = { confirmGroup = null }) { Text("Отмена") }
@@ -578,7 +595,7 @@ private fun SectionPage(
                         .padding(24.dp),
                 ) {
                     Text(
-                        "Каналов пока нет. Создайте свой в разделе «Группы» " +
+                        "Каналов пока нет. Создайте свой в разделе «Сообщества» " +
                             "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
                         textAlign = TextAlign.Center,
                         style     = MaterialTheme.typography.bodyMedium,
@@ -763,10 +780,11 @@ private fun SectionPage(
                                     )
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.myRole == GroupRole.OWNER) {
-                                                if (item.group.isChannel) "Удалить канал" else "Удалить группу"
-                                            } else {
-                                                "Выйти"
+                                            title = when {
+                                                item.group.myRole == GroupRole.OWNER ->
+                                                    if (item.group.isChannel) "Удалить канал" else "Удалить группу"
+                                                item.group.isChannel -> "Отписаться"
+                                                else -> "Выйти"
                                             },
                                             icon = Icons.Default.Delete,
                                             destructive = true,

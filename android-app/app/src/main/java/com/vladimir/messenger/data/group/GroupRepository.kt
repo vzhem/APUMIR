@@ -1243,7 +1243,7 @@ class GroupRepository(
 
         if (!target.isRoutable) {
             return JoinOutcome.Failed(
-                "Ссылка старого образца: попросите владельца прислать её заново из раздела «Группы»"
+                "Ссылка старого образца: попросите владельца прислать её заново из раздела «Сообщества»"
             )
         }
         val groupId = target.groupId.orEmpty()

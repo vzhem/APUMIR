@@ -413,7 +413,7 @@ private fun OverviewTab(
 
         ApuBubble {
             TextButton(onClick = { showLeaveConfirm = true }) {
-                Text(if (isChannel) "Покинуть канал" else "Покинуть группу")
+                Text(if (isChannel) "Отписаться от канала" else "Покинуть группу")
             }
 
             if (isOwner) {
@@ -440,7 +440,7 @@ private fun OverviewTab(
     if (showLeaveConfirm) {
         AlertDialog(
             onDismissRequest = { showLeaveConfirm = false },
-            title = { Text(if (isChannel) "Покинуть канал?" else "Покинуть группу?") },
+            title = { Text(if (isChannel) "Отписаться от канала?" else "Покинуть группу?") },
             text = {
                 Text(
                     if (isChannel) {
@@ -456,7 +456,7 @@ private fun OverviewTab(
                         showLeaveConfirm = false
                         onLeave()
                     },
-                ) { Text("Покинуть") }
+                ) { Text(if (isChannel) "Отписаться" else "Покинуть") }
             },
             dismissButton = {
                 TextButton(onClick = { showLeaveConfirm = false }) { Text("Отмена") }

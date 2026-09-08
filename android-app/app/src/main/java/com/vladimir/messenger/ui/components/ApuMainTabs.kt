@@ -59,8 +59,11 @@ fun ApuMainTabBar(
                 selected = current == ApuTab.Contacts,
                 onClick = { if (current != ApuTab.Contacts) actions.onContacts() },
             ),
+            // В разделе живут и группы, и каналы, поэтому подпись общая:
+            // «Группы» заставляла искать каналы где-то ещё (владелец,
+            // 2026-09-08). Внутри их различают шапки «Мои группы» / «Мои каналы».
             ApuBottomItem(
-                title = "Группы",
+                title = "Сообщества",
                 icon = Icons.Filled.Groups,
                 selected = current == ApuTab.Groups,
                 onClick = { if (current != ApuTab.Groups) actions.onGroups() },

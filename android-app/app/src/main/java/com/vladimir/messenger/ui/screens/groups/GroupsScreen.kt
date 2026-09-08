@@ -1,7 +1,7 @@
 package com.vladimir.messenger.ui.screens.groups
 
 // =============================================================================
-// GROUPSSCREEN.KT — раздел «Группы»: список групп и создание новой
+// GROUPSSCREEN.KT — раздел «Сообщества»: группы и каналы, создание новых
 // =============================================================================
 
 import com.vladimir.messenger.ui.components.InviteShareCard
@@ -162,7 +162,7 @@ fun GroupsScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
-                title = { Text("Группы") },
+                title = { Text("Сообщества") },
                 navigationIcon = {
                     TextButton(onClick = onBackClick) { Text("Назад") }
                 },
@@ -512,13 +512,26 @@ fun GroupsScreen(
         val what = if (group.isChannel) "канал" else "группу"
         AlertDialog(
             onDismissRequest = { confirmLeave = null },
-            title = { Text(if (owner) "Удалить $what?" else "Выйти из группы?") },
+            title = {
+                Text(
+                    when {
+                        owner -> "Удалить $what?"
+                        group.isChannel -> "Отписаться от канала?"
+                        else -> "Выйти из группы?"
+                    }
+                )
+            },
             text = {
                 Text(
-                    if (owner) {
-                        "«${group.title}» и вся переписка будут удалены у всех участников."
-                    } else {
-                        "Вы перестанете получать сообщения группы «${group.title}»."
+                    when {
+                        owner && group.isChannel ->
+                            "«${group.title}» и все посты будут удалены у всех подписчиков."
+                        owner ->
+                            "«${group.title}» и вся переписка будут удалены у всех участников."
+                        group.isChannel ->
+                            "Вы перестанете получать посты канала «${group.title}»."
+                        else ->
+                            "Вы перестанете получать сообщения группы «${group.title}»."
                     }
                 )
             },
@@ -526,7 +539,15 @@ fun GroupsScreen(
                 TextButton(onClick = {
                     viewModel.leaveOrDelete(group)
                     confirmLeave = null
-                }) { Text(if (owner) "Удалить" else "Выйти") }
+                }) {
+                    Text(
+                        when {
+                            owner -> "Удалить"
+                            group.isChannel -> "Отписаться"
+                            else -> "Выйти"
+                        }
+                    )
+                }
             },
             dismissButton = {
                 TextButton(onClick = { confirmLeave = null }) { Text("Отмена") }
@@ -810,7 +831,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                     requestApproval = entry.needsApproval,
                 )
             )
-        }) { Text("Вступить") }
+        }) { Text(if (entry.isChannel) "Подписаться" else "Вступить") }
     }
     HorizontalDivider()
 }
@@ -861,10 +882,11 @@ private fun groupMenuActions(
     )
     add(
         BubbleMenuAction(
-            title = if (group.myRole == GroupRole.OWNER) {
-                if (group.isChannel) "Удалить канал" else "Удалить группу"
-            } else {
-                "Выйти"
+            title = when {
+                group.myRole == GroupRole.OWNER ->
+                    if (group.isChannel) "Удалить канал" else "Удалить группу"
+                group.isChannel -> "Отписаться"
+                else -> "Выйти"
             },
             icon = Icons.Filled.Delete,
             destructive = true,
