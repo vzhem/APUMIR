@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.JoinOutcome
 import com.vladimir.messenger.data.group.GroupSummary
+import com.vladimir.messenger.data.group.joinedMessage
+import com.vladimir.messenger.data.group.requestSentMessage
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -232,28 +234,18 @@ class GroupsViewModel @Inject constructor(
             val outcome = withContext(Dispatchers.IO) { groupRepository.joinByLink(raw) }
             when (outcome) {
                 is JoinOutcome.Joined -> _uiState.update {
-                    val what = if (outcome.isChannel) "канал" else "группу"
                     it.copy(
                         joining = false,
                         joinedGroupId = outcome.groupId,
                         joinedPostTopicId = postTopicId,
-                        joinMessage = "Вы вошли в $what «" + outcome.title + "»",
+                        joinMessage = joinedMessage(outcome),
                     )
                 }
                 is JoinOutcome.RequestSent -> _uiState.update {
-                    val what = if (outcome.isChannel) "канал" else "группа"
-                    val where = if (outcome.title.isBlank()) what else "«" + outcome.title + "»"
-                    // Ссылка без одобрения: владелец принимает сразу, и заявки
-                    // не будет. Обещать заявку в таком случае нельзя - ровно
-                    // это и выглядело как «заявки в канале не появляются».
-                    val message = if (outcome.needsApproval) {
-                        "Заявка в $where отправлена владельцу. " +
-                            "Как только он её одобрит, $what появится в списке."
-                    } else {
-                        "Входим в $where: одобрение не требуется. " +
-                            "Как только владелец будет на связи, $what появится в списке."
-                    }
-                    it.copy(joining = false, joinMessage = message)
+                    it.copy(
+                        joining = false,
+                        joinMessage = requestSentMessage(outcome, postTopicId != null),
+                    )
                 }
                 is JoinOutcome.Failed -> _uiState.update {
                     it.copy(joining = false, joinMessage = "Не удалось войти: " + outcome.reason)

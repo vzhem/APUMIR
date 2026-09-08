@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupInviteLinks
+import com.vladimir.messenger.data.group.invitePromptFor
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
 import com.vladimir.messenger.ui.update.UpdateDialog
@@ -264,21 +265,22 @@ class MainActivity : ComponentActivity() {
 
                 val pendingGroupLink = pendingGroupInviteLink
                 if (pendingGroupLink != null) {
+                    // Слова зависят от ссылки: пост канала, канал или группа.
+                    // Одно окно «Войти в группу?» на всё путало тех, кто
+                    // пришёл по пересланной ссылке на пост.
+                    val prompt = remember(pendingGroupLink) {
+                        invitePromptFor(GroupInviteLinks.parseTarget(pendingGroupLink))
+                    }
                     androidx.compose.material3.AlertDialog(
                         onDismissRequest = { pendingGroupInviteLink = null },
-                        title = { androidx.compose.material3.Text("Войти в группу?") },
-                        text = {
-                            androidx.compose.material3.Text(
-                                "Открыта ссылка-приглашение в группу. " +
-                                    "Отправить заявку на вступление?"
-                            )
-                        },
+                        title = { androidx.compose.material3.Text(prompt.title) },
+                        text = { androidx.compose.material3.Text(prompt.body) },
                         confirmButton = {
                             androidx.compose.material3.TextButton(onClick = {
                                 pendingGroupInviteLink = null
                                 pendingGroupInvite = pendingGroupLink
                             }) {
-                                androidx.compose.material3.Text("Войти")
+                                androidx.compose.material3.Text(prompt.confirm)
                             }
                         },
                         dismissButton = {
