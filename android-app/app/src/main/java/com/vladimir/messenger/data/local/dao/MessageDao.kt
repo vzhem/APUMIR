@@ -95,6 +95,17 @@ interface MessageDao {
     suspend fun countTopicMessages(chatId: String, topicId: String): Int
 
     /**
+     * Сообщения темы разом, без подписки: нужны владельцу канала, чтобы
+     * дослать опоздавшему подписчику пост с фотографиями.
+     */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC")
+    suspend fun getTopicMessages(chatId: String, topicId: String): List<MessageEntity>
+
+    /** Правка текста: пост канала редактируется под тем же id. */
+    @Query("UPDATE messages SET content = :content WHERE id = :messageId")
+    suspend fun updateContent(messageId: String, content: String)
+
+    /**
      * Стереть все сообщения группы. У messages нет внешнего ключа на groups,
      * поэтому каскад их не убирает — чистим явно при удалении группы.
      */

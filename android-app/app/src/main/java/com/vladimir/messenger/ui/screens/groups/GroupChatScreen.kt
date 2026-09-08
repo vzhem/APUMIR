@@ -774,6 +774,14 @@ private fun MessageBubble(
                         contentDescription = "Картинка из сообщения",
                         modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                     )
+                    // Пост из одних фотографий: сами фото - в ленте канала, а
+                    // здесь, над комментариями, пузырь не должен быть пустым.
+                    bodyText.isBlank() &&
+                        com.vladimir.messenger.util.InlineImage.photoCount(message.content) > 0 ->
+                        Text(
+                            "Фото: " + com.vladimir.messenger.util.InlineImage.photoCount(message.content),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     else -> Text(bodyText)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

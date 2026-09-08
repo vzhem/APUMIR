@@ -17,6 +17,7 @@ import com.vladimir.messenger.data.local.entity.GroupMemberEntity
 import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -634,8 +635,21 @@ class GroupRepository(
 
     // ── Отправка сообщения ────────────────────────────────────────────────────
 
-    suspend fun sendMessage(groupId: String, topicId: String, text: String): Result<String> {
-        val body = text.trim()
+    /**
+     * Сообщение в тему. [photos] - фотографии поста (jpeg base64), каждая
+     * уходит отдельными пакетами-кусками ВСЛЕД за текстом: один пакет с
+     * целой фотографией не проходит через публичный брокер (потолок ~10 КБ),
+     * а куски по [InlineImage.MAX_PART_B64_CHARS] проходят. В тексте
+     * остаётся пометка «фотографий: n», по ней лента ждёт куски.
+     */
+    suspend fun sendMessage(
+        groupId: String,
+        topicId: String,
+        text: String,
+        photos: List<String> = emptyList(),
+    ): Result<String> {
+        val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
+        val body = if (attached.isEmpty()) text.trim() else InlineImage.withPhotoCount(text, attached.size)
         if (body.isEmpty()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
         if (body.length > MAX_MESSAGE_CHARS) {
             return Result.failure(IllegalArgumentException("Сообщение длиннее $MAX_MESSAGE_CHARS символов"))
@@ -675,6 +689,28 @@ class GroupRepository(
             )
         )
         registerOutgoing(groupId, topic, body, me, now)
+        // Куски фотографий ложатся в базу СРАЗУ: лента автора показывает пост
+        // с фото, не дожидаясь, пока веер уйдёт по сети.
+        val partRows = ArrayList<MessageEntity>()
+        attached.forEachIndexed { photoIndex, b64 ->
+            InlineImage.splitPhoto(photoIndex + 1, b64).forEachIndexed { i, partText ->
+                val row = MessageEntity(
+                    id = idFactory(),
+                    chatId = groupId,
+                    senderId = me,
+                    content = partText,
+                    // Время чуть позже текста, чтобы порядок в теме сохранился.
+                    timestamp = now + 1 + partRows.size,
+                    status = "SENT",
+                    isFromMe = true,
+                    channel = "GROUP",
+                    recipientId = "",
+                    topicId = topic.id,
+                )
+                messageDao.insertMessage(row)
+                partRows.add(row)
+            }
+        }
 
         val report = broadcast(
             groupId,
@@ -690,13 +726,220 @@ class GroupRepository(
             ),
             excludeSelf = true,
         )
+        // Куски фотографий разлетаются в фоне: до 18 вееров подряд, и экран
+        // не должен ждать их (а viewModelScope не должен их обрывать, когда
+        // человек уйдёт с экрана). Текст уже ушёл первым.
+        if (partRows.isNotEmpty()) {
+            val senderName = member.displayName
+            backgroundScope.launch {
+                for (row in partRows) {
+                    runCatching {
+                        broadcast(
+                            groupId,
+                            GroupWire.buildMessage(
+                                groupId = groupId,
+                                topicId = topic.id,
+                                text = row.content,
+                                messageId = row.id,
+                                senderName = senderName,
+                            ),
+                            excludeSelf = true,
+                        )
+                    }.onFailure { Log.w(TAG, "photo part fanout failed: ${it.message}") }
+                }
+                Log.i(TAG, "photo parts sent group=$groupId topic=${topic.id} parts=${partRows.size}")
+            }
+        }
         Log.i(
             TAG,
-            "group message id=$messageId group=$groupId topic=${topic.id} " +
+            "group message id=$messageId group=$groupId topic=${topic.id} parts=${partRows.size} " +
                 "fanout=${report.delivered}/${report.attempted} via=${delivery.name}",
         )
         return Result.success(messageId)
     }
+
+    // ── Правка сообщения ──────────────────────────────────────────────────────
+
+    /**
+     * Изменить текст своего сообщения (поста). Владелец группы может править
+     * любое сообщение. Фотографии поста остаются прежними: меняются слова.
+     * У поста канала вместе с текстом обновляется и заголовок темы.
+     */
+    suspend fun editMessage(groupId: String, messageId: String, newText: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        val message = messageDao.getMessageById(messageId)
+            ?: return Result.failure(IllegalStateException("Сообщение не найдено"))
+        if (message.chatId != groupId) {
+            return Result.failure(IllegalArgumentException("Сообщение из другой группы"))
+        }
+        if (message.senderId != me && group.ownerId != me) {
+            return Result.failure(SecurityException("Править может только автор или владелец"))
+        }
+        val words = InlineImage.stripImage(newText)
+        val content = InlineImage.replaceText(message.content, words)
+        if (content.isBlank()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
+        if (content.length > MAX_MESSAGE_CHARS) {
+            return Result.failure(IllegalArgumentException("Сообщение длиннее $MAX_MESSAGE_CHARS символов"))
+        }
+        applyEdit(message, content)
+        // В конверте едут только слова: фотографии у получателей уже есть, а
+        // пакет с ними не прошёл бы через брокер.
+        broadcast(
+            groupId,
+            GroupWire.buildEdit(groupId, message.topicId.orEmpty(), messageId, words),
+            excludeSelf = true,
+        )
+        Log.i(TAG, "message edited id=$messageId group=$groupId")
+        return Result.success(Unit)
+    }
+
+    /** Записать новый текст и, если это пост канала, переименовать его тему. */
+    private suspend fun applyEdit(message: MessageEntity, content: String) {
+        messageDao.updateContent(message.id, content)
+        val topicId = message.topicId ?: return
+        val topic = groupDao.getTopicById(topicId) ?: return
+        val group = groupDao.getGroupById(message.chatId) ?: return
+        if (!group.isChannel) return
+        // Заголовок поста - первая строка текста: правится вместе с ним.
+        val first = messageDao.getTopicMessages(message.chatId, topicId)
+            .firstOrNull { !InlineImage.isPart(it.content) } ?: return
+        if (first.id != message.id) return
+        val title = postTitle(content)
+        if (title != topic.name) groupDao.renameTopic(topicId, title)
+    }
+
+    // ── Досылка старых постов ─────────────────────────────────────────────────
+
+    /** Когда у владельца канала в последний раз просили старые посты. */
+    private val postsRequestedAt = HashMap<String, Long>()
+
+    /**
+     * Попросить у владельца канала последние посты.
+     *
+     * Вступивший позже получает от владельца только СПИСОК тем (названия),
+     * а тексты и фотографии постов - нет: лента у него пустая, комментировать
+     * нечего. В запросе перечислены темы, чьи посты уже есть: владелец шлёт
+     * только недостающее, поэтому повторный запрос при полной ленте стоит
+     * один маленький пакет. Не чаще раза в полминуты на канал.
+     */
+    suspend fun requestPosts(groupId: String) {
+        val me = myId() ?: return
+        val group = groupDao.getGroupById(groupId) ?: return
+        if (!group.isChannel || group.ownerId == me) return
+        if (groupDao.getMember(groupId, me) == null) return
+        val now = clock()
+        synchronized(postsRequestedAt) {
+            val last = postsRequestedAt[groupId] ?: 0L
+            if (now - last < POSTS_REQUEST_GAP_MS) return
+            postsRequestedAt[groupId] = now
+        }
+        // «Есть» - значит есть и текст поста, и все обещанные в нём фото:
+        // пост с недоехавшими кусками просим целиком, лишние пакеты получатель
+        // отбросит по id.
+        val have = groupDao.getTopics(groupId)
+            .sortedByDescending { it.createdAtMs }
+            .take(BACKFILL_POSTS)
+            .filter { topic -> isPostComplete(groupId, topic.id) }
+            .map { it.id }
+        delivery.deliver(
+            groupId,
+            GroupWire.buildPostsRequest(groupId, BACKFILL_POSTS, have),
+            listOf(group.ownerId),
+        )
+        Log.i(TAG, "posts requested group=$groupId have=${have.size}")
+    }
+
+    /**
+     * Дослать участнику [nodeId] последние посты канала: текст поста и куски
+     * его фотографий, каждый под своим исходным id. Автор и время идут в
+     * конверте, чтобы у получателя пост числился за настоящим автором и
+     * стоял на своём месте в ленте, а не «сейчас от владельца».
+     *
+     * Только владелец: у него полная копия. Работает в фоне - веер по сети
+     * не должен держать поток приёма пакетов.
+     */
+    private suspend fun backfillPosts(group: GroupEntity, nodeId: String, limit: Int, have: Set<String>) {
+        val me = myId() ?: return
+        if (!group.isChannel || group.ownerId != me || nodeId == me) return
+        // Что этому человеку слали в последние секунды, второй раз не шлём:
+        // при вступлении владелец шлёт посты сам, а подписчик, открыв канал,
+        // тут же просит их ещё раз - второй веер был бы копией первого. Окно
+        // короткое нарочно: если первый веер разминулся с карточкой канала и
+        // пропал, следующий запрос (список have отсекает дошедшее) должен
+        // сработать, а не упереться в «уже слали». Дубли получатель всё
+        // равно отбрасывает по id - речь только об экономии сети.
+        val key = group.id + '|' + nodeId
+        val now = clock()
+        val recent: Set<String> = synchronized(backfillSent) {
+            val last = backfillSent[key]
+            if (last != null && now - last.first < BACKFILL_REPEAT_MS) last.second else emptySet()
+        }
+        // Последние по времени СОЗДАНИЯ поста, а не по свежести комментариев.
+        // Сначала берём последние N, и только потом вычитаем уже имеющиеся:
+        // иначе подписчик с полной лентой получал бы следующую порцию более
+        // старых постов при каждом открытии канала.
+        val topics = groupDao.getTopics(group.id)
+            .sortedByDescending { it.createdAtMs }
+            .take(limit.coerceIn(1, BACKFILL_POSTS))
+            .filter { it.id !in have }
+        val sentIds = HashSet<String>(recent)
+        var sent = 0
+        // От новых к старым: если связь оборвётся на середине, свежие посты
+        // уже дошли. Порядок в ленте задаёт исходное время в конверте.
+        for (topic in topics) {
+            if (sent >= MAX_BACKFILL_PACKETS) break
+            val thread = messageDao.getTopicMessages(group.id, topic.id)
+            val post = thread.firstOrNull { !InlineImage.isPart(it.content) } ?: continue
+            val parts = thread.filter { InlineImage.isPart(it.content) && it.senderId == post.senderId }
+            val authorName = groupDao.getMember(group.id, post.senderId)?.displayName.orEmpty()
+            for (row in listOf(post) + parts) {
+                if (sent >= MAX_BACKFILL_PACKETS) break
+                if (!sentIds.add(row.id)) continue
+                // Пауза между пакетами: сотня публикаций залпом забивает
+                // очередь ядра и раздражает публичный брокер.
+                if (sent > 0) kotlinx.coroutines.delay(BACKFILL_PACKET_GAP_MS)
+                delivery.deliver(
+                    group.id,
+                    GroupWire.buildMessage(
+                        groupId = group.id,
+                        topicId = topic.id,
+                        text = row.content,
+                        messageId = row.id,
+                        senderName = authorName,
+                        authorId = post.senderId,
+                        sentAtMs = row.timestamp,
+                    ),
+                    listOf(nodeId),
+                )
+                sent++
+            }
+        }
+        synchronized(backfillSent) { backfillSent[key] = now to sentIds }
+        Log.i(TAG, "posts backfilled group=${group.id} to=$nodeId topics=${topics.size} packets=$sent")
+    }
+
+    /** Кому, когда и какие сообщения досылали: ключ «группа|узел». */
+    private val backfillSent = HashMap<String, Pair<Long, Set<String>>>()
+
+    /** Пост темы на месте целиком: текст есть и все обещанные фото собрались. */
+    private suspend fun isPostComplete(groupId: String, topicId: String): Boolean {
+        val thread = messageDao.getTopicMessages(groupId, topicId)
+        val post = thread.firstOrNull { !InlineImage.isPart(it.content) } ?: return false
+        val promised = InlineImage.photoCount(post.content)
+        if (promised == 0) return true
+        val parts = thread.filter { InlineImage.isPart(it.content) && it.senderId == post.senderId }
+        return InlineImage.assemble(parts.map { it.content }).size >= promised
+    }
+
+    /** Заголовок поста канала - первая строка текста без служебных строк. */
+    private fun postTitle(content: String): String =
+        InlineImage.stripImage(content).lineSequence().firstOrNull().orEmpty().trim()
+            .take(POST_TITLE_CHARS).ifBlank { "Пост" }
 
     /** Тема по умолчанию: если тем нет или id пустой — пишем в General. */
     private suspend fun resolveTopic(group: GroupEntity, topicId: String): GroupTopicEntity? {
@@ -734,21 +977,51 @@ class GroupRepository(
                 val localId = packet.messageId.ifBlank { messageId }
                 if (messageDao.messageExists(localId)) return
                 val now = clock()
+                // Досылка старого поста: владелец пересылает чужой пост, автор
+                // и время указаны в конверте. Доверяем этому только владельцу.
+                val relayed = packet.authorId.isNotBlank() && senderId == group.ownerId
+                val authorId = if (relayed) packet.authorId else senderId
+                val isMine = authorId == me
+                val sentAt = if (relayed && packet.sentAtMs in 1L..now) packet.sentAtMs else now
+                val isPart = InlineImage.isPart(packet.text)
                 messageDao.insertMessage(
                     MessageEntity(
                         id = localId,
                         chatId = packet.groupId,
-                        senderId = senderId,
+                        senderId = authorId,
                         content = packet.text,
-                        timestamp = now,
-                        status = "RECEIVED",
-                        isFromMe = false,
+                        timestamp = sentAt,
+                        status = if (isMine) "SENT" else "RECEIVED",
+                        isFromMe = isMine,
                         channel = "GROUP",
-                        recipientId = me,
+                        recipientId = if (isMine) "" else me,
                         topicId = packet.topicId,
                     )
                 )
-                rememberSender(packet.groupId, senderId, packet.senderName, now)
+                rememberSender(packet.groupId, authorId, packet.senderName, now)
+                // Кусок фотографии - не сообщение: он не двигает счётчики
+                // непрочитанного, превью и статистику. Досланные старые посты
+                // тоже не считаются новыми: человек их не пропускал.
+                if (isPart || relayed) {
+                    // Досланный пост темы, которой у нас ещё нет (список тем
+                    // разминулся в пути или пришёл раньше вступления): заводим
+                    // тему сами, иначе пост не попадёт в ленту. Только от
+                    // владельца - relayed это уже гарантирует.
+                    if (relayed && !isPart && groupDao.getTopicById(packet.topicId) == null) {
+                        groupDao.insertTopic(
+                            GroupTopicEntity(
+                                id = packet.topicId,
+                                groupId = packet.groupId,
+                                name = postTitle(packet.text),
+                                ownerId = authorId,
+                                ownerName = packet.senderName,
+                                createdAtMs = sentAt,
+                            )
+                        )
+                    }
+                    Log.i(TAG, "group ${if (isPart) "photo part" else "backfilled post"} in group=${group.id} topic=${packet.topicId}")
+                    return
+                }
                 val topic = groupDao.getTopicById(packet.topicId)
                 if (topic != null) {
                     groupDao.registerTopicMessage(topic.id, preview(packet.text), now)
@@ -758,6 +1031,32 @@ class GroupRepository(
                 groupDao.incrementGroupUnread(packet.groupId)
                 registerStats(packet.groupId, packet.topicId, senderId, now)
                 Log.i(TAG, "group message in group=${group.id} topic=${packet.topicId} from=$senderId")
+            }
+
+            is GroupWire.Packet.Edit -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val message = messageDao.getMessageById(packet.messageId) ?: return
+                if (message.chatId != packet.groupId) return
+                // Править вправе автор и владелец группы - остальное отбрасываем.
+                if (senderId != message.senderId && senderId != group.ownerId) return
+                // Приходят только слова; свои служебные строки (фото) оставляем.
+                val content = InlineImage.replaceText(message.content, packet.text)
+                if (content.isBlank() || content.length > MAX_MESSAGE_CHARS) return
+                applyEdit(message, content)
+                Log.i(TAG, "message edit applied id=${packet.messageId} group=${group.id} from=$senderId")
+            }
+
+            is GroupWire.Packet.PostsRequest -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (!group.isChannel || group.ownerId != me) return
+                val requester = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (requester.isBanned) return
+                // Веер по сети - в фоне: приём пакетов не должен ждать.
+                backgroundScope.launch {
+                    runCatching { backfillPosts(group, senderId, packet.limit, packet.have.toSet()) }
+                        .onFailure { Log.w(TAG, "posts backfill failed: ${it.message}") }
+                }
             }
 
             is GroupWire.Packet.TopicCreated -> {
@@ -1656,6 +1955,18 @@ class GroupRepository(
             listOf(nodeId),
         )
         Log.i(TAG, "member admitted group=${group.id} node=$nodeId")
+        // Новому подписчику канала - последние посты целиком, а не только
+        // названия: иначе лента у него пуста, пока кто-нибудь не напишет.
+        if (group.isChannel) {
+            backgroundScope.launch {
+                // Небольшая пауза: карточка канала, темы и решение о приёме
+                // должны улечься у получателя раньше постов - пост для ещё
+                // не известного канала он отбрасывает.
+                kotlinx.coroutines.delay(1_500L)
+                runCatching { backfillPosts(group, nodeId, BACKFILL_POSTS, emptySet()) }
+                    .onFailure { Log.w(TAG, "posts push failed: ${it.message}") }
+            }
+        }
     }
 
     /** Группы, у которых мы уже просили темы в этом запуске приложения. */
@@ -1827,8 +2138,16 @@ class GroupRepository(
         broadcast(groupId, GroupWire.buildRoster(groupId, entries), excludeSelf = true)
     }
 
-    private fun preview(text: String): String =
-        text.replace('\n', ' ').take(PREVIEW_CHARS)
+    /** Превью для списков: без служебных строк фотографий. */
+    private fun preview(text: String): String {
+        val clean = InlineImage.stripImage(text)
+        val shown = if (clean.isBlank() && (InlineImage.hasImage(text) || InlineImage.photoCount(text) > 0)) {
+            "Фото"
+        } else {
+            clean
+        }
+        return shown.replace('\n', ' ').take(PREVIEW_CHARS)
+    }
 
     private fun dayKey(epochMs: Long): String =
         Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
@@ -1853,6 +2172,24 @@ class GroupRepository(
          */
         const val MAX_MESSAGE_CHARS = 11000
         const val MAX_NOTE_CHARS = 256
+        /** Сколько последних постов канала досылается вступившему позже. */
+        const val BACKFILL_POSTS = 20
+        /**
+         * Потолок пакетов одной досылки: 20 постов по 6 фото по 3 куска - это
+         * 380 пакетов, а очередь исходящих у ядра рассчитана на 256 (с
+         * запасом под остальной трафик). Свежие посты идут первыми, текст
+         * поста - раньше его фото, поэтому урезаются только фото самых
+         * старых постов.
+         */
+        const val MAX_BACKFILL_PACKETS = 150
+        /** Окно, в котором повторная досылка тому же узлу не дублирует уже отправленное. */
+        private const val BACKFILL_REPEAT_MS = 8_000L
+        /** Подписчик просит старые посты не чаще раза в полминуты на канал. */
+        private const val POSTS_REQUEST_GAP_MS = 30_000L
+        /** Пауза между пакетами досылки. */
+        private const val BACKFILL_PACKET_GAP_MS = 40L
+        /** Заголовок поста канала - первая строка текста, не длиннее этого. */
+        const val POST_TITLE_CHARS = 40
         private const val PREVIEW_CHARS = 80
         /** Дальность эпидемии каталога: владелец -> контакты -> их контакты. */
         private const val MAX_DIR_HOPS = 2

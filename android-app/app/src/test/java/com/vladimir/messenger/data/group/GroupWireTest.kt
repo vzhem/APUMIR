@@ -424,4 +424,89 @@ class GroupWireTest {
         assertTrue(parsed is GroupWire.Packet.WhoIs)
         assertEquals("pk_abc", (parsed as GroupWire.Packet.WhoIs).requesterId)
     }
+
+    // ── Досылка старых постов и правка ──────────────────────────────────────
+
+    /**
+     * Досланный пост несёт настоящего автора и исходное время: у получателя
+     * он должен числиться за автором, а не за владельцем, который переслал.
+     */
+    @Test
+    fun relayedMessageCarriesAuthorAndTime() {
+        val envelope = GroupWire.buildMessage(
+            groupId = "ch",
+            topicId = "post-1",
+            text = "старый пост",
+            messageId = "m-1",
+            senderName = "Автор",
+            authorId = "pk_author",
+            sentAtMs = 1_700_000_000_000L,
+        )
+        assertEquals(9, envelope.split('|').size)
+        val msg = GroupWire.parse(envelope) as GroupWire.Packet.Message
+        assertEquals("m-1", msg.messageId)
+        assertEquals("Автор", msg.senderName)
+        assertEquals("pk_author", msg.authorId)
+        assertEquals(1_700_000_000_000L, msg.sentAtMs)
+    }
+
+    /** Живое сообщение по-прежнему уходит 7-полевым конвертом: старые телефоны его понимают. */
+    @Test
+    fun liveMessageStaysSevenFields() {
+        val envelope = GroupWire.buildMessage("g", "t", "текст", "m-2", "Имя")
+        assertEquals(7, envelope.split('|').size)
+        val msg = GroupWire.parse(envelope) as GroupWire.Packet.Message
+        assertEquals("", msg.authorId)
+        assertEquals(0L, msg.sentAtMs)
+    }
+
+    /** Имя может быть пустым, а автор - нет: поле имени остаётся на месте. */
+    @Test
+    fun relayedMessageWithoutNameKeepsFieldOrder() {
+        val envelope = GroupWire.buildMessage("g", "t", "текст", "m-3", "", "pk_a", 5L)
+        val msg = GroupWire.parse(envelope) as GroupWire.Packet.Message
+        assertEquals("m-3", msg.messageId)
+        assertEquals("", msg.senderName)
+        assertEquals("pk_a", msg.authorId)
+        assertEquals(5L, msg.sentAtMs)
+    }
+
+    @Test
+    fun editRoundTrip() {
+        val envelope = GroupWire.buildEdit("g", "t", "m-9", "новый | текст\nвторая строка")
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Edit)
+        val edit = parsed as GroupWire.Packet.Edit
+        assertEquals("g", edit.groupId)
+        assertEquals("t", edit.topicId)
+        assertEquals("m-9", edit.messageId)
+        assertEquals("новый | текст\nвторая строка", edit.text)
+    }
+
+    /** Правка без id сообщения бессмысленна - такой конверт отбрасывается. */
+    @Test
+    fun editWithoutMessageIdIsRejected() {
+        val empty = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(0))
+        assertNull(GroupWire.parse("APUGRP1|edit|g|t|$empty|$empty"))
+    }
+
+    @Test
+    fun postsRequestRoundTrip() {
+        val envelope = GroupWire.buildPostsRequest("ch", 20, listOf("t-1", "t-2"))
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.PostsRequest)
+        val req = parsed as GroupWire.Packet.PostsRequest
+        assertEquals("ch", req.groupId)
+        assertEquals(20, req.limit)
+        assertEquals(listOf("t-1", "t-2"), req.have)
+    }
+
+    @Test
+    fun postsRequestWithoutHaveList() {
+        val req = GroupWire.parse(GroupWire.buildPostsRequest("ch", 5)) as GroupWire.Packet.PostsRequest
+        assertEquals(5, req.limit)
+        assertTrue(req.have.isEmpty())
+        assertNull(GroupWire.parse("APUGRP1|preq|ch|0"))
+        assertNull(GroupWire.parse("APUGRP1|preq|ch|abc"))
+    }
 }

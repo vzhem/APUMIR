@@ -26,12 +26,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
@@ -61,7 +68,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +83,7 @@ import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.util.ImageLinkDetector
+import com.vladimir.messenger.util.InlineImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -88,6 +98,8 @@ fun ChannelScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showNewPost by remember { mutableStateOf(false) }
+    // Пост, который сейчас правят (автор или владелец канала).
+    var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
     val context = LocalContext.current
     // Ссылку на пост создаёт репозиторий (запрос к базе), поэтому «Поделиться»
     // работает в корутине, а не прямо в обработчике нажатия.
@@ -223,8 +235,16 @@ fun ChannelScreen(
                             LaunchedEffect(post.topicId) {
                                 viewModel.onPostSeen(post.topicId)
                             }
+                            // Править пост может его автор и владелец канала.
+                            // Считаем из состояния экрана, а не через ViewModel:
+                            // так карандаш появится сразу, как только станет
+                            // известен мой идентификатор.
+                            val myId = uiState.myId
                             PostCard(
                                 post = post,
+                                canEdit = myId.isNotBlank() &&
+                                    (post.authorId == myId || uiState.channel?.ownerId == myId),
+                                onEdit = { editingPost = post },
                                 onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
                                 onSaveToFavorites = { viewModel.savePostToFavorites(post) },
                                 onSharePost = {
@@ -273,17 +293,41 @@ fun ChannelScreen(
     }
 
     if (showNewPost) {
-        NewPostDialog(
+        PostEditorDialog(
+            title = "Новый пост",
+            confirmLabel = "Опубликовать",
             creating = uiState.creating,
             onDismiss = {
                 showNewPost = false
                 viewModel.dismissError()
             },
-            onPublish = { text, imageB64 ->
-                viewModel.createPost(text, imageB64)
+            onConfirm = { text, photos ->
+                viewModel.createPost(text, photos)
                 showNewPost = false
             },
-            onPickImage = { uri, onReady -> viewModel.prepareImage(context, uri, onReady) },
+            onPickImages = { uris, onReady -> viewModel.prepareImages(context, uris, onReady) },
+        )
+    }
+
+    // Правка: тот же редактор с готовым текстом. Фотографии показываем, но
+    // не меняем - они уже разошлись по подписчикам отдельными пакетами.
+    editingPost?.let { post ->
+        PostEditorDialog(
+            title = "Изменить пост",
+            confirmLabel = "Сохранить",
+            initialText = post.text,
+            initialImages = post.images,
+            imagesEditable = false,
+            creating = uiState.creating,
+            onDismiss = {
+                editingPost = null
+                viewModel.dismissError()
+            },
+            onConfirm = { text, _ ->
+                viewModel.editPost(post, text)
+                editingPost = null
+            },
+            onPickImages = { _, onReady -> onReady(emptyList()) },
         )
     }
 }
@@ -292,6 +336,9 @@ fun ChannelScreen(
 @OptIn(ExperimentalFoundationApi::class)
 private fun PostCard(
     post: ChannelPost,
+    /** Правка доступна автору поста и владельцу канала. */
+    canEdit: Boolean = false,
+    onEdit: () -> Unit = {},
     onOpenComments: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
     onSharePost: () -> Unit = {},
@@ -331,35 +378,36 @@ private fun PostCard(
             ),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                post.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                "${post.authorName} - $time",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // Прикреплённое фото поста: разбор строки base64 - в фоне и с кэшем.
-            val attached = com.vladimir.messenger.ui.components.AvatarBitmaps
-                .rememberAvatar(post.imageB64)
-            val shownAttached = attached
-            if (shownAttached != null) {
-                androidx.compose.foundation.Image(
-                    bitmap = shownAttached.asImageBitmap(),
-                    contentDescription = "Фото поста",
-                    // Без contentScale картинка рисовалась в своих пикселях и
-                    // висела крошечной посреди карточки: сжатие ужимает её до
-                    // нескольких сотен точек по стороне. FillWidth растягивает
-                    // на всю ширину поста, высота подстраивается сама.
-                    contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 320.dp)
-                        .padding(top = 8.dp)
-                        .clip(RoundedCornerShape(12.dp)),
-                )
+            Row(verticalAlignment = Alignment.Top) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        post.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "${post.authorName} - $time",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // Карандаш в углу поста: не теснит нижний ряд кнопок, который
+                // на узком экране и так заполнен.
+                if (canEdit) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Изменить пост",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+            if (post.images.isNotEmpty() || post.pendingPhotos > 0) {
+                // Фотографии поста: одна - во всю ширину, несколько - галерея
+                // с листанием и счётчиком «1/3».
+                PostGallery(images = post.images, pending = post.pendingPhotos)
                 if (post.text.isNotBlank()) {
                     Text(post.text, modifier = Modifier.padding(top = 8.dp))
                 }
@@ -476,36 +524,141 @@ private fun PostCard(
     }
 }
 
+/**
+ * Фотографии поста.
+ *
+ * Одна фотография рисуется во всю ширину, высота подстраивается. Несколько -
+ * листаются по одной (HorizontalPager) в рамке фиксированной высоты, чтобы
+ * карточка не прыгала между вертикальными и горизонтальными снимками; в углу
+ * счётчик «2/5». Недоехавшие фото обозначены подписью - их куски ещё в пути.
+ */
 @Composable
-private fun NewPostDialog(
+private fun PostGallery(images: List<String>, pending: Int) {
+    if (images.size == 1 && pending == 0) {
+        // Разбор строки base64 - в фоне и с кэшем.
+        val single = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(images[0])
+        if (single != null) {
+            androidx.compose.foundation.Image(
+                bitmap = single.asImageBitmap(),
+                contentDescription = "Фото поста",
+                // Без contentScale картинка рисовалась в своих пикселях и
+                // висела крошечной посреди карточки: сжатие ужимает её до
+                // нескольких сотен точек по стороне. FillWidth растягивает
+                // на всю ширину поста, высота подстраивается сама.
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(12.dp)),
+            )
+        }
+        return
+    }
+    if (images.isEmpty()) {
+        Text(
+            if (pending == 1) "Фото ещё загружается…" else "Фото ещё загружаются…",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        return
+    }
+    val pagerState = rememberPagerState(pageCount = { images.size })
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .height(280.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            key = { page -> page },
+        ) { page ->
+            val bitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
+                .rememberAvatar(images[page])
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (bitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Фото поста ${page + 1} из ${images.size}",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
+            }
+        }
+        Text(
+            buildString {
+                append(pagerState.currentPage + 1).append('/').append(images.size)
+                if (pending > 0) append(" · ещё ").append(pending)
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * Редактор поста: и для нового, и для правки существующего.
+ *
+ * Фотографий до [InlineImage.MAX_PHOTOS]; выбираются сразу несколько. При
+ * правке фотографии показываются, но не меняются ([imagesEditable] = false):
+ * они уже разошлись подписчикам отдельными пакетами, меняется только текст.
+ */
+@Composable
+private fun PostEditorDialog(
+    title: String,
+    confirmLabel: String,
     creating: Boolean,
     onDismiss: () -> Unit,
-    onPublish: (String, String?) -> Unit,
-    /** Сжатие выбранной картинки: делается во ViewModel, вне главного потока. */
-    onPickImage: (android.net.Uri, (String?) -> Unit) -> Unit,
+    onConfirm: (String, List<String>) -> Unit,
+    /** Сжатие выбранных картинок: делается во ViewModel, вне главного потока. */
+    onPickImages: (List<android.net.Uri>, (List<String>) -> Unit) -> Unit,
+    initialText: String = "",
+    initialImages: List<String> = emptyList(),
+    imagesEditable: Boolean = true,
 ) {
-    var text by remember { mutableStateOf("") }
-    // Уже сжатая картинка (base64) и её же превью.
-    var imageB64 by remember { mutableStateOf<String?>(null) }
+    var text by remember { mutableStateOf(initialText) }
+    // Уже сжатые картинки (base64) по порядку.
+    var images by remember { mutableStateOf(initialImages) }
     var preparing by remember { mutableStateOf(false) }
+    var overflowHint by remember { mutableStateOf<String?>(null) }
 
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            preparing = true
-            onPickImage(uri) { encoded ->
-                imageB64 = encoded
-                preparing = false
+        androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val room = (InlineImage.MAX_PHOTOS - images.size).coerceAtLeast(0)
+            val taken = uris.take(room)
+            overflowHint = if (uris.size > room) {
+                "К посту можно приложить не больше ${InlineImage.MAX_PHOTOS} фото"
+            } else {
+                null
+            }
+            if (taken.isNotEmpty()) {
+                preparing = true
+                onPickImages(taken) { encoded ->
+                    images = (images + encoded).take(InlineImage.MAX_PHOTOS)
+                    preparing = false
+                }
             }
         }
     }
 
-    val preview = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(imageB64)
-
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Новый пост") },
+        title = { Text(title) },
         text = {
             Column {
                 OutlinedTextField(
@@ -515,37 +668,83 @@ private fun NewPostDialog(
                     modifier = Modifier.heightIn(min = 120.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                val shownPreview = preview
-                if (shownPreview != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = shownPreview.asImageBitmap(),
-                        contentDescription = "Прикреплённое фото",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 180.dp),
-                    )
+                if (images.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        itemsIndexed(images, key = { index, _ -> index }) { index, b64 ->
+                            val thumb = com.vladimir.messenger.ui.components.AvatarBitmaps
+                                .rememberAvatar(b64)
+                            Box(
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                            ) {
+                                if (thumb != null) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = thumb.asImageBitmap(),
+                                        contentDescription = "Фото ${index + 1}",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
+                                if (imagesEditable) {
+                                    IconButton(
+                                        onClick = {
+                                            images = images.toMutableList().also { it.removeAt(index) }
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(24.dp)
+                                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp)),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Убрать фото",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
-                        onClick = { picker.launch("image/*") },
-                        enabled = !preparing && !creating,
-                    ) {
-                        Text(if (imageB64 == null) "Прикрепить фото" else "Заменить фото")
+                if (imagesEditable) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = { picker.launch("image/*") },
+                            enabled = !preparing && !creating && images.size < InlineImage.MAX_PHOTOS,
+                        ) {
+                            Text(
+                                if (images.isEmpty()) "Прикрепить фото" else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
+                            )
+                        }
+                        if (preparing) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        }
                     }
-                    if (imageB64 != null) {
-                        TextButton(onClick = { imageB64 = null }) { Text("Убрать") }
+                    overflowHint?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    if (preparing) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    }
+                } else if (images.isNotEmpty()) {
+                    Text(
+                        "Фотографии при правке не меняются",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onPublish(text, imageB64) },
-                enabled = (text.isNotBlank() || imageB64 != null) && !creating && !preparing,
-            ) { Text("Опубликовать") }
+                onClick = { onConfirm(text, images) },
+                enabled = (text.isNotBlank() || images.isNotEmpty()) && !creating && !preparing,
+            ) { Text(confirmLabel) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }

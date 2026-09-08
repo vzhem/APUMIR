@@ -54,6 +54,16 @@ object GroupWire {
     const val KIND_WHOIS = "who"
     /** Аватар участника: маленький JPEG в base64. */
     const val KIND_AVAT = "avat"
+    /**
+     * Правка сообщения (поста канала). Принимается от автора сообщения и от
+     * владельца группы; остальные пакеты правки отбрасываются.
+     */
+    const val KIND_EDIT = "edit"
+    /**
+     * «Пришлите последние посты»: вступивший позже просит владельца канала
+     * прислать тексты и фотографии последних постов, а не только список тем.
+     */
+    const val KIND_POSTS_REQUEST = "preq"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -81,6 +91,40 @@ object GroupWire {
              * сообщение - сразу знаешь, кто написал.
              */
             val senderName: String = "",
+            /**
+             * Настоящий автор, если сообщение пересылает не он.
+             *
+             * Владелец канала досылает опоздавшему подписчику старые посты от
+             * своего имени, но написать их мог администратор. Пустое поле -
+             * автор и есть отправитель (все конверты старого образца).
+             */
+            val authorId: String = "",
+            /**
+             * Исходное время сообщения при досылке старых постов; 0 у живых
+             * сообщений. Без него пост недельной давности показывался бы
+             * опоздавшему как написанный только что.
+             */
+            val sentAtMs: Long = 0L,
+        ) : Packet()
+
+        /** Правка текста сообщения: новый текст ложится под тот же id. */
+        data class Edit(
+            val groupId: String,
+            val topicId: String,
+            val messageId: String,
+            val text: String,
+        ) : Packet()
+
+        /**
+         * Просьба прислать последние [limit] постов канала целиком.
+         *
+         * [have] - темы, чьи посты у просящего уже есть: владелец их не шлёт,
+         * иначе каждый запуск приложения гонял бы по сети одни и те же фото.
+         */
+        data class PostsRequest(
+            val groupId: String,
+            val limit: Int,
+            val have: List<String> = emptyList(),
         ) : Packet()
 
         data class TopicCreated(
@@ -231,13 +275,32 @@ object GroupWire {
         text: String,
         messageId: String = "",
         senderName: String = "",
+        authorId: String = "",
+        sentAtMs: Long = 0L,
     ): String {
         val base = "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(text)}"
         // Поля добавляются по порядку и только если есть что добавить:
         // конверт из 5 частей понимают даже телефоны с прошлой версией.
-        if (messageId.isBlank() && senderName.isBlank()) return base
+        val relayed = authorId.isNotBlank() || sentAtMs > 0L
+        if (messageId.isBlank() && senderName.isBlank() && !relayed) return base
         val withId = "$base|${encode(messageId)}"
-        return if (senderName.isBlank()) withId else "$withId|${encode(senderName)}"
+        if (senderName.isBlank() && !relayed) return withId
+        val withName = "$withId|${encode(senderName)}"
+        // Восьмое и девятое поля (автор и исходное время) - только при
+        // досылке старых постов: конверт из 7 частей по-прежнему понимают
+        // телефоны с прошлой версией, а 9-полевой они молча отбрасывают.
+        return if (!relayed) withName else "$withName|${encode(authorId)}|${sentAtMs.coerceAtLeast(0L)}"
+    }
+
+    /** Правка сообщения: тот же id, новый текст. */
+    fun buildEdit(groupId: String, topicId: String, messageId: String, text: String): String =
+        "$PREFIX|$KIND_EDIT|$groupId|$topicId|${encode(messageId)}|${encode(text)}"
+
+    /** «Пришлите последние limit постов, кроме этих» - владельцу канала. */
+    fun buildPostsRequest(groupId: String, limit: Int, have: List<String> = emptyList()): String {
+        val base = "$PREFIX|$KIND_POSTS_REQUEST|$groupId|$limit"
+        if (have.isEmpty()) return base
+        return base + "|" + have.joinToString(",") { encode(it) }
     }
 
     /** «Представься» - адресный запрос имени и аватара. */
@@ -345,12 +408,35 @@ object GroupWire {
         if (groupId.isBlank()) return null
 
         return when (parts[1]) {
-            KIND_MESSAGE -> if (parts.size in 5..7) {
+            KIND_MESSAGE -> if (parts.size in 5..9) {
                 val body = decode(parts[4]) ?: return null
                 // Конверты старого образца приходили без id и без имени.
                 val senderMessageId = if (parts.size >= 6) decode(parts[5]).orEmpty() else ""
                 val senderName = if (parts.size >= 7) decode(parts[6]).orEmpty() else ""
-                Packet.Message(groupId, parts[3], body, senderMessageId, senderName)
+                val authorId = if (parts.size >= 8) decode(parts[7]).orEmpty() else ""
+                val sentAtMs = if (parts.size >= 9) parts[8].toLongOrNull() ?: 0L else 0L
+                Packet.Message(groupId, parts[3], body, senderMessageId, senderName, authorId, sentAtMs)
+            } else {
+                null
+            }
+
+            KIND_EDIT -> if (parts.size == 6) {
+                val editedId = decode(parts[4]) ?: return null
+                val body = decode(parts[5]) ?: return null
+                if (editedId.isBlank()) null else Packet.Edit(groupId, parts[3], editedId, body)
+            } else {
+                null
+            }
+
+            KIND_POSTS_REQUEST -> if (parts.size == 4 || parts.size == 5) {
+                val limit = parts[3].toIntOrNull() ?: return null
+                if (limit <= 0) return null
+                val have = if (parts.size == 5 && parts[4].isNotBlank()) {
+                    parts[4].split(',').mapNotNull { cell -> decode(cell)?.takeIf { it.isNotBlank() } }
+                } else {
+                    emptyList()
+                }
+                Packet.PostsRequest(groupId, limit, have)
             } else {
                 null
             }

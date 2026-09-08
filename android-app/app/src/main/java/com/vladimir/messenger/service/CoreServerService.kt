@@ -495,14 +495,19 @@ class CoreServerService : Service() {
                     // Простая логика: если сообщение появилось в последние 2 секунды и входящее
                     val now = System.currentTimeMillis()
                     val recentIncoming = messages.filter { 
-                        !it.isFromMe && (now - it.timestamp) < 2000 
+                        !it.isFromMe && (now - it.timestamp) < 2000 &&
+                            // Куски фотографий поста - служебные строки, а не
+                            // сообщения: без этого фильтра один пост с шестью
+                            // фото давал полтора десятка уведомлений с «буквами».
+                            !com.vladimir.messenger.util.InlineImage.isPart(it.content)
                     }
                     for (msg in recentIncoming) {
                         try {
                             notificationHelper.showMessageNotification(
                                 chatId = msg.chatId,
                                 senderId = msg.senderId,
-                                messageText = msg.content.take(200),
+                                messageText = com.vladimir.messenger.util.InlineImage
+                                    .stripImage(msg.content).ifBlank { "Фото" }.take(200),
                                 isIncoming = true
                             )
                         } catch (e: Exception) {

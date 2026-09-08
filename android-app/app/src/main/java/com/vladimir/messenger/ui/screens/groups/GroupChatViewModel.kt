@@ -68,6 +68,10 @@ class GroupChatViewModel @Inject constructor(
         observeTopics()
         // Вступивший позже не застал создание тем - просим список у владельца.
         viewModelScope.launch { groupRepository.requestTopics(groupId) }
+        // В канале ещё и сами посты: по ссылке на пост человек попадает сюда,
+        // минуя ленту, и без этого видел бы пустые комментарии к пустому посту.
+        // Репозиторий сам молчит, если это группа, владелец или уже просили.
+        viewModelScope.launch { runCatching { groupRepository.requestPosts(groupId) } }
         observeReactions()
         // Закрепы подписываем на выбранную тему, а не на всю группу:
         // observePinned(topicId) стартует вместе с лентой сообщений.
@@ -146,7 +150,10 @@ class GroupChatViewModel @Inject constructor(
     private fun observeMessages(topicId: String) {
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
-            groupRepository.observeTopicMessages(groupId, topicId).collect { list ->
+            groupRepository.observeTopicMessages(groupId, topicId).collect { all ->
+                // Куски фотографий поста - служебные строки, а не сообщения:
+                // в комментариях их не показываем (галерея собирает их в ленте).
+                val list = all.filter { !com.vladimir.messenger.util.InlineImage.isPart(it.content) }
                 _uiState.update { it.copy(messages = list) }
                 // Экран открыт - значит тема прочитана. Вызываем на каждом
                 // обновлении, чтобы счётчик гас и на новых сообщениях.

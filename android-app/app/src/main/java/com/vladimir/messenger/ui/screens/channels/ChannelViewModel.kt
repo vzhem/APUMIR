@@ -7,6 +7,7 @@ import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.util.InlineImage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,17 +24,24 @@ import javax.inject.Inject
  * сообщение темы и есть текст поста. Остальные сообщения темы - комментарии,
  * поэтому их число считается как «всего сообщений минус один».
  *
+ * Фотографии поста едут отдельными сообщениями-кусками той же темы (см.
+ * [InlineImage.PART_MARKER]); лента склеивает их в [images], а в комментариях
+ * и счётчике они не участвуют.
+ *
  * Порядок ленты - от старых к новым, как в переписке: свежий пост всегда
  * внизу, и экран при открытии прокручивается туда.
  */
 data class ChannelPost(
     val topicId: String,
-    /** id самого сообщения-поста: к нему привязываются реакции. */
+    /** id самого сообщения-поста: к нему привязываются реакции и правка. */
     val messageId: String,
     val title: String,
     val text: String,
-    /** Прикреплённая к посту картинка (jpeg в base64) или null. */
-    val imageB64: String? = null,
+    /** Фотографии поста (jpeg в base64) по порядку; пусто, если фото нет. */
+    val images: List<String> = emptyList(),
+    /** Сколько фотографий обещано, но ещё не доехало целиком. */
+    val pendingPhotos: Int = 0,
+    val authorId: String = "",
     val authorName: String,
     val timeMs: Long,
     val comments: Int,
@@ -47,6 +55,8 @@ data class ChannelUiState(
     val posts: List<ChannelPost> = emptyList(),
     /** Писать посты может владелец и администраторы; комментарии - все. */
     val canPost: Boolean = false,
+    /** Мой идентификатор узла: по нему решается, можно ли править пост. */
+    val myId: String = "",
     val isLoading: Boolean = true,
     val creating: Boolean = false,
     val error: String? = null,
@@ -69,9 +79,17 @@ class ChannelViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChannelUiState(channelId = channelId))
     val uiState: StateFlow<ChannelUiState> = _uiState.asStateFlow()
 
+    /** Повторная просьба о постах после появления членства уже ушла. */
+    private var postsAskedAfterJoin = false
+
     init {
         observe()
         observeReactions()
+        // Вступивший позже не застал посты - просим у владельца последние
+        // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
+        viewModelScope.launch {
+            runCatching { groupRepository.requestPosts(channelId) }
+        }
     }
 
     /** Реакции канала: поток уже уведён на IO внутри репозитория. */
@@ -89,20 +107,23 @@ class ChannelViewModel @Inject constructor(
     }
 
     /**
-     * Сжать выбранную картинку в фоне и вернуть строку для поста.
-     * Пустой результат означает, что картинка не читается или не влезла.
+     * Сжать выбранные картинки в фоне и вернуть строки для поста (по порядку
+     * выбора). Нечитаемые и не влезшие картинки пропускаются, о них сообщаем.
      */
-    fun prepareImage(
+    fun prepareImages(
         context: android.content.Context,
-        uri: android.net.Uri,
-        onReady: (String?) -> Unit,
+        uris: List<android.net.Uri>,
+        onReady: (List<String>) -> Unit,
     ) {
         viewModelScope.launch {
             val encoded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.vladimir.messenger.util.InlineImage.compressUri(context, uri)
+                uris.mapNotNull { uri -> InlineImage.compressUri(context, uri) }
             }
-            if (encoded == null) {
-                _uiState.update { it.copy(error = "Картинку не удалось прикрепить") }
+            if (encoded.size < uris.size) {
+                val lost = uris.size - encoded.size
+                _uiState.update {
+                    it.copy(error = if (lost == 1) "Одну картинку не удалось прикрепить" else "Не удалось прикрепить картинок: $lost")
+                }
             }
             onReady(encoded)
         }
@@ -144,17 +165,30 @@ class ChannelViewModel @Inject constructor(
                 val byTopic = messages.groupBy { it.topicId.orEmpty() }
                 val posts = topics.mapNotNull { topic ->
                     val thread = byTopic[topic.id].orEmpty()
-                    val first = thread.firstOrNull() ?: return@mapNotNull null
+                    // Куски фотографий - не сообщения: пост это первое
+                    // ТЕКСТОВОЕ сообщение темы, комментарии - остальные текстовые.
+                    val texts = thread.filter { !InlineImage.isPart(it.content) }
+                    val first = texts.firstOrNull() ?: return@mapNotNull null
+                    val parts = thread.filter {
+                        InlineImage.isPart(it.content) && it.senderId == first.senderId
+                    }
+                    val images = ArrayList<String>()
+                    // Старый способ: одна картинка прямо в тексте поста.
+                    InlineImage.extractB64(first.content)?.let { images.add(it) }
+                    images.addAll(InlineImage.assemble(parts.map { it.content }))
+                    val promised = InlineImage.photoCount(first.content)
                     ChannelPost(
                         topicId = topic.id,
                         messageId = first.id,
                         title = topic.name,
-                        text = com.vladimir.messenger.util.InlineImage.stripImage(first.content),
-                        imageB64 = com.vladimir.messenger.util.InlineImage.extractB64(first.content),
+                        text = InlineImage.stripImage(first.content),
+                        images = images,
+                        pendingPhotos = (promised - images.size).coerceAtLeast(0),
+                        authorId = first.senderId,
                         authorName = names[first.senderId]?.takeIf { it.isNotBlank() }
                             ?: "Участник " + first.senderId.takeLast(4),
                         timeMs = first.timestamp,
-                        comments = (thread.size - 1).coerceAtLeast(0),
+                        comments = (texts.size - 1).coerceAtLeast(0),
                         views = viewCounts[topic.id] ?: 0,
                     )
                 }.sortedBy { it.timeMs }
@@ -163,6 +197,7 @@ class ChannelViewModel @Inject constructor(
                     channel = channel,
                     posts = posts,
                     canPost = GroupRole.isAdminOrOwner(me?.role ?: GroupRole.MEMBER),
+                    myId = me?.nodeId.orEmpty(),
                 )
             }.collect { snapshot ->
                 _uiState.update {
@@ -170,42 +205,49 @@ class ChannelViewModel @Inject constructor(
                         channel = snapshot.channel,
                         posts = snapshot.posts,
                         canPost = snapshot.canPost,
+                        myId = snapshot.myId,
                         isLoading = false,
                     )
+                }
+                // Только что вступили: карточка канала и членство появились
+                // уже после открытия экрана, и просьба из init ушла впустую.
+                // Просим ещё раз - один раз, когда канал стал «нашим».
+                if (snapshot.channel != null && snapshot.myId.isNotBlank() && !postsAskedAfterJoin) {
+                    postsAskedAfterJoin = true
+                    viewModelScope.launch { runCatching { groupRepository.requestPosts(channelId) } }
                 }
             }
         }
     }
 
-    /** То, что собирается из четырёх потоков одним пакетом. */
+    /** То, что собирается из пяти потоков одним пакетом. */
     private data class ChannelSnapshot(
         val channel: GroupSummary?,
         val posts: List<ChannelPost>,
         val canPost: Boolean,
+        val myId: String,
     )
 
     /**
-     * Новый пост: создаём тему и сразу пишем в неё текст.
+     * Новый пост: создаём тему и сразу пишем в неё текст, а следом - куски
+     * фотографий (до [InlineImage.MAX_PHOTOS]).
      *
      * Тема нужна, чтобы у поста было своё место для комментариев - ровно как
      * обсуждение под постом в Телеграме.
      */
-    fun createPost(text: String, imageB64: String? = null) {
-        val stripped = text.trim()
-        val body = if (imageB64.isNullOrBlank()) {
-            stripped
-        } else {
-            com.vladimir.messenger.util.InlineImage.attach(stripped, imageB64)
-        }
-        if (body.isEmpty()) return
+    fun createPost(text: String, photos: List<String> = emptyList()) {
+        val stripped = InlineImage.stripImage(text)
+        val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
+        if (stripped.isEmpty() && attached.isEmpty()) return
         _uiState.update { it.copy(creating = true, error = null) }
         viewModelScope.launch {
-            // Заголовок берём из ТЕКСТА, а не из служебной строки картинки.
-            val title = stripped.lineSequence().firstOrNull().orEmpty().trim().take(40)
+            // Заголовок берём из ТЕКСТА, а не из служебных строк картинок.
+            val title = stripped.lineSequence().firstOrNull().orEmpty().trim()
+                .take(GroupRepository.POST_TITLE_CHARS)
                 .ifBlank { "Пост" }
             groupRepository.createTopic(channelId, title)
                 .onSuccess { topic ->
-                    groupRepository.sendMessage(channelId, topic.id, body)
+                    groupRepository.sendMessage(channelId, topic.id, stripped, attached)
                         .onFailure { e ->
                             _uiState.update {
                                 it.copy(creating = false, error = e.message ?: "Не удалось опубликовать пост")
@@ -218,6 +260,26 @@ class ChannelViewModel @Inject constructor(
                         it.copy(creating = false, error = e.message ?: "Не удалось создать пост")
                     }
                 }
+        }
+    }
+
+    /**
+     * Изменить текст поста. Фотографии остаются прежними. Заголовок темы
+     * (первая строка) обновляется в репозитории вместе с текстом.
+     */
+    fun editPost(post: ChannelPost, newText: String) {
+        val words = InlineImage.stripImage(newText)
+        if (words.isEmpty() && post.images.isEmpty() && post.pendingPhotos == 0) {
+            _uiState.update { it.copy(error = "Пост не может быть пустым") }
+            return
+        }
+        _uiState.update { it.copy(creating = true, error = null) }
+        viewModelScope.launch {
+            groupRepository.editMessage(channelId, post.messageId, words)
+                .onFailure { e ->
+                    _uiState.update { it.copy(creating = false, error = e.message ?: "Не удалось изменить пост") }
+                }
+                .onSuccess { _uiState.update { it.copy(creating = false) } }
         }
     }
 
