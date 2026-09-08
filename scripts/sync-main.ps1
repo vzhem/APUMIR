@@ -79,13 +79,22 @@ if ($WorkBranch -eq '') {
 # have fetched the working branch above, so fetch it by name as well.
 & git fetch origin "$WorkBranch"
 if ($LASTEXITCODE -ne 0) { Write-Output "RESULT: could not fetch $WorkBranch."; Pop-Location; exit 1 }
+# The owner's clone usually has no local copy of the session branch: the
+# work was done in the sandbox. The fetch above put the tip in FETCH_HEAD, so
+# use the remote tip when there is no local branch. On 2026-09-08 this FATAL
+# left main on b7f7971 and v11.70.0 was tagged 19 commits behind v11.69.3.
 & git show-ref --verify --quiet "refs/heads/$WorkBranch"
-if ($LASTEXITCODE -ne 0) {
-    Write-Output "FATAL: local branch $WorkBranch does not exist."
-    Pop-Location
-    exit 1
+if ($LASTEXITCODE -eq 0) {
+    $WorkTip = (& git rev-parse $WorkBranch | Out-String).Trim()
+    $RemoteTip = (& git rev-parse FETCH_HEAD | Out-String).Trim()
+    if ($WorkTip -ne $RemoteTip) {
+        Write-Output "NOTE: local $WorkBranch ($WorkTip) differs from origin ($RemoteTip); using origin."
+        $WorkTip = $RemoteTip
+    }
+} else {
+    $WorkTip = (& git rev-parse FETCH_HEAD | Out-String).Trim()
+    Write-Output "no local branch $WorkBranch - using the tip fetched from origin."
 }
-$WorkTip = (& git rev-parse $WorkBranch | Out-String).Trim()
 Write-Output "working branch: $WorkBranch"
 Write-Output "working tip:    $WorkTip"
 

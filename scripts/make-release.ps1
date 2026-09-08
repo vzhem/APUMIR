@@ -104,7 +104,30 @@ try {
             exit 1
         }
     }
-    Write-Output "tag to create: $Version on $Head"
+    # The tag must not point behind the previous release or behind origin/main.
+    # On 2026-09-08 sync-main had failed, main sat 19 commits behind v11.69.3
+    # (database schema 15 instead of 17) and v11.70.0 was tagged on it: with
+    # fallbackToDestructiveMigration a downgrade wipes the database on every
+    # phone that installs it. This check makes that impossible.
+    if ($null -ne $Highest) {
+        & git merge-base --is-ancestor "$HighestName^{commit}" $Head 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Output "FATAL: HEAD $Head does not contain $HighestName."
+            Write-Output "A release tagged here would be OLDER than the one people already run,"
+            Write-Output "and a database downgrade wipes their messages. Bring main up first:"
+            Write-Output '  powershell -NoProfile -ExecutionPolicy Bypass -File C:\APU-M8\scripts\sync-main.ps1 -WorkBranch <branch>'
+            exit 1
+        }
+    }
+    & git fetch origin main 2>$null | Out-Null
+    $RemoteMain = (& git rev-parse FETCH_HEAD | Out-String).Trim()
+    & git merge-base --is-ancestor $RemoteMain $Head 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "FATAL: HEAD $Head does not contain origin/main ($RemoteMain)."
+        Write-Output 'The local checkout is behind the server. Run sync-main.ps1 (or git pull --ff-only) first.'
+        exit 1
+    }
+    Write-Output "tag to create: $Version on $Head (contains $HighestName and origin/main)"
 
     # ---- gate ---------------------------------------------------------------
     Write-Step 'groups gate (unit tests, compile, assemble, androidTest, schema)'
