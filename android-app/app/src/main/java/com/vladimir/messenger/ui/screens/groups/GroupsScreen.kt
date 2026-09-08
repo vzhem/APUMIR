@@ -134,10 +134,16 @@ fun GroupsScreen(
     }
     var showJoin by remember { mutableStateOf(false) }
 
+    // Входим по ссылке РОВНО ОДИН раз за жизнь экрана - по той же причине,
+    // что и с create: параметр остаётся в маршруте, и при возврате из поста
+    // вход повторялся, а окно «Вы подписаны на канал» всплывало снова
+    // (владелец, 2026-09-08). rememberSaveable переживает уход экрана в стек.
+    var joinHandled by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(joinLink) {
         // Проверяем, что это действительно ссылка: в параметр может прилететь
         // шаблон маршрута или посторонний текст - тогда нечего и пытаться.
-        if (!joinLink.isNullOrBlank() && GroupInviteLinks.parseTarget(joinLink) != null) {
+        if (!joinHandled && !joinLink.isNullOrBlank() && GroupInviteLinks.parseTarget(joinLink) != null) {
+            joinHandled = true
             viewModel.joinByLink(joinLink)
         }
     }

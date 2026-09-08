@@ -614,7 +614,12 @@ fun MessengerNavGraph(
                     navController.navigate(Screen.Channel.createRoute(channelId))
                 },
                 onOpenPost = { channelId, topicId ->
-                    // Ссылка вела к записи: открываем её обсуждение сразу.
+                    // Ссылка вела к записи. Под неё кладём ленту канала:
+                    // «Назад» из поста ведёт ко всем постам, а не обратно в
+                    // раздел с окном входа (владелец, 2026-09-08). Оба
+                    // перехода в одном кадре - лента не мелькает, а
+                    // собирается только когда до неё дойдут.
+                    navController.navigate(Screen.Channel.createRoute(channelId))
                     navController.navigate(Screen.GroupChat.createTopicRoute(channelId, topicId))
                 },
                 onBackClick = { navController.popBackStack() },

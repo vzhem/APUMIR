@@ -8,7 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,10 +32,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 
 /** Одна кнопка нижней панели. */
 data class ApuBottomItem(
@@ -65,7 +68,7 @@ fun ApuBottomBar(
     modifier: Modifier = Modifier,
 ) {
     if (items.isEmpty()) return
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
@@ -78,23 +81,46 @@ fun ApuBottomBar(
                 shape = RoundedCornerShape(22.dp),
             ),
     ) {
+        // Кнопкам достаётся поровну, а подписи - один кегль на всех, такой,
+        // чтобы самая длинная уместилась целиком. Раньше ширина шла по
+        // содержимому: «Сообщества» отобрало место у соседа, и «Настройки»
+        // превратились в «Настрой…» (владелец, 2026-09-08). Считаем заранее
+        // по метрикам текста, а не подгоняем по факту - без мигания.
+        val measurer = rememberTextMeasurer()
+        val labelStyle = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium)
+        val density = LocalDensity.current
+        val slot = (maxWidth - ROW_PADDING * 2) / items.size - BUTTON_PADDING * 2
+        val titles = items.joinToString("\u0000") { it.title }
+        val labelScale = remember(titles, maxWidth, density, labelStyle) {
+            val slotPx = with(density) { slot.toPx() }
+            val widest = items.maxOf {
+                measurer.measure(text = it.title, style = labelStyle, softWrap = false).size.width
+            }
+            if (widest <= slotPx) 1f else (slotPx / widest * 0.98f).coerceAtLeast(MIN_LABEL_SCALE)
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
+                .padding(horizontal = ROW_PADDING, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             for (item in items) {
-                BottomButton(item)
+                BottomButton(item, labelScale, Modifier.weight(1f))
             }
         }
     }
 }
 
+private val ROW_PADDING = 4.dp
+private val BUTTON_PADDING = 4.dp
+
+/** Мельче этого подпись не делаем: лучше многоточие, чем нечитаемая строка. */
+private const val MIN_LABEL_SCALE = 0.7f
+
 /** Кнопка с подписью: при нажатии слегка проседает, как настоящая клавиша. */
 @Composable
-private fun BottomButton(item: ApuBottomItem) {
+private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modifier = Modifier) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -110,7 +136,7 @@ private fun BottomButton(item: ApuBottomItem) {
         Color.Transparent
     }
     Column(
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .background(highlight)
             .clickable(
@@ -118,7 +144,7 @@ private fun BottomButton(item: ApuBottomItem) {
                 indication = null,
                 onClick = item.onClick,
             )
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .padding(horizontal = BUTTON_PADDING, vertical = 4.dp)
             .scale(scale),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -141,12 +167,17 @@ private fun BottomButton(item: ApuBottomItem) {
             )
         }
         Spacer(Modifier.height(2.dp))
+        val base = MaterialTheme.typography.labelSmall
         Text(
             item.title,
-            style = MaterialTheme.typography.labelSmall,
+            style = base.copy(
+                fontSize = base.fontSize * labelScale,
+                letterSpacing = if (base.letterSpacing.isSpecified) base.letterSpacing * labelScale else base.letterSpacing,
+            ),
             fontWeight = FontWeight.Medium,
             color = Color(0xFF1E2430),
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
