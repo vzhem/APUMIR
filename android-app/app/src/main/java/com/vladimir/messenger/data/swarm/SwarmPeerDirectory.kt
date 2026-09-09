@@ -36,15 +36,16 @@ class SwarmPeerDirectory @Inject constructor(
     private var cachedAtMs = 0L
 
     /** Текущий снимок (из кэша или свежий). Никогда не бросает: в худшем случае - прежний или пустой. */
-    suspend fun knowledge(nowMs: Long = System.currentTimeMillis()): PeerKnowledge =
-        mutex.withLock {
-            if (cachedAtMs != 0L && nowMs - cachedAtMs < TTL_MS) return cached
+    suspend fun knowledge(nowMs: Long = System.currentTimeMillis()): PeerKnowledge {
+        return mutex.withLock {
+            if (cachedAtMs != 0L && nowMs - cachedAtMs < TTL_MS) return@withLock cached
             cached = runCatching { collect(nowMs) }
                 .onFailure { Log.w(TAG, "peer knowledge unavailable: ${it.message}") }
                 .getOrDefault(cached)
             cachedAtMs = nowMs
             cached
         }
+    }
 
     /** Ярус одного узла - для отладки и экрана «Узлы сети». */
     suspend fun tierOf(nodeId: String): PeerTier = SwarmPolicy.tierOf(nodeId, knowledge())
@@ -54,7 +55,9 @@ class SwarmPeerDirectory @Inject constructor(
         SwarmPolicy.order(candidates, knowledge())
 
     /** Забыть кэш: после добавления контакта или смены роли, если нужно сразу. */
-    suspend fun invalidate() = mutex.withLock { cachedAtMs = 0L }
+    suspend fun invalidate() {
+        mutex.withLock { cachedAtMs = 0L }
+    }
 
     private suspend fun collect(nowMs: Long): PeerKnowledge {
         val contacts = contactDao.allIds().filter { it.isNotBlank() }.toHashSet()

@@ -65,23 +65,32 @@ object SwarmSettings {
     }
 
     /** Мобильный интернет или включённая «Экономия трафика». */
-    fun isMetered(context: Context): Boolean = runCatching {
-        val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            ?: return false
-        cm.isActiveNetworkMetered ||
-            cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENFORCED
-    }.getOrDefault(false)
+    fun isMetered(context: Context): Boolean {
+        return try {
+            val cm = context.applicationContext
+                .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+            cm.isActiveNetworkMetered ||
+                cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENFORCED
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     /** Заряд ниже порога и телефон не на зарядке. */
-    fun isLowPower(context: Context): Boolean = runCatching {
-        val app = context.applicationContext
-        val status: Intent = app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            ?: return false
-        val plugged = status.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-        if (plugged) return false
-        val level = status.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-        val scale = status.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        if (level < 0 || scale <= 0) return false
-        level * 100 / scale < SwarmPolicy.LOW_BATTERY_PERCENT
-    }.getOrDefault(false)
+    fun isLowPower(context: Context): Boolean {
+        return try {
+            val status: Intent = context.applicationContext
+                .registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                ?: return false
+            val plugged = status.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+            if (plugged) return false
+            val level = status.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = status.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            if (level < 0 || scale <= 0) return false
+            level * 100 / scale < SwarmPolicy.LOW_BATTERY_PERCENT
+        } catch (_: Exception) {
+            false
+        }
+    }
 }

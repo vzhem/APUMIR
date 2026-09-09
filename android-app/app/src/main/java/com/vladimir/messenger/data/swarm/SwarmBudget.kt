@@ -41,14 +41,22 @@ class SwarmBudget(
     /** Дождаться жетона (содержимое) или забрать его, если он есть (служебное). */
     suspend fun acquire(lane: SwarmLane): Boolean {
         while (true) {
-            val waitMs = mutex.withLock {
+            // Отрицательное значение - решение принято без ожидания:
+            // -1 = жетон взят, -2 = служебный пакет отброшен.
+            val waitMs: Long = mutex.withLock {
                 val current = limits()
                 refill(clock(), current)
-                if (take(lane)) return true
-                if (lane == SwarmLane.SIGNAL) return false
-                millisUntilNextToken(current)
+                when {
+                    take(lane) -> TOKEN_TAKEN
+                    lane == SwarmLane.SIGNAL -> SIGNAL_DROPPED
+                    else -> millisUntilNextToken(current)
+                }
             }
-            sleep(waitMs)
+            when (waitMs) {
+                TOKEN_TAKEN -> return true
+                SIGNAL_DROPPED -> return false
+                else -> sleep(waitMs)
+            }
         }
     }
 
@@ -107,6 +115,8 @@ class SwarmBudget(
     }
 
     companion object {
+        private const val TOKEN_TAKEN = -1L
+        private const val SIGNAL_DROPPED = -2L
         const val MINUTE_MS = 60_000.0
         /** Не крутиться впустую и не спать дольше, чем нужно для одного жетона. */
         const val MIN_WAIT_MS = 20L
