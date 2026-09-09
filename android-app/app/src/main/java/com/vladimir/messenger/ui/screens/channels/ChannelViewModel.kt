@@ -283,7 +283,7 @@ class ChannelViewModel @Inject constructor(
         }
     }
 
-    /** Переслать пост канала себе в «Избранное». */
+    /** Переслать пост канала себе в «Избранное» - с текстом и фотографиями. */
     fun savePostToFavorites(post: ChannelPost) {
         val source = _uiState.value.channel?.title.orEmpty()
         val body = if (post.title.isBlank()) post.text else post.title + "\n\n" + post.text
@@ -296,8 +296,39 @@ class ChannelViewModel @Inject constructor(
                     id = channelId,
                     topicId = post.topicId,
                 ),
+                photos = post.images,
             )
             _uiState.update { it.copy(error = "Добавлено в избранное") }
+        }
+    }
+
+    /**
+     * Репост поста в другое приложение: текст, ссылка «Открыть в APU» и все
+     * фотографии поста файлами. Подготовка (ссылка из базы, запись jpeg в
+     * кэш) идёт в фоне, меню открывается по готовности.
+     */
+    fun sharePost(context: android.content.Context, post: ChannelPost) {
+        val app = context.applicationContext
+        viewModelScope.launch {
+            val link = postLink(post.topicId)
+            val title = post.title.ifBlank { "Пост" }
+            val text = buildString {
+                append(title)
+                if (post.text.isNotBlank() && post.text != title) append("\n\n").append(post.text)
+                if (link != null) append("\n\nОткрыть в APU:\n").append(link)
+            }
+            val uris = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    com.vladimir.messenger.util.PhotoShare.writeJpegs(app, post.images, post.topicId)
+                }.getOrDefault(emptyList())
+            }
+            if (post.images.isNotEmpty() && uris.isEmpty()) {
+                _uiState.update { it.copy(error = "Фото не удалось подготовить, отправляем текст") }
+            }
+            val intent = com.vladimir.messenger.util.PhotoShare.buildIntent(text, uris)
+            if (!com.vladimir.messenger.util.PhotoShare.open(app, intent, "Поделиться постом")) {
+                _uiState.update { it.copy(error = "Не удалось поделиться") }
+            }
         }
     }
 

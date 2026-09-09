@@ -8,6 +8,15 @@ on:
 permissions:
   contents: write
 
+# Один тег иногда порождает ДВА запуска (GitHub дважды доставляет событие
+# push тега - так было с v11.70.2). Группа concurrency ставит второй запуск
+# в очередь; когда первый опубликует релиз, второй увидит его в job `check`
+# и не станет собирать заново. cancel-in-progress выключен нарочно: обрывать
+# первый запуск на середине сборки нельзя.
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   check:
     name: Skip auto-build if Release already exists

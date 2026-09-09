@@ -63,7 +63,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,7 +71,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -101,9 +99,6 @@ fun ChannelScreen(
     // Пост, который сейчас правят (автор или владелец канала).
     var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
     val context = LocalContext.current
-    // Ссылку на пост создаёт репозиторий (запрос к базе), поэтому «Поделиться»
-    // работает в корутине, а не прямо в обработчике нажатия.
-    val shareScope = rememberCoroutineScope()
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -247,25 +242,8 @@ fun ChannelScreen(
                                 onEdit = { editingPost = post },
                                 onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
                                 onSaveToFavorites = { viewModel.savePostToFavorites(post) },
-                                onSharePost = {
-                                    shareScope.launch {
-                                        val link = viewModel.postLink(post.topicId)
-                                        if (link != null) {
-                                            val title = post.title.ifBlank { "Пост" }
-                                            val send = android.content.Intent().apply {
-                                                action = android.content.Intent.ACTION_SEND
-                                                type = "text/plain"
-                                                putExtra(
-                                                    android.content.Intent.EXTRA_TEXT,
-                                                    "$title\n\n${post.text}\n\nОткрыть в APU:\n$link",
-                                                )
-                                            }
-                                            context.startActivity(
-                                                android.content.Intent.createChooser(send, "Поделиться постом")
-                                            )
-                                        }
-                                    }
-                                },
+                                // Репост: текст, ссылка и фотографии файлами.
+                                onSharePost = { viewModel.sharePost(context, post) },
                                 reactions = uiState.reactions[post.messageId].orEmpty(),
                                 onToggleReaction = { emoji ->
                                     viewModel.toggleReaction(post.messageId, emoji)

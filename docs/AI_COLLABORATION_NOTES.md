@@ -8590,3 +8590,42 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   проверен снаружи (`fetch_page`) - отдаёт v11.70.2. Workflow всё ещё
   старый: владелец так и не скопировал `scripts/ci/build-release.yml`.
 
+- **2026-09-08 (раунд 100) — репост с фото, concurrency в CI, проект роя.**
+  Песочница после релиза откатилась на `91916fb` с чужой правкой манифеста
+  - восстановлено `git reset --hard origin/arena/01a07cda-apumir`
+  (`a022166`), ничего не потеряно (всё было на origin). Владелец подтвердил:
+  6 фото прикрепляются; попросил (1) команду для установки нового workflow,
+  (2) репост с фотографиями, (3) раздачу «как торрент» для 10 000+.
+  **Репост.** Раньше «Поделиться» слал `text/plain` (заголовок, текст,
+  ссылка). Теперь `ChannelViewModel.sharePost` → `PhotoShare.writeJpegs`
+  (base64 → `cache/shared/apu-<topic>-<n>.jpg`, путь `cache-path` уже был в
+  `file_paths.xml`) → `buildIntent` (`ACTION_SEND_MULTIPLE` при 2+ фото,
+  `image/jpeg`, `EXTRA_STREAM` + `ClipData` с `FLAG_GRANT_READ_URI_PERMISSION`
+  - без ClipData принимающее приложение не получает права на файлы) →
+  `createChooser` с `FLAG_ACTIVITY_NEW_TASK` (контекст приложения).
+  Подготовка в `Dispatchers.IO`. Если фото не записались - уходит текст и
+  человеку сообщается. «В избранное»: `saved_items.photos` (строки base64
+  через `\n`, `SavedItemEntity.photoList()/joinPhotos`), схема 17→18,
+  `MIGRATION_17_18` + регистрация в `AppModule`; `SavedScreen` рисует фото
+  над текстом (`AvatarBitmaps.rememberAvatar`, кэш) и показывает «Поделиться»
+  у записей с фото; `SavedViewModel.share` для текста с фото зовёт тот же
+  `PhotoShare`. `GroupChatViewModel.saveToFavorites` вырезает `APUIMG1` из
+  текста и кладёт картинку в `photos`. Тест `SavedItemPhotosTest` (порядок,
+  пустые строки, старая запись). Проверено чтением, не компилировалось.
+  **CI.** В `scripts/ci/build-release.yml` добавлена группа
+  `concurrency: build-release-${{ github.ref }}` без отмены: второй прогон по
+  тому же тегу ждёт первого и на `check` видит готовый релиз. Живой workflow
+  по-прежнему старый - владельцу дана команда PowerShell (скопировать файл
+  и запушить в `main`).
+  **Рой.** Написан `docs/CHANNEL_SWARM_DESIGN.md`: почему нынешний веер
+  упирается в ~200 подписчиков (190 000 отправок на пост из 6 фото,
+  roster не влезает в 16 КБ уже при ~130 участниках, просмотры/реакции
+  O(N²)); схема - подписанный манифест поста (`pman`, Ed25519 ключом
+  личности R0.5/S2), любой полный участник = сид, куски тянутся полосами
+  `pwant k/m` от m сидов, первая волна K=20 от владельца, раздача R=10 за
+  раунд, выборка соседей `peers` вместо полного roster, таблица
+  `post_manifests` (схема 19), три этапа. Подпись в Kotlin - библиотека
+  `net.i2p.crypto:eddsa` до появления FFI подписи (биндинги uniffi
+  закоммичены и из песочницы не перегенерируются). Код не писался: ждём
+  четыре решения владельца (раздел 8 документа).
+

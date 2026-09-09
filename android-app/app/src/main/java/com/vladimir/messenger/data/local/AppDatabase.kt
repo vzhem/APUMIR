@@ -62,7 +62,7 @@ import com.vladimir.messenger.data.local.entity.SavedItemEntity
         ProfileHeartEntity::class,
         PostViewEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -417,7 +417,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** Обратная ссылка из «Избранного» на оригинал: пять новых колонок. */
+        /** Фотографии сохранённого поста канала - одной колонкой в «Избранном». */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `saved_items` ADD COLUMN `photos` TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
         /** Просмотры постов канала: по строке на читателя. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {

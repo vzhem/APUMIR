@@ -55,15 +55,23 @@ class SavedItemsRepository @Inject constructor(
 
     fun observeCount(): Flow<Int> = dao.observeCount()
 
-    /** Сохранить текст: заметку, пост канала или сообщение из группы. */
+    /**
+     * Сохранить текст: заметку, пост канала или сообщение из группы.
+     *
+     * @param photos фотографии поста (base64 jpeg, см. InlineImage) - они
+     *   ложатся в запись вместе с текстом, чтобы репост из «Избранного» и
+     *   сама запись показывали пост целиком, а не одни слова.
+     */
     suspend fun saveText(
         text: String,
         sourceTitle: String = "",
         /** Откуда сохранено, чтобы потом вернуться к оригиналу. */
         origin: SavedOrigin? = null,
+        photos: List<String> = emptyList(),
     ): SaveResult {
         val trimmed = text.trim()
-        if (trimmed.isEmpty()) return SaveResult.FileNotReady
+        val kept = photos.filter { it.isNotBlank() }
+        if (trimmed.isEmpty() && kept.isEmpty()) return SaveResult.FileNotReady
         dao.upsert(
             SavedItemEntity(
                 id = UUID.randomUUID().toString(),
@@ -76,6 +84,7 @@ class SavedItemsRepository @Inject constructor(
                 originTopicId = origin?.topicId.orEmpty(),
                 originName = origin?.name.orEmpty(),
                 originContactId = origin?.contactId.orEmpty(),
+                photos = SavedItemEntity.joinPhotos(kept),
             )
         )
         return SaveResult.Saved

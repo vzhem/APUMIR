@@ -210,14 +210,17 @@ class GroupChatViewModel @Inject constructor(
         val source = _uiState.value.group?.title.orEmpty()
         val topicId = _uiState.value.selectedTopicId.orEmpty()
         viewModelScope.launch {
+            // Вложенная картинка (служебная строка) уходит в фотографии
+            // записи, а не в её текст: иначе в избранном тянулись бы «буквы».
             savedItems.saveText(
-                text,
+                com.vladimir.messenger.util.InlineImage.stripImage(text),
                 if (source.isBlank()) "" else "Группа " + source,
                 com.vladimir.messenger.data.repository.SavedOrigin(
                     kind = com.vladimir.messenger.data.repository.SavedOrigin.GROUP,
                     id = groupId,
                     topicId = topicId,
                 ),
+                photos = listOfNotNull(com.vladimir.messenger.util.InlineImage.extractB64(text)),
             )
             _uiState.update { it.copy(error = "Добавлено в избранное") }
         }

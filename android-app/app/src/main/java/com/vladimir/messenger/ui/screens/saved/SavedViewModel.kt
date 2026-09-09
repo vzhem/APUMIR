@@ -68,8 +68,12 @@ class SavedViewModel @Inject constructor(
         return fileTransferRouter.previewFileFor(transfer)
     }
 
-    /** Отдать файл системному меню «Поделиться». */
+    /** Отдать файл (или сохранённый пост с фотографиями) системному меню «Поделиться». */
     fun share(item: SavedItemEntity) {
+        if (item.kind != SavedItemsRepository.KIND_FILE) {
+            sharePost(item)
+            return
+        }
         viewModelScope.launch {
             val transfer = transferOf(item)
             if (transfer == null) {
@@ -97,6 +101,21 @@ class SavedViewModel @Inject constructor(
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }.onFailure {
+                _uiState.update { st -> st.copy(message = "Не удалось поделиться") }
+            }
+        }
+    }
+
+    /** Сохранённый пост канала: текст подписью, фотографии - файлами. */
+    private fun sharePost(item: SavedItemEntity) {
+        viewModelScope.launch {
+            val uris = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    com.vladimir.messenger.util.PhotoShare.writeJpegs(appContext, item.photoList(), item.id)
+                }.getOrDefault(emptyList())
+            }
+            val intent = com.vladimir.messenger.util.PhotoShare.buildIntent(item.text, uris)
+            if (!com.vladimir.messenger.util.PhotoShare.open(appContext, intent, "Поделиться")) {
                 _uiState.update { st -> st.copy(message = "Не удалось поделиться") }
             }
         }

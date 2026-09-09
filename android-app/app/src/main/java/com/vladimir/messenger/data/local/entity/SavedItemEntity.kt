@@ -51,4 +51,21 @@ data class SavedItemEntity(
     /** Адрес собеседника: тоже часть маршрута личного чата. */
     @ColumnInfo(defaultValue = "")
     val originContactId: String = "",
-)
+    // ── Фотографии поста (схема 17 → 18) ─────────────────────────────────────
+    // Пост канала с фотографиями сохраняется вместе с ними: строки base64
+    // (см. InlineImage), разделённые переводом строки. Это единственное
+    // место, где «Избранное» хранит копию, а не ссылку: фото поста маленькие
+    // (до ~5 КБ каждое), а оригинал пропадает вместе с подпиской на канал.
+    @ColumnInfo(defaultValue = "")
+    val photos: String = "",
+) {
+    /** Фотографии по порядку; пусто, если их нет. Функция, а не свойство: Room не должен видеть в ней колонку. */
+    fun photoList(): List<String> =
+        if (photos.isBlank()) emptyList() else photos.split('\n').filter { it.isNotBlank() }
+
+    companion object {
+        /** Собрать колонку из списка фотографий. */
+        fun joinPhotos(images: List<String>): String =
+            images.filter { it.isNotBlank() }.joinToString("\n")
+    }
+}

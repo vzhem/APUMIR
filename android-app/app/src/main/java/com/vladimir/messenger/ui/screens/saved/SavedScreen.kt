@@ -329,7 +329,26 @@ private fun SavedItemBubble(
                 }
             }
         } else {
-            Text(item.text, style = MaterialTheme.typography.bodyMedium)
+            // Пост канала с фотографиями: снимки идут первыми, как в ленте.
+            val photos = remember(item.id, item.photos) { item.photoList() }
+            photos.forEachIndexed { index, b64 ->
+                val bitmap = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(b64)
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Фото ${index + 1} из ${photos.size}",
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                            .padding(bottom = 6.dp)
+                            .clip(RoundedCornerShape(14.dp)),
+                    )
+                }
+            }
+            if (item.text.isNotBlank()) {
+                Text(item.text, style = MaterialTheme.typography.bodyMedium)
+            }
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -339,6 +358,16 @@ private fun SavedItemBubble(
                 color = ApuBubbleMutedColor,
                 modifier = Modifier.weight(1f),
             )
+            if (!isFile && item.photos.isNotBlank()) {
+                // Репост сохранённого поста дальше - вместе с фотографиями.
+                IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = "Поделиться",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
             if (isFile) {
                 IconButton(onClick = onExport, modifier = Modifier.size(34.dp)) {
                     Icon(
