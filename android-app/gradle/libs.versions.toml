@@ -62,6 +62,9 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
+# Ed25519 на чистой Java (RFC 8032): подпись манифестов постов канала тем же
+# семенем, что установлено в ядро. Убирается, когда ядро получит FFI подписи.
+eddsa = { group = "net.i2p.crypto", name = "eddsa", version = "0.3.0" }
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }

@@ -44,6 +44,7 @@ object AppModule {
                 AppDatabase.MIGRATION_15_16,
                 AppDatabase.MIGRATION_16_17,
                 AppDatabase.MIGRATION_17_18,
+                AppDatabase.MIGRATION_18_19,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -83,6 +84,14 @@ object AppModule {
 
     @Provides @Singleton
     fun provideFileExchangePeerDao(db: AppDatabase): FileExchangePeerDao = db.fileExchangePeerDao()
+
+    @Provides
+    fun providePostManifestDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.PostManifestDao =
+        db.postManifestDao()
+
+    @Provides
+    fun providePostSignerDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.PostSignerDao =
+        db.postSignerDao()
 
     @Provides @Singleton
     fun provideGroupDao(db: AppDatabase): GroupDao = db.groupDao()

@@ -208,6 +208,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.zxing.core)
     implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation(libs.eddsa)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -90,12 +90,25 @@ object GroupsModule {
         avatarDao: AvatarDao,
         contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
         chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+        manifestDao: com.vladimir.messenger.data.local.dao.PostManifestDao,
+        signerDao: com.vladimir.messenger.data.local.dao.PostSignerDao,
+        directory: SwarmPeerDirectory,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
         messageDao = messageDao,
         delivery = delivery,
         directoryDao = directoryDao,
+        // Рой постов (этап 1): манифесты, ключи подписантов, подпись ключом
+        // личности через Java-библиотеку eddsa (см. PostSigner), соседи по
+        // ярусам из того же справочника, что и очередь веера.
+        manifestDao = manifestDao,
+        signerDao = signerDao,
+        signManifest = { manifest ->
+            com.vladimir.messenger.data.swarm.PostSigner.sign(context.applicationContext, manifest)
+        },
+        myPostKey = { com.vladimir.messenger.data.swarm.PostSigner.publicKey(context.applicationContext) },
+        orderPeers = { ids -> runCatching { directory.order(ids) }.getOrDefault(ids) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

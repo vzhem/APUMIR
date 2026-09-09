@@ -38,6 +38,10 @@ import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
 import com.vladimir.messenger.data.local.entity.PostViewEntity
 import com.vladimir.messenger.data.local.entity.ProfileHeartEntity
 import com.vladimir.messenger.data.local.entity.SavedItemEntity
+import com.vladimir.messenger.data.local.entity.PostManifestEntity
+import com.vladimir.messenger.data.local.entity.PostSignerEntity
+import com.vladimir.messenger.data.local.dao.PostManifestDao
+import com.vladimir.messenger.data.local.dao.PostSignerDao
 
 @Database(
     entities = [
@@ -61,8 +65,10 @@ import com.vladimir.messenger.data.local.entity.SavedItemEntity
         SavedItemEntity::class,
         ProfileHeartEntity::class,
         PostViewEntity::class,
+        PostManifestEntity::class,
+        PostSignerEntity::class,
     ],
-    version = 18,
+    version = 19,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -80,6 +86,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun savedItemDao(): SavedItemDao
     abstract fun profileHeartDao(): ProfileHeartDao
     abstract fun postViewDao(): PostViewDao
+    abstract fun postManifestDao(): PostManifestDao
+    abstract fun postSignerDao(): PostSignerDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -413,6 +421,43 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_message_reactions_chatId` " +
                         "ON `message_reactions` (`chatId`)"
+                )
+            }
+        }
+
+        /** Манифесты постов канала (рой, этап 1): подписанный список текста и кусков фото. */
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `post_manifests` (" +
+                        "`messageId` TEXT NOT NULL, " +
+                        "`groupId` TEXT NOT NULL, " +
+                        "`topicId` TEXT NOT NULL, " +
+                        "`authorId` TEXT NOT NULL, " +
+                        "`sentAtMs` INTEGER NOT NULL, " +
+                        "`textSha` TEXT NOT NULL, " +
+                        "`parts` TEXT NOT NULL, " +
+                        "`revision` INTEGER NOT NULL, " +
+                        "`signerKey` TEXT NOT NULL, " +
+                        "`signature` TEXT NOT NULL, " +
+                        "`receivedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`messageId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_post_manifests_groupId` " +
+                        "ON `post_manifests` (`groupId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_post_manifests_topicId` " +
+                        "ON `post_manifests` (`topicId`)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `post_signers` (" +
+                        "`nodeId` TEXT NOT NULL, " +
+                        "`attestedBy` TEXT NOT NULL, " +
+                        "`publicKey` TEXT NOT NULL, " +
+                        "`updatedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`nodeId`, `attestedBy`))"
                 )
             }
         }

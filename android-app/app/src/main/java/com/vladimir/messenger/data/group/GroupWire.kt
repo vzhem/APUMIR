@@ -23,6 +23,9 @@ object GroupWire {
     /** Ограничение на длину конверта, чтобы один пакет не занимал всю очередь. */
     const val MAX_ENVELOPE_BYTES = 16 * 1024
 
+    /** Ключей в одном `pkeys`: владелец + до 15 администраторов. */
+    const val MAX_POST_KEYS = 16
+
     const val KIND_MESSAGE = "msg"
     const val KIND_TOPIC = "topic"
     const val KIND_JOIN_REQUEST = "req"
@@ -64,6 +67,19 @@ object GroupWire {
      * прислать тексты и фотографии последних постов, а не только список тем.
      */
     const val KIND_POSTS_REQUEST = "preq"
+    /**
+     * Манифест поста (рой, этап 1): текст и куски фото с хэшами, подпись
+     * автора. Позволяет принимать пост от любого участника, а не только от
+     * владельца. Старые телефоны вид не знают и молча отбрасывают.
+     */
+    const val KIND_POST_MANIFEST = "pman"
+    /**
+     * Ключи подписи постов: `pkeys|groupId|nodeId:b64(pubkey),…`. Узел шлёт
+     * свой ключ сам, владелец канала - свой и ключи администраторов.
+     */
+    const val KIND_POST_KEYS = "pkeys"
+    /** Просьба прислать ключи подписи: `pkreq|groupId`; отвечают владелец и администраторы. */
+    const val KIND_POST_KEYS_REQUEST = "pkreq"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -126,6 +142,22 @@ object GroupWire {
             val limit: Int,
             val have: List<String> = emptyList(),
         ) : Packet()
+
+        /**
+         * Манифест поста: см. [com.vladimir.messenger.data.swarm.PostManifest].
+         * Подпись здесь НЕ проверена - это делает приёмник.
+         */
+        data class PostManifest(
+            val manifest: com.vladimir.messenger.data.swarm.PostManifest,
+        ) : Packet()
+
+        /** Ключи подписи постов: пары «узел → открытый ключ Ed25519 (32 байта)». */
+        data class PostKeys(
+            val groupId: String,
+            val keys: List<Pair<String, ByteArray>>,
+        ) : Packet()
+
+        data class PostKeysRequest(val groupId: String) : Packet()
 
         data class TopicCreated(
             val groupId: String,
@@ -303,6 +335,35 @@ object GroupWire {
         return base + "|" + have.joinToString(",") { encode(it) }
     }
 
+    /**
+     * Манифест поста: `pman|groupId|topicId|b64(messageId)|b64(authorId)|sentAtMs|rev|
+     * hex(sha256 текста)|части|b64(pubkey)|b64(sig)`; части - `id:sha16b64,…`
+     * (id сообщений - UUID без запятых и двоеточий).
+     */
+    fun buildPostManifest(m: com.vladimir.messenger.data.swarm.PostManifest): String {
+        require(m.isSigned) { "manifest is not signed" }
+        val pm = com.vladimir.messenger.data.swarm.PostManifest
+        return "$PREFIX|$KIND_POST_MANIFEST|${m.groupId}|${m.topicId}|${encode(m.messageId)}|" +
+            "${encode(m.authorId)}|${m.sentAtMs}|${m.revision}|${pm.hex(m.textSha)}|${m.partsWire()}|" +
+            "${pm.b64(m.signerPublicKey)}|${pm.b64(m.signature)}"
+    }
+
+    fun buildPostKeysRequest(groupId: String): String = "$PREFIX|$KIND_POST_KEYS_REQUEST|$groupId"
+
+    /** Ключи подписи постов: не больше [MAX_POST_KEYS] пар, ключи ровно по 32 байта. */
+    fun buildPostKeys(groupId: String, keys: List<Pair<String, ByteArray>>): String {
+        val cells = keys.asSequence()
+            .filter { (nodeId, key) ->
+                nodeId.isNotBlank() && ':' !in nodeId && ',' !in nodeId && '|' !in nodeId &&
+                    key.size == com.vladimir.messenger.data.swarm.Ed25519.PUBLIC_KEY_BYTES
+            }
+            .take(MAX_POST_KEYS)
+            .joinToString(",") { (nodeId, key) ->
+                nodeId + ":" + com.vladimir.messenger.data.swarm.PostManifest.b64(key)
+            }
+        return "$PREFIX|$KIND_POST_KEYS|$groupId|$cells"
+    }
+
     /** «Представься» - адресный запрос имени и аватара. */
     fun buildWhoIs(requesterId: String): String = "$PREFIX|$KIND_WHOIS|$requesterId"
 
@@ -437,6 +498,66 @@ object GroupWire {
                     emptyList()
                 }
                 Packet.PostsRequest(groupId, limit, have)
+            } else {
+                null
+            }
+
+            KIND_POST_MANIFEST -> if (parts.size == 12) {
+                val pm = com.vladimir.messenger.data.swarm.PostManifest
+                val topicId = parts[3]
+                val messageId = decode(parts[4]) ?: return null
+                val authorId = decode(parts[5]) ?: return null
+                val sentAtMs = parts[6].toLongOrNull() ?: return null
+                val revision = parts[7].toIntOrNull() ?: return null
+                val textSha = pm.unhex(parts[8]) ?: return null
+                val manifestParts = pm.parseParts(parts[9]) ?: return null
+                val pubKey = pm.unb64(parts[10]) ?: return null
+                val sig = pm.unb64(parts[11]) ?: return null
+                if (topicId.isBlank() || messageId.isBlank() || authorId.isBlank() ||
+                    sentAtMs <= 0L || revision < 0 || textSha.size != 32 ||
+                    pubKey.size != com.vladimir.messenger.data.swarm.Ed25519.PUBLIC_KEY_BYTES ||
+                    sig.size != com.vladimir.messenger.data.swarm.Ed25519.SIGNATURE_BYTES
+                ) {
+                    null
+                } else {
+                    Packet.PostManifest(
+                        com.vladimir.messenger.data.swarm.PostManifest(
+                            groupId = groupId,
+                            topicId = topicId,
+                            messageId = messageId,
+                            authorId = authorId,
+                            sentAtMs = sentAtMs,
+                            textSha = textSha,
+                            parts = manifestParts,
+                            revision = revision,
+                            signerPublicKey = pubKey,
+                            signature = sig,
+                        ),
+                    )
+                }
+            } else {
+                null
+            }
+
+            KIND_POST_KEYS_REQUEST -> if (parts.size == 3) {
+                Packet.PostKeysRequest(groupId)
+            } else {
+                null
+            }
+
+            KIND_POST_KEYS -> if (parts.size == 4) {
+                val cells = parts[3].split(',').filter { it.isNotBlank() }
+                if (cells.size > MAX_POST_KEYS) return null
+                val keys = ArrayList<Pair<String, ByteArray>>(cells.size)
+                for (cell in cells) {
+                    val colon = cell.indexOf(':')
+                    if (colon <= 0) return null
+                    val key = com.vladimir.messenger.data.swarm.PostManifest.unb64(cell.substring(colon + 1))
+                        ?: return null
+                    if (key.size != com.vladimir.messenger.data.swarm.Ed25519.PUBLIC_KEY_BYTES) return null
+                    keys.add(cell.substring(0, colon) to key)
+                }
+                Packet.PostKeys(groupId, keys)
             } else {
                 null
             }

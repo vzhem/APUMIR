@@ -17,6 +17,13 @@ import com.vladimir.messenger.data.local.entity.GroupMemberEntity
 import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.local.dao.PostManifestDao
+import com.vladimir.messenger.data.local.dao.PostSignerDao
+import com.vladimir.messenger.data.local.entity.PostManifestEntity
+import com.vladimir.messenger.data.local.entity.PostSignerEntity
+import com.vladimir.messenger.data.swarm.Ed25519
+import com.vladimir.messenger.data.swarm.PostManifest
+import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,6 +84,20 @@ class GroupRepository(
      */
     private val backgroundScope: CoroutineScope =
         CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    /**
+     * Рой постов (этап 1, docs/CHANNEL_SWARM_DESIGN.md): манифесты постов,
+     * закреплённые ключи подписантов и подпись моих манифестов. Без
+     * хранилищ (null) всё работает по-старому: посты без манифестов, досылка
+     * только от владельца.
+     */
+    private val manifestDao: PostManifestDao? = null,
+    private val signerDao: PostSignerDao? = null,
+    /** Подписать манифест моим ключом личности; null - подпись недоступна. */
+    private val signManifest: (PostManifest) -> PostManifest? = { null },
+    /** Мой открытый ключ подписи (32 байта) или null. */
+    private val myPostKey: () -> ByteArray? = { null },
+    /** Соседи по рою в порядке предпочтения (свои, проверенные, стабильные…). */
+    private val orderPeers: suspend (List<String>) -> List<String> = { it },
 ) {
 
     /**
@@ -674,6 +695,10 @@ class GroupRepository(
 
         val now = clock()
         val messageId = idFactory()
+        // Пост канала - первое сообщение своей темы; всё остальное в теме -
+        // комментарии, они роем не ходят и манифеста не получают.
+        val isChannelPost = group.isChannel && isAdmin &&
+            messageDao.countTopicMessages(groupId, topic.id) == 0
         messageDao.insertMessage(
             MessageEntity(
                 id = messageId,
@@ -750,6 +775,31 @@ class GroupRepository(
                 Log.i(TAG, "photo parts sent group=$groupId topic=${topic.id} parts=${partRows.size}")
             }
         }
+        // Рой: пост канала от владельца или администратора получает подписанный
+        // манифест. По нему подписчики принимают текст и куски от кого угодно и
+        // сами досылают пост опоздавшим. Обычные группы и личные сообщения роем
+        // не ходят.
+        if (isChannelPost) {
+            val manifest = signManifest(
+                PostManifest.build(
+                    groupId = groupId,
+                    topicId = topic.id,
+                    messageId = messageId,
+                    authorId = me,
+                    sentAtMs = now,
+                    text = body,
+                    parts = partRows.map { it.id to it.content },
+                ),
+            )
+            if (manifest != null) {
+                storeManifest(manifest)
+                backgroundScope.launch {
+                    runCatching {
+                        broadcast(groupId, GroupWire.buildPostManifest(manifest), excludeSelf = true)
+                    }.onFailure { Log.w(TAG, "manifest fanout failed: ${it.message}") }
+                }
+            }
+        }
         Log.i(
             TAG,
             "group message id=$messageId group=$groupId topic=${topic.id} parts=${partRows.size} " +
@@ -794,6 +844,35 @@ class GroupRepository(
             GroupWire.buildEdit(groupId, message.topicId.orEmpty(), messageId, words),
             excludeSelf = true,
         )
+        // Рой: у поста с манифестом после правки другой хэш текста. Автор
+        // подписывает новый манифест (правка +1), иначе сиды перестали бы
+        // принимать исправленный текст. Владелец, правящий чужой пост, свой
+        // манифест выпустить не может (ключ автора не его) - такой пост
+        // дальше раздаёт только он сам, как до роя.
+        val known = manifestDao?.get(messageId)
+        if (known != null && message.senderId == me) {
+            val parts = PostManifest.parseParts(known.parts).orEmpty()
+            val manifest = signManifest(
+                PostManifest(
+                    groupId = groupId,
+                    topicId = known.topicId,
+                    messageId = messageId,
+                    authorId = me,
+                    sentAtMs = known.sentAtMs,
+                    textSha = PostManifest.sha256(content),
+                    parts = parts,
+                    revision = known.revision + 1,
+                ),
+            )
+            if (manifest != null) {
+                storeManifest(manifest)
+                backgroundScope.launch {
+                    runCatching {
+                        broadcast(groupId, GroupWire.buildPostManifest(manifest), excludeSelf = true)
+                    }.onFailure { Log.w(TAG, "manifest re-sign fanout failed: ${it.message}") }
+                }
+            }
+        }
         Log.i(TAG, "message edited id=$messageId group=$groupId")
         return Result.success(Unit)
     }
@@ -841,17 +920,42 @@ class GroupRepository(
         // «Есть» - значит есть и текст поста, и все обещанные в нём фото:
         // пост с недоехавшими кусками просим целиком, лишние пакеты получатель
         // отбросит по id.
-        val have = groupDao.getTopics(groupId)
+        val recent = groupDao.getTopics(groupId)
             .sortedByDescending { it.createdAtMs }
             .take(BACKFILL_POSTS)
-            .filter { topic -> isPostComplete(groupId, topic.id) }
             .map { it.id }
+        val have = recent.filter { topicId -> isPostComplete(groupId, topicId) }
+        val missing = recent.filter { it !in have }
+        // Владельцу - просьба как раньше: у него есть всё.
         delivery.deliver(
             groupId,
             GroupWire.buildPostsRequest(groupId, BACKFILL_POSTS, have),
             listOf(group.ownerId),
         )
-        Log.i(TAG, "posts requested group=$groupId have=${have.size}")
+        // Рой: ту же просьбу получают ещё несколько соседей по каналу - любой
+        // участник с полной копией и проверенным манифестом ответит. Новичок
+        // получает посты, даже когда владелец не в сети, а нагрузка досылки
+        // расползается. Недостающие посты делятся между соседями полосами
+        // (каждому - своя доля списка), чтобы не получать четыре копии всего.
+        // Соседей берём случайно из лучших по ярусу: иначе все подписчики
+        // спрашивали бы одних и тех же трёх «самых надёжных».
+        val neighbours = orderPeers(
+            groupDao.getMembers(groupId)
+                .asSequence()
+                .map { it.nodeId }
+                .filter { it != me && it != group.ownerId }
+                .toList(),
+        ).take(SWARM_REQUEST_POOL).shuffled()
+            .take(if (missing.isEmpty()) 1 else SWARM_REQUEST_PEERS)
+        neighbours.forEachIndexed { k, peer ->
+            val stripeHave = have + missing.filterIndexed { i, _ -> i % neighbours.size != k }
+            delivery.deliver(
+                groupId,
+                GroupWire.buildPostsRequest(groupId, BACKFILL_POSTS, stripeHave),
+                listOf(peer),
+            )
+        }
+        Log.i(TAG, "posts requested group=$groupId have=${have.size} missing=${missing.size} peers=${1 + neighbours.size}")
     }
 
     /**
@@ -865,7 +969,12 @@ class GroupRepository(
      */
     private suspend fun backfillPosts(group: GroupEntity, nodeId: String, limit: Int, have: Set<String>) {
         val me = myId() ?: return
-        if (!group.isChannel || group.ownerId != me || nodeId == me) return
+        if (!group.isChannel || nodeId == me) return
+        // Владелец шлёт всё, что у него есть. Остальные участники (рой) - только
+        // посты с проверенным манифестом: без него получатель чужую пересылку
+        // не примет, и пакеты ушли бы впустую.
+        val isOwner = group.ownerId == me
+        if (!isOwner && manifestDao == null) return
         // Что этому человеку слали в последние секунды, второй раз не шлём:
         // при вступлении владелец шлёт посты сам, а подписчик, открыв канал,
         // тут же просит их ещё раз - второй веер был бы копией первого. Окно
@@ -897,6 +1006,20 @@ class GroupRepository(
             val post = thread.firstOrNull { !InlineImage.isPart(it.content) } ?: continue
             val parts = thread.filter { InlineImage.isPart(it.content) && it.senderId == post.senderId }
             val authorName = groupDao.getMember(group.id, post.senderId)?.displayName.orEmpty()
+            // Манифест - первым: по нему получатель примет текст и куски от
+            // меня, даже если я не владелец. Не владелец без манифеста поста
+            // этот пост пропускает; пост с недоехавшими кусками тоже (сид
+            // раздаёт только то, что у него целиком).
+            val manifest = manifestDao?.get(post.id)?.let(::toManifest)
+            if (!isOwner) {
+                if (manifest == null) continue
+                if (InlineImage.assemble(parts.map { it.content }).size < InlineImage.photoCount(post.content)) continue
+            }
+            if (manifest != null && sentIds.add(MANIFEST_SENT_PREFIX + post.id)) {
+                if (sent > 0) kotlinx.coroutines.delay(BACKFILL_PACKET_GAP_MS)
+                delivery.deliver(group.id, GroupWire.buildPostManifest(manifest), listOf(nodeId))
+                sent++
+            }
             for (row in listOf(post) + parts) {
                 if (sent >= MAX_BACKFILL_PACKETS) break
                 if (!sentIds.add(row.id)) continue
@@ -912,7 +1035,10 @@ class GroupRepository(
                         messageId = row.id,
                         senderName = authorName,
                         authorId = post.senderId,
-                        sentAtMs = row.timestamp,
+                        // Время поста - из подписанного манифеста: получатель
+                        // всё равно поверит только ему, а у сида, получившего
+                        // пост вживую, в строке стоит время приёма.
+                        sentAtMs = if (row.id == post.id && manifest != null) manifest.sentAtMs else row.timestamp,
                     ),
                     listOf(nodeId),
                 )
@@ -920,11 +1046,233 @@ class GroupRepository(
             }
         }
         synchronized(backfillSent) { backfillSent[key] = now to sentIds }
-        Log.i(TAG, "posts backfilled group=${group.id} to=$nodeId topics=${topics.size} packets=$sent")
+        Log.i(TAG, "posts backfilled group=${group.id} to=$nodeId topics=${topics.size} packets=$sent owner=$isOwner")
     }
 
     /** Кому, когда и какие сообщения досылали: ключ «группа|узел». */
     private val backfillSent = HashMap<String, Pair<Long, Set<String>>>()
+
+    // ── Рой постов (этап 1) ───────────────────────────────────────────────────
+
+    /** Куски и тексты, пришедшие раньше своего манифеста: ключ - id сообщения. */
+    private class PendingPiece(
+        val senderId: String,
+        val packet: GroupWire.Packet.Message,
+        val transportId: String,
+    )
+
+    private val pendingPieces = SwarmBuffer<PendingPiece>(PENDING_PIECES, PENDING_TTL_MS, clock)
+
+    /** Манифесты, чей ключ подписанта ещё не закреплён: ключ - id поста. */
+    private val pendingManifests = SwarmBuffer<Pair<String, PostManifest>>(PENDING_MANIFESTS, PENDING_TTL_MS, clock)
+
+    /** Сколько чужих просьб о досылке я обслуживаю как сид (не владелец). */
+    private val seedRate = RateWindow(SEED_REPLIES_PER_MINUTE, 60_000L)
+
+    private sealed class SwarmVerdict {
+        class Verified(val manifest: PostManifest) : SwarmVerdict()
+        object Wait : SwarmVerdict()
+        object Reject : SwarmVerdict()
+    }
+
+    /**
+     * Судьба чужой пересылки поста (не от владельца): есть проверенный
+     * манифест и хэш сходится - принимаем; манифеста ещё нет - ждём; манифест
+     * есть, но хэш не сходится - отбрасываем.
+     */
+    private suspend fun swarmVerdict(packet: GroupWire.Packet.Message, localId: String): SwarmVerdict {
+        val dao = manifestDao ?: return SwarmVerdict.Reject
+        val isPart = InlineImage.isPart(packet.text)
+        // Кусок фото ищет манифест своей темы (у поста канала тема одна),
+        // текст поста - манифест по своему id.
+        val row = if (isPart) dao.getByTopic(packet.topicId) else dao.get(localId)
+        val manifest = row?.let(::toManifest) ?: return SwarmVerdict.Wait
+        if (manifest.groupId != packet.groupId || manifest.topicId != packet.topicId) return SwarmVerdict.Reject
+        if (manifest.authorId != packet.authorId) return SwarmVerdict.Reject
+        val ok = if (isPart) manifest.matchesPart(localId, packet.text) else manifest.matchesText(packet.text)
+        if (!ok) return SwarmVerdict.Reject
+        return SwarmVerdict.Verified(manifest)
+    }
+
+    /**
+     * Пришёл манифест поста. Подпись сверяется с ключом, который закреплён за
+     * автором (сам автор предъявил его или владелец канала заверил).
+     * Неизвестный ключ - манифест ждёт `pkeys`; битая подпись - тишина.
+     */
+    private suspend fun handleManifest(senderId: String, manifest: PostManifest) {
+        val dao = manifestDao ?: return
+        val me = myId().orEmpty()
+        val group = groupDao.getGroupById(manifest.groupId) ?: return
+        if (!group.isChannel) return
+        if (groupDao.getMember(manifest.groupId, me) == null) return
+        // Уже есть такой же или более новый манифест этого поста - ничего не делаем.
+        val known = dao.get(manifest.messageId)
+        if (known != null && known.revision >= manifest.revision) return
+        if (!manifest.verifySignature()) {
+            Log.w(TAG, "manifest with bad signature dropped post=${manifest.messageId} from=$senderId")
+            return
+        }
+        // Подписывать вправе владелец и администраторы канала. Автора, которого
+        // ещё нет в моём списке участников (список в пути), не отвергаем, а
+        // ждём вместе с ключом.
+        val author = groupDao.getMember(manifest.groupId, manifest.authorId)
+        if (manifest.authorId != group.ownerId) {
+            if (author == null) {
+                pendingManifests.put(manifest.messageId, senderId to manifest)
+                Log.i(TAG, "manifest buffered until roster post=${manifest.messageId}")
+                return
+            }
+            if (!GroupRole.isAdminOrOwner(author.role)) {
+                Log.w(TAG, "manifest from non-admin author dropped post=${manifest.messageId}")
+                return
+            }
+        }
+        // Автор прислал манифест сам: его ключ закрепляем за ним (подлинность
+        // отправителя гарантирует ядро). Иначе ключ должен быть уже закреплён.
+        if (senderId == manifest.authorId) {
+            pinSigner(manifest.authorId, manifest.authorId, manifest.signerPublicKey)
+        } else if (!signerKnown(group, manifest.authorId, manifest.signerPublicKey)) {
+            pendingManifests.put(manifest.messageId, senderId to manifest)
+            // Ключи знают владелец и сам автор: спрашиваем обоих, но не чаще
+            // раза за запуск на пару «канал|автор».
+            if (pkeysAsked.add(manifest.groupId + '|' + manifest.authorId)) {
+                delivery.deliver(
+                    manifest.groupId,
+                    GroupWire.buildPostKeysRequest(manifest.groupId),
+                    listOf(group.ownerId, manifest.authorId).distinct(),
+                )
+            }
+            Log.i(TAG, "manifest buffered until signer key post=${manifest.messageId}")
+            return
+        }
+        storeManifest(manifest)
+        Log.i(TAG, "manifest accepted post=${manifest.messageId} rev=${manifest.revision} group=${group.id} from=$senderId")
+        // Более новая правка текста, чем у нас: сам текст придёт (или уже
+        // пришёл) конвертом edit; манифест лишь перестаёт отвергать его хэш.
+        releasePendingPieces(manifest)
+    }
+
+    /** Заверенные ключи: свой - от самого узла, чужие - только от владельца канала. */
+    private suspend fun handlePostKeys(senderId: String, packet: GroupWire.Packet.PostKeys) {
+        signerDao ?: return
+        val me = myId().orEmpty()
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        val fromOwner = senderId == group.ownerId
+        // Чужим ключи не закрепляем: таблица не должна расти от случайных пакетов.
+        if (!fromOwner && groupDao.getMember(packet.groupId, senderId) == null) return
+        for ((nodeId, key) in packet.keys) {
+            if (nodeId == senderId) {
+                pinSigner(nodeId, nodeId, key)
+            } else if (fromOwner) {
+                pinSigner(nodeId, group.ownerId, key)
+            }
+        }
+        // Ключ мог быть последним, чего ждали отложенные манифесты.
+        val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
+        for ((from, manifest) in ready) handleManifest(from, manifest)
+    }
+
+    /** Разослать мой ключ подписи и ключи администраторов: владелец - новичку и всем по запросу. */
+    private suspend fun sendPostKeys(group: GroupEntity, nodeId: String) {
+        val dao = signerDao ?: return
+        val me = myId() ?: return
+        val mine = myPostKey() ?: return
+        val keys = ArrayList<Pair<String, ByteArray>>()
+        keys.add(me to mine)
+        if (group.ownerId == me) {
+            val adminIds = groupDao.getMembers(group.id)
+                .filter { it.nodeId != me && GroupRole.isAdminOrOwner(it.role) }
+                .map { it.nodeId }
+            if (adminIds.isNotEmpty()) {
+                dao.selfAttested(adminIds).forEach { row ->
+                    PostManifest.unb64(row.publicKey)?.let { keys.add(row.nodeId to it) }
+                }
+            }
+        }
+        delivery.deliver(group.id, GroupWire.buildPostKeys(group.id, keys), listOf(nodeId))
+    }
+
+    /** Группы|узлы, чей ключ мы уже спрашивали у владельца в этом запуске. */
+    private val pkeysAsked = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    private suspend fun pinSigner(nodeId: String, attestedBy: String, key: ByteArray) {
+        val dao = signerDao ?: return
+        if (key.size != Ed25519.PUBLIC_KEY_BYTES) return
+        val encoded = PostManifest.b64(key)
+        val current = dao.get(nodeId, attestedBy)
+        if (current?.publicKey == encoded) return
+        dao.put(PostSignerEntity(nodeId, attestedBy, encoded, clock()))
+    }
+
+    /** Закреплён ли за [nodeId] именно этот ключ - им самим или владельцем канала. */
+    private suspend fun signerKnown(group: GroupEntity, nodeId: String, key: ByteArray): Boolean {
+        val dao = signerDao ?: return false
+        val encoded = PostManifest.b64(key)
+        if (dao.get(nodeId, nodeId)?.publicKey == encoded) return true
+        return dao.get(nodeId, group.ownerId)?.publicKey == encoded
+    }
+
+    private suspend fun storeManifest(manifest: PostManifest) {
+        val dao = manifestDao ?: return
+        dao.put(
+            PostManifestEntity(
+                messageId = manifest.messageId,
+                groupId = manifest.groupId,
+                topicId = manifest.topicId,
+                authorId = manifest.authorId,
+                sentAtMs = manifest.sentAtMs,
+                textSha = PostManifest.hex(manifest.textSha),
+                parts = manifest.partsWire(),
+                revision = manifest.revision,
+                signerKey = PostManifest.b64(manifest.signerPublicKey),
+                signature = PostManifest.b64(manifest.signature),
+                receivedAtMs = clock(),
+            ),
+        )
+    }
+
+    private fun toManifest(row: PostManifestEntity): PostManifest? {
+        val textSha = PostManifest.unhex(row.textSha) ?: return null
+        val parts = PostManifest.parseParts(row.parts) ?: return null
+        val key = PostManifest.unb64(row.signerKey) ?: return null
+        val sig = PostManifest.unb64(row.signature) ?: return null
+        return PostManifest(
+            groupId = row.groupId,
+            topicId = row.topicId,
+            messageId = row.messageId,
+            authorId = row.authorId,
+            sentAtMs = row.sentAtMs,
+            textSha = textSha,
+            parts = parts,
+            revision = row.revision,
+            signerPublicKey = key,
+            signature = sig,
+        )
+    }
+
+    /** Манифест доехал: прогоняем куски, что ждали его, обычным путём. */
+    private suspend fun releasePendingPieces(manifest: PostManifest) {
+        val waiting = pendingPieces.take { it.packet.topicId == manifest.topicId }
+        for (piece in waiting) {
+            runCatching { handleIncoming(piece.senderId, piece.packet, piece.transportId) }
+                .onFailure { Log.w(TAG, "buffered piece failed: ${it.message}") }
+        }
+        if (waiting.isNotEmpty()) Log.i(TAG, "released ${waiting.size} buffered pieces topic=${manifest.topicId}")
+    }
+
+    /** Скользящее окно: не больше [limit] событий за [windowMs]. */
+    private class RateWindow(private val limit: Int, private val windowMs: Long) {
+        private val stamps = ArrayDeque<Long>()
+
+        @Synchronized
+        fun allow(now: Long): Boolean {
+            while (stamps.isNotEmpty() && now - stamps.first() > windowMs) stamps.removeFirst()
+            if (stamps.size >= limit) return false
+            stamps.addLast(now)
+            return true
+        }
+    }
 
     /** Пост темы на месте целиком: текст есть и все обещанные фото собрались. */
     private suspend fun isPostComplete(groupId: String, topicId: String): Boolean {
@@ -977,13 +1325,40 @@ class GroupRepository(
                 val localId = packet.messageId.ifBlank { messageId }
                 if (messageDao.messageExists(localId)) return
                 val now = clock()
-                // Досылка старого поста: владелец пересылает чужой пост, автор
-                // и время указаны в конверте. Доверяем этому только владельцу.
-                val relayed = packet.authorId.isNotBlank() && senderId == group.ownerId
+                // Досылка старого поста: отправитель пересылает чужой пост, автор
+                // и время указаны в конверте. Верим владельцу канала - и любому
+                // участнику, если у нас есть проверенный манифест этого поста и
+                // текст сходится с хэшем (рой). Кусок или пост, чей манифест ещё
+                // не доехал, ждёт в буфере, а не отбрасывается.
+                var relayed = packet.authorId.isNotBlank() && senderId == group.ownerId
+                var verifiedBy: PostManifest? = null
+                if (packet.authorId.isNotBlank() && !relayed && group.isChannel && manifestDao != null) {
+                    when (val verdict = swarmVerdict(packet, localId)) {
+                        is SwarmVerdict.Verified -> {
+                            relayed = true
+                            verifiedBy = verdict.manifest
+                        }
+                        SwarmVerdict.Wait -> {
+                            pendingPieces.put(localId, PendingPiece(senderId, packet, messageId))
+                            Log.i(TAG, "piece buffered until manifest id=$localId group=${group.id}")
+                            return
+                        }
+                        SwarmVerdict.Reject -> {
+                            Log.w(TAG, "relayed piece rejected id=$localId group=${group.id} from=$senderId")
+                            return
+                        }
+                    }
+                }
                 val authorId = if (relayed) packet.authorId else senderId
                 val isMine = authorId == me
-                val sentAt = if (relayed && packet.sentAtMs in 1L..now) packet.sentAtMs else now
                 val isPart = InlineImage.isPart(packet.text)
+                // Время поста: из подписанного манифеста, если он есть, - сид мог
+                // получить пост «вживую» и хранить его под своим временем приёма.
+                val sentAt = when {
+                    verifiedBy != null && !isPart && verifiedBy.sentAtMs in 1L..now -> verifiedBy.sentAtMs
+                    relayed && packet.sentAtMs in 1L..now -> packet.sentAtMs
+                    else -> now
+                }
                 messageDao.insertMessage(
                     MessageEntity(
                         id = localId,
@@ -1006,7 +1381,8 @@ class GroupRepository(
                     // Досланный пост темы, которой у нас ещё нет (список тем
                     // разминулся в пути или пришёл раньше вступления): заводим
                     // тему сами, иначе пост не попадёт в ленту. Только от
-                    // владельца - relayed это уже гарантирует.
+                    // владельца или по проверенному манифесту - relayed это
+                    // уже гарантирует.
                     if (relayed && !isPart && groupDao.getTopicById(packet.topicId) == null) {
                         groupDao.insertTopic(
                             GroupTopicEntity(
@@ -1049,14 +1425,40 @@ class GroupRepository(
 
             is GroupWire.Packet.PostsRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return
-                if (!group.isChannel || group.ownerId != me) return
+                if (!group.isChannel) return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                // Отвечает владелец - и любой участник с манифестами (рой).
+                // Только тем, кто есть в моей таблице участников: список
+                // приходит от владельца при каждом вступлении, а чужим и
+                // забаненным трафик не тратим. Сид (не владелец) отвечает не
+                // чаще нескольких раз в минуту.
                 val requester = groupDao.getMember(packet.groupId, senderId) ?: return
                 if (requester.isBanned) return
+                if (group.ownerId != me && !seedRate.allow(clock())) {
+                    Log.i(TAG, "posts request throttled group=${group.id} from=$senderId")
+                    return
+                }
                 // Веер по сети - в фоне: приём пакетов не должен ждать.
                 backgroundScope.launch {
                     runCatching { backfillPosts(group, senderId, packet.limit, packet.have.toSet()) }
                         .onFailure { Log.w(TAG, "posts backfill failed: ${it.message}") }
                 }
+            }
+
+            is GroupWire.Packet.PostManifest -> handleManifest(senderId, packet.manifest)
+
+            is GroupWire.Packet.PostKeys -> handlePostKeys(senderId, packet)
+
+            is GroupWire.Packet.PostKeysRequest -> {
+                // Отвечают владелец и администраторы канала: у них есть что
+                // предъявить. Обычный участник постов не подписывает.
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (!group.isChannel) return
+                val member = groupDao.getMember(packet.groupId, me) ?: return
+                if (!GroupRole.isAdminOrOwner(member.role) && group.ownerId != me) return
+                val requester = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (requester.isBanned) return
+                sendPostKeys(group, senderId)
             }
 
             is GroupWire.Packet.TopicCreated -> {
@@ -1294,6 +1696,10 @@ class GroupRepository(
                     }
                 }
                 groupDao.refreshMemberCount(packet.groupId)
+                // Состав обновился: манифесты, ждавшие автора-администратора,
+                // можно проверить ещё раз.
+                val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
+                for ((from, manifest) in ready) handleManifest(from, manifest)
             }
         }
     }
@@ -1858,6 +2264,7 @@ class GroupRepository(
     /** Локальная зачистка: сообщения группы, затем сама группа (дочерние строки — каскадом). */
     private suspend fun deleteGroupLocally(groupId: String) {
         messageDao.deleteGroupMessages(groupId)
+        manifestDao?.deleteForGroup(groupId)
         groupDao.deleteGroup(groupId)
     }
 
@@ -1949,6 +2356,7 @@ class GroupRepository(
         sendGroupInfo(group, nodeId)
         sendTopics(group.id, nodeId)
         publishRoster(group.id)
+        if (group.isChannel) sendPostKeys(group, nodeId)
         delivery.deliver(
             group.id,
             GroupWire.buildJoinDecision(group.id, nodeId, true),
@@ -2188,6 +2596,18 @@ class GroupRepository(
         private const val POSTS_REQUEST_GAP_MS = 30_000L
         /** Пауза между пакетами досылки. */
         private const val BACKFILL_PACKET_GAP_MS = 40L
+        /** Рой: кроме владельца, просьбу о постах получают ещё столько соседей. */
+        const val SWARM_REQUEST_PEERS = 3
+        /** Рой: соседей выбирают случайно из стольких лучших по ярусу. */
+        const val SWARM_REQUEST_POOL = 10
+        /** Рой: сколько чужих просьб в минуту обслуживает участник-сид. */
+        private const val SEED_REPLIES_PER_MINUTE = 6
+        /** Рой: буфер кусков без манифеста - записей и срок жизни. */
+        private const val PENDING_PIECES = 100
+        private const val PENDING_MANIFESTS = 40
+        private const val PENDING_TTL_MS = 60_000L
+        /** Метка в списке «уже слали»: манифест поста, а не сообщение. */
+        private const val MANIFEST_SENT_PREFIX = "pman:"
         /** Заголовок поста канала - первая строка текста, не длиннее этого. */
         const val POST_TITLE_CHARS = 40
         private const val PREVIEW_CHARS = 80
