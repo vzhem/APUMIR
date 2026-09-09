@@ -287,6 +287,18 @@ fun ChannelScreen(
         )
     }
 
+    // Репост поста с фото: два шага (текст со ссылкой, потом фотографии),
+    // потому что подпись к нескольким файлам мессенджеры теряют.
+    uiState.pendingShare?.let { share ->
+        com.vladimir.messenger.ui.components.SharePostDialog(
+            step = share.step,
+            photoCount = share.photoUris.size,
+            onShareText = { viewModel.shareText(context) },
+            onSharePhotos = { viewModel.sharePhotos(context) },
+            onDismiss = { viewModel.dismissShare() },
+        )
+    }
+
     // Правка: тот же редактор с готовым текстом. Фотографии показываем, но
     // не меняем - они уже разошлись по подписчикам отдельными пакетами.
     editingPost?.let { post ->

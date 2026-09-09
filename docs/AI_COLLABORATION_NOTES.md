@@ -8690,3 +8690,17 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   «Раздача» (радио Обычный/Экономный с числами из `SwarmPolicy`), `init` в
   `MainActivity`. Тест `SwarmPolicyTest` (ярусы, порядок, пределы, бюджет).
   `GroupRepository` не трогался. Проверено чтением, не компилировалось.
+  **Репост с фото - разбор поломки (2026-09-09).** Владелец на v11.70.3:
+  фото доходят, текста и ссылки нет. Проверено по исходникам Telegram
+  (`LaunchActivity`): при `ACTION_SEND_MULTIPLE` он читает только
+  `EXTRA_STREAM`, `EXTRA_TEXT` не смотрит вовсе; при `ACTION_SEND` с
+  `image/*` текст берётся, но как подпись к одному фото. Значит подпись к
+  нескольким файлам через intent не передать никак - только двумя
+  отправками. Сделано: `PhotoShare.buildTextIntent`/`buildPhotosIntent`/
+  `copyToClipboard`; `PendingShare(text, photoUris, step)` в
+  `ChannelViewModel` (+ `shareText`/`sharePhotos`/`dismissShare`) и в
+  `SavedViewModel`; общее окно `SharePostDialog` (кнопка 2 включается после
+  шага 1, «Готово» после обоих). Без фото и для записей без текста -
+  по-прежнему одна отправка без окна. Заметки - `RELEASE_NOTES_v11.70.4.md`.
+  `SwarmSettings.isLowPower` переписан на `BatteryManager.isCharging` +
+  `BATTERY_PROPERTY_CAPACITY` (без sticky-broadcast).

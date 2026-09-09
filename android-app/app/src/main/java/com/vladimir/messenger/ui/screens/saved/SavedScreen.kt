@@ -226,6 +226,17 @@ fun SavedScreen(
         )
     }
 
+    // Репост записи с фото: текст и фото уходят двумя отправками.
+    uiState.pendingShare?.let { share ->
+        com.vladimir.messenger.ui.components.SharePostDialog(
+            step = share.step,
+            photoCount = share.photoUris.size,
+            onShareText = { viewModel.shareText() },
+            onSharePhotos = { viewModel.sharePhotos() },
+            onDismiss = { viewModel.dismissShare() },
+        )
+    }
+
     confirmDelete?.let { item ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },

@@ -1,8 +1,6 @@
 package com.vladimir.messenger.data.swarm
 
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.os.BatteryManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,15 +78,13 @@ object SwarmSettings {
     /** Заряд ниже порога и телефон не на зарядке. */
     fun isLowPower(context: Context): Boolean {
         return try {
-            val status: Intent = context.applicationContext
-                .registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val battery = context.applicationContext
+                .getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                 ?: return false
-            val plugged = status.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
-            if (plugged) return false
-            val level = status.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-            val scale = status.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-            if (level < 0 || scale <= 0) return false
-            level * 100 / scale < SwarmPolicy.LOW_BATTERY_PERCENT
+            if (battery.isCharging) return false
+            // Отрицательное или огромное значение - свойство недоступно: считаем, что заряда хватает.
+            val percent = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            percent in 0 until SwarmPolicy.LOW_BATTERY_PERCENT
         } catch (_: Exception) {
             false
         }
