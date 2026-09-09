@@ -22,6 +22,10 @@ interface NicknameDao {
     @Query("SELECT * FROM nicknames WHERE ownerId = :ownerId")
     suspend fun byOwner(ownerId: String): NicknameEntity?
 
+    /** Кто вообще зарегистрировал @имя: для яруса «проверенные» в рое. */
+    @Query("SELECT ownerId FROM nicknames")
+    suspend fun allOwnerIds(): List<String>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entry: NicknameEntity)
 

@@ -5,6 +5,9 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.PostViewDao
 import com.vladimir.messenger.data.local.entity.PostViewEntity
+import com.vladimir.messenger.data.swarm.SwarmBudget
+import com.vladimir.messenger.data.swarm.SwarmLane
+import com.vladimir.messenger.data.swarm.SwarmPeerDirectory
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,6 +29,8 @@ import kotlinx.coroutines.withContext
 class PostViewRepository @Inject constructor(
     private val postViewDao: PostViewDao,
     private val groupDao: GroupDao,
+    private val swarmBudget: SwarmBudget,
+    private val swarmDirectory: SwarmPeerDirectory,
 ) {
     /** Счётчики по всем постам: ключ - тема поста. */
     fun observeCounts(): Flow<Map<String, Int>> =
@@ -55,13 +60,23 @@ class PostViewRepository @Inject constructor(
                 val envelope = PostViewWire.build(topicId, System.currentTimeMillis())
                     ?: return@runCatching
                 // Рассылаем участникам канала: у каждого свой счётчик, и он
-                // должен сойтись с нашим.
-                val recipients = groupDao.getMembers(channelId)
+                // должен сойтись с нашим. Просмотр - служебный пакет: сначала
+                // своим и проверенным, а когда служебный бюджет телефона
+                // исчерпан - остальным не шлём (счётчик у них чуть ниже, зато
+                // посты и сообщения не ждут за просмотрами).
+                val members = groupDao.getMembers(channelId)
                     .filter { !it.isBanned }
                     .map { it.nodeId }
                     .filter { it.isNotBlank() && it != me }
+                val recipients = runCatching { swarmDirectory.order(members) }.getOrDefault(members)
+                var sent = 0
                 for (peer in recipients) {
+                    if (!swarmBudget.tryAcquire(SwarmLane.SIGNAL)) break
                     RustBridge.sendMessage(UUID.randomUUID().toString(), channelId, peer, envelope)
+                    sent++
+                }
+                if (sent < recipients.size) {
+                    Log.i(TAG, "view fanout capped: $sent/${recipients.size} (signal budget)")
                 }
             }.onFailure { Log.w(TAG, "view mark failed: ${it.message}") }
         }

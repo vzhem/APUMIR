@@ -38,20 +38,29 @@ interface GroupDelivery {
 /**
  * Отправка каждому участнику отдельно тем же транспортом, что и личные чаты.
  *
- * Ограничение [maxConcurrent] нужно по двум причинам: не забить очередь ядра
- * при большом списке участников и не держать в памяти сразу весь веер копий.
+ * Ограничение ширины ([maxConcurrent] или [concurrency]) нужно по двум
+ * причинам: не забить очередь ядра при большом списке участников и не держать
+ * в памяти сразу весь веер копий. [gate] - общий на телефон бюджет пакетов
+ * (см. `data/swarm/SwarmBudget`): перед каждой отправкой веер ждёт жетон,
+ * поэтому пост с шестью фото в группу на двести человек уходит в разрешённом
+ * темпе, а не залпом.
  */
 class PerMemberFanoutDelivery(
     override val name: String = "per-member-fanout",
     private val maxConcurrent: Int = 8,
     private val send: suspend (groupId: String, recipientId: String, envelope: String) -> Boolean,
     /**
-     * Порядок обхода получателей: лучшие узлы первыми.
+     * Порядок обхода получателей: свои, проверенные, стабильные, остальные;
+     * внутри яруса - лучшие по рейтингу первыми.
      *
      * По умолчанию порядок не меняется - так веер остаётся проверяемым
      * обычным JVM-тестом, без Android и без накопленной статистики.
      */
-    private val order: (List<String>) -> List<String> = { it },
+    private val order: suspend (List<String>) -> List<String> = { it },
+    /** Ширина веера на момент отправки; по умолчанию - постоянная [maxConcurrent]. */
+    private val concurrency: () -> Int = { maxConcurrent },
+    /** Ожидание жетона перед каждой отправкой; по умолчанию - без ожидания. */
+    private val gate: suspend () -> Unit = {},
 ) : GroupDelivery {
 
     override suspend fun deliver(
@@ -60,18 +69,23 @@ class PerMemberFanoutDelivery(
         recipients: List<String>,
     ): DeliveryReport =
         coroutineScope {
-            // Сначала те, кто чаще в сети и быстрее принимает: при обрыве
-            // связи на середине веера данные успеют уйти хотя бы надёжным.
+            // Сначала свои и надёжные: при обрыве связи на середине веера
+            // данные успеют уйти хотя бы тем, кто раздаст дальше.
             val targets = order(recipients.filter { it.isNotBlank() }.distinct())
             if (targets.isEmpty()) return@coroutineScope DeliveryReport(0, 0, emptyList())
 
-            val width = maxConcurrent.coerceAtLeast(1)
+            val width = concurrency().coerceAtLeast(1)
             val failed = ArrayList<String>()
             var delivered = 0
 
             targets.chunked(width).forEach { batch ->
                 val results = batch.map { id ->
-                    async { id to runCatching { send(groupId, id, envelope) }.getOrDefault(false) }
+                    async {
+                        id to runCatching {
+                            gate()
+                            send(groupId, id, envelope)
+                        }.getOrDefault(false)
+                    }
                 }.awaitAll()
                 results.forEach { (id, ok) ->
                     if (ok) delivered++ else failed.add(id)

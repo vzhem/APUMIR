@@ -6,6 +6,9 @@ import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.data.local.entity.MessageReactionEntity
+import com.vladimir.messenger.data.swarm.SwarmBudget
+import com.vladimir.messenger.data.swarm.SwarmLane
+import com.vladimir.messenger.data.swarm.SwarmPeerDirectory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -34,6 +37,8 @@ class ReactionRepository @Inject constructor(
     private val reactionDao: MessageReactionDao,
     private val chatDao: ChatDao,
     private val groupDao: GroupDao,
+    private val swarmBudget: SwarmBudget,
+    private val swarmDirectory: SwarmPeerDirectory,
 ) {
 
     /** Реакции всего чата, разложенные по сообщениям. */
@@ -109,14 +114,26 @@ class ReactionRepository @Inject constructor(
         val envelope = ReactionWire.build(chatId, messageId, emoji, added, atMs)
         val me = RustBridge.nodeId().orEmpty()
         val group = groupDao.getGroupById(chatId)
-        val recipients = if (group != null) {
-            groupDao.getMembers(chatId).filter { !it.isBanned }.map { it.nodeId }
-                .filter { it.isNotBlank() && it != me }
-        } else {
-            listOfNotNull(chatDao.getChatById(chatId)?.contactId?.takeIf { it.isNotBlank() })
-        }
-        for (peer in recipients) {
+        if (group == null) {
+            // Личный чат: один собеседник, бюджет роя не трогаем.
+            val peer = chatDao.getChatById(chatId)?.contactId?.takeIf { it.isNotBlank() } ?: return
             RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+            return
+        }
+        // Группа: реакция - служебный пакет. Сначала своим и проверенным; когда
+        // служебный бюджет телефона исчерпан, остальные её не получат - это
+        // лучше, чем задерживать посты и сообщения ради значка.
+        val members = groupDao.getMembers(chatId).filter { !it.isBanned }.map { it.nodeId }
+            .filter { it.isNotBlank() && it != me }
+        val recipients = runCatching { swarmDirectory.order(members) }.getOrDefault(members)
+        var sent = 0
+        for (peer in recipients) {
+            if (!swarmBudget.tryAcquire(SwarmLane.SIGNAL)) break
+            RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+            sent++
+        }
+        if (sent < recipients.size) {
+            Log.i(TAG, "reaction fanout capped: $sent/${recipients.size} (signal budget)")
         }
     }
 

@@ -52,6 +52,9 @@ import com.vladimir.messenger.ui.theme.StatusConnecting
 import com.vladimir.messenger.ui.theme.StatusDegraded
 import com.vladimir.messenger.ui.theme.StatusOffline
 import com.vladimir.messenger.ui.theme.StatusOnline
+import com.vladimir.messenger.data.swarm.SwarmMode
+import com.vladimir.messenger.data.swarm.SwarmPolicy
+import com.vladimir.messenger.data.swarm.SwarmSettings
 import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
@@ -825,6 +828,51 @@ private fun SettingsTabContent(
                         title    = "Очистить завершённые",
                         subtitle = "Освобождает место; сохранённые файлы остаются у вас",
                         onClick  = viewModel::onPurgeCompletedTransfers,
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // РАЗДАЧА: темп, в котором телефон рассылает и раздаёт дальше
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Раздача") }
+            item {
+                SettingsCard {
+                    val context = LocalContext.current
+                    // Режим прочитан в MainActivity.onCreate (SwarmSettings.init).
+                    val swarmMode by SwarmSettings.mode.collectAsStateWithLifecycle()
+                    SwarmMode.entries.forEach { mode ->
+                        val limits = SwarmPolicy.limitsFor(mode, metered = false, lowPower = false)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { SwarmSettings.set(context, mode) }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(
+                                selected = swarmMode == mode,
+                                onClick = { SwarmSettings.set(context, mode) },
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(mode.title, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "до ${limits.maxPacketsPerMinute} пакетов в минуту, " +
+                                        "${limits.maxConcurrentSends} одновременно",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon = Icons.Default.Groups,
+                        title = "Кому первому",
+                        subtitle = "Сначала контактам, проверенным и стабильным узлам, " +
+                            "потом всем остальным. На мобильном интернете и при заряде " +
+                            "ниже ${SwarmPolicy.LOW_BATTERY_PERCENT} % темп вдвое ниже.",
                     )
                 }
             }

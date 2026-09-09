@@ -14,6 +14,10 @@ import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.referral.ReferralRankStore
+import com.vladimir.messenger.data.swarm.SwarmBudget
+import com.vladimir.messenger.data.swarm.SwarmLane
+import com.vladimir.messenger.data.swarm.SwarmPeerDirectory
+import com.vladimir.messenger.data.swarm.SwarmSettings
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -32,6 +36,17 @@ object GroupsModule {
     private const val DISPLAY_NAME_KEY = "display_name"
 
     /**
+     * Один бюджет исходящих групповых пакетов на весь телефон. Пределы
+     * берутся из настроек «Раздача» и обстановки (мобильный интернет, низкий
+     * заряд) при каждом решении - смена режима действует сразу.
+     */
+    @Provides
+    @Singleton
+    fun provideSwarmBudget(
+        @ApplicationContext context: Context,
+    ): SwarmBudget = SwarmBudget(limits = { SwarmSettings.limits(context.applicationContext) })
+
+    /**
      * Групповой веер поверх существующей отправки 1:1. Rust-ядро не менялось:
      * каждый участник получает обычный APUGRP1-конверт как личное сообщение,
      * а групповой роутер разбирает его до сохранения в чат.
@@ -40,6 +55,8 @@ object GroupsModule {
     @Singleton
     fun provideGroupDelivery(
         @ApplicationContext context: Context,
+        directory: SwarmPeerDirectory,
+        budget: SwarmBudget,
     ): GroupDelivery = PerMemberFanoutDelivery(
         // Всегда в IO. Вызов ядра блокирующий: прямой QUIC ждёт до 5 с на
         // соединение и до 5 с на запись, а веер зовут из viewModelScope, то
@@ -51,14 +68,14 @@ object GroupsModule {
                 RustBridge.sendMessage(UUID.randomUUID().toString(), groupId, recipientId, envelope)
             }
         },
-        // Рейтинг решает очередь: надёжные и быстрые узлы получают конверт
-        // первыми, остальные - следом.
+        // Очередь решают ярус и рейтинг: сначала свои, проверенные,
+        // стабильные (внутри - надёжные и быстрые первыми), потом остальные.
         order = { ids ->
-            runCatching {
-                com.vladimir.messenger.data.peer.PeerRatingStore
-                    .preferredOrder(context.applicationContext, ids)
-            }.getOrDefault(ids)
+            runCatching { directory.order(ids) }.getOrDefault(ids)
         },
+        // Ширина веера и темп - из действующих пределов (режим + обстановка).
+        concurrency = { SwarmSettings.limits(context.applicationContext).maxConcurrentSends },
+        gate = { budget.acquire(SwarmLane.CONTENT) },
     )
 
     @Provides

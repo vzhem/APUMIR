@@ -183,6 +183,17 @@ interface GroupDao {
     @Query("SELECT COUNT(*) FROM group_members WHERE groupId = :groupId AND isBanned = 0")
     suspend fun countMembers(groupId: String): Int
 
+    /**
+     * Владельцы и админы всех сообществ, где телефон состоит: ярус
+     * «стабильные» в рое (им пакеты уходят раньше прочих незнакомцев).
+     */
+    @Query(
+        "SELECT DISTINCT nodeId FROM group_members WHERE isBanned = 0 " +
+            "AND role IN ('OWNER','ADMIN') " +
+            "AND groupId IN (SELECT id FROM groups WHERE isLeft = 0)"
+    )
+    suspend fun getAllAdminIds(): List<String>
+
     /** Поиск участников по имени или идентификатору узла. */
     @Query(
         "SELECT * FROM group_members WHERE groupId = :groupId AND isBanned = 0 AND " +

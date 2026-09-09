@@ -203,6 +203,7 @@ class MainActivity : ComponentActivity() {
 
         ThemeModeHolder.init(this)
         WallpaperHolder.init(this)
+        com.vladimir.messenger.data.swarm.SwarmSettings.init(this)
         UsernameHolder.init(this)
         AvatarHolder.init(this)
         setContent {

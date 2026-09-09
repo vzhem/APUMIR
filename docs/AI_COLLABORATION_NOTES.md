@@ -8667,3 +8667,26 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   стоять: K=20/R=10, подпись Java-библиотекой `eddsa` сейчас, посты
   админов тоже роем (их привязки - в `info`), на закрытом канале куски
   отдавать только известным участникам.
+  **Рой, кусок 1 - код (после v11.70.3).** Новый пакет
+  `data/swarm/`: `SwarmPolicy.kt` (чистый Kotlin: `PeerTier`
+  OWN/VERIFIED/STABLE/OTHER, `tierOf` - контакт всегда «свой», привязка или
+  @имя - «проверенный», админ/владелец моего сообщества или рейтинг ≥ 60 -
+  «стабильный»; `order` - ярус → рейтинг → id; `limitsFor` - Обычный 8/300,
+  Экономный 4/120, ×0.5 на мобильном интернете/экономии трафика, ×0.5 при
+  заряде < 20 % без зарядки, пол 2/30; служебная полоса - треть);
+  `SwarmBudget.kt` (ведро жетонов, содержимое ждёт, служебное режется,
+  часы/сон подменяются для теста); `SwarmPeerDirectory.kt` (@Singleton,
+  снимок из `ContactDao.allIds`, `FileExchangePeerDao.getAll`,
+  `NicknameDao.allOwnerIds` (новый), `GroupDao.getAllAdminIds` (новый),
+  `PeerRatingStore.ranked`; кэш 60 с); `SwarmSettings.kt` (режим в
+  `p2p_prefs.swarm_mode`, обстановка через `ConnectivityManager` и sticky
+  `ACTION_BATTERY_CHANGED`, кэш 1 с). `PerMemberFanoutDelivery` получил
+  `order: suspend`, `concurrency()` и `gate()`; `GroupsModule` даёт
+  `SwarmBudget` и собирает веер с ними (`PeerRatingStore.preferredOrder`
+  больше не зовётся напрямую - рейтинг учтён внутри яруса).
+  `ReactionRepository.broadcast` и `PostViewRepository.markViewed` в группах
+  идут по служебной полосе (`tryAcquire(SIGNAL)`, порядок по ярусу, при
+  нехватке - остаток не шлётся, в лог `… capped`). Настройки: раздел
+  «Раздача» (радио Обычный/Экономный с числами из `SwarmPolicy`), `init` в
+  `MainActivity`. Тест `SwarmPolicyTest` (ярусы, порядок, пределы, бюджет).
+  `GroupRepository` не трогался. Проверено чтением, не компилировалось.
