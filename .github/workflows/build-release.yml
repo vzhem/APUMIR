@@ -1,4 +1,4 @@
-﻿name: Build Release APK
+name: Build Release APK
 
 on:
   push:
@@ -87,20 +87,74 @@ jobs:
         working-directory: ./android-app
         run: ./gradlew :app:assembleRelease --no-daemon
 
+      # ---- подпись релиза -------------------------------------------------
+      # Gradle подписывает APK прежним ключом android-app/app/p2p-release.jks.
+      # Этот ключ лежит в ПУБЛИЧНОМ репозитории, поэтому подписать APK «как APU»
+      # может кто угодно. Здесь подпись переделывается: новый ключ приходит из
+      # секретов, а файл apu-signing-lineage (родословная подписи) говорит
+      # Android, что новый ключ - законный преемник старого. Телефоны обновятся
+      # без переустановки. Порядок и команды - docs/SIGNING_KEY_ROTATION.md.
+      - name: Install build-tools (apksigner)
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;35.0.0" > /dev/null
+
+      - name: Re-sign with the rotated release key
+        env:
+          APU_KS_B64: ${{ secrets.APU_RELEASE_KEYSTORE_B64 }}
+          APU_KS_PASS: ${{ secrets.APU_RELEASE_KEYSTORE_PASSWORD }}
+          APU_KS_ALIAS: ${{ secrets.APU_RELEASE_KEY_ALIAS }}
+        run: |
+          set -e
+          APK_DIR=android-app/app/build/outputs/apk/release
+          LINEAGE=android-app/app/apu-signing-lineage
+          if [ -z "$APU_KS_B64" ]; then
+            if [ -f "$LINEAGE" ]; then
+              echo "::error::apu-signing-lineage is committed but the APU_RELEASE_* secrets are missing. An APK signed with the OLD key would be REJECTED as an update by phones that already rotated. Run scripts/rotate-signing-key.ps1 (it sets the secrets) and re-run this tag."
+              exit 1
+            fi
+            echo "::warning::APU_RELEASE_* secrets are not set - this APK is signed with the OLD key from the public repository. See docs/SIGNING_KEY_ROTATION.md."
+            exit 0
+          fi
+          if [ ! -f "$LINEAGE" ]; then
+            echo "::error::Secrets are set but android-app/app/apu-signing-lineage is not committed. scripts/rotate-signing-key.ps1 creates it; commit it and re-run."
+            exit 1
+          fi
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)"
+          echo "using $BT"
+          echo "$APU_KS_B64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/apu-release.jks"
+          printf '%s' "$APU_KS_PASS" > "$RUNNER_TEMP/apu-release.pass"
+          # Старый ключ первым: им подписываются v1/v2 для Android 8; новым -
+          # v3 для Android 9+ (rotation-min-sdk-version 28), где и живёт
+          # родословная. Старый ключ после этого обновлять приложение не может.
+          "$BT/apksigner" sign \
+            --ks android-app/app/p2p-release.jks --ks-pass pass:p2p2026release \
+            --ks-key-alias p2p --key-pass pass:p2p2026release \
+            --next-signer \
+            --ks "$RUNNER_TEMP/apu-release.jks" --ks-pass "file:$RUNNER_TEMP/apu-release.pass" \
+            --ks-key-alias "$APU_KS_ALIAS" --key-pass "file:$RUNNER_TEMP/apu-release.pass" \
+            --lineage "$LINEAGE" --rotation-min-sdk-version 28 \
+            --v4-signing-enabled false \
+            --out "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
+          "$BT/apksigner" verify --verbose --print-certs "$APK_DIR/app-release-rotated.apk"
+          mv -f "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
+          rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release.pass"
+          echo "signed with the rotated key"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: android-app/app/build/outputs/apk/release/app-release.apk
           name: Release ${{ steps.get_version.outputs.VERSION }}
+          # Заготовка. Перед публикацией promote-release.ps1 -NotesFile заменяет её
+          # текстом по docs/RELEASE_PUBLICATION_POLICY.md.
           body: |
-            ## P2P Messenger ${{ steps.get_version.outputs.VERSION }}
+            ## APU ${{ steps.get_version.outputs.VERSION }}
 
-            втоматическая сборка из тега.
+            Автоматическая сборка из тега.
 
-            ### становка
-            1. Скачайте app-release.apk
-            2. азрешите установку из неизвестных источников
-            3. становите
+            ### Установка
+            1. Скачайте app-release.apk.
+            2. Разрешите установку из неизвестных источников.
+            3. Установите поверх прежней версии — переписка сохранится.
           draft: false
           prerelease: true
         env:
