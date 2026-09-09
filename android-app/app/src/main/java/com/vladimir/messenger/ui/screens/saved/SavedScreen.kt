@@ -17,6 +17,7 @@ import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -311,6 +312,13 @@ private fun SavedItemBubble(
             }
             // Локальная копия ради умного приведения к non-null.
             val shownBitmap = bitmap
+            var showFull by remember(previewPath) { mutableStateOf(false) }
+            if (showFull && previewPath != null) {
+                com.vladimir.messenger.ui.components.PhotoViewer(
+                    photos = listOf(com.vladimir.messenger.ui.components.PhotoSource.File(previewPath)),
+                    onDismiss = { showFull = false },
+                )
+            }
             if (shownBitmap != null) {
                 Image(
                     bitmap = shownBitmap.asImageBitmap(),
@@ -319,7 +327,8 @@ private fun SavedItemBubble(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 240.dp)
-                        .clip(RoundedCornerShape(14.dp)),
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { showFull = true },
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -341,7 +350,16 @@ private fun SavedItemBubble(
             }
         } else {
             // Пост канала с фотографиями: снимки идут первыми, как в ленте.
+            // Нажатие - на весь экран с увеличением.
             val photos = remember(item.id, item.photos) { item.photoList() }
+            var viewerIndex by remember(item.id) { mutableStateOf<Int?>(null) }
+            viewerIndex?.let { start ->
+                com.vladimir.messenger.ui.components.PhotoViewer(
+                    photos = photos.map { com.vladimir.messenger.ui.components.PhotoSource.Encoded(it) },
+                    initialIndex = start,
+                    onDismiss = { viewerIndex = null },
+                )
+            }
             photos.forEachIndexed { index, b64 ->
                 val bitmap = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(b64)
                 if (bitmap != null) {
@@ -353,7 +371,8 @@ private fun SavedItemBubble(
                             .fillMaxWidth()
                             .heightIn(max = 240.dp)
                             .padding(bottom = 6.dp)
-                            .clip(RoundedCornerShape(14.dp)),
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { viewerIndex = index },
                     )
                 }
             }

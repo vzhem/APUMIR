@@ -8704,3 +8704,14 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   по-прежнему одна отправка без окна. Заметки - `RELEASE_NOTES_v11.70.4.md`.
   `SwarmSettings.isLowPower` переписан на `BatteryManager.isCharging` +
   `BATTERY_PROPERTY_CAPACITY` (без sticky-broadcast).
+  **Фото на весь экран (2026-09-09).** `PhotoViewer` - см. START_HERE.
+  Почему не `Modifier.transformable`: он не умеет отдавать горизонтальный
+  сдвиг пейджеру при масштабе 1 и забирать его при увеличении; поэтому
+  жесты разобраны вручную в `PointerEventPass.Initial` и потребляются
+  (`consume()`) только когда жест наш (два пальца или масштаб > 1). Плюс
+  `userScrollEnabled = !zoomed` у пейджера как страховка. `Dialog` с
+  `usePlatformDefaultWidth = false, decorFitsSystemWindows = false` и
+  `statusBarsPadding()` у шапки. Файлы читаются без `inSampleSize`
+  (`AvatarBitmaps.loadFile(path)`), base64 - через `rememberAvatar`.
+  Песочница откатывалась ещё раз (HEAD `91916fb`); рабочее дерево уцелело,
+  восстановлено `git reset 2ada518` + один коммит `4e2eea6`.

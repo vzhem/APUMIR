@@ -11,6 +11,7 @@ package com.vladimir.messenger.ui.screens.channels
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
@@ -524,6 +525,16 @@ private fun PostCard(
  */
 @Composable
 private fun PostGallery(images: List<String>, pending: Int) {
+    // Нажатие на фото открывает его на весь экран (щипок - увеличение,
+    // свайп - соседние фото поста). Здесь помним, с какого начать.
+    var viewerIndex by remember { mutableStateOf<Int?>(null) }
+    viewerIndex?.let { start ->
+        com.vladimir.messenger.ui.components.PhotoViewer(
+            photos = images.map { com.vladimir.messenger.ui.components.PhotoSource.Encoded(it) },
+            initialIndex = start,
+            onDismiss = { viewerIndex = null },
+        )
+    }
     if (images.size == 1 && pending == 0) {
         // Разбор строки base64 - в фоне и с кэшем.
         val single = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(images[0])
@@ -540,7 +551,8 @@ private fun PostGallery(images: List<String>, pending: Int) {
                     .fillMaxWidth()
                     .heightIn(max = 320.dp)
                     .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(12.dp)),
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { viewerIndex = 0 },
             )
         }
         return
@@ -576,7 +588,9 @@ private fun PostGallery(images: List<String>, pending: Int) {
                         bitmap = bitmap.asImageBitmap(),
                         contentDescription = "Фото поста ${page + 1} из ${images.size}",
                         contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { viewerIndex = page },
                     )
                 } else {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))

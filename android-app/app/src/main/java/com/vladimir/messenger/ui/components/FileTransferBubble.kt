@@ -101,6 +101,16 @@ fun FileTransferBubble(
             // Локальная копия ради умного приведения к non-null: у делегата
             // (var ... by) его не бывает.
             val shownPreview = previewBitmap
+            // Нажатие - фото на весь экран (щипок увеличивает).
+            var showFullImage by androidx.compose.runtime.remember(previewPath) {
+                androidx.compose.runtime.mutableStateOf(false)
+            }
+            if (showFullImage && previewPath != null) {
+                PhotoViewer(
+                    photos = listOf(PhotoSource.File(previewPath)),
+                    onDismiss = { showFullImage = false },
+                )
+            }
             if (shownPreview != null && isImage) {
                 // Раунд 44: картинка показывается полноценно, без имени файла и
                 // размера. Действия (сохранить/поделиться) - в меню: три точки в
@@ -115,7 +125,7 @@ fun FileTransferBubble(
                             .heightIn(max = 320.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .combinedClickable(
-                                onClick = { },
+                                onClick = { showFullImage = true },
                                 onLongClick = {
                                     if (canActOnImage) imageMenuOpen.value = true
                                 },

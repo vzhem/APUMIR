@@ -757,13 +757,24 @@ private fun MessageBubble(
                 val imageUrl = remember(bodyText) {
                     ImageLinkDetector.directImageUrl(bodyText)
                 }
+                // Нажатие на картинку - на весь экран с увеличением.
+                var showFullImage by remember(message.id) { mutableStateOf(false) }
+                if (showFullImage && attachedB64 != null) {
+                    com.vladimir.messenger.ui.components.PhotoViewer(
+                        photos = listOf(com.vladimir.messenger.ui.components.PhotoSource.Encoded(attachedB64)),
+                        onDismiss = { showFullImage = false },
+                    )
+                }
                 when {
                     attachedBitmap != null -> {
                         androidx.compose.foundation.Image(
                             bitmap = attachedBitmap.asImageBitmap(),
                             contentDescription = "Картинка из сообщения",
                             contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                                .clickable { showFullImage = true },
                         )
                         if (bodyText.isNotBlank()) {
                             Text(bodyText, modifier = Modifier.padding(top = 6.dp))
