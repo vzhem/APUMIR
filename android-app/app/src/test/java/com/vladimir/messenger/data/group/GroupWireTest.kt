@@ -509,4 +509,90 @@ class GroupWireTest {
         assertNull(GroupWire.parse("APUGRP1|preq|ch|0"))
         assertNull(GroupWire.parse("APUGRP1|preq|ch|abc"))
     }
+
+    // ── Рой, этап 2: полосы кусков и выборка соседей ─────────────────────────
+
+    @Test
+    fun pieceWantRoundTrip() {
+        val envelope = GroupWire.buildPieceWant("ch", "topic|с трубой", 2, 4, listOf("m-1", "p|2"))
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.PieceWant)
+        val want = parsed as GroupWire.Packet.PieceWant
+        assertEquals("ch", want.groupId)
+        assertEquals("topic|с трубой", want.topicId)
+        assertEquals(2, want.stripe)
+        assertEquals(4, want.stripes)
+        assertEquals(listOf("m-1", "p|2"), want.have)
+        assertEquals(7, envelope.split('|').size)
+    }
+
+    @Test
+    fun pieceWantWithoutHaveList() {
+        val want = GroupWire.parse(GroupWire.buildPieceWant("ch", "t", 0, 1, emptyList())) as GroupWire.Packet.PieceWant
+        assertEquals(0, want.stripe)
+        assertEquals(1, want.stripes)
+        assertTrue(want.have.isEmpty())
+    }
+
+    /** Полоса вне диапазона - и при сборке, и при разборе - не проходит. */
+    @Test
+    fun pieceWantRejectsBadStripes() {
+        val t = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("t".toByteArray(Charsets.UTF_8))
+        assertNull(GroupWire.parse("APUGRP1|pwant|ch|$t|4|4|"))
+        assertNull(GroupWire.parse("APUGRP1|pwant|ch|$t|0|0|"))
+        assertNull(GroupWire.parse("APUGRP1|pwant|ch|$t|0|${GroupWire.MAX_STRIPES + 1}|"))
+        assertNull(GroupWire.parse("APUGRP1|pwant|ch|$t|-1|2|"))
+        assertNull(GroupWire.parse("APUGRP1|pwant|ch|$t|x|2|"))
+        assertNull(GroupWire.parse("APUGRP1|pwant|ch|$t|0|2"))
+        var thrown = false
+        try {
+            GroupWire.buildPieceWant("ch", "t", 3, 3, emptyList())
+        } catch (_: IllegalArgumentException) {
+            thrown = true
+        }
+        assertTrue(thrown)
+    }
+
+    /** Полосы вместе покрывают весь пост ровно один раз: номер 0 - текст, дальше куски. */
+    @Test
+    fun stripesPartitionPieces() {
+        val ids = (0 until 19).map { "piece-$it" }
+        for (m in 1..GroupWire.MAX_STRIPES) {
+            val covered = ArrayList<String>()
+            for (k in 0 until m) covered.addAll(GroupWire.stripe(ids, k, m, emptySet()))
+            assertEquals(ids.sorted(), covered.sorted())
+            assertEquals(ids.size, covered.size)
+        }
+        // Уже имеющиеся куски выпадают из полосы.
+        assertEquals(listOf("piece-0", "piece-4"), GroupWire.stripe(ids.take(6), 0, 2, setOf("piece-2")))
+        assertEquals(emptyList<String>(), GroupWire.stripe(ids, 1, 2, ids.toSet()))
+    }
+
+    @Test
+    fun peersRoundTrip() {
+        val ids = (1..GroupWire.MAX_PEERS).map { "pk_node$it" }
+        val envelope = GroupWire.buildPeers("ch", 12_345, ids)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Peers)
+        val peers = parsed as GroupWire.Packet.Peers
+        assertEquals("ch", peers.groupId)
+        assertEquals(12_345, peers.memberCount)
+        assertEquals(ids, peers.nodeIds)
+        assertTrue("envelope is ${envelope.length} chars", envelope.length < 4_000)
+    }
+
+    /** Лишние адреса сборка отрезает, пустой список и нулевой счётчик допустимы, мусор - нет. */
+    @Test
+    fun peersLimitsAndRejects() {
+        val many = (1..GroupWire.MAX_PEERS + 5).map { "n$it" }
+        val trimmed = GroupWire.parse(GroupWire.buildPeers("ch", 7, many)) as GroupWire.Packet.Peers
+        assertEquals(GroupWire.MAX_PEERS, trimmed.nodeIds.size)
+        val empty = GroupWire.parse(GroupWire.buildPeers("ch", 0, emptyList())) as GroupWire.Packet.Peers
+        assertEquals(0, empty.memberCount)
+        assertTrue(empty.nodeIds.isEmpty())
+        assertNull(GroupWire.parse("APUGRP1|peers|ch|-1|a,b"))
+        assertNull(GroupWire.parse("APUGRP1|peers|ch|x|a,b"))
+        assertNull(GroupWire.parse("APUGRP1|peers|ch|5"))
+        assertNull(GroupWire.parse("APUGRP1|peers|ch|5|" + (1..GroupWire.MAX_PEERS + 1).joinToString(",") { "n$it" }))
+    }
 }

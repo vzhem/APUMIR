@@ -154,6 +154,18 @@ interface GroupDao {
     @Query("UPDATE groups SET memberCount = :count WHERE id = :groupId")
     suspend fun updateMemberCount(groupId: String, count: Int)
 
+    /**
+     * Поднять счётчик до размера локальной таблицы, но не опускать: на
+     * большом канале таблица участника заведомо неполная (владелец даёт
+     * выборку соседей), а число подписчиков он присылает отдельно.
+     */
+    @Query(
+        "UPDATE groups SET memberCount = MAX(memberCount, " +
+            "(SELECT COUNT(*) FROM group_members WHERE groupId = :groupId AND isBanned = 0)) " +
+            "WHERE id = :groupId"
+    )
+    suspend fun bumpMemberCount(groupId: String)
+
     // ── Участники ─────────────────────────────────────────────────────────────
     @Query("SELECT * FROM group_members WHERE groupId = :groupId AND isBanned = 0 ORDER BY joinedAtMs ASC")
     fun observeMembers(groupId: String): Flow<List<GroupMemberEntity>>

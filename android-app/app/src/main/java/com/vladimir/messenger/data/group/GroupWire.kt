@@ -26,6 +26,12 @@ object GroupWire {
     /** Ключей в одном `pkeys`: владелец + до 15 администраторов. */
     const val MAX_POST_KEYS = 16
 
+    /** Больше стольких сидов один пост полосами не тянут. */
+    const val MAX_STRIPES = 4
+
+    /** Адресов соседей в одном `peers`: 30 × ~64 байта укладываются в ~4 КБ открытого текста. */
+    const val MAX_PEERS = 30
+
     const val KIND_MESSAGE = "msg"
     const val KIND_TOPIC = "topic"
     const val KIND_JOIN_REQUEST = "req"
@@ -80,6 +86,21 @@ object GroupWire {
     const val KIND_POST_KEYS = "pkeys"
     /** Просьба прислать ключи подписи: `pkreq|groupId`; отвечают владелец и администраторы. */
     const val KIND_POST_KEYS_REQUEST = "pkreq"
+    /**
+     * «Хочу куски» (рой, этап 2): `pwant|groupId|b64(topicId)|k|m|b64(id),…`.
+     * «Из m сидов тебе досталась полоса k: пришли куски поста с номером
+     * ≡ k (mod m), кроме перечисленных». Номер 0 - текст поста, дальше -
+     * куски фото в порядке манифеста.
+     */
+    const val KIND_PIECE_WANT = "pwant"
+    /**
+     * Выборка соседей (рой, этап 2): `peers|groupId|count|nodeId,…`.
+     * На большом канале полный список участников в пакет не помещается;
+     * владелец даёт новичку `count` (число подписчиков для карточки) и до
+     * [MAX_PEERS] адресов, у кого спрашивать посты. Имена узлы узнают по
+     * `who` и из конвертов сообщений.
+     */
+    const val KIND_PEERS = "peers"
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -158,6 +179,22 @@ object GroupWire {
         ) : Packet()
 
         data class PostKeysRequest(val groupId: String) : Packet()
+
+        /** Выборка соседей от владельца: [memberCount] подписчиков всего, [nodeIds] - у кого спрашивать. */
+        data class Peers(
+            val groupId: String,
+            val memberCount: Int,
+            val nodeIds: List<String>,
+        ) : Packet()
+
+        /** Просьба прислать полосу кусков поста темы [topicId]; [have] - что уже есть. */
+        data class PieceWant(
+            val groupId: String,
+            val topicId: String,
+            val stripe: Int,
+            val stripes: Int,
+            val have: List<String> = emptyList(),
+        ) : Packet()
 
         data class TopicCreated(
             val groupId: String,
@@ -350,6 +387,33 @@ object GroupWire {
 
     fun buildPostKeysRequest(groupId: String): String = "$PREFIX|$KIND_POST_KEYS_REQUEST|$groupId"
 
+    /** Выборка соседей: не больше [MAX_PEERS] адресов, без разделителей внутри. */
+    fun buildPeers(groupId: String, memberCount: Int, nodeIds: List<String>): String {
+        val cells = nodeIds.asSequence()
+            .filter { it.isNotBlank() && ',' !in it && '|' !in it }
+            .distinct()
+            .take(MAX_PEERS)
+            .joinToString(",")
+        return "$PREFIX|$KIND_PEERS|$groupId|${memberCount.coerceAtLeast(0)}|$cells"
+    }
+
+    /**
+     * Полоса [stripe] из [stripes] над упорядоченным списком кусков поста
+     * ([ordered]: номер 0 - текст, дальше куски фото в порядке манифеста):
+     * куски с номером ≡ stripe (mod stripes), которых нет в [have]. Одна
+     * формула у просящего и у сида - полосы не пересекаются и вместе дают
+     * весь пост.
+     */
+    fun stripe(ordered: List<String>, stripe: Int, stripes: Int, have: Set<String>): List<String> =
+        ordered.filterIndexed { index, id -> index % stripes == stripe && id !in have }
+
+    /** «Хочу куски»: полоса [stripe] из [stripes], без перечисленных в [have]. */
+    fun buildPieceWant(groupId: String, topicId: String, stripe: Int, stripes: Int, have: List<String>): String {
+        require(stripes in 1..MAX_STRIPES && stripe in 0 until stripes) { "bad stripe $stripe/$stripes" }
+        return "$PREFIX|$KIND_PIECE_WANT|$groupId|${encode(topicId)}|$stripe|$stripes|" +
+            have.joinToString(",") { encode(it) }
+    }
+
     /** Ключи подписи постов: не больше [MAX_POST_KEYS] пар, ключи ровно по 32 байта. */
     fun buildPostKeys(groupId: String, keys: List<Pair<String, ByteArray>>): String {
         val cells = keys.asSequence()
@@ -541,6 +605,38 @@ object GroupWire {
 
             KIND_POST_KEYS_REQUEST -> if (parts.size == 3) {
                 Packet.PostKeysRequest(groupId)
+            } else {
+                null
+            }
+
+            KIND_PEERS -> if (parts.size == 5) {
+                val count = parts[3].toIntOrNull() ?: return null
+                if (count < 0) return null
+                val ids = if (parts[4].isBlank()) {
+                    emptyList()
+                } else {
+                    parts[4].split(',').filter { it.isNotBlank() }
+                }
+                if (ids.size > MAX_PEERS) return null
+                Packet.Peers(groupId, count, ids)
+            } else {
+                null
+            }
+
+            KIND_PIECE_WANT -> if (parts.size == 7) {
+                val topicId = decode(parts[3]) ?: return null
+                val stripe = parts[4].toIntOrNull() ?: return null
+                val stripes = parts[5].toIntOrNull() ?: return null
+                val have = if (parts[6].isBlank()) {
+                    emptyList()
+                } else {
+                    parts[6].split(',').mapNotNull { cell -> decode(cell)?.takeIf { it.isNotBlank() } }
+                }
+                if (topicId.isBlank() || stripes !in 1..MAX_STRIPES || stripe !in 0 until stripes) {
+                    null
+                } else {
+                    Packet.PieceWant(groupId, topicId, stripe, stripes, have)
+                }
             } else {
                 null
             }

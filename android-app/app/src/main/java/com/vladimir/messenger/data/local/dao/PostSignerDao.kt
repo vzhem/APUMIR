@@ -19,4 +19,12 @@ interface PostSignerDao {
     /** Ключи, которые узлы предъявили сами: их владелец канала вправе заверить дальше. */
     @Query("SELECT * FROM post_signers WHERE nodeId = attestedBy AND nodeId IN (:nodeIds)")
     suspend fun selfAttested(nodeIds: List<String>): List<PostSignerEntity>
+
+    /**
+     * Все узлы, предъявившие свой ключ сами, - это и есть телефоны, которые
+     * умеют рой (старые версии `pkeys` не шлют). Одним запросом без IN(...):
+     * у SQLite предел в 999 параметров, а подписчиков может быть больше.
+     */
+    @Query("SELECT nodeId FROM post_signers WHERE nodeId = attestedBy")
+    suspend fun allSelfAttestedIds(): List<String>
 }
