@@ -32,6 +32,8 @@ enum class PeerTier(val rank: Int, val title: String) {
 enum class SwarmMode(val storedValue: String, val title: String) {
     NORMAL("normal", "Обычный"),
     ECONOMY("economy", "Экономный"),
+    /** На полную: предел ядра, без скидок на мобильный интернет и заряд. */
+    UNLIMITED("unlimited", "Без ограничений"),
     ;
 
     companion object {
@@ -85,6 +87,10 @@ object SwarmPolicy {
     const val MIN_CONCURRENT = 2
     const val MIN_PACKETS_PER_MINUTE = 30
 
+    /** Режим «Без ограничений»: столько ядро переваривает, не копя очередь. */
+    const val UNLIMITED_CONCURRENT = 32
+    const val UNLIMITED_PACKETS_PER_MINUTE = 3000
+
     /** Доля бюджета на служебные пакеты: треть от содержимого. */
     const val SIGNAL_SHARE = 3
 
@@ -117,6 +123,15 @@ object SwarmPolicy {
      */
     fun limitsFor(mode: SwarmMode, metered: Boolean, lowPower: Boolean): SwarmLimits {
         val (concurrent, perMinute) = when (mode) {
+            // «Без ограничений» - это предел ядра, а не бесконечность: канал к
+            // Rust вмещает 256 пакетов, и ширина веера больше 32 только копит
+            // очередь. Мобильный интернет и заряд этот режим не сбавляют -
+            // человек сам так решил.
+            SwarmMode.UNLIMITED -> return SwarmLimits(
+                maxConcurrentSends = UNLIMITED_CONCURRENT,
+                maxPacketsPerMinute = UNLIMITED_PACKETS_PER_MINUTE,
+                maxSignalsPerMinute = UNLIMITED_PACKETS_PER_MINUTE / SIGNAL_SHARE,
+            )
             SwarmMode.NORMAL -> 8 to 300
             SwarmMode.ECONOMY -> 4 to 120
         }

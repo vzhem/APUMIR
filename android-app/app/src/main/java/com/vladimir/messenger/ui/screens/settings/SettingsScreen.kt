@@ -858,8 +858,12 @@ private fun SettingsTabContent(
                             Column {
                                 Text(mode.title, style = MaterialTheme.typography.bodyLarge)
                                 Text(
-                                    "до ${limits.maxPacketsPerMinute} пакетов в минуту, " +
-                                        "${limits.maxConcurrentSends} одновременно",
+                                    if (mode == SwarmMode.UNLIMITED) {
+                                        "Раздаёт на полную и на мобильном интернете, и при низком заряде"
+                                    } else {
+                                        "до ${limits.maxPacketsPerMinute} пакетов в минуту, " +
+                                            "${limits.maxConcurrentSends} одновременно"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -871,8 +875,9 @@ private fun SettingsTabContent(
                         icon = Icons.Default.Groups,
                         title = "Кому первому",
                         subtitle = "Сначала контактам, проверенным и стабильным узлам, " +
-                            "потом всем остальным. На мобильном интернете и при заряде " +
-                            "ниже ${SwarmPolicy.LOW_BATTERY_PERCENT} % темп вдвое ниже.",
+                            "потом всем остальным. В обычном и экономном режимах на " +
+                            "мобильном интернете и при заряде ниже " +
+                            "${SwarmPolicy.LOW_BATTERY_PERCENT} % темп вдвое ниже.",
                     )
                 }
             }

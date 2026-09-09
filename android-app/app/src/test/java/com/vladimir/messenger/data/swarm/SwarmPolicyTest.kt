@@ -79,7 +79,18 @@ class SwarmPolicyTest {
     }
 
     @Test
+    fun unlimitedIgnoresMeteredAndBattery() {
+        val best = SwarmPolicy.limitsFor(SwarmMode.UNLIMITED, metered = false, lowPower = false)
+        val worst = SwarmPolicy.limitsFor(SwarmMode.UNLIMITED, metered = true, lowPower = true)
+        assertEquals(best, worst)
+        assertEquals(SwarmPolicy.UNLIMITED_CONCURRENT, best.maxConcurrentSends)
+        assertEquals(SwarmPolicy.UNLIMITED_PACKETS_PER_MINUTE, best.maxPacketsPerMinute)
+        assertTrue(best.maxPacketsPerMinute > SwarmPolicy.limitsFor(SwarmMode.NORMAL, false, false).maxPacketsPerMinute)
+    }
+
+    @Test
     fun storedModeFallsBackToNormal() {
+        assertEquals(SwarmMode.UNLIMITED, SwarmMode.fromStored("unlimited"))
         assertEquals(SwarmMode.ECONOMY, SwarmMode.fromStored("economy"))
         assertEquals(SwarmMode.NORMAL, SwarmMode.fromStored(null))
         assertEquals(SwarmMode.NORMAL, SwarmMode.fromStored("garbage"))

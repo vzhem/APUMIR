@@ -62,28 +62,7 @@ data class ChannelUiState(
     val error: String? = null,
     /** Реакции по сообщениям канала: ключ - id сообщения-поста. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
-    /** Подготовленный репост: экран показывает окно «текст → фото». */
-    val pendingShare: PendingShare? = null,
 )
-
-/**
- * Репост поста наружу, разложенный на два шага.
- *
- * Мессенджеры при получении нескольких файлов выбрасывают подпись: у
- * получателя оставались одни фотографии без текста и ссылки (владелец,
- * 2026-09-09). Поэтому текст со ссылкой и фотографии уходят двумя отправками,
- * а окно на экране ведёт человека по шагам.
- */
-data class PendingShare(
-    /** Заголовок, текст и ссылка «Открыть в APU». */
-    val text: String,
-    /** Адреса jpeg в кэше для другого приложения; пусто - фото нет. */
-    val photoUris: List<android.net.Uri>,
-    /** Что уже отправлено: 0 - ничего, 1 - текст, 2 - всё. */
-    val step: Int = 0,
-) {
-    val hasPhotos: Boolean get() = photoUris.isNotEmpty()
-}
 
 @HiltViewModel
 class ChannelViewModel @Inject constructor(
@@ -324,70 +303,41 @@ class ChannelViewModel @Inject constructor(
     }
 
     /**
-     * Репост поста в другое приложение: текст со ссылкой «Открыть в APU» и
-     * все фотографии поста файлами. Подготовка (ссылка из базы, запись jpeg
-     * в кэш) идёт в фоне. Без фотографий меню открывается сразу; с
-     * фотографиями экран показывает окно из двух шагов ([PendingShare]),
-     * потому что подпись к нескольким файлам мессенджеры теряют.
+     * Репост поста в другое приложение одним нажатием: одно меню «Поделиться»,
+     * одно сообщение у получателя - картинка (одно фото или сетка из всех
+     * фото поста) с подписью из текста и ссылки «Открыть в APU». Почему так, а
+     * не файлами по отдельности - в [com.vladimir.messenger.util.PhotoShare].
+     * Подготовка (ссылка из базы, сборка картинки) идёт в фоне.
      */
     fun sharePost(context: android.content.Context, post: ChannelPost) {
         val app = context.applicationContext
         viewModelScope.launch {
             val link = postLink(post.topicId)
-            val title = post.title.ifBlank { "Пост" }
-            val text = buildString {
-                append(title)
-                if (post.text.isNotBlank() && post.text != title) append("\n\n").append(post.text)
-                if (link != null) append("\n\nОткрыть в APU:\n").append(link)
-            }
-            val uris = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val text = com.vladimir.messenger.util.PhotoShare.buildText(
+                title = post.title.ifBlank { "Пост" },
+                body = post.text,
+                link = link,
+            )
+            val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching {
-                    com.vladimir.messenger.util.PhotoShare.writeJpegs(app, post.images, post.topicId)
-                }.getOrDefault(emptyList())
+                    com.vladimir.messenger.util.PhotoShare.writeShareImage(app, post.images, post.topicId)
+                }.getOrNull()
             }
-            if (post.images.isNotEmpty() && uris.isEmpty()) {
-                _uiState.update { it.copy(error = "Фото не удалось подготовить, отправляем текст") }
-            }
-            // Текст - в буфер обмена в любом случае: если мессенджер всё же
-            // потеряет его, человек вставит одним нажатием.
+            // Полный текст - в буфер обмена: если мессенджер урежет подпись,
+            // человек вставит его одним нажатием.
             com.vladimir.messenger.util.PhotoShare.copyToClipboard(app, "Пост APU", text)
-            if (uris.isEmpty()) {
-                val intent = com.vladimir.messenger.util.PhotoShare.buildTextIntent(text)
-                if (!com.vladimir.messenger.util.PhotoShare.open(app, intent, "Поделиться постом")) {
-                    _uiState.update { it.copy(error = "Не удалось поделиться") }
-                }
-                return@launch
+            val intent = if (uri != null) {
+                com.vladimir.messenger.util.PhotoShare.buildImageIntent(
+                    uri,
+                    com.vladimir.messenger.util.PhotoShare.captionFor(text, link),
+                )
+            } else {
+                com.vladimir.messenger.util.PhotoShare.buildTextIntent(text)
             }
-            _uiState.update { it.copy(pendingShare = PendingShare(text = text, photoUris = uris)) }
+            if (!com.vladimir.messenger.util.PhotoShare.open(app, intent, "Поделиться постом")) {
+                _uiState.update { it.copy(error = "Не удалось поделиться") }
+            }
         }
-    }
-
-    /** Шаг 1 окна репоста: отправить текст со ссылкой. */
-    fun shareText(context: android.content.Context) {
-        val share = _uiState.value.pendingShare ?: return
-        val intent = com.vladimir.messenger.util.PhotoShare.buildTextIntent(share.text)
-        if (com.vladimir.messenger.util.PhotoShare.open(context.applicationContext, intent, "Отправить текст поста")) {
-            _uiState.update { it.copy(pendingShare = share.copy(step = maxOf(share.step, 1))) }
-        } else {
-            _uiState.update { it.copy(error = "Не удалось поделиться") }
-        }
-    }
-
-    /** Шаг 2 окна репоста: отправить фотографии. */
-    fun sharePhotos(context: android.content.Context) {
-        val share = _uiState.value.pendingShare ?: return
-        if (!share.hasPhotos) return
-        val intent = com.vladimir.messenger.util.PhotoShare.buildPhotosIntent(share.photoUris)
-        if (com.vladimir.messenger.util.PhotoShare.open(context.applicationContext, intent, "Отправить фото поста")) {
-            _uiState.update { it.copy(pendingShare = share.copy(step = 2)) }
-        } else {
-            _uiState.update { it.copy(error = "Не удалось поделиться") }
-        }
-    }
-
-    /** Закрыть окно репоста. */
-    fun dismissShare() {
-        _uiState.update { it.copy(pendingShare = null) }
     }
 
     fun dismissError() {

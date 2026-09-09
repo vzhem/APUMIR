@@ -23,8 +23,6 @@ data class SavedUiState(
     val message: String? = null,
     /** Файл, для которого человек выбирает, куда выгрузить. */
     val pendingExport: FileTransferEntity? = null,
-    /** Репост записи с фото: окно «текст → фото» (см. PendingShare в канале). */
-    val pendingShare: com.vladimir.messenger.ui.screens.channels.PendingShare? = null,
 )
 
 @HiltViewModel
@@ -108,59 +106,35 @@ class SavedViewModel @Inject constructor(
         }
     }
 
-    /** Сохранённый пост канала: текст подписью, фотографии - файлами. */
+    /**
+     * Сохранённый пост канала одним сообщением: картинка (одно фото или сетка
+     * из всех) с текстом подписью; без фото - просто текст. Ссылки на пост у
+     * записи нет, поэтому подпись - только текст (см. PhotoShare).
+     */
     private fun sharePost(item: SavedItemEntity) {
         viewModelScope.launch {
-            val uris = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val uri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching {
-                    com.vladimir.messenger.util.PhotoShare.writeJpegs(appContext, item.photoList(), item.id)
-                }.getOrDefault(emptyList())
+                    com.vladimir.messenger.util.PhotoShare.writeShareImage(appContext, item.photoList(), item.id)
+                }.getOrNull()
             }
             com.vladimir.messenger.util.PhotoShare.copyToClipboard(appContext, "Пост APU", item.text)
-            if (uris.isEmpty() || item.text.isBlank()) {
-                // Только текст или только фото - одна отправка, окно не нужно.
-                val intent = com.vladimir.messenger.util.PhotoShare.buildIntent(item.text, uris)
-                if (!com.vladimir.messenger.util.PhotoShare.open(appContext, intent, "Поделиться")) {
-                    _uiState.update { st -> st.copy(message = "Не удалось поделиться") }
-                }
-                return@launch
-            }
-            // Текст и фото вместе мессенджеры не принимают - два шага.
-            _uiState.update {
-                it.copy(
-                    pendingShare = com.vladimir.messenger.ui.screens.channels.PendingShare(
-                        text = item.text,
-                        photoUris = uris,
-                    ),
+            val intent = when {
+                uri != null -> com.vladimir.messenger.util.PhotoShare.buildImageIntent(
+                    uri,
+                    com.vladimir.messenger.util.PhotoShare.captionFor(item.text, link = null),
                 )
+                item.text.isNotBlank() -> com.vladimir.messenger.util.PhotoShare.buildTextIntent(item.text)
+                else -> {
+                    _uiState.update { st -> st.copy(message = "Нечем поделиться") }
+                    return@launch
+                }
+            }
+            if (!com.vladimir.messenger.util.PhotoShare.open(appContext, intent, "Поделиться")) {
+                _uiState.update { st -> st.copy(message = "Не удалось поделиться") }
             }
         }
     }
-
-    /** Шаг 1 окна репоста: текст. */
-    fun shareText() {
-        val share = _uiState.value.pendingShare ?: return
-        val intent = com.vladimir.messenger.util.PhotoShare.buildTextIntent(share.text)
-        if (com.vladimir.messenger.util.PhotoShare.open(appContext, intent, "Отправить текст")) {
-            _uiState.update { it.copy(pendingShare = share.copy(step = maxOf(share.step, 1))) }
-        } else {
-            _uiState.update { it.copy(message = "Не удалось поделиться") }
-        }
-    }
-
-    /** Шаг 2 окна репоста: фотографии. */
-    fun sharePhotos() {
-        val share = _uiState.value.pendingShare ?: return
-        if (!share.hasPhotos) return
-        val intent = com.vladimir.messenger.util.PhotoShare.buildPhotosIntent(share.photoUris)
-        if (com.vladimir.messenger.util.PhotoShare.open(appContext, intent, "Отправить фото")) {
-            _uiState.update { it.copy(pendingShare = share.copy(step = 2)) }
-        } else {
-            _uiState.update { it.copy(message = "Не удалось поделиться") }
-        }
-    }
-
-    fun dismissShare() = _uiState.update { it.copy(pendingShare = null) }
 
     /** Человек нажал «Сохранить в телефон» - спрашиваем, куда. */
     fun requestExport(item: SavedItemEntity) {
