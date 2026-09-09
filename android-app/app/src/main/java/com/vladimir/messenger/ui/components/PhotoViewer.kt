@@ -14,6 +14,7 @@ package com.vladimir.messenger.ui.components
 // =============================================================================
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,6 +62,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Откуда просмотрщик берёт картинку: строка base64 (посты, комментарии) или файл (передачи). */
 sealed class PhotoSource {
@@ -267,15 +270,42 @@ private fun ZoomablePhoto(
     }
 }
 
-/** Картинка файла в полном размере (без уменьшения при чтении), через общий кэш. */
+/**
+ * Картинка файла для экрана, через общий кэш.
+ *
+ * Присланный снимок может быть 4000×3000 - в памяти это под 50 МБ, на слабом
+ * телефоне так и до нехватки памяти недалеко. Поэтому сначала читаются одни
+ * размеры, и картинка уменьшается при чтении так, чтобы длинная сторона была
+ * не больше [MAX_DECODED_SIDE]: для щипка до 6× этого хватает.
+ */
 @Composable
 private fun rememberFileBitmap(path: String): Bitmap? {
     var bitmap by remember(path) { mutableStateOf(AvatarBitmaps.cachedFile(path)) }
     LaunchedEffect(path) {
-        if (bitmap == null) bitmap = AvatarBitmaps.loadFile(path)
+        if (bitmap == null) {
+            val sample = withContext(Dispatchers.IO) { sampleSizeFor(path) }
+            bitmap = AvatarBitmaps.loadFile(path, sampleSize = sample)
+        }
     }
     return bitmap
 }
+
+/** Степень двойки, с которой длинная сторона файла укладывается в [MAX_DECODED_SIDE]. */
+private fun sampleSizeFor(path: String): Int {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    try {
+        BitmapFactory.decodeFile(path, bounds)
+    } catch (e: Exception) {
+        return 1
+    }
+    val longest = maxOf(bounds.outWidth, bounds.outHeight)
+    if (longest <= 0) return 1
+    var sample = 1
+    while (longest / (sample * 2) >= MAX_DECODED_SIDE) sample *= 2
+    return sample
+}
+
+private const val MAX_DECODED_SIDE = 2560
 
 private const val MIN_SCALE = 1f
 private const val MAX_SCALE = 6f
