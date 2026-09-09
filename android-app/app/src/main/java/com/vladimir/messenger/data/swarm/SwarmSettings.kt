@@ -69,7 +69,7 @@ object SwarmSettings {
                 .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
                 ?: return false
             cm.isActiveNetworkMetered ||
-                cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENFORCED
+                cm.restrictBackgroundStatus == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
         } catch (_: Exception) {
             false
         }

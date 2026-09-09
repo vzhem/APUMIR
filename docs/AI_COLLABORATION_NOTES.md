@@ -8715,3 +8715,10 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   (`AvatarBitmaps.loadFile(path)`), base64 - через `rememberAvatar`.
   Песочница откатывалась ещё раз (HEAD `91916fb`); рабочее дерево уцелело,
   восстановлено `git reset 2ada518` + один коммит `4e2eea6`.
+  **Первая сборка v11.70.4 упала** (run 34332884336, 3 м 28 с до ошибки):
+  `SwarmSettings.kt:72 Unresolved reference RESTRICT_BACKGROUND_STATUS_ENFORCED`.
+  У `ConnectivityManager` есть только `RESTRICT_BACKGROUND_STATUS_DISABLED /
+  _WHITELISTED / _ENABLED`. Единственная ошибка на весь кусок роя, репост и
+  просмотрщик. Логи CI: `gh run view --log-failed` и `gh api .../jobs/<id>/logs`
+  отдают ссылку на blob.core.windows.net, куда из песочницы curl не ходит -
+  ссылку надо открыть через fetch_page (последний chunk - хвост лога).
