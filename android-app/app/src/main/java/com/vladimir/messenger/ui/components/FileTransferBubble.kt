@@ -10,7 +10,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.padding
@@ -115,14 +116,20 @@ fun FileTransferBubble(
                 // Раунд 44: картинка показывается полноценно, без имени файла и
                 // размера. Действия (сохранить/поделиться) - в меню: три точки в
                 // правом верхнем углу или удержание пальца.
+                // Пропорции - как у самой фотографии: широкая занимает ширину
+                // пузыря (до 340 dp), высокая - до 320 dp в высоту и уже по
+                // ширине. Раньше любая картинка вписывалась в ширину и
+                // обрезалась по высоте (Crop), и портретный снимок терял верх
+                // и низ - как в квадратном превью у отправителя.
+                val ratio = shownPreview.width.toFloat() / shownPreview.height.coerceAtLeast(1).toFloat()
                 Box {
                     androidx.compose.foundation.Image(
                         bitmap = shownPreview.asImageBitmap(),
                         contentDescription = transfer.displayName,
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 320.dp)
+                            .sizeIn(maxWidth = 340.dp, maxHeight = 320.dp)
+                            .aspectRatio(ratio.coerceIn(0.4f, 3f))
                             .clip(RoundedCornerShape(12.dp))
                             .combinedClickable(
                                 onClick = { showFullImage = true },

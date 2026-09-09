@@ -152,20 +152,17 @@ class OutgoingFilePreparationService private constructor(
                 }
             }
             stageChunks(source, manifest, inspected.sha256, store)
-            // Раунд 43: для картинок кладём маленькое превью рядом - пузырь в
-            // чате показывает фото, а не только имя файла и размер.
+            // Раунд 43: для картинок кладём превью рядом - пузырь в чате
+            // показывает фото, а не только имя файла и размер. Превью - вся
+            // картинка целиком (уменьшенная, с теми же пропорциями), а не
+            // квадрат из середины: отправитель, открыв своё фото на весь экран,
+            // должен видеть то же, что и получатель.
             if (inspected.mediaType.startsWith("image/")) {
                 runCatching {
-                    val b64 = com.vladimir.messenger.util.AvatarCompress.compressUri(
-                        context, source.toString(), size = 320, quality = 75,
+                    val dir = java.io.File(context.noBackupFilesDir, "file_preview/v1")
+                    com.vladimir.messenger.util.PhotoPreview.write(
+                        context, source, java.io.File(dir, manifest.transferIdHex + ".jpg"),
                     )
-                    if (b64 != null) {
-                        val dir = java.io.File(context.noBackupFilesDir, "file_preview/v1")
-                            .apply { mkdirs() }
-                        java.io.File(dir, manifest.transferIdHex + ".jpg").writeBytes(
-                            android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                        )
-                    }
                 }
             }
             PreparedTransfer(
