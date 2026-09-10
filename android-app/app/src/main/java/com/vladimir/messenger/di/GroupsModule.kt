@@ -94,6 +94,7 @@ object GroupsModule {
         signerDao: com.vladimir.messenger.data.local.dao.PostSignerDao,
         directory: SwarmPeerDirectory,
         counters: com.vladimir.messenger.data.channel.PostCounterRepository,
+        shortener: com.vladimir.messenger.data.link.LinkShortener,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -113,6 +114,10 @@ object GroupsModule {
         // Счётчики через владельца (этап 3): просьбы о сводке и сводки.
         onCountersRequest = { senderId, packet -> counters.serve(senderId, packet) },
         onCounters = { senderId, packet -> counters.applyCounters(senderId, packet) },
+        // Короткие ссылки для пересылки: код выдаёт и разворачивает наш
+        // сервис (worker, /short); коды кэшируются в LinkShortener.
+        shortenLink = { target -> shortener.codeFor(target) },
+        expandShortLink = { code -> shortener.expand(code) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

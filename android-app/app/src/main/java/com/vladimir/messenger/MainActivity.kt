@@ -17,6 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.group.invitePromptFor
+import com.vladimir.messenger.data.link.LinkShortener
+import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
 import com.vladimir.messenger.ui.update.UpdateDialog
@@ -55,6 +57,7 @@ interface MainActivityEntryPoint {
     fun botApi(): BotApi
     fun contactRepository(): ContactRepository
     fun updateChecker(): UpdateChecker
+    fun linkShortener(): LinkShortener
 }
 
 @AndroidEntryPoint
@@ -104,6 +107,15 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // Короткая ссылка https://<хост>/s/<код>: что за ней - знает только
+        // наш сервис. Спрашиваем его и дальше идём как с обычной ссылкой:
+        // на канал, пост, группу или контакт.
+        if (ShortLinks.isShortLink(rawUri)) {
+            lastHandledInviteUri = rawUri
+            resolveShortLink(rawUri)
+            return
+        }
+
         val verifiedReferral = VerifiedReferralInviteLink.verify(rawUri)
         if (verifiedReferral != null) {
             val pending = PendingReferralStore.saveVerified(applicationContext, verifiedReferral.token)
@@ -131,6 +143,53 @@ class MainActivity : ComponentActivity() {
         rememberReferralToken(invite.nodeId, invite.referralToken)
         Log.i("MainActivity", "Legacy contact invite accepted")
         resolveInviteContact(invite.nodeId, invite.publicKey, invite.displayName)
+    }
+
+    /**
+     * Разворачивает короткую ссылку через сервис и передаёт полную ссылку в
+     * обычный разбор. Пока идёт запрос, окно «Открыть пост?» не показываем:
+     * его слова зависят от того, куда ведёт ссылка.
+     */
+    private fun resolveShortLink(shortLink: String) {
+        lifecycleScope.launch {
+            val entryPoint = EntryPointAccessors.fromApplication(
+                applicationContext,
+                MainActivityEntryPoint::class.java
+            )
+            val full = try {
+                entryPoint.linkShortener().expandIfShort(shortLink)
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Short link expand failed: ${e.javaClass.simpleName}")
+                null
+            }
+            if (full == null || full == shortLink) {
+                android.widget.Toast.makeText(
+                    applicationContext,
+                    "Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                // Повторное нажатие той же ссылки должно сработать снова, а
+                // onResume с тем же intent - нет: забываем ссылку и там, и там.
+                lastHandledInviteUri = null
+                intent?.data = null
+                return@launch
+            }
+            Log.i("MainActivity", "Short link expanded")
+            if (GroupInviteLinks.parseTarget(full) != null) {
+                // Дальше как обычная ссылка на группу: сначала спрашиваем, потом
+                // ведём в «Сообщества». Внутрь отдаём полную ссылку, чтобы
+                // разбор и вход больше в сеть не ходили.
+                pendingGroupInviteLink = full
+                return@launch
+            }
+            val invite = InviteLinkParser.parse(full)
+            if (invite == null) {
+                Log.w("MainActivity", "Short link leads to an unsupported link")
+                return@launch
+            }
+            rememberReferralToken(invite.nodeId, invite.referralToken)
+            resolveInviteContact(invite.nodeId, invite.publicKey, invite.displayName)
+        }
     }
 
     private fun rememberReferralToken(nodeId: String, encodedToken: String?) {

@@ -143,7 +143,11 @@ fun ShareProfileScreen(
                     Spacer(Modifier.height(8.dp))
                     
                     Text(
-                        "Альтернативная ссылка через Telegram:",
+                        if (uiState.alternativeLink.contains("/s/")) {
+                            "Короткая ссылка для других мессенджеров:"
+                        } else {
+                            "Альтернативная ссылка через Telegram:"
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -192,7 +196,7 @@ fun ShareProfileScreen(
                             Если приложение уже установлено, открой ссылку:
                             ${uiState.shareLink}
 
-                            Альтернативная ссылка через Telegram:
+                            Или эта ссылка:
                             ${uiState.alternativeLink}
 
                             Если APU не установлен, скачай APK здесь:
@@ -221,7 +225,10 @@ fun ShareProfileScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Скопировать Telegram-ссылку")
+                Text(
+                    if (uiState.alternativeLink.contains("/s/")) "Скопировать короткую ссылку"
+                    else "Скопировать Telegram-ссылку"
+                )
             }
 
             Spacer(Modifier.height(16.dp))

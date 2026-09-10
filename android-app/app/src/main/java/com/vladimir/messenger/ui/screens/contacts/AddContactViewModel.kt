@@ -10,6 +10,7 @@ import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.data.referral.ReferralAttributionSender
 import com.vladimir.messenger.data.referral.ReferralWire
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.util.InviteLinkParser
 import com.vladimir.messenger.util.VerifiedReferralInviteLink
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -41,6 +42,7 @@ class AddContactViewModel @Inject constructor(
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     @dagger.hilt.android.qualifiers.ApplicationContext
     private val appContext: android.content.Context,
+    private val linkShortener: com.vladimir.messenger.data.link.LinkShortener,
 ) : ViewModel() {
 
     companion object {
@@ -113,12 +115,32 @@ class AddContactViewModel @Inject constructor(
     }
 
     fun onAddContactClicked() {
-        val raw = _uiState.value.inviteLink.trim()
-        if (raw.isBlank()) {
+        val pasted = _uiState.value.inviteLink.trim()
+        if (pasted.isBlank()) {
             _uiState.update { it.copy(error = "Invite link is empty") }
             return
         }
+        // Короткая ссылка https://<хост>/s/<код>: что за ней - знает сервис.
+        // Разворачиваем и продолжаем с полной ссылкой.
+        if (ShortLinks.isShortLink(pasted)) {
+            viewModelScope.launch {
+                _uiState.update { it.copy(isLoading = true, error = null) }
+                val full = runCatching { linkShortener.expandIfShort(pasted) }.getOrNull()
+                _uiState.update { it.copy(isLoading = false) }
+                if (full == null || full == pasted) {
+                    _uiState.update {
+                        it.copy(error = "Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.")
+                    }
+                } else {
+                    addContactFromLink(full)
+                }
+            }
+            return
+        }
+        addContactFromLink(pasted)
+    }
 
+    private fun addContactFromLink(raw: String) {
         // Сначала общий разборщик ссылок: приложение само генерирует
         // p2pmessenger://add?node_id=..., а этот блок раньше понимал только
         // p2p://invite/, p2p://key/ и голый pk_, то есть QR контакта не срабатывал.

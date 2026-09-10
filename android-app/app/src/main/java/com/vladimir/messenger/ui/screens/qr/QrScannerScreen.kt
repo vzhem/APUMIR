@@ -50,7 +50,7 @@ import com.journeyapps.barcodescanner.DecoratedBarcodeView
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ChatWallpaper
-import com.vladimir.messenger.util.AppShare
+import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.util.QrCodeGenerator
 
@@ -319,7 +319,7 @@ private fun MyCodePane() {
                 Text(if (copied) "Скопировано" else "Копировать")
             }
             Button(
-                onClick = { AppShare.shareInvite(context, displayName, link) },
+                onClick = { ShortShare.shareInvite(context, displayName, link) },
                 modifier = Modifier.weight(1f),
             ) {
                 Icon(Icons.Default.Share, contentDescription = null)

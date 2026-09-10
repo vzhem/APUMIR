@@ -11,8 +11,13 @@ import java.util.regex.Pattern
  * Поддерживаемые формы (по образцу util.InviteLinkParser для личных контактов):
  *  - p2pmessenger://group?slug=<slug>
  *  - p2p://group/<slug>
- *  - https://p2p-relay.1985vzhem.workers.dev/i?slug=<slug> (пересылка наружу)
+ *  - https://p2p-relay.1985vzhem.workers.dev/i?slug=<slug> (длинная веб-ссылка)
  *  - https://t.me/p2p_messenger_relay_bot?start=grp_<slug>
+ *
+ * Для пересылки наружу с версии 11.70.9 используется КОРОТКАЯ ссылка
+ * https://<хост>/s/<код> (data.link.ShortLinks): она не показывает ни канал,
+ * ни владельца, ни запись. Здесь она не разбирается - её сначала разворачивает
+ * сервис (GroupRepository.expandLink), а результат уже разбирает parseTarget.
  */
 object GroupInviteLinks {
 
@@ -101,13 +106,50 @@ object GroupInviteLinks {
         ownerId: String? = null,
         isChannel: Boolean = false,
         postTopicId: String? = null,
+        requestApproval: Boolean = false,
     ): String {
         val sb = StringBuilder(WEB_LINK_PREFIX).append(slug)
         if (!groupId.isNullOrBlank()) sb.append("&g=").append(groupId)
         if (!ownerId.isNullOrBlank()) sb.append("&o=").append(ownerId)
         if (!postTopicId.isNullOrBlank()) sb.append("&p=").append(postTopicId)
         if (isChannel) sb.append("&c=1")
+        if (requestApproval) sb.append("&a=1")
         return sb.toString()
+    }
+
+    /**
+     * Та же ссылка в основном виде `p2pmessenger://group?…` из любой
+     * поддерживаемой формы. Именно её прячем за коротким кодом: у сервиса
+     * код - отпечаток строки, и одинаковые приглашения в разной записи
+     * должны давать один и тот же код. Null, если строка не приглашение.
+     */
+    fun toDeepLink(raw: String?): String? {
+        val target = parseTarget(raw) ?: return null
+        return build(
+            slug = target.slug,
+            groupId = target.groupId,
+            ownerId = target.ownerId,
+            isChannel = target.isChannel,
+            requestApproval = target.needsApproval,
+            postTopicId = target.postTopicId,
+        )
+    }
+
+    /**
+     * Та же ссылка в веб-виде для пересылки: из любой поддерживаемой формы
+     * (обычно p2pmessenger://group?…). Null, если строка не приглашение.
+     * Запасной путь, когда короткую ссылку получить не удалось.
+     */
+    fun toWebLink(raw: String?): String? {
+        val target = parseTarget(raw) ?: return null
+        return buildWebLink(
+            slug = target.slug,
+            groupId = target.groupId,
+            ownerId = target.ownerId,
+            isChannel = target.isChannel,
+            postTopicId = target.postTopicId,
+            requestApproval = target.needsApproval,
+        )
     }
 
     fun buildTelegramLink(slug: String): String =

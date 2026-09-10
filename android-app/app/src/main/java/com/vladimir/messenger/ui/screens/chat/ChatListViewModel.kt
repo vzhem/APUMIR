@@ -519,20 +519,10 @@ class ChatListViewModel @Inject constructor(
 
     fun shareGroupInvite(groupId: String, onReady: (title: String, link: String) -> Unit) {
         viewModelScope.launch {
+            // Короткая веб-ссылка без идентификаторов группы и владельца;
+            // тип входа (по заявке для частной) решает репозиторий.
             val prepared = withContext(Dispatchers.IO) {
-                val group = runCatching { groupDao.getGroupById(groupId) }.getOrNull()
-                    ?: return@withContext null
-                val slug = group.inviteSlug
-                if (slug.isBlank()) return@withContext null
-                group.title to com.vladimir.messenger.data.group.GroupInviteLinks.build(
-                    slug = slug,
-                    groupId = group.id,
-                    ownerId = group.ownerId,
-                    isChannel = group.isChannel,
-                    // Частная группа принимает по заявке - вступающий телефон
-                    // должен честно написать «заявка отправлена».
-                    requestApproval = !group.isPublic,
-                )
+                runCatching { groupRepository.inviteLinkFor(groupId) }.getOrNull()
             }
             if (prepared != null) onReady(prepared.first, prepared.second)
         }

@@ -347,21 +347,54 @@
 
 ### Ссылка пересылки поста: как устроена и что где лежит
 
-- Строит: `GroupRepository.postLinkFor` → `GroupInviteLinks.buildWebLink` →
+- **С v11.70.9 наружу уходит КОРОТКАЯ ссылка** `https://<хост>/s/<код>`
+  (10 знаков, ни канала, ни владельца, ни записи в адресе - просьба
+  владельца 2026-09-10). Код выдаёт worker (`POST /short`, KV `short:<код>`,
+  код = SHA-256 полной ссылки `p2pmessenger://group?…`, поэтому один и тот
+  же пост всегда даёт один код); приложение разворачивает код через
+  `GET /short/<код>`; браузер без APU получает страницу `GET /s/<код>`.
+  Kotlin: `data/link/ShortLinks.kt` (разбор, чистый Kotlin, тест
+  `ShortLinksTest`), `data/link/LinkShortener.kt` (кэш кодов + пауза 2 мин
+  после отказа сервиса), `data/link/ShortShare.kt` («Поделиться» для
+  экранов без ViewModel), `BotApi.shortenLink/expandShortLink` (таймаут
+  5 с), `GroupRepository.shareLinkFor/expandLink` (хуки приходят из
+  `GroupsModule`; в JVM-тестах их нет - ссылки длинные).
+- Где сокращается: репост поста (`postLinkFor` - теперь одно бессрочное
+  приглашение «вход сразу» на канал, `openInviteFor`, а не новое на каждый
+  репост), «Поделиться» группой/каналом из «Сообществ» и списка чатов
+  (`inviteLinkFor`), несколько групп контакту (`inviteLinksFor`), список
+  ссылок в админке (`InviteSummary.shareLink`, QR - по основной ссылке),
+  свой профиль (`ShortShare.shareInvite` в контактах/QR/рангах,
+  `ShareProfileViewModel.alternativeLink`), контакт из списка
+  (`ShortShare.shareText`).
+- Где разворачивается: `MainActivity.resolveShortLink` (тап снаружи),
+  сканер QR в `NavGraph`, «Войти по ссылке» (`GroupsViewModel.joinByLink`
+  → `expandLink`), `AddContactViewModel` (вставка). Сервис не ответил -
+  прямое сообщение «нет связи с сервисом APU», а не «это не ссылка».
+- **Пока владелец не опубликовал новый worker, приложение делится длинной
+  ссылкой** (POST /short отвечает 404 → откат). Порядок: сначала worker,
+  потом раздача APK - как с assetlinks.
+- Длинный вид остаётся: строит `GroupInviteLinks.buildWebLink` →
   `https://p2p-relay.1985vzhem.workers.dev/i?slug=…&g=…&o=…&p=…&c=1`.
 - Понимает: `GroupInviteLinks.parseTarget` (и чистый адрес, и внутри текста -
   `LINK_PATTERN`), `MainActivity.handleDeepLinkIntent`, intent-filter на хост
-  `p2p-relay.1985vzhem.workers.dev` путь `/i` в манифесте.
+  `p2p-relay.1985vzhem.workers.dev` пути `/i` и `/s/` в манифесте.
 - Хост зашит в трёх местах: `GroupInviteLinks.WEB_HOST`, манифест, worker.
-  Менять только вместе.
+  Менять только вместе. Хост `apumir.app` уже принимается везде
+  (`OFFICIAL_HOST`, манифест) - когда владелец купит домен и подключит его к
+  worker'у как Custom Domain, достаточно сменить `WEB_HOST`.
 - Worker (`tools/worker/p2p_relay_worker.js`): `/i` - страница «Открыть в
-  APU / Установить», `/.well-known/assetlinks.json` - отпечатки ключей подписи
+  APU / Установить», `/s/<код>` - та же страница по короткой ссылке,
+  `POST /short` и `GET /short/<код>` - короткие ссылки (v11.70.9),
+  `/.well-known/assetlinks.json` - отпечатки ключей подписи
   релиза (массив `RELEASE_CERT_SHA256S`; сейчас один, `F8:43:CB:E7…A5:F7`;
-  после ротации ключа добавить второй). **Опубликовано владельцем
-  2026-09-07 вечером**, проверено живьём: `/i` отдаёт страницу с кнопками,
-  `assetlinks.json` - JSON с пакетом и отпечатком, `/vault/*` не сломан.
-  Порядок для будущих правок тот же: сначала worker, потом APK - Android
-  проверяет файл при установке приложения.
+  после ротации ключа добавить второй). Версия с `/i` и `assetlinks`
+  **опубликована владельцем 2026-09-07 вечером**, проверена живьём.
+  Версия с короткими ссылками отправлена владельцу в чат 2026-09-10 -
+  проверить публикацию: `https://p2p-relay.1985vzhem.workers.dev/s/x`
+  должен отвечать «Ссылка неполная» (старый worker ответит JSON
+  `not found`). Порядок для будущих правок тот же: сначала worker, потом
+  APK - Android проверяет файл при установке приложения.
 - Тесты: `GroupInviteLinksTest` (`web link …`). Slug в тестах - только из
   алфавита `newSlug` (без `0 1 I O l`), иначе `isValidSlug` тихо отбракует и
   тест проверит пустоту - так и случилось с `"abcd1234"` в v11.69.x.

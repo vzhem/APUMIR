@@ -2,7 +2,6 @@ package com.vladimir.messenger.ui.screens.contacts
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.domain.model.Contact
@@ -30,6 +29,7 @@ class ContactsViewModel @Inject constructor(
     private val contactRepository: ContactRepository,
     private val groupDao: GroupDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
 ) : ViewModel() {
 
     /** Короткий отчёт для всплывающей подсказки после отправки. */
@@ -102,20 +102,10 @@ class ContactsViewModel @Inject constructor(
     ) {
         if (groupIds.isEmpty()) return
         viewModelScope.launch {
+            // Короткие веб-ссылки: в чужом мессенджере кликабельны и не
+            // показывают идентификаторы группы и владельца.
             val invites = withContext(Dispatchers.IO) {
-                groupIds.mapNotNull { id ->
-                    val group = runCatching { groupDao.getGroupById(id) }.getOrNull()
-                        ?: return@mapNotNull null
-                    val slug = group.inviteSlug
-                    if (slug.isBlank()) return@mapNotNull null
-                    group.title to GroupInviteLinks.build(
-                        slug = slug,
-                        groupId = group.id,
-                        ownerId = group.ownerId,
-                        isChannel = group.isChannel,
-                        requestApproval = !group.isPublic,
-                    )
-                }
+                runCatching { groupRepository.inviteLinksFor(groupIds) }.getOrDefault(emptyList())
             }
             if (invites.isNotEmpty()) onReady(invites)
         }
@@ -130,19 +120,10 @@ class ContactsViewModel @Inject constructor(
         if (groupIds.isEmpty() || contactId.isBlank()) return
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) {
-                val invites = groupIds.mapNotNull { id ->
-                    val group = runCatching { groupDao.getGroupById(id) }.getOrNull()
-                        ?: return@mapNotNull null
-                    val slug = group.inviteSlug
-                    if (slug.isBlank()) return@mapNotNull null
-                    group.title to GroupInviteLinks.build(
-                        slug = slug,
-                        groupId = group.id,
-                        ownerId = group.ownerId,
-                        isChannel = group.isChannel,
-                        requestApproval = !group.isPublic,
-                    )
-                }
+                // Те же короткие https-ссылки, что и наружу: в пузыре чата
+                // кликабельны только http(s), и по нажатию APU открывает их сам.
+                val invites = runCatching { groupRepository.inviteLinksFor(groupIds) }
+                    .getOrDefault(emptyList())
                 if (invites.isEmpty()) return@withContext false
                 val text = com.vladimir.messenger.util.AppShare.groupsInviteText(invites)
                 val chat = chatRepository.getOrCreateChat(contactId, contactName)

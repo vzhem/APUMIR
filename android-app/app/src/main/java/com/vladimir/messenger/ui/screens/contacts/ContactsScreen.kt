@@ -19,11 +19,11 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
-import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.util.AppShare
+import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.util.ContactShareLink
 import com.vladimir.messenger.util.OwnInvite
 import androidx.compose.ui.Alignment
@@ -97,7 +97,7 @@ fun ContactsScreen(
                     IconButton(
                         onClick = {
                             OwnInvite.link(context)?.let { link ->
-                                AppShare.shareInvite(context, OwnInvite.displayName(context), link)
+                                ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
                             }
                         },
                     ) {
@@ -170,7 +170,7 @@ fun ContactsScreen(
                     OutlinedButton(
                         onClick = {
                             OwnInvite.link(context)?.let { link ->
-                                AppShare.shareInvite(context, OwnInvite.displayName(context), link)
+                                ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
                             }
                         },
                     ) {
@@ -199,20 +199,17 @@ fun ContactsScreen(
                         val shareContact = {
                             try {
                                     val link = ContactShareLink.build(contact.id, contact.displayName, contact.username)
-                                    val send = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        putExtra(
-                                            Intent.EXTRA_TEXT,
-                                            // Доллар НЕ экранируем: с ${'$'} в
-                                            // сообщение уходил сам текст
-                                            // "${contact.displayName}" вместо имени,
-                                            // а вместо ссылки - "${link}".
-                                            "Мой контакт ${contact.displayName} в APU. " +
-                                                "Открой ссылку для добавления:\n$link",
-                                        )
-                                        type = "text/plain"
+                                    // Наружу - короткой https-ссылкой: apu:// в чужих
+                                    // мессенджерах не кликабельна. Сервис молчит -
+                                    // уйдёт прежняя ссылка.
+                                    ShortShare.shareText(ctx, link, "Поделиться контактом") { shared ->
+                                        // Доллар НЕ экранируем: с ${'$'} в
+                                        // сообщение уходил сам текст
+                                        // "${contact.displayName}" вместо имени,
+                                        // а вместо ссылки - "${link}".
+                                        "Мой контакт ${contact.displayName} в APU. " +
+                                            "Открой ссылку для добавления:\n$shared"
                                     }
-                                    ctx.startActivity(Intent.createChooser(send, "Поделиться контактом"))
                                 } catch (_: Exception) {
                                 }
                             Unit

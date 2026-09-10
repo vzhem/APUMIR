@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupInviteLinks
+import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.HintBubble
@@ -142,7 +143,9 @@ fun GroupsScreen(
     LaunchedEffect(joinLink) {
         // Проверяем, что это действительно ссылка: в параметр может прилететь
         // шаблон маршрута или посторонний текст - тогда нечего и пытаться.
-        if (!joinHandled && !joinLink.isNullOrBlank() && GroupInviteLinks.parseTarget(joinLink) != null) {
+        if (!joinHandled && !joinLink.isNullOrBlank() &&
+            (GroupInviteLinks.parseTarget(joinLink) != null || ShortLinks.isShortLink(joinLink))
+        ) {
             joinHandled = true
             viewModel.joinByLink(joinLink)
         }
@@ -765,7 +768,9 @@ private fun JoinByLinkDialog(
                     // Проверяем, что это приглашение в группу, но отдаём ВСЮ
                     // ссылку: в ней id группы и адрес владельца, без них войти
                     // с другого телефона нельзя.
-                    if (GroupInviteLinks.parseTarget(link) == null) {
+                    // Короткую ссылку /s/<код> принимаем тоже: что за ней -
+                    // узнает репозиторий у сервиса.
+                    if (GroupInviteLinks.parseTarget(link) == null && !ShortLinks.isShortLink(link)) {
                         error = "Не похоже на ссылку-приглашение в группу"
                     } else {
                         onSubmit(link.trim())

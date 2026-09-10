@@ -56,6 +56,12 @@ import com.vladimir.messenger.ui.screens.groups.GroupAdminScreen
 import com.vladimir.messenger.ui.screens.channels.ChannelScreen
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.util.InviteLinkParser
+import com.vladimir.messenger.data.link.LinkShortenerEntryPoint
+import com.vladimir.messenger.data.link.ShortLinks
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.vladimir.messenger.data.call.CallManager
 import com.vladimir.messenger.data.call.CallStateMachine
 import com.vladimir.messenger.ui.screens.call.CallScreen
@@ -695,34 +701,66 @@ fun MessengerNavGraph(
 
         composable(route = Screen.QrScanner.route) {
             val scanContext = LocalContext.current
+            val scanScope = rememberCoroutineScope()
+            // Сканер отдаёт весь прочитанный текст, разбор здесь.
+            // InviteLinkParser понимает и p2p://invite/pk_... — именно такой
+            // QR приложение показывает в профиле, раньше он уходил в тост
+            // «Это не ссылка APU». В навигацию отдаём ВЕСЬ текст: в ссылке
+            // есть имя контакта, без него карточка контакта беднее.
+            val routeScanned: (String) -> Unit = { qrContent ->
+                when {
+                    GroupInviteLinks.parseTarget(qrContent) != null ->
+                        navController.navigate(Screen.Groups.createJoinRoute(qrContent)) {
+                            popUpTo(Screen.QrScanner.route) { inclusive = true }
+                        }
+
+                    InviteLinkParser.parse(qrContent) != null ->
+                        navController.navigate(Screen.AddContact.createRoute(qrContent)) {
+                            popUpTo(Screen.QrScanner.route) { inclusive = true }
+                        }
+
+                    else -> {
+                        Toast.makeText(
+                            scanContext,
+                            "Это не ссылка APU: " + qrContent.take(64),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        navController.popBackStack()
+                    }
+                }
+            }
             QrScannerScreen(
                 onBackClick = { navController.popBackStack() },
                 onQrScanned = { qrContent ->
-                    // Сканер отдаёт весь прочитанный текст, разбор здесь.
-                    // InviteLinkParser понимает и p2p://invite/pk_... — именно такой
-                    // QR приложение показывает в профиле, раньше он уходил в тост
-                    // «Это не ссылка APU». В навигацию отдаём ВЕСЬ текст: в ссылке
-                    // есть имя контакта, без него карточка контакта беднее.
-                    val isGroupInvite = GroupInviteLinks.parseTarget(qrContent) != null
-                    when {
-                        isGroupInvite ->
-                            navController.navigate(Screen.Groups.createJoinRoute(qrContent)) {
-                                popUpTo(Screen.QrScanner.route) { inclusive = true }
+                    if (ShortLinks.isShortLink(qrContent)) {
+                        // Короткая ссылка /s/<код> (её печатают на афишах и
+                        // визитках): что за ней - группа, пост или контакт -
+                        // знает только сервис. Спрашиваем и ведём по ответу.
+                        scanScope.launch {
+                            val full = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    EntryPointAccessors
+                                        .fromApplication(
+                                            scanContext.applicationContext,
+                                            LinkShortenerEntryPoint::class.java,
+                                        )
+                                        .linkShortener()
+                                        .expandIfShort(qrContent)
+                                }.getOrNull()
                             }
-
-                        InviteLinkParser.parse(qrContent) != null ->
-                            navController.navigate(Screen.AddContact.createRoute(qrContent)) {
-                                popUpTo(Screen.QrScanner.route) { inclusive = true }
+                            if (full == null || full == qrContent) {
+                                Toast.makeText(
+                                    scanContext,
+                                    "Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                navController.popBackStack()
+                            } else {
+                                routeScanned(full)
                             }
-
-                        else -> {
-                            Toast.makeText(
-                                scanContext,
-                                "Это не ссылка APU: " + qrContent.take(64),
-                                Toast.LENGTH_LONG,
-                            ).show()
-                            navController.popBackStack()
                         }
+                    } else {
+                        routeScanned(qrContent)
                     }
                 }
             )

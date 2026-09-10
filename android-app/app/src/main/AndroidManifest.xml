@@ -79,6 +79,8 @@
                 <data android:scheme="https"
                       android:host="apumir.app"
                       android:pathPrefix="/i" />
+                <!-- Короткая ссылка /s/<код> (data/link/ShortLinks.kt). -->
+                <data android:pathPrefix="/s/" />
             </intent-filter>
 
             <!-- Пересланная ссылка на канал или пост: её отдаёт наш сервис.
@@ -98,6 +100,11 @@
                 <data android:scheme="https"
                       android:host="p2p-relay.1985vzhem.workers.dev"
                       android:pathPrefix="/i" />
+                <!-- Короткая ссылка /s/<код>: путь нарочно другой, чем /i,
+                     чтобы старые версии APU (они знают только /i) отдавали её
+                     браузеру, а страница сервиса уже вела их в приложение
+                     полной ссылкой. -->
+                <data android:pathPrefix="/s/" />
             </intent-filter>
 
             <!-- HTTP схема (fallback) -->

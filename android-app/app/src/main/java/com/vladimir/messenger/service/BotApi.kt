@@ -21,6 +21,8 @@ import javax.inject.Singleton
  * - POST /register  — регистрация своего {node_id, public_key, display_name}
  * - GET /lookup?node_id=XX — получение данных о другом node
  * - GET /version — последняя версия APK (Phase 7)
+ * - POST /short {target} — короткая ссылка для пересылки (data.link.ShortLinks)
+ * - GET /short/<код> — куда ведёт короткая ссылка
  */
 @Singleton
 class BotApi @Inject constructor(
@@ -30,6 +32,8 @@ class BotApi @Inject constructor(
         private const val TAG = "BotApi"
         private const val REGISTRY_URL = "https://p2p-relay.1985vzhem.workers.dev"
         private const val HTTP_TIMEOUT = 15000
+        /** Короткие ссылки ждут человека у кнопки «Поделиться»: ждём меньше. */
+        private const val SHORT_LINK_TIMEOUT = 5000
         const val BOT_USERNAME = "p2p_messenger_relay_bot"
     }
 
@@ -153,6 +157,42 @@ class BotApi @Inject constructor(
     }
 
     /**
+     * Спрятать длинную ссылку за коротким кодом. Сервис сам считает код как
+     * отпечаток ссылки, поэтому одна и та же ссылка всегда даёт один код.
+     *
+     * @return код (обычно 10 знаков) либо null, если сервис недоступен или
+     *         отказал (ссылка не того вида).
+     */
+    suspend fun shortenLink(target: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply { put("target", target) }
+            val response = postJson("$REGISTRY_URL/short", body.toString(), SHORT_LINK_TIMEOUT)
+                ?: return@withContext null
+            JSONObject(response).optString("code", "").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Shorten failed", e)
+            null
+        }
+    }
+
+    /**
+     * Куда ведёт короткая ссылка. Null - код неизвестен сервису либо сервис
+     * недоступен; вызывающий сам решает, что сказать человеку.
+     */
+    suspend fun expandShortLink(code: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val response = getJson(
+                "$REGISTRY_URL/short/" + URLEncoder.encode(code, "UTF-8"),
+                SHORT_LINK_TIMEOUT,
+            ) ?: return@withContext null
+            JSONObject(response).optString("target", "").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Expand failed", e)
+            null
+        }
+    }
+
+    /**
      * Получить последнюю версию APK (для Phase 7).
      */
     suspend fun getLatestVersion(): String? = withContext(Dispatchers.IO) {
@@ -166,13 +206,13 @@ class BotApi @Inject constructor(
         }
     }
 
-    private fun postJson(url: String, body: String): String? {
+    private fun postJson(url: String, body: String, timeoutMs: Int = HTTP_TIMEOUT): String? {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
             doOutput = true
-            connectTimeout = HTTP_TIMEOUT
-            readTimeout = HTTP_TIMEOUT
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
         }
         return try {
             conn.outputStream.use { it.write(body.toByteArray()) }
@@ -190,11 +230,11 @@ class BotApi @Inject constructor(
         }
     }
 
-    private fun getJson(url: String): String? {
+    private fun getJson(url: String, timeoutMs: Int = HTTP_TIMEOUT): String? {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = HTTP_TIMEOUT
-            readTimeout = HTTP_TIMEOUT
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
         }
         return try {
             val code = conn.responseCode

@@ -25,6 +25,7 @@ import com.vladimir.messenger.data.swarm.Ed25519
 import com.vladimir.messenger.data.swarm.ManifestPart
 import com.vladimir.messenger.data.swarm.PostManifest
 import com.vladimir.messenger.data.swarm.SwarmBuffer
+import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transform
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.UUID
@@ -108,6 +110,14 @@ class GroupRepository(
      */
     private val onCountersRequest: suspend (senderId: String, packet: GroupWire.Packet.CountersRequest) -> Unit = { _, _ -> },
     private val onCounters: suspend (senderId: String, packet: GroupWire.Packet.Counters) -> Unit = { _, _ -> },
+    /**
+     * Короткие ссылки (data.link.LinkShortener): спрятать длинную ссылку за
+     * кодом и узнать, куда ведёт код. Оба вызова ходят на наш сервис; null -
+     * сервис недоступен. Без них (по умолчанию) ссылки остаются длинными, а
+     * короткие не разворачиваются - так работают JVM-тесты.
+     */
+    private val shortenLink: suspend (target: String) -> String? = { null },
+    private val expandShortLink: suspend (code: String) -> String? = { null },
 ) {
 
     /**
@@ -2339,10 +2349,16 @@ class GroupRepository(
     // ── Ссылки-приглашения и QR ───────────────────────────────────────────────
 
     fun observeInvites(groupId: String): Flow<List<InviteSummary>> =
-        groupDao.observeInvites(groupId).map { list ->
+        groupDao.observeInvites(groupId).transform { list ->
             val group = groupDao.getGroupById(groupId)
-            list.map { toInviteSummary(it, group?.ownerId, group?.isChannel == true) }
-        }
+            val plain = list.map { toInviteSummary(it, group?.ownerId, group?.isChannel == true) }
+            // Список - сразу, с основными ссылками; короткие ссылки для
+            // пересылки - вторым заходом: за ними нужен сервис, и без сети
+            // экран не должен ждать таймаута.
+            emit(plain)
+            val shortened = plain.map { it.copy(shareLink = shareLinkFor(it.link)) }
+            if (shortened != plain) emit(shortened)
+        }.flowOn(Dispatchers.IO)
 
     /**
      * Ссылка-приглашение. Кроме slug несёт id группы и адрес владельца — иначе
@@ -2446,7 +2462,12 @@ class GroupRepository(
      * ссылку на своём телефоне) — работаем по старому локальному пути.
      */
     suspend fun joinByLink(raw: String, note: String = ""): JoinOutcome {
-        val target = GroupInviteLinks.parseTarget(raw)
+        // Короткая ссылка /s/<код>: сначала спрашиваем сервис, куда она ведёт.
+        val expanded = expandLink(raw)
+            ?: return JoinOutcome.Failed(
+                "Не удалось открыть короткую ссылку: нет связи с сервисом APU. Попробуйте позже."
+            )
+        val target = GroupInviteLinks.parseTarget(expanded)
             ?: return JoinOutcome.Failed("Это не ссылка-приглашение в группу")
         val me = myId() ?: return JoinOutcome.Failed("Идентичность узла ещё не готова")
 
@@ -2689,23 +2710,34 @@ class GroupRepository(
     }
 
     /**
-     * Ссылка-приглашение в группу и её название: то же, что готовит главный
-     * экран, но доступное и из раздела «Группы».
+     * Ссылка-приглашение в группу и её название для кнопки «Поделиться»:
+     * короткая веб-ссылка `/s/<код>` (без сервиса - длинная веб-ссылка). В
+     * чужих мессенджерах кликабельны только http(s); идентификаторы группы и
+     * владельца короткая ссылка не показывает.
      */
     suspend fun inviteLinkFor(groupId: String): Pair<String, String>? {
         val group = groupDao.getGroupById(groupId) ?: return null
         val slug = group.inviteSlug
         if (slug.isBlank()) return null
-        return group.title to GroupInviteLinks.build(
-            slug = slug,
-            groupId = group.id,
-            ownerId = group.ownerId,
-            isChannel = group.isChannel,
-            // Частная группа принимает по заявке: вступающий телефон должен
-            // честно написать «заявка отправлена».
-            requestApproval = !group.isPublic,
+        return group.title to shareLinkFor(
+            GroupInviteLinks.build(
+                slug = slug,
+                groupId = group.id,
+                ownerId = group.ownerId,
+                isChannel = group.isChannel,
+                // Частная группа принимает по заявке: вступающий телефон должен
+                // честно написать «заявка отправлена».
+                requestApproval = !group.isPublic,
+            )
         )
     }
+
+    /**
+     * Ссылки для «Поделиться» сразу несколькими группами или каналами:
+     * название и короткая ссылка на каждую. Группы без приглашения пропускаются.
+     */
+    suspend fun inviteLinksFor(groupIds: Collection<String>): List<Pair<String, String>> =
+        groupIds.mapNotNull { id -> runCatching { inviteLinkFor(id) }.getOrNull() }
 
     /**
      * Ссылка для QR при личной встрече: вход БЕЗ одобрения.
@@ -2730,16 +2762,64 @@ class GroupRepository(
      */
     suspend fun postLinkFor(channelId: String, topicId: String): String? {
         val channel = groupDao.getGroupById(channelId) ?: return null
-        val invite = createInvite(channelId, requestApproval = false).getOrNull() ?: return null
+        // Одно бессрочное приглашение «вход сразу» на канал, а не новое на
+        // каждый репост: иначе список ссылок в админке рос с каждым нажатием,
+        // а короткий код у одного и того же поста менялся от репоста к репосту.
+        val invite = openInviteFor(channelId) ?: return null
         // Веб-адрес, а не p2pmessenger://: чужие мессенджеры подсвечивают
         // только http(s), поэтому пересланная ссылка была мёртвым текстом.
-        return GroupInviteLinks.buildWebLink(
-            slug = invite.slug,
-            groupId = channelId,
-            ownerId = channel.ownerId,
-            isChannel = channel.isChannel,
-            postTopicId = topicId,
+        // Короткий вид прячет канал, владельца и запись за кодом; если сервис
+        // недоступен - длинная веб-ссылка, как раньше.
+        return shareLinkFor(
+            GroupInviteLinks.build(
+                slug = invite.slug,
+                groupId = channelId,
+                ownerId = channel.ownerId,
+                isChannel = channel.isChannel,
+                postTopicId = topicId,
+            )
         )
+    }
+
+    /**
+     * Действующее бессрочное приглашение без одобрения и без лимита - для
+     * ссылок на посты. Если такого ещё нет, создаётся одно и переиспользуется.
+     */
+    private suspend fun openInviteFor(groupId: String): InviteSummary? {
+        val group = groupDao.getGroupById(groupId) ?: return null
+        val existing = groupDao.getInvites(groupId).firstOrNull {
+            !it.revoked && !it.requestApproval && it.maxUses <= 0 && it.expiresAtMs == null
+        }
+        if (existing != null) return toInviteSummary(existing, group.ownerId, group.isChannel)
+        return createInvite(groupId, requestApproval = false).getOrNull()
+    }
+
+    /**
+     * Ссылка для пересылки наружу: короткая `https://<хост>/s/<код>`, а если
+     * сервис коротких ссылок недоступен - длинная веб-ссылка `/i?slug=…`.
+     * На входе любая форма приглашения (обычно p2pmessenger://group?…).
+     * Не приглашение - возвращается как есть.
+     */
+    suspend fun shareLinkFor(link: String): String {
+        // За кодом прячем основную форму p2pmessenger://group?…: у сервиса код -
+        // отпечаток строки, и одно приглашение в разной записи должно давать
+        // один и тот же код. Кэш и пауза после отказа - в LinkShortener.
+        val deepLink = GroupInviteLinks.toDeepLink(link) ?: return link
+        val code = runCatching { shortenLink(deepLink) }.getOrNull()
+        if (code != null && ShortLinks.isValidCode(code)) return ShortLinks.build(code)
+        return GroupInviteLinks.toWebLink(deepLink) ?: link
+    }
+
+    /**
+     * Разворачивает короткую ссылку в полную через сервис. Обычная (длинная)
+     * ссылка возвращается как есть. Null - короткая ссылка, но сервис не
+     * ответил или код неизвестен; в цель, которую сервис вернул, верим только
+     * если она из тех форм, что строит само приложение.
+     */
+    suspend fun expandLink(raw: String): String? {
+        val code = ShortLinks.codeOf(raw) ?: return raw
+        val target = runCatching { expandShortLink(code) }.getOrNull() ?: return null
+        return target.takeIf { ShortLinks.isAllowedTarget(it) }
     }
 
     suspend fun leaveGroup(groupId: String): Result<Unit> {

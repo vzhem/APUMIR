@@ -49,7 +49,7 @@ import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.PromoCodes
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.ui.components.ChatWallpaper
-import com.vladimir.messenger.util.AppShare
+import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.util.OwnInvite
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,7 +114,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                             Button(
                                 onClick = {
                                     OwnInvite.link(context)?.let { link ->
-                                        AppShare.shareInvite(context, OwnInvite.displayName(context), link)
+                                        ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
                                     }
                                 },
                             ) {

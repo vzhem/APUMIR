@@ -867,6 +867,9 @@ private fun InviteCard(
     onRevoke: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    // QR - по основной ссылке (сканер APU разбирает её без сети), а текст,
+    // «Копировать» и «Поделиться» - короткая ссылка для пересылки: она не
+    // показывает идентификаторы группы и владельца.
     val bitmap = remember(invite.link) { QrCodeGenerator.generateQrCode(invite.link) }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -878,7 +881,7 @@ private fun InviteCard(
                     // SelectionContainer делает текст выделяемым: без него
                     // ссылку нельзя было ни отметить, ни скопировать.
                     SelectionContainer {
-                        Text(invite.link, style = MaterialTheme.typography.bodyMedium)
+                        Text(invite.shareLink, style = MaterialTheme.typography.bodyMedium)
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -908,10 +911,10 @@ private fun InviteCard(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { clipboard.setText(AnnotatedString(invite.link)) }) {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(invite.shareLink)) }) {
                     Text("Копировать")
                 }
-                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.link) }) {
+                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink) }) {
                     Text("Поделиться")
                 }
                 // Отозвать и удалить ссылку может только администратор:

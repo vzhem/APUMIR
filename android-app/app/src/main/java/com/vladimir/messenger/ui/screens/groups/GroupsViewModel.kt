@@ -227,11 +227,25 @@ class GroupsViewModel @Inject constructor(
                     joinedPostTopicId = null,
                 )
             }
+            // Короткая ссылка /s/<код>: сперва узнаём у сервиса полную. Не
+            // ответил - говорим прямо, а не «это не ссылка».
+            val link = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.expandLink(raw) }.getOrNull()
+            }
+            if (link == null) {
+                _uiState.update {
+                    it.copy(
+                        joining = false,
+                        joinMessage = "Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.",
+                    )
+                }
+                return@launch
+            }
             // Тема поста едет в самой ссылке: достаём до вступления, чтобы
             // потом открыть нужную запись, а не начало ленты.
             val postTopicId = com.vladimir.messenger.data.group.GroupInviteLinks
-                .parseTarget(raw)?.postTopicId
-            val outcome = withContext(Dispatchers.IO) { groupRepository.joinByLink(raw) }
+                .parseTarget(link)?.postTopicId
+            val outcome = withContext(Dispatchers.IO) { groupRepository.joinByLink(link) }
             when (outcome) {
                 is JoinOutcome.Joined -> _uiState.update {
                     it.copy(

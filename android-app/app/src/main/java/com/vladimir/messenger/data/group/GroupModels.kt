@@ -58,6 +58,7 @@ data class JoinRequestSummary(
 data class InviteSummary(
     val slug: String,
     val groupId: String,
+    /** Основная ссылка p2pmessenger://group?… - для QR-кода и разбора без сети. */
     val link: String,
     val createdAtMs: Long,
     val expiresAtMs: Long?,
@@ -65,6 +66,12 @@ data class InviteSummary(
     val useCount: Int,
     val revoked: Boolean,
     val requestApproval: Boolean,
+    /**
+     * Ссылка для пересылки наружу: короткая https://<хост>/s/<код> без
+     * идентификаторов группы и владельца; если сервис коротких ссылок
+     * недоступен - длинная веб-ссылка. По умолчанию совпадает с [link].
+     */
+    val shareLink: String = link,
 ) {
     val isActive: Boolean
         get() = !revoked &&

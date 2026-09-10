@@ -29,7 +29,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import com.vladimir.messenger.util.AppShare
+import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.util.QrCodeGenerator
 
 @Composable
@@ -70,7 +70,9 @@ fun InviteShareCard(
             OutlinedButton(onClick = { clipboard.setText(AnnotatedString(link)) }) {
                 Text("Копировать")
             }
-            Button(onClick = { AppShare.shareInvite(context, displayName, link) }) {
+            // Наружу - короткой https-ссылкой (кликабельна везде); QR выше
+            // остаётся прежней ссылкой, сканер разбирает её без сети.
+            Button(onClick = { ShortShare.shareInvite(context, displayName, link) }) {
                 Text("Поделиться")
             }
         }

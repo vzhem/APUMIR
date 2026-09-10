@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vladimir.messenger.data.link.LinkShortener
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.service.BotApi
 import com.vladimir.messenger.util.OwnInvite
@@ -34,6 +35,7 @@ data class ShareProfileUiState(
 class ShareProfileViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val botApi: BotApi,
+    private val linkShortener: LinkShortener,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ShareProfileUiState())
@@ -87,6 +89,12 @@ class ShareProfileViewModel @Inject constructor(
                     isLoading = false,
                 )
             }
+            // Запасная ссылка для чужих мессенджеров - короткая https на нашем
+            // сервисе: кликабельна везде, у кого APU нет - страница установки,
+            // а адрес узла в ней не виден. Экран уже показан, ответа сервиса
+            // ждём в фоне; сервис молчит - остаётся прежняя t.me-ссылка.
+            val short = runCatching { linkShortener.shorten(legacyLink) }.getOrNull()
+            if (short != null) _uiState.update { it.copy(alternativeLink = short) }
         }
     }
 
