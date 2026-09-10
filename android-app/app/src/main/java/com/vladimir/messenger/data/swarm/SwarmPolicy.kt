@@ -108,6 +108,19 @@ object SwarmPolicy {
     /** Стекать ли просмотры и реакции к владельцу и администраторам при таком числе подписчиков. */
     fun countersViaHubs(memberCount: Int): Boolean = memberCount > COUNTERS_VIA_HUBS_FROM
 
+    /**
+     * С какого числа подписчиков комментарии канала идут не всем, а
+     * владельцу и администраторам («сборщикам») плюс небольшой выборке
+     * соседей (рой, этап 4). Читатель, открыв комментарии, просит последние
+     * у сборщика (`creq` → `msg`), а сборщик передаёт новые комментарии тем,
+     * кто ветку сейчас читает. Порог тот же, что у счётчиков: до него
+     * «каждый шлёт всем» дёшево и комментарии видны всем сразу.
+     */
+    const val COMMENTS_VIA_HUBS_FROM = COUNTERS_VIA_HUBS_FROM
+
+    /** Слать ли комментарии сборщикам (а не всем подписчикам) при таком числе подписчиков. */
+    fun commentsViaHubs(memberCount: Int): Boolean = memberCount > COMMENTS_VIA_HUBS_FROM
+
     /** Ярус узла по снимку знаний. Контакт всегда «свой», даже со слабым рейтингом. */
     fun tierOf(nodeId: String, knowledge: PeerKnowledge): PeerTier = when {
         nodeId in knowledge.contacts -> PeerTier.OWN

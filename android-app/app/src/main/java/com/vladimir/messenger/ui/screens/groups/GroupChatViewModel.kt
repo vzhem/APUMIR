@@ -37,6 +37,12 @@ data class GroupChatUiState(
     val startInTopic: Boolean = false,
     /** Реакции по сообщениям: ключ - id сообщения. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
+    /**
+     * Сколько комментариев в этой ветке у сборщика (владельца канала) сверх
+     * тех, что уже на телефоне: на большом канале комментарии приходят по
+     * запросу, и лента показывает кнопку «Показать ещё N». 0 - нечего.
+     */
+    val moreComments: Int = 0,
 )
 
 @HiltViewModel
@@ -73,6 +79,7 @@ class GroupChatViewModel @Inject constructor(
         // Репозиторий сам молчит, если это группа, владелец или уже просили.
         viewModelScope.launch { runCatching { groupRepository.requestPosts(groupId) } }
         observeReactions()
+        observeCommentCounts()
         // Закрепы подписываем на выбранную тему, а не на всю группу:
         // observePinned(topicId) стартует вместе с лентой сообщений.
     }
@@ -147,8 +154,38 @@ class GroupChatViewModel @Inject constructor(
 
     private var messagesJob: kotlinx.coroutines.Job? = null
 
+    /** Просьбы о комментариях к сборщику, пока ветка канала открыта (рой, этап 4). */
+    private var commentsJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Ветка открыта: на большом канале комментарии ходят через владельца и
+     * администраторов, и здесь могут быть не все. Просим последние и опись у
+     * сборщика сразу и повторяем раз в минуту, пока экран открыт: повтор
+     * добирает пропущенное и продлевает у сборщика «этот человек читает
+     * ветку» - живые комментарии идут ему сразу. На маленьком канале, в
+     * группе и у сборщика репозиторий ничего не шлёт.
+     */
+    private fun followComments(topicId: String) {
+        commentsJob?.cancel()
+        commentsJob = viewModelScope.launch {
+            while (true) {
+                runCatching { groupRepository.requestComments(groupId, topicId) }
+                kotlinx.coroutines.delay(COMMENTS_REFRESH_MS)
+            }
+        }
+    }
+
+    /** «Показать ещё»: попросить у сборщика комментарии старше самых ранних, что есть. */
+    fun loadOlderComments() {
+        val topicId = _uiState.value.selectedTopicId ?: return
+        viewModelScope.launch {
+            runCatching { groupRepository.requestComments(groupId, topicId, older = true) }
+        }
+    }
+
     private fun observeMessages(topicId: String) {
         messagesJob?.cancel()
+        followComments(topicId)
         messagesJob = viewModelScope.launch {
             groupRepository.observeTopicMessages(groupId, topicId).collect { all ->
                 // Куски фотографий и длинного текста - служебные строки, а не
@@ -165,10 +202,28 @@ class GroupChatViewModel @Inject constructor(
                         m.copy(content = inline.expandContent(m.id, m.content, own))
                     }
                 }
-                _uiState.update { it.copy(messages = list) }
+                _uiState.update { it.copy(messages = list, moreComments = moreComments(topicId, list.size)) }
                 // Экран открыт - значит тема прочитана. Вызываем на каждом
                 // обновлении, чтобы счётчик гас и на новых сообщениях.
                 groupRepository.markRead(groupId, topicId)
+            }
+        }
+    }
+
+    /** Сколько комментариев у сборщика сверх [shown] текстовых сообщений темы (включая пост). */
+    private fun moreComments(topicId: String, shown: Int): Int {
+        val atHub = groupRepository.commentCounts.value[topicId] ?: return 0
+        return (atHub - (shown - 1).coerceAtLeast(0)).coerceAtLeast(0)
+    }
+
+    /** Число комментариев у сборщика пришло или изменилось - пересчитать «ещё N». */
+    private fun observeCommentCounts() {
+        viewModelScope.launch {
+            groupRepository.commentCounts.collect {
+                val topicId = _uiState.value.selectedTopicId
+                if (topicId != null) {
+                    _uiState.update { state -> state.copy(moreComments = moreComments(topicId, state.messages.size)) }
+                }
             }
         }
     }
@@ -258,5 +313,10 @@ class GroupChatViewModel @Inject constructor(
     /** Убрать свою реакцию, какой бы она ни была. */
     fun removeReaction(messageId: String) {
         viewModelScope.launch { reactionRepository.removeMine(groupId, messageId) }
+    }
+
+    private companion object {
+        /** Пока ветка открыта, просьба о комментариях повторяется с таким шагом. */
+        const val COMMENTS_REFRESH_MS = 60_000L
     }
 }

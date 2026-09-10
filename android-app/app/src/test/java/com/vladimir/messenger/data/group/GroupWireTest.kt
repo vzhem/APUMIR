@@ -659,4 +659,85 @@ class GroupWireTest {
         val empty = GroupWire.parse("APUGRP1|pcnt|ch|") as GroupWire.Packet.Counters
         assertTrue(empty.cells.isEmpty())
     }
+
+    // ── Комментарии большого канала (рой, этап 4) ────────────────────────────
+
+    @Test
+    fun commentsRequestRoundTrip() {
+        val have = (1..GroupWire.MAX_COMMENT_HAVE + 5).map { java.util.UUID.randomUUID().toString() }
+        val envelope = GroupWire.buildCommentsRequest("ch", "topic|1", 99, 1_700_000_000_000L, 5L, have, listOf("abcdef01"))
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.CommentsRequest)
+        val request = parsed as GroupWire.Packet.CommentsRequest
+        assertEquals("ch", request.groupId)
+        assertEquals("topic|1", request.topicId)
+        assertEquals(GroupWire.MAX_COMMENT_BACKFILL, request.limit)
+        assertEquals(1_700_000_000_000L, request.beforeMs)
+        assertEquals(5L, request.afterMs)
+        assertEquals(have.take(GroupWire.MAX_COMMENT_HAVE).map { it.take(GroupWire.COMMENT_ID_CHARS) }, request.have)
+        assertEquals(listOf("abcdef01"), request.want)
+        assertTrue("envelope is ${envelope.length} chars", envelope.length < 400)
+    }
+
+    @Test
+    fun commentsRequestWithoutListsAndDefaults() {
+        val request = GroupWire.parse(GroupWire.buildCommentsRequest("ch", "t", 5)) as GroupWire.Packet.CommentsRequest
+        assertEquals(5, request.limit)
+        assertEquals(0L, request.beforeMs)
+        assertEquals(0L, request.afterMs)
+        assertTrue(request.have.isEmpty())
+        assertTrue(request.want.isEmpty())
+        // Нулевой предел поднимается до единицы, а не ломает конверт.
+        assertEquals(1, (GroupWire.parse(GroupWire.buildCommentsRequest("ch", "t", 0)) as GroupWire.Packet.CommentsRequest).limit)
+    }
+
+    @Test
+    fun commentsRequestRejectsGarbage() {
+        val topic = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("t".toByteArray())
+        assertNull(GroupWire.parse("APUGRP1|creq|ch|$topic|20|0|0|"))
+        assertNull(GroupWire.parse("APUGRP1|creq|ch|$topic|0|0|0||"))
+        assertNull(GroupWire.parse("APUGRP1|creq|ch|$topic|21|0|0||"))
+        assertNull(GroupWire.parse("APUGRP1|creq|ch|$topic|20|-1|0||"))
+        assertNull(GroupWire.parse("APUGRP1|creq|ch|$topic|20|0|x||"))
+        assertNull(GroupWire.parse("APUGRP1|creq|ch||20|0|0||"))
+        assertNull(GroupWire.parse("APUGRP1|creq|ch|$topic|20|0|0|" + (1..GroupWire.MAX_COMMENT_HAVE + 1).joinToString(",") { "a" } + "|"))
+        assertNull(GroupWire.parse("APUGRP1|creq|ch|$topic|20|0|0|toolongidkey|"))
+    }
+
+    @Test
+    fun commentIdsRoundTripAndLimit() {
+        val ids = (1..GroupWire.MAX_COMMENT_IDS + 7).map { java.util.UUID.randomUUID().toString() }
+        val envelope = GroupWire.buildCommentIds("ch", "t", 1_234, ids)
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.CommentIds
+        assertEquals("t", parsed.topicId)
+        assertEquals(1_234, parsed.count)
+        assertEquals(GroupWire.MAX_COMMENT_IDS, parsed.ids.size)
+        assertEquals(ids.take(GroupWire.MAX_COMMENT_IDS).map { GroupWire.commentIdKey(it) }, parsed.ids)
+        assertTrue("envelope is ${envelope.length} chars", envelope.length < 1_100)
+        val empty = GroupWire.parse(GroupWire.buildCommentIds("ch", "t", 0, emptyList())) as GroupWire.Packet.CommentIds
+        assertTrue(empty.ids.isEmpty())
+        assertNull(GroupWire.parse("APUGRP1|cids|ch|dA|-1|"))
+        assertNull(GroupWire.parse("APUGRP1|cids|ch|dA|1"))
+    }
+
+    @Test
+    fun commentCountsRoundTrip() {
+        val counts = (1..GroupWire.MAX_COUNTER_TOPICS + 2).map { "topic-$it" to it * 10 } + ("topic-1" to 5) + ("" to 1) + ("neg" to -1)
+        val envelope = GroupWire.buildCommentCounts("ch", counts)
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.CommentCounts
+        assertEquals(GroupWire.MAX_COUNTER_TOPICS, parsed.counts.size)
+        assertEquals("topic-1" to 10, parsed.counts.first())
+        assertFalse(parsed.counts.any { it.first == "neg" || it.first.isBlank() })
+        val empty = GroupWire.parse("APUGRP1|cinf|ch|") as GroupWire.Packet.CommentCounts
+        assertTrue(empty.counts.isEmpty())
+        assertNull(GroupWire.parse("APUGRP1|cinf|ch|dA=x"))
+        assertNull(GroupWire.parse("APUGRP1|cinf|ch|=3"))
+        assertNull(GroupWire.parse("APUGRP1|cinf|ch|dA=-2"))
+    }
+
+    @Test
+    fun commentIdKeyIsStablePrefix() {
+        assertEquals("12345678", GroupWire.commentIdKey("12345678-abcd-ef00-1111-222222222222"))
+        assertEquals("abc", GroupWire.commentIdKey("abc"))
+    }
 }

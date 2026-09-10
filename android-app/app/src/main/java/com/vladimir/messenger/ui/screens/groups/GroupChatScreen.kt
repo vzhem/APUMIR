@@ -361,6 +361,18 @@ fun GroupChatScreen(
                 contentPadding = PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // Большой канал: комментарии приходят от владельца по запросу,
+                // и здесь может быть не вся ветка. Кнопка тянет более ранние.
+                if (isChannel && uiState.moreComments > 0) {
+                    item(key = "more-comments") {
+                        TextButton(
+                            onClick = { viewModel.loadOlderComments() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Показать ещё " + uiState.moreComments)
+                        }
+                    }
+                }
                 items(uiState.messages, key = { it.id }) { message ->
                     MessageBubble(
                         message = message,

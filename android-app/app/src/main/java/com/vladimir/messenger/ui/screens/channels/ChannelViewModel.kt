@@ -159,7 +159,7 @@ class ChannelViewModel @Inject constructor(
 
     private fun observe() {
         viewModelScope.launch {
-            combine(
+            val snapshots = combine(
                 groupRepository.observeGroup(channelId),
                 groupRepository.observeMembers(channelId),
                 groupRepository.observeTopics(channelId),
@@ -208,6 +208,21 @@ class ChannelViewModel @Inject constructor(
                     canPost = GroupRole.isAdminOrOwner(me?.role ?: GroupRole.MEMBER),
                     myId = me?.nodeId.orEmpty(),
                 )
+            }
+            // Большой канал (рой, этап 4): комментарии ходят через владельца и
+            // администраторов, на телефоне читателя их лишь часть. Число под
+            // постом - от сборщика, если он его сообщил; ниже своего не падает.
+            combine(snapshots, groupRepository.commentCounts) { snapshot, atHub ->
+                if (atHub.isEmpty()) {
+                    snapshot
+                } else {
+                    snapshot.copy(
+                        posts = snapshot.posts.map { post ->
+                            val known = atHub[post.topicId] ?: return@map post
+                            if (known > post.comments) post.copy(comments = known) else post
+                        },
+                    )
+                }
             }.collect { snapshot ->
                 _uiState.update {
                     it.copy(

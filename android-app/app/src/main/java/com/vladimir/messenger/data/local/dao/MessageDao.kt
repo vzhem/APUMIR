@@ -101,6 +101,49 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC")
     suspend fun getTopicMessages(chatId: String, topicId: String): List<MessageEntity>
 
+    // ── Комментарии большого канала (рой, этап 4) ────────────────────────────
+    // Текстовые сообщения темы - без служебных кусков фото и длинного текста
+    // ([partPattern] = `InlineImage.PART_MARKER + "%"`). В теме канала самое
+    // раннее из них - пост, остальные - комментарии. Запросы с пределом:
+    // у сборщика ветка может быть на тысячи комментариев, и поднимать её
+    // целиком на каждую просьбу нельзя.
+
+    /** Сколько текстовых сообщений (пост + комментарии) в теме. */
+    @Query(
+        "SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
+            "AND content NOT LIKE :partPattern"
+    )
+    suspend fun countTopicTexts(chatId: String, topicId: String, partPattern: String): Int
+
+    /** Текстовые сообщения темы между [afterMs] и [beforeMs] (не включая), от новых к старым, не больше [limit]. */
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
+            "AND content NOT LIKE :partPattern AND timestamp > :afterMs AND timestamp < :beforeMs " +
+            "ORDER BY timestamp DESC LIMIT :limit"
+    )
+    suspend fun getTopicTextsBetween(
+        chatId: String,
+        topicId: String,
+        partPattern: String,
+        afterMs: Long,
+        beforeMs: Long,
+        limit: Int,
+    ): List<MessageEntity>
+
+    /** Самые ранние текстовые сообщения темы (первое - пост), не больше [limit]. */
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
+            "AND content NOT LIKE :partPattern ORDER BY timestamp ASC LIMIT :limit"
+    )
+    suspend fun getTopicTextsOldest(chatId: String, topicId: String, partPattern: String, limit: Int): List<MessageEntity>
+
+    /** Идентификаторы всех текстовых сообщений темы - для сверки с описью сборщика. */
+    @Query(
+        "SELECT id FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
+            "AND content NOT LIKE :partPattern"
+    )
+    suspend fun topicTextIds(chatId: String, topicId: String, partPattern: String): List<String>
+
     /** Правка текста: пост канала редактируется под тем же id. */
     @Query("UPDATE messages SET content = :content WHERE id = :messageId")
     suspend fun updateContent(messageId: String, content: String)

@@ -89,6 +89,15 @@ class SwarmPolicyTest {
     }
 
     @Test
+    fun hubsTakeOverAboveTheSameThresholdForCountersAndComments() {
+        assertFalse(SwarmPolicy.countersViaHubs(SwarmPolicy.COUNTERS_VIA_HUBS_FROM))
+        assertTrue(SwarmPolicy.countersViaHubs(SwarmPolicy.COUNTERS_VIA_HUBS_FROM + 1))
+        assertFalse(SwarmPolicy.commentsViaHubs(SwarmPolicy.COMMENTS_VIA_HUBS_FROM))
+        assertTrue(SwarmPolicy.commentsViaHubs(SwarmPolicy.COMMENTS_VIA_HUBS_FROM + 1))
+        assertEquals(SwarmPolicy.COUNTERS_VIA_HUBS_FROM, SwarmPolicy.COMMENTS_VIA_HUBS_FROM)
+    }
+
+    @Test
     fun storedModeFallsBackToNormal() {
         assertEquals(SwarmMode.UNLIMITED, SwarmMode.fromStored("unlimited"))
         assertEquals(SwarmMode.ECONOMY, SwarmMode.fromStored("economy"))

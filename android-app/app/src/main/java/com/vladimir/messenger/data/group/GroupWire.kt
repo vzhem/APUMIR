@@ -114,6 +114,44 @@ object GroupWire {
      * b64(emoji)=n+b64(emoji)=n`, а cells разделены `;`.
      */
     const val KIND_COUNTERS = "pcnt"
+    /**
+     * Просьба прислать комментарии поста (рой, этап 4):
+     * `creq|groupId|b64(topicId)|limit|beforeMs|afterMs|have|want`. На большом
+     * канале комментарий уходит не всем подписчикам, а владельцу и
+     * администраторам («сборщикам») и небольшой выборке соседей; читатель,
+     * открыв комментарии, просит у сборщика: ровно `want` (после сверки
+     * описи), иначе последние `limit` старше `beforeMs` («показать ещё»),
+     * иначе новее `afterMs` (всё, что появилось с прошлого раза), - кроме
+     * `have`. `have` и `want` - начала идентификаторов сообщений
+     * ([COMMENT_ID_CHARS] знаков) через запятую. Ответ - опись `cids` и
+     * обычные конверты `msg` с автором и временем, как при досылке постов.
+     */
+    const val KIND_COMMENTS_REQUEST = "creq"
+    /**
+     * Опись комментариев темы у сборщика: `cids|groupId|b64(topicId)|count|p,p,…`
+     * - сколько всего и начала идентификаторов самых свежих (до
+     * [MAX_COMMENT_IDS], от новых к старым). По ней читатель точно знает,
+     * чего у него нет, и просит недостающее по `want`.
+     */
+    const val KIND_COMMENT_IDS = "cids"
+    /**
+     * Число комментариев по темам: `cinf|groupId|b64(topicId)=n,…`. Идёт
+     * вдогонку сводке счётчиков (`pcnt`): по нему лента показывает настоящее
+     * «Комментарии (N)», а не число дошедших до этого телефона.
+     */
+    const val KIND_COMMENT_COUNTS = "cinf"
+
+    /** Комментариев в одном ответе сборщика (и в первом окне «последние»). */
+    const val MAX_COMMENT_BACKFILL = 20
+
+    /** Идентификаторов в `have` и `want` просьбы о комментариях: 20 × 9 байт. */
+    const val MAX_COMMENT_HAVE = 20
+
+    /** Идентификаторов в описи `cids`: 100 × 9 байт - меньше килобайта; глубже - по «показать ещё». */
+    const val MAX_COMMENT_IDS = 100
+
+    /** Столько первых знаков идентификатора (UUID) хватает, чтобы различать комментарии одной темы. */
+    const val COMMENT_ID_CHARS = 8
 
     /** Тем в одной просьбе о счётчиках - столько же, сколько постов досылается новичку. */
     const val MAX_COUNTER_TOPICS = 20
@@ -219,6 +257,35 @@ object GroupWire {
         data class Counters(
             val groupId: String,
             val cells: List<PostCounters>,
+        ) : Packet()
+
+        /**
+         * Просьба прислать комментарии поста (темы [topicId]): ровно [want]
+         * (начала идентификаторов); иначе последние [limit] штук старше
+         * [beforeMs] (если он задан); иначе новее [afterMs] - кроме [have].
+         */
+        data class CommentsRequest(
+            val groupId: String,
+            val topicId: String,
+            val limit: Int,
+            val beforeMs: Long = 0L,
+            val afterMs: Long = 0L,
+            val have: List<String> = emptyList(),
+            val want: List<String> = emptyList(),
+        ) : Packet()
+
+        /** Опись комментариев темы у сборщика: всего [count], начала идентификаторов свежих - [ids]. */
+        data class CommentIds(
+            val groupId: String,
+            val topicId: String,
+            val count: Int,
+            val ids: List<String>,
+        ) : Packet()
+
+        /** Сколько комментариев у сборщика в каждой из тем: «тема → число». */
+        data class CommentCounts(
+            val groupId: String,
+            val counts: List<Pair<String, Int>>,
         ) : Packet()
 
         /** Просьба прислать полосу кусков поста темы [topicId]; [have] - что уже есть. */
@@ -477,6 +544,54 @@ object GroupWire {
         return "$PREFIX|$KIND_COUNTERS|$groupId|$body"
     }
 
+    /** Начало идентификатора для `have`/`want`/`cids`: без разделителей конверта. */
+    fun commentIdKey(messageId: String): String = messageId.take(COMMENT_ID_CHARS)
+
+    private fun idKeys(ids: List<String>, limit: Int): String =
+        ids.asSequence().map { commentIdKey(it) }
+            .filter { it.isNotBlank() && ',' !in it && '|' !in it }
+            .distinct().take(limit).joinToString(",")
+
+    private fun parseIdKeys(cell: String, limit: Int): List<String>? {
+        if (cell.isBlank()) return emptyList()
+        val keys = cell.split(',').filter { it.isNotBlank() }
+        if (keys.size > limit || keys.any { it.length > COMMENT_ID_CHARS || '|' in it }) return null
+        return keys
+    }
+
+    /**
+     * «Пришлите комментарии поста» - владельцу или администратору канала:
+     * ровно [want] (если задан), иначе последние [limit] старше [beforeMs]
+     * (если задан), иначе новее [afterMs] - кроме [have]. Списки режутся до
+     * [MAX_COMMENT_HAVE] начал идентификаторов.
+     */
+    fun buildCommentsRequest(
+        groupId: String,
+        topicId: String,
+        limit: Int,
+        beforeMs: Long = 0L,
+        afterMs: Long = 0L,
+        have: List<String> = emptyList(),
+        want: List<String> = emptyList(),
+    ): String =
+        "$PREFIX|$KIND_COMMENTS_REQUEST|$groupId|${encode(topicId)}|" +
+            "${limit.coerceIn(1, MAX_COMMENT_BACKFILL)}|${beforeMs.coerceAtLeast(0L)}|${afterMs.coerceAtLeast(0L)}|" +
+            idKeys(have, MAX_COMMENT_HAVE) + "|" + idKeys(want, MAX_COMMENT_HAVE)
+
+    /** Опись комментариев темы: всего [count], начала идентификаторов [ids] (от новых к старым, до [MAX_COMMENT_IDS]). */
+    fun buildCommentIds(groupId: String, topicId: String, count: Int, ids: List<String>): String =
+        "$PREFIX|$KIND_COMMENT_IDS|$groupId|${encode(topicId)}|${count.coerceAtLeast(0)}|" + idKeys(ids, MAX_COMMENT_IDS)
+
+    /** Число комментариев по темам: не больше [MAX_COUNTER_TOPICS] тем, отрицательные не шлём. */
+    fun buildCommentCounts(groupId: String, counts: List<Pair<String, Int>>): String {
+        val cells = counts.asSequence()
+            .filter { (topicId, n) -> topicId.isNotBlank() && n >= 0 }
+            .distinctBy { it.first }
+            .take(MAX_COUNTER_TOPICS)
+            .joinToString(",") { (topicId, n) -> encode(topicId) + "=" + n }
+        return "$PREFIX|$KIND_COMMENT_COUNTS|$groupId|$cells"
+    }
+
     /** Ключи подписи постов: не больше [MAX_POST_KEYS] пар, ключи ровно по 32 байта. */
     fun buildPostKeys(groupId: String, keys: List<Pair<String, ByteArray>>): String {
         val cells = keys.asSequence()
@@ -700,6 +815,35 @@ object GroupWire {
             KIND_COUNTERS -> if (parts.size == 4) {
                 val cells = parseCounters(parts[3]) ?: return null
                 Packet.Counters(groupId, cells)
+            } else {
+                null
+            }
+
+            KIND_COMMENTS_REQUEST -> if (parts.size == 9) {
+                val topicId = decode(parts[3])?.takeIf { it.isNotBlank() } ?: return null
+                val limit = parts[4].toIntOrNull() ?: return null
+                val beforeMs = parts[5].toLongOrNull() ?: return null
+                val afterMs = parts[6].toLongOrNull() ?: return null
+                if (limit !in 1..MAX_COMMENT_BACKFILL || beforeMs < 0L || afterMs < 0L) return null
+                val have = parseIdKeys(parts[7], MAX_COMMENT_HAVE) ?: return null
+                val want = parseIdKeys(parts[8], MAX_COMMENT_HAVE) ?: return null
+                Packet.CommentsRequest(groupId, topicId, limit, beforeMs, afterMs, have, want)
+            } else {
+                null
+            }
+
+            KIND_COMMENT_IDS -> if (parts.size == 6) {
+                val topicId = decode(parts[3])?.takeIf { it.isNotBlank() } ?: return null
+                val count = parts[4].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+                val ids = parseIdKeys(parts[5], MAX_COMMENT_IDS) ?: return null
+                Packet.CommentIds(groupId, topicId, count, ids)
+            } else {
+                null
+            }
+
+            KIND_COMMENT_COUNTS -> if (parts.size == 4) {
+                val counts = parseCommentCounts(parts[3]) ?: return null
+                Packet.CommentCounts(groupId, counts)
             } else {
                 null
             }
@@ -946,6 +1090,22 @@ object GroupWire {
             out.add(PostCounters(topicId, messageId, views, reactions))
         }
         if (out.size > MAX_COUNTER_CELLS) return null
+        return out
+    }
+
+    /** `b64(topicId)=n,…` → пары; мусор - null. Пустое тело - пустой список. */
+    private fun parseCommentCounts(body: String): List<Pair<String, Int>>? {
+        if (body.isBlank()) return emptyList()
+        val out = ArrayList<Pair<String, Int>>()
+        for (cell in body.split(',')) {
+            if (cell.isBlank()) continue
+            val eq = cell.indexOf('=')
+            if (eq <= 0) return null
+            val topicId = decode(cell.substring(0, eq))?.takeIf { it.isNotBlank() } ?: return null
+            val count = cell.substring(eq + 1).toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            out.add(topicId to count)
+        }
+        if (out.size > MAX_COUNTER_TOPICS) return null
         return out
     }
 
