@@ -8,7 +8,6 @@ import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.data.local.entity.MessageReactionEntity
 import com.vladimir.messenger.data.swarm.SwarmBudget
 import com.vladimir.messenger.data.swarm.SwarmLane
-import com.vladimir.messenger.data.swarm.SwarmPeerDirectory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -38,7 +37,7 @@ class ReactionRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val groupDao: GroupDao,
     private val swarmBudget: SwarmBudget,
-    private val swarmDirectory: SwarmPeerDirectory,
+    private val counters: com.vladimir.messenger.data.channel.PostCounterRepository,
 ) {
 
     /** Реакции всего чата, разложенные по сообщениям. */
@@ -122,10 +121,10 @@ class ReactionRepository @Inject constructor(
         }
         // Группа: реакция - служебный пакет. Сначала своим и проверенным; когда
         // служебный бюджет телефона исчерпан, остальные её не получат - это
-        // лучше, чем задерживать посты и сообщения ради значка.
-        val members = groupDao.getMembers(chatId).filter { !it.isBanned }.map { it.nodeId }
-            .filter { it.isNotBlank() && it != me }
-        val recipients = runCatching { swarmDirectory.order(members) }.getOrDefault(members)
+        // лучше, чем задерживать посты и сообщения ради значка. На большом
+        // канале (рой, этап 3) получатели - только владелец и администраторы:
+        // у них счётчик сходится, остальные спрашивают у них сводку.
+        val recipients = counters.signalTargets(group, me)
         var sent = 0
         for (peer in recipients) {
             if (!swarmBudget.tryAcquire(SwarmLane.SIGNAL)) break

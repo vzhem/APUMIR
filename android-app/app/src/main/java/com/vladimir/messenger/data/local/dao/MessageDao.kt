@@ -106,6 +106,17 @@ interface MessageDao {
     suspend fun updateContent(messageId: String, content: String)
 
     /**
+     * Служебные строки по шаблону содержимого: куски длинного текста одного
+     * сообщения (см. InlineImage.textPartPattern) - при правке куски прежней
+     * редакции убираются.
+     */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND content LIKE :pattern")
+    suspend fun getByContentPattern(chatId: String, pattern: String): List<MessageEntity>
+
+    @Query("DELETE FROM messages WHERE id = :messageId")
+    suspend fun deleteById(messageId: String)
+
+    /**
      * Стереть все сообщения группы. У messages нет внешнего ключа на groups,
      * поэтому каскад их не убирает — чистим явно при удалении группы.
      */

@@ -22,6 +22,7 @@ import com.vladimir.messenger.data.local.dao.PostSignerDao
 import com.vladimir.messenger.data.local.entity.PostManifestEntity
 import com.vladimir.messenger.data.local.entity.PostSignerEntity
 import com.vladimir.messenger.data.swarm.Ed25519
+import com.vladimir.messenger.data.swarm.ManifestPart
 import com.vladimir.messenger.data.swarm.PostManifest
 import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.util.InlineImage
@@ -100,6 +101,13 @@ class GroupRepository(
     private val myPostKey: () -> ByteArray? = { null },
     /** Соседи по рою в порядке предпочтения (свои, проверенные, стабильные…). */
     private val orderPeers: suspend (List<String>) -> List<String> = { it },
+    /**
+     * Счётчики через владельца (рой, этап 3): просьба о сводке `pcreq` и сама
+     * сводка `pcnt` разбираются здесь, а считает и применяет их
+     * PostCounterRepository. Без обработчиков пакеты молча отбрасываются.
+     */
+    private val onCountersRequest: suspend (senderId: String, packet: GroupWire.Packet.CountersRequest) -> Unit = { _, _ -> },
+    private val onCounters: suspend (senderId: String, packet: GroupWire.Packet.Counters) -> Unit = { _, _ -> },
 ) {
 
     /**
@@ -664,6 +672,11 @@ class GroupRepository(
      * целой фотографией не проходит через публичный брокер (потолок ~10 КБ),
      * а куски по [InlineImage.MAX_PART_B64_CHARS] проходят. В тексте
      * остаётся пометка «фотографий: n», по ней лента ждёт куски.
+     *
+     * Длинный текст (рой, этап 3) режется так же: в самом сообщении остаётся
+     * первый кусок и пометка «продолжение в n кусках», остальные куски идут
+     * отдельными пакетами той же темы ПЕРЕД кусками фото - слова важнее.
+     * Раньше пост длиннее ~3 500 знаков через брокер не проходил вовсе.
      */
     suspend fun sendMessage(
         groupId: String,
@@ -672,10 +685,28 @@ class GroupRepository(
         photos: List<String> = emptyList(),
     ): Result<String> {
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
-        val body = if (attached.isEmpty()) text.trim() else InlineImage.withPhotoCount(text, attached.size)
-        if (body.isEmpty()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
-        if (body.length > MAX_MESSAGE_CHARS) {
+        val words = InlineImage.stripImage(text)
+        if (words.isEmpty() && attached.isEmpty()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
+        if (words.length > MAX_MESSAGE_CHARS) {
             return Result.failure(IllegalArgumentException("Сообщение длиннее $MAX_MESSAGE_CHARS символов"))
+        }
+        val chunks = InlineImage.splitText(words)
+        val textTail = chunks.drop(1)
+        if (textTail.size > InlineImage.MAX_TEXT_PARTS) {
+            return Result.failure(IllegalArgumentException("Сообщение слишком длинное: сократите текст"))
+        }
+        val body = InlineImage.headContent(chunks.first(), 0, textTail.size, attached.size)
+        if (body.isEmpty()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
+        // Куски фото - по InlineImage.MAX_PART_B64_CHARS на каждый, до трёх на
+        // фото. Манифест поста вмещает не больше PostManifest.MAX_PARTS кусков
+        // (столько понимают и прошлые версии): очень длинный текст вместе с
+        // шестью фото туда не помещается - честно отказываем сразу, а не
+        // теряем куски молча.
+        val photoParts = attached.sumOf { (it.length + InlineImage.MAX_PART_B64_CHARS - 1) / InlineImage.MAX_PART_B64_CHARS }
+        if (textTail.size + photoParts > PostManifest.MAX_PARTS) {
+            return Result.failure(
+                IllegalArgumentException("Слишком длинный текст для поста с таким числом фото: сократите текст или уберите фото"),
+            )
         }
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val group = groupDao.getGroupById(groupId)
@@ -716,27 +747,33 @@ class GroupRepository(
             )
         )
         registerOutgoing(groupId, topic, body, me, now)
-        // Куски фотографий ложатся в базу СРАЗУ: лента автора показывает пост
-        // с фото, не дожидаясь, пока веер уйдёт по сети.
-        val partRows = ArrayList<MessageEntity>()
+        // Куски текста и фотографий ложатся в базу СРАЗУ: лента автора
+        // показывает пост целиком, не дожидаясь, пока веер уйдёт по сети.
+        // Сначала текст, потом фото - в таком же порядке они и уходят.
+        val partTexts = ArrayList<String>()
+        textTail.forEachIndexed { i, piece ->
+            partTexts.add(InlineImage.buildTextPart(messageId, 0, i + 1, textTail.size, piece))
+        }
         attached.forEachIndexed { photoIndex, b64 ->
-            InlineImage.splitPhoto(photoIndex + 1, b64).forEach { partText ->
-                val row = MessageEntity(
-                    id = idFactory(),
-                    chatId = groupId,
-                    senderId = me,
-                    content = partText,
-                    // Время чуть позже текста, чтобы порядок в теме сохранился.
-                    timestamp = now + 1 + partRows.size,
-                    status = "SENT",
-                    isFromMe = true,
-                    channel = "GROUP",
-                    recipientId = "",
-                    topicId = topic.id,
-                )
-                messageDao.insertMessage(row)
-                partRows.add(row)
-            }
+            partTexts.addAll(InlineImage.splitPhoto(photoIndex + 1, b64))
+        }
+        val partRows = ArrayList<MessageEntity>()
+        for (partText in partTexts) {
+            val row = MessageEntity(
+                id = idFactory(),
+                chatId = groupId,
+                senderId = me,
+                content = partText,
+                // Время чуть позже текста, чтобы порядок в теме сохранился.
+                timestamp = now + 1 + partRows.size,
+                status = "SENT",
+                isFromMe = true,
+                channel = "GROUP",
+                recipientId = "",
+                topicId = topic.id,
+            )
+            messageDao.insertMessage(row)
+            partRows.add(row)
         }
 
         // Рой: пост канала от владельца или администратора получает подписанный
@@ -781,9 +818,10 @@ class GroupRepository(
             ),
             fullRecipients,
         )
-        // Куски фотографий разлетаются в фоне: до 18 вееров подряд, и экран
-        // не должен ждать их (а viewModelScope не должен их обрывать, когда
-        // человек уйдёт с экрана). Текст уже ушёл первым.
+        // Куски текста и фотографий разлетаются в фоне: до двух десятков
+        // вееров подряд, и экран не должен ждать их (а viewModelScope не
+        // должен их обрывать, когда человек уйдёт с экрана). Голова текста
+        // уже ушла первой.
         if (partRows.isNotEmpty()) {
             val senderName = member.displayName
             backgroundScope.launch {
@@ -802,7 +840,7 @@ class GroupRepository(
                         )
                     }.onFailure { Log.w(TAG, "photo part fanout failed: ${it.message}") }
                 }
-                Log.i(TAG, "photo parts sent group=$groupId topic=${topic.id} parts=${partRows.size}")
+                Log.i(TAG, "parts sent group=$groupId topic=${topic.id} text=${textTail.size} parts=${partRows.size}")
             }
         }
         if (manifest != null) {
@@ -859,6 +897,14 @@ class GroupRepository(
      * Изменить текст своего сообщения (поста). Владелец группы может править
      * любое сообщение. Фотографии поста остаются прежними: меняются слова.
      * У поста канала вместе с текстом обновляется и заголовок темы.
+     *
+     * Длинный новый текст режется на куски, как при отправке: в конверте
+     * правки едут первый кусок и пометка «продолжение в n кусках правки r»,
+     * остальные куски - отдельными пакетами той же темы. Куски прежней
+     * редакции у автора удаляются, у получателей - по номеру правки
+     * перестают подклеиваться. Чужой пост владелец может укоротить, но не
+     * удлинить сверх одного куска: его куски получатели не признали бы
+     * (они принимают куски только от автора поста).
      */
     suspend fun editMessage(groupId: String, messageId: String, newText: String): Result<Unit> {
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
@@ -876,19 +922,73 @@ class GroupRepository(
             return Result.failure(SecurityException("Править может только автор или владелец"))
         }
         val words = InlineImage.stripImage(newText)
-        val content = InlineImage.replaceText(message.content, words)
-        if (content.isBlank()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
-        if (content.length > MAX_MESSAGE_CHARS) {
+        if (words.length > MAX_MESSAGE_CHARS) {
             return Result.failure(IllegalArgumentException("Сообщение длиннее $MAX_MESSAGE_CHARS символов"))
         }
+        val chunks = InlineImage.splitText(words)
+        val textTail = chunks.drop(1)
+        if (textTail.size > InlineImage.MAX_TEXT_PARTS) {
+            return Result.failure(IllegalArgumentException("Сообщение слишком длинное: сократите текст"))
+        }
+        if (textTail.isNotEmpty() && message.senderId != me) {
+            return Result.failure(IllegalArgumentException("Такой длинный текст чужого поста может задать только его автор"))
+        }
+        val now = clock()
+        val rev = if (textTail.isEmpty()) 0 else InlineImage.revisionAt(now)
+        // В конверте едут только слова (и пометка о продолжении): фотографии у
+        // получателей уже есть, а пакет с ними не прошёл бы через брокер.
+        val wireText = InlineImage.headContent(chunks.first(), rev, textTail.size, 0)
+        val content = InlineImage.replaceText(message.content, wireText)
+        if (content.isBlank()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
+        val topicIdValue = message.topicId.orEmpty()
+        // Куски прежней редакции больше не нужны - ни в ленте, ни в манифесте.
+        val stale = messageDao.getByContentPattern(groupId, InlineImage.textPartPattern(messageId))
+            .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
+        val partRows = ArrayList<MessageEntity>()
+        textTail.forEachIndexed { i, piece ->
+            val row = MessageEntity(
+                id = idFactory(),
+                chatId = groupId,
+                senderId = me,
+                content = InlineImage.buildTextPart(messageId, rev, i + 1, textTail.size, piece),
+                timestamp = now + 1 + i,
+                status = "SENT",
+                isFromMe = true,
+                channel = "GROUP",
+                recipientId = "",
+                topicId = topicIdValue,
+            )
+            messageDao.insertMessage(row)
+            partRows.add(row)
+        }
+        for (row in stale) messageDao.deleteById(row.id)
         applyEdit(message, content)
-        // В конверте едут только слова: фотографии у получателей уже есть, а
-        // пакет с ними не прошёл бы через брокер.
         broadcast(
             groupId,
-            GroupWire.buildEdit(groupId, message.topicId.orEmpty(), messageId, words),
+            GroupWire.buildEdit(groupId, topicIdValue, messageId, wireText),
             excludeSelf = true,
         )
+        if (partRows.isNotEmpty()) {
+            val senderName = member.displayName
+            backgroundScope.launch {
+                for (row in partRows) {
+                    runCatching {
+                        broadcast(
+                            groupId,
+                            GroupWire.buildMessage(
+                                groupId = groupId,
+                                topicId = topicIdValue,
+                                text = row.content,
+                                messageId = row.id,
+                                senderName = senderName,
+                            ),
+                            excludeSelf = true,
+                        )
+                    }.onFailure { Log.w(TAG, "edit text part fanout failed: ${it.message}") }
+                }
+                Log.i(TAG, "edit text parts sent id=$messageId parts=${partRows.size}")
+            }
+        }
         // Рой: у поста с манифестом после правки другой хэш текста. Автор
         // подписывает новый манифест (правка +1), иначе сиды перестали бы
         // принимать исправленный текст. Владелец, правящий чужой пост, свой
@@ -896,7 +996,11 @@ class GroupRepository(
         // дальше раздаёт только он сам, как до роя.
         val known = manifestDao?.get(messageId)
         if (known != null && message.senderId == me) {
-            val parts = PostManifest.parseParts(known.parts).orEmpty()
+            // Части манифеста: новые куски текста, затем прежние части без
+            // кусков старого текста (куски фото остаются).
+            val staleIds = stale.map { it.id }.toHashSet()
+            val kept = PostManifest.parseParts(known.parts).orEmpty().filter { it.messageId !in staleIds }
+            val fresh = partRows.map { ManifestPart(it.id, PostManifest.sha256(it.content).copyOf(PostManifest.SHA16_BYTES)) }
             val manifest = signManifest(
                 PostManifest(
                     groupId = groupId,
@@ -905,7 +1009,7 @@ class GroupRepository(
                     authorId = me,
                     sentAtMs = known.sentAtMs,
                     textSha = PostManifest.sha256(content),
-                    parts = parts,
+                    parts = (fresh + kept).take(PostManifest.MAX_PARTS),
                     revision = known.revision + 1,
                 ),
             )
@@ -1065,7 +1169,9 @@ class GroupRepository(
             val manifest = manifestDao?.get(post.id)?.let(::toManifest)
             if (!isOwner) {
                 if (manifest == null) continue
-                if (InlineImage.assemble(parts.map { it.content }).size < InlineImage.photoCount(post.content)) continue
+                val partTexts = parts.map { it.content }
+                if (!InlineImage.textComplete(post.id, post.content, partTexts)) continue
+                if (InlineImage.assemble(partTexts).size < InlineImage.photoCount(post.content)) continue
             }
             if (manifest != null && sentIds.add(MANIFEST_SENT_PREFIX + post.id)) {
                 if (sent > 0) kotlinx.coroutines.delay(BACKFILL_PACKET_GAP_MS)
@@ -1404,18 +1510,24 @@ class GroupRepository(
         if (clock() - manifest.sentAtMs > FRESH_POST_MS) return
         if (!manifestRelayed.add(manifest.messageId)) return
         val me = myId() ?: return
-        // Ключей соседей сид не знает (их знает владелец), поэтому шлёт
-        // случайным участникам: старый телефон манифест молча отбросит - цена
-        // один маленький пакет. Лучшим по ярусу - чуть больше шансов: они
-        // надёжнее раздают дальше.
         val candidates = allRecipients(group.id, me).filter { it != manifest.authorId && it != group.ownerId }
         if (candidates.isEmpty()) return
-        val top = orderPeers(candidates).take(RELAY_FANOUT * 2).shuffled().take(RELAY_FANOUT / 2)
-        val rest = candidates.filter { it !in top }.shuffled().take(RELAY_FANOUT - top.size)
-        val targets = top + rest
+        // Этап 3: сначала те, кто точно умеет рой - соседи, предъявившие свой
+        // ключ подписи (прислали `pkeys` или манифест). Старому телефону
+        // манифест бесполезен (он его молча отбросит), и место в эстафете
+        // лучше отдать тому, кто понесёт её дальше. Среди умеющих - лучшим по
+        // ярусу чуть больше шансов: они надёжнее раздают. Остаток добираем
+        // случайными участниками, о которых ничего не известно.
+        val capable = signerDao?.allSelfAttestedIds()?.toHashSet().orEmpty()
+        val known = candidates.filter { it in capable }
+        val unknown = candidates.filter { it !in capable }
+        val top = orderPeers(known).take(RELAY_FANOUT * 2).shuffled().take(RELAY_FANOUT / 2)
+        val moreKnown = known.filter { it !in top }.shuffled().take(RELAY_FANOUT - top.size)
+        val rest = unknown.shuffled().take(RELAY_FANOUT - top.size - moreKnown.size)
+        val targets = top + moreKnown + rest
         kotlinx.coroutines.delay((1_000L..5_000L).random())
         delivery.deliver(group.id, GroupWire.buildPostManifest(manifest), targets)
-        Log.i(TAG, "manifest relayed post=${manifest.messageId} to=${targets.size}")
+        Log.i(TAG, "manifest relayed post=${manifest.messageId} to=${targets.size} known=${top.size + moreKnown.size}")
     }
 
     /**
@@ -1611,14 +1723,14 @@ class GroupRepository(
         }
     }
 
-    /** Пост темы на месте целиком: текст есть и все обещанные фото собрались. */
+    /** Пост темы на месте целиком: текст есть (со всеми кусками) и все обещанные фото собрались. */
     private suspend fun isPostComplete(groupId: String, topicId: String): Boolean {
         val thread = messageDao.getTopicMessages(groupId, topicId)
         val post = thread.firstOrNull { !InlineImage.isPart(it.content) } ?: return false
-        val promised = InlineImage.photoCount(post.content)
-        if (promised == 0) return true
-        val parts = thread.filter { InlineImage.isPart(it.content) && it.senderId == post.senderId }
-        return InlineImage.assemble(parts.map { it.content }).size >= promised
+        if (!InlineImage.expectsParts(post.content)) return true
+        val parts = thread.filter { InlineImage.isPart(it.content) && it.senderId == post.senderId }.map { it.content }
+        if (!InlineImage.textComplete(post.id, post.content, parts)) return false
+        return InlineImage.assemble(parts).size >= InlineImage.photoCount(post.content)
     }
 
     /** Заголовок поста канала - первая строка текста без служебных строк. */
@@ -1745,7 +1857,7 @@ class GroupRepository(
                     // Свежий пост целиком собран: я - сид, эстафету манифеста
                     // веду дальше (см. maybeRelay); пост без фото собран сразу.
                     val complete = verifiedBy
-                    if (complete != null && InlineImage.photoCount(packet.text) == 0) {
+                    if (complete != null && !InlineImage.expectsParts(packet.text)) {
                         maybeRelay(group, complete, senderId)
                     }
                 }
@@ -1767,10 +1879,17 @@ class GroupRepository(
                 if (message.chatId != packet.groupId) return
                 // Править вправе автор и владелец группы - остальное отбрасываем.
                 if (senderId != message.senderId && senderId != group.ownerId) return
-                // Приходят только слова; свои служебные строки (фото) оставляем.
+                // Приходят только слова (и пометка о продолжении длинного
+                // текста); свои служебные строки (фото) оставляем.
                 val content = InlineImage.replaceText(message.content, packet.text)
                 if (content.isBlank() || content.length > MAX_MESSAGE_CHARS) return
                 applyEdit(message, content)
+                // Куски текста прежних редакций больше не подклеиваются - убираем.
+                val keepRev = InlineImage.textTail(content)?.rev
+                for (row in messageDao.getByContentPattern(group.id, InlineImage.textPartPattern(packet.messageId))) {
+                    val part = InlineImage.parseTextPart(row.content) ?: continue
+                    if (part.headId == packet.messageId && part.rev != keepRev) messageDao.deleteById(row.id)
+                }
                 Log.i(TAG, "message edit applied id=${packet.messageId} group=${group.id} from=$senderId")
             }
 
@@ -1802,6 +1921,18 @@ class GroupRepository(
             is GroupWire.Packet.PostKeys -> handlePostKeys(senderId, packet)
 
             is GroupWire.Packet.PieceWant -> handlePieceWant(senderId, packet)
+
+            // Счётчики через владельца (этап 3): сводку считает и применяет
+            // PostCounterRepository; сеть - в фоне, приём пакетов не ждёт.
+            is GroupWire.Packet.CountersRequest -> backgroundScope.launch {
+                runCatching { onCountersRequest(senderId, packet) }
+                    .onFailure { Log.w(TAG, "counters serve failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.Counters -> backgroundScope.launch {
+                runCatching { onCounters(senderId, packet) }
+                    .onFailure { Log.w(TAG, "counters apply failed: ${it.message}") }
+            }
 
             is GroupWire.Packet.Peers -> {
                 // Выборку соседей и число подписчиков принимаем только от
@@ -2992,10 +3123,15 @@ class GroupRepository(
             return
         }
         // Владелец и администраторы - всегда, остальное место - случайные
-        // подписчики: у них новичок будет спрашивать посты.
+        // подписчики: у них новичок будет спрашивать посты. Этап 3: сначала
+        // те, кто умеет рой (владелец знает их ключи - каждый новичок
+        // предъявляет свой), потом остальные: сосед со старой версией на
+        // просьбу о кусках не ответит.
         val admins = adminMembers.map { it.nodeId }.toHashSet()
-        val others = members.asSequence().map { it.nodeId }
-            .filter { it != me && it !in admins && it != newcomer }.toList().shuffled()
+        val capable = signerDao?.allSelfAttestedIds()?.toHashSet().orEmpty()
+        val plain = members.asSequence().map { it.nodeId }
+            .filter { it != me && it !in admins && it != newcomer }.toList()
+        val others = plain.filter { it in capable }.shuffled() + plain.filter { it !in capable }.shuffled()
         val sample = (admins.toList() + others).filter { it != newcomer }.take(PEERS_SAMPLE)
         delivery.deliver(groupId, adminRoster, listOf(newcomer))
         delivery.deliver(groupId, GroupWire.buildPeers(groupId, members.size, sample), listOf(newcomer))

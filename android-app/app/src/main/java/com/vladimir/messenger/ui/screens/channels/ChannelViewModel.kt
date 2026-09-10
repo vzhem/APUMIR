@@ -72,6 +72,7 @@ class ChannelViewModel @Inject constructor(
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     private val postViews: com.vladimir.messenger.data.channel.PostViewRepository,
+    private val postCounters: com.vladimir.messenger.data.channel.PostCounterRepository,
 ) : ViewModel() {
 
     private val channelId: String = savedStateHandle.get<String>("channelId").orEmpty()
@@ -89,6 +90,11 @@ class ChannelViewModel @Inject constructor(
         // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
         viewModelScope.launch {
             runCatching { groupRepository.requestPosts(channelId) }
+        }
+        // На большом канале просмотры и реакции стекаются к владельцу и
+        // администраторам (рой, этап 3): сводные числа спрашиваем у них.
+        viewModelScope.launch {
+            runCatching { postCounters.requestCounters(channelId) }
         }
     }
 
@@ -172,16 +178,19 @@ class ChannelViewModel @Inject constructor(
                     val parts = thread.filter {
                         InlineImage.isPart(it.content) && it.senderId == first.senderId
                     }
+                    val partTexts = parts.map { it.content }
                     val images = ArrayList<String>()
                     // Старый способ: одна картинка прямо в тексте поста.
                     InlineImage.extractB64(first.content)?.let { images.add(it) }
-                    images.addAll(InlineImage.assemble(parts.map { it.content }))
+                    images.addAll(InlineImage.assemble(partTexts))
                     val promised = InlineImage.photoCount(first.content)
                     ChannelPost(
                         topicId = topic.id,
                         messageId = first.id,
                         title = topic.name,
-                        text = InlineImage.stripImage(first.content),
+                        // Длинный текст едет кусками (рой, этап 3): склеиваем;
+                        // пока куски в пути - текст с многоточием.
+                        text = InlineImage.fullText(first.id, first.content, partTexts).text,
                         images = images,
                         pendingPhotos = (promised - images.size).coerceAtLeast(0),
                         authorId = first.senderId,
@@ -215,6 +224,7 @@ class ChannelViewModel @Inject constructor(
                 if (snapshot.channel != null && snapshot.myId.isNotBlank() && !postsAskedAfterJoin) {
                     postsAskedAfterJoin = true
                     viewModelScope.launch { runCatching { groupRepository.requestPosts(channelId) } }
+                    viewModelScope.launch { runCatching { postCounters.requestCounters(channelId) } }
                 }
             }
         }

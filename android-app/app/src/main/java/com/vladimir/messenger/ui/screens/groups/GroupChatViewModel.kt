@@ -151,9 +151,20 @@ class GroupChatViewModel @Inject constructor(
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
             groupRepository.observeTopicMessages(groupId, topicId).collect { all ->
-                // Куски фотографий поста - служебные строки, а не сообщения:
-                // в комментариях их не показываем (галерея собирает их в ленте).
-                val list = all.filter { !com.vladimir.messenger.util.InlineImage.isPart(it.content) }
+                // Куски фотографий и длинного текста - служебные строки, а не
+                // сообщения: в ленте их не показываем (галерея собирает фото
+                // в ленте канала, а куски текста подклеиваются к своему
+                // сообщению здесь же).
+                val inline = com.vladimir.messenger.util.InlineImage
+                val parts = all.filter { inline.isPart(it.content) }
+                val list = all.filter { !inline.isPart(it.content) }.map { m ->
+                    if (inline.textTail(m.content) == null) {
+                        m
+                    } else {
+                        val own = parts.filter { it.senderId == m.senderId }.map { it.content }
+                        m.copy(content = inline.expandContent(m.id, m.content, own))
+                    }
+                }
                 _uiState.update { it.copy(messages = list) }
                 // Экран открыт - значит тема прочитана. Вызываем на каждом
                 // обновлении, чтобы счётчик гас и на новых сообщениях.

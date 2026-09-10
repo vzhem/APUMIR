@@ -669,7 +669,9 @@ private fun SectionPage(
                 LazyColumn(
                     state          = listState,
                     modifier       = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 4.dp),
+                    // Снизу - запас под плавающий «+»: иначе он закрывает
+                    // последний чат (как было в ленте канала и в избранном).
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp),
                 ) {
                     items(
                         items = items,

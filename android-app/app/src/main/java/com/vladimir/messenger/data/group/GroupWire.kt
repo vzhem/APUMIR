@@ -101,6 +101,28 @@ object GroupWire {
      * `who` и из конвертов сообщений.
      */
     const val KIND_PEERS = "peers"
+    /**
+     * Просьба прислать счётчики постов (рой, этап 3): `pcreq|groupId|b64(topicId),…`.
+     * На большом канале просмотры и реакции стекаются к владельцу и
+     * администраторам, а не ко всем подписчикам; открывая канал, читатель
+     * спрашивает сводные числа у одного из них.
+     */
+    const val KIND_COUNTERS_REQUEST = "pcreq"
+    /**
+     * Сводные счётчики постов от владельца или администратора:
+     * `pcnt|groupId|cells`, где cell = `b64(topicId),b64(messageId),views,
+     * b64(emoji)=n+b64(emoji)=n`, а cells разделены `;`.
+     */
+    const val KIND_COUNTERS = "pcnt"
+
+    /** Тем в одной просьбе о счётчиках - столько же, сколько постов досылается новичку. */
+    const val MAX_COUNTER_TOPICS = 20
+
+    /** Постов в одном пакете счётчиков: с реакциями это около 3 КБ - проходит через брокер. */
+    const val MAX_COUNTER_CELLS = 10
+
+    /** Значков реакций на пост в сводке: самые частые. */
+    const val MAX_COUNTER_EMOJI = 8
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -185,6 +207,18 @@ object GroupWire {
             val groupId: String,
             val memberCount: Int,
             val nodeIds: List<String>,
+        ) : Packet()
+
+        /** Просьба прислать сводные счётчики перечисленных постов (тем). */
+        data class CountersRequest(
+            val groupId: String,
+            val topicIds: List<String>,
+        ) : Packet()
+
+        /** Сводные счётчики постов от владельца или администратора. */
+        data class Counters(
+            val groupId: String,
+            val cells: List<PostCounters>,
         ) : Packet()
 
         /** Просьба прислать полосу кусков поста темы [topicId]; [have] - что уже есть. */
@@ -331,6 +365,17 @@ object GroupWire {
 
     data class RosterEntry(val nodeId: String, val displayName: String, val role: String)
 
+    /**
+     * Сводка одного поста: сколько разных читателей его открыли и сколько
+     * реакций каждого значка стоит на сообщении-посте [messageId].
+     */
+    data class PostCounters(
+        val topicId: String,
+        val messageId: String,
+        val views: Int,
+        val reactions: List<Pair<String, Int>>,
+    )
+
     data class TopicEntry(val topicId: String, val name: String, val iconEmoji: String = "")
 
     fun isGroupPacket(text: String?): Boolean =
@@ -412,6 +457,24 @@ object GroupWire {
         require(stripes in 1..MAX_STRIPES && stripe in 0 until stripes) { "bad stripe $stripe/$stripes" }
         return "$PREFIX|$KIND_PIECE_WANT|$groupId|${encode(topicId)}|$stripe|$stripes|" +
             have.joinToString(",") { encode(it) }
+    }
+
+    /** «Пришлите счётчики этих постов» - владельцу или администратору канала. */
+    fun buildCountersRequest(groupId: String, topicIds: List<String>): String =
+        "$PREFIX|$KIND_COUNTERS_REQUEST|$groupId|" +
+            topicIds.filter { it.isNotBlank() }.distinct().take(MAX_COUNTER_TOPICS).joinToString(",") { encode(it) }
+
+    /** Сводные счётчики: не больше [MAX_COUNTER_CELLS] постов и [MAX_COUNTER_EMOJI] значков на пост. */
+    fun buildCounters(groupId: String, cells: List<PostCounters>): String {
+        val body = cells.take(MAX_COUNTER_CELLS).joinToString(";") { cell ->
+            val reactions = cell.reactions.asSequence()
+                .filter { (emoji, count) -> emoji.isNotBlank() && count > 0 }
+                .sortedByDescending { it.second }
+                .take(MAX_COUNTER_EMOJI)
+                .joinToString("+") { (emoji, count) -> encode(emoji) + "=" + count }
+            encode(cell.topicId) + "," + encode(cell.messageId) + "," + cell.views.coerceAtLeast(0) + "," + reactions
+        }
+        return "$PREFIX|$KIND_COUNTERS|$groupId|$body"
     }
 
     /** Ключи подписи постов: не больше [MAX_POST_KEYS] пар, ключи ровно по 32 байта. */
@@ -619,6 +682,24 @@ object GroupWire {
                 }
                 if (ids.size > MAX_PEERS) return null
                 Packet.Peers(groupId, count, ids)
+            } else {
+                null
+            }
+
+            KIND_COUNTERS_REQUEST -> if (parts.size == 4) {
+                val ids = if (parts[3].isBlank()) {
+                    emptyList()
+                } else {
+                    parts[3].split(',').mapNotNull { cell -> decode(cell)?.takeIf { it.isNotBlank() } }
+                }
+                if (ids.isEmpty() || ids.size > MAX_COUNTER_TOPICS) null else Packet.CountersRequest(groupId, ids)
+            } else {
+                null
+            }
+
+            KIND_COUNTERS -> if (parts.size == 4) {
+                val cells = parseCounters(parts[3]) ?: return null
+                Packet.Counters(groupId, cells)
             } else {
                 null
             }
@@ -839,6 +920,33 @@ object GroupWire {
 
             else -> null
         }
+    }
+
+    private fun parseCounters(body: String): List<PostCounters>? {
+        if (body.isBlank()) return emptyList()
+        val out = ArrayList<PostCounters>()
+        for (cell in body.split(';')) {
+            if (cell.isBlank()) continue
+            val fields = cell.split(',')
+            if (fields.size != 4) return null
+            val topicId = decode(fields[0])?.takeIf { it.isNotBlank() } ?: return null
+            val messageId = decode(fields[1]) ?: return null
+            val views = fields[2].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            val reactions = ArrayList<Pair<String, Int>>()
+            if (fields[3].isNotBlank()) {
+                for (entry in fields[3].split('+')) {
+                    val eq = entry.indexOf('=')
+                    if (eq <= 0) return null
+                    val emoji = decode(entry.substring(0, eq))?.takeIf { it.isNotBlank() } ?: return null
+                    val count = entry.substring(eq + 1).toIntOrNull()?.takeIf { it >= 0 } ?: return null
+                    reactions.add(emoji to count)
+                }
+            }
+            if (reactions.size > MAX_COUNTER_EMOJI) return null
+            out.add(PostCounters(topicId, messageId, views, reactions))
+        }
+        if (out.size > MAX_COUNTER_CELLS) return null
+        return out
     }
 
     private fun parseTopics(csv: String): List<TopicEntry>? {

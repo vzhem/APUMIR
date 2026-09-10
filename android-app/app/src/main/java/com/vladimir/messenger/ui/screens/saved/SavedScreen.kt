@@ -192,7 +192,15 @@ fun SavedScreen(
                     LazyColumn(
                         state = scrollState,
                         modifier = Modifier.fillMaxSize().padding(padding),
-                        contentPadding = PaddingValues(vertical = 8.dp, horizontal = 2.dp),
+                        // Снизу больше места: круглая кнопка «+» висит поверх
+                        // списка и накрывала «Поделиться» и текст у последней
+                        // записи - как раньше в ленте канала.
+                        contentPadding = PaddingValues(
+                            start = 2.dp,
+                            end = 2.dp,
+                            top = 8.dp,
+                            bottom = 88.dp,
+                        ),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         items(uiState.items, key = { it.id }) { item ->

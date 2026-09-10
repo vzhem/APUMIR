@@ -93,6 +93,7 @@ object GroupsModule {
         manifestDao: com.vladimir.messenger.data.local.dao.PostManifestDao,
         signerDao: com.vladimir.messenger.data.local.dao.PostSignerDao,
         directory: SwarmPeerDirectory,
+        counters: com.vladimir.messenger.data.channel.PostCounterRepository,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -109,6 +110,9 @@ object GroupsModule {
         },
         myPostKey = { com.vladimir.messenger.data.swarm.PostSigner.publicKey(context.applicationContext) },
         orderPeers = { ids -> runCatching { directory.order(ids) }.getOrDefault(ids) },
+        // Счётчики через владельца (этап 3): просьбы о сводке и сводки.
+        onCountersRequest = { senderId, packet -> counters.serve(senderId, packet) },
+        onCounters = { senderId, packet -> counters.applyCounters(senderId, packet) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

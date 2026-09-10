@@ -331,7 +331,8 @@ fun GroupChatScreen(
                             uiState.pinned.forEach { m ->
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        m.content,
+                                        // Без служебных строк фото и длинного текста.
+                                        com.vladimir.messenger.util.InlineImage.stripImage(m.content),
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 2,
                                         modifier = Modifier.weight(1f),

@@ -29,4 +29,8 @@ interface PostViewDao {
         "SELECT COUNT(*) FROM post_views WHERE topicId = :topicId AND viewerId = :viewerId"
     )
     suspend fun hasView(topicId: String, viewerId: String): Int
+
+    /** Все просмотры поста: читатель раскладывает по ним сводку сборщика. */
+    @Query("SELECT * FROM post_views WHERE topicId = :topicId")
+    suspend fun getForTopic(topicId: String): List<PostViewEntity>
 }

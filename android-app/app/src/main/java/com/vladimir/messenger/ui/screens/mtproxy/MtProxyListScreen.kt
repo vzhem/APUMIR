@@ -130,7 +130,8 @@ fun MtProxyListScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
+                // Снизу - запас под плавающий «+», чтобы он не закрывал последний прокси.
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(uiState.proxies, key = { it.id }) { proxy ->

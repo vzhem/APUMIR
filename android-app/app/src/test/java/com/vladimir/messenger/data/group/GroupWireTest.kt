@@ -595,4 +595,68 @@ class GroupWireTest {
         assertNull(GroupWire.parse("APUGRP1|peers|ch|5"))
         assertNull(GroupWire.parse("APUGRP1|peers|ch|5|" + (1..GroupWire.MAX_PEERS + 1).joinToString(",") { "n$it" }))
     }
+
+    // ── Счётчики через владельца (этап 3) ─────────────────────────────────────
+
+    @Test
+    fun countersRequestRoundTrip() {
+        val topics = (1..GroupWire.MAX_COUNTER_TOPICS).map { "topic-$it" }
+        val envelope = GroupWire.buildCountersRequest("ch", topics + "topic-1" + "")
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.CountersRequest)
+        val request = parsed as GroupWire.Packet.CountersRequest
+        assertEquals("ch", request.groupId)
+        assertEquals(topics, request.topicIds)
+        assertTrue("envelope is ${envelope.length} chars", envelope.length < 1_000)
+        assertNull(GroupWire.parse("APUGRP1|pcreq|ch|"))
+        assertNull(GroupWire.parse("APUGRP1|pcreq|ch"))
+        assertNull(GroupWire.parse("APUGRP1|pcreq|ch|" + (1..GroupWire.MAX_COUNTER_TOPICS + 1).joinToString(",") { "dA" }))
+    }
+
+    @Test
+    fun countersRoundTripKeepsViewsAndTopReactions() {
+        val many = (1..GroupWire.MAX_COUNTER_EMOJI + 3).map { i -> "e$i" to i }
+        val cells = listOf(
+            GroupWire.PostCounters("t1", "m1", 1_234, listOf("❤️" to 10, "🔥" to 3, "👍" to 0)),
+            GroupWire.PostCounters("t2", "m2", 0, emptyList()),
+            GroupWire.PostCounters("t3", "", 5, many),
+        )
+        val envelope = GroupWire.buildCounters("ch", cells)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Counters)
+        val counters = parsed as GroupWire.Packet.Counters
+        assertEquals("ch", counters.groupId)
+        assertEquals(3, counters.cells.size)
+        assertEquals(GroupWire.PostCounters("t1", "m1", 1_234, listOf("❤️" to 10, "🔥" to 3)), counters.cells[0])
+        assertEquals(GroupWire.PostCounters("t2", "m2", 0, emptyList()), counters.cells[1])
+        val third = counters.cells[2]
+        assertEquals("", third.messageId)
+        assertEquals(GroupWire.MAX_COUNTER_EMOJI, third.reactions.size)
+        assertEquals(many.sortedByDescending { it.second }.take(GroupWire.MAX_COUNTER_EMOJI), third.reactions)
+    }
+
+    @Test
+    fun countersPacketWithMaxCellsFitsBroker() {
+        val reactions = (1..GroupWire.MAX_COUNTER_EMOJI).map { i -> "\uD83D\uDE00$i" to 100_000 + i }
+        val cells = (1..GroupWire.MAX_COUNTER_CELLS + 2).map { i ->
+            GroupWire.PostCounters(java.util.UUID.randomUUID().toString(), java.util.UUID.randomUUID().toString(), 1_000_000 + i, reactions)
+        }
+        val envelope = GroupWire.buildCounters("ch", cells)
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.Counters
+        assertEquals(GroupWire.MAX_COUNTER_CELLS, parsed.cells.size)
+        assertTrue("envelope is ${envelope.length} chars", envelope.length < 4_000)
+    }
+
+    @Test
+    fun countersRejectGarbage() {
+        assertNull(GroupWire.parse("APUGRP1|pcnt|ch"))
+        assertNull(GroupWire.parse("APUGRP1|pcnt|ch|dA,bQ,-1,"))
+        assertNull(GroupWire.parse("APUGRP1|pcnt|ch|dA,bQ,x,"))
+        assertNull(GroupWire.parse("APUGRP1|pcnt|ch|dA,bQ,1"))
+        assertNull(GroupWire.parse("APUGRP1|pcnt|ch|dA,bQ,1,4pyF"))
+        assertNull(GroupWire.parse("APUGRP1|pcnt|ch|dA,bQ,1,=3"))
+        assertNull(GroupWire.parse("APUGRP1|pcnt|ch|,bQ,1,"))
+        val empty = GroupWire.parse("APUGRP1|pcnt|ch|") as GroupWire.Packet.Counters
+        assertTrue(empty.cells.isEmpty())
+    }
 }
