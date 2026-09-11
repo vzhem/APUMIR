@@ -97,6 +97,14 @@ class SwarmPolicyTest {
         assertEquals(SwarmPolicy.COUNTERS_VIA_HUBS_FROM, SwarmPolicy.COMMENTS_VIA_HUBS_FROM)
     }
 
+    /** Сообщения группы идут роем только выше порога, и порог не ниже первой волны публикации. */
+    @Test
+    fun groupSwarmStartsAboveThresholdNotBelowFirstWave() {
+        assertFalse(SwarmPolicy.groupSwarm(SwarmPolicy.GROUP_SWARM_FROM))
+        assertTrue(SwarmPolicy.groupSwarm(SwarmPolicy.GROUP_SWARM_FROM + 1))
+        assertTrue(SwarmPolicy.GROUP_SWARM_FROM >= SwarmPolicy.COUNTERS_VIA_HUBS_FROM)
+    }
+
     @Test
     fun storedModeFallsBackToNormal() {
         assertEquals(SwarmMode.UNLIMITED, SwarmMode.fromStored("unlimited"))

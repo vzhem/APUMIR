@@ -789,9 +789,12 @@ class GroupRepository(
 
         // Рой: пост канала от владельца или администратора получает подписанный
         // манифест. По нему подписчики принимают текст и куски от кого угодно и
-        // сами досылают пост опоздавшим. Обычные группы и личные сообщения роем
-        // не ходят.
-        val manifest = if (isChannelPost) {
+        // сами досылают пост опоздавшим. Этап 5: то же - сообщение большой
+        // группы от любого участника (получатели верят подписи автора, а
+        // ключ автора закреплён за ним самим). Маленькие группы и личные
+        // сообщения роем не ходят.
+        val groupSwarm = !group.isChannel && groupSwarm(group)
+        val manifest = if (isChannelPost || groupSwarm) {
             signManifest(
                 PostManifest.build(
                     groupId = groupId,
@@ -872,10 +875,28 @@ class GroupRepository(
             TAG,
             "group message id=$messageId group=$groupId topic=${topic.id} parts=${partRows.size} " +
                 "fanout=${report.delivered}/${report.attempted} swarmRest=${wave?.rest ?: 0} " +
-                "viaHubs=${commentRoute != null} via=${delivery.name}",
+                "viaHubs=${commentRoute != null} manifest=${manifest != null} via=${delivery.name}",
         )
         return Result.success(messageId)
     }
+
+    // ── Сообщения обычных групп роем (этап 5) ────────────────────────────────
+    //
+    // В группе больше порога участников сообщение ходит как пост канала: автор
+    // подписывает манифест, шлёт сообщение целиком первой волне (лучшим по
+    // ярусу из умеющих рой) и всем старым телефонам, манифест - волне; сиды
+    // разносят манифест дальше (`pman`) и отдают куски по `mwant`. Отличия от
+    // канала: писать может любой участник, поэтому манифест принимается от
+    // любого участника группы по его собственному ключу (ключ закреплён за
+    // узлом им самим - `pkeys`, манифест от него самого - или спрошен `pkreq`
+    // с именем узла); в теме много сообщений, поэтому манифест ищут по id
+    // сообщения, а не по теме; пропущенное за время офлайна добирается
+    // просьбой `mreq` к соседям, а не `preq` к владельцу.
+
+    /** Идут ли сообщения этой группы роем: обычная группа больше порога участников. */
+    private suspend fun groupSwarm(group: GroupEntity): Boolean =
+        !group.isChannel && manifestDao != null &&
+            SwarmPolicy.groupSwarm(maxOf(group.memberCount, groupDao.countMembers(group.id)))
 
     /** Кому шлём пост целиком ([full] = старые телефоны + первая волна [wave]); [rest] - сколько ждут роя. */
     private class SwarmWave(val full: List<String>, val wave: List<String>, val rest: Int)
@@ -1645,6 +1666,114 @@ class GroupRepository(
     /** Кому, когда и какие сообщения досылали: ключ «группа|узел». */
     private val backfillSent = HashMap<String, Pair<Long, Set<String>>>()
 
+    /** Темы групп, в которых мы уже просили дослать сообщения: ключ - тема, значение - когда. */
+    private val groupMessagesAsked = HashMap<String, Long>()
+
+    /**
+     * Добрать сообщения темы большой группы, пропущенные в офлайне (этап 5).
+     *
+     * Вызывается при открытии темы. В маленькой группе, у владельца которой
+     * нет никакой особой роли, сообщения приходят всем напрямую и добирать
+     * нечего; в большой сообщение до отсутствовавшего дойдёт, только если он
+     * попадёт в чью-то волну или эстафету - поэтому спрашиваем соседей сами.
+     * Спрашиваем последние [BACKFILL_POSTS] сообщений новее последнего
+     * известного нам, полосами по времени у [SWARM_REQUEST_PEERS] соседей
+     * (умеющих рой, лучших по ярусу), не чаще раза в [POSTS_REQUEST_GAP_MS]
+     * на тему. Соседи отвечают манифестом и конвертами с автором: получатель
+     * верит только подписи, так что просить можно кого угодно.
+     */
+    suspend fun requestGroupMessages(groupId: String, topicId: String) {
+        val me = myId() ?: return
+        val dao = signerDao ?: return
+        val group = groupDao.getGroupById(groupId) ?: return
+        if (group.isChannel || !groupSwarm(group)) return
+        if (groupDao.getMember(groupId, me) == null) return
+        val now = clock()
+        synchronized(groupMessagesAsked) {
+            val last = groupMessagesAsked[topicId]
+            if (last != null && now - last < POSTS_REQUEST_GAP_MS) return
+            if (groupMessagesAsked.size >= MAX_TRACKED_TOPICS) groupMessagesAsked.clear()
+            groupMessagesAsked[topicId] = now
+        }
+        val capable = dao.allSelfAttestedIds().toHashSet()
+        val peers = orderPeers(allRecipients(groupId, me).filter { it in capable })
+        if (peers.isEmpty()) return
+        // Из первых SWARM_REQUEST_POOL по ярусу берём SWARM_REQUEST_PEERS
+        // случайных: одни и те же лучшие узлы не должны обслуживать всех.
+        val chosen = peers.take(SWARM_REQUEST_POOL).shuffled().take(SWARM_REQUEST_PEERS)
+        // «Новее моего последнего» с запасом: соседи могли получить сообщение
+        // чуть раньше меня, а повтор получатель отбрасывает по id.
+        val latest = messageDao.latestTopicTimestamp(groupId, topicId) ?: 0L
+        val afterMs = (latest - POSTS_REQUEST_SLACK_MS).coerceAtLeast(0L)
+        chosen.forEachIndexed { k, peer ->
+            delivery.deliver(
+                groupId,
+                GroupWire.buildManifestsRequest(groupId, topicId, afterMs, BACKFILL_POSTS, k, chosen.size),
+                listOf(peer),
+            )
+        }
+        Log.i(TAG, "group messages requested group=$groupId topic=$topicId after=$afterMs peers=${chosen.size}")
+    }
+
+    /**
+     * Дослать соседу сообщения темы большой группы по его просьбе `mreq`
+     * (этап 5): те, что у меня собраны целиком и подписаны манифестом,
+     * новее указанного времени и из его полосы. Порядок и паузы - как у
+     * досылки постов канала; сколько чужих просьб обслуживаю в минуту,
+     * ограничивает [seedRate].
+     */
+    private suspend fun serveGroupMessages(senderId: String, packet: GroupWire.Packet.ManifestsRequest) {
+        val dao = manifestDao ?: return
+        val me = myId() ?: return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (group.isChannel || !groupSwarm(group)) return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        val requester = groupDao.getMember(packet.groupId, senderId) ?: return
+        if (requester.isBanned) return
+        if (!seedRate.allow(clock())) return
+        // Самые новые из полосы просителя, но шлём от старых к новым: так
+        // они лягут в ленту по порядку, а превью группы останется за самым
+        // свежим. Оборвётся связь - следующая просьба спросит остаток.
+        val rows = dao.latestForTopic(packet.topicId, MAX_BACKFILL_MANIFESTS)
+            .filter { it.groupId == group.id && it.sentAtMs > packet.afterMs }
+            .filter { packet.stripes == 1 || Math.floorMod(it.sentAtMs, packet.stripes.toLong()).toInt() == packet.stripe }
+            .take(packet.limit.coerceIn(1, GroupWire.MAX_MANIFESTS_REQUEST))
+            .reversed()
+        var sent = 0
+        for (row in rows) {
+            if (sent >= MAX_BACKFILL_PACKETS) break
+            val manifest = toManifest(row) ?: continue
+            val head = messageDao.getMessageById(manifest.messageId) ?: continue
+            val partIds = manifest.parts.map { it.messageId }
+            val parts = partIds.mapNotNull { messageDao.getMessageById(it) }
+            // Сид раздаёт только то, что у него целиком.
+            if (parts.size != partIds.size) continue
+            val authorName = groupDao.getMember(group.id, manifest.authorId)?.displayName.orEmpty()
+            if (sent > 0) kotlinx.coroutines.delay(BACKFILL_PACKET_GAP_MS)
+            delivery.deliver(group.id, GroupWire.buildPostManifest(manifest), listOf(senderId))
+            sent++
+            for (msg in listOf(head) + parts) {
+                if (sent >= MAX_BACKFILL_PACKETS) break
+                kotlinx.coroutines.delay(BACKFILL_PACKET_GAP_MS)
+                delivery.deliver(
+                    group.id,
+                    GroupWire.buildMessage(
+                        groupId = group.id,
+                        topicId = manifest.topicId,
+                        text = msg.content,
+                        messageId = msg.id,
+                        senderName = authorName,
+                        authorId = manifest.authorId,
+                        sentAtMs = if (msg.id == manifest.messageId) manifest.sentAtMs else msg.timestamp,
+                    ),
+                    listOf(senderId),
+                )
+                sent++
+            }
+        }
+        Log.i(TAG, "group messages served group=${group.id} topic=${packet.topicId} to=$senderId messages=${rows.size} packets=$sent")
+    }
+
     // ── Рой постов (этап 1) ───────────────────────────────────────────────────
 
     /** Куски и тексты, пришедшие раньше своего манифеста: ключ - id сообщения. */
@@ -1673,18 +1802,36 @@ class GroupRepository(
      * манифест и хэш сходится - принимаем; манифеста ещё нет - ждём; манифест
      * есть, но хэш не сходится - отбрасываем.
      */
-    private suspend fun swarmVerdict(packet: GroupWire.Packet.Message, localId: String): SwarmVerdict {
+    private suspend fun swarmVerdict(group: GroupEntity, packet: GroupWire.Packet.Message, localId: String): SwarmVerdict {
         val dao = manifestDao ?: return SwarmVerdict.Reject
         val isPart = InlineImage.isPart(packet.text)
         // Кусок фото ищет манифест своей темы (у поста канала тема одна),
-        // текст поста - манифест по своему id.
-        val row = if (isPart) dao.getByTopic(packet.topicId) else dao.get(localId)
+        // текст поста - манифест по своему id. В группе (этап 5) в теме
+        // сообщений много: кусок текста называет голову сам, кусок фото
+        // ищем среди свежих манифестов темы по своему id.
+        val row = when {
+            !isPart -> dao.get(localId)
+            group.isChannel -> dao.getByTopic(packet.topicId)
+            else -> {
+                val head = InlineImage.parseTextPart(packet.text)?.headId
+                if (head != null) dao.get(head) else groupPartManifest(packet.topicId, localId)
+            }
+        }
         val manifest = row?.let(::toManifest) ?: return SwarmVerdict.Wait
         if (manifest.groupId != packet.groupId || manifest.topicId != packet.topicId) return SwarmVerdict.Reject
         if (manifest.authorId != packet.authorId) return SwarmVerdict.Reject
         val ok = if (isPart) manifest.matchesPart(localId, packet.text) else manifest.matchesText(packet.text)
         if (!ok) return SwarmVerdict.Reject
         return SwarmVerdict.Verified(manifest)
+    }
+
+    /** Манифест сообщения группы, которому принадлежит кусок [partId]: ищем среди свежих манифестов темы. */
+    private suspend fun groupPartManifest(topicId: String, partId: String): PostManifestEntity? {
+        val dao = manifestDao ?: return null
+        val needle = partId + ":"
+        return dao.latestForTopic(topicId, GROUP_PART_LOOKUP).firstOrNull { row ->
+            row.parts.split(',').any { it.startsWith(needle) }
+        }
     }
 
     /**
@@ -1696,12 +1843,15 @@ class GroupRepository(
         val dao = manifestDao ?: return
         val me = myId().orEmpty()
         val group = groupDao.getGroupById(manifest.groupId) ?: return
-        if (!group.isChannel) return
+        // Канал - всегда; обычная группа - только большая (этап 5): в
+        // маленькой сообщения ходят всем напрямую, и манифест там лишний.
+        val swarmGroup = !group.isChannel && groupSwarm(group)
+        if (!group.isChannel && !swarmGroup) return
         if (groupDao.getMember(manifest.groupId, me) == null) return
         // Кто прислал манифест - у того пост есть (сид раздаёт манифест, только
         // собрав пост): запоминаем, у кого просить полосы. Повторный манифест
         // от другого сида - ещё один адрес, где пост точно есть.
-        noteSeed(manifest.topicId, senderId)
+        noteSeed(seedKey(group, manifest), senderId)
         // Уже есть такой же или более новый манифест этого поста - ничего не делаем.
         val known = dao.get(manifest.messageId)
         if (known != null && known.revision >= manifest.revision) return
@@ -1709,9 +1859,10 @@ class GroupRepository(
             Log.w(TAG, "manifest with bad signature dropped post=${manifest.messageId} from=$senderId")
             return
         }
-        // Подписывать вправе владелец и администраторы канала. Автора, которого
-        // ещё нет в моём списке участников (список в пути), не отвергаем, а
-        // ждём вместе с ключом.
+        // Подписывать вправе владелец и администраторы канала; в группе -
+        // любой не забаненный участник. Автора, которого ещё нет в моём
+        // списке участников (список в пути), не отвергаем, а ждём вместе с
+        // ключом.
         val author = groupDao.getMember(manifest.groupId, manifest.authorId)
         if (manifest.authorId != group.ownerId) {
             if (author == null) {
@@ -1719,7 +1870,11 @@ class GroupRepository(
                 Log.i(TAG, "manifest buffered until roster post=${manifest.messageId}")
                 return
             }
-            if (!GroupRole.isAdminOrOwner(author.role)) {
+            if (author.isBanned) {
+                Log.w(TAG, "manifest from banned author dropped post=${manifest.messageId}")
+                return
+            }
+            if (!swarmGroup && !GroupRole.isAdminOrOwner(author.role)) {
                 Log.w(TAG, "manifest from non-admin author dropped post=${manifest.messageId}")
                 return
             }
@@ -1727,15 +1882,17 @@ class GroupRepository(
         // Автор прислал манифест сам: его ключ закрепляем за ним (подлинность
         // отправителя гарантирует ядро). Иначе ключ должен быть уже закреплён.
         if (senderId == manifest.authorId) {
-            pinSigner(manifest.authorId, manifest.authorId, manifest.signerPublicKey)
+            val fresh = pinSigner(manifest.authorId, manifest.authorId, manifest.signerPublicKey)
+            if (fresh && swarmGroup) replyKey(group, senderId)
         } else if (!signerKnown(group, manifest.authorId, manifest.signerPublicKey)) {
             pendingManifests.put(manifest.messageId, senderId to manifest)
             // Ключи знают владелец и сам автор: спрашиваем обоих, но не чаще
-            // раза за запуск на пару «канал|автор».
+            // раза за запуск на пару «канал|автор». В группе просьба называет
+            // автора: владелец отвечает его ключом, если тот ему предъявлялся.
             if (pkeysAsked.add(manifest.groupId + '|' + manifest.authorId)) {
                 delivery.deliver(
                     manifest.groupId,
-                    GroupWire.buildPostKeysRequest(manifest.groupId),
+                    GroupWire.buildPostKeysRequest(manifest.groupId, if (swarmGroup) manifest.authorId else ""),
                     listOf(group.ownerId, manifest.authorId).distinct(),
                 )
             }
@@ -1760,19 +1917,27 @@ class GroupRepository(
     /** Посты (topicId), которые сейчас тянем полосами. */
     private val fetching = HashSet<String>()
 
-    /** Кто прислал манифест или куски поста (по темам): у них пост есть - у них и просим полосы. */
+    /**
+     * Кто прислал манифест или куски поста: у них пост есть - у них и просим
+     * полосы. Ключ - тема (пост канала: в теме он один) или id сообщения
+     * (группа, этап 5: в теме сообщений много), см. [seedKey].
+     */
     private val topicSeeds = HashMap<String, LinkedHashSet<String>>()
 
-    private fun noteSeed(topicId: String, nodeId: String) {
+    /** Ключ сидов и сборки: у поста канала - тема, у сообщения группы - его id. */
+    private fun seedKey(group: GroupEntity, manifest: PostManifest): String =
+        if (group.isChannel) manifest.topicId else manifest.messageId
+
+    private fun noteSeed(key: String, nodeId: String) {
         if (nodeId.isBlank() || nodeId == cachedNodeId) return
         synchronized(topicSeeds) {
-            if (topicSeeds.size >= MAX_TRACKED_TOPICS && topicId !in topicSeeds) topicSeeds.clear()
-            topicSeeds.getOrPut(topicId) { LinkedHashSet<String>() }.add(nodeId)
+            if (topicSeeds.size >= MAX_TRACKED_TOPICS && key !in topicSeeds) topicSeeds.clear()
+            topicSeeds.getOrPut(key) { LinkedHashSet<String>() }.add(nodeId)
         }
     }
 
-    private fun seedsOf(topicId: String): List<String> =
-        synchronized(topicSeeds) { topicSeeds[topicId]?.toList().orEmpty() }
+    private fun seedsOf(key: String): List<String> =
+        synchronized(topicSeeds) { topicSeeds[key]?.toList().orEmpty() }
 
     /** Одновременно тянем не больше стольких постов: лента наполняется, телефон не захлёбывается. */
     private val fetchSlots = Semaphore(FETCH_PARALLEL)
@@ -1797,11 +1962,15 @@ class GroupRepository(
      */
     private suspend fun announceKey(group: GroupEntity) {
         val me = myId() ?: return
-        if (!group.isChannel || group.ownerId == me) return
+        if (group.ownerId == me) return
+        if (!group.isChannel && !groupSwarm(group)) return
         if (!keyAnnounced.add(group.id)) return
         val mine = myPostKey() ?: return
         // Владельцу и администраторам: посты пишут они, и делить подписчиков
-        // на первую волну и остальных - тоже им.
+        // на первую волну и остальных - тоже им. В большой группе (этап 5)
+        // пишут все, и авторы узнают умеющих рой по манифестам и `pkeys`
+        // соседей; владелец и администраторы - справочная: у них спрашивают
+        // ключ автора, чей манифест пришёл раньше его ключа.
         val targets = (listOf(group.ownerId) + groupDao.getAdmins(group.id).map { it.nodeId })
             .filter { it != me }.distinct()
         delivery.deliver(group.id, GroupWire.buildPostKeys(group.id, listOf(me to mine)), targets)
@@ -1838,8 +2007,9 @@ class GroupRepository(
      * пост за раз; параллельно - не больше [FETCH_PARALLEL] постов.
      */
     private fun scheduleFetch(group: GroupEntity, manifest: PostManifest, from: String) {
+        val key = seedKey(group, manifest)
         synchronized(fetching) {
-            if (!fetching.add(manifest.topicId)) return
+            if (!fetching.add(key)) return
         }
         backgroundScope.launch {
             try {
@@ -1847,7 +2017,7 @@ class GroupRepository(
             } catch (e: Exception) {
                 Log.w(TAG, "piece fetch failed: ${e.message}")
             } finally {
-                synchronized(fetching) { fetching.remove(manifest.topicId) }
+                synchronized(fetching) { fetching.remove(key) }
             }
         }
     }
@@ -1889,7 +2059,7 @@ class GroupRepository(
             // мёртвый сид не стопорил. Автора и владельца бережём: к ним идём
             // только в последнем раунде или когда больше спросить некого.
             val last = round == FETCH_ROUNDS - 1
-            val known = seedsOf(manifest.topicId)
+            val known = seedsOf(seedKey(group, manifest))
                 .filter { it != me && it != manifest.authorId && it != group.ownerId }
                 .shuffled()
             val stripes = known.size.coerceIn(MIN_STRIPES, GroupWire.MAX_STRIPES)
@@ -1913,14 +2083,17 @@ class GroupRepository(
             pool.remove(me)
             val seeds = pool.toList().take(stripes)
             if (seeds.isEmpty()) return
+            // Пост канала просим по теме (`pwant`), сообщение группы - по его
+            // id (`mwant`): в теме группы сообщений много.
+            val wantId = if (group.isChannel) "" else manifest.messageId
             seeds.forEachIndexed { k, seed ->
                 delivery.deliver(
                     group.id,
-                    GroupWire.buildPieceWant(group.id, manifest.topicId, k, seeds.size, have),
+                    GroupWire.buildPieceWant(group.id, manifest.topicId, k, seeds.size, have, wantId),
                     listOf(seed),
                 )
             }
-            Log.i(TAG, "pwant sent topic=${manifest.topicId} round=$round seeds=${seeds.size} have=${have.size}")
+            Log.i(TAG, "pwant sent topic=${manifest.topicId} post=${manifest.messageId.take(8)} round=$round seeds=${seeds.size} have=${have.size}")
         }
         // Раунды кончились: если пост всё же собрался - раздаём; если нет,
         // остаток доберёт обычный preq при открытии канала.
@@ -1945,7 +2118,10 @@ class GroupRepository(
         if (clock() - manifest.sentAtMs > FRESH_POST_MS) return
         if (!manifestRelayed.add(manifest.messageId)) return
         val me = myId() ?: return
-        val candidates = allRecipients(group.id, me).filter { it != manifest.authorId && it != group.ownerId }
+        // В группе (этап 5) владелец - обычный участник: ему сообщение тоже
+        // нужно, эстафета его не обходит; в канале владелец и так всё имеет.
+        val candidates = allRecipients(group.id, me)
+            .filter { it != manifest.authorId && (!group.isChannel || it != group.ownerId) }
         if (candidates.isEmpty()) return
         // Этап 3: сначала те, кто точно умеет рой - соседи, предъявившие свой
         // ключ подписи (прислали `pkeys` или манифест). Старому телефону
@@ -1962,6 +2138,27 @@ class GroupRepository(
         val targets = top + moreKnown + rest
         kotlinx.coroutines.delay((1_000L..5_000L).random())
         delivery.deliver(group.id, GroupWire.buildPostManifest(manifest), targets)
+        // Вслед за манифестом - сам текст (голова, один пакет): получатель
+        // видит сообщение сразу и не тратит круг «полоса - ответ» на то, что
+        // весит не больше манифеста; куски фото он по-прежнему тянет сам.
+        // Пришедший раньше манифеста текст подождёт его в буфере.
+        val head = messageDao.getMessageById(manifest.messageId)
+        if (head != null && head.chatId == group.id) {
+            val authorName = groupDao.getMember(group.id, manifest.authorId)?.displayName.orEmpty()
+            delivery.deliver(
+                group.id,
+                GroupWire.buildMessage(
+                    groupId = group.id,
+                    topicId = manifest.topicId,
+                    text = head.content,
+                    messageId = head.id,
+                    senderName = authorName,
+                    authorId = manifest.authorId,
+                    sentAtMs = manifest.sentAtMs,
+                ),
+                targets,
+            )
+        }
         Log.i(TAG, "manifest relayed post=${manifest.messageId} to=${targets.size} known=${top.size + moreKnown.size}")
     }
 
@@ -1975,7 +2172,10 @@ class GroupRepository(
         val dao = manifestDao ?: return
         val me = myId() ?: return
         val group = groupDao.getGroupById(packet.groupId) ?: return
-        if (!group.isChannel) return
+        // Пост канала просят по теме (`pwant`), сообщение группы - по id
+        // (`mwant`, этап 5); перепутанный вид - не отвечаем.
+        if (group.isChannel != packet.messageId.isBlank()) return
+        if (!group.isChannel && !groupSwarm(group)) return
         if (groupDao.getMember(packet.groupId, me) == null) return
         // Закрытый канал - только известным участникам; открытый - любому
         // (на большом канале список участников до всех не доходит, а вступить
@@ -1983,7 +2183,9 @@ class GroupRepository(
         val requester = groupDao.getMember(packet.groupId, senderId)
         if (requester?.isBanned == true) return
         if (requester == null && !group.isPublic) return
-        val manifest = dao.getByTopic(packet.topicId)?.let(::toManifest) ?: return
+        val row = if (group.isChannel) dao.getByTopic(packet.topicId) else dao.get(packet.messageId)
+        val manifest = row?.let(::toManifest) ?: return
+        if (manifest.groupId != group.id || manifest.topicId != packet.topicId) return
         if (!messageDao.messageExists(manifest.messageId)) return
         // Предел отдачи (§4): не больше нескольких полос разом и не больше
         // стольких-то кусков в минуту. Лишние просьбы молча отбрасываем -
@@ -1994,16 +2196,18 @@ class GroupRepository(
         }
         backgroundScope.launch {
             try {
-                val thread = messageDao.getTopicMessages(group.id, packet.topicId)
-                val byId = thread.associateBy { it.id }
-                val post = byId[manifest.messageId] ?: return@launch
+                // Строки берём по id, а не всей темой: в теме большой группы
+                // (этап 5) тысячи сообщений, а нужны голова и до 24 кусков.
+                val post = messageDao.getMessageById(manifest.messageId) ?: return@launch
+                if (post.chatId != group.id) return@launch
                 val ordered = listOf(manifest.messageId) + manifest.parts.map { it.messageId }
                 val wanted = GroupWire.stripe(ordered, packet.stripe, packet.stripes, packet.have.toHashSet())
                 val authorName = groupDao.getMember(group.id, manifest.authorId)?.displayName.orEmpty()
                 var sent = 0
                 // Манифест не шлём: просящий просит по нему - он у него есть.
                 for (id in wanted) {
-                    val row = byId[id] ?: continue
+                    val row = messageDao.getMessageById(id) ?: continue
+                    if (row.chatId != group.id) continue
                     if (!pieceRate.allow(clock())) break
                     if (sent > 0) kotlinx.coroutines.delay(BACKFILL_PACKET_GAP_MS)
                     delivery.deliver(
@@ -2042,23 +2246,34 @@ class GroupRepository(
         // в моём (неполном на большом канале) списке, предъявляет свой ключ,
         // чтобы автор считал его умеющим рой.
         if (!fromOwner && groupDao.getMember(packet.groupId, senderId) == null && !group.isPublic) return
+        var senderKeyNew = false
         for ((nodeId, key) in packet.keys) {
             if (nodeId == senderId) {
-                pinSigner(nodeId, nodeId, key)
+                if (pinSigner(nodeId, nodeId, key)) senderKeyNew = true
             } else if (fromOwner) {
                 pinSigner(nodeId, group.ownerId, key)
             }
         }
         // Владелец прислал ключи (обычно при приёме) - отвечаем своим: так он
-        // узнаёт, что этот телефон умеет рой.
-        if (fromOwner) announceKey(group)
+        // узнаёт, что этот телефон умеет рой. В большой группе (этап 5) так
+        // же отвечаем любому участнику, чей ключ узнали впервые: авторы
+        // должны знать умеющих рой, чтобы слать им не всё, а манифест.
+        if (fromOwner) {
+            announceKey(group)
+        } else if (senderKeyNew && !group.isChannel && groupSwarm(group)) {
+            replyKey(group, senderId)
+        }
         // Ключ мог быть последним, чего ждали отложенные манифесты.
         val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
         for ((from, manifest) in ready) handleManifest(from, manifest)
     }
 
-    /** Разослать мой ключ подписи и ключи администраторов: владелец - новичку и всем по запросу. */
-    private suspend fun sendPostKeys(group: GroupEntity, nodeId: String) {
+    /**
+     * Разослать мой ключ подписи и ключи администраторов: владелец - новичку
+     * и всем по запросу. [about] - чей ключ ещё просили (группа, этап 5):
+     * владелец добавляет его, если узел предъявлял ключ сам.
+     */
+    private suspend fun sendPostKeys(group: GroupEntity, nodeId: String, about: String = "") {
         val dao = signerDao ?: return
         val me = myId() ?: return
         val mine = myPostKey() ?: return
@@ -2068,8 +2283,9 @@ class GroupRepository(
             val adminIds = groupDao.getMembers(group.id)
                 .filter { it.nodeId != me && GroupRole.isAdminOrOwner(it.role) }
                 .map { it.nodeId }
-            if (adminIds.isNotEmpty()) {
-                dao.selfAttested(adminIds).forEach { row ->
+            val wanted = if (about.isNotBlank() && about != me && about !in adminIds) adminIds + about else adminIds
+            if (wanted.isNotEmpty()) {
+                dao.selfAttested(wanted).forEach { row ->
                     PostManifest.unb64(row.publicKey)?.let { keys.add(row.nodeId to it) }
                 }
             }
@@ -2080,13 +2296,28 @@ class GroupRepository(
     /** Группы|узлы, чей ключ мы уже спрашивали у владельца в этом запуске. */
     private val pkeysAsked = java.util.Collections.synchronizedSet(HashSet<String>())
 
-    private suspend fun pinSigner(nodeId: String, attestedBy: String, key: ByteArray) {
-        val dao = signerDao ?: return
-        if (key.size != Ed25519.PUBLIC_KEY_BYTES) return
+    private suspend fun pinSigner(nodeId: String, attestedBy: String, key: ByteArray): Boolean {
+        val dao = signerDao ?: return false
+        if (key.size != Ed25519.PUBLIC_KEY_BYTES) return false
         val encoded = PostManifest.b64(key)
         val current = dao.get(nodeId, attestedBy)
-        if (current?.publicKey == encoded) return
+        if (current?.publicKey == encoded) return false
         dao.put(PostSignerEntity(nodeId, attestedBy, encoded, clock()))
+        return true
+    }
+
+    /**
+     * Ответить своим ключом узлу, чей ключ я только что узнал (группа,
+     * этап 5). В группе пишут все, и автору, чтобы делить участников на
+     * первую волну и остальных, нужно знать, кто умеет рой; владельцу об
+     * этом сообщает `announceKey`, а прочим авторам - этот ответ. Обмен
+     * гаснет сам: второй раз тот же ключ новостью не будет.
+     */
+    private suspend fun replyKey(group: GroupEntity, nodeId: String) {
+        val me = myId() ?: return
+        if (nodeId == me || nodeId.isBlank()) return
+        val mine = myPostKey() ?: return
+        delivery.deliver(group.id, GroupWire.buildPostKeys(group.id, listOf(me to mine)), listOf(nodeId))
     }
 
     /** Закреплён ли за [nodeId] именно этот ключ - им самим или владельцем канала. */
@@ -2137,7 +2368,13 @@ class GroupRepository(
 
     /** Манифест доехал: прогоняем куски, что ждали его, обычным путём. */
     private suspend fun releasePendingPieces(manifest: PostManifest) {
-        val waiting = pendingPieces.take { it.packet.topicId == manifest.topicId }
+        // Ждавшие манифеста куски темы: в теме группы (этап 5) сообщений много,
+        // поэтому отпускаем только те, что этому манифесту принадлежат (по id
+        // головы или куска); чужие ждут своего манифеста дальше.
+        val mine = HashSet<String>(manifest.parts.size + 1)
+        mine.add(manifest.messageId)
+        manifest.parts.forEach { mine.add(it.messageId) }
+        val waiting = pendingPieces.take { it.packet.topicId == manifest.topicId && it.packet.messageId in mine }
         for (piece in waiting) {
             runCatching { handleIncoming(piece.senderId, piece.packet, piece.transportId) }
                 .onFailure { Log.w(TAG, "buffered piece failed: ${it.message}") }
@@ -2226,12 +2463,15 @@ class GroupRepository(
                     val fromAdmin = groupDao.getMember(group.id, senderId)?.let { GroupRole.isAdminOrOwner(it.role) } == true
                     if (fromAdmin) relayed = true
                 }
-                if (packet.authorId.isNotBlank() && !relayed && group.isChannel && manifestDao != null) {
-                    when (val verdict = swarmVerdict(packet, localId)) {
+                // Пересылка с автором в конверте (канал - всегда; группа -
+                // когда она большая, этап 5): судьбу решает манифест.
+                val swarmGroup = packet.authorId.isNotBlank() && !relayed && !group.isChannel && groupSwarm(group)
+                if (packet.authorId.isNotBlank() && !relayed && (group.isChannel || swarmGroup) && manifestDao != null) {
+                    when (val verdict = swarmVerdict(group, packet, localId)) {
                         is SwarmVerdict.Verified -> {
                             relayed = true
                             verifiedBy = verdict.manifest
-                            noteSeed(packet.topicId, senderId)
+                            noteSeed(seedKey(group, verdict.manifest), senderId)
                         }
                         SwarmVerdict.Wait -> {
                             pendingPieces.put(localId, PendingPiece(senderId, packet, messageId))
@@ -2301,8 +2541,10 @@ class GroupRepository(
                     // Свежий пост, пришедший через рой (не от автора, а от
                     // сида), для читателя новый: считаем его непрочитанным, как
                     // обычное сообщение. Старая досылка (пост давний) - нет:
-                    // человек её не пропускал.
-                    val fresh = relayed && !isPart && now - sentAt < FRESH_POST_MS
+                    // человек её не пропускал. Досланное сообщение большой
+                    // группы (этап 5) - пропускал: его просят только «новее
+                    // моего последнего», поэтому оно новое в любом возрасте.
+                    val fresh = relayed && !isPart && (swarmGroup || now - sentAt < FRESH_POST_MS)
                     if (!fresh) {
                         Log.i(TAG, "group ${if (isPart) "photo part" else "backfilled post"} in group=${group.id} topic=${packet.topicId}")
                         return
@@ -2314,13 +2556,20 @@ class GroupRepository(
                         maybeRelay(group, complete, senderId)
                     }
                 }
+                // Своё сообщение, вернувшееся от соседа (например, добранное
+                // после переустановки), непрочитанным не считаем.
                 val topic = groupDao.getTopicById(packet.topicId)
                 if (topic != null) {
                     groupDao.registerTopicMessage(topic.id, preview(packet.text), now)
-                    groupDao.incrementTopicUnread(topic.id)
+                    if (!isMine) groupDao.incrementTopicUnread(topic.id)
                 }
-                groupDao.updateGroupLastMessage(packet.groupId, preview(packet.text), now)
-                groupDao.incrementGroupUnread(packet.groupId)
+                // Превью группы - за самым свежим сообщением: досланное старое
+                // (сообщение группы, добранное после офлайна) его не сдвигает.
+                val current = group.lastMessageAtMs ?: 0L
+                if (!relayed || sentAt >= current) {
+                    groupDao.updateGroupLastMessage(packet.groupId, preview(packet.text), if (relayed) sentAt else now)
+                }
+                if (!isMine) groupDao.incrementGroupUnread(packet.groupId)
                 registerStats(packet.groupId, packet.topicId, authorId, now)
                 Log.i(TAG, "group message in group=${group.id} topic=${packet.topicId} from=$senderId")
             }
@@ -2433,15 +2682,33 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.PostKeysRequest -> {
-                // Отвечают владелец и администраторы канала: у них есть что
-                // предъявить. Обычный участник постов не подписывает.
+                // Отвечают владелец и администраторы: у них есть что
+                // предъявить. В канале обычный участник постов не подписывает;
+                // в большой группе (этап 5) просьба называет автора - он
+                // отвечает своим ключом сам, а владелец и администраторы -
+                // своими и его, если он им предъявлялся.
                 val group = groupDao.getGroupById(packet.groupId) ?: return
-                if (!group.isChannel) return
+                val swarmGroup = !group.isChannel && groupSwarm(group)
+                if (!group.isChannel && !swarmGroup) return
                 val member = groupDao.getMember(packet.groupId, me) ?: return
-                if (!GroupRole.isAdminOrOwner(member.role) && group.ownerId != me) return
                 val requester = groupDao.getMember(packet.groupId, senderId) ?: return
-                if (requester.isBanned) return
-                sendPostKeys(group, senderId)
+                if (requester.isBanned || member.isBanned) return
+                if (packet.nodeId == me) {
+                    val mine = myPostKey() ?: return
+                    delivery.deliver(group.id, GroupWire.buildPostKeys(group.id, listOf(me to mine)), listOf(senderId))
+                    return
+                }
+                if (!GroupRole.isAdminOrOwner(member.role) && group.ownerId != me) return
+                sendPostKeys(group, senderId, packet.nodeId)
+            }
+
+            is GroupWire.Packet.ManifestsRequest -> {
+                // Сосед добирает пропущенные сообщения темы большой группы
+                // (этап 5): отвечаю в фоне, с паузами между пакетами.
+                backgroundScope.launch {
+                    runCatching { serveGroupMessages(senderId, packet) }
+                        .onFailure { Log.w(TAG, "group messages serve failed: ${it.message}") }
+                }
             }
 
             is GroupWire.Packet.TopicCreated -> {
@@ -3412,7 +3679,9 @@ class GroupRepository(
         sendGroupInfo(group, nodeId)
         sendTopics(group.id, nodeId)
         publishRoster(group.id, newcomer = nodeId)
-        if (group.isChannel) sendPostKeys(group, nodeId)
+        // Ключи подписи - новичку канала и большой группы (этап 5): в ответ он
+        // предъявит свой, и я буду знать, что он умеет рой.
+        if (group.isChannel || groupSwarm(group)) sendPostKeys(group, nodeId)
         delivery.deliver(
             group.id,
             GroupWire.buildJoinDecision(group.id, nodeId, true),
@@ -3787,6 +4056,16 @@ class GroupRepository(
         private const val MIN_STRIPES = 2
         /** Рой, этап 2: по скольким темам помним сидов. */
         private const val MAX_TRACKED_TOPICS = 200
+
+        /**
+         * Среди скольких свежих манифестов темы группы искать хозяина куска
+         * фото (у куска фото нет id головы) и из скольких выбирать досылку
+         * соседу по `mreq` (этап 5).
+         */
+        private const val GROUP_PART_LOOKUP = 40
+        private const val MAX_BACKFILL_MANIFESTS = 60
+        /** Запас к «новее моего последнего» в просьбе `mreq`: соседи могли получить сообщение раньше меня. */
+        private const val POSTS_REQUEST_SLACK_MS = 10_000L
         /** Рой, этап 2: свежий пост от автора ждём до 18 × 5 с (веер автора небыстрый), прежде чем просить куски у соседей. */
         private const val AUTHOR_WAIT_POLLS = 18
         private const val AUTHOR_WAIT_POLL_MS = 5_000L

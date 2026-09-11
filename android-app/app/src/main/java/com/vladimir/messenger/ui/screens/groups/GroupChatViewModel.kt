@@ -168,6 +168,11 @@ class GroupChatViewModel @Inject constructor(
     private fun followComments(topicId: String) {
         commentsJob?.cancel()
         commentsJob = viewModelScope.launch {
+            // Большая группа (рой, этап 5): сообщения, пропущенные в офлайне,
+            // добираем у соседей; в канале и маленькой группе репозиторий
+            // молчит. Один раз на открытие темы - в фоне повторять незачем:
+            // живые сообщения приходят волной и эстафетой манифестов.
+            runCatching { groupRepository.requestGroupMessages(groupId, topicId) }
             while (true) {
                 runCatching { groupRepository.requestComments(groupId, topicId) }
                 kotlinx.coroutines.delay(COMMENTS_REFRESH_MS)

@@ -740,4 +740,66 @@ class GroupWireTest {
         assertEquals("12345678", GroupWire.commentIdKey("12345678-abcd-ef00-1111-222222222222"))
         assertEquals("abc", GroupWire.commentIdKey("abc"))
     }
+
+    // ── Рой, этап 5: сообщения обычных групп ─────────────────────────────────
+
+    /** Просьба о кусках сообщения группы называет сообщение: другой вид, восемь полей. */
+    @Test
+    fun messageWantRoundTrip() {
+        val envelope = GroupWire.buildPieceWant("g", "topic|1", 1, 3, listOf("m-1"), messageId = "msg|id")
+        assertTrue(envelope.startsWith("APUGRP1|mwant|g|"))
+        assertEquals(8, envelope.split('|').size)
+        val want = GroupWire.parse(envelope) as GroupWire.Packet.PieceWant
+        assertEquals("topic|1", want.topicId)
+        assertEquals("msg|id", want.messageId)
+        assertEquals(1, want.stripe)
+        assertEquals(3, want.stripes)
+        assertEquals(listOf("m-1"), want.have)
+        // Без id сообщения - прежний `pwant` с пустым messageId: старые телефоны его понимают.
+        val legacy = GroupWire.parse(GroupWire.buildPieceWant("g", "t", 0, 1, emptyList())) as GroupWire.Packet.PieceWant
+        assertEquals("", legacy.messageId)
+        val t = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("t".toByteArray(Charsets.UTF_8))
+        assertNull(GroupWire.parse("APUGRP1|mwant|g|$t||0|1|"))
+        assertNull(GroupWire.parse("APUGRP1|mwant|g|$t|$t|1|1|"))
+        assertNull(GroupWire.parse("APUGRP1|mwant|g|$t|$t|0|1"))
+    }
+
+    /** Просьба о ключе конкретного узла - четвёртое поле; без него - прежние три. */
+    @Test
+    fun postKeysRequestWithNode() {
+        val plain = GroupWire.parse(GroupWire.buildPostKeysRequest("g")) as GroupWire.Packet.PostKeysRequest
+        assertEquals("", plain.nodeId)
+        assertEquals(3, GroupWire.buildPostKeysRequest("g").split('|').size)
+        val about = GroupWire.parse(GroupWire.buildPostKeysRequest("g", "pk_author")) as GroupWire.Packet.PostKeysRequest
+        assertEquals("pk_author", about.nodeId)
+        assertNull(GroupWire.parse("APUGRP1|pkreq|g|"))
+        assertNull(GroupWire.parse("APUGRP1|pkreq|g|a|b"))
+    }
+
+    @Test
+    fun manifestsRequestRoundTrip() {
+        val envelope = GroupWire.buildManifestsRequest("g", "topic|x", 1_700_000_000_000L, 20, 2, 3)
+        assertEquals(8, envelope.split('|').size)
+        val req = GroupWire.parse(envelope) as GroupWire.Packet.ManifestsRequest
+        assertEquals("g", req.groupId)
+        assertEquals("topic|x", req.topicId)
+        assertEquals(1_700_000_000_000L, req.afterMs)
+        assertEquals(20, req.limit)
+        assertEquals(2, req.stripe)
+        assertEquals(3, req.stripes)
+        // Предел числа сообщений и отрицательное время подрезаются при сборке.
+        val clipped = GroupWire.parse(GroupWire.buildManifestsRequest("g", "t", -5L, 999)) as GroupWire.Packet.ManifestsRequest
+        assertEquals(0L, clipped.afterMs)
+        assertEquals(GroupWire.MAX_MANIFESTS_REQUEST, clipped.limit)
+        assertEquals(0, clipped.stripe)
+        assertEquals(1, clipped.stripes)
+        val t = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("t".toByteArray(Charsets.UTF_8))
+        assertNull(GroupWire.parse("APUGRP1|mreq|g|$t|0|0|0|1"))
+        assertNull(GroupWire.parse("APUGRP1|mreq|g|$t|0|${GroupWire.MAX_MANIFESTS_REQUEST + 1}|0|1"))
+        assertNull(GroupWire.parse("APUGRP1|mreq|g|$t|-1|5|0|1"))
+        assertNull(GroupWire.parse("APUGRP1|mreq|g|$t|0|5|1|1"))
+        assertNull(GroupWire.parse("APUGRP1|mreq|g|$t|0|5|0|${GroupWire.MAX_STRIPES + 1}"))
+        assertNull(GroupWire.parse("APUGRP1|mreq|g|$t|0|5"))
+        assertNull(GroupWire.parse("APUGRP1|mreq|g||0|5|0|1"))
+    }
 }

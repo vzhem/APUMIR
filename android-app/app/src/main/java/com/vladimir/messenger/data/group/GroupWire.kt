@@ -84,7 +84,14 @@ object GroupWire {
      * свой ключ сам, владелец канала - свой и ключи администраторов.
      */
     const val KIND_POST_KEYS = "pkeys"
-    /** Просьба прислать ключи подписи: `pkreq|groupId`; отвечают владелец и администраторы. */
+    /**
+     * Просьба прислать ключи подписи: `pkreq|groupId[|b64(nodeId)]`. В канале
+     * отвечают владелец и администраторы. В группе (рой, этап 5) четвёртое
+     * поле называет, чей ключ нужен: сам этот узел отвечает своим ключом,
+     * владелец и администраторы - своими и его, если он им предъявлялся.
+     * Прошлые версии четырёхполевую просьбу отбрасывают (они и не отвечают
+     * за группы).
+     */
     const val KIND_POST_KEYS_REQUEST = "pkreq"
     /**
      * «Хочу куски» (рой, этап 2): `pwant|groupId|b64(topicId)|k|m|b64(id),…`.
@@ -93,6 +100,28 @@ object GroupWire {
      * куски фото в порядке манифеста.
      */
     const val KIND_PIECE_WANT = "pwant"
+    /**
+     * «Хочу куски» сообщения (рой, этап 5):
+     * `mwant|groupId|b64(topicId)|b64(messageId)|k|m|b64(id),…` - то же, что
+     * `pwant`, но пост назван своим id, а не темой: в теме обычной группы
+     * сообщений много, и у каждого свой манифест. Прошлые версии вид не
+     * знают и молча отбрасывают - они и манифестов групп не хранят.
+     */
+    const val KIND_MESSAGE_WANT = "mwant"
+    /**
+     * Просьба дослать сообщения темы группы (рой, этап 5):
+     * `mreq|groupId|b64(topicId)|afterMs|limit|k|m` - «из m соседей тебе
+     * досталась полоса k: пришли не больше `limit` сообщений темы новее
+     * `afterMs`, чьё время ≡ k (mod m)». Полоса считается от времени
+     * сообщения, поэтому соседи делят работу, не сговариваясь. Отвечает
+     * любой участник, у которого сообщение собрано: манифест `pman`, затем
+     * текст и куски конвертами `msg` с автором и временем (как досылка постов
+     * канала). Так вернувшийся из офлайна и новичок добирают пропущенное.
+     */
+    const val KIND_MANIFESTS_REQUEST = "mreq"
+
+    /** Сообщений в одном ответе на `mreq` - столько же, сколько постов досылается новичку канала. */
+    const val MAX_MANIFESTS_REQUEST = 20
     /**
      * Выборка соседей (рой, этап 2): `peers|groupId|count|nodeId,…`.
      * На большом канале полный список участников в пакет не помещается;
@@ -238,7 +267,21 @@ object GroupWire {
             val keys: List<Pair<String, ByteArray>>,
         ) : Packet()
 
-        data class PostKeysRequest(val groupId: String) : Packet()
+        /** Просьба о ключах подписи; [nodeId] - чей ключ нужен (пусто - владельца и администраторов). */
+        data class PostKeysRequest(val groupId: String, val nodeId: String = "") : Packet()
+
+        /**
+         * Просьба дослать сообщения темы группы новее [afterMs], не больше
+         * [limit], полоса [stripe] из [stripes] по времени сообщения.
+         */
+        data class ManifestsRequest(
+            val groupId: String,
+            val topicId: String,
+            val afterMs: Long,
+            val limit: Int,
+            val stripe: Int = 0,
+            val stripes: Int = 1,
+        ) : Packet()
 
         /** Выборка соседей от владельца: [memberCount] подписчиков всего, [nodeIds] - у кого спрашивать. */
         data class Peers(
@@ -288,13 +331,18 @@ object GroupWire {
             val counts: List<Pair<String, Int>>,
         ) : Packet()
 
-        /** Просьба прислать полосу кусков поста темы [topicId]; [have] - что уже есть. */
+        /**
+         * Просьба прислать полосу кусков поста темы [topicId]; [have] - что
+         * уже есть. [messageId] задан у сообщения группы (`mwant`): там пост
+         * ищут по нему, а не по теме; у поста канала (`pwant`) он пустой.
+         */
         data class PieceWant(
             val groupId: String,
             val topicId: String,
             val stripe: Int,
             val stripes: Int,
             val have: List<String> = emptyList(),
+            val messageId: String = "",
         ) : Packet()
 
         data class TopicCreated(
@@ -497,7 +545,27 @@ object GroupWire {
             "${pm.b64(m.signerPublicKey)}|${pm.b64(m.signature)}"
     }
 
-    fun buildPostKeysRequest(groupId: String): String = "$PREFIX|$KIND_POST_KEYS_REQUEST|$groupId"
+    /** «Пришлите ключи подписи»; с [nodeId] - ключ именно этого узла (группа, этап 5). */
+    fun buildPostKeysRequest(groupId: String, nodeId: String = ""): String =
+        if (nodeId.isBlank()) {
+            "$PREFIX|$KIND_POST_KEYS_REQUEST|$groupId"
+        } else {
+            "$PREFIX|$KIND_POST_KEYS_REQUEST|$groupId|${encode(nodeId)}"
+        }
+
+    /** «Дошлите сообщения темы новее [afterMs]», полоса [stripe] из [stripes], - соседям по группе (этап 5). */
+    fun buildManifestsRequest(
+        groupId: String,
+        topicId: String,
+        afterMs: Long,
+        limit: Int,
+        stripe: Int = 0,
+        stripes: Int = 1,
+    ): String {
+        require(stripes in 1..MAX_STRIPES && stripe in 0 until stripes) { "bad stripe $stripe/$stripes" }
+        return "$PREFIX|$KIND_MANIFESTS_REQUEST|$groupId|${encode(topicId)}|${afterMs.coerceAtLeast(0L)}|" +
+            "${limit.coerceIn(1, MAX_MANIFESTS_REQUEST)}|$stripe|$stripes"
+    }
 
     /** Выборка соседей: не больше [MAX_PEERS] адресов, без разделителей внутри. */
     fun buildPeers(groupId: String, memberCount: Int, nodeIds: List<String>): String {
@@ -519,11 +587,25 @@ object GroupWire {
     fun stripe(ordered: List<String>, stripe: Int, stripes: Int, have: Set<String>): List<String> =
         ordered.filterIndexed { index, id -> index % stripes == stripe && id !in have }
 
-    /** «Хочу куски»: полоса [stripe] из [stripes], без перечисленных в [have]. */
-    fun buildPieceWant(groupId: String, topicId: String, stripe: Int, stripes: Int, have: List<String>): String {
+    /**
+     * «Хочу куски»: полоса [stripe] из [stripes], без перечисленных в [have].
+     * С [messageId] - просьба о сообщении группы (`mwant`), без него - о
+     * посте темы канала (`pwant`, его понимают и прошлые версии).
+     */
+    fun buildPieceWant(
+        groupId: String,
+        topicId: String,
+        stripe: Int,
+        stripes: Int,
+        have: List<String>,
+        messageId: String = "",
+    ): String {
         require(stripes in 1..MAX_STRIPES && stripe in 0 until stripes) { "bad stripe $stripe/$stripes" }
-        return "$PREFIX|$KIND_PIECE_WANT|$groupId|${encode(topicId)}|$stripe|$stripes|" +
-            have.joinToString(",") { encode(it) }
+        val haveCells = have.joinToString(",") { encode(it) }
+        if (messageId.isBlank()) {
+            return "$PREFIX|$KIND_PIECE_WANT|$groupId|${encode(topicId)}|$stripe|$stripes|$haveCells"
+        }
+        return "$PREFIX|$KIND_MESSAGE_WANT|$groupId|${encode(topicId)}|${encode(messageId)}|$stripe|$stripes|$haveCells"
     }
 
     /** «Пришлите счётчики этих постов» - владельцу или администратору канала. */
@@ -781,8 +863,27 @@ object GroupWire {
                 null
             }
 
-            KIND_POST_KEYS_REQUEST -> if (parts.size == 3) {
-                Packet.PostKeysRequest(groupId)
+            KIND_POST_KEYS_REQUEST -> when (parts.size) {
+                3 -> Packet.PostKeysRequest(groupId)
+                4 -> {
+                    val nodeId = decode(parts[3])?.takeIf { it.isNotBlank() } ?: return null
+                    Packet.PostKeysRequest(groupId, nodeId)
+                }
+                else -> null
+            }
+
+            KIND_MANIFESTS_REQUEST -> if (parts.size == 8) {
+                val topicId = decode(parts[3])?.takeIf { it.isNotBlank() } ?: return null
+                val afterMs = parts[4].toLongOrNull() ?: return null
+                val limit = parts[5].toIntOrNull() ?: return null
+                val stripe = parts[6].toIntOrNull() ?: return null
+                val stripes = parts[7].toIntOrNull() ?: return null
+                if (afterMs < 0L || limit !in 1..MAX_MANIFESTS_REQUEST ||
+                    stripes !in 1..MAX_STRIPES || stripe !in 0 until stripes
+                ) {
+                    return null
+                }
+                Packet.ManifestsRequest(groupId, topicId, afterMs, limit, stripe, stripes)
             } else {
                 null
             }
@@ -852,15 +953,26 @@ object GroupWire {
                 val topicId = decode(parts[3]) ?: return null
                 val stripe = parts[4].toIntOrNull() ?: return null
                 val stripes = parts[5].toIntOrNull() ?: return null
-                val have = if (parts[6].isBlank()) {
-                    emptyList()
-                } else {
-                    parts[6].split(',').mapNotNull { cell -> decode(cell)?.takeIf { it.isNotBlank() } }
-                }
+                val have = parseHave(parts[6])
                 if (topicId.isBlank() || stripes !in 1..MAX_STRIPES || stripe !in 0 until stripes) {
                     null
                 } else {
                     Packet.PieceWant(groupId, topicId, stripe, stripes, have)
+                }
+            } else {
+                null
+            }
+
+            KIND_MESSAGE_WANT -> if (parts.size == 8) {
+                val topicId = decode(parts[3]) ?: return null
+                val messageId = decode(parts[4]) ?: return null
+                val stripe = parts[5].toIntOrNull() ?: return null
+                val stripes = parts[6].toIntOrNull() ?: return null
+                val have = parseHave(parts[7])
+                if (topicId.isBlank() || messageId.isBlank() || stripes !in 1..MAX_STRIPES || stripe !in 0 until stripes) {
+                    null
+                } else {
+                    Packet.PieceWant(groupId, topicId, stripe, stripes, have, messageId)
                 }
             } else {
                 null
@@ -1125,6 +1237,14 @@ object GroupWire {
         }
         return out
     }
+
+    /** Список «уже есть» из просьбы о кусках: b64(id) через запятую, пустые и битые ячейки пропускаются. */
+    private fun parseHave(cell: String): List<String> =
+        if (cell.isBlank()) {
+            emptyList()
+        } else {
+            cell.split(',').mapNotNull { c -> decode(c)?.takeIf { it.isNotBlank() } }
+        }
 
     private fun parseRoster(csv: String): List<RosterEntry>? {
         if (csv.isBlank()) return emptyList()

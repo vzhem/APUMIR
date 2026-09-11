@@ -101,6 +101,10 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC")
     suspend fun getTopicMessages(chatId: String, topicId: String): List<MessageEntity>
 
+    /** Время самого свежего сообщения темы (null - тема пуста); без загрузки всей темы. */
+    @Query("SELECT MAX(timestamp) FROM messages WHERE chatId = :chatId AND topicId = :topicId")
+    suspend fun latestTopicTimestamp(chatId: String, topicId: String): Long?
+
     // ── Комментарии большого канала (рой, этап 4) ────────────────────────────
     // Текстовые сообщения темы - без служебных кусков фото и длинного текста
     // ([partPattern] = `InlineImage.PART_MARKER + "%"`). В теме канала самое
