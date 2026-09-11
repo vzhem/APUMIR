@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -126,7 +127,9 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                                     "Сеть APU держится на самих телефонах. Чем чаще узел в сети, " +
                                         "чем быстрее он принимает файлы и чем проще к нему " +
                                         "подключиться напрямую, тем выше его оценка — и тем " +
-                                        "раньше ему уходят данные.",
+                                        "раньше ему уходят данные. Объявленное место под " +
+                                        "пересылку добавляет до 10 баллов — и только тем, " +
+                                        "кто бывает в сети.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
@@ -220,6 +223,16 @@ private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
                 icon = Icons.Default.Public,
                 label = "Прямая связь",
                 value = if (peer.hasPublicAddress) "есть" else "только через других",
+            )
+            Metric(
+                icon = Icons.Default.Storage,
+                label = "Место под пересылку",
+                value = if (peer.offeredBytes > 0) {
+                    com.vladimir.messenger.data.swarm.StoragePolicy.format(peer.offeredBytes) +
+                        " (+%.1f)".format(peer.storageBonus)
+                } else {
+                    "не сообщал"
+                },
             )
         }
     }

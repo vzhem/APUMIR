@@ -64,6 +64,14 @@ object GroupWire {
     /** Аватар участника: маленький JPEG в base64. */
     const val KIND_AVAT = "avat"
     /**
+     * Возможности узла как сервера: `cap|nodeId|offeredBytes|atMs`.
+     * Сейчас одно поле - сколько места под пересылку узел отдаёт (ползунок
+     * «Место под пересылку»). Только от самого узла своим контактам, без
+     * эпидемии: самооценка не должна разъезжаться по сети. Старые телефоны
+     * молча отбрасывают.
+     */
+    const val KIND_CAPABILITIES = "cap"
+    /**
      * Правка сообщения (поста канала). Принимается от автора сообщения и от
      * владельца группы; остальные пакеты правки отбрасываются.
      */
@@ -455,6 +463,16 @@ object GroupWire {
         ) : Packet()
 
         /**
+         * Возможности узла: сколько места под пересылку он отдаёт (байт).
+         * Принимается только от [nodeId] = отправитель (проверка в приёмнике).
+         */
+        data class Capabilities(
+            val nodeId: String,
+            val offeredBytes: Long,
+            val atMs: Long,
+        ) : Packet()
+
+        /**
          * Аватар: JPEG 96x96 в base64, присланный владельцем. Свежесть по
          * updatedAtMs: старые пакеты не затирают новые.
          */
@@ -714,6 +732,10 @@ object GroupWire {
 
     fun buildAvatar(ownerId: String, dataB64: String, updatedAtMs: Long, hops: Int): String =
         "$PREFIX|$KIND_AVAT|$ownerId|$dataB64|$updatedAtMs|$hops"
+
+    /** Возможности узла: объявленное место под пересылку. */
+    fun buildCapabilities(nodeId: String, offeredBytes: Long, atMs: Long): String =
+        "$PREFIX|$KIND_CAPABILITIES|$nodeId|${offeredBytes.coerceAtLeast(0L)}|${atMs.coerceAtLeast(0L)}"
 
     fun buildTopicCreated(
         groupId: String,
@@ -1134,6 +1156,15 @@ object GroupWire {
                         hops = parts[9].toIntOrNull() ?: 0,
                     )
                 }
+            } else {
+                null
+            }
+
+            KIND_CAPABILITIES -> if (parts.size == 5) {
+                val offered = parts[3].toLongOrNull() ?: return null
+                val at = parts[4].toLongOrNull() ?: return null
+                if (offered < 0L || at < 0L) return null
+                Packet.Capabilities(nodeId = groupId, offeredBytes = offered, atMs = at)
             } else {
                 null
             }

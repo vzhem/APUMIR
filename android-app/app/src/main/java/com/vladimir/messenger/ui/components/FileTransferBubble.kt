@@ -295,6 +295,12 @@ private fun stateLabel(transfer: FileTransferEntity): String {
     } else {
         ""
     }
+    // Приём стоит: место под пересылку кончилось. Передача не провалена -
+    // отправитель повторит, как только владелец подвинет ползунок или
+    // очистит завершённые.
+    if (transfer.state != "FAILED" && transfer.errorCode == "NO_SPACE") {
+        return "Нет места под пересылку — увеличьте его в настройках$ofChunks"
+    }
     return when (transfer.state) {
         "PREPARING" -> "Подготовка…"
         "PREPARED" -> "В очереди (дождётся получателя)"

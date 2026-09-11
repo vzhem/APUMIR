@@ -25,6 +25,7 @@ class PeerRatingTest {
         delivered: Long = 0,
         failed: Long = 0,
         public: Boolean = false,
+        offered: Long = 0,
     ) = PeerStats(
         peerId = id,
         sightings = sightings,
@@ -35,7 +36,46 @@ class PeerRatingTest {
         delivered = delivered,
         failed = failed,
         hasPublicAddress = public,
+        offeredBytes = offered,
     )
+
+    private val gib = 1024L * 1024 * 1024
+
+    @Test
+    fun offeredStorageRaisesTheScoreButNotAboveTenPoints() {
+        val plain = peer(sightings = 10, misses = 0)
+        val generous = peer(sightings = 10, misses = 0, offered = 100L * gib)
+        assertTrue(generous.score(now) > plain.score(now))
+        assertTrue(generous.score(now) - plain.score(now) <= 10)
+        assertEquals(10.0, generous.storageBonus, 0.0001)
+        // Больше потолка ползунка не ценится.
+        assertEquals(10.0, peer(sightings = 10, offered = Long.MAX_VALUE).storageBonus, 0.0001)
+    }
+
+    @Test
+    fun offeredStorageIsWorthMoreTheMoreIsOffered() {
+        val one = peer(sightings = 10, offered = gib).storageBonus
+        val ten = peer(sightings = 10, offered = 10L * gib).storageBonus
+        val hundred = peer(sightings = 10, offered = 100L * gib).storageBonus
+        assertTrue(one in 3.0..3.7)
+        assertTrue(ten in 6.3..7.0)
+        assertTrue(one < ten && ten < hundred)
+        // Минимум ползунка (100 МБ) и «не сообщал» - без надбавки.
+        assertEquals(0.0, peer(sightings = 10, offered = 100L * 1024 * 1024).storageBonus, 0.0)
+        assertEquals(0.0, peer(sightings = 10).storageBonus, 0.0)
+    }
+
+    @Test
+    fun promisedStorageCannotLiftAPeerThatIsNeverThere() {
+        // Самооценка взвешена доступностью: узел, которого нет на месте,
+        // не поднимается за счёт «100 ГБ».
+        val absent = peer(sightings = 0, misses = 50, lastSeenMs = 0, offered = 100L * gib)
+        assertEquals(0.0, absent.storageBonus, 0.0)
+        val half = peer(sightings = 50, misses = 50, offered = 100L * gib)
+        assertEquals(5.0, half.storageBonus, 0.0001)
+        val steady = peer(sightings = 100, misses = 0)
+        assertTrue(steady.score(now) > absent.score(now))
+    }
 
     @Test
     fun alwaysOnlinePeerBeatsRarelySeenOne() {

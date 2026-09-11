@@ -119,6 +119,14 @@ class GroupRepository(
      */
     private val shortenLink: suspend (target: String) -> String? = { null },
     private val expandShortLink: suspend (code: String) -> String? = { null },
+    /**
+     * Место под пересылку (ползунок «Место под пересылку», байт), которое я
+     * объявляю контактам пакетом `cap`; 0 - не объявлять. Присланное чужое
+     * объявление уходит в [onPeerCapabilities] (рейтинг узлов). По умолчанию
+     * ничего не объявляется и не учитывается - так живут JVM-тесты.
+     */
+    private val myOfferedStorageBytes: () -> Long = { 0L },
+    private val onPeerCapabilities: (nodeId: String, offeredBytes: Long) -> Unit = { _, _ -> },
 ) {
 
     /**
@@ -161,6 +169,7 @@ class GroupRepository(
     private var lastDirectoryPublishMs: Long = 0L
     private var lastNicknamePublishMs: Long = 0L
     private var lastAvatarPublishMs: Long = 0L
+    private var lastCapabilitiesPublishMs: Long = 0L
     /** Когда последний раз просили конкретный узел представиться. */
     private val lastWhoIsAskedMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
@@ -367,6 +376,28 @@ class GroupRepository(
         runCatching { delivery.deliver("avatars", envelope, ids) }
             .onFailure { Log.w(TAG, "avatar publish failed: ${it.message}") }
         lastAvatarPublishMs = clock()
+    }
+
+    /**
+     * Объявить контактам, сколько места под пересылку я отдаю (`cap`).
+     *
+     * Адресно контактам, без эпидемии: это самооценка, у получателя она
+     * стоит не больше 10 баллов рейтинга и взвешена наблюдаемой
+     * доступностью (PeerStats.storageBonus). Раз в несколько часов и сразу
+     * после смены ползунка (force).
+     */
+    suspend fun publishMyCapabilities(force: Boolean = false) {
+        if (!force && !dueNow(lastCapabilitiesPublishMs, GOSSIP_MIN_INTERVAL_MS)) return
+        val me = myId() ?: return
+        val offered = myOfferedStorageBytes()
+        if (offered <= 0L) return
+        val ids = contactIds()
+        if (ids.isEmpty()) return
+        val envelope = GroupWire.buildCapabilities(nodeId = me, offeredBytes = offered, atMs = clock())
+        runCatching { delivery.deliver("capabilities", envelope, ids) }
+            .onFailure { Log.w(TAG, "capabilities publish failed: ${it.message}") }
+        lastCapabilitiesPublishMs = clock()
+        Log.i(TAG, "capabilities published offered=$offered peers=${ids.size}")
     }
 
     /**
@@ -2890,6 +2921,15 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.Avatar -> handleAvatar(packet, senderId)
+
+            is GroupWire.Packet.Capabilities -> {
+                // Только о себе: чужое объявление от третьего лица - подделка
+                // или пересылка, ни то ни другое в рейтинг не идёт.
+                if (packet.nodeId != senderId || senderId == me) return
+                runCatching { onPeerCapabilities(senderId, packet.offeredBytes) }
+                    .onFailure { Log.w(TAG, "capabilities apply failed: ${it.message}") }
+                Log.i(TAG, "capabilities from=${senderId.takeLast(8)} offered=${packet.offeredBytes}")
+            }
 
             is GroupWire.Packet.TopicsRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return

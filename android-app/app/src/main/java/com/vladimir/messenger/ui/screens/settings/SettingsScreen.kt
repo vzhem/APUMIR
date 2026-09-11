@@ -52,9 +52,14 @@ import com.vladimir.messenger.ui.theme.StatusConnecting
 import com.vladimir.messenger.ui.theme.StatusDegraded
 import com.vladimir.messenger.ui.theme.StatusOffline
 import com.vladimir.messenger.ui.theme.StatusOnline
+import com.vladimir.messenger.data.swarm.StoragePolicy
+import com.vladimir.messenger.data.swarm.StorageSettings
 import com.vladimir.messenger.data.swarm.SwarmMode
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.swarm.SwarmSettings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
@@ -878,6 +883,85 @@ private fun SettingsTabContent(
                             "потом всем остальным. В обычном и экономном режимах на " +
                             "мобильном интернете и при заряде ниже " +
                             "${SwarmPolicy.LOW_BATTERY_PERCENT} % темп вдвое ниже.",
+                    )
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // МЕСТО ПОД ПЕРЕСЫЛКУ: сколько байт телефон отдаёт как сервер
+            // ----------------------------------------------------------------
+            item {
+                SettingsCard {
+                    val context = LocalContext.current
+                    // Квота прочитана в MainActivity.onCreate (StorageSettings.init).
+                    val quota by StorageSettings.quotaBytes.collectAsStateWithLifecycle()
+                    // Ползунок двигается по положениям шкалы; в настройки и
+                    // контактам уходит только отпущенное значение, а не каждый
+                    // кадр перетаскивания.
+                    var step by remember(quota) { mutableIntStateOf(StoragePolicy.nearestStep(quota)) }
+                    // Занятое место считается обходом папок - не на главном потоке.
+                    val usage by produceState<StorageSettings.Usage?>(initialValue = null, key1 = quota) {
+                        value = withContext(Dispatchers.IO) {
+                            runCatching { StorageSettings.usage(context) }.getOrNull()
+                        }
+                    }
+                    val free by produceState(initialValue = 0L, key1 = quota) {
+                        value = withContext(Dispatchers.IO) { StorageSettings.freeBytes(context) }
+                    }
+                    SettingsItem(
+                        icon = Icons.Default.Storage,
+                        title = "Место под пересылку: ${StoragePolicy.format(StoragePolicy.stepBytes(step))}",
+                        subtitle = "Сколько места телефон отдаёт под данные в пути: куски " +
+                            "файлов и то, что ждёт узлов не в сети. Телефон здесь и есть " +
+                            "сервер: чем больше места вы даёте, тем выше ваш рейтинг у " +
+                            "других узлов (до +10 из 100, и только пока вы бываете в сети).",
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            StoragePolicy.format(StoragePolicy.MIN_QUOTA_BYTES),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Slider(
+                            value = step.toFloat(),
+                            onValueChange = {
+                                step = it.roundToInt().coerceIn(0, StoragePolicy.STEPS.lastIndex)
+                            },
+                            onValueChangeFinished = {
+                                StorageSettings.set(context, StoragePolicy.stepBytes(step))
+                            },
+                            valueRange = 0f..StoragePolicy.STEPS.lastIndex.toFloat(),
+                            steps = StoragePolicy.STEPS.size - 2,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp),
+                        )
+                        Text(
+                            StoragePolicy.format(StoragePolicy.MAX_QUOTA_BYTES),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val used = usage
+                    Text(
+                        if (used == null) {
+                            "Считаю занятое место…"
+                        } else {
+                            "Занято сейчас: ${StoragePolicy.format(used.total)} " +
+                                "(куски файлов ${StoragePolicy.format(used.chunkBytes)}, " +
+                                "принятые файлы ${StoragePolicy.format(used.receivedBytes)}, " +
+                                "очередь сообщений ${StoragePolicy.format(used.relayBytes)}). " +
+                                "Свободно на телефоне: ${StoragePolicy.format(free)}; последние " +
+                                "${StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES)} не занимаются никогда."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                     )
                 }
             }

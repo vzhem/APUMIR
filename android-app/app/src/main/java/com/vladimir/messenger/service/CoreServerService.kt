@@ -193,6 +193,17 @@ class CoreServerService : Service() {
                 // затем разослать свой контактам (раунд 40).
                 runCatching { groupRepository.loadAvatars() }
                 runCatching { groupRepository.publishMyAvatar() }
+                // Сколько места под пересылку отдаю - контактам, для их рейтинга.
+                runCatching { groupRepository.publishMyCapabilities() }
+            }
+            // Подвинул ползунок «Место под пересылку» - контакты узнают сразу.
+            // init до подписки: иначе чтение сохранённого значения само
+            // выглядело бы как смена ползунка.
+            com.vladimir.messenger.data.swarm.StorageSettings.init(applicationContext)
+            serviceScope.launch {
+                com.vladimir.messenger.data.swarm.StorageSettings.quotaBytes
+                    .drop(1)
+                    .collect { runCatching { groupRepository.publishMyCapabilities(force = true) } }
             }
             serviceScope.launch {
                 com.vladimir.messenger.ui.theme.UsernameHolder.name

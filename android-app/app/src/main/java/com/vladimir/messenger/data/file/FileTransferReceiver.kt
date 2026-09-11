@@ -349,6 +349,16 @@ class FileTransferReceiver(
             chunkStore.storeEncryptedChunk(transferIdHex, chunkIndex, ciphertext)
         } catch (storeError: Exception) {
             Log.w(TAG, "Chunk $chunkIndex rejected by store for $transferIdHex: ${storeError.message}")
+            // Место под пересылку кончилось: передача не падает (отправитель
+            // повторит кусок, а владелец может подвинуть ползунок или
+            // очистить завершённые), но пузырь в чате должен сказать, чего
+            // ждём. Следующий удачный кусок снимает пометку сам (advance
+            // без errorCode).
+            if (storeError is FileTransferChunkStore.StorageFullException &&
+                transfer.errorCode != ERROR_NO_SPACE
+            ) {
+                advance(transfer, newState = transfer.state, errorCode = ERROR_NO_SPACE)
+            }
             return
         }
         val inserted = transferDao.insertChunkIgnore(
@@ -598,6 +608,8 @@ class FileTransferReceiver(
 
     companion object {
         private const val TAG = "FileTransferReceiver"
+        /** errorCode строки передачи, пока приём стоит из-за квоты «Место под пересылку». */
+        const val ERROR_NO_SPACE = "NO_SPACE"
         const val MAX_PENDING_ITEMS = 64
         const val MAX_PENDING_BYTES = 32L * 1024 * 1024
         const val MAX_BUFFERED_TRANSFERS = 32

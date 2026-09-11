@@ -11,6 +11,11 @@ package com.vladimir.messenger.data.peer
 // Считается локально, из того, что телефон видел сам. Никаких обещаний от
 // чужой стороны: узел не может объявить себя хорошим - он может только вести
 // себя хорошо, и это будет замечено.
+//
+// Единственное исключение - объявленное место под пересылку (ползунок
+// «Место под пересылку», 100 МБ…100 ГБ): его узел сообщает сам. Поэтому оно
+// стоит не больше 10 баллов из 100 и умножается на наблюдаемую доступность:
+// «100 ГБ» у узла, которого никогда нет на месте, не стоят ничего.
 // =============================================================================
 
 import android.content.Context
@@ -47,6 +52,11 @@ data class PeerStats(
     val hasPublicAddress: Boolean = false,
     /** Последний известный адрес - его показываем в подробностях. */
     val lastAddress: String = "",
+    /**
+     * Сколько места под пересылку узел объявил сам (байт; 0 - не сообщал).
+     * Обещание, а не наблюдение - см. [score].
+     */
+    val offeredBytes: Long = 0,
 ) {
 
     /** Средняя скорость обмена, байт в секунду. Ноль - обмена не было. */
@@ -78,7 +88,11 @@ data class PeerStats(
      *  - скорость (20) - на ней экономится время передачи файлов;
      *  - надёжность доставки (15) - обещал и donёс;
      *  - свежесть (5) - узел, которого не видели неделю, не должен обгонять
-     *    того, кто в сети прямо сейчас.
+     *    того, кто в сети прямо сейчас;
+     *  - объявленное место под пересылку (до +10, см. [storageBonus]) -
+     *    единственная самооценка в формуле: чем больше телефон отдаёт под
+     *    чужие данные, тем выше он в очереди; взвешена доступностью, так
+     *    что поднять мёртвый узел она не может. Сумма обрезается до 100.
      */
     fun score(nowMs: Long): Int {
         val availabilityPart = availability * 35.0
@@ -98,9 +112,18 @@ data class PeerStats(
             ageMs >= STALE_MS -> 0.0
             else -> 5.0 * (1.0 - (ageMs - FRESH_MS).toDouble() / (STALE_MS - FRESH_MS))
         }
-        val total = availabilityPart + publicPart + speedPart + reliabilityPart + freshPart
+        val total = availabilityPart + publicPart + speedPart + reliabilityPart + freshPart + storageBonus
         return total.coerceIn(0.0, 100.0).toInt()
     }
+
+    /**
+     * Надбавка за объявленное место: 0 у 100 МБ и меньше, 10 у 100 ГБ, по
+     * логарифму между ними (1 ГБ ≈ 3,3; 10 ГБ ≈ 6,7), умноженная на
+     * доступность 0..1.
+     */
+    val storageBonus: Double
+        get() = com.vladimir.messenger.data.swarm.StoragePolicy.storageFraction(offeredBytes) *
+            STORAGE_BONUS_MAX * availability
 
     /** Словесная оценка: цифра без объяснения владельцу ничего не говорит. */
     fun tier(nowMs: Long): String = when {
@@ -114,6 +137,8 @@ data class PeerStats(
         const val FAST_BYTES_PER_SECOND = 2L * 1024 * 1024
         const val FRESH_MS = 5L * 60 * 1000
         const val STALE_MS = 24L * 60 * 60 * 1000
+        /** Потолок надбавки за объявленное место под пересылку. */
+        const val STORAGE_BONUS_MAX = 10.0
     }
 }
 
@@ -214,6 +239,21 @@ object PeerRatingStore {
     }
 
     /**
+     * Узел сообщил, сколько места отдаёт под пересылку. Принимается только
+     * от него самого (проверяет вызывающий); значение обрезается до
+     * допустимых пределов ползунка, чтобы «миллион терабайт» не стоил больше
+     * честных 100 ГБ.
+     */
+    fun recordOfferedStorage(context: Context, peerId: String, offeredBytes: Long) {
+        val clean = if (offeredBytes <= 0L) {
+            0L
+        } else {
+            offeredBytes.coerceAtMost(com.vladimir.messenger.data.swarm.StoragePolicy.MAX_QUOTA_BYTES)
+        }
+        update(context, peerId) { old -> old.copy(offeredBytes = clean) }
+    }
+
+    /**
      * Похож ли адрес на доступный извне.
      *
      * Домашние и служебные диапазоны исключаем: узел за домашним роутером
@@ -298,6 +338,7 @@ object PeerRatingStore {
                 failed = o.optLong("no"),
                 hasPublicAddress = o.optBoolean("pub"),
                 lastAddress = o.optString("addr", ""),
+                offeredBytes = o.optLong("off"),
             )
         }
         return result
@@ -318,7 +359,8 @@ object PeerRatingStore {
                     .put("ok", v.delivered)
                     .put("no", v.failed)
                     .put("pub", v.hasPublicAddress)
-                    .put("addr", v.lastAddress),
+                    .put("addr", v.lastAddress)
+                    .put("off", v.offeredBytes),
             )
         }
         return root.toString()

@@ -98,6 +98,30 @@ class FileTransferChunkStoreTest {
     }
 
     @Test
+    fun liveHeadroomIsAskedOnEveryWriteAndCanShrink() {
+        // Ползунок «Место под пересылку»: хранилище не запоминает квоту, а
+        // спрашивает остаток при каждой записи - смена настройки действует сразу.
+        var allowed = 1_000L
+        val seenUsed = ArrayList<Long>()
+        val store = FileTransferChunkStore(root, headroom = { used -> seenUsed += used; allowed })
+        store.storeEncryptedChunk(transferId, 0, ByteArray(600) { 1 })
+        assertEquals(listOf(0L), seenUsed)
+        allowed = 100L
+        expectFailure { store.storeEncryptedChunk(transferId, 1, ByteArray(600) { 2 }) }
+        assertEquals(listOf(0L, 600L), seenUsed)
+        assertNull(store.readEncryptedChunk(transferId, 1))
+        // Повтор того же куска - не запись: остаток не спрашивается и не нужен.
+        allowed = 0L
+        val retry = store.storeEncryptedChunk(transferId, 0, ByteArray(600) { 1 })
+        assertFalse(retry.newlyStored)
+        assertEquals(2, seenUsed.size)
+        // Место освободили - запись снова проходит.
+        allowed = 1_000L
+        assertTrue(store.storeEncryptedChunk(transferId, 1, ByteArray(600) { 2 }).newlyStored)
+        assertEquals(1_200L, store.currentStoredBytes())
+    }
+
+    @Test
     fun traversalAndInvalidIndicesAreRejected() {
         val store = FileTransferChunkStore(root)
         for (invalid in listOf("", "../escape", "A".repeat(32), "0".repeat(31))) {

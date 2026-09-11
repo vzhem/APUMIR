@@ -118,6 +118,16 @@ object GroupsModule {
         // сервис (worker, /short); коды кэшируются в LinkShortener.
         shortenLink = { target -> shortener.codeFor(target) },
         expandShortLink = { code -> shortener.expand(code) },
+        // Место под пересылку: своё объявляем контактам (`cap`), чужое
+        // объявление - в рейтинг узлов (не больше 10 баллов, взвешено
+        // наблюдаемой доступностью).
+        myOfferedStorageBytes = {
+            com.vladimir.messenger.data.swarm.StorageSettings.quota(context.applicationContext)
+        },
+        onPeerCapabilities = { nodeId, offeredBytes ->
+            com.vladimir.messenger.data.peer.PeerRatingStore
+                .recordOfferedStorage(context.applicationContext, nodeId, offeredBytes)
+        },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

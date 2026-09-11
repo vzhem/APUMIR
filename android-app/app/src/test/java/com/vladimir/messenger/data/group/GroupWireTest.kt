@@ -331,6 +331,30 @@ class GroupWireTest {
         assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_DIRECTORY}|g|t|a|o|s|1|0"))
     }
 
+    // ---------------- возможности узла (место под пересылку) ----------------
+
+    @Test
+    fun capabilitiesRoundTrip() {
+        val envelope = GroupWire.buildCapabilities("pk_me", 2L * 1024 * 1024 * 1024, 1_700_000_000_000L)
+        assertEquals("${GroupWire.PREFIX}|cap|pk_me|2147483648|1700000000000", envelope)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Capabilities)
+        val cap = parsed as GroupWire.Packet.Capabilities
+        assertEquals("pk_me", cap.nodeId)
+        assertEquals(2L * 1024 * 1024 * 1024, cap.offeredBytes)
+        assertEquals(1_700_000_000_000L, cap.atMs)
+    }
+
+    @Test
+    fun capabilitiesRejectGarbage() {
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|cap|pk_me|много|1"))
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|cap|pk_me|-1|1"))
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|cap|pk_me|1"))
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|cap|pk_me|1|2|3"))
+        // Отрицательное на сборке не уходит: обрезается до нуля.
+        assertEquals("${GroupWire.PREFIX}|cap|pk_me|0|0", GroupWire.buildCapabilities("pk_me", -7L, -1L))
+    }
+
     // ---------------- @ник-реестр ----------------
 
     @Test

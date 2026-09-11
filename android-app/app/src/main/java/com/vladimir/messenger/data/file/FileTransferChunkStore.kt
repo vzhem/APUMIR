@@ -10,10 +10,20 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 
-/** App-private store for bounded encrypted chunks only. Plaintext and file keys are forbidden here. */
+/**
+ * App-private store for bounded encrypted chunks only. Plaintext and file keys are forbidden here.
+ *
+ * Два предела на запись: жёсткий [maxStoreBytes] (потолок экземпляра, тесты) и
+ * живой [headroom] - сколько ещё можно записать при текущем заполнении.
+ * В приложении [headroom] отвечает ползунок «Место под пересылку»
+ * (`StorageSettings.headroom`): квота владельца телефона минус занятое, но не
+ * глубже запаса свободного места на разделе. Спрашивается при каждой записи,
+ * поэтому смена ползунка действует сразу.
+ */
 class FileTransferChunkStore(
     private val root: File,
     private val maxStoreBytes: Long = DEFAULT_STORE_QUOTA_BYTES,
+    private val headroom: ((usedBytes: Long) -> Long)? = null,
 ) {
     /** Lazily rebuilt once after process start; avoids an O(total chunks) scan for every write. */
     private var cachedStoredBytes: Long? = null
@@ -23,6 +33,9 @@ class FileTransferChunkStore(
         val sha256: String,
         val newlyStored: Boolean,
     )
+
+    /** Квота «Место под пересылку» или запас диска исчерпаны: кусок не записан, файл цел. */
+    class StorageFullException(message: String) : IllegalStateException(message)
 
     init {
         require(maxStoreBytes in MIN_STORE_QUOTA_BYTES..MAX_STORE_QUOTA_BYTES)
@@ -101,8 +114,21 @@ class FileTransferChunkStore(
             return StoredChunk(chunkIndex, target.length(), incomingHash, newlyStored = false)
         }
 
-        val projected = Math.addExact(currentStoredBytes(), ciphertext.size.toLong())
+        val used = currentStoredBytes()
+        val projected = Math.addExact(used, ciphertext.size.toLong())
         check(projected <= maxStoreBytes) { "File transfer owner quota exceeded" }
+        headroom?.let { room ->
+            val allowed = room(used)
+            // Текст показывается отправителю дословно («Файл не отправлен: …»),
+            // поэтому он по-русски и говорит, что делать.
+            if (ciphertext.size.toLong() > allowed) {
+                throw StorageFullException(
+                    "не хватает места под пересылку (занято " +
+                        com.vladimir.messenger.data.swarm.StoragePolicy.format(used) +
+                        "). Увеличьте «Место под пересылку» в настройках или очистите завершённые передачи",
+                )
+            }
+        }
         atomicWrite(target, ciphertext)
         cachedStoredBytes = projected
         return StoredChunk(chunkIndex, target.length(), incomingHash, newlyStored = true)
@@ -269,8 +295,12 @@ class FileTransferChunkStore(
         private val TRANSFER_ID = Regex("^[0-9a-f]{32}$")
         private val CHUNK_FILE = Regex("^(?:[0-9]{8}|[0-9]{20})\\.chunk$")
 
-        fun forApplication(context: Context): FileTransferChunkStore = FileTransferChunkStore(
-            File(context.noBackupFilesDir, "file_transfers/v1"),
-        )
+        fun forApplication(context: Context): FileTransferChunkStore {
+            val app = context.applicationContext
+            return FileTransferChunkStore(
+                File(app.noBackupFilesDir, "file_transfers/v1"),
+                headroom = { used -> com.vladimir.messenger.data.swarm.StorageSettings.headroom(app, used) },
+            )
+        }
     }
 }
