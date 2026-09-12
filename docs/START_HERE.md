@@ -49,13 +49,18 @@
 
 ## 3. Где мы сейчас (проверено 2026-09-12, не по памяти)
 
-- Релиз **v11.70.14** = Latest (`gh api repos/vzhem/APUMIR/releases/latest --jq .tag_name`),
-  `app-release.apk` = 37 232 502 байт, sha256 `d26719b2…da3e`, тег на
-  коммите `8ed2309`, прогон 34699658907 с первого раза; `main` = ветка.
+- Релиз **v11.70.15** = Latest (`gh api repos/vzhem/APUMIR/releases/latest --jq .tag_name`),
+  `app-release.apk` = 37 248 886 байт, sha256 `bf0724c2…758b`, тег на
+  коммите `7449879`, прогон 34702315753 с первого раза; `main` = ветка.
+  Описание - `docs/RELEASE_NOTES_v11.70.15.md`: звонки через мобильную
+  сеть - прямой UDP между телефонами (STUN-кандидаты, пробивание NAT,
+  `CallUdpChannel`/`StunCodec`, пакеты `cand`/`probe`), при неудаче -
+  мост v11.70.14. Карта - `docs/CALLS_BOOTSTRAP.md` §8.2/§8.4 (п. 2), что
+  проверить - `AI_HANDOFF.md` 0j. На телефонах НЕ проверено.
+- v11.70.14: `app-release.apk` = 37 232 502 байт, sha256 `d26719b2…da3e`,
+  тег на коммите `8ed2309`, прогон 34699658907 с первого раза.
   Описание - `docs/RELEASE_NOTES_v11.70.14.md`: звонки через мобильную
-  сеть - мост через брокер (`CallBrokerLink`, ADPCM, `cap`/`ac`). Карта -
-  `docs/CALLS_BOOTSTRAP.md` §8.4, диагноз и что проверить - `AI_HANDOFF.md`
-  0j. На телефонах НЕ проверено. Следующий (v11.70.15) - прямой UDP + STUN.
+  сеть - мост через брокер (`CallBrokerLink`, ADPCM, `cap`/`ac`).
 - v11.70.13: `app-release.apk` = 37 216 118 байт, sha256 `c4a82c19…cb83`, тег на
   коммите `cb9b54d`, прогон 34666142057 с первого раза.
   Описание - `docs/RELEASE_NOTES_v11.70.13.md`: рой, этап 7 - хранение
