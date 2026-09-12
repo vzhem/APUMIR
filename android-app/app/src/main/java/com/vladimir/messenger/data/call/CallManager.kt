@@ -727,8 +727,9 @@ class CallManager @Inject constructor(
             }
             // Принимающий ждёт входящее соединение звонящего (его видит сервер 42109) —
             // только если сам объявил LAN-адрес в accept; без Wi-Fi ждать нечего.
+            // Если мост уже жив, ждём коротко: звонящий, скорее всего, в другой сети.
             if (!lanOk && !sm.outgoing && audioChannel.lanEndpointHost() != null) {
-                val deadline = nowMs() + LAN_WAIT_MS
+                val deadline = nowMs() + if (peerLinkAlive) LAN_WAIT_LINK_MS else LAN_WAIT_MS
                 while (!lanOk && nowMs() < deadline && machine === sm &&
                     sm.phase == CallStateMachine.Phase.CONNECTING
                 ) {
@@ -1121,6 +1122,7 @@ class CallManager @Inject constructor(
         private const val LINK_LINGER_MS = 1_500L
         /** Сколько принимающий ждёт LAN-сокет звонящего, прежде чем считать путь «интернет». */
         private const val LAN_WAIT_MS = 8_000L
+        private const val LAN_WAIT_LINK_MS = 3_000L
         /** Пока собеседник не ответил по мосту, приветствие cap повторяем с этим шагом. */
         private const val LINK_GREET_MS = 1_000L
         /** Переоткрытие умершего моста: не чаще и не больше, чем указано. */
