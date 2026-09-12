@@ -215,6 +215,78 @@ class CallWireTest {
         assertNull(CallWire.parse("APUCALL1|cap|$callId|1,3|nak"))
     }
 
+    // ── Кандидаты UDP и пробы пробивания NAT ──────────────────────────────────
+
+    @Test
+    fun candidatesRoundTrip() {
+        val endpoints = listOf(
+            "203.0.113.9" to 40123,
+            "2001:db8:1234:5678:11:2233:4455:6677" to 40123,
+            "192.168.1.42" to 40123,
+        )
+        val text = CallWire.buildCandidates(callId, endpoints)
+        assertEquals(
+            "APUCALL1|cand|$callId|203.0.113.9/40123,2001:db8:1234:5678:11:2233:4455:6677/40123,192.168.1.42/40123",
+            text,
+        )
+        val parsed = CallWire.parse(text) as CallWire.Packet.Candidates
+        assertEquals(callId, parsed.callId)
+        assertEquals(endpoints, parsed.endpoints)
+        assertEquals("c${callId}n1", CallWire.candidatesMessageId(callId, 1))
+    }
+
+    @Test
+    fun candidatesRejectGarbage() {
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|"))
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|example.com/1234"))     // имя, не литерал — DNS не нужен
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|256.1.1.1/1234"))
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|10.0.0.1/0"))
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|10.0.0.1/70000"))
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|10.0.0.1"))
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|2001:db8::1::2/5"))
+        assertNull(CallWire.parse("APUCALL1|cand|$callId|" + (1..7).joinToString(",") { "10.0.0.$it/5000" }))
+        try {
+            CallWire.buildCandidates(callId, listOf("evil.example" to 80))
+            fail("hostname must throw")
+        } catch (_: IllegalArgumentException) {}
+        try {
+            CallWire.buildCandidates(callId, emptyList())
+            fail("empty list must throw")
+        } catch (_: IllegalArgumentException) {}
+    }
+
+    @Test
+    fun ipLiteralValidation() {
+        assertTrue(CallWire.isValidIpLiteral("0.0.0.0"))
+        assertTrue(CallWire.isValidIpLiteral("192.168.1.42"))
+        assertTrue(CallWire.isValidIpLiteral("2a00:1450:4001:82a::200e"))
+        assertTrue(CallWire.isValidIpLiteral("::1"))
+        assertTrue(CallWire.isValidIpLiteral("::ffff:192.0.2.128"))
+        assertTrue(CallWire.isValidIpLiteral("1:2:3:4:5:6:7:8"))
+        assertFalse(CallWire.isValidIpLiteral("01.2.3.4"))
+        assertFalse(CallWire.isValidIpLiteral("1.2.3"))
+        assertFalse(CallWire.isValidIpLiteral("1:2:3:4:5:6:7"))
+        assertFalse(CallWire.isValidIpLiteral("12345::1"))
+        assertFalse(CallWire.isValidIpLiteral(":::1"))
+        assertFalse(CallWire.isValidIpLiteral("2001:db8:0:0:0:0:0:2:1"))
+        assertFalse(CallWire.isValidIpLiteral("fe80::1%wlan0"))
+        assertFalse(CallWire.isValidIpLiteral("example.com"))
+        assertFalse(CallWire.isValidIpLiteral(""))
+    }
+
+    @Test
+    fun probeRoundTrip() {
+        assertEquals("APUCALL1|probe|$callId|0", CallWire.buildProbe(callId, seen = false))
+        assertEquals("APUCALL1|probe|$callId|1", CallWire.buildProbe(callId, seen = true))
+        val seen = CallWire.parse(CallWire.buildProbe(callId, true)) as CallWire.Packet.Probe
+        assertTrue(seen.seen)
+        assertEquals(callId, seen.callId)
+        val unseen = CallWire.parse(CallWire.buildProbe(callId, false)) as CallWire.Packet.Probe
+        assertFalse(unseen.seen)
+        assertNull(CallWire.parse("APUCALL1|probe|$callId|2"))
+        assertNull(CallWire.parse("APUCALL1|probe|$callId"))
+    }
+
     @Test
     fun capabilitiesRejectsGarbage() {
         assertNull(CallWire.parse("APUCALL1|cap|$callId|"))

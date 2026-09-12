@@ -62,6 +62,21 @@ object CallWire {
     const val KIND_CAPABILITIES = "cap"
     const val CAP_ACK = "ack"
 
+    /**
+     * Кандидаты прямого UDP-канала (CallUdpChannel): `cand|<callId>|<ip>/<port>[,<ip>/<port>…]`
+     * — внешний адрес от STUN плюс адреса своих интерфейсов, до MAX_CANDIDATES.
+     * Идёт по мосту и по durable-пути сразу после offer/accept; старые сборки отбросят.
+     */
+    const val KIND_CANDIDATES = "cand"
+    const val MAX_CANDIDATES = 6
+
+    /**
+     * Проба пробивания NAT по UDP: `probe|<callId>|<seen>`, seen = 1, если мы уже
+     * получали пробы собеседника. Ходит ТОЛЬКО внутри зашифрованного control-пакета
+     * CallLinkWire по UDP; по durable-пути её не бывает.
+     */
+    const val KIND_PROBE = "probe"
+
     /** Версия голосового канала: v1 — выделенный TCP-сокет 42109 (udp1 добавится позже). */
     const val PROTO_TCP1 = "tcp1"
 
@@ -141,6 +156,15 @@ object CallWire {
             val codecs: Set<Int>,
             val ack: Boolean = false,
         ) : Packet()
+
+        /** Адреса, по которым собеседник ждёт наши UDP-пробы (ip → порт), в порядке предпочтения. */
+        data class Candidates(
+            val callId: String,
+            val endpoints: List<Pair<String, Int>>,
+        ) : Packet()
+
+        /** Проба пробивания NAT; seen — «твои пробы до меня доходят». */
+        data class Probe(val callId: String, val seen: Boolean) : Packet()
     }
 
     fun isCallPacket(text: String?): Boolean =
@@ -243,6 +267,23 @@ object CallWire {
         return if (ack) "$base|$CAP_ACK" else base
     }
 
+    /** Список кандидатов UDP: 1..MAX_CANDIDATES адресов-литералов (IPv4 или IPv6) с портом. */
+    fun buildCandidates(callId: String, endpoints: List<Pair<String, Int>>): String {
+        requireValidCallId(callId)
+        require(endpoints.isNotEmpty() && endpoints.size <= MAX_CANDIDATES) { "Bad candidate list" }
+        val body = endpoints.joinToString(",") { (ip, port) ->
+            require(isValidIpLiteral(ip)) { "Bad candidate address" }
+            require(port in 1..65535) { "Bad candidate port" }
+            "$ip/$port"
+        }
+        return "$PREFIX|$KIND_CANDIDATES|$callId|$body"
+    }
+
+    fun buildProbe(callId: String, seen: Boolean): String {
+        requireValidCallId(callId)
+        return "$PREFIX|$KIND_PROBE|$callId|${if (seen) 1 else 0}"
+    }
+
     // ── Детерминированные messageId для транспортной дедупликации ──────────
 
     fun offerMessageId(callId: String, attempt: Int): String = "c${callId}o$attempt"
@@ -253,6 +294,7 @@ object CallWire {
     fun audioMessageId(callId: String, seq: Long): String = "c${callId}au$seq"
     fun audioBatchMessageId(callId: String, firstSeq: Long): String = "c${callId}ab$firstSeq"
     fun capabilitiesMessageId(callId: String, attempt: Int): String = "c${callId}p$attempt"
+    fun candidatesMessageId(callId: String, attempt: Int): String = "c${callId}n$attempt"
 
     // ── Разбор ──────────────────────────────────────────────────────────────
 
@@ -349,6 +391,35 @@ object CallWire {
                 null
             }
 
+            KIND_CANDIDATES -> if (parts.size == 4) {
+                val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
+                val items = parts[3].split(',')
+                if (items.isEmpty() || items.size > MAX_CANDIDATES) return null
+                val endpoints = ArrayList<Pair<String, Int>>(items.size)
+                for (item in items) {
+                    val slash = item.lastIndexOf('/')
+                    if (slash <= 0) return null
+                    val ip = item.substring(0, slash)
+                    val port = item.substring(slash + 1).toIntOrNull() ?: return null
+                    if (!isValidIpLiteral(ip) || port !in 1..65535) return null
+                    endpoints += ip to port
+                }
+                Packet.Candidates(callId, endpoints)
+            } else {
+                null
+            }
+
+            KIND_PROBE -> if (parts.size == 4) {
+                val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
+                when (parts[3]) {
+                    "0" -> Packet.Probe(callId, false)
+                    "1" -> Packet.Probe(callId, true)
+                    else -> null
+                }
+            } else {
+                null
+            }
+
             KIND_CAPABILITIES -> if (parts.size == 4 || parts.size == 5) {
                 val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
                 val codecs = LinkedHashSet<Int>()
@@ -391,6 +462,33 @@ object CallWire {
     }
 
     fun isValidCallId(callId: String): Boolean = callId.matches(Regex("^[0-9a-f]{32}$"))
+
+    /** Литерал IPv4 (строго 4 октета 0..255) или IPv6 (группы hex, одно «::», допустим хвост IPv4). Имён нет — DNS не нужен. */
+    fun isValidIpLiteral(ip: String): Boolean = IPV4_LITERAL.matches(ip) || isValidIpv6Literal(ip)
+
+    private fun isValidIpv6Literal(ip: String): Boolean {
+        if (ip.length !in 2..45 || !ip.contains(':')) return false
+        if (ip.any { !(it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' || it == ':' || it == '.') }) return false
+        val compressed = ip.indexOf("::")
+        if (compressed >= 0 && ip.indexOf("::", compressed + 1) >= 0) return false
+        if (compressed < 0 && (ip.startsWith(":") || ip.endsWith(":"))) return false
+        val parts = ip.split(':')
+        if (parts.size > 8) return false
+        var groups = 0
+        for ((i, part) in parts.withIndex()) {
+            if (part.isEmpty()) continue
+            if (part.contains('.')) {
+                if (i != parts.lastIndex || !IPV4_LITERAL.matches(part)) return false
+                groups += 2
+            } else {
+                if (part.length > 4) return false
+                groups++
+            }
+        }
+        return if (compressed >= 0) groups <= 7 else groups == 8
+    }
+
+    private val IPV4_LITERAL = Regex("^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$")
 
     fun requireValidCallId(callId: String) {
         require(isValidCallId(callId)) { "Invalid call ID" }

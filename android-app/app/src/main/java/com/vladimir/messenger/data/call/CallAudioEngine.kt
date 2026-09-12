@@ -154,21 +154,25 @@ class CallAudioEngine(context: Context) {
     // ── Приём ───────────────────────────────────────────────────────────────
 
     /** Шифртекст PCM-кадра собеседника (LAN-сокет). */
-    fun incomingCipher(seq: Long, cipher: ByteArray) =
+    fun incomingCipher(seq: Long, cipher: ByteArray): Boolean =
         incomingFrame(seq, CallWire.CODEC_PCM_16K, cipher)
 
-    /** Шифртекст кадра любого кодека: расшифровать, раскодировать, встать в очередь воспроизведения. */
-    fun incomingFrame(seq: Long, codec: Int, cipher: ByteArray) {
-        val crypto = recvCrypto ?: return
-        val plain = crypto.decrypt(seq, cipher) ?: return
+    /**
+     * Шифртекст кадра любого кодека: расшифровать, раскодировать, встать в очередь
+     * воспроизведения. @return true, если кадр подлинный (расшифровался ключом
+     * звонка) — даже если опоздал и выброшен; false = мусор или чужой.
+     */
+    fun incomingFrame(seq: Long, codec: Int, cipher: ByteArray): Boolean {
+        val crypto = recvCrypto ?: return false
+        val plain = crypto.decrypt(seq, cipher) ?: return false
         val pcm = when (codec) {
             CallWire.CODEC_PCM_16K -> plain
-            CallWire.CODEC_ADPCM_16K -> adpcmDecoder.decodeFrame(plain) ?: return
-            else -> return
+            CallWire.CODEC_ADPCM_16K -> adpcmDecoder.decodeFrame(plain) ?: return false
+            else -> return false
         }
-        if (pcm.size != FRAME_BYTES) return
+        if (pcm.size != FRAME_BYTES) return false
         synchronized(playLock) {
-            if (expectedSeq >= 0 && seq < expectedSeq) return // опоздал — выкидываем
+            if (expectedSeq >= 0 && seq < expectedSeq) return true // подлинный, но опоздал — выкидываем
             pending[seq] = pcm
             // Ограничение очереди: старейшие впереди текущего — мусор, догоняем живой край.
             while (pending.size > maxPendingFrames) {
@@ -177,12 +181,19 @@ class CallAudioEngine(context: Context) {
                 expectedSeq = maxOf(expectedSeq, dropSeq + 1)
             }
         }
+        return true
     }
 
-    /** Глубина джиттер-буфера под путь: LAN — короткая, интернет — с разгоном. */
+    /** Глубина джиттер-буфера под путь: LAN — короткая, интернет (мост) — с разгоном. */
     fun configureJitter(viaLan: Boolean) {
         prefillFrames = if (viaLan) LAN_PREFILL_FRAMES else NET_PREFILL_FRAMES
         maxPendingFrames = if (viaLan) LAN_MAX_PENDING_FRAMES else NET_MAX_PENDING_FRAMES
+    }
+
+    /** Прямой UDP через интернет: между LAN и мостом — датаграммы по 40 мс, рывки меньше, чем у брокера. */
+    fun configureJitterUdp() {
+        prefillFrames = UDP_PREFILL_FRAMES
+        maxPendingFrames = UDP_MAX_PENDING_FRAMES
     }
 
     private fun nextPlayFrame(): ByteArray? {
@@ -366,5 +377,7 @@ class CallAudioEngine(context: Context) {
         const val LAN_MAX_PENDING_FRAMES = 8
         const val NET_PREFILL_FRAMES = 10
         const val NET_MAX_PENDING_FRAMES = 30
+        const val UDP_PREFILL_FRAMES = 4
+        const val UDP_MAX_PENDING_FRAMES = 15
     }
 }

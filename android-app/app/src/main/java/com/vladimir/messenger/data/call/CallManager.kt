@@ -35,8 +35,13 @@ import kotlinx.coroutines.launch
 /**
  * Оркестратор звонков (CALLS_BOOTSTRAP.md, раздел 8): маршрутизатор APUCALL1-пакетов
  * из общего потока CoreServerService, держатель машины состояний, уведомление о
- * входящем, рингтон, и связка медиа: LAN-сокет (одна Wi-Fi) → мост через брокер
+ * входящем, рингтон, и связка медиа: LAN-сокет (одна Wi-Fi) → прямой UDP с
+ * пробиванием NAT (CallUdpChannel: интернет, ADPCM) → мост через брокер
  * (CallBrokerLink: любая сеть, ADPCM) → текстовый фолбэк QUIC/relay (старые сборки).
+ *
+ * Внешние ресурсы (STUN-серверы, публичные брокеры) — вспомогательные: любой из
+ * них может быть заблокирован надолго, и звонок обязан идти дальше следующим
+ * путём слабее, но идти.
  *
  * Один звонок на телефон: второй входящий получает reject|busy. Сигналы идут по
  * трём путям сразу (durable relay + прямой QUIC-ускоритель + мост, когда он
@@ -65,6 +70,8 @@ class CallManager @Inject constructor(
         val slowTransport: Boolean = false,
         /** Голос едет мостом через брокер (постоянное соединение, ADPCM): «через интернет». */
         val viaBroker: Boolean = false,
+        /** Голос едет прямым UDP через интернет (NAT пробит): лучший путь вне Wi-Fi. */
+        val viaUdp: Boolean = false,
         /** Причина конца по-русски («Завершён», «Занято», …) — показываем и сворачиваемся. */
         val endText: String = "",
     )
@@ -99,6 +106,15 @@ class CallManager @Inject constructor(
     @Volatile private var peerLinkAlive = false
     /** Кодеки собеседника из cap (по любому пути); пусто = старая сборка, только PCM. */
     @Volatile private var peerCodecs: Set<Int> = emptySet()
+
+    /** Прямой UDP через интернет: сокет на звонок, кандидаты свои и собеседника. */
+    @Volatile private var udpChannel: CallUdpChannel? = null
+    @Volatile private var myCandidates: List<Pair<String, Int>> = emptyList()
+    @Volatile private var peerCandidates: List<Pair<String, Int>> = emptyList()
+    @Volatile private var audioViaUdp = false
+    private var candidatesLinkSends = 0
+    /** Самый большой seq пробы собеседника: повтор старой пробы с другого адреса не перехватит канал. */
+    private var lastPeerProbeSeq = -1L
     private var ringtone: Ringtone? = null
     private var tickJob: Job? = null
     private var endedResetJob: Job? = null
@@ -109,6 +125,9 @@ class CallManager @Inject constructor(
 
     /** cap, пришедший раньше своего offer (пути не упорядочены): подождёт машину. */
     private val earlyCaps = LinkedHashMap<String, Set<Int>>()
+
+    /** cand, пришедший раньше своего offer: то же самое. */
+    private val earlyCands = LinkedHashMap<String, List<Pair<String, Int>>>()
 
     /** Очередь исходящих голосовых кадров: поток микрофона не ждёт сеть. */
     private val frameOutQueue = java.util.concurrent.ArrayBlockingQueue<OutgoingFrame>(128)
@@ -142,14 +161,28 @@ class CallManager @Inject constructor(
                     applyPeerCodecs(packet.codecs)
                 } else if (!recentlyEnded.containsKey(packet.callId)) {
                     earlyCaps[packet.callId] = packet.codecs
-                    while (earlyCaps.size > 8) {
-                        val eldest = earlyCaps.keys.iterator()
-                        if (eldest.hasNext()) { eldest.next(); eldest.remove() } else break
-                    }
+                    trimEarly(earlyCaps)
                 }
             }
+            is CallWire.Packet.Candidates -> synchronized(this) {
+                if (matchesCall(packet.callId)) {
+                    applyPeerCandidates(packet.endpoints)
+                } else if (!recentlyEnded.containsKey(packet.callId)) {
+                    earlyCands[packet.callId] = packet.endpoints
+                    trimEarly(earlyCands)
+                }
+            }
+            // Пробы ходят только по UDP; с durable-пути — мусор.
+            is CallWire.Packet.Probe -> Unit
         }
         return true
+    }
+
+    private fun trimEarly(map: LinkedHashMap<String, *>) {
+        while (map.size > 8) {
+            val eldest = map.keys.iterator()
+            if (eldest.hasNext()) { eldest.next(); eldest.remove() } else break
+        }
     }
 
     private fun matchesCall(callId: String): Boolean =
@@ -211,10 +244,14 @@ class CallManager @Inject constructor(
             val sm = CallStateMachine(offer.callId, senderId, outgoing = false, startedAtMs = now)
             machine = sm
             peerCodecs = earlyCaps.remove(offer.callId) ?: emptySet()
+            peerCandidates = earlyCands.remove(offer.callId) ?: emptyList()
             resetLinkCounters(outgoing = false)
             // Мост поднимаем сразу на offer: пока телефон звонит, соединение с
             // брокером уже стоит, и accept с голосом пойдут без задержки.
-            if (callerKey != null && callerKey.size == 16) openBrokerLink(sm, callerKey)
+            if (callerKey != null && callerKey.size == 16) {
+                openBrokerLink(sm, callerKey)
+                openUdpChannel(sm)
+            }
             _uiState.value = CallUiState(
                 phase = sm.phase,
                 peerId = senderId,
@@ -337,28 +374,42 @@ class CallManager @Inject constructor(
         openBrokerLink(sm, key)
     }
 
-    /** Сигнал по мосту: шифруем ключом моста, seq из своего диапазона. */
-    private fun sendLinkControl(text: String): Boolean {
-        val link = brokerLink ?: return false
-        val crypto = linkCrypto ?: return false
-        if (!link.isOpen()) return false
+    /** Control-пакет провода: шифруем ключом моста, seq из своего диапазона (общий счётчик для моста и UDP). */
+    private fun buildLinkControl(text: String): ByteArray? {
+        val crypto = linkCrypto ?: return null
         val seq = synchronized(this) { linkControlSeq++ }
         val cipher = runCatching { crypto.encrypt(seq, text.toByteArray(Charsets.UTF_8)) }
-            .getOrNull() ?: return false
-        return link.send(CallLinkWire.buildControl(seq, cipher))
+            .getOrNull() ?: return null
+        return CallLinkWire.buildControl(seq, cipher)
+    }
+
+    /** Сигнал по мосту (и по прямому UDP, если он пробит): доезжает за доли секунды. */
+    private fun sendLinkControl(text: String): Boolean {
+        val link = brokerLink
+        val udp = udpChannel
+        val viaLink = link != null && link.isOpen()
+        val viaUdp = udp != null && udp.isOpen()
+        if (!viaLink && !viaUdp) return false
+        val packet = buildLinkControl(text) ?: return false
+        var sent = false
+        if (viaUdp) sent = udp!!.send(packet)
+        if (viaLink) sent = link!!.send(packet) || sent
+        return sent
     }
 
     private fun markPeerLinkAlive(callId: String) {
         if (peerLinkAlive) return
         peerLinkAlive = true
         Log.i(TAG, "broker link alive both ways for ${callId.take(8)} (${brokerLink?.brokerHost})")
+        sendCandidatesViaLink(callId)
         val sm = machine ?: return
         if (sm.phase == CallStateMachine.Phase.CONNECTING || sm.phase == CallStateMachine.Phase.ACTIVE) {
             syncUi(sm)
         }
     }
 
-    private fun onLinkPacket(callId: String, bytes: ByteArray) {
+    /** Пакет провода CallLinkWire: from == null — с моста через брокер, иначе — с прямого UDP. */
+    private fun onLinkPacket(callId: String, bytes: ByteArray, from: java.net.InetSocketAddress? = null) {
         val sm = machine ?: return
         if (sm.callId != callId) return
         when (val packet = CallLinkWire.parse(bytes)) {
@@ -367,34 +418,155 @@ class CallManager @Inject constructor(
                 val plain = crypto.decrypt(packet.seq, packet.cipher) ?: return
                 val text = String(plain, Charsets.UTF_8)
                 val signal = CallWire.parse(text) ?: return
-                // Расшифровалось ключом моста = это собеседник, и он уже подписан: мост жив.
-                markPeerLinkAlive(callId)
+                // Расшифровалось ключом моста = это собеседник; по мосту — значит, он уже подписан.
+                if (from == null) markPeerLinkAlive(callId) else if (signal !is CallWire.Packet.Probe) udpChannel?.onPeerPacket(from)
                 // Только сигналы ЭТОГО звонка: ключ моста и так привязан к нему, но проверяем.
+                if (signal !is CallWire.Packet.Probe && signalCallId(signal) != callId) return
                 when (signal) {
-                    is CallWire.Packet.Capabilities -> if (signal.callId == callId) {
+                    is CallWire.Packet.Capabilities -> {
                         applyPeerCodecs(signal.codecs)
                         // На приветствие отвечаем ack (каждый раз: QoS0 теряет), на ack — молчим.
                         if (!signal.ack) {
                             sendLinkControl(CallWire.buildCapabilities(callId, CallWire.LOCAL_CODECS, ack = true))
                         }
                     }
-                    is CallWire.Packet.Ring -> if (signal.callId == callId) feedMachine { it.onRing(nowMs()) }
-                    is CallWire.Packet.Accept -> if (signal.callId == callId) onAcceptPacket(sm.peerId, signal)
-                    is CallWire.Packet.Reject -> if (signal.callId == callId) feedMachine { it.onReject(signal.reason, nowMs()) }
-                    is CallWire.Packet.Bye -> if (signal.callId == callId) feedMachine { it.onBye(signal.reason, nowMs()) }
+                    is CallWire.Packet.Candidates -> synchronized(this) { applyPeerCandidates(signal.endpoints) }
+                    is CallWire.Packet.Probe -> if (from != null && signal.callId == callId) {
+                        val fresh = synchronized(this) {
+                            if (packet.seq > lastPeerProbeSeq) { lastPeerProbeSeq = packet.seq; true } else false
+                        }
+                        if (fresh) udpChannel?.onPeerProbe(from, signal.seen)
+                    }
+                    is CallWire.Packet.Ring -> feedMachine { it.onRing(nowMs()) }
+                    is CallWire.Packet.Accept -> onAcceptPacket(sm.peerId, signal)
+                    is CallWire.Packet.Reject -> feedMachine { it.onReject(signal.reason, nowMs()) }
+                    is CallWire.Packet.Bye -> feedMachine { it.onBye(signal.reason, nowMs()) }
                     else -> Unit
                 }
             }
             is CallLinkWire.Packet.Media -> {
-                markPeerLinkAlive(callId)
                 val engine = audioEngine ?: return
-                packet.frames.forEach { f -> engine.incomingFrame(f.seq, packet.codec, f.cipher) }
-                val frames = packet.frames.size
-                feedMachine { it.mediaFrames(nowMs(), frames) }
+                // Живость и адрес засчитываем только по кадрам, которые расшифровались
+                // медиа-ключом: чужая датаграмма не должна ни держать звонок, ни
+                // перехватить адрес. Дубли по двум путям движок отсеет по seq.
+                var authentic = 0
+                packet.frames.forEach { f -> if (engine.incomingFrame(f.seq, packet.codec, f.cipher)) authentic++ }
+                if (authentic == 0) return
+                if (from == null) markPeerLinkAlive(callId) else udpChannel?.onPeerPacket(from)
+                feedMachine { it.mediaFrames(nowMs(), authentic) }
             }
             null -> Unit
         }
     }
+
+    private fun signalCallId(signal: CallWire.Packet): String = when (signal) {
+        is CallWire.Packet.Offer -> signal.callId
+        is CallWire.Packet.Ring -> signal.callId
+        is CallWire.Packet.Accept -> signal.callId
+        is CallWire.Packet.Reject -> signal.callId
+        is CallWire.Packet.Bye -> signal.callId
+        is CallWire.Packet.Audio -> signal.callId
+        is CallWire.Packet.AudioBatch -> signal.callId
+        is CallWire.Packet.Capabilities -> signal.callId
+        is CallWire.Packet.Candidates -> signal.callId
+        is CallWire.Packet.Probe -> signal.callId
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Прямой UDP через интернет (CallUdpChannel): STUN-кандидаты + пробивание NAT
+    // ═════════════════════════════════════════════════════════════════════
+
+    /** Открыть UDP-сокет звонка и в фоне собрать кандидатов (STUN ждём ≤ 1,5 с). Идемпотентно. */
+    private fun openUdpChannel(sm: CallStateMachine) {
+        if (udpChannel != null) return
+        val udp = CallUdpChannel(
+            callId = sm.callId,
+            onDatagram = { bytes, _, from -> onLinkPacket(sm.callId, bytes, from) },
+            onState = { state -> onUdpState(sm.callId, state) },
+        )
+        if (!udp.open()) return
+        udpChannel = udp
+        myCandidates = emptyList()
+        candidatesLinkSends = 0
+        scope.launch(Dispatchers.IO) {
+            val candidates = runCatching { udp.gatherCandidates() }.getOrDefault(emptyList())
+            if (machine !== sm || udpChannel !== udp) return@launch
+            if (candidates.isEmpty()) {
+                Log.i(TAG, "udp: no candidates for ${sm.callId.take(8)} — direct path skipped")
+                return@launch
+            }
+            myCandidates = candidates
+            val text = runCatching { CallWire.buildCandidates(sm.callId, candidates) }.getOrNull() ?: return@launch
+            // Durable-путь (relay/QUIC) — страховка; мост — быстрый путь, когда он уже жив.
+            // messageId без коллизий между сторонами (как у cap): звонящий 1, принимающий 0.
+            sendSignal(sm.peerId, CallWire.candidatesMessageId(sm.callId, if (sm.outgoing) 1 else 0), text)
+            if (peerLinkAlive) sendCandidatesViaLink(sm.callId)
+            // Кандидаты собеседника могли прийти раньше наших: пробивать можно сразу.
+            synchronized(this@CallManager) { startProbingIfReady(sm) }
+        }
+    }
+
+    /** Наши кандидаты по мосту (≤ 3 раз за звонок: на «мост жив» и в ответ на cand собеседника). */
+    private fun sendCandidatesViaLink(callId: String) {
+        val candidates = myCandidates
+        if (candidates.isEmpty() || machine?.callId != callId) return
+        synchronized(this) {
+            if (candidatesLinkSends >= 3) return
+            candidatesLinkSends++
+        }
+        val text = runCatching { CallWire.buildCandidates(callId, candidates) }.getOrNull() ?: return
+        sendLinkControl(text)
+    }
+
+    /** Кандидаты собеседника (любым путём): запоминаем, отвечаем своими по мосту, начинаем пробивать. */
+    private fun applyPeerCandidates(endpoints: List<Pair<String, Int>>) {
+        val sm = machine ?: return
+        val fresh = endpoints != peerCandidates
+        peerCandidates = endpoints
+        if (fresh) sendCandidatesViaLink(sm.callId)
+        startProbingIfReady(sm)
+    }
+
+    /** Под замком. Пробы стартуют, когда есть сокет, ключ моста и адреса собеседника. */
+    private fun startProbingIfReady(sm: CallStateMachine) {
+        val udp = udpChannel ?: return
+        if (udp.isClosed() || linkCrypto == null) return
+        val targets = peerCandidates
+        if (targets.isEmpty()) return
+        if (sm.phase == CallStateMachine.Phase.ENDED) return
+        udp.startProbing(targets) { seen ->
+            buildLinkControl(CallWire.buildProbe(sm.callId, seen))
+        }
+    }
+
+    private fun onUdpState(callId: String, state: CallUdpChannel.UdpState) {
+        val sm = machine ?: return
+        if (sm.callId != callId) return
+        when (state) {
+            CallUdpChannel.UdpState.OPEN -> {
+                Log.i(TAG, "udp direct path open for ${callId.take(8)}: ${udpChannel?.lockedPeer()}")
+                if (!audioViaLan) {
+                    audioViaUdp = true
+                    audioEngine?.let { engine ->
+                        engine.configureJitterUdp()
+                        engine.outgoingCodec = preferredCodec()
+                    }
+                    _uiState.value = _uiState.value.copy(slowTransport = true, viaUdp = true, viaBroker = false)
+                }
+            }
+            CallUdpChannel.UdpState.CLOSED -> {
+                if (audioViaUdp) {
+                    // Прямой путь умер (сеть сменилась): голос обратно на мост, буфер шире.
+                    audioViaUdp = false
+                    audioEngine?.configureJitter(viaLan = false)
+                    _uiState.value = _uiState.value.copy(viaUdp = false, viaBroker = peerLinkAlive)
+                    Log.i(TAG, "udp direct path closed mid-call ${callId.take(8)}: back to broker link")
+                }
+            }
+            CallUdpChannel.UdpState.PROBING -> Unit
+        }
+    }
+
 
     // ═════════════════════════════════════════════════════════════════════
     // Команды от UI
@@ -437,6 +609,7 @@ class CallManager @Inject constructor(
             val sm = CallStateMachine(callId, peerId, outgoing = true, startedAtMs = now)
             machine = sm
             openBrokerLink(sm, key)
+            openUdpChannel(sm)
             _uiState.value = CallUiState(
                 phase = sm.phase,
                 peerId = peerId,
@@ -716,7 +889,7 @@ class CallManager @Inject constructor(
             // мост уже жив — одна: чужой LAN-адрес за NAT недостижим, а голос ждать не может).
             if (!lanOk && sm.outgoing && host != null && port > 0) {
                 var attempt = 0
-                val maxAttempts = if (peerLinkAlive) 1 else 3
+                val maxAttempts = if (peerLinkAlive || udpChannel?.isOpen() == true) 1 else 3
                 while (attempt < maxAttempts && !lanOk && machine === sm &&
                     sm.phase == CallStateMachine.Phase.CONNECTING
                 ) {
@@ -729,7 +902,8 @@ class CallManager @Inject constructor(
             // только если сам объявил LAN-адрес в accept; без Wi-Fi ждать нечего.
             // Если мост уже жив, ждём коротко: звонящий, скорее всего, в другой сети.
             if (!lanOk && !sm.outgoing && audioChannel.lanEndpointHost() != null) {
-                val deadline = nowMs() + if (peerLinkAlive) LAN_WAIT_LINK_MS else LAN_WAIT_MS
+                val internetAlive = peerLinkAlive || udpChannel?.isOpen() == true
+                val deadline = nowMs() + if (internetAlive) LAN_WAIT_LINK_MS else LAN_WAIT_MS
                 while (!lanOk && nowMs() < deadline && machine === sm &&
                     sm.phase == CallStateMachine.Phase.CONNECTING
                 ) {
@@ -739,15 +913,26 @@ class CallManager @Inject constructor(
             }
             if (machine !== sm || sm.phase != CallStateMachine.Phase.CONNECTING) return@launch
             audioViaLan = lanOk
+            val udpOk = !lanOk && udpChannel?.isOpen() == true
+            audioViaUdp = udpOk
             audioEngine?.let { engine ->
-                engine.configureJitter(viaLan = lanOk)
+                when {
+                    lanOk -> engine.configureJitter(viaLan = true)
+                    udpOk -> engine.configureJitterUdp()
+                    else -> engine.configureJitter(viaLan = false)
+                }
                 engine.outgoingCodec = if (lanOk) CallWire.CODEC_PCM_16K else preferredCodec()
             }
-            _uiState.value = _uiState.value.copy(slowTransport = !lanOk, viaBroker = !lanOk && peerLinkAlive)
+            _uiState.value = _uiState.value.copy(
+                slowTransport = !lanOk,
+                viaUdp = udpOk,
+                viaBroker = !lanOk && !udpOk && peerLinkAlive,
+            )
             Log.i(
                 TAG,
                 "media channel: " + when {
                     lanOk -> "LAN socket"
+                    udpOk -> "direct UDP (${udpChannel?.lockedPeer()})"
                     peerLinkAlive -> "broker link (${brokerLink?.brokerHost})"
                     else -> "text fallback (direct/relay)"
                 },
@@ -761,12 +946,14 @@ class CallManager @Inject constructor(
         if (sm.callId != callId || !audioViaLan) return
         if (sm.phase != CallStateMachine.Phase.CONNECTING && sm.phase != CallStateMachine.Phase.ACTIVE) return
         audioViaLan = false
+        val udpOk = udpChannel?.isOpen() == true
+        audioViaUdp = udpOk
         audioEngine?.let { engine ->
-            engine.configureJitter(viaLan = false)
+            if (udpOk) engine.configureJitterUdp() else engine.configureJitter(viaLan = false)
             engine.outgoingCodec = preferredCodec()
         }
-        _uiState.value = _uiState.value.copy(slowTransport = true, viaBroker = peerLinkAlive)
-        Log.i(TAG, "LAN socket closed mid-call ${callId.take(8)}: falling back to broker link")
+        _uiState.value = _uiState.value.copy(slowTransport = true, viaUdp = udpOk, viaBroker = !udpOk && peerLinkAlive)
+        Log.i(TAG, "LAN socket closed mid-call ${callId.take(8)}: falling back to ${if (udpOk) "direct UDP" else "broker link"}")
     }
 
     /** ADPCM, если собеседник объявил его в cap; иначе PCM (старая сборка). */
@@ -775,8 +962,9 @@ class CallManager @Inject constructor(
 
     /**
      * Разносит кадры транспорту, пояса по скорости:
-     * живой LAN-сокет → МОСТ через брокер (постоянное соединение, пачка из
-     * 4 кадров = 80 мс, двоичный провод) → прямой QUIC одиночным кадром →
+     * живой LAN-сокет → прямой UDP (NAT пробит, 2 кадра в датаграмме) → МОСТ
+     * через брокер (постоянное соединение, пачка из 4 кадров = 80 мс, двоичный
+     * провод) → прямой QUIC одиночным кадром →
      * текстовая ab/ac-строка через ядро (только для сборок без моста). Кадры,
      * которые не ушли, просто теряем — копить их в durable-очередь значит
      * вывалить на собеседника простыню из прошлого; дыру добьёт сторож темпа.
@@ -797,6 +985,19 @@ class CallManager @Inject constructor(
                     audioChannel.sendFrame(frame.seq, frame.ptsMs, frame.cipher, frame.codec)
                 ) {
                     continue
+                }
+                val udp = udpChannel
+                if (udp != null && udp.isOpen()) {
+                    // Прямой UDP: 2 кадра (40 мс) в датаграмме — 25 пакетов/с, в MTU влезает.
+                    val frames = ArrayList<CallLinkWire.MediaFrame>(UDP_BATCH_FRAMES)
+                    frames += CallLinkWire.MediaFrame(frame.seq, frame.cipher)
+                    val codec = frame.codec
+                    val next = frameOutQueue.poll(25, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    if (next != null) {
+                        if (next.codec == codec) frames += CallLinkWire.MediaFrame(next.seq, next.cipher) else frameOutQueue.offer(next)
+                    }
+                    val packet = runCatching { CallLinkWire.buildMedia(codec, frames) }.getOrNull()
+                    if (packet != null && udp.send(packet)) continue
                 }
                 val link = brokerLink
                 if (link != null && link.isOpen() && peerLinkAlive) {
@@ -877,19 +1078,28 @@ class CallManager @Inject constructor(
         audioChannel.onFrame = null
         if (!keepLink) closeBrokerLink()
         runCatching { CallService.stop(appContext) }
-        _uiState.value = _uiState.value.copy(muted = false, speaker = false, slowTransport = false, viaBroker = false)
+        _uiState.value = _uiState.value.copy(
+            muted = false, speaker = false, slowTransport = false, viaBroker = false, viaUdp = false,
+        )
     }
 
-    /** Мост закрываем чуть позже конца звонка: последний bye по нему ещё должен уйти. */
+    /** Мост и UDP закрываем чуть позже конца звонка: последний bye по ним ещё должен уйти. */
     private fun closeBrokerLink() {
-        val link = brokerLink ?: return
+        val udp = udpChannel
+        udpChannel = null
+        audioViaUdp = false
+        myCandidates = emptyList()
+        peerCandidates = emptyList()
+        val link = brokerLink
         brokerLink = null
         linkCrypto = null
         linkCallerKey = null
         peerLinkAlive = false
+        if (link == null && udp == null) return
         scope.launch {
             delay(LINK_LINGER_MS)
-            runCatching { link.close() }
+            runCatching { link?.close() }
+            runCatching { udp?.close() }
         }
     }
 
@@ -899,6 +1109,9 @@ class CallManager @Inject constructor(
         linkReopens = 0
         lastLinkReopenAtMs = 0L
         lastGreetAtMs = 0L
+        lastPeerProbeSeq = -1L
+        candidatesLinkSends = 0
+        audioViaUdp = false
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -1046,7 +1259,8 @@ class CallManager @Inject constructor(
             phase = sm.phase,
             connectedAtMs = sm.connectedAtMs,
             recovering = sm.recovering,
-            viaBroker = current.slowTransport && peerLinkAlive,
+            viaUdp = current.slowTransport && audioViaUdp,
+            viaBroker = current.slowTransport && !audioViaUdp && peerLinkAlive,
             endText = endText,
         )
         if (sm.phase == CallStateMachine.Phase.ENDED) scheduleIdleReset()
@@ -1119,6 +1333,7 @@ class CallManager @Inject constructor(
         private const val QUIC_BREAKER_MS = 45_000L
         /** Кадров в одной публикации моста (по 20 мс) и сколько мост живёт после конца звонка. */
         private const val LINK_BATCH_FRAMES = 4
+        private const val UDP_BATCH_FRAMES = 2
         private const val LINK_LINGER_MS = 1_500L
         /** Сколько принимающий ждёт LAN-сокет звонящего, прежде чем считать путь «интернет». */
         private const val LAN_WAIT_MS = 8_000L
