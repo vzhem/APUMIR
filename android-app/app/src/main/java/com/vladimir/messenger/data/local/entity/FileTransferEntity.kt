@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -32,4 +33,18 @@ data class FileTransferEntity(
     val expiresAtMs: Long,
     val updatedAtMs: Long,
     val errorCode: String? = null,
+    /**
+     * Чей файл, когда мы лишь храним его для получателя (direction = CUSTODY,
+     * этап 7 роя): адрес отправителя. Для своих передач пусто. Схема 19 → 20.
+     */
+    @ColumnInfo(defaultValue = "")
+    val originNodeId: String = "",
+    /**
+     * Узел-хранитель (этап 7 роя). У своей исходящей передачи - кому отдали
+     * файл на хранение, пока получатель не в сети; у входящей - от кого
+     * пришло пересланное (подтверждения кусков идут ему, а не отправителю).
+     * Пусто, когда файл идёт напрямую. Схема 19 → 20.
+     */
+    @ColumnInfo(defaultValue = "")
+    val custodianNodeId: String = "",
 )

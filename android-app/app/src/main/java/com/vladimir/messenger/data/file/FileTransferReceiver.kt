@@ -37,7 +37,29 @@ class FileTransferReceiver(
     private val ackSink: suspend (transferIdHex: String, contiguousChunks: Long) -> Unit,
     private val notifier: FileChatNotifier,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /** Хранение чужих файлов и приём через хранителя (этап 7 роя); по умолчанию всё отклоняется. */
+    private val custody: CustodyPolicy = CustodyPolicy(),
 ) {
+    /**
+     * Границы политики хранения у третьего телефона. Приёмник сам решает
+     * только про подлинность и геометрию; «кого пускать», «сколько места»
+     * и «в какой чат» приходят снаружи, чтобы JVM-тесты жили без Android.
+     */
+    class CustodyPolicy(
+        /** Берём ли на хранение файл этого отправителя (в приложении - он наш контакт). */
+        val acceptsFrom: suspend (originId: String) -> Boolean = { false },
+        /** Сколько байт ещё можно записать в хранилище кусков (квота «Место под пересылку»). */
+        val headroomBytes: () -> Long = { 0L },
+        /** Чат с отправителем пересланного файла на ЭТОМ телефоне; null - отправитель не контакт. */
+        val chatIdFor: suspend (originId: String) -> String? = { null },
+        /** Подтверждение хранителя моей исходящей передаче (см. [FileCustodySender.onCustodianAck]). */
+        val onCustodianAck: suspend (transferIdHex: String, from: String, contiguous: Long, status: Byte) -> Unit =
+            { _, _, _, _ -> },
+        /** Подтверждение получателя хранимой у меня передаче (см. [FileCustodySender.onRecipientAck]). */
+        val onRecipientAck: suspend (transferIdHex: String, from: String, contiguous: Long, status: Byte) -> Unit =
+            { _, _, _, _ -> },
+    )
+
     private class PendingItem {
         val fragments: MutableMap<Int, ByteArray> = HashMap()
         var fragmentCount: Int = -1
@@ -48,6 +70,12 @@ class FileTransferReceiver(
     private val bufferedChunks = LinkedHashMap<String, MutableMap<Long, ByteArray>>()
     /** One bounded progress cursor per active transfer; never one heap entry per file chunk. */
     private val contiguousPrefixes = HashMap<String, Long>()
+    /**
+     * Передачи через хранителя, по которым отправитель объявился и напрямую:
+     * тогда подтверждения нужны обоим - хранителю (чтобы освободил место) и
+     * отправителю (его окно двигают только обычные ACK).
+     */
+    private val directFromOrigin = HashSet<String>()
     private var pendingBytes = 0L
 
     /** Returns true when the text was a file packet (caller must not store it as chat text). */
@@ -160,11 +188,16 @@ class FileTransferReceiver(
         try {
             when (packet.type) {
                 FileTransferPacketCodec.Type.OFFER -> handleOffer(senderId, chatId, payload)
-                FileTransferPacketCodec.Type.CHUNK -> handleChunk(transferIdHex, packet.itemIndex, payload)
+                FileTransferPacketCodec.Type.CHUNK -> handleChunk(senderId, transferIdHex, packet.itemIndex, payload)
                 FileTransferPacketCodec.Type.ACK ->
                     handleAck(senderId, transferIdHex, packet.itemIndex, payload)
                 FileTransferPacketCodec.Type.CANCEL ->
                     Log.i(TAG, "File transfer CANCEL notice for $transferIdHex")
+                FileTransferPacketCodec.Type.CUSTODY_OFFER -> handleCustodyOffer(senderId, payload)
+                FileTransferPacketCodec.Type.CUSTODY_CHUNK ->
+                    handleCustodyChunk(senderId, transferIdHex, packet.itemIndex, payload)
+                FileTransferPacketCodec.Type.CUSTODY_ACK ->
+                    handleCustodyAck(senderId, transferIdHex, packet.itemIndex, payload)
             }
         } finally {
             payload.fill(0)
@@ -253,6 +286,7 @@ class FileTransferReceiver(
             return
         }
         val transfer = existing ?: insertIncomingTransfer(manifest, senderId, chatId, now) ?: return
+        if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
 
         Log.i(
             TAG,
@@ -284,12 +318,29 @@ class FileTransferReceiver(
         }
     }
 
-    private suspend fun handleChunk(transferIdHex: String, chunkIndex: Long, ciphertext: ByteArray) {
-        if (transferDao.getTransfer(transferIdHex) == null ||
-            chunkStore.readManifest(transferIdHex) == null
-        ) {
+    private suspend fun handleChunk(
+        senderId: String,
+        transferIdHex: String,
+        chunkIndex: Long,
+        ciphertext: ByteArray,
+    ) {
+        val transfer = transferDao.getTransfer(transferIdHex)
+        if (transfer == null || chunkStore.readManifest(transferIdHex) == null) {
             bufferOrDropChunk(transferIdHex, chunkIndex, ciphertext)
             return
+        }
+        if (transfer.direction == "CUSTODY") {
+            // Обычные куски чужой передаче не адресуются: хранитель принимает
+            // только CUSTODY_CHUNK от отправителя.
+            Log.w(TAG, "Plain chunk for custody transfer $transferIdHex from ${senderId.takeLast(8)}; dropped")
+            return
+        }
+        // Кусок пришёл напрямую от отправителя, хотя файл идёт и через
+        // хранителя: с этого момента подтверждаем обоим (см. sendFileAck).
+        if (transfer.direction == "INCOMING" && transfer.custodianNodeId.isNotBlank() &&
+            senderId == transfer.peerNodeId
+        ) {
+            directFromOrigin.add(transferIdHex)
         }
         ingestChunkCiphertext(transferIdHex, chunkIndex, ciphertext)
     }
@@ -328,7 +379,14 @@ class FileTransferReceiver(
         ciphertext: ByteArray,
     ) {
         val transfer = transferDao.getTransfer(transferIdHex) ?: return
-        if (transfer.state == "COMPLETE" || transfer.state == "FAILED") return
+        if (transfer.state == "COMPLETE") {
+            // Отправитель не получил итогового подтверждения и шлёт снова:
+            // повторяем его (id детерминирован, сеть отсеет дубли), иначе
+            // он будет качать в пустоту до конца срока.
+            sendFileAck(transferIdHex, transfer.chunkCount)
+            return
+        }
+        if (transfer.state == "FAILED") return
         val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return
         val manifest = crypto.parseManifest(manifestBytes)
         val chunkCount = manifest.chunkCount.toLong()
@@ -445,6 +503,7 @@ class FileTransferReceiver(
                 "Cannot persist verified file completion"
             }
             Log.i(TAG, "File transfer COMPLETE: $transferIdHex (${manifest.displayName})")
+            directFromOrigin.remove(transferIdHex)
             notifier.onFileReceived(
                 chatId = fresh.chatId,
                 senderId = fresh.peerNodeId,
@@ -523,6 +582,15 @@ class FileTransferReceiver(
     }
 
     private suspend fun sendFileAck(transferIdHex: String, contiguousChunks: Long) {
+        val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        // Приём через хранителя: окно двигает подтверждение ЕМУ, а
+        // отправителю (он, скорее всего, не в сети - потому и хранитель)
+        // уходит только итоговое, чтобы не забивать очередь ретранслятора
+        // сотней мелких подтверждений.
+        if (transfer.direction == "INCOMING" && transfer.custodianNodeId.isNotBlank()) {
+            sendCustodyAck(transfer.custodianNodeId, transferIdHex, contiguousChunks, FileCustodyPdu.ACK_OK)
+            if (contiguousChunks < transfer.chunkCount && transferIdHex !in directFromOrigin) return
+        }
         runCatching {
             val packet = FileTransferPacketCodec.encode(
                 FileTransferPacketCodec.Packet(
@@ -534,7 +602,6 @@ class FileTransferReceiver(
                     byteArrayOf(1),
                 )
             )
-            val transfer = transferDao.getTransfer(transferIdHex) ?: return
             transport.send(
                 FileTransferWire.ackMessageId(transferIdHex, contiguousChunks),
                 transfer.chatId,
@@ -543,6 +610,346 @@ class FileTransferReceiver(
             )
         }.onFailure { error ->
             Log.w(TAG, "File ACK send failed for $transferIdHex: ${error.message}")
+        }
+    }
+
+    // ── Хранение у третьего телефона (этап 7 роя) ──────────────────────────
+
+    private suspend fun handleCustodyOffer(senderId: String, payload: ByteArray) {
+        val custodyOffer = FileCustodyPdu.decode(payload)
+        val me = identity.myNodeId() ?: return
+        if (custodyOffer.recipientId == me) {
+            handleForwardedOffer(senderId, custodyOffer)
+        } else {
+            handleCustodyRequest(senderId, custodyOffer)
+        }
+    }
+
+    /**
+     * Хранитель переслал мне чужой файл: проверяем ровно как прямое
+     * предложение, только отправитель - [FileCustodyPdu.Custody.originId], а
+     * не тот, от кого пришёл пакет. Конверт с ключом запечатан отправителем
+     * для меня, хранитель его вскрыть не мог.
+     */
+    private suspend fun handleForwardedOffer(custodianId: String, custodyOffer: FileCustodyPdu.Custody) {
+        val manifest = crypto.parseManifest(custodyOffer.manifest)
+        val transferIdHex = manifest.transferIdHex
+        val originId = custodyOffer.originId
+        val now = nowMs()
+        val me = identity.myNodeId() ?: return
+        suspend fun refuse(reason: String) {
+            Log.w(TAG, "Forwarded file offer $transferIdHex via ${custodianId.takeLast(8)} refused: $reason")
+            sendCustodyAck(custodianId, transferIdHex, 0L, FileCustodyPdu.ACK_REFUSED)
+        }
+        if (manifest.fileSize > Long.MAX_VALUE.toULong() || manifest.chunkCount > Long.MAX_VALUE.toULong()) {
+            refuse("geometry"); return
+        }
+        if (manifest.senderNodeId != originId || manifest.recipientNodeId != me) {
+            refuse("manifest parties mismatch"); return
+        }
+        if (manifest.expiresAtMs <= now) {
+            refuse("expired"); return
+        }
+        if (!crypto.verifyBinding(custodyOffer.senderBinding) ||
+            crypto.bindingNodeId(custodyOffer.senderBinding) != originId
+        ) {
+            refuse("origin binding"); return
+        }
+        val existing = transferDao.getTransfer(transferIdHex)
+        if (existing != null && (existing.direction != "INCOMING" || existing.peerNodeId != originId)) {
+            refuse("conflicts with local transfer row"); return
+        }
+        if (existing?.state == "FAILED") {
+            refuse("already failed"); return
+        }
+        if (existing?.state == "COMPLETE") {
+            // Уже всё есть: хранителю достаточно знать, что можно удалять.
+            sendCustodyAck(custodianId, transferIdHex, existing.chunkCount, FileCustodyPdu.ACK_OK)
+            return
+        }
+        // Чужой файл от не-контакта не принимаем - и ключ чужака не
+        // закрепляем: проверка знакомства раньше закрепления.
+        val chatId = existing?.chatId ?: custody.chatIdFor(originId)
+        if (chatId == null) {
+            refuse("origin is not a contact"); return
+        }
+        try {
+            pinner.pinFirstSeen(custodyOffer.senderBinding, now)
+        } catch (pinError: Exception) {
+            refuse("pinned exchange key changed for $originId (${pinError.message})"); return
+        }
+        if (existing == null && insertIncomingTransfer(manifest, originId, chatId, now) == null) return
+        transferDao.setCustodian(transferIdHex, custodianId, now)
+        Log.i(
+            TAG,
+            "Forwarded file offer accepted: $transferIdHex from ${originId.takeLast(8)} " +
+                "via ${custodianId.takeLast(8)} (${manifest.displayName}, ${manifest.fileSize} B)",
+        )
+        chunkStore.storeManifest(transferIdHex, custodyOffer.manifest)
+        chunkStore.storeKeyEnvelope(transferIdHex, custodyOffer.keyEnvelope)
+        if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) {
+            openAndImportKey(transferIdHex, custodyOffer.asOffer())
+        }
+        recoverDurableProgress(transferIdHex)
+        bufferedChunks.remove(transferIdHex)?.let { buffered ->
+            for ((chunkIndex, ciphertext) in buffered.toSortedMap()) {
+                ingestChunkCiphertext(transferIdHex, chunkIndex, ciphertext)
+                ciphertext.fill(0)
+            }
+        }
+        val contiguous = contiguousReceived(transferIdHex)
+        sendFileAck(transferIdHex, contiguous)
+        val fresh = transferDao.getTransfer(transferIdHex) ?: return
+        if (contiguous >= manifest.chunkCount.toLong()) {
+            finalizeTransfer(fresh, manifest)
+        } else if (fresh.state == "OFFERED") {
+            advance(fresh, newState = "TRANSFERRING")
+        }
+    }
+
+    /**
+     * Отправитель просит подержать файл для получателя, который не в сети.
+     * Берём, если отправитель - наш контакт, лимиты не выбраны и место есть;
+     * иначе отвечаем отказом или «полон», и он идёт к следующему кандидату.
+     */
+    private suspend fun handleCustodyRequest(senderId: String, custodyOffer: FileCustodyPdu.Custody) {
+        val manifest = crypto.parseManifest(custodyOffer.manifest)
+        val transferIdHex = manifest.transferIdHex
+        val now = nowMs()
+        suspend fun answer(status: Byte, reason: String) {
+            Log.i(TAG, "Custody request $transferIdHex from ${senderId.takeLast(8)}: $reason")
+            sendCustodyAck(senderId, transferIdHex, 0L, status)
+        }
+        if (custodyOffer.originId != senderId) {
+            answer(FileCustodyPdu.ACK_REFUSED, "origin is not the sender"); return
+        }
+        if (manifest.fileSize > Long.MAX_VALUE.toULong() || manifest.chunkCount > Long.MAX_VALUE.toULong()) {
+            answer(FileCustodyPdu.ACK_REFUSED, "geometry"); return
+        }
+        if (manifest.senderNodeId != senderId || manifest.recipientNodeId != custodyOffer.recipientId) {
+            answer(FileCustodyPdu.ACK_REFUSED, "manifest parties mismatch"); return
+        }
+        if (manifest.expiresAtMs <= now) {
+            answer(FileCustodyPdu.ACK_REFUSED, "expired"); return
+        }
+        if (!crypto.verifyBinding(custodyOffer.senderBinding) ||
+            crypto.bindingNodeId(custodyOffer.senderBinding) != senderId
+        ) {
+            answer(FileCustodyPdu.ACK_REFUSED, "sender binding"); return
+        }
+        if (!custody.acceptsFrom(senderId)) {
+            answer(FileCustodyPdu.ACK_REFUSED, "not a contact"); return
+        }
+        try {
+            pinner.pinFirstSeen(custodyOffer.senderBinding, now)
+        } catch (pinError: Exception) {
+            answer(FileCustodyPdu.ACK_REFUSED, "pinned exchange key changed (${pinError.message})"); return
+        }
+        val existing = transferDao.getTransfer(transferIdHex)
+        if (existing != null) {
+            if (existing.direction != "CUSTODY" || existing.originNodeId != senderId ||
+                existing.peerNodeId != custodyOffer.recipientId
+            ) {
+                answer(FileCustodyPdu.ACK_REFUSED, "conflicts with local transfer row"); return
+            }
+            // Повтор предложения: напоминаем, сколько уже держим.
+            recoverDurableProgress(transferIdHex)
+            sendCustodyAck(senderId, transferIdHex, contiguousReceived(transferIdHex), FileCustodyPdu.ACK_OK)
+            return
+        }
+        if (transferDao.countActiveCustody() >= FileCustodySender.MAX_CUSTODY_TRANSFERS) {
+            answer(FileCustodyPdu.ACK_FULL, "too many files held"); return
+        }
+        if (transferDao.countActiveCustodyFrom(senderId) >= FileCustodySender.MAX_CUSTODY_PER_ORIGIN) {
+            answer(FileCustodyPdu.ACK_FULL, "too many files held for this sender"); return
+        }
+        val needed = Math.addExact(
+            manifest.fileSize.toLong(),
+            Math.multiplyExact(manifest.chunkCount.toLong(), FileTransferChunkStore.AEAD_TAG_BYTES.toLong()),
+        )
+        if (needed > custody.headroomBytes()) {
+            answer(FileCustodyPdu.ACK_FULL, "no space ($needed B needed)"); return
+        }
+        val entity = FileTransferEntity(
+            transferId = transferIdHex,
+            messageId = "custody-$transferIdHex",
+            chatId = FileTransferChatRouting.CUSTODY_SCOPE,
+            peerNodeId = custodyOffer.recipientId,
+            direction = "CUSTODY",
+            displayName = manifest.displayName,
+            mediaType = manifest.mediaType,
+            totalBytes = manifest.fileSize.toLong(),
+            chunkSize = manifest.chunkSize.toInt(),
+            chunkCount = manifest.chunkCount.toLong(),
+            fileSha256 = manifest.fileSha256Hex,
+            state = "HOLDING",
+            createdAtMs = now,
+            expiresAtMs = minOf(manifest.expiresAtMs, Math.addExact(now, FileCustodySender.CUSTODY_TTL_MS)),
+            updatedAtMs = now,
+            originNodeId = senderId,
+        )
+        if (!transferDao.insertNewTransfer(entity)) {
+            answer(FileCustodyPdu.ACK_REFUSED, "row collision"); return
+        }
+        chunkStore.storeManifest(transferIdHex, custodyOffer.manifest)
+        chunkStore.storeKeyEnvelope(transferIdHex, custodyOffer.keyEnvelope)
+        chunkStore.storeOriginBinding(transferIdHex, custodyOffer.senderBinding)
+        recoverDurableProgress(transferIdHex)
+        Log.i(
+            TAG,
+            "Custody accepted: $transferIdHex from ${senderId.takeLast(8)} " +
+                "for ${custodyOffer.recipientId.takeLast(8)} (${manifest.fileSize} B, ${manifest.chunkCount} chunks)",
+        )
+        bufferedChunks.remove(transferIdHex)?.let { buffered ->
+            for ((chunkIndex, ciphertext) in buffered.toSortedMap()) {
+                ingestCustodyChunk(transferIdHex, chunkIndex, ciphertext)
+                ciphertext.fill(0)
+            }
+        }
+        sendCustodyAck(senderId, transferIdHex, contiguousReceived(transferIdHex), FileCustodyPdu.ACK_OK)
+    }
+
+    private suspend fun handleCustodyChunk(
+        senderId: String,
+        transferIdHex: String,
+        chunkIndex: Long,
+        ciphertext: ByteArray,
+    ) {
+        val transfer = transferDao.getTransfer(transferIdHex)
+        if (transfer == null || chunkStore.readManifest(transferIdHex) == null) {
+            bufferOrDropChunk(transferIdHex, chunkIndex, ciphertext)
+            return
+        }
+        when (transfer.direction) {
+            "CUSTODY" -> {
+                if (transfer.originNodeId != senderId) {
+                    Log.w(TAG, "Custody chunk for $transferIdHex from a stranger ${senderId.takeLast(8)}; dropped")
+                    return
+                }
+                ingestCustodyChunk(transferIdHex, chunkIndex, ciphertext)
+            }
+            "INCOMING" -> {
+                if (transfer.custodianNodeId != senderId) {
+                    // Хранитель ещё не представился предложением (или это не он).
+                    Log.w(TAG, "Forwarded chunk for $transferIdHex from unexpected ${senderId.takeLast(8)}; dropped")
+                    return
+                }
+                ingestChunkCiphertext(transferIdHex, chunkIndex, ciphertext)
+            }
+            else -> Log.w(TAG, "Custody chunk for own outgoing $transferIdHex; dropped")
+        }
+    }
+
+    /** Кусок чужого файла на хранение: только геометрия и место, содержимое нам недоступно. */
+    private suspend fun ingestCustodyChunk(transferIdHex: String, chunkIndex: Long, ciphertext: ByteArray) {
+        val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        if (transfer.direction != "CUSTODY" || transfer.state == "COMPLETE") return
+        val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return
+        val manifest = crypto.parseManifest(manifestBytes)
+        val chunkCount = manifest.chunkCount.toLong()
+        if (chunkIndex !in 0L until chunkCount) {
+            Log.w(TAG, "Custody chunk index $chunkIndex out of range for $transferIdHex")
+            return
+        }
+        if (transfer.expiresAtMs <= nowMs()) return
+        val expectedPlaintext = plaintextLengthOf(manifest, chunkIndex)
+        if (ciphertext.size != expectedPlaintext + FileTransferChunkStore.AEAD_TAG_BYTES) {
+            Log.w(TAG, "Custody chunk $chunkIndex geometry mismatch for $transferIdHex")
+            return
+        }
+        val stored = try {
+            chunkStore.storeEncryptedChunk(transferIdHex, chunkIndex, ciphertext)
+        } catch (storeError: Exception) {
+            Log.w(TAG, "Custody chunk $chunkIndex rejected by store for $transferIdHex: ${storeError.message}")
+            if (storeError is FileTransferChunkStore.StorageFullException) {
+                // Места нет: честно говорим «полон» и освобождаем начатое -
+                // отправитель уйдёт к следующему хранителю.
+                sendCustodyAck(transfer.originNodeId, transferIdHex, 0L, FileCustodyPdu.ACK_FULL)
+                runCatching { chunkStore.deleteTransfer(transferIdHex) }
+                transferDao.deleteTransfer(transferIdHex)
+                contiguousPrefixes.remove(transferIdHex)
+            }
+            return
+        }
+        val inserted = transferDao.insertChunkIgnore(
+            FileTransferChunkEntity(
+                transferId = transferIdHex,
+                chunkIndex = chunkIndex,
+                state = "HELD",
+                ciphertextBytes = stored.ciphertextBytes,
+                chunkSha256 = stored.sha256,
+                updatedAtMs = nowMs(),
+            )
+        ) != -1L
+        val contiguous = advanceContiguousPrefix(transferIdHex)
+        if (!inserted) {
+            sendCustodyAck(transfer.originNodeId, transferIdHex, contiguous, FileCustodyPdu.ACK_OK)
+            return
+        }
+        val completedChunks = Math.addExact(transfer.completedChunks, 1L)
+        val transferredBytes = Math.addExact(transfer.transferredBytes, expectedPlaintext.toLong())
+        advance(
+            transfer,
+            newState = transfer.state,
+            completedChunks = completedChunks,
+            transferredBytes = transferredBytes,
+        )
+        if (completedChunks == chunkCount) {
+            Log.i(TAG, "Custody complete: $transferIdHex ($chunkCount chunks) held for ${transfer.peerNodeId.takeLast(8)}")
+        }
+        // Подтверждение на каждый кусок, как у прямого приёма: id
+        // детерминирован, а транспорт переключается на прямой канал, когда
+        // он есть (SwitchingPacketTransport), так что очередь ретранслятора
+        // это не нагружает.
+        sendCustodyAck(transfer.originNodeId, transferIdHex, contiguous, FileCustodyPdu.ACK_OK)
+    }
+
+    private suspend fun handleCustodyAck(
+        senderId: String,
+        transferIdHex: String,
+        contiguousChunks: Long,
+        payload: ByteArray,
+    ) {
+        val status = FileCustodyPdu.ackStatus(payload)
+        if (status == null) {
+            Log.w(TAG, "Malformed custody ACK payload for $transferIdHex; dropped")
+            return
+        }
+        val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        if (contiguousChunks !in 0L..transfer.chunkCount) {
+            Log.w(TAG, "Out-of-range custody ACK $contiguousChunks for $transferIdHex; dropped")
+            return
+        }
+        when (transfer.direction) {
+            "OUTGOING" -> custody.onCustodianAck(transferIdHex, senderId, contiguousChunks, status)
+            "CUSTODY" -> if (transfer.peerNodeId == senderId) {
+                custody.onRecipientAck(transferIdHex, senderId, contiguousChunks, status)
+            }
+            else -> Log.w(TAG, "Custody ACK for incoming $transferIdHex from ${senderId.takeLast(8)}; dropped")
+        }
+    }
+
+    private suspend fun sendCustodyAck(to: String, transferIdHex: String, contiguousChunks: Long, status: Byte) {
+        val me = identity.myNodeId() ?: return
+        runCatching {
+            val packet = FileTransferPacketCodec.encode(
+                FileTransferPacketCodec.Packet(
+                    FileTransferPacketCodec.Type.CUSTODY_ACK,
+                    hexToBytes(transferIdHex),
+                    contiguousChunks,
+                    0,
+                    1,
+                    byteArrayOf(status),
+                )
+            )
+            transport.send(
+                FileTransferWire.custodyAckMessageId(transferIdHex, me, contiguousChunks),
+                FileTransferChatRouting.CUSTODY_SCOPE,
+                to,
+                FileTransferWire.encodeEncodedPacket(packet),
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Custody ACK send failed for $transferIdHex: ${error.message}")
         }
     }
 

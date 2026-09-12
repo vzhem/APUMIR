@@ -86,8 +86,12 @@ class FileTransferSender(
             if (result.isFailure) {
                 val error = result.exceptionOrNull()
                 if (error is RecipientOfflineException) {
-                    advance(transfer, newState = "WAITING_RECIPIENT")
-                    Log.i(TAG, "Transfer ${transfer.transferId} waiting for recipient online")
+                    // Файл уже у хранителя: получатель заберёт у него, а мы
+                    // лишь изредка пробуем напрямую - состояние остаётся
+                    // «у хранителя», а не «ждём получателя».
+                    val waitState = if (transfer.custodianNodeId.isNotBlank()) "CUSTODIED" else "WAITING_RECIPIENT"
+                    advance(transfer, newState = waitState)
+                    Log.i(TAG, "Transfer ${transfer.transferId} waiting for recipient online ($waitState)")
                 } else {
                     failures++
                     Log.w(TAG, "File transfer pump failed for ${transfer.transferId}: ${error?.message}")

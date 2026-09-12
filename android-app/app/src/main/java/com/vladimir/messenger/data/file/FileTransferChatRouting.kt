@@ -11,6 +11,14 @@ internal object FileTransferChatRouting {
     const val DIRECT_TRANSPORT_SCOPE = "direct"
 
     /**
+     * Чужой файл на хранении (этап 7 роя) чата на этом телефоне не имеет:
+     * строка помечается этой меткой, пузырь в переписке не рисуется, а
+     * подтверждения хранения уходят с ней вместо id чата (транспорту чат
+     * нужен только как метка).
+     */
+    const val CUSTODY_SCOPE = "custody"
+
+    /**
      * Returns the recipient's local chat when known. A non-direct transport scope is retained only
      * for the legacy path; the direct sentinel is never allowed to become a Room chat ID.
      */

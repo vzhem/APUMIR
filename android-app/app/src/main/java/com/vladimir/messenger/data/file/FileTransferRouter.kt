@@ -32,7 +32,14 @@ class FileTransferRouter @Inject constructor(
     private val appContext: Context
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
+    private val custodySender: FileCustodySender
     private val transport: PacketTransport
+    /**
+     * Кто сейчас в сети - по пульсу присутствия (`peer_discovered`), ведёт
+     * CoreServerService через [markOnline]/[markOffline]. Нужно хранителю:
+     * отдавать чужой файл получателю имеет смысл, только когда он появился.
+     */
+    private val onlinePeers = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private lateinit var lanChannel: LanDirectChannel
     private lateinit var chunkStore: FileTransferChunkStore
     private val receivedStore: ReceivedFileStore
@@ -68,6 +75,41 @@ class FileTransferRouter @Inject constructor(
                 )
             },
         )
+        val directSend: (String, String) -> Boolean = { recipientId, payload ->
+            // F4-F: LAN direct channel first (phone-to-phone TCP over shared
+            // Wi-Fi). Falls back to the QUIC direct path when LAN is not
+            // available. Mesh signalling is used to find the endpoint, and
+            // when the mesh itself is dead a /24 subnet discovery scan runs.
+            // The router singleton is created before the Rust engine is up,
+            // so the LAN identity is re-synced here on every use (during
+            // startup RustBridge.nodeId() is null and the old one-shot
+            // assignment left myNodeId empty — servers then rejected every
+            // handshake with "bad lan sender id").
+            syncLanIdentity()
+            val lanOk = runBlocking {
+                val scope = FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE
+                val quick = lan.hasChannel(recipientId) &&
+                    lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
+                if (quick) {
+                    true
+                } else {
+                    val viaSignal = lan.awaitChannel(recipientId, System.currentTimeMillis()) { requestText ->
+                        transportLocal.send("lan-seek-" + System.nanoTime(), scope, recipientId, requestText)
+                    }
+                    val established = viaSignal || lan.discoverPeer(recipientId)
+                    established && lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
+                }
+            }
+            if (lanOk) {
+                true
+            } else {
+                try {
+                    com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        }
         val senderLocal = FileTransferSender(
             transferDao = transferDao,
             chunkStore = chunkStore,
@@ -90,43 +132,19 @@ class FileTransferRouter @Inject constructor(
                     }
                 }
             },
-            directTransport = { recipientId, payload ->
-                // F4-F: LAN direct channel first (phone-to-phone TCP over shared
-                // Wi-Fi). Falls back to the QUIC direct path when LAN is not
-                // available. Mesh signalling is used to find the endpoint, and
-                // when the mesh itself is dead a /24 subnet discovery scan runs.
-                // The router singleton is created before the Rust engine is up,
-                // so the LAN identity is re-synced here on every use (during
-                // startup RustBridge.nodeId() is null and the old one-shot
-                // assignment left myNodeId empty — servers then rejected every
-                // handshake with "bad lan sender id").
-                syncLanIdentity()
-                val lanOk = runBlocking {
-                    val scope = FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE
-                    val quick = lan.hasChannel(recipientId) &&
-                        lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
-                    if (quick) {
-                        true
-                    } else {
-                        val viaSignal = lan.awaitChannel(recipientId, System.currentTimeMillis()) { requestText ->
-                            transportLocal.send("lan-seek-" + System.nanoTime(), scope, recipientId, requestText)
-                        }
-                        val established = viaSignal || lan.discoverPeer(recipientId)
-                        established && lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
-                    }
-                }
-                if (lanOk) {
-                    true
-                } else {
-                    try {
-                        com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
-                    } catch (_: Exception) {
-                        false
-                    }
-                }
-            },
+            directTransport = directSend,
         )
         sender = senderLocal
+        val custodyLocal = FileCustodySender(
+            transferDao = transferDao,
+            chunkStore = chunkStore,
+            directTransport = directSend,
+            ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
+            myNodeId = { RustBridge.nodeId() },
+            candidates = { recipientId, totalBytes -> custodyCandidates(recipientId, totalBytes) },
+            isOnline = { nodeId -> isPeerOnline(nodeId) },
+        )
+        custodySender = custodyLocal
         receiver = FileTransferReceiver(
             transferDao = transferDao,
             chunkStore = chunkStore,
@@ -152,6 +170,33 @@ class FileTransferRouter @Inject constructor(
                 senderLocal.pumpOnce()
             },
             notifier = notifier,
+            custody = FileTransferReceiver.CustodyPolicy(
+                // Держим чужие файлы только для контактов: чужак не должен
+                // занимать место на телефоне. Получатель контактом быть не
+                // обязан - это забота отправителя.
+                acceptsFrom = { originId -> contactDao.getContactById(originId) != null },
+                headroomBytes = {
+                    com.vladimir.messenger.data.swarm.StorageSettings
+                        .headroom(appContext, chunkStore.currentStoredBytes())
+                },
+                // Пересланный файл - в чат с его отправителем, а не с
+                // хранителем; нет чата - создаём, как для обычного входящего
+                // сообщения от контакта.
+                chatIdFor = { originId ->
+                    runCatching {
+                        chatRepository.getChatByContactId(originId)?.id
+                            ?: contactDao.getContactById(originId)?.let { contact ->
+                                chatRepository.getOrCreateChat(originId, contact.displayName).id
+                            }
+                    }.getOrNull()
+                },
+                onCustodianAck = { transferIdHex, from, contiguous, status ->
+                    custodyLocal.onCustodianAck(transferIdHex, from, contiguous, status)
+                },
+                onRecipientAck = { transferIdHex, from, contiguous, status ->
+                    custodyLocal.onRecipientAck(transferIdHex, from, contiguous, status)
+                },
+            ),
         )
         // LAN server starts only after sender/receiver exist: an early incoming
         // frame must never hit a half-constructed router.
@@ -176,6 +221,14 @@ class FileTransferRouter @Inject constructor(
             return true
         }
         if (!FileTransferWire.isFilePacketText(text)) return false
+
+        // Хранение у третьего телефона: хранитель и отправитель могут не
+        // иметь общего чата (получатель с хранителем - тем более). Чат здесь
+        // не нужен: приёмник сам находит чат с отправителем для пересланного
+        // файла, а чужой файл на хранении чата не имеет вовсе.
+        if (FileTransferWire.peekType(text)?.isCustody == true) {
+            return receiver.onIncomingText(senderId, FileTransferChatRouting.CUSTODY_SCOPE, messageId, text)
+        }
 
         // Chat UUIDs are device-local. In particular, direct QUIC frames carry the explicit
         // "direct" transport scope rather than a remote chat UUID. Resolve it to THIS phone's
@@ -271,8 +324,81 @@ class FileTransferRouter @Inject constructor(
         }
         runCatching { sendHelloHandshakes() }
             .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
-        return sender.pumpOnce()
+        val summary = sender.pumpOnce()
+        pumpCustody()
+        return summary
     }
+
+    /**
+     * Хранение у третьего телефона (этап 7 роя): своим ожидающим передачам
+     * ищем хранителя, чужие хранимые отдаём появившимся получателям, старое
+     * подчищаем. Ошибки здесь не должны ронять обычный насос.
+     */
+    private suspend fun pumpCustody() {
+        runCatching {
+            val now = System.currentTimeMillis()
+            val resumed = transferDao.resumeStaleCustodied(now, now - FileCustodySender.DIRECT_RETRY_AFTER_MS)
+            if (resumed > 0) Log.i(TAG, "custody: $resumed transfer(s) retried directly after custody")
+            val origin = custodySender.pumpOrigin()
+            val forward = custodySender.pumpForwarding()
+            val swept = custodySender.sweep()
+            if (origin.originPumped > 0 || forward.forwarded > 0 || swept > 0) {
+                Log.i(
+                    TAG,
+                    "custody pump: offered=${origin.originPumped} forwarded=${forward.forwarded} " +
+                        "packets=${origin.packets + forward.packets} swept=$swept",
+                )
+            }
+        }.onFailure { Log.w(TAG, "custody pump failed: ${it.message}") }
+    }
+
+    /** Пульс присутствия: узел в сети. Будит выдачу хранимых для него файлов. */
+    suspend fun markOnline(nodeId: String) {
+        val first = onlinePeers.put(nodeId, System.currentTimeMillis()) == null
+        if (first && RustBridge.isRunning()) {
+            val held = runCatching { transferDao.getCustodyForRecipient(nodeId, System.currentTimeMillis()) }
+                .getOrDefault(emptyList())
+            if (held.isNotEmpty()) {
+                Log.i(TAG, "custody: ${held.size} held file(s) for ${nodeId.takeLast(8)} who just came online")
+                runCatching { custodySender.pumpForwarding() }
+                    .onFailure { Log.w(TAG, "custody forward on presence failed: ${it.message}") }
+            }
+        }
+    }
+
+    fun markOffline(nodeId: String) {
+        onlinePeers.remove(nodeId)
+    }
+
+    private fun isPeerOnline(nodeId: String): Boolean {
+        val seen = onlinePeers[nodeId] ?: return false
+        return System.currentTimeMillis() - seen < ONLINE_TTL_MS
+    }
+
+    /**
+     * Кандидаты в хранители: контакты в сети, кроме получателя, лучшие по
+     * рейтингу первыми; узлы, объявившие место (`cap`) меньше файла, - в
+     * хвост, но не выбрасываются (объявление могло устареть, ответит «полон»).
+     */
+    private suspend fun custodyCandidates(recipientId: String, totalBytes: Long): List<String> {
+        val now = System.currentTimeMillis()
+        val online = onlinePeers.entries
+            .filter { now - it.value < ONLINE_TTL_MS && it.key != recipientId && it.key.startsWith("pk_") }
+            .map { it.key }
+        if (online.isEmpty()) return emptyList()
+        val contacts = runCatching { contactDao.allIds().toSet() }.getOrDefault(emptySet())
+        val eligible = online.filter { it in contacts }
+        if (eligible.isEmpty()) return emptyList()
+        val ordered = com.vladimir.messenger.data.peer.PeerRatingStore.preferredOrder(appContext, eligible, now)
+        val (roomy, tight) = ordered.partition { id ->
+            val offered = com.vladimir.messenger.data.peer.PeerRatingStore.statsFor(appContext, id)?.offeredBytes ?: 0L
+            offered <= 0L || offered >= totalBytes
+        }
+        return (roomy + tight).take(MAX_CUSTODY_CANDIDATES)
+    }
+
+    /** Сколько чужих байт держим для других (строка «Занято сейчас…» в настройках). */
+    suspend fun custodyHeldBytes(): Long = runCatching { transferDao.custodyHeldBytes() }.getOrDefault(0L)
 
     /** UI escape hatch when preparation reports the recipient binding is not pinned yet. */
     suspend fun requestExchangeBinding(recipientNodeId: String) {
@@ -444,6 +570,9 @@ class FileTransferRouter @Inject constructor(
     companion object {
         private const val TAG = "FileTransferRouter"
         const val HELLO_MIN_INTERVAL_MS = 60_000L
+        /** Пульс присутствия идёт раз в минуту; три пропуска - узел «не в сети» (как в сервисе). */
+        const val ONLINE_TTL_MS = 200_000L
+        const val MAX_CUSTODY_CANDIDATES = 8
 
         /** Как часто сверять, со всеми ли контактами обменялись ключами. */
         const val HELLO_SWEEP_INTERVAL_MS = 5 * 60_000L

@@ -768,6 +768,13 @@ class CoreServerService : Service() {
                 val lastSeen = knownPeers[peerId] ?: 0L
                 knownPeers[peerId] = now  // свежесть ДО дедупа: пульс = жизнь
                 val lightTouch = now - lastSeen < PEER_DEDUP_MS
+                // Хранение у третьего телефона (этап 7 роя): маршрутизатор
+                // файлов ведёт свой список «кто в сети» - по нему выбирается
+                // хранитель и отдаётся хранимое появившемуся получателю.
+                serviceScope.launch {
+                    runCatching { fileTransferRouter.markOnline(peerId) }
+                        .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
+                }
 
                 // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
                 try {
@@ -873,6 +880,7 @@ class CoreServerService : Service() {
                 Log.i(TAG, "Peer lost: $peerId")
                 onlineMarked.remove(peerId)
                 knownPeers.remove(peerId)
+                fileTransferRouter.markOffline(peerId)
                 try { contactRepository.updateOnlineStatus(peerId, false) } catch (_: Exception) {}
                 try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (_: Exception) {}
             }
@@ -959,6 +967,7 @@ class CoreServerService : Service() {
                 for (pid in staleIds) {
                     onlineMarked.remove(pid)
                     knownPeers.remove(pid)
+                    fileTransferRouter.markOffline(pid)
                     // Пропущенный круг - минус к доступности в рейтинге.
                     runCatching {
                         com.vladimir.messenger.data.peer.PeerRatingStore

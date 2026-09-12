@@ -908,11 +908,19 @@ private fun SettingsTabContent(
                     val free by produceState(initialValue = 0L, key1 = quota) {
                         value = withContext(Dispatchers.IO) { StorageSettings.freeBytes(context) }
                     }
+                    // Чужие файлы на хранении (этап 7 роя) - часть «кусков
+                    // файлов», но человеку важно видеть, сколько из них не его.
+                    val held by produceState(initialValue = 0L, key1 = quota) {
+                        value = withContext(Dispatchers.IO) {
+                            runCatching { viewModel.custodyHeldBytes() }.getOrDefault(0L)
+                        }
+                    }
                     SettingsItem(
                         icon = Icons.Default.Storage,
                         title = "Место под пересылку: ${StoragePolicy.format(StoragePolicy.stepBytes(step))}",
                         subtitle = "Сколько места телефон отдаёт под данные в пути: куски " +
-                            "файлов и то, что ждёт узлов не в сети. Телефон здесь и есть " +
+                            "файлов, чужие файлы на хранении для контактов, которые сейчас " +
+                            "не в сети, и то, что ждёт узлов не в сети. Телефон здесь и есть " +
                             "сервер: чем больше места вы даёте, тем выше ваш рейтинг у " +
                             "других узлов (до +10 из 100, и только пока вы бываете в сети).",
                     )
@@ -953,8 +961,9 @@ private fun SettingsTabContent(
                             "Считаю занятое место…"
                         } else {
                             "Занято сейчас: ${StoragePolicy.format(used.total)} " +
-                                "(куски файлов ${StoragePolicy.format(used.chunkBytes)}, " +
-                                "принятые файлы ${StoragePolicy.format(used.receivedBytes)}, " +
+                                "(куски файлов ${StoragePolicy.format(used.chunkBytes)}" +
+                                (if (held > 0L) ", из них чужих на хранении ${StoragePolicy.format(held)}" else "") +
+                                ", принятые файлы ${StoragePolicy.format(used.receivedBytes)}, " +
                                 "очередь сообщений ${StoragePolicy.format(used.relayBytes)}). " +
                                 "Свободно на телефоне: ${StoragePolicy.format(free)}; последние " +
                                 "${StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES)} не занимаются никогда."

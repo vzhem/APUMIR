@@ -27,6 +27,21 @@ object FileTransferWire {
         return wire
     }
 
+    /**
+     * Тип пакета без полного разбора: второй байт после версии. Нужен
+     * маршрутизатору, чтобы пакеты хранения (этап 7 роя) не требовали чата с
+     * отправителем - хранитель и получатель могут быть незнакомы. null, если
+     * это не файловый пакет или он битый.
+     */
+    fun peekType(text: String): FileTransferPacketCodec.Type? {
+        if (!isFilePacketText(text) || text.length < PREFIX.length + 4) return null
+        return runCatching {
+            // Первые 4 символа base64 = первые 3 байта: версия, тип, начало id.
+            val head = Base64.getDecoder().decode(text.substring(PREFIX.length, PREFIX.length + 4))
+            if (head.size < 2) null else FileTransferPacketCodec.Type.fromWire(head[1])
+        }.getOrNull()
+    }
+
     fun decodeToEncodedPacket(text: String): ByteArray {
         require(isFilePacketText(text)) { "Not a file packet message" }
         val encoded = Base64.getDecoder().decode(text.removePrefix(PREFIX))
@@ -58,6 +73,25 @@ object FileTransferWire {
     fun chatPlaceholderMessageId(transferIdHex: String): String {
         requireValidTransferId(transferIdHex)
         return "file-$transferIdHex".also(::requireValidMessageId)
+    }
+
+    // ── Хранение у третьего телефона (этап 7 роя) ──────────────────────────
+    // Предложение и куски идут только по прямому каналу (id сообщения там не
+    // нужен); через надёжный транспорт ходят лишь подтверждения. Метка
+    // отправителя подтверждения в id нужна, потому что по одной передаче
+    // подтверждают двое: хранитель - отправителю, получатель - хранителю.
+
+    fun custodyAckMessageId(transferIdHex: String, senderTag: String, contiguousChunks: Long): String {
+        requireValidTransferId(transferIdHex)
+        require(contiguousChunks >= 0)
+        return "f${transferIdHex}k${cleanTag(senderTag)}a$contiguousChunks".also(::requireValidMessageId)
+    }
+
+    /** Короткая метка узла для id сообщения: хвост адреса без служебных знаков. */
+    private fun cleanTag(nodeId: String): String {
+        val tag = nodeId.takeLast(8).filter { it in '0'..'9' || it in 'a'..'f' }
+        require(tag.isNotEmpty()) { "Empty custody holder tag" }
+        return tag
     }
 
     // ── File-HELLO: signed exchange-binding handshake (breaks the first-file deadlock) ──

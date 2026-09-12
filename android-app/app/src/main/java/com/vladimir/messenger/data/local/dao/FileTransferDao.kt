@@ -114,6 +114,74 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE state = 'CANCELLED'")
     suspend fun getCancelled(): List<FileTransferEntity>
 
+    // ── Хранение у третьего телефона (этап 7 роя) ──────────────────────────
+    // Чужой файл на хранении - строка direction = 'CUSTODY': peerNodeId =
+    // получатель, originNodeId = отправитель (схема 19 → 20).
+    // Состояния: HOLDING (собираем куски от отправителя) → FORWARDING (получатель
+    // в сети, отдаём) → COMPLETE (получатель подтвердил всё, куски удалены).
+
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE direction = 'CUSTODY' AND state IN ('HOLDING', 'FORWARDING')
+          AND expiresAtMs > :nowMs
+        ORDER BY createdAtMs ASC
+        """
+    )
+    suspend fun getActiveCustody(nowMs: Long): List<FileTransferEntity>
+
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE direction = 'CUSTODY' AND peerNodeId = :recipientId
+          AND state IN ('HOLDING', 'FORWARDING') AND expiresAtMs > :nowMs
+        ORDER BY createdAtMs ASC
+        """
+    )
+    suspend fun getCustodyForRecipient(recipientId: String, nowMs: Long): List<FileTransferEntity>
+
+    @Query("SELECT * FROM file_transfers WHERE direction = 'CUSTODY' AND (expiresAtMs <= :nowMs OR state = 'COMPLETE')")
+    suspend fun getFinishedCustody(nowMs: Long): List<FileTransferEntity>
+
+    @Query("SELECT COUNT(*) FROM file_transfers WHERE direction = 'CUSTODY' AND state IN ('HOLDING', 'FORWARDING')")
+    suspend fun countActiveCustody(): Int
+
+    /** Сколько чужих исходящих (одного отправителя) уже держим: защита от затопления одним узлом. */
+    @Query(
+        """
+        SELECT COUNT(*) FROM file_transfers
+        WHERE direction = 'CUSTODY' AND originNodeId = :originId AND state IN ('HOLDING', 'FORWARDING')
+        """
+    )
+    suspend fun countActiveCustodyFrom(originId: String): Int
+
+    /**
+     * Файл давно у хранителя, а получатель так и не подтвердил: вернуть в
+     * обычную очередь, чтобы отправитель попробовал и напрямую (см.
+     * FileCustodySender.DIRECT_RETRY_AFTER_MS).
+     */
+    @Query(
+        """
+        UPDATE file_transfers
+        SET state = 'TRANSFERRING', updatedAtMs = :nowMs
+        WHERE direction = 'OUTGOING' AND state = 'CUSTODIED' AND updatedAtMs < :olderThanMs
+        """
+    )
+    suspend fun resumeStaleCustodied(nowMs: Long, olderThanMs: Long): Int
+
+    /** Сколько чужих байт (шифротекста) держим для других: строка в настройках. */
+    @Query(
+        """
+        SELECT COALESCE(SUM(ciphertextBytes), 0) FROM file_transfer_chunks
+        WHERE transferId IN (SELECT transferId FROM file_transfers WHERE direction = 'CUSTODY')
+        """
+    )
+    suspend fun custodyHeldBytes(): Long
+
+    /** Кому отдали на хранение (исходящая) / от кого пересланное (входящая); пусто - напрямую. */
+    @Query("UPDATE file_transfers SET custodianNodeId = :custodianNodeId, updatedAtMs = :updatedAtMs WHERE transferId = :transferId")
+    suspend fun setCustodian(transferId: String, custodianNodeId: String, updatedAtMs: Long): Int
+
     @Query("SELECT * FROM file_transfers WHERE state = 'COMPLETE'")
     suspend fun getCompleted(): List<FileTransferEntity>
 

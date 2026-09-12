@@ -121,6 +121,47 @@ class FakeFileTransferDao : FileTransferDao {
     override suspend fun getCancelled(): List<FileTransferEntity> =
         transfers.values.filter { it.state == "CANCELLED" }
 
+    private val custodyStates = setOf("HOLDING", "FORWARDING")
+
+    override suspend fun getActiveCustody(nowMs: Long): List<FileTransferEntity> =
+        transfers.values
+            .filter { it.direction == "CUSTODY" && it.state in custodyStates && it.expiresAtMs > nowMs }
+            .sortedBy { it.createdAtMs }
+
+    override suspend fun getCustodyForRecipient(recipientId: String, nowMs: Long): List<FileTransferEntity> =
+        getActiveCustody(nowMs).filter { it.peerNodeId == recipientId }
+
+    override suspend fun getFinishedCustody(nowMs: Long): List<FileTransferEntity> =
+        transfers.values.filter { it.direction == "CUSTODY" && (it.expiresAtMs <= nowMs || it.state == "COMPLETE") }
+
+    override suspend fun countActiveCustody(): Int =
+        transfers.values.count { it.direction == "CUSTODY" && it.state in custodyStates }
+
+    override suspend fun countActiveCustodyFrom(originId: String): Int =
+        transfers.values.count { it.direction == "CUSTODY" && it.state in custodyStates && it.originNodeId == originId }
+
+    override suspend fun resumeStaleCustodied(nowMs: Long, olderThanMs: Long): Int {
+        var n = 0
+        transfers.replaceAll { _, e ->
+            if (e.direction == "OUTGOING" && e.state == "CUSTODIED" && e.updatedAtMs < olderThanMs) {
+                n++; e.copy(state = "TRANSFERRING", updatedAtMs = nowMs)
+            } else e
+        }
+        return n
+    }
+
+    override suspend fun custodyHeldBytes(): Long {
+        val custody = transfers.values.filter { it.direction == "CUSTODY" }.map { it.transferId }.toSet()
+        return chunks.filterKeys { it.first in custody }.values.sumOf { it.ciphertextBytes }
+    }
+
+    override suspend fun setCustodian(transferId: String, custodianNodeId: String, updatedAtMs: Long): Int {
+        val current = transfers[transferId] ?: return 0
+        transfers[transferId] = current.copy(custodianNodeId = custodianNodeId, updatedAtMs = updatedAtMs)
+        observe.value += 1
+        return 1
+    }
+
     override suspend fun getCompleted(): List<FileTransferEntity> =
         transfers.values.filter { it.state == "COMPLETE" }
 

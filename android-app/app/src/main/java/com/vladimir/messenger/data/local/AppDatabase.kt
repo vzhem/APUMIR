@@ -68,7 +68,7 @@ import com.vladimir.messenger.data.local.dao.PostSignerDao
         PostManifestEntity::class,
         PostSignerEntity::class,
     ],
-    version = 19,
+    version = 20,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -426,6 +426,18 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /** Манифесты постов канала (рой, этап 1): подписанный список текста и кусков фото. */
+        /** Хранение чужих файлов для получателей не в сети (этап 7 роя): чей файл. */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `file_transfers` ADD COLUMN `originNodeId` TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE `file_transfers` ADD COLUMN `custodianNodeId` TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
         val MIGRATION_18_19 = object : Migration(18, 19) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

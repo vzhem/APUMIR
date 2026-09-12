@@ -90,6 +90,34 @@ class FileTransferChunkStore(
         return readExactBounded(target, MIN_KEY_ENVELOPE_BYTES, MAX_KEY_ENVELOPE_BYTES)
     }
 
+    /**
+     * Подписанная привязка отправителя чужого файла, взятого на хранение
+     * (этап 7 роя). Хранитель пересылает её получателю вместе с манифестом и
+     * конвертом, чтобы тот проверил файл так же, как при прямой передаче.
+     * Секрета в ней нет (открытая часть подписанной привязки).
+     */
+    @Synchronized
+    fun storeOriginBinding(transferId: String, binding: ByteArray): Boolean {
+        validateTransferId(transferId)
+        require(binding.size in 1..MAX_ORIGIN_BINDING_BYTES) { "Invalid origin binding size" }
+        val target = checkedChild(transferDirectory(transferId, create = true), ORIGIN_BINDING_FILE)
+        if (target.exists()) {
+            val existing = readExactBounded(target, 1, MAX_ORIGIN_BINDING_BYTES)
+            check(MessageDigest.isEqual(existing, binding)) { "Transfer already contains a different origin binding" }
+            return false
+        }
+        atomicWrite(target, binding)
+        return true
+    }
+
+    @Synchronized
+    fun readOriginBinding(transferId: String): ByteArray? {
+        validateTransferId(transferId)
+        val target = checkedChild(transferDirectory(transferId, create = false), ORIGIN_BINDING_FILE)
+        if (!target.exists()) return null
+        return readExactBounded(target, 1, MAX_ORIGIN_BINDING_BYTES)
+    }
+
     @Synchronized
     fun storeEncryptedChunk(
         transferId: String,
@@ -292,6 +320,8 @@ class FileTransferChunkStore(
         private const val LEGACY_MAX_CHUNK_INDEX = 99_999_999L
         private const val MANIFEST_FILE = "manifest.v1"
         private const val KEY_ENVELOPE_FILE = "key-envelope.v1"
+        private const val ORIGIN_BINDING_FILE = "origin-binding.v1"
+        const val MAX_ORIGIN_BINDING_BYTES = 512
         private val TRANSFER_ID = Regex("^[0-9a-f]{32}$")
         private val CHUNK_FILE = Regex("^(?:[0-9]{8}|[0-9]{20})\\.chunk$")
 

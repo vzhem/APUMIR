@@ -24,7 +24,31 @@ object FileTransferPacketCodec {
         OFFER(1),
         CHUNK(2),
         ACK(3),
-        CANCEL(4);
+        CANCEL(4),
+
+        /**
+         * Хранение у третьего телефона (этап 7 роя). Один и тот же пакет
+         * служит обоим плечам: отправитель → хранитель и хранитель →
+         * получатель; кому он адресован, решает поле recipientId внутри
+         * ([FileCustodyPdu]): «это мне» - принять как пересланное
+         * предложение, «не мне» - взять на хранение. Телефоны до v11.70.13
+         * такие типы не знают и молча отбрасывают - поэтому хранитель
+         * подтверждает приём явно ([CUSTODY_ACK]), а без подтверждения
+         * отправитель идёт к следующему кандидату.
+         */
+        CUSTODY_OFFER(5),
+        /** Зашифрованный кусок на хранение / от хранителя; itemIndex = номер куска. */
+        CUSTODY_CHUNK(6),
+        /**
+         * Подтверждение по цепочке: хранитель → отправитель («держу N кусков
+         * подряд») и получатель → хранитель («получил N подряд»). itemIndex =
+         * N, payload = один байт статуса ([FileCustodyPdu.ACK_OK],
+         * [FileCustodyPdu.ACK_REFUSED], [FileCustodyPdu.ACK_FULL]).
+         */
+        CUSTODY_ACK(7);
+
+        val isCustody: Boolean
+            get() = this == CUSTODY_OFFER || this == CUSTODY_CHUNK || this == CUSTODY_ACK
 
         companion object {
             fun fromWire(value: Byte): Type = entries.firstOrNull { it.wire == value }

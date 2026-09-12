@@ -87,6 +87,9 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Сколько чужих байт держим для получателей не в сети (этап 7 роя). */
+    suspend fun custodyHeldBytes(): Long = fileTransferRouter.custodyHeldBytes()
+
     /** Освободить место: удалить локальные файлы завершённых передач. */
     fun onPurgeCompletedTransfers() {
         viewModelScope.launch {

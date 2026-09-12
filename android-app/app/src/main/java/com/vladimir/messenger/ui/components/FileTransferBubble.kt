@@ -307,6 +307,8 @@ private fun stateLabel(transfer: FileTransferEntity): String {
         "OFFERED" -> "Входящий файл…"
         "TRANSFERRING" -> if (transfer.direction == "OUTGOING") {
             "Передача…$ofChunks"
+        } else if (transfer.custodianNodeId.isNotBlank()) {
+            "Приём от хранителя…$ofChunks"
         } else {
             "Приём…$ofChunks"
         }
@@ -315,7 +317,14 @@ private fun stateLabel(transfer: FileTransferEntity): String {
         "COMPLETE" -> if (transfer.direction == "OUTGOING") "Доставлено ✓" else "Сохранено ✓"
         "FAILED" -> "Ошибка (${transfer.errorCode ?: "неизвестно"})"
         "EXPIRED" -> "Срок истёк"
-        "WAITING_RECIPIENT" -> "Ждём получателя онлайн"
+        "WAITING_RECIPIENT" -> if (transfer.custodianNodeId.isNotBlank()) {
+            "У хранителя, ждём получателя онлайн"
+        } else {
+            "Ждём получателя онлайн"
+        }
+        // Файл лежит у третьего телефона (этап 7 роя): получатель заберёт
+        // его, даже если отправитель выйдет из сети.
+        "CUSTODIED" -> "Передано на хранение, получатель заберёт при появлении"
         else -> transfer.state
     }
 }
