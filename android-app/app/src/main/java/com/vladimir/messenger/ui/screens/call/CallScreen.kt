@@ -159,7 +159,11 @@ fun CallScreen(
                 }
                 if (state.phase == CallStateMachine.Phase.ACTIVE && state.slowTransport) {
                     Text(
-                        "Медленный канал — собеседник не в одной Wi-Fi сети",
+                        if (state.viaBroker) {
+                            "Через интернет — сжатый звук, возможна задержка"
+                        } else {
+                            "Медленный канал — собеседник не в одной Wi-Fi сети"
+                        },
                         color = Color(0xFF5A6472),
                         style = MaterialTheme.typography.bodySmall,
                     )

@@ -25,9 +25,16 @@ import android.util.Log
  * CallMediaCrypto (AES-GCM, ключ на направление), наружу уходит шифртекст,
  * снаружи приходит шифртекст — движок не знает, по какому транспорту едет звук.
  *
- * Воспроизведение с маленьким джиттер-буфером: кадры по номеру seq, опоздавшие
- * (пришли после их очереди) роняются, при недоборе играется тишина — голос
- * плывёт, но не трещит. Тайминг вывода задаёт блокирующий AudioTrack.write.
+ * Воспроизведение с джиттер-буфером: кадры по номеру seq, опоздавшие (пришли
+ * после их очереди) роняются, при недоборе играется тишина — голос плывёт, но
+ * не трещит. Глубина буфера зависит от пути: LAN — 2 кадра разгона и 8 предела,
+ * интернет (мост через брокер) — 10 и 30: там кадры едут пачками и с рывками,
+ * и без разгона каждая пачка оказывалась бы «опоздавшей». Тайминг вывода
+ * задаёт блокирующий AudioTrack.write.
+ *
+ * Кодек кадра: PCM (LAN) или IMA ADPCM (AdpcmCodec, узкие пути) — кодирование
+ * идёт ДО шифрования, декодирование после расшифровки; шифр и AAD не зависят
+ * от кодека, поэтому провод и ключи общие.
  */
 @SuppressLint("MissingPermission") // RECORD_AUDIO проверяет CallManager до start()
 class CallAudioEngine(context: Context) {
@@ -35,8 +42,14 @@ class CallAudioEngine(context: Context) {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-    /** Зашифрованный кадр нашего микрофона, уходит в транспорт (LAN-сокет или текст). */
-    @Volatile var onOutgoingCipher: ((seq: Long, ptsMs: Long, cipher: ByteArray) -> Unit)? = null
+    /** Зашифрованный кадр нашего микрофона (codec = чем закодирован до шифрования), уходит в транспорт. */
+    @Volatile var onOutgoingCipher: ((seq: Long, ptsMs: Long, codec: Int, cipher: ByteArray) -> Unit)? = null
+
+    /** Кодек исходящих кадров; менеджер переключает по пути (LAN = PCM, мост = ADPCM). */
+    @Volatile var outgoingCodec: Int = CallWire.CODEC_PCM_16K
+
+    private val adpcmEncoder = AdpcmCodec()
+    private val adpcmDecoder = AdpcmCodec()
 
     @Volatile private var running = false
     @Volatile var muted: Boolean = false
@@ -57,10 +70,14 @@ class CallAudioEngine(context: Context) {
     private var recvCrypto: CallMediaCrypto? = null
     private var seqOut = 0L
 
-    // Намербуфер воспроизведения: seq → PCM.
+    // Джиттер-буфер воспроизведения: seq → PCM.
     private val playLock = Any()
     private val pending = HashMap<Long, ByteArray>()
     private var expectedSeq = -1L
+    /** Разгон: играть начинаем, когда накопилось prefillFrames; после недобора — снова копим. */
+    private var buffering = true
+    @Volatile private var prefillFrames = LAN_PREFILL_FRAMES
+    @Volatile private var maxPendingFrames = LAN_MAX_PENDING_FRAMES
 
     @Volatile private var framesIn = 0L
     @Volatile private var framesOut = 0L
@@ -70,11 +87,15 @@ class CallAudioEngine(context: Context) {
         running = true
         sendCrypto = CallMediaCrypto(sendKey)
         recvCrypto = CallMediaCrypto(recvKey)
-        pending.clear()
-        expectedSeq = -1L
+        synchronized(playLock) {
+            pending.clear()
+            expectedSeq = -1L
+            buffering = true
+        }
         seqOut = 0L
         framesIn = 0L
         framesOut = 0L
+        adpcmEncoder.reset()
 
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         takeAudioFocus()
@@ -132,17 +153,25 @@ class CallAudioEngine(context: Context) {
 
     // ── Приём ───────────────────────────────────────────────────────────────
 
-    /** Шифртекст кадра собеседника: расшифровать и встать в очередь воспроизведения. */
-    fun incomingCipher(seq: Long, cipher: ByteArray) {
+    /** Шифртекст PCM-кадра собеседника (LAN-сокет). */
+    fun incomingCipher(seq: Long, cipher: ByteArray) =
+        incomingFrame(seq, CallWire.CODEC_PCM_16K, cipher)
+
+    /** Шифртекст кадра любого кодека: расшифровать, раскодировать, встать в очередь воспроизведения. */
+    fun incomingFrame(seq: Long, codec: Int, cipher: ByteArray) {
         val crypto = recvCrypto ?: return
-        val pcm = crypto.decrypt(seq, cipher) ?: return
+        val plain = crypto.decrypt(seq, cipher) ?: return
+        val pcm = when (codec) {
+            CallWire.CODEC_PCM_16K -> plain
+            CallWire.CODEC_ADPCM_16K -> adpcmDecoder.decodeFrame(plain) ?: return
+            else -> return
+        }
         if (pcm.size != FRAME_BYTES) return
         synchronized(playLock) {
             if (expectedSeq >= 0 && seq < expectedSeq) return // опоздал — выкидываем
-            if (expectedSeq < 0) expectedSeq = seq
             pending[seq] = pcm
-            // Ограничение очереди: больше 8 кадров (160 мс) — старейшие впереди текущего мусор.
-            while (pending.size > MAX_PENDING_FRAMES) {
+            // Ограничение очереди: старейшие впереди текущего — мусор, догоняем живой край.
+            while (pending.size > maxPendingFrames) {
                 val dropSeq = pending.keys.minOrNull() ?: break
                 pending.remove(dropSeq)
                 expectedSeq = maxOf(expectedSeq, dropSeq + 1)
@@ -150,9 +179,25 @@ class CallAudioEngine(context: Context) {
         }
     }
 
+    /** Глубина джиттер-буфера под путь: LAN — короткая, интернет — с разгоном. */
+    fun configureJitter(viaLan: Boolean) {
+        prefillFrames = if (viaLan) LAN_PREFILL_FRAMES else NET_PREFILL_FRAMES
+        maxPendingFrames = if (viaLan) LAN_MAX_PENDING_FRAMES else NET_MAX_PENDING_FRAMES
+    }
+
     private fun nextPlayFrame(): ByteArray? {
         synchronized(playLock) {
-            if (expectedSeq < 0) return null
+            if (pending.isEmpty()) {
+                buffering = true
+                return null
+            }
+            if (buffering) {
+                if (pending.size < prefillFrames) return null
+                buffering = false
+                // Стартуем с самого старого из накопленного (оно не младше прежнего
+                // края: опоздавшие отсеяны выше) — разрыв после паузы не растягиваем тишиной.
+                expectedSeq = pending.keys.minOrNull() ?: return null
+            }
             val want = expectedSeq
             val frame = pending.remove(want)
             expectedSeq = want + 1
@@ -173,14 +218,16 @@ class CallAudioEngine(context: Context) {
                 val ptsMs = seq * FRAME_MS
                 val crypto = sendCrypto ?: break
                 val plain = if (muted) ByteArray(FRAME_BYTES) else buf.copyOf()
+                val codec = outgoingCodec
                 val cipher = try {
-                    crypto.encrypt(seq, plain)
+                    val payload = if (codec == CallWire.CODEC_ADPCM_16K) adpcmEncoder.encodeFrame(plain) else plain
+                    crypto.encrypt(seq, payload)
                 } catch (e: Exception) {
                     Log.w(TAG, "encrypt failed: ${e.message}")
                     break
                 }
                 framesOut++
-                onOutgoingCipher?.invoke(seq, ptsMs, cipher)
+                onOutgoingCipher?.invoke(seq, ptsMs, codec, cipher)
             }
         }.apply {
             name = "call-capture"
@@ -299,7 +346,10 @@ class CallAudioEngine(context: Context) {
         focusRequest = null
         runCatching { audioManager.isSpeakerphoneOn = false }
         runCatching { audioManager.mode = AudioManager.MODE_NORMAL }
-        synchronized(playLock) { pending.clear() }
+        synchronized(playLock) {
+            pending.clear()
+            buffering = true
+        }
         sendCrypto = null
         recvCrypto = null
         Log.i(TAG, "audio engine stopped (in=$framesIn out=$framesOut)")
@@ -311,6 +361,10 @@ class CallAudioEngine(context: Context) {
         const val FRAME_MS = 20
         const val FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS / 1000 // 320
         const val FRAME_BYTES = FRAME_SAMPLES * 2               // 640 (s16le mono)
-        private const val MAX_PENDING_FRAMES = 8
+        /** Джиттер-буфер (кадры по 20 мс): разгон и предел для LAN и для интернета. */
+        const val LAN_PREFILL_FRAMES = 2
+        const val LAN_MAX_PENDING_FRAMES = 8
+        const val NET_PREFILL_FRAMES = 10
+        const val NET_MAX_PENDING_FRAMES = 30
     }
 }

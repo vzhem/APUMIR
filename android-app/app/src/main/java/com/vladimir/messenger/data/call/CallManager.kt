@@ -35,11 +35,13 @@ import kotlinx.coroutines.launch
 /**
  * Оркестратор звонков (CALLS_BOOTSTRAP.md, раздел 8): маршрутизатор APUCALL1-пакетов
  * из общего потока CoreServerService, держатель машины состояний, уведомление о
- * входящем, рингтон, и связка медиа (LAN-сокет → текстовый фолбэк QUIC/relay).
+ * входящем, рингтон, и связка медиа: LAN-сокет (одна Wi-Fi) → мост через брокер
+ * (CallBrokerLink: любая сеть, ADPCM) → текстовый фолбэк QUIC/relay (старые сборки).
  *
  * Один звонок на телефон: второй входящий получает reject|busy. Сигналы идут по
- * двум путям сразу (durable relay + прямой QUIC-ускоритель) — дедупликация по
- * callId, повторы безвредны. Живой звонок, офлайн-устойчивость не нужна.
+ * трём путям сразу (durable relay + прямой QUIC-ускоритель + мост, когда он
+ * открыт) — дедупликация по callId, повторы безвредны. Живой звонок,
+ * офлайн-устойчивость не нужна.
  */
 @Singleton
 class CallManager @Inject constructor(
@@ -59,8 +61,10 @@ class CallManager @Inject constructor(
         val speaker: Boolean = false,
         /** 5+ секунд без кадров: «восстановление соединения…». */
         val recovering: Boolean = false,
-        /** Голос едет текстовым фолбэком (не LAN-сокет): «медленный канал». */
+        /** Голос едет не LAN-сокетом (мост через брокер или текстовый фолбэк). */
         val slowTransport: Boolean = false,
+        /** Голос едет мостом через брокер (постоянное соединение, ADPCM): «через интернет». */
+        val viaBroker: Boolean = false,
         /** Причина конца по-русски («Завершён», «Занято», …) — показываем и сворачиваемся. */
         val endText: String = "",
     )
@@ -82,6 +86,19 @@ class CallManager @Inject constructor(
     private var remoteHost: String? = null   // endpoint сокета звонка собеседника
     private var remotePort: Int = 0
     private var audioEngine: CallAudioEngine? = null
+
+    /** Мост через брокер: поднимается на offer/accept, живёт до конца звонка. */
+    @Volatile private var brokerLink: CallBrokerLink? = null
+    private var linkCrypto: CallMediaCrypto? = null
+    private var linkCallerKey: ByteArray? = null
+    private var linkControlSeq = 0L
+    private var linkReopens = 0
+    private var lastLinkReopenAtMs = 0L
+    private var lastGreetAtMs = 0L
+    /** Собеседник ответил по мосту (пришёл его cap) — значит, мост у него тоже открыт. */
+    @Volatile private var peerLinkAlive = false
+    /** Кодеки собеседника из cap (по любому пути); пусто = старая сборка, только PCM. */
+    @Volatile private var peerCodecs: Set<Int> = emptySet()
     private var ringtone: Ringtone? = null
     private var tickJob: Job? = null
     private var endedResetJob: Job? = null
@@ -90,10 +107,13 @@ class CallManager @Inject constructor(
     /** Недавно завершённые звонки: поздний offer-дубль не должен воскрешать их на экране. */
     private val recentlyEnded = LinkedHashMap<String, Long>()
 
+    /** cap, пришедший раньше своего offer (пути не упорядочены): подождёт машину. */
+    private val earlyCaps = LinkedHashMap<String, Set<Int>>()
+
     /** Очередь исходящих голосовых кадров: поток микрофона не ждёт сеть. */
     private val frameOutQueue = java.util.concurrent.ArrayBlockingQueue<OutgoingFrame>(128)
     @Volatile private var framesPumpStarted = false
-    private data class OutgoingFrame(val seq: Long, val ptsMs: Long, val cipher: ByteArray)
+    private data class OutgoingFrame(val seq: Long, val ptsMs: Long, val codec: Int, val cipher: ByteArray)
 
     // ═════════════════════════════════════════════════════════════════════
     // Маршрутизатор входящих пакетов (вызывает CoreServerService до сохранения в чат)
@@ -114,9 +134,20 @@ class CallManager @Inject constructor(
             is CallWire.Packet.Accept -> onAcceptPacket(senderId, packet) // сам сверяет callId
             is CallWire.Packet.Reject -> if (matchesCall(packet.callId)) feedMachine { it.onReject(packet.reason, nowMs()) }
             is CallWire.Packet.Bye -> if (matchesCall(packet.callId)) feedMachine { it.onBye(packet.reason, nowMs()) }
-            is CallWire.Packet.Audio -> onAudioPacket(senderId, packet)
+            is CallWire.Packet.Audio -> onAudioPacket(senderId, packet, CallWire.CODEC_PCM_16K)
             is CallWire.Packet.AudioBatch ->
-                packet.frames.forEach { onAudioPacket(senderId, it) }
+                packet.frames.forEach { onAudioPacket(senderId, it, packet.codec) }
+            is CallWire.Packet.Capabilities -> synchronized(this) {
+                if (matchesCall(packet.callId)) {
+                    applyPeerCodecs(packet.codecs)
+                } else if (!recentlyEnded.containsKey(packet.callId)) {
+                    earlyCaps[packet.callId] = packet.codecs
+                    while (earlyCaps.size > 8) {
+                        val eldest = earlyCaps.keys.iterator()
+                        if (eldest.hasNext()) { eldest.next(); eldest.remove() } else break
+                    }
+                }
+            }
         }
         return true
     }
@@ -154,8 +185,10 @@ class CallManager @Inject constructor(
                 current.phase != CallStateMachine.Phase.IDLE &&
                 current.phase != CallStateMachine.Phase.ENDED
             if (ringResend) {
+                val ring = CallWire.buildRing(offer.callId)
+                sendLinkControl(ring)
                 scope.launch {
-                    sendSignal(senderId, CallWire.ringMessageId(offer.callId), CallWire.buildRing(offer.callId))
+                    sendSignal(senderId, CallWire.ringMessageId(offer.callId), ring)
                 }
                 Log.i(TAG, "duplicate offer for ringing call ${offer.callId.take(8)}: ring re-sent")
                 return
@@ -168,14 +201,20 @@ class CallManager @Inject constructor(
             syncChannelIdentity()
             ensureCallServer()
             sendKey = randomKey()
-            recvKey = CallWire.decodeBytes(offer.mediaKeyB64)
+            val callerKey = CallWire.decodeBytes(offer.mediaKeyB64)
+            recvKey = callerKey
             remoteHost = offer.lanHost
             remotePort = offer.lanPort
             audioChannel.activeCallId = offer.callId
-            audioChannel.onFrame = { seq, _, cipher -> onIncomingMedia(offer.callId, seq, cipher) }
-            audioChannel.onClosed = { }
+            audioChannel.onFrame = { seq, _, codec, cipher -> onIncomingMedia(offer.callId, seq, codec, cipher) }
+            audioChannel.onClosed = { onLanClosed(offer.callId) }
             val sm = CallStateMachine(offer.callId, senderId, outgoing = false, startedAtMs = now)
             machine = sm
+            peerCodecs = earlyCaps.remove(offer.callId) ?: emptySet()
+            resetLinkCounters(outgoing = false)
+            // Мост поднимаем сразу на offer: пока телефон звонит, соединение с
+            // брокером уже стоит, и accept с голосом пойдут без задержки.
+            if (callerKey != null && callerKey.size == 16) openBrokerLink(sm, callerKey)
             _uiState.value = CallUiState(
                 phase = sm.phase,
                 peerId = senderId,
@@ -205,28 +244,156 @@ class CallManager @Inject constructor(
             remoteHost = accept.lanHost
             remotePort = accept.lanPort
             audioChannel.activeCallId = accept.callId
-            audioChannel.onFrame = { seq, _, cipher -> onIncomingMedia(accept.callId, seq, cipher) }
+            audioChannel.onFrame = { seq, _, codec, cipher -> onIncomingMedia(accept.callId, seq, codec, cipher) }
+            audioChannel.onClosed = { onLanClosed(accept.callId) }
             current
         }
-        val effects = sm.onAccept(nowMs())
+        val effects = synchronized(this) { sm.onAccept(nowMs()) }
         executeEffects(sm, effects)
         syncUi(sm)
     }
 
-    private fun onAudioPacket(senderId: String, audio: CallWire.Packet.Audio) {
+    private fun onAudioPacket(senderId: String, audio: CallWire.Packet.Audio, codec: Int) {
         val sm = machine ?: return
         if (sm.callId != audio.callId) return
-        // Текстовый фолбэк активен только без живого LAN-сокета.
+        // Текстовый фолбэк активен только без живого LAN-сокета (собеседник шлёт
+        // одним путём за раз; повтор seq движок отбросит сам).
         if (!audioChannel.isOpen()) {
-            audioEngine?.incomingCipher(audio.seq, audio.payload)
+            audioEngine?.incomingFrame(audio.seq, codec, audio.payload)
         }
         feedMachine { it.mediaFrame(nowMs()) }
     }
 
-    private fun onIncomingMedia(callId: String, seq: Long, cipher: ByteArray) {
+    private fun onIncomingMedia(callId: String, seq: Long, codec: Int, cipher: ByteArray) {
         if (machine?.callId != callId) return
-        audioEngine?.incomingCipher(seq, cipher)
+        audioEngine?.incomingFrame(seq, codec, cipher)
         feedMachine { it.mediaFrame(nowMs()) }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Мост через брокер (CallBrokerLink): сигналы + голос вне Wi-Fi
+    // ═════════════════════════════════════════════════════════════════════
+
+    /** Кодеки собеседника узнали (любым путём): если голос уже идёт не по LAN — переключаем кодек. */
+    private fun applyPeerCodecs(codecs: Set<Int>) {
+        peerCodecs = codecs
+        val engine = audioEngine ?: return
+        if (!audioViaLan) engine.outgoingCodec = preferredCodec()
+    }
+
+    /** Поднять мост для звонка (идемпотентно). Ключ моста — производная от медиа-ключа звонящего. */
+    private fun openBrokerLink(sm: CallStateMachine, callerMediaKey: ByteArray) {
+        if (brokerLink != null) return
+        val myId = audioChannel.myNodeId.takeIf { it.startsWith("pk_") } ?: RustBridge.nodeId() ?: return
+        linkCallerKey = callerMediaKey
+        linkCrypto = CallMediaCrypto(CallLinkWire.deriveLinkKey(callerMediaKey))
+        // Счётчик nonce задаётся один раз на звонок (resetLinkCounters) и при
+        // переоткрытии моста НЕ сбрасывается: ключ тот же на весь звонок.
+        peerLinkAlive = false
+        lastGreetAtMs = 0L
+        val link = CallBrokerLink(
+            callId = sm.callId,
+            myNodeId = myId,
+            peerNodeId = sm.peerId,
+            onPacket = { bytes -> onLinkPacket(sm.callId, bytes) },
+            onState = { state -> onLinkState(sm.callId, state) },
+        )
+        brokerLink = link
+        link.start()
+    }
+
+    private fun onLinkState(callId: String, state: CallBrokerLink.LinkState) {
+        if (machine?.callId != callId) return
+        when (state) {
+            CallBrokerLink.LinkState.OPEN -> {
+                // Приветствие по мосту: наши кодеки. Любой пакет собеседника в ответ =
+                // мост жив в обе стороны (он шлёт только после своей подписки).
+                lastGreetAtMs = nowMs()
+                sendLinkControl(CallWire.buildCapabilities(callId, CallWire.LOCAL_CODECS))
+                Log.i(TAG, "broker link open (${brokerLink?.brokerHost}) for ${callId.take(8)}")
+            }
+            CallBrokerLink.LinkState.CLOSED -> {
+                peerLinkAlive = false
+                Log.i(TAG, "broker link closed for ${callId.take(8)}")
+            }
+            CallBrokerLink.LinkState.CONNECTING -> Unit
+        }
+    }
+
+    /**
+     * Мост умер посреди живого звонка (брокер разорвал, сеть сменилась):
+     * переоткрываем, не больше LINK_REOPEN_MAX раз за звонок, с паузой.
+     */
+    private fun reopenBrokerLinkIfDead(sm: CallStateMachine, now: Long) {
+        val link = brokerLink ?: return
+        if (link.isOpen() || link.isConnecting()) return
+        if (sm.phase == CallStateMachine.Phase.ENDED) return
+        val key = linkCallerKey ?: return
+        if (linkReopens >= LINK_REOPEN_MAX || now - lastLinkReopenAtMs < LINK_REOPEN_MS) return
+        linkReopens++
+        lastLinkReopenAtMs = now
+        brokerLink = null
+        Log.i(TAG, "broker link reopen #$linkReopens for ${sm.callId.take(8)}")
+        openBrokerLink(sm, key)
+    }
+
+    /** Сигнал по мосту: шифруем ключом моста, seq из своего диапазона. */
+    private fun sendLinkControl(text: String): Boolean {
+        val link = brokerLink ?: return false
+        val crypto = linkCrypto ?: return false
+        if (!link.isOpen()) return false
+        val seq = synchronized(this) { linkControlSeq++ }
+        val cipher = runCatching { crypto.encrypt(seq, text.toByteArray(Charsets.UTF_8)) }
+            .getOrNull() ?: return false
+        return link.send(CallLinkWire.buildControl(seq, cipher))
+    }
+
+    private fun markPeerLinkAlive(callId: String) {
+        if (peerLinkAlive) return
+        peerLinkAlive = true
+        Log.i(TAG, "broker link alive both ways for ${callId.take(8)} (${brokerLink?.brokerHost})")
+        val sm = machine ?: return
+        if (sm.phase == CallStateMachine.Phase.CONNECTING || sm.phase == CallStateMachine.Phase.ACTIVE) {
+            syncUi(sm)
+        }
+    }
+
+    private fun onLinkPacket(callId: String, bytes: ByteArray) {
+        val sm = machine ?: return
+        if (sm.callId != callId) return
+        when (val packet = CallLinkWire.parse(bytes)) {
+            is CallLinkWire.Packet.Control -> {
+                val crypto = linkCrypto ?: return
+                val plain = crypto.decrypt(packet.seq, packet.cipher) ?: return
+                val text = String(plain, Charsets.UTF_8)
+                val signal = CallWire.parse(text) ?: return
+                // Расшифровалось ключом моста = это собеседник, и он уже подписан: мост жив.
+                markPeerLinkAlive(callId)
+                // Только сигналы ЭТОГО звонка: ключ моста и так привязан к нему, но проверяем.
+                when (signal) {
+                    is CallWire.Packet.Capabilities -> if (signal.callId == callId) {
+                        applyPeerCodecs(signal.codecs)
+                        // На приветствие отвечаем ack (каждый раз: QoS0 теряет), на ack — молчим.
+                        if (!signal.ack) {
+                            sendLinkControl(CallWire.buildCapabilities(callId, CallWire.LOCAL_CODECS, ack = true))
+                        }
+                    }
+                    is CallWire.Packet.Ring -> if (signal.callId == callId) feedMachine { it.onRing(nowMs()) }
+                    is CallWire.Packet.Accept -> if (signal.callId == callId) onAcceptPacket(sm.peerId, signal)
+                    is CallWire.Packet.Reject -> if (signal.callId == callId) feedMachine { it.onReject(signal.reason, nowMs()) }
+                    is CallWire.Packet.Bye -> if (signal.callId == callId) feedMachine { it.onBye(signal.reason, nowMs()) }
+                    else -> Unit
+                }
+            }
+            is CallLinkWire.Packet.Media -> {
+                markPeerLinkAlive(callId)
+                val engine = audioEngine ?: return
+                packet.frames.forEach { f -> engine.incomingFrame(f.seq, packet.codec, f.cipher) }
+                val frames = packet.frames.size
+                feedMachine { it.mediaFrames(nowMs(), frames) }
+            }
+            null -> Unit
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -259,13 +426,17 @@ class CallManager @Inject constructor(
             syncChannelIdentity()
             ensureCallServer()
             val callId = newCallId()
-            sendKey = randomKey()
+            val key = randomKey()
+            sendKey = key
             recvKey = null
             remoteHost = null
             remotePort = 0
             endTextOverride = null
+            peerCodecs = emptySet()
+            resetLinkCounters(outgoing = true)
             val sm = CallStateMachine(callId, peerId, outgoing = true, startedAtMs = now)
             machine = sm
+            openBrokerLink(sm, key)
             _uiState.value = CallUiState(
                 phase = sm.phase,
                 peerId = peerId,
@@ -281,7 +452,7 @@ class CallManager @Inject constructor(
     /** Принять входящий (кнопка в UI после предоставления RECORD_AUDIO). */
     fun accept() {
         val sm = synchronized(this) { machine } ?: return
-        val effects = sm.userAccept(nowMs())
+        val effects = synchronized(this) { sm.userAccept(nowMs()) }
         executeEffects(sm, effects)
         syncUi(sm)
     }
@@ -290,11 +461,13 @@ class CallManager @Inject constructor(
     fun hangupOrReject() {
         val sm = synchronized(this) { machine } ?: return
         val now = nowMs()
-        val effects = when {
-            sm.outgoing && (sm.phase == CallStateMachine.Phase.OFFERING ||
-                sm.phase == CallStateMachine.Phase.RINGING) -> sm.userCancel(now)
-            !sm.outgoing && sm.phase == CallStateMachine.Phase.INCOMING -> sm.userReject(now)
-            else -> sm.userHangup(now)
+        val effects = synchronized(this) {
+            when {
+                sm.outgoing && (sm.phase == CallStateMachine.Phase.OFFERING ||
+                    sm.phase == CallStateMachine.Phase.RINGING) -> sm.userCancel(now)
+                !sm.outgoing && sm.phase == CallStateMachine.Phase.INCOMING -> sm.userReject(now)
+                else -> sm.userHangup(now)
+            }
         }
         if (effects.isEmpty()) {
             forceLocalEnd(CallWire.BYE_CANCEL)
@@ -323,13 +496,15 @@ class CallManager @Inject constructor(
         val sm = synchronized(this) { machine } ?: return
         endTextOverride = "Нужен доступ к микрофону"
         val now = nowMs()
-        val effects = when {
-            sm.outgoing && (sm.phase == CallStateMachine.Phase.OFFERING ||
-                sm.phase == CallStateMachine.Phase.RINGING) -> sm.userCancel(now)
-            !sm.outgoing && sm.phase == CallStateMachine.Phase.INCOMING -> sm.userReject(now)
-            sm.phase == CallStateMachine.Phase.CONNECTING ||
-                sm.phase == CallStateMachine.Phase.ACTIVE -> sm.userHangup(now)
-            else -> emptyList()
+        val effects = synchronized(this) {
+            when {
+                sm.outgoing && (sm.phase == CallStateMachine.Phase.OFFERING ||
+                    sm.phase == CallStateMachine.Phase.RINGING) -> sm.userCancel(now)
+                !sm.outgoing && sm.phase == CallStateMachine.Phase.INCOMING -> sm.userReject(now)
+                sm.phase == CallStateMachine.Phase.CONNECTING ||
+                    sm.phase == CallStateMachine.Phase.ACTIVE -> sm.userHangup(now)
+                else -> emptyList()
+            }
         }
         executeEffects(sm, effects)
         syncUi(sm)
@@ -340,6 +515,7 @@ class CallManager @Inject constructor(
     // ═════════════════════════════════════════════════════════════════════
 
     private fun executeEffects(sm: CallStateMachine, effects: List<CallStateMachine.Effect>) {
+        var mediaStopped = false
         for (effect in effects) {
             when (effect) {
                 is CallStateMachine.Effect.SendOffer -> {
@@ -357,39 +533,68 @@ class CallManager @Inject constructor(
                         mediaKey = key,
                     )
                     sendSignal(sm.peerId, CallWire.offerMessageId(sm.callId, effect.attempt), text)
+                    // Кодеки — отдельным пакетом следом: формат offer не трогаем (старые сборки
+                    // разбирают его строго по числу полей), а cap они молча отбросят.
+                    sendSignal(
+                        sm.peerId,
+                        CallWire.capabilitiesMessageId(sm.callId, effect.attempt),
+                        CallWire.buildCapabilities(sm.callId, CallWire.LOCAL_CODECS),
+                    )
                 }
 
-                CallStateMachine.Effect.SendRing ->
-                    sendSignal(sm.peerId, CallWire.ringMessageId(sm.callId), CallWire.buildRing(sm.callId))
+                CallStateMachine.Effect.SendRing -> {
+                    val text = CallWire.buildRing(sm.callId)
+                    sendLinkControl(text)
+                    sendSignal(sm.peerId, CallWire.ringMessageId(sm.callId), text)
+                }
 
                 CallStateMachine.Effect.SendAccept -> {
                     val key = sendKey ?: continue
                     val host = audioChannel.lanEndpointHost()
                     val port = if (host != null) audioChannel.listenPort else 0
                     val text = CallWire.buildAccept(sm.callId, host, port, key)
+                    // По мосту accept доезжает за доли секунды; durable-путь — страховка.
+                    sendLinkControl(text)
                     // accept дублируем: его потеря = оборванный звонок.
                     sendSignal(sm.peerId, CallWire.acceptMessageId(sm.callId, 1), text)
                     sendSignal(sm.peerId, CallWire.acceptMessageId(sm.callId, 2), text)
+                    sendSignal(
+                        sm.peerId,
+                        CallWire.capabilitiesMessageId(sm.callId, 0),
+                        CallWire.buildCapabilities(sm.callId, CallWire.LOCAL_CODECS),
+                    )
                     scheduleAcceptResends(sm.callId, sm.peerId, text)
                 }
 
-                is CallStateMachine.Effect.SendReject ->
-                    sendSignal(sm.peerId, CallWire.rejectMessageId(sm.callId), CallWire.buildReject(sm.callId, effect.reason))
+                is CallStateMachine.Effect.SendReject -> {
+                    val text = CallWire.buildReject(sm.callId, effect.reason)
+                    sendLinkControl(text)
+                    sendSignal(sm.peerId, CallWire.rejectMessageId(sm.callId), text)
+                }
 
-                is CallStateMachine.Effect.SendBye ->
-                    sendSignal(sm.peerId, CallWire.byeMessageId(sm.callId, effect.attempt), CallWire.buildBye(sm.callId, effect.reason))
+                is CallStateMachine.Effect.SendBye -> {
+                    val text = CallWire.buildBye(sm.callId, effect.reason)
+                    sendLinkControl(text)
+                    sendSignal(sm.peerId, CallWire.byeMessageId(sm.callId, effect.attempt), text)
+                }
 
                 CallStateMachine.Effect.StartMedia -> startMedia(sm)
 
                 CallStateMachine.Effect.MarkMediaUp -> syncUi(sm)
 
-                CallStateMachine.Effect.StopMedia -> stopMedia()
+                // Мост закрываем ПОСЛЕ всего списка: bye идёт в нём следом за StopMedia
+                // и должен успеть уйти по мосту.
+                CallStateMachine.Effect.StopMedia -> {
+                    stopMedia(keepLink = true)
+                    mediaStopped = true
+                }
 
                 CallStateMachine.Effect.NotifyIncoming -> notifyIncoming(sm)
 
                 CallStateMachine.Effect.CancelIncoming -> cancelIncoming()
             }
         }
+        if (mediaStopped) closeBrokerLink()
     }
 
     /** Сигналы едут двумя путями: durable relay (messageId детерминирован) + прямой QUIC. */
@@ -452,13 +657,18 @@ class CallManager @Inject constructor(
             .onFailure { Log.w(TAG, "CallService start failed: ${it.message}") }
 
         val engine = CallAudioEngine(appContext)
-        engine.onOutgoingCipher = { seq, pts, cipher ->
+        engine.onOutgoingCipher = { seq, pts, codec, cipher ->
             // Микрофонный поток не ждёт сеть: кадры в очередь, переполнение — выкидываем.
-            if (!frameOutQueue.offer(OutgoingFrame(seq, pts, cipher))) {
+            if (!frameOutQueue.offer(OutgoingFrame(seq, pts, codec, cipher))) {
                 frameOutQueue.poll()
-                frameOutQueue.offer(OutgoingFrame(seq, pts, cipher))
+                frameOutQueue.offer(OutgoingFrame(seq, pts, codec, cipher))
             }
         }
+        // До выбора пути — сжатый кодек, если собеседник его умеет: новый LAN его
+        // тоже понимает, а на мосту/фолбэке он в четыре раза легче. Старой сборке — PCM.
+        audioViaLan = audioChannel.isOpen()
+        engine.outgoingCodec = if (audioViaLan) CallWire.CODEC_PCM_16K else preferredCodec()
+        engine.configureJitter(viaLan = audioViaLan)
         try {
             engine.start(sk, rk)
         } catch (e: Throwable) {
@@ -489,6 +699,7 @@ class CallManager @Inject constructor(
                     return@launch
                 }
                 Log.i(TAG, "accept resend #$attempt for ${callId.take(8)}")
+                sendLinkControl(acceptText)
                 sendSignal(peerId, CallWire.acceptMessageId(callId, attempt), acceptText)
                 attempt++
             }
@@ -501,10 +712,12 @@ class CallManager @Inject constructor(
         val port = remotePort
         scope.launch {
             var lanOk = audioChannel.isOpen()
-            // Звонящий стучится на endpoint принимающего из accept (3 попытки).
+            // Звонящий стучится на endpoint принимающего из accept (3 попытки; если
+            // мост уже жив — одна: чужой LAN-адрес за NAT недостижим, а голос ждать не может).
             if (!lanOk && sm.outgoing && host != null && port > 0) {
                 var attempt = 0
-                while (attempt < 3 && !lanOk && machine === sm &&
+                val maxAttempts = if (peerLinkAlive) 1 else 3
+                while (attempt < maxAttempts && !lanOk && machine === sm &&
                     sm.phase == CallStateMachine.Phase.CONNECTING
                 ) {
                     lanOk = audioChannel.awaitOpen(host, port)
@@ -512,9 +725,10 @@ class CallManager @Inject constructor(
                     attempt++
                 }
             }
-            // Принимающий ждёт входящее соединение звонящего (его видит сервер 42109).
-            if (!lanOk && !sm.outgoing) {
-                val deadline = nowMs() + CallStateMachine.CONNECT_TIMEOUT_MS - 1500
+            // Принимающий ждёт входящее соединение звонящего (его видит сервер 42109) —
+            // только если сам объявил LAN-адрес в accept; без Wi-Fi ждать нечего.
+            if (!lanOk && !sm.outgoing && audioChannel.lanEndpointHost() != null) {
+                val deadline = nowMs() + LAN_WAIT_MS
                 while (!lanOk && nowMs() < deadline && machine === sm &&
                     sm.phase == CallStateMachine.Phase.CONNECTING
                 ) {
@@ -524,16 +738,46 @@ class CallManager @Inject constructor(
             }
             if (machine !== sm || sm.phase != CallStateMachine.Phase.CONNECTING) return@launch
             audioViaLan = lanOk
-            _uiState.value = _uiState.value.copy(slowTransport = !lanOk)
-            Log.i(TAG, "media channel: ${if (lanOk) "LAN socket" else "text fallback (direct/relay)"}")
+            audioEngine?.let { engine ->
+                engine.configureJitter(viaLan = lanOk)
+                engine.outgoingCodec = if (lanOk) CallWire.CODEC_PCM_16K else preferredCodec()
+            }
+            _uiState.value = _uiState.value.copy(slowTransport = !lanOk, viaBroker = !lanOk && peerLinkAlive)
+            Log.i(
+                TAG,
+                "media channel: " + when {
+                    lanOk -> "LAN socket"
+                    peerLinkAlive -> "broker link (${brokerLink?.brokerHost})"
+                    else -> "text fallback (direct/relay)"
+                },
+            )
         }
     }
 
+    /** LAN-сокет умер посреди разговора: голос дальше едет мостом/фолбэком — сжатым и с разгоном. */
+    private fun onLanClosed(callId: String) {
+        val sm = machine ?: return
+        if (sm.callId != callId || !audioViaLan) return
+        if (sm.phase != CallStateMachine.Phase.CONNECTING && sm.phase != CallStateMachine.Phase.ACTIVE) return
+        audioViaLan = false
+        audioEngine?.let { engine ->
+            engine.configureJitter(viaLan = false)
+            engine.outgoingCodec = preferredCodec()
+        }
+        _uiState.value = _uiState.value.copy(slowTransport = true, viaBroker = peerLinkAlive)
+        Log.i(TAG, "LAN socket closed mid-call ${callId.take(8)}: falling back to broker link")
+    }
+
+    /** ADPCM, если собеседник объявил его в cap; иначе PCM (старая сборка). */
+    private fun preferredCodec(): Int =
+        if (CallWire.CODEC_ADPCM_16K in peerCodecs) CallWire.CODEC_ADPCM_16K else CallWire.CODEC_PCM_16K
+
     /**
-     * Разносит кадры транспорту, три пояса по скорости:
-     * живой LAN-сокет → прямой QUIC одиночным кадром → БРОКЕР (любая сеть:
-     * мобильная/чужой NAT/спутник) одной ab-строкой на пачку. Кадры, которые
-     * не ушли и в брокер, просто теряем — копить их в durable-очередь значит
+     * Разносит кадры транспорту, пояса по скорости:
+     * живой LAN-сокет → МОСТ через брокер (постоянное соединение, пачка из
+     * 4 кадров = 80 мс, двоичный провод) → прямой QUIC одиночным кадром →
+     * текстовая ab/ac-строка через ядро (только для сборок без моста). Кадры,
+     * которые не ушли, просто теряем — копить их в durable-очередь значит
      * вывалить на собеседника простыню из прошлого; дыру добьёт сторож темпа.
      */
     private fun startFramesPump(sm: CallStateMachine) {
@@ -548,24 +792,65 @@ class CallManager @Inject constructor(
                 ) {
                     continue
                 }
-                if (audioChannel.isOpen() && audioChannel.sendFrame(frame.seq, frame.ptsMs, frame.cipher)) {
+                if (audioChannel.isOpen() &&
+                    audioChannel.sendFrame(frame.seq, frame.ptsMs, frame.cipher, frame.codec)
+                ) {
                     continue
                 }
-                val single = CallWire.buildAudio(current.callId, frame.seq, frame.ptsMs, frame.cipher)
-                val direct = sendQuic(current.peerId, single)
-                if (direct) continue
+                val link = brokerLink
+                if (link != null && link.isOpen() && peerLinkAlive) {
+                    // Пачка: 4 кадра (80 мс) или что накопилось за 60 мс — компромисс
+                    // между числом публикаций и задержкой.
+                    val frames = ArrayList<CallLinkWire.MediaFrame>(LINK_BATCH_FRAMES)
+                    frames += CallLinkWire.MediaFrame(frame.seq, frame.cipher)
+                    val codec = frame.codec
+                    val deadline = android.os.SystemClock.uptimeMillis() + 60
+                    while (frames.size < LINK_BATCH_FRAMES &&
+                        android.os.SystemClock.uptimeMillis() < deadline
+                    ) {
+                        val next = frameOutQueue.poll(20, java.util.concurrent.TimeUnit.MILLISECONDS)
+                            ?: break
+                        if (next.codec != codec) {
+                            // Кодек переключился на границе пачки: отправляем что есть, кадр — в следующую.
+                            frameOutQueue.offer(next)
+                            break
+                        }
+                        frames += CallLinkWire.MediaFrame(next.seq, next.cipher)
+                    }
+                    val packet = runCatching { CallLinkWire.buildMedia(codec, frames) }.getOrNull()
+                    if (packet != null && link.send(packet)) continue
+                }
+                // Одиночный au по проводу — только PCM (старые сборки другого не знают);
+                // сжатый кадр едет ac-бандажом из одного кадра.
+                val single = runCatching {
+                    if (frame.codec == CallWire.CODEC_PCM_16K) {
+                        CallWire.buildAudio(current.callId, frame.seq, frame.ptsMs, frame.cipher)
+                    } else {
+                        CallWire.buildAudioBatch(
+                            current.callId,
+                            listOf(CallWire.Packet.Audio(current.callId, frame.seq, frame.ptsMs, frame.cipher)),
+                            frame.codec,
+                        )
+                    }
+                }.getOrNull()
+                if (single != null && sendQuic(current.peerId, single)) continue
                 // Бандаж: дотягиваем до 8 кадров (или 120 мс), чтобы не душить брокер.
                 val batch = ArrayList<CallWire.Packet.Audio>(CallWire.AUDIO_BATCH_MAX_FRAMES)
                 batch += CallWire.Packet.Audio(current.callId, frame.seq, frame.ptsMs, frame.cipher)
+                val codec = frame.codec
                 val deadline = android.os.SystemClock.uptimeMillis() + 120
                 while (batch.size < CallWire.AUDIO_BATCH_MAX_FRAMES &&
                     android.os.SystemClock.uptimeMillis() < deadline
                 ) {
                     val next = frameOutQueue.poll(20, java.util.concurrent.TimeUnit.MILLISECONDS)
                         ?: break
+                    if (next.codec != codec) {
+                        frameOutQueue.offer(next)
+                        break
+                    }
                     batch += CallWire.Packet.Audio(current.callId, next.seq, next.ptsMs, next.cipher)
                 }
-                val text = runCatching { CallWire.buildAudioBatch(current.callId, batch) }
+                val text = runCatching { CallWire.buildAudioBatch(current.callId, batch, codec) }
                     .getOrNull() ?: continue
                 runCatching { RustBridge.sendMessageMqtt(current.peerId, text) }
             }
@@ -576,20 +861,43 @@ class CallManager @Inject constructor(
         Log.w(TAG, "media failed: $why")
         if (endTextOverride == null) endTextOverride = "Не удалось соединить"
         if (machine !== sm) return
-        executeEffects(sm, sm.userHangup(nowMs()).ifEmpty { listOf(CallStateMachine.Effect.StopMedia) })
+        val effects = synchronized(this) { sm.userHangup(nowMs()) }
+        executeEffects(sm, effects.ifEmpty { listOf(CallStateMachine.Effect.StopMedia) })
         forceLocalEnd(CallWire.BYE_FAILED)
     }
 
     private var audioViaLan = false
 
-    private fun stopMedia() {
+    private fun stopMedia(keepLink: Boolean = false) {
         runCatching { audioEngine?.stop() }
         audioEngine = null
         runCatching { audioChannel.closeCall() }
         audioChannel.activeCallId = null
         audioChannel.onFrame = null
+        if (!keepLink) closeBrokerLink()
         runCatching { CallService.stop(appContext) }
-        _uiState.value = _uiState.value.copy(muted = false, speaker = false, slowTransport = false)
+        _uiState.value = _uiState.value.copy(muted = false, speaker = false, slowTransport = false, viaBroker = false)
+    }
+
+    /** Мост закрываем чуть позже конца звонка: последний bye по нему ещё должен уйти. */
+    private fun closeBrokerLink() {
+        val link = brokerLink ?: return
+        brokerLink = null
+        linkCrypto = null
+        linkCallerKey = null
+        peerLinkAlive = false
+        scope.launch {
+            delay(LINK_LINGER_MS)
+            runCatching { link.close() }
+        }
+    }
+
+    /** Зовётся при создании машины звонка, ДО openBrokerLink. */
+    private fun resetLinkCounters(outgoing: Boolean) {
+        linkControlSeq = if (outgoing) 0L else CallLinkWire.CONTROL_SEQ_CALLEE_BASE
+        linkReopens = 0
+        lastLinkReopenAtMs = 0L
+        lastGreetAtMs = 0L
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -663,11 +971,14 @@ class CallManager @Inject constructor(
     // Тики, синхронизация UI, завершение
     // ═════════════════════════════════════════════════════════════════════
 
+    /** Машину двигаем под замком: события приходят с трёх потоков (ядро, LAN-сокет, мост). */
     private fun feedMachine(handler: (CallStateMachine) -> List<CallStateMachine.Effect>) {
-        val sm = synchronized(this) { machine } ?: return
-        val effects = handler(sm)
-        executeEffects(sm, effects)
-        syncUi(sm)
+        val fed = synchronized(this) {
+            val sm = machine ?: return
+            sm to handler(sm)
+        }
+        executeEffects(fed.first, fed.second)
+        syncUi(fed.first)
     }
 
     private fun startTicker() {
@@ -675,9 +986,23 @@ class CallManager @Inject constructor(
         tickJob = scope.launch {
             while (isActive) {
                 delay(TICK_MS)
-                val sm = synchronized(this@CallManager) { machine } ?: continue
-                val effects = sm.tick(nowMs())
-                executeEffects(sm, effects)
+                val now = nowMs()
+                val ticked = synchronized(this@CallManager) {
+                    val sm = machine ?: return@synchronized null
+                    // Приветствие по мосту (QoS0, может потеряться; собеседник мог
+                    // подписаться позже нас): повторяем, пока он не ответил.
+                    val link = brokerLink
+                    if (link != null && link.isOpen() && !peerLinkAlive && now - lastGreetAtMs >= LINK_GREET_MS &&
+                        sm.phase != CallStateMachine.Phase.ENDED
+                    ) {
+                        lastGreetAtMs = now
+                        sendLinkControl(CallWire.buildCapabilities(sm.callId, CallWire.LOCAL_CODECS))
+                    }
+                    reopenBrokerLinkIfDead(sm, now)
+                    sm to sm.tick(now)
+                } ?: continue
+                val sm = ticked.first
+                executeEffects(sm, ticked.second)
                 syncUi(sm)
                 if (sm.phase == CallStateMachine.Phase.ENDED) {
                     scheduleIdleReset()
@@ -696,6 +1021,7 @@ class CallManager @Inject constructor(
                 val finished = machine
                 if (finished?.phase == CallStateMachine.Phase.ENDED) {
                     machine = null
+                    closeBrokerLink() // звонок мог кончиться до медиа (отклонён, не ответили)
                     _uiState.value = CallUiState()
                     recentlyEnded[finished.callId] = nowMs()
                     while (recentlyEnded.size > 32) {
@@ -719,6 +1045,7 @@ class CallManager @Inject constructor(
             phase = sm.phase,
             connectedAtMs = sm.connectedAtMs,
             recovering = sm.recovering,
+            viaBroker = current.slowTransport && peerLinkAlive,
             endText = endText,
         )
         if (sm.phase == CallStateMachine.Phase.ENDED) scheduleIdleReset()
@@ -789,5 +1116,15 @@ class CallManager @Inject constructor(
         /** Пауза между досылками accept и длинна отключения мёртвого QUIC. */
         private const val ACCEPT_RESEND_MS = 2_500L
         private const val QUIC_BREAKER_MS = 45_000L
+        /** Кадров в одной публикации моста (по 20 мс) и сколько мост живёт после конца звонка. */
+        private const val LINK_BATCH_FRAMES = 4
+        private const val LINK_LINGER_MS = 1_500L
+        /** Сколько принимающий ждёт LAN-сокет звонящего, прежде чем считать путь «интернет». */
+        private const val LAN_WAIT_MS = 8_000L
+        /** Пока собеседник не ответил по мосту, приветствие cap повторяем с этим шагом. */
+        private const val LINK_GREET_MS = 1_000L
+        /** Переоткрытие умершего моста: не чаще и не больше, чем указано. */
+        private const val LINK_REOPEN_MS = 4_000L
+        private const val LINK_REOPEN_MAX = 3
     }
 }

@@ -44,8 +44,8 @@ class CallAudioChannel private constructor() {
     /** Node id подставляет менеджер (как у LanDirectChannel — без зависимости от Rust). */
     @Volatile var myNodeId: String = "pk_unknown"
 
-    /** Кадр от собеседника (уже зашифрованный payload — расшифрует движок). */
-    @Volatile var onFrame: ((seq: Long, ptsMs: Long, payload: ByteArray) -> Unit)? = null
+    /** Кадр от собеседника (уже зашифрованный payload — расшифрует движок; codec — чем закодирован до шифра). */
+    @Volatile var onFrame: ((seq: Long, ptsMs: Long, codec: Int, payload: ByteArray) -> Unit)? = null
 
     /** Сокет поднялся: входящий принят и опознан, либо исходящий соединился. */
     @Volatile var onConnected: (() -> Unit)? = null
@@ -182,14 +182,14 @@ class CallAudioChannel private constructor() {
     // ── Кадры ───────────────────────────────────────────────────────────────
 
     /** Отправить один голосовой кадр. false = сокета нет/умер, зови текстовый фолбэк. */
-    fun sendFrame(seq: Long, ptsMs: Long, payload: ByteArray): Boolean {
+    fun sendFrame(seq: Long, ptsMs: Long, payload: ByteArray, codec: Int = CallWire.CODEC_PCM_16K): Boolean {
         val socket = callSocket ?: return false
         if (socket.isClosed) return false
         return try {
             val output = DataOutputStream(socket.getOutputStream())
             synchronized(socket) {
                 output.writeInt(FRAME_HEADER_BYTES + payload.size)
-                output.writeShort(CallWire.CODEC_PCM_16K)
+                output.writeShort(codec)
                 output.writeInt((seq and 0xFFFFFFFFL).toInt())
                 output.writeLong(ptsMs)
                 output.write(payload)
@@ -212,8 +212,9 @@ class CallAudioChannel private constructor() {
             val ptsMs = input.readLong()
             val payload = ByteArray(length - FRAME_HEADER_BYTES)
             input.readFully(payload)
-            if (codec.toInt() == CallWire.CODEC_PCM_16K) {
-                onFrame?.invoke(seq, ptsMs, payload)
+            val codecId = codec.toInt()
+            if (codecId == CallWire.CODEC_PCM_16K || codecId == CallWire.CODEC_ADPCM_16K) {
+                onFrame?.invoke(seq, ptsMs, codecId, payload)
             }
         }
     }

@@ -157,10 +157,17 @@ class CallStateMachine(
     // ── Медиа-события ───────────────────────────────────────────────────────
 
     /** Первый принятый голосовой кадр: соединение состоялось. */
-    fun mediaFrame(nowMs: Long): List<Effect> {
+    fun mediaFrame(nowMs: Long): List<Effect> = mediaFrames(nowMs, 1)
+
+    /**
+     * Пачка из count кадров одним пакетом (мост через брокер): сторож темпа
+     * считает кадры, не пакеты, иначе 4 кадра в публикации выглядели бы как один.
+     */
+    fun mediaFrames(nowMs: Long, count: Int): List<Effect> {
+        if (count <= 0) return emptyList()
         lastMediaAtMs = nowMs
         recovering = false
-        frameTimesMs.addLast(nowMs)
+        repeat(count) { frameTimesMs.addLast(nowMs) }
         trimFrameWindow(nowMs)
         if (phase == Phase.CONNECTING) {
             connectedAtMs = nowMs

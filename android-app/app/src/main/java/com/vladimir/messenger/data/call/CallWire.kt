@@ -44,6 +44,24 @@ object CallWire {
     /** Сколько кадров максимум упаковываем в одну ab-строку. */
     const val AUDIO_BATCH_MAX_FRAMES = 8
 
+    /**
+     * Бандаж сжатых кадров (IMA ADPCM, см. AdpcmCodec): та же раскладка, что у
+     * ab, но каждый кадр вчетверо короче — для мобильной сети и брокера.
+     * Старые сборки неизвестный kind отбросят молча; шлём только тем, кто
+     * объявил кодек пакетом cap.
+     */
+    const val KIND_AUDIO_BATCH_ADPCM = "ac"
+
+    /**
+     * Возможности стороны: `cap|<callId>|<кодеки через запятую>[|ack]`. Звонящий
+     * шлёт вместе с offer, принимающий — вместе с accept. По мосту через брокер
+     * тот же пакет служит приветствием: на приветствие отвечают `cap|...|ack`,
+     * на ack не отвечают (петли нет). Старые сборки пакета не знают (и не шлют),
+     * поэтому их считаем «только PCM».
+     */
+    const val KIND_CAPABILITIES = "cap"
+    const val CAP_ACK = "ack"
+
     /** Версия голосового канала: v1 — выделенный TCP-сокет 42109 (udp1 добавится позже). */
     const val PROTO_TCP1 = "tcp1"
 
@@ -58,8 +76,12 @@ object CallWire {
     /** Offer старше этого возраста = пропущенный звонок, живой звонок не зажигаем. */
     const val OFFER_FRESH_MS = 60_000L
 
-    /** Кодеки кадров: 1 = PCM 16 кГц mono s16le (Opus = 2 — резерв под узкие пути). */
+    /** Кодеки кадров: 1 = PCM 16 кГц mono s16le (Opus = 2 — резерв), 3 = IMA ADPCM 16 кГц. */
     const val CODEC_PCM_16K = 1
+    const val CODEC_ADPCM_16K = 3
+
+    /** Что умеет эта сборка (уходит пакетом cap). */
+    val LOCAL_CODECS: Set<Int> = setOf(CODEC_PCM_16K, CODEC_ADPCM_16K)
 
     const val MAX_CALLER_NAME_CHARS = 128
     const val MAX_AUDIO_PAYLOAD_BYTES = 4 * 1024
@@ -109,6 +131,15 @@ object CallWire {
         data class AudioBatch(
             val callId: String,
             val frames: List<Audio>,
+            /** Кодек всех кадров бандажа: ab = PCM, ac = ADPCM. */
+            val codec: Int = CODEC_PCM_16K,
+        ) : Packet()
+
+        /** Возможности собеседника: какие кодеки он принимает; ack = ответ на приветствие моста. */
+        data class Capabilities(
+            val callId: String,
+            val codecs: Set<Int>,
+            val ack: Boolean = false,
         ) : Packet()
     }
 
@@ -175,12 +206,21 @@ object CallWire {
     }
 
     /** Бандаж из 1..AUDIO_BATCH_MAX_FRAMES кадров; проверки те же, что у одиночного. */
-    fun buildAudioBatch(callId: String, frames: List<Packet.Audio>): String {
+    fun buildAudioBatch(
+        callId: String,
+        frames: List<Packet.Audio>,
+        codec: Int = CODEC_PCM_16K,
+    ): String {
         requireValidCallId(callId)
         require(frames.isNotEmpty() && frames.size <= AUDIO_BATCH_MAX_FRAMES) {
             "Audio batch out of bounds"
         }
-        val sb = StringBuilder("$PREFIX|$KIND_AUDIO_BATCH|$callId|${frames.size}")
+        val kind = when (codec) {
+            CODEC_PCM_16K -> KIND_AUDIO_BATCH
+            CODEC_ADPCM_16K -> KIND_AUDIO_BATCH_ADPCM
+            else -> throw IllegalArgumentException("Unknown audio codec")
+        }
+        val sb = StringBuilder("$PREFIX|$kind|$callId|${frames.size}")
         frames.forEach { f ->
             require(f.callId == callId) { "Mixed callIds in batch" }
             require(f.seq >= 0) { "Negative audio seq" }
@@ -195,6 +235,14 @@ object CallWire {
         return s
     }
 
+    /** Возможности стороны: непустой список кодеков 1..99; ack — ответ на приветствие моста. */
+    fun buildCapabilities(callId: String, codecs: Set<Int>, ack: Boolean = false): String {
+        requireValidCallId(callId)
+        require(codecs.isNotEmpty() && codecs.all { it in 1..99 }) { "Bad codec list" }
+        val base = "$PREFIX|$KIND_CAPABILITIES|$callId|${codecs.sorted().joinToString(",")}"
+        return if (ack) "$base|$CAP_ACK" else base
+    }
+
     // ── Детерминированные messageId для транспортной дедупликации ──────────
 
     fun offerMessageId(callId: String, attempt: Int): String = "c${callId}o$attempt"
@@ -203,6 +251,8 @@ object CallWire {
     fun rejectMessageId(callId: String): String = "c${callId}j"
     fun byeMessageId(callId: String, attempt: Int): String = "c${callId}b$attempt"
     fun audioMessageId(callId: String, seq: Long): String = "c${callId}au$seq"
+    fun audioBatchMessageId(callId: String, firstSeq: Long): String = "c${callId}ab$firstSeq"
+    fun capabilitiesMessageId(callId: String, attempt: Int): String = "c${callId}p$attempt"
 
     // ── Разбор ──────────────────────────────────────────────────────────────
 
@@ -277,7 +327,7 @@ object CallWire {
                 null
             }
 
-            KIND_AUDIO_BATCH -> if (parts.size >= 7) {
+            KIND_AUDIO_BATCH, KIND_AUDIO_BATCH_ADPCM -> if (parts.size >= 7) {
                 val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
                 val n = parts[3].toIntOrNull() ?: return null
                 if (n <= 0 || n > AUDIO_BATCH_MAX_FRAMES) return null
@@ -293,7 +343,24 @@ object CallWire {
                     frames += Packet.Audio(callId, seq, tsMs, payload)
                     i += 3
                 }
-                Packet.AudioBatch(callId, frames)
+                val codec = if (parts[1] == KIND_AUDIO_BATCH_ADPCM) CODEC_ADPCM_16K else CODEC_PCM_16K
+                Packet.AudioBatch(callId, frames, codec)
+            } else {
+                null
+            }
+
+            KIND_CAPABILITIES -> if (parts.size == 4 || parts.size == 5) {
+                val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
+                val codecs = LinkedHashSet<Int>()
+                for (item in parts[3].split(',')) {
+                    val codec = item.toIntOrNull() ?: return null
+                    if (codec !in 1..99) return null
+                    codecs += codec
+                }
+                if (codecs.isEmpty()) return null
+                val ack = parts.size == 5
+                if (ack && parts[4] != CAP_ACK) return null
+                Packet.Capabilities(callId, codecs, ack)
             } else {
                 null
             }

@@ -165,4 +165,66 @@ class CallWireTest {
             fail("empty batch must throw")
         } catch (_: IllegalArgumentException) {}
     }
+
+    // ── Сжатый бандаж ac и пакет возможностей cap ─────────────────────────────
+
+    @Test
+    fun adpcmBatchCarriesCodec() {
+        val frames = listOf(CallWire.Packet.Audio(callId, 7L, 1_700_000_000_000L, ByteArray(164) { 1 }))
+        val text = CallWire.buildAudioBatch(callId, frames, CallWire.CODEC_ADPCM_16K)
+        assertTrue(text.startsWith("APUCALL1|ac|$callId|1|"))
+        val parsed = CallWire.parse(text) as CallWire.Packet.AudioBatch
+        assertEquals(CallWire.CODEC_ADPCM_16K, parsed.codec)
+        assertEquals(1, parsed.frames.size)
+        assertEquals(7L, parsed.frames[0].seq)
+        // Обычный ab остаётся PCM — старые сборки его так и читают.
+        val pcm = CallWire.parse(CallWire.buildAudioBatch(callId, frames)) as CallWire.Packet.AudioBatch
+        assertEquals(CallWire.CODEC_PCM_16K, pcm.codec)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun audioBatchRejectsUnknownCodec() {
+        CallWire.buildAudioBatch(
+            callId,
+            listOf(CallWire.Packet.Audio(callId, 1L, 1_700_000_000_000L, byteArrayOf(1))),
+            codec = 42,
+        )
+    }
+
+    @Test
+    fun capabilitiesRoundTrip() {
+        val text = CallWire.buildCapabilities(callId, setOf(3, 1))
+        assertEquals("APUCALL1|cap|$callId|1,3", text) // кодеки отсортированы
+        val parsed = CallWire.parse(text) as CallWire.Packet.Capabilities
+        assertEquals(callId, parsed.callId)
+        assertEquals(setOf(1, 3), parsed.codecs)
+        assertFalse(parsed.ack)
+        assertEquals("c${callId}p2", CallWire.capabilitiesMessageId(callId, 2))
+        assertTrue(CallWire.LOCAL_CODECS.contains(CallWire.CODEC_PCM_16K))
+        assertTrue(CallWire.LOCAL_CODECS.contains(CallWire.CODEC_ADPCM_16K))
+    }
+
+    @Test
+    fun capabilitiesAckIsOptionalFifthField() {
+        val ack = CallWire.buildCapabilities(callId, setOf(1, 3), ack = true)
+        assertEquals("APUCALL1|cap|$callId|1,3|ack", ack)
+        val parsed = CallWire.parse(ack) as CallWire.Packet.Capabilities
+        assertTrue(parsed.ack)
+        assertEquals(setOf(1, 3), parsed.codecs)
+        // Пятое поле бывает только «ack».
+        assertNull(CallWire.parse("APUCALL1|cap|$callId|1,3|nak"))
+    }
+
+    @Test
+    fun capabilitiesRejectsGarbage() {
+        assertNull(CallWire.parse("APUCALL1|cap|$callId|"))
+        assertNull(CallWire.parse("APUCALL1|cap|$callId|1,x"))
+        assertNull(CallWire.parse("APUCALL1|cap|$callId|0"))
+        assertNull(CallWire.parse("APUCALL1|cap|$callId|1,3|ack|more"))
+        assertNull(CallWire.parse("APUCALL1|cap|short|1"))
+        try {
+            CallWire.buildCapabilities(callId, emptySet())
+            fail("empty codec set must throw")
+        } catch (_: IllegalArgumentException) {}
+    }
 }
