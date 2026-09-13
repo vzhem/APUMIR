@@ -40,6 +40,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,7 +62,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.vladimir.messenger.data.backup.BackupCipher
+import com.vladimir.messenger.data.backup.BackupSchedule
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
@@ -80,6 +86,9 @@ fun ProfileBackupScreen(
     var repeat by remember { mutableStateOf("") }
     var includeReceived by remember { mutableStateOf(true) }
     var restorePassword by remember { mutableStateOf("") }
+    var autoPeriod by remember { mutableStateOf(BackupSchedule.Period.WEEKLY) }
+    // Вернулись на экран - задача могла отработать, перечитываем итог.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshSchedule() }
 
     // Диалоги системы: «куда сохранить» и «какой файл открыть». Пароль
     // берём из полей на момент выбора файла.
@@ -326,6 +335,107 @@ fun ProfileBackupScreen(
                     }
                 }
 
+                // Автообновление: показываем, когда есть что обновлять - только что
+                // сохранённый файл или уже включённое расписание.
+                val schedule = state.schedule
+                if (state.hasIdentity && (state.lastSaved != null || schedule?.enabled == true || schedule?.lastError != null)) item {
+                    Card(
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                        ),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "Обновлять копию автоматически",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            if (schedule?.enabled == true) {
+                                val fmt = SimpleDateFormat("d MMMM, HH:mm", Locale.forLanguageTag("ru"))
+                                Text(
+                                    "Файл: ${schedule.targetName}\n" +
+                                        "Период: ${schedule.period.title}" +
+                                        (if (schedule.includeReceived) ", с полученными файлами" else ", без полученных файлов") +
+                                        (if (schedule.lastOkAtMs > 0) {
+                                            "\nПоследнее обновление: ${fmt.format(Date(schedule.lastOkAtMs))} " +
+                                                "(${ProfileBackupViewModel.humanBytes(schedule.lastOkBytes)})"
+                                        } else {
+                                            "\nПервое обновление - примерно через ${schedule.period.days} дн. после включения"
+                                        }) +
+                                        (if (schedule.nextDueAtMs > 0) "\nСледующее: около ${fmt.format(Date(schedule.nextDueAtMs))}" else "") +
+                                        (schedule.lastError?.let { "\nПоследняя попытка не удалась: $it" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (schedule.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                PeriodChooser(
+                                    selected = schedule.period,
+                                    enabled = !state.busy,
+                                    onSelect = viewModel::setAutoPeriod,
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Row {
+                                    OutlinedButton(
+                                        onClick = viewModel::runAutoNow,
+                                        enabled = !state.busy,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.weight(1f),
+                                    ) { Text("Обновить сейчас") }
+                                    Spacer(Modifier.width(8.dp))
+                                    TextButton(onClick = viewModel::disableAutoUpdate, enabled = !state.busy) { Text("Выключить") }
+                                }
+                            } else {
+                                if (schedule?.lastError != null) {
+                                    Text(
+                                        "Автообновление остановлено: ${schedule.lastError}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                                if (state.lastSaved != null) {
+                                    Text(
+                                        "Телефон сам будет перезаписывать только что сохранённый файл тем же " +
+                                            "паролем. Момент выбирает система: не при низком заряде, обычно ночью. " +
+                                            "Никуда, кроме этого файла, копия не уходит.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    PeriodChooser(
+                                        selected = autoPeriod,
+                                        enabled = !state.busy,
+                                        onSelect = { autoPeriod = it },
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    Button(
+                                        onClick = { viewModel.enableAutoUpdate(password, includeReceived, autoPeriod) },
+                                        enabled = !state.busy && password.length >= BackupCipher.MIN_PASSWORD_LENGTH,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) { Text("Включить: ${autoPeriod.title}") }
+                                    if (password.length < BackupCipher.MIN_PASSWORD_LENGTH) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            "Пароль в поле выше стёрт — введите его снова, он нужен для обновлений",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        "Сохраните копию в файл — и здесь можно будет включить её обновление.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     Card(
                         shape = RoundedCornerShape(18.dp),
@@ -389,6 +499,27 @@ fun ProfileBackupScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PeriodChooser(
+    selected: BackupSchedule.Period,
+    enabled: Boolean,
+    onSelect: (BackupSchedule.Period) -> Unit,
+) {
+    val periods = BackupSchedule.Period.entries
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        periods.forEachIndexed { index, period ->
+            SegmentedButton(
+                selected = selected == period,
+                onClick = { onSelect(period) },
+                enabled = enabled,
+                shape = SegmentedButtonDefaults.itemShape(index, periods.size),
+                label = { Text(period.short) },
+            )
         }
     }
 }

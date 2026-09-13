@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.backup.BackupCipher
 import com.vladimir.messenger.data.backup.BackupManifest
+import com.vladimir.messenger.data.backup.BackupSchedule
 import com.vladimir.messenger.data.backup.ProfileBackup
 import com.vladimir.messenger.data.swarm.StorageSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,6 +36,10 @@ data class ProfileBackupUiState(
     val hasIdentity: Boolean = true,
     /** Подтверждено: приложение закрывается, копия применится при следующем запуске. */
     val restarting: Boolean = false,
+    /** Файл, только что записанный руками: в него можно включить автообновление. */
+    val lastSaved: Uri? = null,
+    /** Расписание автообновления (что включено, куда, когда в последний раз). */
+    val schedule: BackupSchedule.State? = null,
 )
 
 /**
@@ -58,7 +63,18 @@ class ProfileBackupViewModel @Inject constructor(
             val staged = if (backup.hasStaged()) backup.stagedManifest() else null
             val hasIdentity = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
                 .getBoolean("identity_created", false)
-            _uiState.update { it.copy(receivedBytes = received, stagedManifest = staged, hasIdentity = hasIdentity) }
+            val schedule = BackupSchedule.state(context)
+            _uiState.update {
+                it.copy(receivedBytes = received, stagedManifest = staged, hasIdentity = hasIdentity, schedule = schedule)
+            }
+        }
+    }
+
+    /** Перечитать расписание (после возврата на экран, когда задача могла отработать). */
+    fun refreshSchedule() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val schedule = BackupSchedule.state(context)
+            _uiState.update { it.copy(schedule = schedule) }
         }
     }
 
@@ -82,14 +98,23 @@ class ProfileBackupViewModel @Inject constructor(
                 backup.create(target, password.toCharArray(), includeReceived)
             }
             when (result) {
-                is ProfileBackup.CreateResult.Success -> _uiState.update {
-                    it.copy(
-                        busy = false,
-                        message = "Копия сохранена (${humanBytes(result.bytes)}" +
-                            (if (result.receivedFiles > 0) ", файлов: ${result.receivedFiles}" else "") +
-                            "). Запомните пароль: без него файл не открыть.",
-                        failed = false,
-                    )
+                is ProfileBackup.CreateResult.Success -> {
+                    // Расписание уже смотрит в этот файл - обновляем сведения о последней записи.
+                    val schedule = BackupSchedule.state(context)
+                    if (schedule.enabled && BackupSchedule.target(context) == target) {
+                        withContext(Dispatchers.IO) { BackupSchedule.recordSuccess(context, result.bytes) }
+                    }
+                    _uiState.update {
+                        it.copy(
+                            busy = false,
+                            message = "Копия сохранена (${humanBytes(result.bytes)}" +
+                                (if (result.receivedFiles > 0) ", файлов: ${result.receivedFiles}" else "") +
+                                "). Запомните пароль: без него файл не открыть.",
+                            failed = false,
+                            lastSaved = target,
+                            schedule = BackupSchedule.state(context),
+                        )
+                    }
                 }
                 ProfileBackup.CreateResult.NoIdentity -> fail("Профиль ещё не создан.")
                 ProfileBackup.CreateResult.BadPassword -> fail("Пароль не короче ${BackupCipher.MIN_PASSWORD_LENGTH} знаков.")
@@ -126,6 +151,69 @@ class ProfileBackupViewModel @Inject constructor(
                 ProfileBackup.StageResult.Truncated -> fail("Файл копии повреждён или скопирован не до конца.")
                 is ProfileBackup.StageResult.Failed -> fail("Не удалось прочитать копию: ${result.reason}")
             }
+        }
+    }
+
+    /** Включить автообновление только что сохранённого файла тем же паролем. */
+    fun enableAutoUpdate(password: String, includeReceived: Boolean, period: BackupSchedule.Period) {
+        val target = _uiState.value.lastSaved ?: run {
+            fail("Сначала сохраните копию в файл — обновляться будет именно он.")
+            return
+        }
+        if (_uiState.value.busy) return
+        _uiState.update { it.copy(busy = true, busyText = "Включаем обновление…", message = null, failed = false) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                BackupSchedule.enable(context, target, password.toCharArray(), includeReceived, period)
+            }
+            val schedule = withContext(Dispatchers.IO) { BackupSchedule.state(context) }
+            when (result) {
+                BackupSchedule.EnableResult.Ok -> _uiState.update {
+                    it.copy(
+                        busy = false,
+                        schedule = schedule,
+                        message = "Файл будет обновляться ${period.title}. Пароль тот же; " +
+                            "он хранится в защищённом хранилище телефона.",
+                        failed = false,
+                    )
+                }
+                BackupSchedule.EnableResult.NoPersistentAccess -> _uiState.update {
+                    it.copy(
+                        busy = false,
+                        schedule = schedule,
+                        message = "Это хранилище не даёт постоянного доступа к файлу — обновлять его " +
+                            "автоматически нельзя. Сохраните копию в «Файлы» телефона или на карту памяти.",
+                        failed = true,
+                    )
+                }
+                is BackupSchedule.EnableResult.Failed -> _uiState.update {
+                    it.copy(busy = false, schedule = schedule, message = "Не удалось включить: ${result.reason}", failed = true)
+                }
+            }
+        }
+    }
+
+    fun setAutoPeriod(period: BackupSchedule.Period) {
+        viewModelScope.launch(Dispatchers.IO) {
+            BackupSchedule.setPeriod(context, period)
+            val schedule = BackupSchedule.state(context)
+            _uiState.update { it.copy(schedule = schedule) }
+        }
+    }
+
+    fun disableAutoUpdate() {
+        viewModelScope.launch(Dispatchers.IO) {
+            BackupSchedule.disable(context)
+            val schedule = BackupSchedule.state(context)
+            _uiState.update { it.copy(schedule = schedule, message = "Автообновление выключено.", failed = false) }
+        }
+    }
+
+    /** Обновить файл сейчас (в фоне, той же задачей, что и по расписанию). */
+    fun runAutoNow() {
+        viewModelScope.launch(Dispatchers.IO) {
+            BackupSchedule.runNow(context)
+            _uiState.update { it.copy(message = "Обновление запущено в фоне; итог появится здесь через минуту-другую.", failed = false) }
         }
     }
 

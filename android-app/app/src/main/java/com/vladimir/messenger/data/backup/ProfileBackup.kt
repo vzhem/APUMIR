@@ -100,7 +100,53 @@ class ProfileBackup @Inject constructor(
      * Записать копию в [target] (SAF-URI из ACTION_CREATE_DOCUMENT). Долго:
      * вывод ключа, снимок базы и копирование файлов - звать не с главного потока.
      */
-    fun create(target: Uri, password: CharArray, includeReceived: Boolean): CreateResult {
+    fun create(target: Uri, password: CharArray, includeReceived: Boolean): CreateResult =
+        create(password, includeReceived) {
+            // «wt» = перезаписать с нуля; часть провайдеров документов понимает только «w».
+            runCatching { appContext.contentResolver.openOutputStream(target, "wt") }.getOrNull()
+                ?: appContext.contentResolver.openOutputStream(target, "w")
+        }
+
+    /** То же в обычный файл (служебный файл автообновления - [BackupSchedule]). */
+    fun createFile(target: File, password: CharArray, includeReceived: Boolean): CreateResult =
+        create(password, includeReceived) {
+            target.parentFile?.mkdirs()
+            FileOutputStream(target)
+        }
+
+    /** Перелить готовый файл копии в SAF-адрес человека. Возвращает число байт. */
+    fun copyFileTo(source: File, target: Uri): Long {
+        val raw = runCatching { appContext.contentResolver.openOutputStream(target, "wt") }.getOrNull()
+            ?: appContext.contentResolver.openOutputStream(target, "w")
+            ?: throw IOException("cannot open destination")
+        var total = 0L
+        BufferedOutputStream(raw, 1 shl 16).use { out ->
+            FileInputStream(source).use { input ->
+                val buffer = ByteArray(1 shl 16)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    out.write(buffer, 0, n)
+                    total += n
+                }
+            }
+            out.flush()
+        }
+        return total
+    }
+
+    /** Грубая оценка размера копии сверху (база + файлы, без сжатия). */
+    fun estimateBytes(includeReceived: Boolean): Long {
+        var total = 0L
+        val db = appContext.getDatabasePath("messenger_database")
+        listOf("", "-wal").forEach { total += File(db.path + it).length() }
+        avatarDir().listFiles()?.forEach { if (it.isFile) total += it.length() }
+        previewDir().listFiles()?.forEach { if (it.isFile) total += it.length() }
+        if (includeReceived) total += listReceived().sumOf { it.second.length() }
+        return total
+    }
+
+    private fun create(password: CharArray, includeReceived: Boolean, open: () -> OutputStream?): CreateResult {
         if (password.size < BackupCipher.MIN_PASSWORD_LENGTH) return CreateResult.BadPassword
         val prefs = appContext.getSharedPreferences(MAIN_PREFS, Context.MODE_PRIVATE)
         if (!prefs.getBoolean("identity_created", false)) return CreateResult.NoIdentity
@@ -127,10 +173,7 @@ class ProfileBackup @Inject constructor(
                 receivedFiles = received.size,
                 receivedBytes = received.sumOf { it.second.length() },
             )
-            // «wt» = перезаписать с нуля; часть провайдеров документов понимает только «w».
-            val raw = runCatching { appContext.contentResolver.openOutputStream(target, "wt") }.getOrNull()
-                ?: appContext.contentResolver.openOutputStream(target, "w")
-                ?: return CreateResult.Failed("cannot open destination")
+            val raw = open() ?: return CreateResult.Failed("cannot open destination")
             val counting = CountingOutputStream(BufferedOutputStream(raw, 1 shl 16))
             ZipOutputStream(BackupCipher.encrypt(counting, password)).use { zip ->
                 // Архив внутри шифра: сжатие включено (текст базы и настроек ужимается заметно).
