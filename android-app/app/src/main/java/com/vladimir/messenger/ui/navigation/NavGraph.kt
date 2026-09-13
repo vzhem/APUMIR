@@ -45,6 +45,7 @@ import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
 import com.vladimir.messenger.ui.screens.contacts.RenameContactScreen
 import com.vladimir.messenger.ui.screens.settings.SettingsScreen
 import com.vladimir.messenger.ui.screens.settings.IdentityBackupScreen
+import com.vladimir.messenger.ui.screens.settings.ProfileBackupScreen
 import com.vladimir.messenger.ui.screens.settings.PeerRatingScreen
 import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
@@ -122,6 +123,8 @@ sealed class Screen(val route: String) {
     data object RankBenefits : Screen("rank_benefits")
     data object PeerRating : Screen("peer_rating")
     data object IdentityBackup : Screen("identity_backup")
+    /** Полная резервная копия профиля в файл и восстановление из него. */
+    data object ProfileBackup : Screen("profile_backup")
 
     // Избранное - личное хранилище абонента
     data object Saved : Screen("saved")
@@ -283,6 +286,7 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         composable(route = Screen.Onboarding.route) {
             OnboardingScreen(
+                onRestoreFromFile = { navController.navigate(Screen.ProfileBackup.route) },
                 onProfileCreated = {
                     // РџРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ РїСЂРѕС„РёР»СЏ в†’ РіР»Р°РІРЅС‹Р№ СЌРєСЂР°РЅ
                     // clearBackStack: РЅРµР»СЊР·СЏ РІРµСЂРЅСѓС‚СЊСЃСЏ РЅР°Р·Р°Рґ Рє РѕРЅР±РѕСЂРґРёРЅРіСѓ
@@ -468,6 +472,7 @@ fun MessengerNavGraph(
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
                 onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
                 onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
+                onProfileBackupClick = { navController.navigate(Screen.ProfileBackup.route) },
             )
         }
 
@@ -484,11 +489,15 @@ fun MessengerNavGraph(
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
                 onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
                 onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
+                onProfileBackupClick = { navController.navigate(Screen.ProfileBackup.route) },
             )
         }
 
         composable(route = Screen.IdentityBackup.route) {
             IdentityBackupScreen(onBackClick = { navController.popBackStack() })
+        }
+        composable(route = Screen.ProfileBackup.route) {
+            ProfileBackupScreen(onBackClick = { navController.popBackStack() })
         }
         composable(route = Screen.PeerRating.route) {
             PeerRatingScreen(onBackClick = { navController.popBackStack() })

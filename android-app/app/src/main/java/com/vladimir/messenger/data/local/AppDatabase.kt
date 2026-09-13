@@ -43,6 +43,13 @@ import com.vladimir.messenger.data.local.entity.PostSignerEntity
 import com.vladimir.messenger.data.local.dao.PostManifestDao
 import com.vladimir.messenger.data.local.dao.PostSignerDao
 
+/**
+ * Версия схемы. Вынесена в константу, потому что её сверяет резервная копия
+ * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
+ * миграции ниже доведут сами.
+ */
+const val APP_DATABASE_VERSION = 20
+
 @Database(
     entities = [
         MtProtoProxyEntity::class,
@@ -68,7 +75,7 @@ import com.vladimir.messenger.data.local.dao.PostSignerDao
         PostManifestEntity::class,
         PostSignerEntity::class,
     ],
-    version = 20,
+    version = APP_DATABASE_VERSION,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

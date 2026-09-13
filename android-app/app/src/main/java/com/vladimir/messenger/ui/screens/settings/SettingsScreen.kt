@@ -77,6 +77,8 @@ fun SettingsScreen(
     onPeerRatingClick: () -> Unit = {},
     /** Никнейм и пароль, которыми личность возвращается после переустановки. */
     onIdentityBackupClick: () -> Unit = {},
+    /** Полная копия профиля в файл (чаты, контакты, ключи) и восстановление из него. */
+    onProfileBackupClick: () -> Unit = {},
     /**
      * Открыть сразу профиль, а не список настроек.
      *
@@ -156,6 +158,7 @@ fun SettingsScreen(
                     onMtProxyClick = onMtProxyClick,
                     onPeerRatingClick = onPeerRatingClick,
                     onIdentityBackupClick = onIdentityBackupClick,
+                    onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
                 )
             }
@@ -606,6 +609,7 @@ private fun SettingsTabContent(
     onMtProxyClick: () -> Unit,
     onPeerRatingClick: () -> Unit = {},
     onIdentityBackupClick: () -> Unit = {},
+    onProfileBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
 ) {
     // Бегунок справа: видно, где мы в длинном списке.
@@ -745,6 +749,15 @@ private fun SettingsTabContent(
                         // строка честно говорит, защищён человек или нет.
                         subtitle = "Никнейм и пароль, чтобы вернуть себя после переустановки",
                         onClick  = onIdentityBackupClick,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsItem(
+                        icon     = Icons.Default.Save,
+                        title    = "Резервная копия",
+                        // «Защита личности» возвращает только адрес и имя; здесь -
+                        // всё: чаты, контакты, сообщества, ключи, ранг, настройки.
+                        subtitle = "Сохранить всё в файл и восстановить после переустановки",
+                        onClick  = onProfileBackupClick,
                     )
                 }
             }

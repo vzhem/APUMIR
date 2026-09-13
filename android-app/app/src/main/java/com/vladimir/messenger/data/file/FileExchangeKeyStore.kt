@@ -95,6 +95,23 @@ object FileExchangeKeyStore {
         return try { operation(secret) } finally { secret.fill(0) }
     }
 
+    /**
+     * Положить секрет из резервной копии, завернув его ключом Keystore ЭТОГО
+     * телефона. Прежний секрет (если был) заменяется: копия возвращает личность
+     * целиком, и ключ обмена файлами должен совпасть с привязкой, которую
+     * собеседники уже закрепили (иначе строгий TOFU отверг бы нас как самозванца).
+     */
+    @Synchronized
+    fun importSecret(context: Context, secret: ByteArray): Boolean = try {
+        require(secret.size == FileTransferKeyEnvelope.KEY_BYTES)
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val encoded = wrap(secret, ensureWrapKey())
+        check(encoded.length <= MAX_ENCODED_SECRET)
+        prefs.edit().putString(WRAPPED_SECRET, encoded).commit()
+    } catch (_: Exception) {
+        false
+    }
+
     @Synchronized
     fun mode(context: Context): Mode {
         val app = context.applicationContext

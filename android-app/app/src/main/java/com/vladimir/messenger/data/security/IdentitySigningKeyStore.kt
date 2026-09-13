@@ -156,6 +156,21 @@ object IdentitySigningKeyStore {
         }
     }
 
+    /**
+     * Положить seed из резервной копии, завернув его ключом Keystore ЭТОГО
+     * телефона. Прежний seed (если был) заменяется - вместе с ним копия несёт
+     * и привязку личности, подписанную именно этим seed.
+     */
+    @Synchronized
+    fun importSeed(context: Context, seed: ByteArray): Boolean = try {
+        require(seed.size == IdentitySigningSeedEnvelope.SEED_BYTES)
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val encoded = wrap(seed, ensureWrapKey())
+        prefs.edit().putString(PREF_WRAPPED_SEED, encoded).commit()
+    } catch (_: Exception) {
+        false
+    }
+
     /** Read-only diagnostic: never creates a Keystore key, seed, or prefs. */
     @Synchronized
     fun mode(context: Context): Mode {

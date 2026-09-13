@@ -44,6 +44,8 @@ import com.vladimir.messenger.util.QrCodeGenerator
 @Composable
 fun OnboardingScreen(
     onProfileCreated: () -> Unit,
+    /** Восстановление из файла резервной копии (полный профиль, не только личность). */
+    onRestoreFromFile: () -> Unit = {},
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -91,6 +93,7 @@ fun OnboardingScreen(
                             onRestoreModeChanged    = viewModel::onRestoreModeChanged,
                             onCreateClick           = viewModel::onCreateProfileClicked,
                             onRestoreClick          = viewModel::onRestoreClicked,
+                            onRestoreFromFile       = onRestoreFromFile,
                         )
                     OnboardingStep.Generating ->
                         GeneratingStep()
@@ -119,6 +122,7 @@ private fun EnterNameStep(
     onRestoreModeChanged: (Boolean) -> Unit,
     onCreateClick: () -> Unit,
     onRestoreClick: () -> Unit,
+    onRestoreFromFile: () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
     Column(
@@ -301,6 +305,25 @@ private fun EnterNameStep(
                 if (state.restoreMode) "Войти" else "Создать профиль",
                 style = MaterialTheme.typography.titleMedium,
             )
+        }
+
+        // Вход по никнейму возвращает только адрес и имя. Если человек делал
+        // полную резервную копию в файл - из неё вернётся всё: чаты, контакты,
+        // сообщества, ключи и ранг.
+        if (state.restoreMode) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedButton(
+                onClick  = onRestoreFromFile,
+                enabled  = !state.isLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape    = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Restore, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Восстановить из файла резервной копии")
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))

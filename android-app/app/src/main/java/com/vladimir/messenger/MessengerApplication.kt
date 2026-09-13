@@ -23,6 +23,11 @@ class MessengerApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Резервная копия, подготовленная к восстановлению, ложится на место
+        // здесь - до Room, сервисов и воркеров, пока базу никто не открыл.
+        if (com.vladimir.messenger.data.backup.ProfileBackup.applyStagedIfAny(applicationContext)) {
+            Log.i("MessengerApp", "Profile restored from backup on startup")
+        }
         // Must run before Room/services/workers can observe restored stale state.
         DeviceIdentityMarker.discardIfRestored(applicationContext)
         createNotificationChannels()
