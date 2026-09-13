@@ -94,7 +94,13 @@ object BackupCipher {
      */
     fun decrypt(input: InputStream, password: CharArray): InputStream {
         val header = ByteArray(HEADER_BYTES)
-        if (!readFully(input, header)) throw UnsupportedFormatException("file is too short to be an APU backup")
+        val complete = try {
+            readFully(input, header)
+        } catch (_: EOFException) {
+            false
+        }
+        // Короткий файл - не «обрезанная копия», а просто не наш файл.
+        if (!complete) throw UnsupportedFormatException("file is too short to be an APU backup")
         val buf = ByteBuffer.wrap(header)
         val magic = ByteArray(MAGIC.length).also { buf.get(it) }
         if (String(magic, Charsets.US_ASCII) != MAGIC) throw UnsupportedFormatException("not an APU backup file")

@@ -100,6 +100,9 @@ class BackupCipherTest {
             open("PK\u0003\u0004 this is a zip, not a backup, long enough header".toByteArray())
         }
         assertTrue(!error.newer)
+        // Короткий чужой файл - тоже «не наш», а не «обрезанный».
+        assertThrows(BackupCipher.UnsupportedFormatException::class.java) { open("hello".toByteArray()) }
+        assertThrows(BackupCipher.UnsupportedFormatException::class.java) { open(ByteArray(0)) }
     }
 
     @Test
