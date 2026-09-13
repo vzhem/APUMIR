@@ -146,7 +146,13 @@ class ProfileBackup @Inject constructor(
         return total
     }
 
-    private fun create(password: CharArray, includeReceived: Boolean, open: () -> OutputStream?): CreateResult {
+    /** Две копии разом (руками и по расписанию) делили бы один снимок базы - по очереди. */
+    private val createLock = Any()
+
+    private fun create(password: CharArray, includeReceived: Boolean, open: () -> OutputStream?): CreateResult =
+        synchronized(createLock) { createLocked(password, includeReceived, open) }
+
+    private fun createLocked(password: CharArray, includeReceived: Boolean, open: () -> OutputStream?): CreateResult {
         if (password.size < BackupCipher.MIN_PASSWORD_LENGTH) return CreateResult.BadPassword
         val prefs = appContext.getSharedPreferences(MAIN_PREFS, Context.MODE_PRIVATE)
         if (!prefs.getBoolean("identity_created", false)) return CreateResult.NoIdentity
@@ -427,6 +433,9 @@ class ProfileBackup @Inject constructor(
             }
             // Ключ ретрансляционного хранилища принадлежал старому телефону.
             app.getSharedPreferences("apu_relay_at_rest", Context.MODE_PRIVATE).edit().clear().commit()
+            // Автообновление копии смотрело в файл ПРЕЖНЕГО профиля этого
+            // телефона: другой профиль туда писать нельзя - выключаем с пояснением.
+            runCatching { BackupSchedule.resetAfterRestore(app) }
             listOf(
                 "apu_relay.sqlite", "apu_relay.sqlite-wal", "apu_relay.sqlite-shm",
                 "apu_relay.sqlite.relay.sqlite", "apu_relay.sqlite.relay.sqlite-wal", "apu_relay.sqlite.relay.sqlite-shm",

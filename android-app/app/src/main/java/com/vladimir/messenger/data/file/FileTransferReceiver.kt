@@ -58,6 +58,11 @@ class FileTransferReceiver(
         /** Подтверждение получателя хранимой у меня передаче (см. [FileCustodySender.onRecipientAck]). */
         val onRecipientAck: suspend (transferIdHex: String, from: String, contiguous: Long, status: Byte) -> Unit =
             { _, _, _, _ -> },
+        /** Инвентарь получателя хранимой у меня передаче (этап 8, см. [FileCustodySender.onRecipientWant]). */
+        val onRecipientWant: suspend (transferIdHex: String, from: String, contiguous: Long, seq: Long, ranges: List<LongRange>) -> Unit =
+            { _, _, _, _, _ -> },
+        /** Отправитель отпускает хранимую у меня копию (этап 8, см. [FileCustodySender.onOriginRelease]). */
+        val onOriginRelease: suspend (transferIdHex: String, from: String) -> Unit = { _, _ -> },
     )
 
     private class PendingItem {
@@ -76,6 +81,16 @@ class FileTransferReceiver(
      * отправителю (его окно двигают только обычные ACK).
      */
     private val directFromOrigin = HashSet<String>()
+    /** Номер последнего инвентаря по передаче (этап 8): строго растёт, даже если часы стоят. */
+    private val wantSeq = HashMap<String, Long>()
+    /** Когда инвентарь уходил в последний раз: не чаще [INVENTORY_INTERVAL_MS], кроме появления нового хранителя. */
+    private val inventorySentAt = HashMap<String, Long>()
+    /** transferId -> (хранитель -> когда от него последний раз пришёл кусок): кто из хранителей жив. */
+    private val holderSeenAt = HashMap<String, MutableMap<String, Long>>()
+    /** transferId -> (хранитель -> когда его последний раз просили о кусках): молчащий после просьбы - выбыл. */
+    private val holderAskedAt = HashMap<String, MutableMap<String, Long>>()
+    /** transferId -> хранитель, говоривший с нами последним: подтверждение идёт ему, остальным - реже. */
+    private val lastHolderHeard = HashMap<String, String>()
     private var pendingBytes = 0L
 
     /** Returns true when the text was a file packet (caller must not store it as chat text). */
@@ -198,6 +213,8 @@ class FileTransferReceiver(
                     handleCustodyChunk(senderId, transferIdHex, packet.itemIndex, payload)
                 FileTransferPacketCodec.Type.CUSTODY_ACK ->
                     handleCustodyAck(senderId, transferIdHex, packet.itemIndex, payload)
+                FileTransferPacketCodec.Type.CUSTODY_WANT ->
+                    handleCustodyWant(senderId, transferIdHex, packet.itemIndex, payload)
             }
         } finally {
             payload.fill(0)
@@ -239,6 +256,15 @@ class FileTransferReceiver(
             return
         }
         ackSink(transferIdHex, contiguousChunks)
+        // Получатель подтвердил весь файл - хранителям копии больше не нужны
+        // (этап 8: получатель старой версии подтверждает только одному из них,
+        // остальные иначе держали бы файл до срока). Id детерминирован: повтор
+        // итогового ACK повторит и это, сеть отсеет дубли.
+        if (contiguousChunks >= transfer.chunkCount) {
+            for (holder in FileCustodyPdu.holders(transfer.custodianNodeId)) {
+                sendCustodyAck(holder, transferIdHex, contiguousChunks, FileCustodyPdu.ACK_RELEASE, holderTag = holder)
+            }
+        }
     }
 
     private suspend fun handleOffer(senderId: String, chatId: String, payload: ByteArray) {
@@ -504,6 +530,11 @@ class FileTransferReceiver(
             }
             Log.i(TAG, "File transfer COMPLETE: $transferIdHex (${manifest.displayName})")
             directFromOrigin.remove(transferIdHex)
+            wantSeq.remove(transferIdHex)
+            inventorySentAt.remove(transferIdHex)
+            holderSeenAt.remove(transferIdHex)
+            holderAskedAt.remove(transferIdHex)
+            lastHolderHeard.remove(transferIdHex)
             notifier.onFileReceived(
                 chatId = fresh.chatId,
                 senderId = fresh.peerNodeId,
@@ -587,9 +618,34 @@ class FileTransferReceiver(
         // отправителю (он, скорее всего, не в сети - потому и хранитель)
         // уходит только итоговое, чтобы не забивать очередь ретранслятора
         // сотней мелких подтверждений.
-        if (transfer.direction == "INCOMING" && transfer.custodianNodeId.isNotBlank()) {
-            sendCustodyAck(transfer.custodianNodeId, transferIdHex, contiguousChunks, FileCustodyPdu.ACK_OK)
-            if (contiguousChunks < transfer.chunkCount && transferIdHex !in directFromOrigin) return
+        val holders = if (transfer.direction == "INCOMING") FileCustodyPdu.holders(transfer.custodianNodeId) else emptyList()
+        if (holders.isNotEmpty()) {
+            // Этап 8: несколько хранителей - каждому свой список недостающего,
+            // чтобы они не слали одно и то же. Инвентарь идёт ПЕРЕД
+            // подтверждением: получив подтверждение, хранитель сразу шлёт
+            // окно, и оно должно быть уже по инвентарю. С одним хранителем
+            // инвентарь не нужен: он и так идёт от подтверждённого префикса.
+            val complete = contiguousChunks >= transfer.chunkCount
+            var inventoryNow = false
+            if (holders.size > 1 && !complete) {
+                val now = nowMs()
+                val last = inventorySentAt[transferIdHex]
+                if (last == null || now - last >= INVENTORY_INTERVAL_MS) {
+                    inventorySentAt[transferIdHex] = now
+                    inventoryNow = true
+                    sendInventory(transfer, holders, contiguousChunks)
+                }
+            }
+            // Подтверждение на каждый кусок - тому, кто его прислал (им он
+            // отмеряет следующую порцию); остальным - вместе с инвентарём и
+            // по завершении, чтобы не удваивать мелкие пакеты в очереди.
+            val from = lastHolderHeard[transferIdHex]
+            for (holder in holders) {
+                if (complete || inventoryNow || from == null || holder == from) {
+                    sendCustodyAck(holder, transferIdHex, contiguousChunks, FileCustodyPdu.ACK_OK, holderTag = holder)
+                }
+            }
+            if (!complete && transferIdHex !in directFromOrigin) return
         }
         runCatching {
             val packet = FileTransferPacketCodec.encode(
@@ -637,9 +693,11 @@ class FileTransferReceiver(
         val originId = custodyOffer.originId
         val now = nowMs()
         val me = identity.myNodeId() ?: return
+        // Метка хранителя в id: с двумя хранителями одинаковые ответы разным
+        // адресатам иначе слились бы для сети в один.
         suspend fun refuse(reason: String) {
             Log.w(TAG, "Forwarded file offer $transferIdHex via ${custodianId.takeLast(8)} refused: $reason")
-            sendCustodyAck(custodianId, transferIdHex, 0L, FileCustodyPdu.ACK_REFUSED)
+            sendCustodyAck(custodianId, transferIdHex, 0L, FileCustodyPdu.ACK_REFUSED, holderTag = custodianId)
         }
         if (manifest.fileSize > Long.MAX_VALUE.toULong() || manifest.chunkCount > Long.MAX_VALUE.toULong()) {
             refuse("geometry"); return
@@ -664,7 +722,7 @@ class FileTransferReceiver(
         }
         if (existing?.state == "COMPLETE") {
             // Уже всё есть: хранителю достаточно знать, что можно удалять.
-            sendCustodyAck(custodianId, transferIdHex, existing.chunkCount, FileCustodyPdu.ACK_OK)
+            sendCustodyAck(custodianId, transferIdHex, existing.chunkCount, FileCustodyPdu.ACK_OK, holderTag = custodianId)
             return
         }
         // Чужой файл от не-контакта не принимаем - и ключ чужака не
@@ -679,11 +737,23 @@ class FileTransferReceiver(
             refuse("pinned exchange key changed for $originId (${pinError.message})"); return
         }
         if (existing == null && insertIncomingTransfer(manifest, originId, chatId, now) == null) return
-        transferDao.setCustodian(transferIdHex, custodianId, now)
+        // Несколько хранителей (этап 8): каждый, кто представился, - в список;
+        // подтверждения и инвентарь пойдут всем (не больше MAX_HOLDERS).
+        val knownHolders = FileCustodyPdu.holders(existing?.custodianNodeId ?: "")
+        if (custodianId !in knownHolders) {
+            if (knownHolders.size >= FileCustodyPdu.MAX_HOLDERS) {
+                Log.i(TAG, "Forwarded offer for $transferIdHex from ${custodianId.takeLast(8)}: enough holders already")
+                sendCustodyAck(custodianId, transferIdHex, 0L, FileCustodyPdu.ACK_REFUSED, holderTag = custodianId)
+                return
+            }
+            transferDao.setCustodian(transferIdHex, FileCustodyPdu.joinHolders(knownHolders + custodianId), now)
+            inventorySentAt.remove(transferIdHex) // новый хранитель - инвентарь всем сразу
+        }
+        lastHolderHeard[transferIdHex] = custodianId // ответ на предложение - тому, кто его прислал
         Log.i(
             TAG,
             "Forwarded file offer accepted: $transferIdHex from ${originId.takeLast(8)} " +
-                "via ${custodianId.takeLast(8)} (${manifest.displayName}, ${manifest.fileSize} B)",
+                "via ${custodianId.takeLast(8)} (${manifest.displayName}, ${manifest.fileSize} B; holders=${knownHolders.size + 1})",
         )
         chunkStore.storeManifest(transferIdHex, custodyOffer.manifest)
         chunkStore.storeKeyEnvelope(transferIdHex, custodyOffer.keyEnvelope)
@@ -829,11 +899,13 @@ class FileTransferReceiver(
                 ingestCustodyChunk(transferIdHex, chunkIndex, ciphertext)
             }
             "INCOMING" -> {
-                if (transfer.custodianNodeId != senderId) {
+                if (senderId !in FileCustodyPdu.holders(transfer.custodianNodeId)) {
                     // Хранитель ещё не представился предложением (или это не он).
                     Log.w(TAG, "Forwarded chunk for $transferIdHex from unexpected ${senderId.takeLast(8)}; dropped")
                     return
                 }
+                holderSeenAt.getOrPut(transferIdHex) { HashMap<String, Long>() }[senderId] = nowMs()
+                lastHolderHeard[transferIdHex] = senderId
                 ingestChunkCiphertext(transferIdHex, chunkIndex, ciphertext)
             }
             else -> Log.w(TAG, "Custody chunk for own outgoing $transferIdHex; dropped")
@@ -921,15 +993,25 @@ class FileTransferReceiver(
             return
         }
         when (transfer.direction) {
-            "OUTGOING" -> custody.onCustodianAck(transferIdHex, senderId, contiguousChunks, status)
-            "CUSTODY" -> if (transfer.peerNodeId == senderId) {
+            "OUTGOING" -> if (status != FileCustodyPdu.ACK_RELEASE) {
+                custody.onCustodianAck(transferIdHex, senderId, contiguousChunks, status)
+            }
+            "CUSTODY" -> if (status == FileCustodyPdu.ACK_RELEASE) {
+                if (transfer.originNodeId == senderId) custody.onOriginRelease(transferIdHex, senderId)
+            } else if (transfer.peerNodeId == senderId) {
                 custody.onRecipientAck(transferIdHex, senderId, contiguousChunks, status)
             }
             else -> Log.w(TAG, "Custody ACK for incoming $transferIdHex from ${senderId.takeLast(8)}; dropped")
         }
     }
 
-    private suspend fun sendCustodyAck(to: String, transferIdHex: String, contiguousChunks: Long, status: Byte) {
+    private suspend fun sendCustodyAck(
+        to: String,
+        transferIdHex: String,
+        contiguousChunks: Long,
+        status: Byte,
+        holderTag: String? = null,
+    ) {
         val me = identity.myNodeId() ?: return
         runCatching {
             val packet = FileTransferPacketCodec.encode(
@@ -943,7 +1025,7 @@ class FileTransferReceiver(
                 )
             )
             transport.send(
-                FileTransferWire.custodyAckMessageId(transferIdHex, me, contiguousChunks),
+                FileTransferWire.custodyAckMessageId(transferIdHex, me, contiguousChunks, holderTag),
                 FileTransferChatRouting.CUSTODY_SCOPE,
                 to,
                 FileTransferWire.encodeEncodedPacket(packet),
@@ -951,6 +1033,88 @@ class FileTransferReceiver(
         }.onFailure { error ->
             Log.w(TAG, "Custody ACK send failed for $transferIdHex: ${error.message}")
         }
+    }
+
+    /**
+     * Инвентарь недостающего каждому хранителю (этап 8): недостающие куски
+     * делятся полосами ([FileCustodyPdu.stripe]) между хранителями в порядке
+     * их появления; хранитель старой версии тип не знает и продолжает слать
+     * от префикса - лишнего от этого не станет, только дубли.
+     */
+    private suspend fun sendInventory(transfer: FileTransferEntity, holders: List<String>, contiguousChunks: Long) {
+        val me = identity.myNodeId() ?: return
+        val transferIdHex = transfer.transferId
+        val have = chunkStore.storedChunkIndices(transferIdHex).toHashSet()
+        val missing = ArrayList<Long>()
+        var index = contiguousChunks
+        while (index < transfer.chunkCount && missing.size < MAX_INVENTORY_CHUNKS) {
+            if (index !in have) missing += index
+            index++
+        }
+        if (missing.isEmpty()) return
+        val now = nowMs()
+        val first = wantSeq[transferIdHex] == null
+        val seq = maxOf(now, (wantSeq[transferIdHex] ?: -1L) + 1)
+        wantSeq[transferIdHex] = seq
+        // Делят живые хранители: от кого куски шли недавно или кого ещё не
+        // просили. Замолчавший (ушёл из сети) из дележа выпадает, его куски
+        // достаются остальным; вернётся - следующий инвентарь учтёт.
+        val seen = holderSeenAt[transferIdHex].orEmpty()
+        val asked = holderAskedAt.getOrPut(transferIdHex) { HashMap<String, Long>() }
+        val active = holders.indices.filter { position ->
+            val holder = holders[position]
+            val askedAt = asked[holder] ?: return@filter true // ещё не просили - пусть попробует
+            now - maxOf(askedAt, seen[holder] ?: 0L) < HOLDER_STALE_MS
+        }
+        // Первый инвентарь: первый хранитель уже получил подтверждение и шлёт
+        // окно от префикса - его не делим, иначе второй пришлёт то же самое.
+        val reservedEnd = if (first) contiguousChunks + FileCustodySender.windowChunks(transfer.chunkSize) else 0L
+        val stripes = FileCustodyPdu.assign(missing.toLongArray(), holders.size, active, reservedFor = 0, reservedEnd = reservedEnd)
+        for ((position, holder) in holders.withIndex()) {
+            val ranges = FileCustodyPdu.compressRanges(stripes[position])
+            if (ranges.isNotEmpty()) asked[holder] = now
+            runCatching {
+                val packet = FileTransferPacketCodec.encode(
+                    FileTransferPacketCodec.Packet(
+                        FileTransferPacketCodec.Type.CUSTODY_WANT,
+                        hexToBytes(transferIdHex),
+                        contiguousChunks,
+                        0,
+                        1,
+                        FileCustodyPdu.encodeWant(seq, ranges),
+                    )
+                )
+                transport.send(
+                    FileTransferWire.custodyWantMessageId(transferIdHex, me, holder, seq),
+                    FileTransferChatRouting.CUSTODY_SCOPE,
+                    holder,
+                    FileTransferWire.encodeEncodedPacket(packet),
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "Custody WANT send failed for $transferIdHex: ${error.message}")
+            }
+        }
+    }
+
+    /** Получатель хранимой у меня передачи прислал инвентарь (этап 8). */
+    private suspend fun handleCustodyWant(
+        senderId: String,
+        transferIdHex: String,
+        contiguousChunks: Long,
+        payload: ByteArray,
+    ) {
+        val want = runCatching { FileCustodyPdu.decodeWant(payload) }.getOrNull()
+        if (want == null) {
+            Log.w(TAG, "Malformed custody WANT payload for $transferIdHex; dropped")
+            return
+        }
+        val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        if (transfer.direction != "CUSTODY" || transfer.peerNodeId != senderId) {
+            Log.w(TAG, "Custody WANT for $transferIdHex from ${senderId.takeLast(8)} is not for a held transfer; dropped")
+            return
+        }
+        if (contiguousChunks !in 0L..transfer.chunkCount) return
+        custody.onRecipientWant(transferIdHex, senderId, contiguousChunks, want.seq, want.ranges)
     }
 
     private suspend fun insertIncomingTransfer(
@@ -1022,5 +1186,11 @@ class FileTransferReceiver(
         const val MAX_BUFFERED_TRANSFERS = 32
         const val MAX_BUFFERED_CHUNKS = 64
         const val MAX_BUFFERED_CHUNK_BYTES = 16L * 1024 * 1024
+        /** Инвентарь (этап 8) охватывает не больше стольких недостающих кусков за раз. */
+        const val MAX_INVENTORY_CHUNKS = 4096
+        /** Инвентарь хранителям - не чаще, чем раз в столько (подтверждения идут и так на каждый кусок). */
+        const val INVENTORY_INTERVAL_MS = 10_000L
+        /** Хранитель, от которого столько не было кусков (а просили), в дележе не участвует. */
+        const val HOLDER_STALE_MS = 45_000L
     }
 }

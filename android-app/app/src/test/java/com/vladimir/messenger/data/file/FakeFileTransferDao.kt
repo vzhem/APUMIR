@@ -108,6 +108,9 @@ class FakeFileTransferDao : FileTransferDao {
     override suspend fun getWaitingRecipient(): List<FileTransferEntity> =
         transfers.values.filter { it.direction == "OUTGOING" && it.state == "WAITING_RECIPIENT" }
 
+    override suspend fun getCustodied(nowMs: Long): List<FileTransferEntity> =
+        transfers.values.filter { it.direction == "OUTGOING" && it.state == "CUSTODIED" && it.expiresAtMs > nowMs }
+
     override suspend fun resumeAllWaitingRecipient(nowMs: Long): Int {
         var n = 0
         transfers.replaceAll { _, e ->

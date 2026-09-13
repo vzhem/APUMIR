@@ -35,6 +35,13 @@ object FileCustodyPdu {
     const val ACK_REFUSED: Byte = 2
     /** У хранителя нет места под пересылку - отправитель идёт к следующему. */
     const val ACK_FULL: Byte = 3
+    /**
+     * Отправитель → хранителю (этап 8): получатель подтвердил весь файл,
+     * копию можно удалить. Нужен, когда получатель старой версии подтверждает
+     * только одному из хранителей. Хранитель до v11.70.18 байт не знает и
+     * отбрасывает пакет как мусор - тогда копия живёт до срока, как раньше.
+     */
+    const val ACK_RELEASE: Byte = 4
 
     data class Custody(
         val originId: String,
@@ -105,7 +112,148 @@ object FileCustodyPdu {
     /** Один байт статуса подтверждения; всё остальное - мусор. */
     fun ackStatus(payload: ByteArray): Byte? {
         if (payload.size != 1) return null
-        return payload[0].takeIf { it == ACK_OK || it == ACK_REFUSED || it == ACK_FULL }
+        return payload[0].takeIf { it == ACK_OK || it == ACK_REFUSED || it == ACK_FULL || it == ACK_RELEASE }
+    }
+
+    // ── Несколько хранителей одного файла (этап 8) ───────────────────────────
+    // Колонка custodianNodeId хранит их через запятую в порядке появления:
+    // у отправителя - кому отдал копии, у получателя - от кого пришли
+    // предложения. Старые строки с одним адресом читаются как список из одного.
+
+    const val MAX_HOLDERS = 4
+
+    fun holders(column: String): List<String> =
+        if (column.isBlank()) emptyList() else column.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
+    fun joinHolders(holders: Collection<String>): String = holders.distinct().joinToString(",")
+
+    // ── CUSTODY_WANT: инвентарь недостающего ─────────────────────────────────
+    // ver(1)=1 | seq(8) | n(1) ≤ 96 | n × (start u64, len u32); диапазоны по
+    // возрастанию, без пересечений и касаний. Пустой список - «пока ничего не
+    // шли» (эти куски просят у других хранителей). seq - время отправки в мс:
+    // растёт и после перезапуска приложения; хранитель отбрасывает инвентарь
+    // не новее уже полученного.
+
+    const val WANT_VERSION: Byte = 1
+    const val MAX_WANT_RANGES = 96
+    private const val WANT_HEADER_BYTES = 1 + 8 + 1
+    private const val WANT_RANGE_BYTES = 8 + 4
+
+    data class Want(val seq: Long, val ranges: List<LongRange>)
+
+    fun maxWantBytes(): Int = WANT_HEADER_BYTES + MAX_WANT_RANGES * WANT_RANGE_BYTES
+
+    fun encodeWant(seq: Long, ranges: List<LongRange>): ByteArray {
+        require(seq >= 0) { "Want seq out of range" }
+        require(ranges.size <= MAX_WANT_RANGES) { "Too many want ranges" }
+        var previousLast = -1L
+        for (range in ranges) {
+            require(range.first >= 0 && range.last >= range.first) { "Malformed want range" }
+            require(previousLast < 0 || range.first > previousLast + 1) { "Want ranges must be sorted and disjoint" }
+            require(range.last - range.first < 0xffff_ffffL) { "Want range too long" }
+            previousLast = range.last
+        }
+        val buffer = ByteBuffer.allocate(WANT_HEADER_BYTES + ranges.size * WANT_RANGE_BYTES).order(ByteOrder.BIG_ENDIAN)
+        buffer.put(WANT_VERSION).putLong(seq).put(ranges.size.toByte())
+        for (range in ranges) {
+            buffer.putLong(range.first)
+            buffer.putInt((range.last - range.first + 1).toInt())
+        }
+        return buffer.array()
+    }
+
+    fun decodeWant(bytes: ByteArray): Want {
+        require(bytes.size >= WANT_HEADER_BYTES && bytes.size <= maxWantBytes()) { "Invalid want size" }
+        val input = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
+        require(input.get() == WANT_VERSION) { "Unsupported want version" }
+        val seq = input.long
+        require(seq >= 0) { "Want seq out of range" }
+        val count = input.get().toInt() and 0xff
+        require(count <= MAX_WANT_RANGES) { "Too many want ranges" }
+        require(bytes.size == WANT_HEADER_BYTES + count * WANT_RANGE_BYTES) { "Want size mismatch" }
+        val ranges = ArrayList<LongRange>(count)
+        var previousLast = -1L
+        repeat(count) {
+            val start = input.long
+            val length = input.int.toLong() and 0xffff_ffffL
+            require(start >= 0 && length >= 1) { "Malformed want range" }
+            require(previousLast < 0 || start > previousLast + 1) { "Want ranges must be sorted and disjoint" }
+            require(start <= Long.MAX_VALUE - length) { "Want range overflow" }
+            val last = start + length - 1
+            ranges += start..last
+            previousLast = last
+        }
+        return Want(seq, ranges)
+    }
+
+    /**
+     * Делёж недостающих кусков между хранителями (этап 8).
+     *
+     * Полосами по [STRIPE] кусков по кругу - по НОМЕРУ куска, а не по месту
+     * в списке, чтобы при следующем инвентаре (недостающих стало меньше)
+     * каждый кусок остался за тем же хранителем. Делят только [active]
+     * хранители (от кого куски приходят или кого ещё не просили); пустой
+     * [active] - делят все. Куски до [reservedEnd] отдаются хранителю
+     * [reservedFor] без дележа: это его окно «от префикса», которое уже в
+     * пути (первый инвентарь уходит, когда первый хранитель уже получил
+     * подтверждение и шлёт). [missing] - по возрастанию.
+     * @return для каждого хранителя (по порядку) его куски.
+     */
+    fun assign(
+        missing: LongArray,
+        holderCount: Int,
+        active: List<Int>,
+        reservedFor: Int = -1,
+        reservedEnd: Long = 0L,
+    ): List<LongArray> {
+        require(holderCount >= 1) { "Bad holder count" }
+        val pool = active.filter { it in 0 until holderCount }.distinct().sorted().ifEmpty { (0 until holderCount).toList() }
+        val buckets = List(holderCount) { ArrayList<Long>() }
+        val reserve = reservedFor in 0 until holderCount
+        for (index in missing) {
+            if (reserve && index < reservedEnd) {
+                buckets[reservedFor] += index
+            } else {
+                buckets[pool[((index / STRIPE) % pool.size).toInt()]] += index
+            }
+        }
+        return buckets.map { it.toLongArray() }
+    }
+
+    const val STRIPE = 8
+
+    /** Отсортированные номера кусков → диапазоны; лишние (сверх [maxRanges]) отбрасываются с конца. */
+    fun compressRanges(sortedIndices: LongArray, maxRanges: Int = MAX_WANT_RANGES): List<LongRange> {
+        val out = ArrayList<LongRange>()
+        var start = -1L
+        var last = -1L
+        for (index in sortedIndices) {
+            if (start < 0) {
+                start = index; last = index
+            } else if (index == last + 1) {
+                last = index
+            } else {
+                if (out.size == maxRanges) return out
+                out += start..last
+                start = index; last = index
+            }
+        }
+        if (start >= 0 && out.size < maxRanges) out += start..last
+        return out
+    }
+
+    /** Диапазоны → номера кусков в пределах [0, chunkCount), не больше [limit] штук. */
+    fun expandRanges(ranges: List<LongRange>, chunkCount: Long, limit: Int): LongArray {
+        val out = ArrayList<Long>()
+        for (range in ranges) {
+            var index = maxOf(0L, range.first)
+            while (index <= range.last && index < chunkCount) {
+                if (out.size >= limit) return out.toLongArray()
+                out += index
+                index++
+            }
+        }
+        return out.toLongArray()
     }
 
     private fun nodeIdBytes(nodeId: String): ByteArray {

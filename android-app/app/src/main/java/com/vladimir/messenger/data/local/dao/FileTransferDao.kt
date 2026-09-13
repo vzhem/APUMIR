@@ -102,6 +102,10 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE direction = 'OUTGOING' AND state = 'WAITING_RECIPIENT'")
     suspend fun getWaitingRecipient(): List<FileTransferEntity>
 
+    /** Уже у хранителя (одного или нескольких), получатель ещё не подтвердил: можно добавить копию (этап 8). */
+    @Query("SELECT * FROM file_transfers WHERE direction = 'OUTGOING' AND state = 'CUSTODIED' AND expiresAtMs > :nowMs")
+    suspend fun getCustodied(nowMs: Long): List<FileTransferEntity>
+
     @Query(
         """
         UPDATE file_transfers

@@ -154,7 +154,7 @@ object BackupSchedule {
         }
 
         // Прежний файл (если был другой) больше не наш - отпускаем право на него.
-        val previous = target(app)
+        val previous = targetUri(app)
         if (previous != null && previous != target) releaseQuietly(app, previous)
 
         val ok = prefs(app).edit()
@@ -195,7 +195,7 @@ object BackupSchedule {
         runCatching {
             WorkManager.getInstance(app).cancelUniqueWork(WORK_NAME)
         }.onFailure { Log.w(TAG, "cancel failed: ${it.message}") }
-        target(app)?.let { releaseQuietly(app, it) }
+        targetUri(app)?.let { releaseQuietly(app, it) }
         prefs(app).edit().clear().commit()
         Log.i(TAG, "auto backup disabled")
     }
@@ -217,7 +217,7 @@ object BackupSchedule {
     // Для задачи
     // ─────────────────────────────────────────────────────────────────────
 
-    fun target(context: Context): Uri? =
+    fun targetUri(context: Context): Uri? =
         prefs(context).getString(KEY_TARGET_URI, null)?.let { runCatching { Uri.parse(it) }.getOrNull() }
 
     fun boundNodeId(context: Context): String? = prefs(context).getString(KEY_NODE_ID, null)
@@ -256,11 +256,25 @@ object BackupSchedule {
         prefs(context).edit().putString(KEY_LAST_ERROR, error.take(300)).commit()
     }
 
+    /**
+     * После восстановления профиля из копии: расписание смотрело в файл
+     * ПРЕЖНЕГО профиля этого телефона, другой профиль туда писать нельзя.
+     * Вызывается из `ProfileBackup.applyStagedIfAny` при старте приложения.
+     */
+    fun resetAfterRestore(context: Context) {
+        val app = context.applicationContext
+        runCatching { WorkManager.getInstance(app).cancelUniqueWork(WORK_NAME) }
+        targetUri(app)?.let { releaseQuietly(app, it) }
+        prefs(app).edit().clear()
+            .putString(KEY_LAST_ERROR, "профиль восстановлен из копии — включите обновление заново для нового файла")
+            .commit()
+    }
+
     /** Остановить расписание, оставив на экране причину (например, сменился профиль). */
     fun disableWithError(context: Context, error: String) {
         val app = context.applicationContext
         runCatching { WorkManager.getInstance(app).cancelUniqueWork(WORK_NAME) }
-        target(app)?.let { releaseQuietly(app, it) }
+        targetUri(app)?.let { releaseQuietly(app, it) }
         prefs(app).edit()
             .putBoolean(KEY_ENABLED, false)
             .remove(KEY_TARGET_URI)

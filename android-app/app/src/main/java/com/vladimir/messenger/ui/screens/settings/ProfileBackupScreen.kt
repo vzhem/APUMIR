@@ -338,7 +338,8 @@ fun ProfileBackupScreen(
                 // Автообновление: показываем, когда есть что обновлять - только что
                 // сохранённый файл или уже включённое расписание.
                 val schedule = state.schedule
-                if (state.hasIdentity && (state.lastSaved != null || schedule?.enabled == true || schedule?.lastError != null)) item {
+                val scheduleError = schedule?.lastError
+                if (state.hasIdentity && (state.lastSaved != null || (schedule != null && schedule.enabled) || scheduleError != null)) item {
                     Card(
                         shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(
@@ -352,7 +353,7 @@ fun ProfileBackupScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(4.dp))
-                            if (schedule?.enabled == true) {
+                            if (schedule != null && schedule.enabled) {
                                 val fmt = SimpleDateFormat("d MMMM, HH:mm", Locale.forLanguageTag("ru"))
                                 Text(
                                     "Файл: ${schedule.targetName}\n" +
@@ -365,9 +366,9 @@ fun ProfileBackupScreen(
                                             "\nПервое обновление - примерно через ${schedule.period.days} дн. после включения"
                                         }) +
                                         (if (schedule.nextDueAtMs > 0) "\nСледующее: около ${fmt.format(Date(schedule.nextDueAtMs))}" else "") +
-                                        (schedule.lastError?.let { "\nПоследняя попытка не удалась: $it" } ?: ""),
+                                        (scheduleError?.let { "\nПоследняя попытка не удалась: $it" } ?: ""),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (schedule.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = if (scheduleError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 Spacer(Modifier.height(10.dp))
                                 PeriodChooser(
@@ -387,9 +388,9 @@ fun ProfileBackupScreen(
                                     TextButton(onClick = viewModel::disableAutoUpdate, enabled = !state.busy) { Text("Выключить") }
                                 }
                             } else {
-                                if (schedule?.lastError != null) {
+                                if (scheduleError != null) {
                                     Text(
-                                        "Автообновление остановлено: ${schedule.lastError}",
+                                        "Автообновление остановлено: $scheduleError",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.error,
                                     )

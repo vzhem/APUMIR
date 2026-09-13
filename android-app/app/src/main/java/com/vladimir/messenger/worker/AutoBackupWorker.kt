@@ -57,7 +57,7 @@ class AutoBackupWorker(
             Log.i(TAG, "auto backup: disabled, nothing to do")
             return@withContext Result.success()
         }
-        val target = BackupSchedule.target(app)
+        val target = BackupSchedule.targetUri(app)
         if (target == null) {
             stop(app, "файл копии не задан — сохраните копию заново и включите обновление")
             return@withContext Result.success()
@@ -127,7 +127,7 @@ class AutoBackupWorker(
             Log.i(TAG, "auto backup: updated, $bytes bytes, period=${state.period.name}")
             Result.success()
         } finally {
-            password.fill(0.toChar())
+            password.fill('\u0000')
         }
     }
 

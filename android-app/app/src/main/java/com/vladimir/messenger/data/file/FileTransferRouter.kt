@@ -196,6 +196,10 @@ class FileTransferRouter @Inject constructor(
                 onRecipientAck = { transferIdHex, from, contiguous, status ->
                     custodyLocal.onRecipientAck(transferIdHex, from, contiguous, status)
                 },
+                onRecipientWant = { transferIdHex, from, contiguous, seq, ranges ->
+                    custodyLocal.onRecipientWant(transferIdHex, from, contiguous, seq, ranges)
+                },
+                onOriginRelease = { transferIdHex, from -> custodyLocal.onOriginRelease(transferIdHex, from) },
             ),
         )
         // LAN server starts only after sender/receiver exist: an early incoming

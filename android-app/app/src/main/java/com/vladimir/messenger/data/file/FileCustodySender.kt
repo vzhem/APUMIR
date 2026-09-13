@@ -47,6 +47,16 @@ import kotlinx.coroutines.sync.withLock
  * полмегабайта кусков. Дальше - окно от подтверждённого префикса; новое окно
  * уходит, когда подтверждён конец предыдущего, либо по таймеру
  * [REPUMP_INTERVAL_MS] (потери), а не на каждое подтверждение.
+ *
+ * Несколько хранителей (этап 8). Файл, который лежит у одного телефона,
+ * пропадает вместе с ним; поэтому отправитель, пока сам в сети, раздаёт
+ * копии до [TARGET_HOLDERS] хранителям (по одному за раз, следующего - когда
+ * предыдущий подтвердил всё; список - в `custodianNodeId` через запятую,
+ * [FileCustodyPdu.holders]). Получатель, увидев предложения от нескольких,
+ * шлёт каждому инвентарь недостающего ([FileTransferPacketCodec.Type.CUSTODY_WANT]):
+ * «есть N подряд, пришли вот эти» - и хранители отдают разные куски, а не
+ * один и тот же. Хранитель без инвентаря (старая версия получателя или пакет
+ * потерялся) шлёт по-старому, от подтверждённого префикса.
  */
 class FileCustodySender(
     private val transferDao: FileTransferDao,
@@ -72,9 +82,16 @@ class FileCustodySender(
         @Volatile var lastPumpAtMs: Long = 0L
         @Volatile var sentUpTo: Long = 0L
         @Volatile var pumps: Int = 0
+        /** Инвентарь получателя (этап 8): какие куски он просит именно у меня; null - шлём от префикса. */
+        @Volatile var wanted: LongArray? = null
+        /** Номер последнего инвентаря - старый, пришедший позже, игнорируем. */
+        @Volatile var wantSeq: Long = -1L
+        /** Конец последнего окна «от префикса» и когда оно ушло: инвентарь сразу следом не должен просить это заново. */
+        @Volatile var plainWindowEnd: Long = 0L
+        @Volatile var plainWindowAtMs: Long = 0L
     }
 
-    private class Window(val sent: Int, val end: Long)
+    private class Window(val sent: Int, val end: Long, val remainingWanted: LongArray? = null)
 
     data class Summary(val originPumped: Int, val forwarded: Int, val packets: Int)
 
@@ -97,7 +114,9 @@ class FileCustodySender(
         val me = myNodeId() ?: return Summary(0, 0, 0)
         var pumped = 0
         var packets = 0
-        val waiting = transferDao.getWaitingRecipient()
+        // Ждущие получателя и уже отданные одному хранителю (им можно добавить
+        // второго, пока отправитель в сети).
+        val waiting = transferDao.getWaitingRecipient() + transferDao.getCustodied(now)
         // Попытки по передачам, которых больше нет (отменены, доставлены,
         // истекли) - забыть; временно ушедшие в TRANSFERRING по пульсу
         // контакта остаются, они вернутся.
@@ -116,9 +135,11 @@ class FileCustodySender(
         for (transfer in waiting) {
             if (transfer.expiresAtMs <= now) continue
             if (transfer.chunkCount <= 0L) continue
-            // Уже лежит у хранителя: второго не ищем (прямые повторы делает
-            // обычный передатчик, см. resumeStaleCustodied).
-            if (transfer.custodianNodeId.isNotBlank()) continue
+            // Уже лежит у хранителей в нужном числе - хватит (прямые повторы
+            // делает обычный передатчик, см. resumeStaleCustodied). Меньше -
+            // пока сами в сети, раздаём ещё по одной копии за раз.
+            val holders = FileCustodyPdu.holders(transfer.custodianNodeId)
+            if (holders.size >= TARGET_HOLDERS) continue
             // От создания, а не от последнего изменения: каждый пульс любого
             // контакта будит ожидающие передачи и обновляет updatedAtMs, так
             // что «две минуты тишины» иначе не наступили бы никогда.
@@ -143,7 +164,7 @@ class FileCustodySender(
             }
             val blocked = rejectedUntil[id].orEmpty().filterValues { it > now }.keys
             val candidate = candidates(transfer.peerNodeId, transfer.totalBytes)
-                .firstOrNull { it != transfer.peerNodeId && it != me && it !in blocked }
+                .firstOrNull { it != transfer.peerNodeId && it != me && it !in blocked && it !in holders }
                 ?: continue
             val fresh = Leg(candidate, now)
             attempts[id] = fresh
@@ -170,14 +191,16 @@ class FileCustodySender(
                     leg.lastAckAtMs = now
                     if (contiguous > leg.acked) leg.acked = contiguous
                     if (contiguous >= transfer.chunkCount) {
-                        transferDao.setCustodian(transferIdHex, from, now)
+                        val holders = FileCustodyPdu.holders(transfer.custodianNodeId) + from
+                        transferDao.setCustodian(transferIdHex, FileCustodyPdu.joinHolders(holders), now)
                         if (transfer.state == "WAITING_RECIPIENT") {
                             advance(transfer, "CUSTODIED")
                         }
                         attempts.remove(transferIdHex)
-                        rejectedUntil.remove(transferIdHex)
-                        Log.i(TAG, "custody: $transferIdHex fully held by ${from.takeLast(8)}")
-                    } else if (transfer.state == "WAITING_RECIPIENT" && contiguous >= leg.sentUpTo) {
+                        // Отказы прошлых кандидатов остаются в силе (их не
+                        // спрашиваем повторно для следующей копии).
+                        Log.i(TAG, "custody: $transferIdHex fully held by ${from.takeLast(8)} (${holders.distinct().size} holder(s))")
+                    } else if (transfer.state in setOf("WAITING_RECIPIENT", "CUSTODIED") && contiguous >= leg.sentUpTo) {
                         // Конец окна подтверждён - следующее окно сразу, не
                         // дожидаясь насоса.
                         val me = myNodeId() ?: return
@@ -245,6 +268,47 @@ class FileCustodySender(
         return Summary(0, forwarded, packets)
     }
 
+    /**
+     * Инвентарь получателя (этап 8): что именно он хочет от меня. Пустой
+     * список - «пока ничего»: у него есть другие хранители на эти куски.
+     */
+    suspend fun onRecipientWant(transferIdHex: String, from: String, contiguous: Long, seq: Long, ranges: List<LongRange>) {
+        mutex.withLock {
+            val row = transferDao.getTransfer(transferIdHex) ?: return
+            if (row.direction != "CUSTODY" || row.peerNodeId != from) return
+            if (row.completedChunks < row.chunkCount) return
+            val now = nowMs()
+            val leg = forwards.getOrPut(transferIdHex) { Leg(from, now) }
+            if (seq <= leg.wantSeq) return
+            leg.wantSeq = seq
+            leg.lastAckAtMs = now
+            if (contiguous > leg.acked) leg.acked = minOf(contiguous, row.chunkCount)
+            var wanted = FileCustodyPdu.expandRanges(ranges, row.chunkCount, MAX_WANTED_PER_INVENTORY)
+            if (leg.plainWindowEnd > 0L && now - leg.plainWindowAtMs < IN_FLIGHT_GRACE_MS) {
+                // Только что ушло окно от префикса - получатель составлял
+                // инвентарь, ещё не видя его. Эти куски в пути; если и правда
+                // потеряются, следующий инвентарь попросит их снова.
+                wanted = wanted.filter { it >= leg.plainWindowEnd }.toLongArray()
+            }
+            leg.wanted = wanted
+            Log.i(TAG, "custody: ${from.takeLast(8)} wants ${wanted.size} chunk(s) of $transferIdHex from me (has $contiguous)")
+            // Инвентарь - явная просьба: первую порцию по нему шлём сразу
+            // (получатель шлёт инвентарь не чаще раза в 10 с), дальше порции
+            // отмеряют его подтверждения (onRecipientAck).
+            if (wanted.isNotEmpty() && isOnline(from)) pushForward(row, leg, now)
+        }
+    }
+
+    /** Отправитель сообщил, что получатель всё подтвердил (этап 8): копия больше не нужна. */
+    suspend fun onOriginRelease(transferIdHex: String, from: String) {
+        mutex.withLock {
+            val row = transferDao.getTransfer(transferIdHex) ?: return
+            if (row.direction != "CUSTODY" || row.originNodeId != from) return
+            Log.i(TAG, "custody: origin ${from.takeLast(8)} released $transferIdHex, deleting copy")
+            release(transferIdHex)
+        }
+    }
+
     /** Подтверждение получателя хранимой у меня передаче. */
     suspend fun onRecipientAck(transferIdHex: String, from: String, contiguous: Long, status: Byte) {
         mutex.withLock {
@@ -259,6 +323,18 @@ class FileCustodySender(
                     if (contiguous >= row.chunkCount) {
                         Log.i(TAG, "custody: $transferIdHex delivered to ${from.takeLast(8)}, releasing")
                         release(transferIdHex)
+                    } else if (leg.wanted != null) {
+                        // Раздача по инвентарю (этап 8): префикс получателя
+                        // двигают и другие хранители, поэтому следующую порцию
+                        // отмеряем по его подтверждениям с небольшим шагом.
+                        val wanted = leg.wanted ?: LongArray(0)
+                        if (wanted.isNotEmpty() && isOnline(from) &&
+                            (leg.lastPumpAtMs == 0L || now - leg.lastPumpAtMs >= WANT_PACE_MS || contiguous >= leg.sentUpTo)
+                        ) {
+                            // Порцию отмеряет подтверждение на наш кусок:
+                            // получатель шлёт его тому, от кого кусок пришёл.
+                            pushForward(row, leg, now)
+                        }
                     } else if (contiguous >= leg.sentUpTo && isOnline(from)) {
                         pushForward(row, leg, now)
                     }
@@ -309,7 +385,7 @@ class FileCustodySender(
             val envelope = chunkStore.readKeyEnvelope(id) ?: error("key envelope missing")
             val binding = chunkStore.readOriginBinding(id) ?: error("origin binding missing")
             val offer = FileCustodyPdu.encode(row.originNodeId, row.peerNodeId, manifest, envelope, binding)
-            sendWindow(row.peerNodeId, row, offer, leg.acked, offerOnly = leg.lastAckAtMs == 0L)
+            sendWindow(row.peerNodeId, row, offer, leg.acked, offerOnly = leg.lastAckAtMs == 0L, wanted = leg.wanted)
         }
         val window = result.getOrNull()
         if (window == null) {
@@ -317,6 +393,14 @@ class FileCustodySender(
             return 0
         }
         leg.sentUpTo = window.end
+        if (leg.wanted != null) {
+            // Отправленное по инвентарю больше не шлём сами: если потерялось,
+            // следующий инвентарь получателя попросит снова.
+            leg.wanted = window.remainingWanted ?: LongArray(0)
+        } else if (window.end > leg.acked) {
+            leg.plainWindowEnd = window.end
+            leg.plainWindowAtMs = now
+        }
         return window.sent
     }
 
@@ -336,12 +420,20 @@ class FileCustodySender(
      */
     private fun due(leg: Leg, chunkCount: Long, now: Long): Boolean {
         if (leg.lastPumpAtMs == 0L) return true
-        if (leg.acked >= leg.sentUpTo && leg.acked < chunkCount && leg.lastAckAtMs != 0L) return true
-        val interval = if (leg.lastAckAtMs == 0L && leg.pumps >= SILENT_PUMPS_BEFORE_BACKOFF) {
-            SILENT_REPUMP_INTERVAL_MS
-        } else {
-            REPUMP_INTERVAL_MS
+        val wanted = leg.wanted
+        if (wanted != null && wanted.isEmpty()) {
+            // Получатель просил пока ничего не слать (эти куски он берёт у
+            // других). Напоминаем о себе одним предложением: если тот
+            // хранитель пропал, получатель ответит новым инвентарём.
+            return now - leg.lastPumpAtMs >= REPUMP_INTERVAL_MS
         }
+        if (leg.acked >= leg.sentUpTo && leg.acked < chunkCount && leg.lastAckAtMs != 0L) return true
+        val silent = leg.lastAckAtMs == 0L && leg.pumps >= SILENT_PUMPS_BEFORE_BACKOFF
+        // Отвечал, но давно замолчал (получатель старой версии переключился
+        // на другого хранителя и подтверждает только ему): не лить окно
+        // каждые полминуты - редкий повтор, пока отправитель не отпустит.
+        val stalled = leg.lastAckAtMs != 0L && now - leg.lastAckAtMs >= STALL_TIMEOUT_MS
+        val interval = if (silent || stalled) SILENT_REPUMP_INTERVAL_MS else REPUMP_INTERVAL_MS
         return now - leg.lastPumpAtMs >= interval
     }
 
@@ -355,6 +447,8 @@ class FileCustodySender(
         offer: ByteArray,
         acked: Long,
         offerOnly: Boolean,
+        /** Этап 8: конкретные куски по инвентарю получателя; null - окно от [acked]. */
+        wanted: LongArray? = null,
     ): Window {
         val id = transfer.transferId
         val transferId = hexToBytes(id)
@@ -365,32 +459,41 @@ class FileCustodySender(
         }
         if (offerOnly) return Window(sent, acked)
         if (acked >= transfer.chunkCount) return Window(sent, transfer.chunkCount)
-        val fragmentsPerChunk = maxOf(
-            1,
-            (transfer.chunkSize + FileTransferChunkStore.AEAD_TAG_BYTES +
-                FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES - 1) /
-                FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES,
-        )
-        val budget = if (transfer.chunkSize >= FileTransferSender.LARGE_CHUNK_BYTES) {
-            FileTransferSender.MAX_INFLIGHT_MESSAGES_LARGE
-        } else {
-            FileTransferSender.MAX_INFLIGHT_MESSAGES
-        }
-        val windowChunks = maxOf(1, budget / fragmentsPerChunk)
-        val windowEnd = minOf(transfer.chunkCount, acked + windowChunks.toLong())
-        for (chunkIndex in acked until windowEnd) {
-            val ciphertext = chunkStore.readEncryptedChunk(id, chunkIndex)
-                ?: throw IllegalStateException("Chunk $chunkIndex missing for $id")
-            try {
-                for (fragment in FileTransferPacketCodec.fragment(FileTransferPacketCodec.Type.CUSTODY_CHUNK, transferId, chunkIndex, ciphertext)) {
-                    check(directTransport(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
-                    sent++
-                }
-            } finally {
-                ciphertext.fill(0)
+        val perWindow = windowChunks(transfer.chunkSize)
+        if (wanted != null) {
+            // Инвентарь получателя: только просимое, не больше окна за раз.
+            // Конец окна для таймера - последний отправленный номер + 1.
+            val pending = wanted.filter { it >= acked && it < transfer.chunkCount }
+            var last = acked
+            var taken = 0
+            for (chunkIndex in pending) {
+                if (taken == perWindow) break
+                sent += sendChunk(to, id, transferId, chunkIndex)
+                last = maxOf(last, chunkIndex + 1)
+                taken++
             }
+            return Window(sent, last, pending.drop(taken).toLongArray())
+        }
+        val windowEnd = minOf(transfer.chunkCount, acked + perWindow.toLong())
+        for (chunkIndex in acked until windowEnd) {
+            sent += sendChunk(to, id, transferId, chunkIndex)
         }
         return Window(sent, windowEnd)
+    }
+
+    private fun sendChunk(to: String, id: String, transferId: ByteArray, chunkIndex: Long): Int {
+        val ciphertext = chunkStore.readEncryptedChunk(id, chunkIndex)
+            ?: throw IllegalStateException("Chunk $chunkIndex missing for $id")
+        var sent = 0
+        try {
+            for (fragment in FileTransferPacketCodec.fragment(FileTransferPacketCodec.Type.CUSTODY_CHUNK, transferId, chunkIndex, ciphertext)) {
+                check(directTransport(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
+                sent++
+            }
+        } finally {
+            ciphertext.fill(0)
+        }
+        return sent
     }
 
     private fun reject(transferIdHex: String, candidate: String, now: Long, cooldown: Long = REJECT_COOLDOWN_MS) {
@@ -415,7 +518,26 @@ class FileCustodySender(
 
     companion object {
         private const val TAG = "FileCustodySender"
-        private val FINISHED_STATES = setOf("COMPLETE", "CANCELLED", "FAILED", "CUSTODIED", "EXPIRED")
+
+        /** Сколько кусков помещается в одно окно прямого канала (та же арифметика, что у прямой передачи). */
+        fun windowChunks(chunkSize: Int): Int {
+            val fragmentsPerChunk = maxOf(
+                1,
+                (chunkSize + FileTransferChunkStore.AEAD_TAG_BYTES +
+                    FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES - 1) /
+                    FileTransferPacketCodec.MAX_FRAGMENT_PAYLOAD_BYTES,
+            )
+            val budget = if (chunkSize >= FileTransferSender.LARGE_CHUNK_BYTES) {
+                FileTransferSender.MAX_INFLIGHT_MESSAGES_LARGE
+            } else {
+                FileTransferSender.MAX_INFLIGHT_MESSAGES
+            }
+            return maxOf(1, budget / fragmentsPerChunk)
+        }
+
+        private val FINISHED_STATES = setOf("COMPLETE", "CANCELLED", "FAILED", "EXPIRED")
+        /** Сколько копий раздать хранителям, пока отправитель в сети (этап 8). */
+        const val TARGET_HOLDERS = 2
         /** Сколько передача ждёт получателя, прежде чем искать хранителя. */
         const val CUSTODY_AFTER_MS = 2 * 60_000L
         /** Кандидат ни разу не ответил - считаем, что не умеет (старая версия) или не хочет. */
@@ -445,5 +567,15 @@ class FileCustodySender(
          * ответит итоговым подтверждением на первый же повтор.
          */
         const val DIRECT_RETRY_AFTER_MS = 15 * 60_000L
+        /** Больше кусков из одного инвентаря не запоминаем: следующий инвентарь принесёт остальное. */
+        const val MAX_WANTED_PER_INVENTORY = 4096
+        /**
+         * Раздача по инвентарю: порцию отмеряет подтверждение получателя на
+         * НАШ кусок (он шлёт его тому, от кого кусок пришёл), это и есть
+         * обратная связь; малый шаг лишь гасит залпы подтверждений.
+         */
+        const val WANT_PACE_MS = 250L
+        /** Окно от префикса считается «в пути» столько: инвентарь за это время не просит его заново. */
+        const val IN_FLIGHT_GRACE_MS = 15_000L
     }
 }

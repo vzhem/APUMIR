@@ -45,10 +45,19 @@ object FileTransferPacketCodec {
          * N, payload = один байт статуса ([FileCustodyPdu.ACK_OK],
          * [FileCustodyPdu.ACK_REFUSED], [FileCustodyPdu.ACK_FULL]).
          */
-        CUSTODY_ACK(7);
+        CUSTODY_ACK(7),
+        /**
+         * Инвентарь недостающего (этап 8 роя): получатель → хранителю «у меня
+         * N подряд, пришли вот эти куски» - itemIndex = N, payload =
+         * [FileCustodyPdu.encodeWant] (список диапазонов). Так несколько
+         * хранителей одного файла отдают разные куски, а не один и тот же.
+         * Хранитель до v11.70.18 тип не знает и молча отбрасывает - тогда он
+         * шлёт по-старому, от подтверждённого префикса.
+         */
+        CUSTODY_WANT(8);
 
         val isCustody: Boolean
-            get() = this == CUSTODY_OFFER || this == CUSTODY_CHUNK || this == CUSTODY_ACK
+            get() = this == CUSTODY_OFFER || this == CUSTODY_CHUNK || this == CUSTODY_ACK || this == CUSTODY_WANT
 
         companion object {
             fun fromWire(value: Byte): Type = entries.firstOrNull { it.wire == value }

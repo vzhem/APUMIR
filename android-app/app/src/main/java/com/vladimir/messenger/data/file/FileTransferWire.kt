@@ -81,10 +81,24 @@ object FileTransferWire {
     // отправителя подтверждения в id нужна, потому что по одной передаче
     // подтверждают двое: хранитель - отправителю, получатель - хранителю.
 
-    fun custodyAckMessageId(transferIdHex: String, senderTag: String, contiguousChunks: Long): String {
+    fun custodyAckMessageId(
+        transferIdHex: String,
+        senderTag: String,
+        contiguousChunks: Long,
+        /** Кому: у получателя с несколькими хранителями одно и то же подтверждение уходит каждому. */
+        holderTag: String? = null,
+    ): String {
         requireValidTransferId(transferIdHex)
         require(contiguousChunks >= 0)
-        return "f${transferIdHex}k${cleanTag(senderTag)}a$contiguousChunks".also(::requireValidMessageId)
+        val to = holderTag?.let { "h${cleanTag(it)}" } ?: ""
+        return "f${transferIdHex}k${cleanTag(senderTag)}${to}a$contiguousChunks".also(::requireValidMessageId)
+    }
+
+    /** Инвентарь недостающего (этап 8): свой номер на каждую отправку, иначе сеть отсеет обновление как дубль. */
+    fun custodyWantMessageId(transferIdHex: String, senderTag: String, holderTag: String, seq: Long): String {
+        requireValidTransferId(transferIdHex)
+        require(seq >= 0)
+        return "f${transferIdHex}w${cleanTag(senderTag)}h${cleanTag(holderTag)}s$seq".also(::requireValidMessageId)
     }
 
     /** Короткая метка узла для id сообщения: хвост адреса без служебных знаков. */

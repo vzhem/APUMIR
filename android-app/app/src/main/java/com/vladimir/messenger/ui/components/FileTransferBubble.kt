@@ -324,7 +324,14 @@ private fun stateLabel(transfer: FileTransferEntity): String {
         }
         // Файл лежит у третьего телефона (этап 7 роя): получатель заберёт
         // его, даже если отправитель выйдет из сети.
-        "CUSTODIED" -> "Передано на хранение, получатель заберёт при появлении"
+        "CUSTODIED" -> {
+            val holders = transfer.custodianNodeId.split(',').count { it.isNotBlank() }
+            if (holders > 1) {
+                "На хранении у $holders телефонов, получатель заберёт при появлении"
+            } else {
+                "Передано на хранение, получатель заберёт при появлении"
+            }
+        }
         else -> transfer.state
     }
 }

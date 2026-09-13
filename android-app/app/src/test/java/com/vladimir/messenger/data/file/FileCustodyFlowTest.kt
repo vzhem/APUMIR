@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.file
 
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import java.io.File
+import uniffi.p2p_core.FileTransferManifestFfi
 import java.security.MessageDigest
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -23,11 +24,13 @@ class FileCustodyFlowTest {
     private val transferIdHex = "0123456789abcdef0123456789abcdef"
     private val originId = "pk_" + "ab".repeat(16)
     private val custodianId = "pk_" + "cd".repeat(16)
+    private val secondCustodianId = "pk_" + "dd".repeat(16)
     private val recipientId = "pk_" + "ef".repeat(16)
     private val chatId = "chat-origin"
 
-    private val plaintext = ByteArray(2500) { (it % 253).toByte() }
+    private var plaintext = ByteArray(2500) { (it % 253).toByte() }
     private val chunkSize = 1024
+    private val chunkCount: Long get() = ((plaintext.size + chunkSize - 1) / chunkSize).toLong()
 
     private lateinit var dirs: MutableList<File>
 
@@ -44,6 +47,12 @@ class FileCustodyFlowTest {
     private lateinit var custodianSender: FileCustodySender
     private var custodianAcceptsContacts = true
     private var custodianHeadroom = Long.MAX_VALUE
+
+    // Второй хранитель (этап 8)
+    private lateinit var secondDao: FakeFileTransferDao
+    private lateinit var secondStore: FileTransferChunkStore
+    private lateinit var secondReceiver: FileTransferReceiver
+    private lateinit var secondSender: FileCustodySender
 
     // Получатель
     private lateinit var recipientDao: FakeFileTransferDao
@@ -70,14 +79,24 @@ class FileCustodyFlowTest {
      */
     private val inFlight = ArrayDeque<Triple<String, String, String>>()
 
-    private fun crypto(sender: String, recipient: String) = FakeFileCryptoGateway(
-        senderNodeId = sender,
-        recipientNodeId = recipient,
-        transferIdHex = transferIdHex,
-        fileSha256Hex = sha256(plaintext),
-        fileSizeBytes = plaintext.size.toLong(),
-        chunkSizeBytes = chunkSize,
-    )
+    /** Фейковая криптография читает размер и хеш файла лениво: тест может подменить [plaintext] после setUp. */
+    private fun crypto(sender: String, recipient: String): FileCryptoGateway = object : FileCryptoGateway {
+        private fun inner() = FakeFileCryptoGateway(
+            senderNodeId = sender,
+            recipientNodeId = recipient,
+            transferIdHex = transferIdHex,
+            fileSha256Hex = sha256(plaintext),
+            fileSizeBytes = plaintext.size.toLong(),
+            chunkSizeBytes = chunkSize,
+        )
+        override fun parseManifest(manifestBytes: ByteArray): FileTransferManifestFfi = inner().parseManifest(manifestBytes)
+        override fun verifyBinding(binding: ByteArray): Boolean = inner().verifyBinding(binding)
+        override fun bindingNodeId(binding: ByteArray): String = inner().bindingNodeId(binding)
+        override fun openKeyEnvelope(envelope: ByteArray, myBinding: ByteArray, secret: ByteArray, manifest: ByteArray): ByteArray =
+            inner().openKeyEnvelope(envelope, myBinding, secret, manifest)
+        override fun decryptChunk(manifestBytes: ByteArray, fileKey: ByteArray, chunkIndex: Long, ciphertext: ByteArray): ByteArray =
+            inner().decryptChunk(manifestBytes, fileKey, chunkIndex, ciphertext)
+    }
 
     private fun newDir(prefix: String): File = TestDirs.newDir(prefix).also { dirs += it }
 
@@ -88,6 +107,8 @@ class FileCustodyFlowTest {
         originStore = FileTransferChunkStore(newDir("apu-custody-origin-"))
         custodianDao = FakeFileTransferDao()
         custodianStore = FileTransferChunkStore(newDir("apu-custody-holder-"))
+        secondDao = FakeFileTransferDao()
+        secondStore = FileTransferChunkStore(newDir("apu-custody-holder2-"))
         recipientDao = FakeFileTransferDao()
         recipientStore = FileTransferChunkStore(newDir("apu-custody-recipient-"))
         recipientReceivedStore = ReceivedFileStore(newDir("apu-custody-received-"))
@@ -163,6 +184,40 @@ class FileCustodyFlowTest {
                 acceptsFrom = { custodianAcceptsContacts },
                 headroomBytes = { custodianHeadroom },
                 onRecipientAck = { id, from, contiguous, status -> custodianSender.onRecipientAck(id, from, contiguous, status) },
+                onRecipientWant = { id, from, contiguous, seq, ranges -> custodianSender.onRecipientWant(id, from, contiguous, seq, ranges) },
+                onOriginRelease = { id, from -> custodianSender.onOriginRelease(id, from) },
+            ),
+        )
+
+        // ── второй хранитель (этап 8) ──
+        secondSender = FileCustodySender(
+            transferDao = secondDao,
+            chunkStore = secondStore,
+            directTransport = directFrom(secondCustodianId),
+            ownBindingProvider = { ByteArray(96) { 6 } },
+            myNodeId = { secondCustodianId },
+            candidates = { _, _ -> emptyList() },
+            isOnline = { it in online },
+            nowMs = { now },
+        )
+        secondReceiver = FileTransferReceiver(
+            transferDao = secondDao,
+            chunkStore = secondStore,
+            receivedStore = ReceivedFileStore(newDir("apu-custody-holder2-rx-")),
+            pinner = RecordingPinner(),
+            crypto = crypto(originId, recipientId),
+            keyVault = FakeTransferKeyVault(),
+            identity = FakeLocalExchangeIdentity(secondCustodianId),
+            transport = reliableFrom(secondCustodianId),
+            ackSink = { _, _ -> },
+            notifier = RecordingNotifier(),
+            nowMs = { now },
+            custody = FileTransferReceiver.CustodyPolicy(
+                acceptsFrom = { true },
+                headroomBytes = { Long.MAX_VALUE },
+                onRecipientAck = { id, from, contiguous, status -> secondSender.onRecipientAck(id, from, contiguous, status) },
+                onRecipientWant = { id, from, contiguous, seq, ranges -> secondSender.onRecipientWant(id, from, contiguous, seq, ranges) },
+                onOriginRelease = { id, from -> secondSender.onOriginRelease(id, from) },
             ),
         )
 
@@ -198,6 +253,7 @@ class FileCustodyFlowTest {
             val receiver = when (to) {
                 originId -> originReceiver
                 custodianId -> custodianReceiver
+                secondCustodianId -> secondReceiver
                 recipientId -> recipientReceiver
                 else -> error("unknown node $to")
             }
@@ -230,10 +286,10 @@ class FileCustodyFlowTest {
                 mediaType = "image/png",
                 totalBytes = plaintext.size.toLong(),
                 chunkSize = chunkSize,
-                chunkCount = 3L,
+                chunkCount = chunkCount,
                 fileSha256 = sha256(plaintext),
                 state = state,
-                completedChunks = 3L,
+                completedChunks = chunkCount,
                 transferredBytes = plaintext.size.toLong(),
                 createdAtMs = now - createdAgoMs,
                 expiresAtMs = now + 7L * 24 * 3_600_000,
@@ -242,7 +298,7 @@ class FileCustodyFlowTest {
         )
         originStore.storeManifest(transferIdHex, ByteArray(96) { 1 })
         originStore.storeKeyEnvelope(transferIdHex, ByteArray(220) { 2 })
-        for (index in 0 until 3) {
+        for (index in 0 until chunkCount.toInt()) {
             val end = minOf(plaintext.size, (index + 1) * chunkSize)
             originStore.storeEncryptedChunk(
                 transferIdHex,
@@ -421,7 +477,8 @@ class FileCustodyFlowTest {
         now += FileCustodySender.CUSTODY_AFTER_MS
         assertEquals(1, offerOrigin().originPumped)
         assertEquals("CUSTODIED", originDao.getTransfer(transferIdHex)!!.state)
-        // Повторный насос ничего не предлагает: файл уже у хранителя.
+        // Повторный насос ничего не предлагает: файл уже у единственного
+        // кандидата, а второго кандидата (этап 8) в сети нет.
         assertEquals(0, offerOrigin().originPumped)
     }
 
@@ -446,6 +503,145 @@ class FileCustodyFlowTest {
         assertEquals(1, custodianSender.sweep(force = true))
         assertNull(custodianDao.getTransfer(transferIdHex))
         assertTrue(custodianStore.storedChunkIndices(transferIdHex).isEmpty())
+    }
+
+    // ── Этап 8: несколько хранителей ─────────────────────────────────────────
+
+    /** Кто получил куски от кого: (хранитель → номера кусков) по журналу прямого канала. */
+    private fun chunksToRecipientBy(holder: String): List<Long> =
+        direct.filter { it.first == holder && it.second == recipientId }
+            .map { FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(it.third)) }
+            .filter { it.type == FileTransferPacketCodec.Type.CUSTODY_CHUNK }
+            .map { it.itemIndex }
+            .distinct()
+
+    @Test
+    fun originSpreadsCopiesToTwoHoldersOneAtATime() = runTest {
+        stageOutgoing()
+        online += custodianId
+        online += secondCustodianId
+
+        // Первый насос: одному кандидату (первому по порядку), не обоим сразу.
+        assertEquals(1, offerOrigin().originPumped)
+        val afterFirst = originDao.getTransfer(transferIdHex)!!
+        assertEquals("CUSTODIED", afterFirst.state)
+        assertEquals(listOf(custodianId), FileCustodyPdu.holders(afterFirst.custodianNodeId))
+        assertTrue(direct.none { it.first == originId && it.second == secondCustodianId })
+
+        // Второй насос: файл уже у одного, отправитель в сети - раздаёт вторую копию.
+        assertEquals(1, offerOrigin().originPumped)
+        val afterSecond = originDao.getTransfer(transferIdHex)!!
+        assertEquals("CUSTODIED", afterSecond.state)
+        assertEquals(listOf(custodianId, secondCustodianId), FileCustodyPdu.holders(afterSecond.custodianNodeId))
+        assertEquals(chunkCount, secondDao.getTransfer(transferIdHex)!!.completedChunks)
+        assertEquals(chunkCount, custodianDao.getTransfer(transferIdHex)!!.completedChunks)
+
+        // Достаточно: третьего не ищем, даже если кандидаты есть.
+        assertEquals(0, offerOrigin().originPumped)
+    }
+
+    @Test
+    fun recipientPullsDifferentChunksFromTwoHoldersAndBothRelease() = runTest {
+        // Файл на 200 кусков: окно прямого канала - 120 сообщений (кусок
+        // 1 КиБ = один фрагмент). Первое окно первого хранителя (0..119)
+        // получатель за ним и оставляет, а остальное делит полосами между
+        // обоими - так куски идут с двух телефонов разом.
+        plaintext = ByteArray(200 * chunkSize - 100) { (it % 251).toByte() }
+        stageOutgoing()
+        online += custodianId
+        online += secondCustodianId
+        offerOrigin()
+        offerOrigin()
+        assertEquals(2, FileCustodyPdu.holders(originDao.getTransfer(transferIdHex)!!.custodianNodeId).size)
+
+        // Получатель появился. Оба хранителя шлют предложения; куски идут
+        // после подтверждений и инвентаря. Второе предложение приходит,
+        // когда первое окно уже в пути - как и бывает на телефонах.
+        online += recipientId
+        custodianSender.pumpForwarding()
+        secondSender.pumpForwarding()
+        drain()
+
+        val received = recipientDao.getTransfer(transferIdHex)!!
+        assertEquals("COMPLETE", received.state)
+        assertEquals(listOf(custodianId, secondCustodianId), FileCustodyPdu.holders(received.custodianNodeId))
+        val file = recipientReceivedStore.receivedFile(transferIdHex, "photo.png")!!
+        assertTrue(file.readBytes().contentEquals(plaintext))
+
+        // Первый хранитель отдал окно от префикса (0..119) и свои полосы
+        // хвоста, второй - только свои полосы: ни один кусок не пришёл дважды,
+        // вместе они покрыли файл.
+        val fromFirst = chunksToRecipientBy(custodianId)
+        val fromSecond = chunksToRecipientBy(secondCustodianId)
+        assertTrue("first holder sent nothing", fromFirst.isNotEmpty())
+        assertTrue("second holder sent nothing", fromSecond.isNotEmpty())
+        assertTrue(fromSecond.none { it < 120L })
+        assertTrue(fromFirst.intersect(fromSecond.toSet()).isEmpty())
+        assertEquals((0L until chunkCount).toSet(), (fromFirst + fromSecond).toSet())
+        // Полосы по 8 по номеру куска: 120..127 - второму, 128..135 - первому.
+        assertTrue(fromSecond.containsAll((120L..127L).toList()))
+        assertTrue(fromFirst.containsAll((128L..135L).toList()))
+
+        // Инвентарь действительно ходил: обоим, с одним номером.
+        val wants = reliable.filter { it.first == recipientId }
+            .map { it.second to FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(it.third)) }
+            .filter { it.second.type == FileTransferPacketCodec.Type.CUSTODY_WANT }
+        assertTrue(wants.any { it.first == custodianId } && wants.any { it.first == secondCustodianId })
+
+        // Оба хранителя освободили место (итоговые подтверждения ушли всем).
+        assertNull(custodianDao.getTransfer(transferIdHex))
+        assertNull(secondDao.getTransfer(transferIdHex))
+        assertTrue(custodianStore.storedChunkIndices(transferIdHex).isEmpty())
+        assertTrue(secondStore.storedChunkIndices(transferIdHex).isEmpty())
+        // Отправителю - итоговое подтверждение, передача доставлена.
+        val toOrigin = reliable.filter { it.first == recipientId && it.second == originId }
+            .map { FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(it.third)) }
+        assertTrue(toOrigin.any { it.type == FileTransferPacketCodec.Type.ACK && it.itemIndex == chunkCount })
+    }
+
+    @Test
+    fun holderReceivesReleaseFromOriginWhenRecipientAcksOnlyTheOther() = runTest {
+        stageOutgoing()
+        online += custodianId
+        online += secondCustodianId
+        offerOrigin()
+        offerOrigin()
+
+        // Второй хранитель не успел представиться получателю (его насос не
+        // сработал - как у телефона, ушедшего в фон): получатель забрал файл
+        // у первого и подтвердил только ему. Копия у второго осталась бы до
+        // срока - если бы не отправитель.
+        online += recipientId
+        forward()
+        assertEquals("COMPLETE", recipientDao.getTransfer(transferIdHex)!!.state)
+        assertNull(custodianDao.getTransfer(transferIdHex))
+        // Второй хранитель тоже отпустил копию: отправитель, получив итоговый
+        // ACK получателя, разослал ACK_RELEASE всем хранителям из списка.
+        assertNull(secondDao.getTransfer(transferIdHex))
+        assertTrue(secondStore.storedChunkIndices(transferIdHex).isEmpty())
+        val releases = reliable.filter { it.first == originId }
+            .map { it.second to FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(it.third)) }
+            .filter { it.second.type == FileTransferPacketCodec.Type.CUSTODY_ACK && FileCustodyPdu.ackStatus(it.second.payload) == FileCustodyPdu.ACK_RELEASE }
+        assertTrue(releases.any { it.first == secondCustodianId })
+    }
+
+    @Test
+    fun strangerCannotReleaseHeldCopy() = runTest {
+        stageOutgoing()
+        online += custodianId
+        offerOrigin()
+        assertNotNull(custodianDao.getTransfer(transferIdHex))
+        val packet = FileTransferPacketCodec.encode(
+            FileTransferPacketCodec.Packet(
+                FileTransferPacketCodec.Type.CUSTODY_ACK, hexToBytes(transferIdHex), chunkCount, 0, 1, byteArrayOf(FileCustodyPdu.ACK_RELEASE),
+            ),
+        )
+        inFlight.addLast(Triple(secondCustodianId, custodianId, FileTransferWire.encodeEncodedPacket(packet)))
+        drain()
+        assertNotNull(custodianDao.getTransfer(transferIdHex))
+        inFlight.addLast(Triple(originId, custodianId, FileTransferWire.encodeEncodedPacket(packet)))
+        drain()
+        assertNull(custodianDao.getTransfer(transferIdHex))
     }
 
     private fun hexToBytes(hex: String): ByteArray =

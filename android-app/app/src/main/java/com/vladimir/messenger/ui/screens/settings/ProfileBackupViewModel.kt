@@ -100,9 +100,11 @@ class ProfileBackupViewModel @Inject constructor(
             when (result) {
                 is ProfileBackup.CreateResult.Success -> {
                     // Расписание уже смотрит в этот файл - обновляем сведения о последней записи.
-                    val schedule = BackupSchedule.state(context)
-                    if (schedule.enabled && BackupSchedule.target(context) == target) {
-                        withContext(Dispatchers.IO) { BackupSchedule.recordSuccess(context, result.bytes) }
+                    val schedule = withContext(Dispatchers.IO) {
+                        if (BackupSchedule.state(context).enabled && BackupSchedule.targetUri(context) == target) {
+                            BackupSchedule.recordSuccess(context, result.bytes)
+                        }
+                        BackupSchedule.state(context)
                     }
                     _uiState.update {
                         it.copy(
@@ -112,7 +114,7 @@ class ProfileBackupViewModel @Inject constructor(
                                 "). Запомните пароль: без него файл не открыть.",
                             failed = false,
                             lastSaved = target,
-                            schedule = BackupSchedule.state(context),
+                            schedule = schedule,
                         )
                     }
                 }
