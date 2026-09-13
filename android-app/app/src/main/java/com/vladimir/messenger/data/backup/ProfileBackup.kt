@@ -127,7 +127,9 @@ class ProfileBackup @Inject constructor(
                 receivedFiles = received.size,
                 receivedBytes = received.sumOf { it.second.length() },
             )
-            val raw = appContext.contentResolver.openOutputStream(target, "wt")
+            // «wt» = перезаписать с нуля; часть провайдеров документов понимает только «w».
+            val raw = runCatching { appContext.contentResolver.openOutputStream(target, "wt") }.getOrNull()
+                ?: appContext.contentResolver.openOutputStream(target, "w")
                 ?: return CreateResult.Failed("cannot open destination")
             val counting = CountingOutputStream(BufferedOutputStream(raw, 1 shl 16))
             ZipOutputStream(BackupCipher.encrypt(counting, password)).use { zip ->
@@ -183,9 +185,15 @@ class ProfileBackup @Inject constructor(
         }
         val source = appContext.getDatabasePath("messenger_database")
         db.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
-        source.copyTo(out, overwrite = true)
-        val wal = File(source.path + "-wal")
-        if (wal.isFile && wal.length() > 0) wal.copyTo(File(out.path + "-wal"), overwrite = true)
+        // Пока копируем, держим блокировку записи: никто не допишет в базу на полпути.
+        db.beginTransaction()
+        try {
+            source.copyTo(out, overwrite = true)
+            val wal = File(source.path + "-wal")
+            if (wal.isFile && wal.length() > 0) wal.copyTo(File(out.path + "-wal"), overwrite = true)
+        } finally {
+            db.endTransaction()
+        }
         return out
     }
 
@@ -250,7 +258,8 @@ class ProfileBackup @Inject constructor(
         try {
             val raw = appContext.contentResolver.openInputStream(source)
                 ?: return StageResult.Failed("cannot open file")
-            ZipInputStream(BackupCipher.decrypt(BufferedInputStream(raw, 1 shl 16), password)).use { zip ->
+            val decrypting = BackupCipher.decrypt(BufferedInputStream(raw, 1 shl 16), password)
+            ZipInputStream(decrypting).use { zip ->
                 var first = true
                 while (true) {
                     val entry = zip.nextEntry ?: break
@@ -276,6 +285,12 @@ class ProfileBackup @Inject constructor(
                     target.parentFile?.mkdirs()
                     FileOutputStream(target).use { out -> zip.copyTo(out, 1 shl 16) }
                 }
+                // ZIP останавливается на оглавлении и дальше не читает. Дочитываем
+                // шифропоток до конца сами: только заверенная последняя порция
+                // доказывает, что файл не обрезан (обрыв ровно на границе записи
+                // ZipInputStream принял бы за конец архива).
+                val sink = ByteArray(8192)
+                while (decrypting.read(sink) != -1) { /* только проверка целостности */ }
             }
         } catch (e: BackupCipher.WrongPasswordException) {
             return StageResult.WrongPassword
@@ -337,10 +352,9 @@ class ProfileBackup @Inject constructor(
             // 1. База: старую убираем целиком (вместе с WAL/SHM), новую кладём.
             val dbFile = app.getDatabasePath("messenger_database")
             app.deleteDatabase("messenger_database")
-            dbFile.parentFile?.mkdirs()
-            File(root, BackupLayout.DB).copyTo(dbFile, overwrite = true)
+            moveFile(File(root, BackupLayout.DB), dbFile)
             val wal = File(root, BackupLayout.DB_WAL)
-            if (wal.isFile) wal.copyTo(File(dbFile.path + "-wal"), overwrite = true)
+            if (wal.isFile) moveFile(wal, File(dbFile.path + "-wal"))
             failInFlightTransfers(dbFile)
 
             // 2. Настройки: каждый файл целиком заменяем содержимым копии;
@@ -348,7 +362,8 @@ class ProfileBackup @Inject constructor(
             for (name in BackupLayout.PREFS_NAMES) {
                 val file = File(root, BackupLayout.prefsEntry(name))
                 if (!file.isFile) continue
-                val entries = PrefsCodec.decode(file.readText()) ?: run {
+                val entries = PrefsCodec.decode(file.readText())
+                if (entries == null) {
                     Log.w(TAG, "restore: prefs $name damaged, skipped")
                     continue
                 }
@@ -404,20 +419,20 @@ class ProfileBackup @Inject constructor(
             // 4. Файлы: аватары, превью, полученные.
             val avatar = File(root, BackupLayout.AVATAR_DIR)
             if (avatar.isDirectory) {
-                val dst = File(app.filesDir, "avatar").apply { mkdirs() }
-                avatar.listFiles()?.filter { it.isFile }?.forEach { it.copyTo(File(dst, it.name), overwrite = true) }
+                val dst = File(app.filesDir, "avatar")
+                avatar.listFiles()?.filter { it.isFile }?.forEach { moveFile(it, File(dst, it.name)) }
             }
             val preview = File(root, BackupLayout.PREVIEW_DIR)
             if (preview.isDirectory) {
-                val dst = File(app.noBackupFilesDir, PREVIEW_ROOT).apply { mkdirs() }
-                preview.listFiles()?.filter { it.isFile }?.forEach { it.copyTo(File(dst, it.name), overwrite = true) }
+                val dst = File(app.noBackupFilesDir, PREVIEW_ROOT)
+                preview.listFiles()?.filter { it.isFile }?.forEach { moveFile(it, File(dst, it.name)) }
             }
             val received = File(root, BackupLayout.RECEIVED_DIR)
             if (received.isDirectory) {
                 val dst = File(app.noBackupFilesDir, RECEIVED_ROOT)
                 received.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
-                    val target = File(dst, dir.name).apply { mkdirs() }
-                    dir.listFiles()?.filter { it.isFile }?.forEach { it.copyTo(File(target, it.name), overwrite = true) }
+                    val target = File(dst, dir.name)
+                    dir.listFiles()?.filter { it.isFile }?.forEach { moveFile(it, File(target, it.name)) }
                 }
             }
 
@@ -425,6 +440,20 @@ class ProfileBackup @Inject constructor(
             //    подсунутым из чужого Auto Backup и стёрли на этом же запуске.
             DeviceIdentityMarker.create(app)
             Log.i(TAG, "restore applied: node=${manifest.nodeId.take(12)}… from app ${manifest.appVersionName}")
+        }
+
+        /**
+         * Служебная папка и места назначения лежат на одном разделе, поэтому
+         * переименование мгновенно даже для гигабайтов полученных файлов;
+         * копирование - запасной путь.
+         */
+        private fun moveFile(src: File, dst: File) {
+            dst.parentFile?.mkdirs()
+            if (dst.exists()) dst.delete()
+            if (!src.renameTo(dst)) {
+                src.copyTo(dst, overwrite = true)
+                src.delete()
+            }
         }
 
         /**

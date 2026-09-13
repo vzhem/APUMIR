@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -301,7 +302,7 @@ fun ProfileBackupScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.busy && state.busyText.startsWith("Собираем")) {
-                                    CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.width(8.dp))
                                     Text(state.busyText)
                                 } else {
@@ -362,7 +363,7 @@ fun ProfileBackupScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.busy && state.busyText.startsWith("Открываем")) {
-                                    CircularProgressIndicator(modifier = Modifier.height(18.dp), strokeWidth = 2.dp)
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.width(8.dp))
                                     Text(state.busyText)
                                 } else {
