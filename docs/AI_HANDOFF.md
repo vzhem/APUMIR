@@ -78,6 +78,34 @@
    (< v11.70.14) `cap`/`ac`/`cand`/мост/UDP не знают — с ними всё как раньше
    (PCM, текстовый фолбэк).
 
+0n. **v11.70.18 (в работе 2026-09-13): контакт-призрак «Contact APUCALL1».**
+   Скриншот владельца: в списке чатов личный чат «Contact APUCALL1» с
+   подписью `8|715|14300|MqzW…`, появился «когда делали звонки». Причина
+   (по коду, не по памяти): голосовой текстовый фолбэк звонка
+   (`CallManager.startFramesPump`, последняя ступень) слал строку
+   `APUCALL1|ab|<callId>|<n>|<seq>|<ts>|<b64>…` через
+   `RustBridge.sendMessageMqtt` КАК ЕСТЬ, а приёмник ядра (`core.rs`,
+   MQTT-путь `p2pm2/msg/<я>`, и такие же TCP/QUIC-приёмники) режет строку
+   `splitn(4,'|')` в `sender|messageId|chatId|text` без проверки первого
+   поля → `sender_id = "APUCALL1"`, `text = "<n>|<seq>|<ts>|<b64>…"`;
+   `CoreServerService` не узнал пакет звонка (текст уже без префикса),
+   завёл контакт `"Contact " + senderId.takeLast(8)` = «Contact APUCALL1»
+   и сохранил обрывок как сообщение. Голос по этому пути, соответственно,
+   тоже не доходил никогда. Что сделано: (1) `util/NodeIds.kt` -
+   `isNodeId` (`pk_` + 7..128 букв/цифр), `autoName`, `isStrayAutoContact`
+   (id не узел + имя = заглушка от этого id); (2) `CoreServerService`
+   отбрасывает `message_received` с отправителем не-узлом ДО всех
+   разборщиков (и то же на CF-relay пути); (3) `ContactRepository.
+   reconcileChats` → `removeStrayAutoContacts()` разово при старте удаляет
+   призраков с чатами, `ChatRepository.deleteStrayChats()` - осиротевшие
+   чаты; (4) фолбэк в `CallManager` теперь заворачивает пакет в конверт
+   `<мой pk_>|<audioBatchMessageId>|direct|<APUCALL1…>` - как
+   `send_direct_payload`; (5) в `core.rs` на трёх приёмниках добавлен
+   `parts[0].starts_with("pk_")` (попадёт на телефон только со сборкой CI -
+   ядро собирается из исходников на релизе). Тест `NodeIdsTest`. Правило на
+   будущее: всё, что уходит через `sendMessageMqtt`, кроме `ack|…`, обязано
+   быть конвертом `sender|msgId|chatId|text`.
+
 0m. **v11.70.17 выпущен 2026-09-13 (Latest, тег `b7490ab`, прогон
    34754528870 с первого раза; рой, этап 8, в одном выпуске с 0l): два
    хранителя на файл, инвентарь недостающего, отпускание копий.** Просьба владельца 2026-09-13

@@ -1054,7 +1054,18 @@ class CallManager @Inject constructor(
                 }
                 val text = runCatching { CallWire.buildAudioBatch(current.callId, batch, codec) }
                     .getOrNull() ?: continue
-                runCatching { RustBridge.sendMessageMqtt(current.peerId, text) }
+                // Через sendMessageMqtt строка уходит КАК ЕСТЬ, а приёмник ядра
+                // режет её на четыре поля sender|messageId|chatId|text. Голый
+                // APUCALL1|ab|… у собеседника разбирался как сообщение от узла
+                // «APUCALL1» с обрывком пакета вместо текста - так рождался
+                // контакт-призрак «Contact APUCALL1» (владелец, 2026-09-13), а
+                // голос по этому пути не доходил вовсе. Конверт - как у прямого
+                // QUIC (send_direct_payload): свой узел, детерминированный id,
+                // область «direct». Кадры уже под медиа-ключом, доп. печать не нужна.
+                val myId = RustBridge.nodeId()?.takeIf { it.startsWith("pk_") } ?: continue
+                val wire = myId + "|" + CallWire.audioBatchMessageId(current.callId, batch.first().seq) +
+                    "|" + TEXT_FALLBACK_SCOPE + "|" + text
+                runCatching { RustBridge.sendMessageMqtt(current.peerId, wire) }
             }
         }
     }
@@ -1343,5 +1354,11 @@ class CallManager @Inject constructor(
         /** Переоткрытие умершего моста: не чаще и не больше, чем указано. */
         private const val LINK_REOPEN_MS = 4_000L
         private const val LINK_REOPEN_MAX = 3
+        /**
+         * Область (третье поле конверта) голосового текстового фолбэка через
+         * ядро - та же, что у прямого QUIC-пути (`send_direct_payload`): чат
+         * на телефоне собеседника ей не нужен, разбор идёт по префиксу текста.
+         */
+        private const val TEXT_FALLBACK_SCOPE = "direct"
     }
 }

@@ -29,6 +29,7 @@ import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import com.vladimir.messenger.service.NotificationHelper
 import com.vladimir.messenger.service.BotApi
 import com.vladimir.messenger.data.repository.ContactRepository
+import com.vladimir.messenger.util.NodeIds
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -327,6 +328,12 @@ class CoreServerService : Service() {
                 Log.i(TAG, "CF relay payload from $senderId: ${payload.take(50)}")
                 serviceScope.launch {
                     try {
+                        // Тот же страж, что и у ядра: отправитель обязан быть
+                        // узлом, иначе ниже вырос бы чат с собеседником «unknown».
+                        if (!NodeIds.isNodeId(senderId)) {
+                            Log.w(TAG, "CF payload with non-node sender '" + senderId.take(24) + "' dropped")
+                            return@launch
+                        }
                         when (val parsed = RelayEnvelope.parse(payload)) {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
@@ -575,6 +582,21 @@ class CoreServerService : Service() {
                 val rawText = event.text ?: return
                 val timestamp = ts
 
+                // Отправитель обязан быть узлом (pk_…). Ядро режет входящую
+                // строку на четыре поля, первое поле не проверяя: строка без
+                // конверта (например, голосовой пакет `APUCALL1|ab|…`, ушедший
+                // как есть) даёт отправителя «APUCALL1», а ниже из него вырос
+                // бы контакт-призрак «Contact APUCALL1» с обрывком пакета
+                // вместо переписки (владелец, скриншот 2026-09-13).
+                if (!NodeIds.isNodeId(senderId)) {
+                    Log.w(
+                        TAG,
+                        "Dropped message with non-node sender '" + senderId.take(24) +
+                            "' msgId=" + messageId.take(24) + " text=" + rawText.take(24),
+                    )
+                    return
+                }
+
                 // ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков, иначе
                 // групповые, файловые и служебные пакеты не будут узнаны.
                 //
@@ -709,7 +731,7 @@ class CoreServerService : Service() {
                     if (chat == null) {
                         Log.i(TAG, "No chat with $senderId - auto-creating contact and chat")
                         try {
-                            val autoName = "Contact " + senderId.takeLast(8)
+                            val autoName = NodeIds.autoName(senderId)
                             val contactResult = contactRepository.addContact(autoName, senderId)
                             if (contactResult.isFailure && contactResult.exceptionOrNull()?.message != "Contact already exists") {
                                 Log.e(TAG, "Auto-add contact failed: " + contactResult.exceptionOrNull()?.message)

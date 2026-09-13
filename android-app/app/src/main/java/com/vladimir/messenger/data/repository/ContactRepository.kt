@@ -5,6 +5,7 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.domain.model.Contact
+import com.vladimir.messenger.util.NodeIds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -166,6 +167,7 @@ class ContactRepository @Inject constructor(
      * создавался не на всех путях добавления, а дубли не схлопывались.
      */
     suspend fun reconcileChats() {
+        removeStrayAutoContacts()
         mergeDuplicateContacts()
         for (contact in contactDao.observeAllContactsOnce()) {
             runCatching {
@@ -181,6 +183,30 @@ class ContactRepository @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Убрать контакты-призраки, заведённые по сообщению с отправителем, который
+     * не является узлом (см. [NodeIds.isStrayAutoContact]): «Contact APUCALL1»
+     * с обрывком голосового пакета вместо переписки и подобные. Чаты таких
+     * записей уходят вместе с ними - написать туда всё равно некому. Новые
+     * призраки больше не появляются (приёмник отбрасывает такого отправителя),
+     * а эта уборка чистит накопленное за прошлые версии: читаем список,
+     * пишем только при находке - как и остальная сверка.
+     */
+    private suspend fun removeStrayAutoContacts() {
+        for (contact in contactDao.observeAllContactsOnce()) {
+            if (!NodeIds.isStrayAutoContact(contact.id, contact.displayName)) continue
+            runCatching {
+                chatRepository.deleteChatsOf(contact.id)
+                contactDao.deleteContact(contact)
+                Log.i("ContactRepository", "контакт-призрак удалён: " + contact.displayName)
+            }.onFailure { Log.w("ContactRepository", "призрак не удалён: " + it.message) }
+        }
+        // Чат-призрак без контакта: контакт мог уже удалить владелец, а чат
+        // с тем же не-узлом остался (или чат создался, а контакт - нет).
+        runCatching { chatRepository.deleteStrayChats() }
+            .onFailure { Log.w("ContactRepository", "чаты-призраки: " + it.message) }
     }
 
     /**

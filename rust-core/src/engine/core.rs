@@ -630,7 +630,11 @@ self.runtime = Some(runtime);
                                     let decoded = String::from_utf8_lossy(&payload);
                                     let parts: Vec<&str> = decoded.splitn(4, '|').collect();
 
-                                    if parts.len() == 4 {
+                                    // Отправитель обязан быть узлом (pk_…): строка без
+                                    // конверта (голый APUCALL1|ab|…) иначе разбиралась как
+                                    // сообщение от узла «APUCALL1», и телефон заводил
+                                    // контакт-призрак. Тот же страж - на TCP и MQTT ниже.
+                                    if parts.len() == 4 && parts[0].starts_with("pk_") {
                                         let sender_id = parts[0].to_string();
                                         let message_id = parts[1].to_string();
                                         let chat_id = parts[2].to_string();
@@ -860,7 +864,8 @@ self.runtime = Some(runtime);
                                     let text = String::from_utf8_lossy(&buf[..n]).to_string();
                                     tracing::info!("TCP recv: {}", &text[..text.len().min(100)]);
                                     let parts: Vec<&str> = text.splitn(4, '|').collect();
-                                    if parts.len() == 4 {
+                                    // Страж отправителя - см. QUIC-приёмник выше.
+                                    if parts.len() == 4 && parts[0].starts_with("pk_") {
                                         let ts = std::time::SystemTime::now()
                                             .duration_since(std::time::UNIX_EPOCH)
                                             .unwrap_or_default()
@@ -2156,7 +2161,9 @@ self.runtime = Some(runtime);
                         // приходят, и проверка адресата обязательна.
                         let recipient_id = evt.topic.trim_start_matches("p2pm2/msg/");
                         let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
-                        if parts.len() == 4 && parts[0] != node_id {  // Skip own messages
+                        // Страж отправителя (pk_…) - см. QUIC-приёмник: голая строка
+                        // без конверта не должна стать «сообщением от APUCALL1».
+                        if parts.len() == 4 && parts[0] != node_id && parts[0].starts_with("pk_") {  // Skip own messages
                             let sender_id = parts[0];
                             let message_id = parts[1];
                             let chat_id = parts[2];

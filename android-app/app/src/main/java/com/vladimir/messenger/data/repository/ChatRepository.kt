@@ -11,6 +11,7 @@ import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
+import com.vladimir.messenger.util.NodeIds
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -388,6 +389,23 @@ class ChatRepository @Inject constructor(
     /** Сколько чатов заведено с этим собеседником: 0, 1 или больше при дублях. */
     suspend fun chatCountOf(contactId: String): Int =
         if (contactId.isBlank()) 0 else chatDao.getChatsByContactId(contactId).size
+
+    /**
+     * Убрать чаты-призраки: собеседник - не узел, имя - заглушка от его же id
+     * (см. [NodeIds.isStrayAutoContact]). Читаем весь список, пишем только
+     * при находке. Возвращает число удалённых чатов.
+     */
+    suspend fun deleteStrayChats(): Int {
+        var removed = 0
+        for (chat in chatDao.getAllChats()) {
+            if (!NodeIds.isStrayAutoContact(chat.contactId, chat.contactName)) continue
+            messageDao.deleteMessagesForChat(chat.id)
+            chatDao.deleteChatById(chat.id)
+            removed++
+            Log.i(TAG, "чат-призрак удалён: " + chat.contactName)
+        }
+        return removed
+    }
 
     /** Убрать все чаты с этим собеседником вместе с перепиской. */
     suspend fun deleteChatsOf(contactId: String) {
