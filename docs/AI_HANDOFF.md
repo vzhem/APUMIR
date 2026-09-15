@@ -79,6 +79,38 @@
    (< v11.70.14) `cap`/`ac`/`cand`/мост/UDP не знают — с ними всё как раньше
    (PCM, текстовый фолбэк).
 
+0p. **v11.70.20 - рой, этап 10: остатки без ядра (выпуск идёт 2026-09-15;
+   тег, прогон, sha256 - `START_HERE.md` §3).** Просьба владельца
+   «доделывай все что можно и выпускай релиз. потом все будем проверять на
+   телефонах» → закрыты границы этапа 9 (см. 0o): (1) просьбы `fwant` на
+   диске - `data/group/GroupFileRequestStore.kt` (`requests.v1`, JVM-тест
+   `GroupFileRequestStoreTest`), `GroupFileSwarm.restoreIfNeeded/warmUp/
+   persistPending`; (2) запасной сид через 30 с (`REASK_FAST_MS`,
+   `FAST_ATTEMPTS = 3`, `PREP_BYTES_PER_MS`) при ≥ 2 известных сидах;
+   (3) отказ от лишнего предложения: `OfferRouting.Duplicate(chatId)` →
+   `CANCEL` с меткой `CANCEL_DECLINED = [2]` (`FileTransferWire.
+   cancelMessageId` = `f<id>x`), приёмник помнит отказанные (`declined`,
+   куски не буферизуются), `handleCancel` у сида - только от адресата
+   исходящей строки → `CANCELLED`/`DECLINED` + куски удалены;
+   `GroupFileSwarm.cancelExtraOffers` после COMPLETE,
+   `FileTransferRouter.declineIncoming`; (4) открытые сообщества:
+   незнакомый отправитель `fwant`/`fhave`/предложения допускается при
+   `group.isPublic` (как `preq`), `sharesGroupWith` считает соседом любой
+   известный сид; (5) карточка файла вынесена в
+   `ui/components/GroupFileCard.kt` (`FileCardState.of`), лента канала
+   рисует её под постом (`ChannelPost.file`, `PostCard(fileCard)`), «Новый
+   пост» - «Прикрепить файл» (`ChannelViewModel.onFileSelected/
+   clearStagedFile`, `createPost` → `GroupFileMarker.compose`); (6) `peers`
+   при N > 100 уже был - записано в `CHANNEL_SWARM_DESIGN.md` §9.3.
+   **Не сделано и без ядра не делается**: полосы одного файла от нескольких
+   сидов (конверт ключа привязан к получателю -
+   `rust-core/src/crypto/file_key_envelope.rs`), подписанные квитанции
+   хранения, FFI подписи/QUIC-куски (uniffi заморожен). Схема БД прежняя
+   (20), `FakeFileTransferDao` не менялся. На телефонах НЕ проверено -
+   владелец проверяет всё скопом после этого релиза; сценарии -
+   `CHANNEL_SWARM_DESIGN.md` §9.4 «Этап 10» (и «Этап 9»), звонки -
+   `CALLS_BOOTSTRAP.md`, резервная копия - `RELEASE_NOTES_v11.70.17.md`.
+
 0o. **v11.70.19 - рой, этап 9: файлы в группах (выпущен 2026-09-15: тег на
    `abbb5c4`, прогон 34921724763, sha256 и размер - `START_HERE.md` §3;
    первая компиляция этапа прошла с первого раза).** Просьба владельца «доделывай систему
@@ -118,10 +150,9 @@
    `GroupFileMarkerTest`, `GroupFileStoreTest`, `GroupWireTest` (fwant/fhave),
    `FileTransferReceiverTest` (4 теста маршрута). На телефонах НЕ проверено;
    что смотреть - `CHANNEL_SWARM_DESIGN.md` §9.4 «Этап 9». Известные
-   границы: просьбы живут в памяти (после перезапуска - «Скачать» заново);
-   один сид на просьбу (полос между сидами нет); файл канала (пост) через
-   тот же экран комментариев - работает как в группе, но лента канала
-   карточку не рисует.
+   границы этапа 9 (просьбы только в памяти; один сид на просьбу без
+   быстрого запасного; лента канала без карточки файла) закрыты в
+   v11.70.20 - см. 0p; полос между сидами по-прежнему нет (ядро).
 
 0n. **v11.70.18 выпущен 2026-09-13 (Latest, тег `e7aec2a`, прогон
    34766279060 с первого раза): контакт-призрак «Contact APUCALL1».**
