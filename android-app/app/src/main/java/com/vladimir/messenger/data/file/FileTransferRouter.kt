@@ -504,6 +504,17 @@ class FileTransferRouter @Inject constructor(
             .onFailure { Log.w(TAG, "release chunks failed for $transferId: ${it.message}") }
     }
 
+    /**
+     * Лишняя входящая (рой, этап 10): файл уже получен от другого сида.
+     * Отправителю - CANCEL (он остановит и освободит место), у себя - убрать
+     * строку и куски. Завершённые не трогаем.
+     */
+    suspend fun declineIncoming(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        if (transfer.direction != "INCOMING" || transfer.state == "COMPLETE") return
+        receiver.declineTransfer(transfer)
+        dropTransfer(transfer.transferId)
+    }
+
     /** Убрать передачу целиком: куски, принятую копию, строку. Для незавершённых и лишних. */
     suspend fun dropTransfer(transferId: String) {
         runCatching { chunkStore.deleteTransfer(transferId) }

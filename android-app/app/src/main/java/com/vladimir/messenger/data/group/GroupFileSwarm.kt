@@ -60,9 +60,18 @@ import kotlinx.coroutines.withContext
  *    или полученной) - не больше [MAX_PARALLEL_SEEDS] одновременно, остальные
  *    ждут очереди; [pump] освобождает куски отданных передач.
  *
- * Состояние просьб и очередей живёт в памяти: после перезапуска карточка
- * без передачи снова предложит «Скачать», а начатые передачи продолжат
- * сами (сид повторяет предложение, пока проситель не подтвердит всё).
+ * Свои просьбы лежат и на диске ([GroupFileRequestStore], этап 10): после
+ * перезапуска телефон помнит, что просил, у кого и сколько раз, и
+ * продолжает круг сидов с того же места. Очередь чужих просьб - только в
+ * памяти (проситель повторит сам). Начатые передачи продолжаются сами: сид
+ * повторяет предложение, пока проситель не подтвердит всё.
+ *
+ * Полос одного файла от нескольких сидов нет и быть не может без ядра:
+ * куски шифруются ключом передачи, а конверт с ключом - под получателя,
+ * поэтому куски от двух сидов не взаимозаменяемы. Вместо полос - быстрый
+ * запасной сид: не ответил первый за [REASK_FAST_MS] - спрашиваем второго,
+ * а лишнее предложение получатель отклоняет пакетом CANCEL, и сид
+ * освобождает место (см. FileTransferReceiver).
  */
 @Singleton
 class GroupFileSwarm @Inject constructor(
@@ -78,6 +87,7 @@ class GroupFileSwarm @Inject constructor(
 ) {
     private val appContext: Context = context.applicationContext
     private val store = GroupFileStore(File(appContext.noBackupFilesDir, "group_files/v1"))
+    private val requestStore = GroupFileRequestStore(File(appContext.noBackupFilesDir, "group_files/requests.v1"))
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
 
@@ -96,6 +106,9 @@ class GroupFileSwarm @Inject constructor(
         /** Кого уже спрашивал в этом круге: следующий - другой сид. */
         val tried = LinkedHashSet<String>()
     }
+
+    /** Просьбы с диска прочитаны (один раз за запуск, при первом обращении). */
+    @Volatile private var restored = false
 
     /** Чужая просьба, которую сейчас не могу выполнить (все места заняты). */
     private class Waiting(
@@ -169,6 +182,7 @@ class GroupFileSwarm @Inject constructor(
      * «Скачать».
      */
     suspend fun onCardSeen(groupId: String, messageId: String, authorId: String, sentAtMs: Long, info: GroupFileMarker.Info) {
+        restoreIfNeeded()
         val key = GroupFileMarker.key(groupId, info.sha256)
         rememberSeed(key, authorId, first = true)
         if (!shouldAutoFetch(info)) return
@@ -197,6 +211,7 @@ class GroupFileSwarm @Inject constructor(
     ) {
         val me = myId() ?: return
         if (authorId == me) return
+        restoreIfNeeded()
         val key = GroupFileMarker.key(groupId, info.sha256)
         rememberSeed(key, authorId, first = true)
         val now = System.currentTimeMillis()
@@ -216,9 +231,58 @@ class GroupFileSwarm @Inject constructor(
         ask(entry, now)
     }
 
+    /**
+     * Просьбы с диска (этап 10): один раз за запуск, при первом обращении к
+     * [pending]. Каждая восстанавливается вместе с известными сидами; давние
+     * (старше [PENDING_TTL_MS]) и те, чей файл уже получен, отбрасываются.
+     * Насос ([pump]) дальше ведёт их как обычные: повтор по времени, смена
+     * сида, запасной сид.
+     */
+    private suspend fun restoreIfNeeded() {
+        if (restored) return
+        val loaded = withContext(Dispatchers.IO) { runCatching { requestStore.load() }.getOrDefault(emptyList()) }
+        val now = System.currentTimeMillis()
+        // Давние и уже полученные - вон (проверка базы до замка).
+        val records = loaded.filter { record ->
+            now - record.startedAtMs <= PENDING_TTL_MS &&
+                transferDao.getForFile(record.groupId, record.info.sha256)
+                    .none { it.direction == "INCOMING" && it.state == "COMPLETE" }
+        }
+        var kept = 0
+        mutex.withLock {
+            if (restored) return
+            restored = true
+            for (record in records) {
+                val key = GroupFileMarker.key(record.groupId, record.info.sha256)
+                if (pending.containsKey(key)) continue
+                val entry = Pending(record.groupId, record.info.sha256, record.messageId, record.info, record.startedAtMs, record.manual)
+                entry.attempts = record.attempts
+                entry.askedSeed = record.askedSeed.ifBlank { null }
+                entry.askedAtMs = record.askedAtMs
+                if (record.askedSeed.isNotBlank()) entry.tried.add(record.askedSeed)
+                pending[key] = entry
+                val set = seeds.getOrPut(key) { LinkedHashSet<String>() }
+                for (seed in record.seeds) if (set.size < MAX_SEEDS_PER_KEY) set.add(seed)
+                kept++
+            }
+            if (kept > 0) publishPending()
+        }
+        if (kept > 0) Log.i(TAG, "restored $kept pending file request(s) from disk")
+    }
+
     /** Просьба ушла ли уже по этому файлу (карточка: «Запрошено…»). */
     fun isPending(groupId: String, sha256: String): Boolean =
         GroupFileMarker.key(groupId, sha256) in _pendingKeys.value
+
+    /**
+     * Поднять просьбы с диска, если ещё не подняты: экран группы зовёт это,
+     * открываясь, чтобы карточки сразу показывали «Запрошено…», а не
+     * «Скачать», пока насос (20 с) не дошёл до первого круга.
+     */
+    fun warmUp() {
+        if (restored) return
+        scope.launch { runCatching { restoreIfNeeded() }.onFailure { Log.w(TAG, "restore failed: ${it.message}") } }
+    }
 
     /** Файл небольшой (и сеть не мобильная для файлов побольше) - тянем без вопросов. */
     fun shouldAutoFetch(info: GroupFileMarker.Info): Boolean {
@@ -250,6 +314,7 @@ class GroupFileSwarm @Inject constructor(
         entry.askedSeed = seed
         entry.askedAtMs = now
         entry.attempts++
+        persistPending()
         val binding = runCatching { FileExchangeKeyStore.publicBinding(appContext) }.getOrNull() ?: ByteArray(0)
         val envelope = GroupWire.buildFileWant(entry.groupId, entry.sha256, entry.messageId, binding)
         val report = delivery.deliver(entry.groupId, envelope, listOf(seed))
@@ -260,11 +325,21 @@ class GroupFileSwarm @Inject constructor(
         )
     }
 
+    /** Сколько сидов файла известно, кроме меня. */
+    private suspend fun knownSeedCount(entry: Pending): Int {
+        val me = myId()
+        return mutex.withLock { seeds[GroupFileMarker.key(entry.groupId, entry.sha256)]?.count { it != me } ?: 0 }
+    }
+
     /** Другой участник получил файл целиком и готов раздавать. */
     suspend fun onFileHave(senderId: String, packet: GroupWire.Packet.FileHave) {
-        if (groupDao.getGroupById(packet.groupId) == null) return
-        val member = groupDao.getMember(packet.groupId, senderId) ?: return
-        if (member.isBanned) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        // Как в onFileWant: в открытом сообществе сидом может оказаться и
+        // участник, которого нет в моём (неполном) списке. Хэш файла всё
+        // равно проверяется при приёме - чужак может лишь потратить трафик.
+        val member = groupDao.getMember(packet.groupId, senderId)
+        if (member?.isBanned == true) return
+        if (member == null && !group.isPublic) return
         rememberSeed(GroupFileMarker.key(packet.groupId, packet.sha256), senderId, first = false)
     }
 
@@ -275,6 +350,7 @@ class GroupFileSwarm @Inject constructor(
      * блокирует: новая строка от нового сида дойдёт, старая истечёт сама.
      */
     suspend fun routeOffer(senderId: String, fileSha256: String): FileTransferReceiver.OfferRouting {
+        restoreIfNeeded()
         val entry = mutex.withLock { pending.values.firstOrNull { it.sha256 == fileSha256 } }
         val groupId = if (entry != null) {
             val key = GroupFileMarker.key(entry.groupId, fileSha256)
@@ -288,27 +364,57 @@ class GroupFileSwarm @Inject constructor(
             groupWithCardFrom(senderId, fileSha256) ?: return FileTransferReceiver.OfferRouting.Unknown
         }
         if (hasLiveTransfer(groupId, fileSha256, System.currentTimeMillis())) {
-            return FileTransferReceiver.OfferRouting.Duplicate
+            return FileTransferReceiver.OfferRouting.Duplicate(groupId)
         }
         return FileTransferReceiver.OfferRouting.Chat(groupId)
     }
 
-    /** Группа, где мы с [senderId] оба состоим и есть визитка файла [sha256]; null - нет такой. */
+    /**
+     * Файл получен целиком от одного сида, а от другого (запасного, этап 10)
+     * тоже начала идти или ещё висит передача того же файла: лишние
+     * незавершённые входящие строки убираем, а их сидам говорим CANCEL - иначе
+     * они повторяли бы предложение и держали куски до конца срока.
+     */
+    private suspend fun cancelExtraOffers(groupId: String, sha256: String) {
+        val rows = transferDao.getForFile(groupId, sha256)
+        if (rows.none { it.direction == "INCOMING" && it.state == "COMPLETE" }) return
+        for (row in rows) {
+            if (row.direction != "INCOMING" || row.state == "COMPLETE") continue
+            runCatching { router.declineIncoming(row) }
+                .onFailure { Log.w(TAG, "decline extra offer ${row.transferId} failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * Группа, где мы с [senderId] оба состоим и есть визитка файла [sha256];
+     * в открытом сообществе отправитель может отсутствовать в моём (неполном)
+     * списке участников. null - нет такой.
+     */
     private suspend fun groupWithCardFrom(senderId: String, sha256: String): String? {
         val me = myId() ?: return null
         for (membership in groupDao.getMyMemberships(me)) {
             val groupId = membership.groupId
-            val sender = groupDao.getMember(groupId, senderId) ?: continue
-            if (sender.isBanned) continue
+            val sender = groupDao.getMember(groupId, senderId)
+            if (sender?.isBanned == true) continue
+            if (sender == null && groupDao.getGroupById(groupId)?.isPublic != true) continue
             if (cardInfo(groupId, sha256) != null) return groupId
         }
         return null
     }
 
-    /** Состоим ли с узлом хотя бы в одном общем сообществе. */
+    /**
+     * Состоим ли с узлом хотя бы в одном общем сообществе - или это сид, у
+     * которого я просил файл (на большом канале участники друг друга по
+     * списку не знают, а предложение от него всё равно должно дойти).
+     */
     suspend fun sharesGroupWith(nodeId: String): Boolean {
         val me = myId() ?: return false
-        return runCatching { groupDao.countSharedGroups(me, nodeId) > 0 }.getOrDefault(false)
+        if (runCatching { groupDao.countSharedGroups(me, nodeId) > 0 }.getOrDefault(false)) return true
+        restoreIfNeeded()
+        // Известный сид (я просил у него или он объявлял «файл у меня»):
+        // само предложение приёмник всё равно проверяет - адресат, подпись
+        // ключа, хэш файла по завершении.
+        return mutex.withLock { seeds.values.any { nodeId in it } }
     }
 
     /**
@@ -318,11 +424,21 @@ class GroupFileSwarm @Inject constructor(
      */
     suspend fun onFileReceived(chatId: String, senderId: String, fileSha256: String): Boolean {
         val group = groupDao.getGroupById(chatId) ?: return false
+        restoreIfNeeded()
         val key = GroupFileMarker.key(group.id, fileSha256)
         val removed = mutex.withLock {
             val entry = pending.remove(key)
             publishPending()
             entry
+        }
+        if (removed != null) persistPending()
+        // Файл получен: второе предложение того же файла (запасной сид
+        // успел ответить) больше не нужно - его строку убираем, а сиду
+        // уходит CANCEL, чтобы он освободил место. В фоне: сюда приходят из
+        // приёмника под его замком, а отказ идёт через тот же приёмник.
+        scope.launch {
+            runCatching { cancelExtraOffers(group.id, fileSha256) }
+                .onFailure { Log.w(TAG, "cancel extra offers failed: ${it.message}") }
         }
         val messageId = removed?.messageId ?: cardMessageId(group.id, fileSha256) ?: return true
         val me = myId() ?: return true
@@ -351,8 +467,13 @@ class GroupFileSwarm @Inject constructor(
         if (senderId == me) return
         val group = groupDao.getGroupById(packet.groupId) ?: return
         if (groupDao.getMember(group.id, me) == null) return
-        val requester = groupDao.getMember(group.id, senderId) ?: return
-        if (requester.isBanned) return
+        // Закрытое сообщество - только известным участникам; открытое - и
+        // незнакомому (на большом канале список участников до всех не
+        // доходит: новичок получает `peers`, а не полный состав). Забаненным -
+        // никогда. То же правило, что у просьбы о постах (`preq`).
+        val requester = groupDao.getMember(group.id, senderId)
+        if (requester?.isBanned == true) return
+        if (requester == null && !group.isPublic) return
         val now = System.currentTimeMillis()
         val serveKey = GroupFileMarker.key(group.id, packet.sha256) + "|" + senderId
         val last = servedAt[serveKey] ?: 0L
@@ -494,12 +615,17 @@ class GroupFileSwarm @Inject constructor(
     }
 
     private suspend fun reask(now: Long) {
+        restoreIfNeeded()
+        var changed = false
         val due = mutex.withLock {
             val expired = pending.values.filter { now - it.startedAtMs > PENDING_TTL_MS }.map {
                 GroupFileMarker.key(it.groupId, it.sha256)
             }
             expired.forEach { pending.remove(it) }
-            if (expired.isNotEmpty()) publishPending()
+            if (expired.isNotEmpty()) {
+                publishPending()
+                changed = true
+            }
             pending.values.toList()
         }
         for (entry in due) {
@@ -508,6 +634,7 @@ class GroupFileSwarm @Inject constructor(
                 .filter { it.direction == "INCOMING" && it.state != "FAILED" }
             if (rows.any { it.state == "COMPLETE" }) {
                 mutex.withLock { pending.remove(key); publishPending() }
+                changed = true
                 continue
             }
             // Передача идёт (куски приходят): сид повторяет предложение сам.
@@ -515,13 +642,30 @@ class GroupFileSwarm @Inject constructor(
             if (rows.any { now - it.updatedAtMs < STALL_MS }) continue
             if (entry.attempts >= MAX_ATTEMPTS) {
                 mutex.withLock { pending.remove(key); publishPending() }
+                changed = true
                 Log.i(TAG, "file request given up key=${entry.sha256.take(12)} after ${entry.attempts} attempts")
                 continue
             }
-            val interval = (REASK_BASE_MS * entry.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
+            // Запасной сид (этап 10). Сидов известно несколько, а первый не
+            // ответил (не в сети, занят очередью) или пропал на полпути
+            // (передача стоит): другого спрашиваем через REASK_FAST_MS, не
+            // дожидаясь растущего интервала. Так лишь первые FAST_ATTEMPTS
+            // раз - дальше обычный шаг, чтобы не долбить группу зря. Лишнее
+            // предложение получатель отклонит (CANCEL), сид освободит место.
+            val seedCount = knownSeedCount(entry)
+            val untried = entry.tried.size < seedCount
+            val fast = seedCount >= 2 && untried && entry.attempts < FAST_ATTEMPTS
+            val interval = if (fast) {
+                // Большому файлу сид готовит копию дольше (хэш и шифрование):
+                // даём ему на это время, иначе второй сид начнёт зря.
+                (REASK_FAST_MS + entry.info.sizeBytes / PREP_BYTES_PER_MS).coerceAtMost(REASK_BASE_MS)
+            } else {
+                (REASK_BASE_MS * entry.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
+            }
             if (now - entry.askedAtMs < interval) continue
             ask(entry, now)
         }
+        if (changed) persistPending()
     }
 
     /**
@@ -531,6 +675,7 @@ class GroupFileSwarm @Inject constructor(
      */
     suspend fun onPeerOnline(nodeId: String) {
         val now = System.currentTimeMillis()
+        restoreIfNeeded()
         val waitingForHim = transferDao.getWaitingRecipient().any { it.peerNodeId == nodeId && isGroupChat(it.chatId) }
         if (waitingForHim) {
             runCatching { router.resumeWaitingForRecipient() }
@@ -640,6 +785,35 @@ class GroupFileSwarm @Inject constructor(
         _pendingKeys.value = pending.keys.toSet()
     }
 
+    /**
+     * Снимок своих просьб - на диск (этап 10). Пишется после каждой отправки
+     * просьбы и после снятия; файл маленький, запись в фоне. Ошибка записи
+     * не мешает работе: в худшем случае после перезапуска просьба забудется,
+     * как было до v11.70.20.
+     */
+    private fun persistPending() {
+        scope.launch {
+            val snapshot = mutex.withLock {
+                pending.values.map { entry ->
+                    val key = GroupFileMarker.key(entry.groupId, entry.sha256)
+                    GroupFileRequestStore.Record(
+                        groupId = entry.groupId,
+                        info = entry.info,
+                        messageId = entry.messageId,
+                        startedAtMs = entry.startedAtMs,
+                        manual = entry.manual,
+                        attempts = entry.attempts,
+                        askedSeed = entry.askedSeed.orEmpty(),
+                        askedAtMs = entry.askedAtMs,
+                        seeds = seeds[key]?.toList().orEmpty(),
+                    )
+                }
+            }
+            runCatching { requestStore.save(snapshot) }
+                .onFailure { Log.w(TAG, "persist pending failed: ${it.message}") }
+        }
+    }
+
     companion object {
         private const val TAG = "GroupFileSwarm"
         /** Столько передач отдаю одновременно как сид; остальные просьбы ждут. */
@@ -650,6 +824,15 @@ class GroupFileSwarm @Inject constructor(
         /** Повтор своей просьбы: с 90 с, растёт с числом попыток до 10 мин; всего сутки. */
         const val REASK_BASE_MS = 90_000L
         const val REASK_MAX_MS = 10L * 60 * 1000
+        /**
+         * Запасной сид (этап 10): когда сидов известно несколько, а первый не
+         * ответил, второго спрашиваем уже через столько (плюс время на
+         * подготовку копии: [PREP_BYTES_PER_MS]), и так первые [FAST_ATTEMPTS] раз.
+         */
+        const val REASK_FAST_MS = 30_000L
+        const val FAST_ATTEMPTS = 3
+        /** Сид шифрует копию примерно с такой скоростью (нижняя оценка для старых телефонов). */
+        const val PREP_BYTES_PER_MS = 2L * 1024
         const val PENDING_TTL_MS = 24L * 60 * 60 * 1000
         const val MAX_ATTEMPTS = 40
         /** Приём без новых кусков дольше этого - застрял: просим у следующего сида. */

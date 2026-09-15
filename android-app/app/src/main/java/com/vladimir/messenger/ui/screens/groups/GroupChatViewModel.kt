@@ -109,6 +109,8 @@ class GroupChatViewModel @Inject constructor(
 
     /** Передачи файлов группы и мои просьбы - карточке файла в ленте. */
     private fun observeTransfers() {
+        // Просьбы с диска (этап 10): карточки сразу показывают «Запрошено…».
+        groupFiles.warmUp()
         viewModelScope.launch {
             fileTransferDao.observeForChat(groupId)
                 .flowOn(Dispatchers.IO)

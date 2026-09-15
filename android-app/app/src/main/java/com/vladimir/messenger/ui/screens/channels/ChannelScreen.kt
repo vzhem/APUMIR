@@ -78,6 +78,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.FileCardState
+import com.vladimir.messenger.ui.components.GroupFileCard
+import com.vladimir.messenger.util.GroupFileMarker
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.ImagePreview
@@ -100,6 +103,14 @@ fun ChannelScreen(
     // Пост, который сейчас правят (автор или владелец канала).
     var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
     val context = LocalContext.current
+    // Файл поста (рой, этап 10): «Сохранить в папку» открывает системное окно.
+    val savePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri -> viewModel.onSaveTargetPicked(uri) }
+    val pendingSave = uiState.pendingSave
+    LaunchedEffect(pendingSave) {
+        pendingSave?.let { transfer -> savePicker.launch(transfer.displayName) }
+    }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -250,6 +261,22 @@ fun ChannelScreen(
                                     viewModel.toggleReaction(post.messageId, emoji)
                                 },
                                 onRemoveReaction = { viewModel.removeReaction(post.messageId) },
+                                // Файл поста (этап 10): карточка под текстом,
+                                // как в группе - «Скачать», ход приёма, «Поделиться».
+                                fileCard = post.file?.let { info ->
+                                    FileCardState.of(
+                                        chatId = uiState.channelId,
+                                        info = info,
+                                        isFromMe = myId.isNotBlank() && post.authorId == myId,
+                                        transfers = uiState.transfers,
+                                        pendingKeys = uiState.pendingFiles,
+                                        receivedFileFor = { viewModel.receivedFileFor(it) },
+                                        authorCopyFor = { viewModel.authorCopyFor(it) },
+                                        onDownload = { viewModel.requestFile(post) },
+                                        onSave = { viewModel.requestSaveReceivedFile(it) },
+                                        onShare = { f -> viewModel.shareFile(f, info.displayName, info.mediaType) },
+                                    )
+                                },
                             )
                         }
                     }
@@ -271,6 +298,11 @@ fun ChannelScreen(
     }
     }
 
+    // Файл к посту (рой, этап 10): системный выбор → хэш и копия → визитка в
+    // тексте поста; сам файл подписчики просят у автора и друг у друга.
+    val filePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(viewModel::onFileSelected) }
     if (showNewPost) {
         PostEditorDialog(
             title = "Новый пост",
@@ -278,6 +310,7 @@ fun ChannelScreen(
             creating = uiState.creating,
             onDismiss = {
                 showNewPost = false
+                viewModel.clearStagedFile()
                 viewModel.dismissError()
             },
             onConfirm = { text, photos ->
@@ -285,6 +318,10 @@ fun ChannelScreen(
                 showNewPost = false
             },
             onPickImages = { uris, onReady -> viewModel.prepareImages(context, uris, onReady) },
+            stagedFile = uiState.stagedFile,
+            preparingFile = uiState.isPreparingFile,
+            onPickFile = { filePicker.launch(arrayOf("*/*")) },
+            onClearFile = { viewModel.clearStagedFile() },
         )
     }
 
@@ -324,8 +361,14 @@ private fun PostCard(
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
+    /** Файл, приложенный к посту (рой, этап 10); null - файла нет. */
+    fileCard: FileCardState? = null,
 ) {
     var showReactions by remember { mutableStateOf(false) }
+    // Подпись «📎 имя (размер)» - для старых версий; здесь её заменяет карточка.
+    val bodyText = remember(post.text, fileCard?.info) {
+        if (fileCard != null) GroupFileMarker.stripCaption(post.text, fileCard.info) else post.text
+    }
     // Копирование текста поста: удержание открывает окно с выделением, как в
     // переписке. Раньше текст поста нельзя было скопировать вообще.
     var selectPostText by remember { mutableStateOf(false) }
@@ -387,11 +430,11 @@ private fun PostCard(
                 // Фотографии поста: одна - во всю ширину, несколько - галерея
                 // с листанием и счётчиком «1/3».
                 PostGallery(images = post.images, pending = post.pendingPhotos)
-                if (post.text.isNotBlank()) {
-                    Text(post.text, modifier = Modifier.padding(top = 8.dp))
+                if (bodyText.isNotBlank()) {
+                    Text(bodyText, modifier = Modifier.padding(top = 8.dp))
                 }
             } else {
-            val imageUrl = remember(post.text) { ImageLinkDetector.directImageUrl(post.text) }
+            val imageUrl = remember(bodyText) { ImageLinkDetector.directImageUrl(bodyText) }
             if (imageUrl != null) {
                 ImagePreview(
                     model = imageUrl,
@@ -401,12 +444,16 @@ private fun PostCard(
                         .heightIn(max = 260.dp)
                         .padding(top = 8.dp),
                 )
-            } else {
+            } else if (bodyText.isNotBlank() || fileCard == null) {
                 Text(
-                    post.text,
+                    bodyText,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
+            }
+            // Файл поста (рой, этап 10): та же карточка, что в группе.
+            if (fileCard != null) {
+                GroupFileCard(state = fileCard, isFromMe = fileCard.isFromMe)
             }
             // Поставленные реакции - прямо под текстом поста, как в привычных
             // каналах: значок с числом, свой обведён золотом.
@@ -620,6 +667,11 @@ private fun PostEditorDialog(
     initialText: String = "",
     initialImages: List<String> = emptyList(),
     imagesEditable: Boolean = true,
+    /** Файл к посту (рой, этап 10): готовая визитка, идёт подготовка, выбрать, убрать. null - без файла (правка). */
+    stagedFile: GroupFileMarker.Info? = null,
+    preparingFile: Boolean = false,
+    onPickFile: (() -> Unit)? = null,
+    onClearFile: () -> Unit = {},
 ) {
     var text by remember { mutableStateOf(initialText) }
     // Уже сжатые картинки (base64) по порядку.
@@ -730,12 +782,56 @@ private fun PostEditorDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // Файл к посту (этап 10): одна строка - имя, размер, «убрать».
+                if (onPickFile != null) {
+                    if (stagedFile != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                com.vladimir.messenger.ui.components.fileIconFor(stagedFile.mediaType),
+                                contentDescription = null,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    stagedFile.displayName,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(GroupFileMarker.formatSize(stagedFile.sizeBytes), style = MaterialTheme.typography.labelSmall)
+                            }
+                            IconButton(onClick = onClearFile, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = onPickFile, enabled = !preparingFile && !creating) {
+                                Text("Прикрепить файл")
+                            }
+                            if (preparingFile) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = { onConfirm(text, images) },
-                enabled = (text.isNotBlank() || images.isNotEmpty()) && !creating && !preparing,
+                enabled = (text.isNotBlank() || images.isNotEmpty() || stagedFile != null) &&
+                    !creating && !preparing && !preparingFile,
             ) { Text(confirmLabel) }
         },
         dismissButton = {

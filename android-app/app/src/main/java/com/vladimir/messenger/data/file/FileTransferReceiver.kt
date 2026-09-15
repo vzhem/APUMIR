@@ -51,8 +51,12 @@ class FileTransferReceiver(
     sealed class OfferRouting {
         /** Файл группы: строка передачи ложится в этот чат (id группы). */
         data class Chat(val chatId: String) : OfferRouting()
-        /** Такой файл уже идёт от другого сида: второе предложение не нужно. */
-        object Duplicate : OfferRouting()
+        /**
+         * Такой файл уже идёт от другого сида (или уже получен): второе
+         * предложение не нужно. Отправителю уходит CANCEL с меткой [chatId]
+         * (этап 10), чтобы он не слал куски в пустоту до конца срока.
+         */
+        data class Duplicate(val chatId: String) : OfferRouting()
         /** Не файл группы: как обычно, по транспортному чату. */
         object Unknown : OfferRouting()
     }
@@ -108,6 +112,14 @@ class FileTransferReceiver(
     private val holderAskedAt = HashMap<String, MutableMap<String, Long>>()
     /** transferId -> хранитель, говоривший с нами последним: подтверждение идёт ему, остальным - реже. */
     private val lastHolderHeard = HashMap<String, String>()
+    /**
+     * Передачи, от которых я отказался (этап 10: файл группы уже идёт от
+     * другого сида). Их куски, долетающие следом за предложением, не
+     * буферизуются, а сразу отбрасываются. Небольшой список, старое вытесняется.
+     */
+    private val declined = object : LinkedHashMap<String, Boolean>(32, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > MAX_DECLINED
+    }
     private var pendingBytes = 0L
 
     /** Returns true when the text was a file packet (caller must not store it as chat text). */
@@ -223,8 +235,7 @@ class FileTransferReceiver(
                 FileTransferPacketCodec.Type.CHUNK -> handleChunk(senderId, transferIdHex, packet.itemIndex, payload)
                 FileTransferPacketCodec.Type.ACK ->
                     handleAck(senderId, transferIdHex, packet.itemIndex, payload)
-                FileTransferPacketCodec.Type.CANCEL ->
-                    Log.i(TAG, "File transfer CANCEL notice for $transferIdHex")
+                FileTransferPacketCodec.Type.CANCEL -> handleCancel(senderId, transferIdHex, payload)
                 FileTransferPacketCodec.Type.CUSTODY_OFFER -> handleCustodyOffer(senderId, payload)
                 FileTransferPacketCodec.Type.CUSTODY_CHUNK ->
                     handleCustodyChunk(senderId, transferIdHex, packet.itemIndex, payload)
@@ -250,6 +261,70 @@ class FileTransferReceiver(
             val oldestKey = pendingItems.keys.firstOrNull() ?: break
             releasePending(oldestKey, pendingItems.getValue(oldestKey))
             Log.w(TAG, "Evicted stale file item buffer $oldestKey")
+        }
+    }
+
+    /**
+     * Получатель отказался от моей исходящей передачи (этап 10: файл группы
+     * уже пришёл от другого сида). Останавливаем её - помечаем CANCELLED и
+     * убираем куски: иначе сид слал бы предложение до конца срока и держал
+     * копию на диске. Только от адресата и только для исходящей; чужие и
+     * старые (до v11.70.20 CANCEL лишь писался в журнал) - как раньше.
+     */
+    private suspend fun handleCancel(senderId: String, transferIdHex: String, payload: ByteArray) {
+        if (!payload.contentEquals(CANCEL_DECLINED)) {
+            Log.i(TAG, "File transfer CANCEL notice for $transferIdHex")
+            return
+        }
+        val transfer = transferDao.getTransfer(transferIdHex)
+        if (transfer == null || transfer.direction != "OUTGOING" || transfer.peerNodeId != senderId) {
+            Log.w(TAG, "Unauthorized file CANCEL from ${senderId.takeLast(8)} for $transferIdHex; dropped")
+            return
+        }
+        if (transfer.state == "COMPLETE" || transfer.state == "CANCELLED") return
+        val updated = advance(transfer, newState = "CANCELLED", errorCode = "DECLINED")
+        if (updated == 1) {
+            runCatching { chunkStore.deleteTransfer(transferIdHex) }
+            Log.i(TAG, "File transfer $transferIdHex declined by ${senderId.takeLast(8)}; cancelled")
+        }
+    }
+
+    /**
+     * Отказаться от уже заведённой входящей передачи (этап 10: тот же файл
+     * группы пришёл от другого сида). Отправителю уходит CANCEL; строку и
+     * куски убирает вызывающий (FileTransferRouter.declineIncoming).
+     */
+    suspend fun declineTransfer(transfer: FileTransferEntity) {
+        if (transfer.direction != "INCOMING" || transfer.state == "COMPLETE") return
+        mutex.withLock {
+            declined[transfer.transferId] = true
+            contiguousPrefixes.remove(transfer.transferId)
+            bufferedChunks.remove(transfer.transferId)?.values?.forEach { it.fill(0) }
+        }
+        sendCancel(transfer.transferId, transfer.chatId, transfer.peerNodeId)
+    }
+
+    /** Отказ от предложения: получателю этот файл уже не нужен (см. [handleCancel]). */
+    private suspend fun sendCancel(transferIdHex: String, chatId: String, to: String) {
+        runCatching {
+            val packet = FileTransferPacketCodec.encode(
+                FileTransferPacketCodec.Packet(
+                    FileTransferPacketCodec.Type.CANCEL,
+                    hexToBytes(transferIdHex),
+                    0L,
+                    0,
+                    1,
+                    CANCEL_DECLINED,
+                )
+            )
+            transport.send(
+                FileTransferWire.cancelMessageId(transferIdHex),
+                chatId,
+                to,
+                FileTransferWire.encodeEncodedPacket(packet),
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "File CANCEL send failed for $transferIdHex: ${error.message}")
         }
     }
 
@@ -333,8 +408,11 @@ class FileTransferReceiver(
         // отбрасывается: метка транспорта в базу попасть не должна.
         val targetChatId = existing?.chatId ?: when (val route = routeOffer(senderId, manifest.fileSha256Hex)) {
             is OfferRouting.Chat -> route.chatId
-            OfferRouting.Duplicate -> {
-                Log.i(TAG, "File offer $transferIdHex from ${senderId.takeLast(8)}: same file already coming; dropped")
+            is OfferRouting.Duplicate -> {
+                Log.i(TAG, "File offer $transferIdHex from ${senderId.takeLast(8)}: same file already coming; declined")
+                declined[transferIdHex] = true
+                bufferedChunks.remove(transferIdHex)?.values?.forEach { it.fill(0) }
+                sendCancel(transferIdHex, route.chatId, senderId)
                 return
             }
             OfferRouting.Unknown -> chatId.takeIf { it.isNotBlank() && it != FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE }
@@ -345,6 +423,8 @@ class FileTransferReceiver(
         }
         val transfer = existing ?: insertIncomingTransfer(manifest, senderId, targetChatId, now) ?: return
         if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
+        // Раньше отказывались, теперь берём (первый сид пропал): куски снова нужны.
+        declined.remove(transferIdHex)
 
         Log.i(
             TAG,
@@ -384,6 +464,7 @@ class FileTransferReceiver(
     ) {
         val transfer = transferDao.getTransfer(transferIdHex)
         if (transfer == null || chunkStore.readManifest(transferIdHex) == null) {
+            if (declined.containsKey(transferIdHex)) return
             bufferOrDropChunk(transferIdHex, chunkIndex, ciphertext)
             return
         }
@@ -1215,6 +1296,9 @@ class FileTransferReceiver(
         const val ERROR_NO_SPACE = "NO_SPACE"
         const val MAX_PENDING_ITEMS = 64
         const val MAX_PENDING_BYTES = 32L * 1024 * 1024
+        /** Полезная нагрузка CANCEL «получателю файл уже не нужен» (этап 10); прочие CANCEL - лишь заметка в журнале. */
+        val CANCEL_DECLINED: ByteArray = byteArrayOf(2)
+        const val MAX_DECLINED = 64
         const val MAX_BUFFERED_TRANSFERS = 32
         const val MAX_BUFFERED_CHUNKS = 64
         const val MAX_BUFFERED_CHUNK_BYTES = 16L * 1024 * 1024

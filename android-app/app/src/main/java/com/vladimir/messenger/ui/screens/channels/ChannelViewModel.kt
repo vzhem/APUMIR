@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -47,6 +48,8 @@ data class ChannelPost(
     val comments: Int,
     /** Сколько разных людей открыли пост. */
     val views: Int = 0,
+    /** Файл, приложенный к посту (визитка `APUFILE1:`, рой этап 9-10); null - файла нет. */
+    val file: com.vladimir.messenger.util.GroupFileMarker.Info? = null,
 )
 
 data class ChannelUiState(
@@ -62,6 +65,16 @@ data class ChannelUiState(
     val error: String? = null,
     /** Реакции по сообщениям канала: ключ - id сообщения-поста. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
+    /** Передачи файлов этого канала (по хэшу файла карточка под постом находит свою). */
+    val transfers: List<com.vladimir.messenger.data.local.entity.FileTransferEntity> = emptyList(),
+    /** Файлы, которые сейчас просим у сидов ([com.vladimir.messenger.util.GroupFileMarker.key]). */
+    val pendingFiles: Set<String> = emptySet(),
+    /** Принятый файл, который человек просит сохранить в папку (системное окно). */
+    val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
+    /** Файл к новому посту: подготовлен (хэш, копия) и ждёт «Опубликовать». */
+    val stagedFile: com.vladimir.messenger.util.GroupFileMarker.Info? = null,
+    /** Идёт подготовка выбранного файла. */
+    val isPreparingFile: Boolean = false,
 )
 
 @HiltViewModel
@@ -73,6 +86,10 @@ class ChannelViewModel @Inject constructor(
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     private val postViews: com.vladimir.messenger.data.channel.PostViewRepository,
     private val postCounters: com.vladimir.messenger.data.channel.PostCounterRepository,
+    private val groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm,
+    private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
+    private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val channelId: String = savedStateHandle.get<String>("channelId").orEmpty()
@@ -86,6 +103,7 @@ class ChannelViewModel @Inject constructor(
     init {
         observe()
         observeReactions()
+        observeTransfers()
         // Вступивший позже не застал посты - просим у владельца последние
         // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
         viewModelScope.launch {
@@ -104,6 +122,103 @@ class ChannelViewModel @Inject constructor(
             reactionRepository.observeChat(channelId).collect { map ->
                 _uiState.update { it.copy(reactions = map) }
             }
+        }
+    }
+
+    // ── Файлы канала (рой, этапы 9-10) ────────────────────────────────────────
+
+    /** Передачи файлов канала и мои просьбы - карточке файла под постом. */
+    private fun observeTransfers() {
+        groupFiles.warmUp()
+        viewModelScope.launch {
+            fileTransferDao.observeForChat(channelId)
+                .flowOn(kotlinx.coroutines.Dispatchers.IO)
+                .collect { list -> _uiState.update { it.copy(transfers = list) } }
+        }
+        viewModelScope.launch {
+            groupFiles.pendingKeys.collect { keys -> _uiState.update { it.copy(pendingFiles = keys) } }
+        }
+    }
+
+    /**
+     * Файл к новому посту выбран в системном окне: посчитать хэш, положить
+     * копию для раздачи. Уйдёт визиткой вместе с постом по «Опубликовать».
+     */
+    fun onFileSelected(uri: android.net.Uri) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                val previous = _uiState.value.stagedFile
+                val info = groupFiles.stage(channelId, uri)
+                if (previous != null && previous.sha256 != info.sha256) groupFiles.unstage(channelId, previous.sha256)
+                _uiState.update { it.copy(stagedFile = info) }
+            } catch (e: Exception) {
+                android.util.Log.w("ChannelVM", "post file stage failed", e)
+                _uiState.update { it.copy(error = "Файл не приложен: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /** Убрать приложенный, но ещё не опубликованный файл. */
+    fun clearStagedFile() {
+        val staged = _uiState.value.stagedFile ?: return
+        _uiState.update { it.copy(stagedFile = null) }
+        viewModelScope.launch { groupFiles.unstage(channelId, staged.sha256) }
+    }
+
+    /** Нажатие «Скачать» на карточке файла поста: попросить у автора или соседей. */
+    fun requestFile(post: ChannelPost) {
+        val info = post.file ?: return
+        viewModelScope.launch {
+            runCatching { groupFiles.request(channelId, post.messageId, info, post.authorId, manual = true) }
+                .onFailure { e -> _uiState.update { it.copy(error = "Не удалось запросить файл: ${e.message}") } }
+        }
+    }
+
+    /** Моя авторская копия файла (превью картинки, «Поделиться»). */
+    fun authorCopyFor(sha256: String): java.io.File? = groupFiles.authorCopy(channelId, sha256)
+
+    /** Принятый файл: копия у меня (для «Поделиться»). */
+    fun receivedFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? =
+        fileTransferRouter.receivedFileFor(transfer)
+
+    fun requestSaveReceivedFile(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return
+        _uiState.update { it.copy(pendingSave = transfer) }
+    }
+
+    fun onSaveTargetPicked(target: android.net.Uri?) {
+        val transfer = _uiState.value.pendingSave
+        _uiState.update { it.copy(pendingSave = null) }
+        if (target == null || transfer == null) return
+        viewModelScope.launch {
+            val ok = runCatching { fileTransferRouter.exportReceivedFile(transfer, target) }.getOrDefault(false)
+            _uiState.update {
+                it.copy(error = if (ok) "Сохранено: ${transfer.displayName}" else "Не удалось сохранить файл")
+            }
+        }
+    }
+
+    /** «Поделиться» принятым файлом (или своей копией) через системное окно. */
+    fun shareFile(file: java.io.File, displayName: String, mediaType: String) {
+        val ctx = appContext
+        viewModelScope.launch {
+            runCatching {
+                val dir = java.io.File(ctx.cacheDir, "shared").apply { mkdirs() }
+                val dst = java.io.File(dir, displayName.ifBlank { file.name })
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.copyTo(dst, overwrite = true) }
+                val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", dst)
+                val intent = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType(mediaType.ifBlank { "application/octet-stream" })
+                    .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val chooser = android.content.Intent.createChooser(intent, "Поделиться")
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(chooser)
+            }.onFailure { e -> _uiState.update { it.copy(error = "Не удалось поделиться: ${e.message}") } }
         }
     }
 
@@ -199,6 +314,9 @@ class ChannelViewModel @Inject constructor(
                         timeMs = first.timestamp,
                         comments = (texts.size - 1).coerceAtLeast(0),
                         views = viewCounts[topic.id] ?: 0,
+                        // Файл поста (этап 10): визитка в тексте, сам файл
+                        // тянется у автора или у соседей по нажатию.
+                        file = com.vladimir.messenger.util.GroupFileMarker.parse(first.content),
                     )
                 }.sortedBy { it.timeMs }
 
@@ -263,21 +381,26 @@ class ChannelViewModel @Inject constructor(
     fun createPost(text: String, photos: List<String> = emptyList()) {
         val stripped = InlineImage.stripImage(text)
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
-        if (stripped.isEmpty() && attached.isEmpty()) return
+        val staged = _uiState.value.stagedFile
+        if (stripped.isEmpty() && attached.isEmpty() && staged == null) return
         _uiState.update { it.copy(creating = true, error = null) }
         viewModelScope.launch {
             // Заголовок берём из ТЕКСТА, а не из служебных строк картинок.
             val title = stripped.lineSequence().firstOrNull().orEmpty().trim()
                 .take(GroupRepository.POST_TITLE_CHARS)
-                .ifBlank { "Пост" }
+                .ifBlank { staged?.displayName?.take(GroupRepository.POST_TITLE_CHARS) ?: "Пост" }
+            // Файл поста (рой, этап 10): визитка последней строкой, как в группе;
+            // сам файл подписчики попросят у автора и друг у друга.
+            val body = if (staged == null) stripped else com.vladimir.messenger.util.GroupFileMarker.compose(stripped, staged)
             groupRepository.createTopic(channelId, title)
                 .onSuccess { topic ->
-                    groupRepository.sendMessage(channelId, topic.id, stripped, attached)
+                    groupRepository.sendMessage(channelId, topic.id, body, attached)
                         .onFailure { e ->
                             _uiState.update {
                                 it.copy(creating = false, error = e.message ?: "Не удалось опубликовать пост")
                             }
                         }
+                        .onSuccess { _uiState.update { it.copy(stagedFile = null) } }
                     _uiState.update { it.copy(creating = false) }
                 }
                 .onFailure { e ->

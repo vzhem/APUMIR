@@ -335,14 +335,57 @@ class FileTransferReceiverTest {
         assertTrue(notifier.events.single().startsWith("group-7|$senderId|"))
     }
 
-    /** Файл уже идёт от другого сида - второе предложение не заводит вторую строку. */
+    /** Файл уже идёт от другого сида - второе предложение не заводит вторую строку, сиду уходит отказ. */
     @Test
-    fun duplicateGroupFileOfferIsIgnored() = runTest {
-        val receiver = receiver(routeOffer = { _, _ -> FileTransferReceiver.OfferRouting.Duplicate })
+    fun duplicateGroupFileOfferIsDeclined() = runTest {
+        val receiver = receiver(routeOffer = { _, _ -> FileTransferReceiver.OfferRouting.Duplicate("group-7") })
         deliver(receiver, offerTexts())
         assertNull(dao.getTransfer(transferIdHex))
         // Чат из транспорта тоже не помог: рой решает раньше него.
         assertTrue(pinner.pinnedBindings.isNotEmpty())
+        // Отказ (этап 10): CANCEL с меткой «не нужен», чтобы сид остановился.
+        val cancels = transportSends.mapNotNull { text ->
+            runCatching { FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(text)) }.getOrNull()
+        }.filter { it.type == FileTransferPacketCodec.Type.CANCEL }
+        assertEquals(1, cancels.size)
+        assertArrayEquals(FileTransferReceiver.CANCEL_DECLINED, cancels.single().payload)
+    }
+
+    /** Сид получил отказ адресата: исходящая останавливается, куски убираются (этап 10). */
+    @Test
+    fun declinedCancelStopsOutgoingTransfer() = runTest {
+        insertOutgoingForAck()
+        chunkStore.storeManifest(transferIdHex, ByteArray(96))
+        val receiver = receiver()
+        val cancel = FileTransferWire.encodeEncodedPacket(
+            FileTransferPacketCodec.encode(
+                FileTransferPacketCodec.Packet(
+                    FileTransferPacketCodec.Type.CANCEL,
+                    transferIdBytes,
+                    0L,
+                    0,
+                    1,
+                    FileTransferReceiver.CANCEL_DECLINED,
+                ),
+            ),
+        )
+        // Чужой отказ не считается.
+        assertTrue(receiver.onIncomingText("pk_" + "ef".repeat(16), chatId, "cancel-foreign", cancel))
+        assertEquals("SENT", dao.getTransfer(transferIdHex)!!.state)
+        // Отказ адресата - считается.
+        assertTrue(receiver.onIncomingText(senderId, chatId, "cancel-1", cancel))
+        assertEquals("CANCELLED", dao.getTransfer(transferIdHex)!!.state)
+        assertNull(chunkStore.readManifest(transferIdHex))
+        // Старый CANCEL без метки (до v11.70.20) состояние не меняет.
+        dao.deleteTransfer(transferIdHex)
+        insertOutgoingForAck()
+        val legacy = FileTransferWire.encodeEncodedPacket(
+            FileTransferPacketCodec.encode(
+                FileTransferPacketCodec.Packet(FileTransferPacketCodec.Type.CANCEL, transferIdBytes, 0L, 0, 1, byteArrayOf(1)),
+            ),
+        )
+        assertTrue(receiver.onIncomingText(senderId, chatId, "cancel-legacy", legacy))
+        assertEquals("SENT", dao.getTransfer(transferIdHex)!!.state)
     }
 
     /** Личный файл (рой не при чём) идёт по-старому: транспортный чат. */

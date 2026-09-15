@@ -59,12 +59,13 @@ class FileTransferWireTest {
             FileTransferWire.chunkMessageId(transferIdHex, 65535, 15),
             FileTransferWire.ackMessageId(transferIdHex, 80),
             FileTransferWire.chatPlaceholderMessageId(transferIdHex),
+            FileTransferWire.cancelMessageId(transferIdHex),
         )
         ids.forEach { id ->
             assertTrue(id.length <= FileTransferWire.MAX_MESSAGE_ID_BYTES)
             assertFalse(id.contains('|'))
         }
-        assertEquals(4, ids.toSet().size)
+        assertEquals(5, ids.toSet().size)
     }
 
     @Test

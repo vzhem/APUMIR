@@ -75,6 +75,12 @@ object FileTransferWire {
         return "file-$transferIdHex".also(::requireValidMessageId)
     }
 
+    /** Отказ получателя от предложения (этап 10 роя): один на передачу, повтор сеть отсеет как дубль. */
+    fun cancelMessageId(transferIdHex: String): String {
+        requireValidTransferId(transferIdHex)
+        return "f${transferIdHex}x".also(::requireValidMessageId)
+    }
+
     // ── Хранение у третьего телефона (этап 7 роя) ──────────────────────────
     // Предложение и куски идут только по прямому каналу (id сообщения там не
     // нужен); через надёжный транспорт ходят лишь подтверждения. Метка
