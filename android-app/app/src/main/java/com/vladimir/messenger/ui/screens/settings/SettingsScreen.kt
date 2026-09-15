@@ -1004,6 +1004,14 @@ private fun SettingsTabContent(
                         title    = "Версия",
                         subtitle = "APU ${uiState.appVersion}",
                     )
+                    // Какое ядро внутри: строку отдаёт само ядро, поэтому
+                    // по ней видно, что мост Kotlin ↔ Rust собран из свежего
+                    // lib.udl (первая функция после снятия заморозки).
+                    SettingsItem(
+                        icon     = Icons.Default.Memory,
+                        title    = "Ядро",
+                        subtitle = uiState.rustCoreVersion,
+                    )
                 }
             }
         }

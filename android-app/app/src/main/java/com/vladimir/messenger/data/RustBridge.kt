@@ -183,6 +183,20 @@ object RustBridge {
 
     fun isRunning(): Boolean = engine?.isRunning() == true
 
+    /**
+     * Строка сборки ядра («p2p_core 0.1.0 · сборка v11.70.23 · 2 брокера»)
+     * для экрана «О приложении». Первая функция моста, добавленная после
+     * того, как CI начал перегенерировать `p2p_core.kt` из `lib.udl`: если
+     * она видна на телефоне - ядро больше не заморожено.
+     */
+    fun coreBuildInfo(): String = try {
+        // Полное имя: одноимённая функция объекта иначе вызвала бы саму себя.
+        uniffi.p2p_core.coreBuildInfo()
+    } catch (e: Throwable) {
+        Log.w(TAG, "coreBuildInfo failed: ${e.message}")
+        "недоступно"
+    }
+
     fun nodeId(): String? = engine?.nodeId()
     fun publicKey(): String? = engine?.publicKey()
 

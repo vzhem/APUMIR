@@ -5,6 +5,12 @@ namespace p2p_core {
     string initialize_core();
 
     string get_version();
+
+    // Что за ядро внутри APK: версия крейта, тег APU, с которым его собрал
+    // CI, набор брокеров. Показывается в Настройках → «О приложении».
+    // Первая функция, добавленная после снятия заморозки моста: CI
+    // перегенерирует p2p_core.kt из этого файла (v11.70.23).
+    string core_build_info();
     u8 get_protocol_version();
 
     P2PCoreHandle create_engine(string display_name);

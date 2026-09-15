@@ -168,6 +168,7 @@ class SettingsViewModel @Inject constructor(
                 OwnInvite.link(context) ?: "p2p://invite/$pubKey"
             }
             val peers = withContext(Dispatchers.IO) { RustBridge.connectedPeers().toInt() }
+            val coreInfo = withContext(Dispatchers.IO) { RustBridge.coreBuildInfo() }
 
             _uiState.update {
                 it.copy(
@@ -182,7 +183,7 @@ class SettingsViewModel @Inject constructor(
                     connectedPeers   = peers,
                     connectionMode   = "P2P / QUIC",
                     appVersion       = appVersion,
-                    rustCoreVersion  = "Rust Core",
+                    rustCoreVersion  = coreInfo,
                     publicIp         = publicIp,
                 )
             }

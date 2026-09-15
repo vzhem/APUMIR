@@ -272,6 +272,15 @@ pub fn get_version() -> String {
     format!("P2P Core v{}", APP_VERSION)
 }
 
+/// Сборка ядра для экрана «О приложении»: версия крейта, тег APU (CI задаёт
+/// `GITHUB_REF_NAME` на время сборки; вне CI - «local»), набор брокеров.
+/// Никаких секретов и адресов здесь быть не должно - строка видна всем.
+pub fn core_build_info() -> String {
+    let tag = option_env!("GITHUB_REF_NAME").unwrap_or("local");
+    let brokers = if cfg!(feature = "mqtt-dual-broker") { "2 брокера" } else { "1 брокер" };
+    format!("p2p_core {} · сборка {} · {}", APP_VERSION, tag, brokers)
+}
+
 pub fn get_protocol_version() -> u8 {
     PROTOCOL_VERSION
 }

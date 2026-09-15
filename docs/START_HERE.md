@@ -49,13 +49,24 @@
 
 ## 3. Где мы сейчас (проверено 2026-09-15, не по памяти)
 
-- Релиз **v11.70.22** готовится (2026-09-15): системный жест «Назад» внутри
-  темы группы ведёт к списку тем (`BackHandler` в `GroupChatScreen`).
-  Описание - `docs/RELEASE_NOTES_v11.70.22.md`; код - `AI_HANDOFF.md` 0r.
-  Там же - заготовка снятия заморозки ядра: `scripts/ci/build-release.yml`
-  теперь перегенерирует uniffi-мост из `lib.udl` в CI; ждёт копирования
-  владельцем в `.github/workflows/` и первого прогона с правкой `lib.udl`.
-- Релиз **v11.70.21** = Latest (`gh api repos/vzhem/APUMIR/releases/latest --jq .tag_name`),
+- Релиз **v11.70.23** готовится (2026-09-15): первая функция ядра после
+  снятия заморозки моста - `core_build_info()` в `lib.udl`/`lib.rs`, строка
+  «Ядро» в Настройках → «О приложении». **Собирается только новым
+  workflow** (шаг «Regenerate uniffi Kotlin bindings from lib.udl» в
+  `scripts/ci/build-release.yml`): владелец должен скопировать файл в
+  `.github/workflows/` ПОСЛЕ `git pull` коммита с этим шагом - его первая
+  копия (2026-09-15) была сделана до него и ничего не изменила. Тег ставить
+  только на коммит, где `.github/workflows/build-release.yml` уже новый.
+  План ядра - `docs/CORE_ROADMAP.md`; код - `AI_HANDOFF.md` 0s.
+- Релиз **v11.70.22** = Latest (`gh api repos/vzhem/APUMIR/releases/latest --jq .tag_name`),
+  `app-release.apk` = 37 531 734 байт, sha256 `49ccc135…5de6`, тег на
+  коммите `8c2dbc5`, прогон 34993655917 (2026-09-15, с первого раза);
+  `main` = ветка. Описание - `docs/RELEASE_NOTES_v11.70.22.md`: системный
+  жест «Назад» внутри темы группы ведёт к списку тем (`BackHandler` в
+  `GroupChatScreen`); код - `AI_HANDOFF.md` 0r. На телефонах НЕ проверен.
+  Владелец 2026-09-15 подтвердил по v11.70.21: заголовок темы и закреп
+  файла работают.
+- Релиз **v11.70.21** (предыдущий Latest),
   `app-release.apk` = 37 531 734 байт, sha256 `ee695516…9c2f`, тег на
   коммите `843aabe`, прогон 34970665553 (2026-09-15, с первого раза);
   `main` = ветка. Описание - `docs/RELEASE_NOTES_v11.70.21.md`: замечания
