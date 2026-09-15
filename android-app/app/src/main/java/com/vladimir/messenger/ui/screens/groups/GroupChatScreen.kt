@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.CircularProgressIndicator
@@ -147,6 +148,13 @@ fun GroupChatScreen(
     // название группы уходит в подзаголовок: раньше имя темы шло мелким
     // серым «дом · 3 участн.», и было не видно, куда зашёл.
     val topicHeader = !isChannel && hasTopics && showFeed && selectedTopic != null
+    // Системный жест «Назад» (смахивание от края экрана, в т.ч. справа
+    // налево) и кнопка «Назад» телефона. Без этого перехватчика Android
+    // закрывал весь экран группы, и из темы человек попадал сразу в список
+    // групп, минуя список тем (владелец, 2026-09-15). Внутри темы - к списку
+    // тем; в списке тем и в группе без тем перехватчик выключен, и жест, как
+    // и прежде, закрывает экран.
+    BackHandler(enabled = hasTopics && showFeed) { showFeed = false }
     val senderNames = remember(uiState.members) {
         uiState.members.associate { it.nodeId to it.displayName }
     }

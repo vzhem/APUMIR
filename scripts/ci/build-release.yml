@@ -82,6 +82,60 @@ jobs:
         working-directory: ./rust-core
         run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../android-app/app/src/main/jniLibs build --release --features mqtt-dual-broker
 
+      # ---- мост Kotlin <-> ядро ----------------------------------------------
+      # android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt порождается из
+      # rust-core/src/lib.udl генератором uniffi-bindgen. Раньше файл лежал в git
+      # «как есть», и любая новая функция ядра требовала генератора на ПК
+      # разработчика (его нет ни у владельца, ни у бота) - ядро было заморожено.
+      # Теперь генератор собирается здесь (tools/uniffi-bindgen, uniffi =0.28.3 -
+      # та же линия 0.28, что у ядра) и переписывает файл перед сборкой APK.
+      # Если шаг не удался - остаётся файл из git, то есть ровно то, что было.
+      - name: Regenerate uniffi Kotlin bindings from lib.udl
+        working-directory: ./rust-core
+        run: |
+          BIND=../android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+          ok=0
+          if cargo run --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
+               generate src/lib.udl --language kotlin --config uniffi.toml \
+               --out-dir ../android-app/app/src/main/java --no-format; then
+            if grep -q "ffi_p2p_core_uniffi_contract_version" "$BIND"; then ok=1; fi
+          fi
+          if [ "$ok" = 1 ]; then
+            # Страховка: генератор и ядро должны быть одной линии uniffi
+            # (0.28 → contract 26). Иначе приложение упадёт на старте.
+            NEWV=$(grep -o 'bindings_contract_version = [0-9]*' "$BIND" | grep -o '[0-9]*$')
+            OLDV=$(git show HEAD:android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt | grep -o 'bindings_contract_version = [0-9]*' | grep -o '[0-9]*$')
+            if [ "$NEWV" != "$OLDV" ]; then
+              ok=0
+              echo "::warning::uniffi contract version changed ($OLDV -> $NEWV): generator and core are on different uniffi lines - keeping the committed bindings"
+            fi
+          fi
+          if [ "$ok" = 1 ]; then
+            echo "::notice::uniffi bindings regenerated from lib.udl, sha256 $(sha256sum "$BIND" | cut -c1-16)"
+            if git diff --quiet -- "$BIND"; then
+              echo "uniffi bindings match the committed file"
+            else
+              echo "::notice::regenerated uniffi bindings differ from git - they will be pushed back to main after the release"
+              git diff --stat -- "$BIND"
+            fi
+          else
+            git checkout -- "$BIND"
+            echo "::warning::uniffi-bindgen failed - building with the committed bindings (new core functions, if any, are NOT visible to Kotlin)"
+          fi
+
+      # Свежие мост и ядро - на вкладке Actions этого прогона (30 дней), на
+      # случай если сборка APK упадёт именно на них.
+      - name: Upload core bindings (debug aid)
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: core-bindings
+          path: |
+            android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+            android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so
+            android-app/app/src/main/jniLibs/armeabi-v7a/libp2p_core.so
+          retention-days: 30
+
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
@@ -172,3 +226,31 @@ jobs:
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Если мост изменился (то есть менялся lib.udl), кладём его вместе с
+      # собранным ядром обратно в main: иначе локальная сборка владельца и
+      # песочница бота останутся со старым мостом (а старое ядро + новый мост
+      # роняют приложение на старте по контрольным суммам). Только когда тег
+      # стоит на вершине main - так делает бот. Релиз к этому моменту уже
+      # опубликован, поэтому неудача здесь релиз не отменяет.
+      - name: Push regenerated bindings and core back to main
+        if: success()
+        continue-on-error: true
+        run: |
+          BIND=android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+          if git diff --quiet -- "$BIND"; then
+            echo "uniffi bindings unchanged - nothing to push"
+            exit 0
+          fi
+          git fetch --depth=1 origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "::warning::tag is not at the head of main - regenerated bindings were NOT pushed; take them from the core-bindings artifact of this run"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$BIND" \
+            android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so \
+            android-app/app/src/main/jniLibs/armeabi-v7a/libp2p_core.so
+          git commit -m "ci: uniffi bindings + core rebuilt for ${GITHUB_REF#refs/tags/}"
+          git push origin HEAD:main || echo "::warning::push to main failed - take the bindings from the core-bindings artifact of this run"
