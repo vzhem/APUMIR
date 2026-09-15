@@ -832,6 +832,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -913,6 +915,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_clear_relay_at_rest_key(uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_p2p_core_fn_func_core_build_info(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_engine(`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
     fun uniffi_p2p_core_fn_func_create_engine_durable(`displayName`: RustBuffer.ByValue,`publicKey`: RustBuffer.ByValue,`privateKey`: RustBuffer.ByValue,`relayDbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1091,6 +1095,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_clear_relay_at_rest_key(
     ): Short
+    fun uniffi_p2p_core_checksum_func_core_build_info(
+    ): Short
     fun uniffi_p2p_core_checksum_func_create_engine(
     ): Short
     fun uniffi_p2p_core_checksum_func_create_engine_durable(
@@ -1227,6 +1233,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_clear_relay_at_rest_key() != 53814.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_core_build_info() != 28854.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_create_engine() != 15702.toShort()) {
@@ -2947,6 +2956,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
         _status)
 }
     
+    
+ fun `coreBuildInfo`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_core_build_info(
+        _status)
+}
+    )
+    }
     
  fun `createEngine`(`displayName`: kotlin.String): P2pCoreHandle {
             return FfiConverterTypeP2PCoreHandle.lift(
