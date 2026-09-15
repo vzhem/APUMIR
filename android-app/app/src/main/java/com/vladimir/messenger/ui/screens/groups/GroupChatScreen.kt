@@ -188,7 +188,7 @@ fun GroupChatScreen(
                             // потоке - на входе в группу это давало зависание.
                             val bmp = com.vladimir.messenger.ui.components.AvatarBitmaps
                                 .rememberAvatar(storeAvatars["g:$gid"])
-                            if (bmp != null) {
+                            if (bmp != null && !topicHeader) {
                                 Image(
                                     bitmap = bmp.asImageBitmap(),
                                     contentDescription = null,
