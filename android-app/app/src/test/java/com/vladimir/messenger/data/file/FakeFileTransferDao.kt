@@ -168,6 +168,9 @@ class FakeFileTransferDao : FileTransferDao {
     override suspend fun getCompleted(): List<FileTransferEntity> =
         transfers.values.filter { it.state == "COMPLETE" }
 
+    override suspend fun getForFile(chatId: String, fileSha256: String): List<FileTransferEntity> =
+        transfers.values.filter { it.chatId == chatId && it.fileSha256 == fileSha256 }.sortedBy { it.createdAtMs }
+
     override suspend fun insertNewTransfer(transfer: FileTransferEntity): Boolean =
         insertTransferIgnore(transfer) != -1L
 }

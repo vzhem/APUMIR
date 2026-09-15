@@ -74,6 +74,13 @@ class FileCustodySender(
     /** Получатель хранимого файла сейчас в сети (по пульсу присутствия). */
     private val isOnline: suspend (nodeId: String) -> Boolean,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /**
+     * Можно ли отдать эту передачу на хранение. Файлы группы (рой, этап 9)
+     * на хранение не идут: у каждого просителя своя копия, и на большой
+     * группе хранители утонули бы в них; проситель просто спросит другого
+     * сида. По умолчанию - можно всё (личные файлы).
+     */
+    private val custodyAllowed: suspend (FileTransferEntity) -> Boolean = { true },
 ) {
     /** Ход одного плеча: кому шлём, что подтверждено, докуда дослали. */
     private class Leg(val peer: String, val startedAtMs: Long) {
@@ -135,6 +142,7 @@ class FileCustodySender(
         for (transfer in waiting) {
             if (transfer.expiresAtMs <= now) continue
             if (transfer.chunkCount <= 0L) continue
+            if (!custodyAllowed(transfer)) continue
             // Уже лежит у хранителей в нужном числе - хватит (прямые повторы
             // делает обычный передатчик, см. resumeStaleCustodied). Меньше -
             // пока сами в сети, раздаём ещё по одной копии за раз.

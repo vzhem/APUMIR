@@ -826,4 +826,57 @@ class GroupWireTest {
         assertNull(GroupWire.parse("APUGRP1|mreq|g|$t|0|5"))
         assertNull(GroupWire.parse("APUGRP1|mreq|g||0|5|0|1"))
     }
+
+    // ── Файлы группы (рой, этап 9) ──────────────────────────────────────────
+
+    @Test
+    fun fileWantRoundTripCarriesBinding() {
+        val sha = "0f".repeat(32)
+        val binding = ByteArray(96) { (it * 7).toByte() }
+        val envelope = GroupWire.buildFileWant("g", sha, "msg-1|x", binding)
+        assertEquals(6, envelope.split('|').size)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.FileWant)
+        val want = parsed as GroupWire.Packet.FileWant
+        assertEquals("g", want.groupId)
+        assertEquals(sha, want.sha256)
+        assertEquals("msg-1|x", want.messageId)
+        assertTrue(binding.contentEquals(want.binding))
+        // Без ключа - пустое поле, пустой массив.
+        val bare = GroupWire.parse(GroupWire.buildFileWant("g", sha, "m", ByteArray(0))) as GroupWire.Packet.FileWant
+        assertEquals(0, bare.binding.size)
+    }
+
+    @Test
+    fun fileWantRejectsGarbage() {
+        val sha = "0f".repeat(32)
+        val m = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("m".toByteArray(Charsets.UTF_8))
+        assertNull(GroupWire.parse("APUGRP1|fwant|g|${sha.uppercase()}|$m|"))
+        assertNull(GroupWire.parse("APUGRP1|fwant|g|${sha.dropLast(2)}|$m|"))
+        assertNull(GroupWire.parse("APUGRP1|fwant|g|$sha||"))
+        assertNull(GroupWire.parse("APUGRP1|fwant|g|$sha|$m|!!!"))
+        assertNull(GroupWire.parse("APUGRP1|fwant|g|$sha|$m"))
+        val tooLong = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(ByteArray(GroupWire.MAX_FILE_WANT_BINDING_BYTES + 1))
+        assertNull(GroupWire.parse("APUGRP1|fwant|g|$sha|$m|$tooLong"))
+        try {
+            GroupWire.buildFileWant("g", "bad", "m", ByteArray(0))
+            org.junit.Assert.fail("bad sha accepted")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
+    @Test
+    fun fileHaveRoundTrip() {
+        val sha = "a1".repeat(32)
+        val envelope = GroupWire.buildFileHave("g", sha, "msg|9")
+        assertEquals(5, envelope.split('|').size)
+        val have = GroupWire.parse(envelope) as GroupWire.Packet.FileHave
+        assertEquals("g", have.groupId)
+        assertEquals(sha, have.sha256)
+        assertEquals("msg|9", have.messageId)
+        assertNull(GroupWire.parse("APUGRP1|fhave|g|$sha"))
+        assertNull(GroupWire.parse("APUGRP1|fhave|g|$sha|"))
+        assertNull(GroupWire.parse("APUGRP1|fhave|g|zz|bQ"))
+    }
 }

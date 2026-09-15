@@ -36,6 +36,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image as ImageIcon
+import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import com.vladimir.messenger.util.GroupFileMarker
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Settings
@@ -106,6 +120,18 @@ fun GroupChatScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf("") }
     var showNewTopic by remember { mutableStateOf(false) }
+    // Файл к сообщению (рой, этап 9): системный выбор → хэш и копия →
+    // визитка в тексте; сам файл участники просят у автора и друг у друга.
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(viewModel::onFileSelected)
+    }
+    val savePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri -> viewModel.onSaveTargetPicked(uri) }
+    val pendingSave = uiState.pendingSave
+    LaunchedEffect(pendingSave) {
+        pendingSave?.let { transfer -> savePicker.launch(transfer.displayName) }
+    }
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
@@ -374,6 +400,45 @@ fun GroupChatScreen(
                     }
                 }
                 items(uiState.messages, key = { it.id }) { message ->
+                    val card = remember(message.content) { GroupFileMarker.parse(message.content) }
+                    val cardState = if (card == null) {
+                        null
+                    } else {
+                        val mine = uiState.transfers.filter { it.fileSha256 == card.sha256 }
+                        // Моя входящая: готовая, иначе самая живая (после смены
+                        // сида строк может быть две), иначе хоть какая-то.
+                        val transfer = mine.firstOrNull { it.direction == "INCOMING" && it.state == "COMPLETE" }
+                            ?: mine.filter { it.direction == "INCOMING" && it.state != "FAILED" }.maxByOrNull { it.updatedAtMs }
+                            ?: mine.lastOrNull { it.direction == "INCOMING" }
+                        val complete = transfer != null && transfer.state == "COMPLETE"
+                        val stalled = transfer != null && !complete && transfer.state != "FAILED" &&
+                            System.currentTimeMillis() - transfer.updatedAtMs >= com.vladimir.messenger.data.group.GroupFileSwarm.STALL_MS
+                        // Файл у меня: принятая копия или моя авторская.
+                        val localFile = when {
+                            complete -> viewModel.receivedFileFor(transfer!!)
+                            message.isFromMe -> viewModel.authorCopyFor(card.sha256)
+                            else -> null
+                        }
+                        FileCardState(
+                            info = card,
+                            transfer = transfer,
+                            pending = GroupFileMarker.key(uiState.groupId, card.sha256) in uiState.pendingFiles,
+                            stalled = stalled,
+                            seeded = if (message.isFromMe) {
+                                mine.count { it.direction == "OUTGOING" && it.state == "COMPLETE" }
+                            } else {
+                                0
+                            },
+                            previewFile = localFile?.takeIf { card.mediaType.startsWith("image/") },
+                            onDownload = { viewModel.requestFile(message, card) },
+                            onSave = if (complete) {
+                                { viewModel.requestSaveReceivedFile(transfer!!) }
+                            } else {
+                                null
+                            },
+                            onShare = localFile?.let { f -> { viewModel.shareFile(f, card.displayName, card.mediaType) } },
+                        )
+                    }
                     MessageBubble(
                         message = message,
                         senderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
@@ -384,7 +449,33 @@ fun GroupChatScreen(
                         reactions = uiState.reactions[message.id].orEmpty(),
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
+                        fileCard = cardState,
                     )
+                }
+            }
+
+            // ── Приложенный файл (этап 9): карточка над полем ввода до отправки.
+            val staged = uiState.stagedFile
+            if (staged != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(staged.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall)
+                    }
+                    IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp))
+                    }
                 }
             }
 
@@ -405,6 +496,25 @@ fun GroupChatScreen(
                     .padding(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // Скрепка (этап 9): файл к сообщению. Закрытые вложения
+                // объясняются, а не молчат.
+                IconButton(
+                    onClick = {
+                        if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
+                    },
+                    enabled = !uiState.isPreparingFile && !uiState.sending,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    if (uiState.isPreparingFile) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            Icons.Filled.AttachFile,
+                            contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
+                            tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { draft = it },
@@ -422,7 +532,7 @@ fun GroupChatScreen(
                 )
                 Spacer(Modifier.width(8.dp))
                 TextButton(
-                    enabled = draft.isNotBlank() && !uiState.sending,
+                    enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
                     onClick = {
                         viewModel.send(draft)
                         draft = ""
@@ -730,6 +840,8 @@ private fun MessageBubble(
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
+    /** Файл, приложенный к сообщению (этап 9), и ход его приёма/раздачи. */
+    fileCard: FileCardState? = null,
 ) {
     // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
@@ -762,8 +874,11 @@ private fun MessageBubble(
                 val attachedB64 = remember(message.content) {
                     com.vladimir.messenger.util.InlineImage.extractB64(message.content)
                 }
-                val bodyText = remember(message.content) {
-                    com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+                val bodyText = remember(message.content, fileCard?.info) {
+                    val words = com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+                    // Подпись «📎 имя (размер)» - для старых версий; здесь её
+                    // заменяет карточка файла.
+                    if (fileCard != null) GroupFileMarker.stripCaption(words, fileCard.info) else words
                 }
                 val attachedBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
                     .rememberAvatar(attachedB64)
@@ -806,7 +921,11 @@ private fun MessageBubble(
                             "Фото: " + com.vladimir.messenger.util.InlineImage.photoCount(message.content),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    bodyText.isBlank() && fileCard != null -> Unit
                     else -> Text(bodyText)
+                }
+                if (fileCard != null) {
+                    GroupFileCard(state = fileCard, isFromMe = message.isFromMe)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(time, style = MaterialTheme.typography.labelSmall)
@@ -863,6 +982,144 @@ private fun MessageBubble(
             }
         }
     }
+}
+
+/** Что карточка файла (этап 9) знает о файле и его передаче на этом телефоне. */
+data class FileCardState(
+    val info: GroupFileMarker.Info,
+    /** Моя входящая передача этого файла или null, если ещё не просил. */
+    val transfer: FileTransferEntity?,
+    /** Просьба ушла, передачи ещё нет. */
+    val pending: Boolean,
+    /** Приём начался, но куски давно не приходят: раздающий пропал. */
+    val stalled: Boolean,
+    /** Скольким участникам я (автор) уже отдал файл целиком. */
+    val seeded: Int,
+    /** Картинка: принятая копия или моя авторская. */
+    val previewFile: java.io.File?,
+    val onDownload: () -> Unit,
+    val onSave: (() -> Unit)?,
+    val onShare: (() -> Unit)?,
+)
+
+/**
+ * Карточка файла в пузыре сообщения группы (рой, этап 9): имя, размер, ход
+ * приёма и кнопки «Скачать» / «Сохранить в папку» / «Поделиться». У автора -
+ * сколько участников уже получили файл.
+ */
+@Composable
+private fun GroupFileCard(state: FileCardState, isFromMe: Boolean) {
+    val info = state.info
+    val transfer = state.transfer
+    val complete = transfer != null && transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
+    val previewPath = state.previewFile?.absolutePath
+    var previewBitmap by remember(previewPath) {
+        mutableStateOf(com.vladimir.messenger.ui.components.AvatarBitmaps.cachedFile(previewPath, sampleSize = 2))
+    }
+    LaunchedEffect(previewPath) {
+        if (previewBitmap == null && previewPath != null) {
+            previewBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps.loadFile(previewPath, sampleSize = 2)
+        }
+    }
+    var showFull by remember(previewPath) { mutableStateOf(false) }
+    if (showFull && previewPath != null) {
+        com.vladimir.messenger.ui.components.PhotoViewer(
+            photos = listOf(com.vladimir.messenger.ui.components.PhotoSource.File(previewPath)),
+            onDismiss = { showFull = false },
+        )
+    }
+    Column(
+        modifier = Modifier
+            .padding(top = 6.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            .padding(8.dp),
+    ) {
+        val bitmap = previewBitmap
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = info.displayName,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showFull = true },
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    info.displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(GroupFileMarker.formatSize(info.sizeBytes), style = MaterialTheme.typography.labelSmall)
+            }
+            // Кнопка «Скачать»: пока файл не просили и он не идёт.
+            if (!isFromMe && transfer == null && !state.pending) {
+                IconButton(onClick = state.onDownload, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.Download, contentDescription = "Скачать")
+                }
+            }
+        }
+        val status = when {
+            isFromMe -> if (state.seeded > 0) "Получили: ${state.seeded}" else "Участники запросят файл у вас"
+            complete -> "Получено ✓"
+            state.stalled -> "Раздающий не отвечает (${transfer!!.completedChunks}/${transfer.chunkCount})"
+            transfer != null -> when (transfer.state) {
+                "FAILED" -> "Ошибка приёма — нажмите «Скачать» ещё раз"
+                "OFFERED", "TRANSFERRING", "VERIFYING" ->
+                    "Приём… ${transfer.completedChunks}/${transfer.chunkCount}"
+                else -> "Ожидание…"
+            }
+            state.pending -> "Запрошено, ждём раздающего…"
+            else -> ""
+        }
+        if (status.isNotEmpty()) {
+            Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+        }
+        if (transfer != null && !complete && transfer.chunkCount > 0 && transfer.state != "FAILED") {
+            LinearProgressIndicator(
+                progress = { (transfer.completedChunks.toFloat() / transfer.chunkCount.toFloat()).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            )
+        }
+        if (transfer != null && (transfer.state == "FAILED" || state.stalled) && !isFromMe) {
+            TextButton(onClick = state.onDownload, contentPadding = PaddingValues(0.dp)) {
+                Text(if (state.stalled) "Спросить у другого" else "Скачать снова", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        if (complete || (isFromMe && state.onShare != null)) {
+            Row {
+                if (state.onSave != null) {
+                    TextButton(onClick = state.onSave, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                        Text("Сохранить в папку", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                if (state.onShare != null) {
+                    TextButton(onClick = state.onShare, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                        Text("Поделиться", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun fileIconFor(mediaType: String): androidx.compose.ui.graphics.vector.ImageVector = when {
+    mediaType.startsWith("image/") -> Icons.Filled.ImageIcon
+    mediaType.startsWith("video/") -> Icons.Filled.Movie
+    mediaType.startsWith("audio/") -> Icons.Filled.MusicNote
+    mediaType == "application/pdf" -> Icons.Filled.Description
+    else -> Icons.Filled.InsertDriveFile
 }
 
 @Composable

@@ -53,7 +53,10 @@ class FileTransferReceiverTest {
             chunkSizeBytes = chunkSize,
         )
 
-    private fun receiver(gateway: FakeFileCryptoGateway = crypto()) = FileTransferReceiver(
+    private fun receiver(
+        gateway: FakeFileCryptoGateway = crypto(),
+        routeOffer: suspend (String, String) -> FileTransferReceiver.OfferRouting = { _, _ -> FileTransferReceiver.OfferRouting.Unknown },
+    ) = FileTransferReceiver(
         transferDao = dao,
         chunkStore = chunkStore,
         receivedStore = receivedStore,
@@ -65,6 +68,7 @@ class FileTransferReceiverTest {
         ackSink = { transferId, contiguous -> acksReceived += transferId to contiguous },
         notifier = notifier,
         nowMs = { 500_000L },
+        routeOffer = routeOffer,
     )
 
     private fun offerTexts(): List<String> {
@@ -291,6 +295,62 @@ class FileTransferReceiverTest {
         // Wire-prefixed garbage is still a "file packet message": consumed, never chat text.
         assertTrue(receiver.onIncomingText(senderId, chatId, "m2", "apu-file1|not-base64!!"))
         assertNull(dao.getTransfer(transferIdHex))
+    }
+
+    // ── Файл группы (рой, этап 9): куда ложится предложение ────────────────
+
+    /** Прямой кадр (`direct`) без чата и без слова роя - в базу не попадает. */
+    @Test
+    fun directOfferWithoutChatIsDropped() = runTest {
+        val receiver = receiver()
+        offerTexts().forEachIndexed { index, text ->
+            assertTrue(receiver.onIncomingText(senderId, FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE, "d-$index", text))
+        }
+        assertNull(dao.getTransfer(transferIdHex))
+    }
+
+    /** Рой сказал «это файл группы» - строка ложится в группу, а не в метку транспорта. */
+    @Test
+    fun groupFileOfferLandsInGroupChat() = runTest {
+        val asked = mutableListOf<Pair<String, String>>()
+        val receiver = receiver(routeOffer = { from, sha ->
+            asked += from to sha
+            FileTransferReceiver.OfferRouting.Chat("group-7")
+        })
+        offerTexts().forEachIndexed { index, text ->
+            assertTrue(receiver.onIncomingText(senderId, FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE, "d-$index", text))
+        }
+        val transfer = dao.getTransfer(transferIdHex)!!
+        assertEquals("group-7", transfer.chatId)
+        assertEquals(senderId, transfer.peerNodeId)
+        assertEquals(listOf(senderId to sha256(plaintext)), asked)
+
+        // Приём целиком: уведомление уходит с чатом группы.
+        val lengths = listOf(1024, 1024, 452)
+        lengths.forEachIndexed { index, length ->
+            val chunk = plaintext.copyOfRange(index * chunkSize, index * chunkSize + length)
+            deliver(receiver, chunkTexts(index, chunk))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+        assertTrue(notifier.events.single().startsWith("group-7|$senderId|"))
+    }
+
+    /** Файл уже идёт от другого сида - второе предложение не заводит вторую строку. */
+    @Test
+    fun duplicateGroupFileOfferIsIgnored() = runTest {
+        val receiver = receiver(routeOffer = { _, _ -> FileTransferReceiver.OfferRouting.Duplicate })
+        deliver(receiver, offerTexts())
+        assertNull(dao.getTransfer(transferIdHex))
+        // Чат из транспорта тоже не помог: рой решает раньше него.
+        assertTrue(pinner.pinnedBindings.isNotEmpty())
+    }
+
+    /** Личный файл (рой не при чём) идёт по-старому: транспортный чат. */
+    @Test
+    fun unknownRoutingKeepsTransportChat() = runTest {
+        val receiver = receiver(routeOffer = { _, _ -> FileTransferReceiver.OfferRouting.Unknown })
+        deliver(receiver, offerTexts())
+        assertEquals(chatId, dao.getTransfer(transferIdHex)!!.chatId)
     }
 
     private fun sha256(bytes: ByteArray): String =

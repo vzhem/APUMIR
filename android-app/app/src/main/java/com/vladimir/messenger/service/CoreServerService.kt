@@ -62,6 +62,7 @@ class CoreServerService : Service() {
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
+    @Inject lateinit var groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
@@ -562,6 +563,13 @@ class CoreServerService : Service() {
                 } catch (ex: Exception) {
                     Log.w(TAG, "File pump error: ${ex.message}")
                 }
+                // Файлы группы роем (этап 9): повторить свои просьбы, отдать
+                // из очереди, освободить куски отданного.
+                try {
+                    groupFiles.pump()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Group file pump error: ${ex.message}")
+                }
                 delay(FILE_PUMP_INTERVAL_MS)
             }
         }
@@ -796,6 +804,12 @@ class CoreServerService : Service() {
                 serviceScope.launch {
                     runCatching { fileTransferRouter.markOnline(peerId) }
                         .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
+                    // Файл группы, который я жду, а его сид только что появился:
+                    // спросить сразу, не дожидаясь очередного круга (этап 9).
+                    if (!lightTouch) {
+                        runCatching { groupFiles.onPeerOnline(peerId) }
+                            .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
+                    }
                 }
 
                 // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)

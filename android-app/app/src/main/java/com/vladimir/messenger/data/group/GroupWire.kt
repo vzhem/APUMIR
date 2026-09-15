@@ -127,6 +127,31 @@ object GroupWire {
      * канала). Так вернувшийся из офлайна и новичок добирают пропущенное.
      */
     const val KIND_MANIFESTS_REQUEST = "mreq"
+    /**
+     * «Пришли мне файл» (рой, этап 9): `fwant|groupId|sha256|b64(messageId)|b64url(binding)`.
+     * Файл, приложенный к сообщению группы, по группе не рассылается - в
+     * сообщении едет только визитка (`APUFILE1:`, см. util.GroupFileMarker).
+     * Кому файл нужен, тот просит его у автора или у любого участника, уже
+     * получившего файл; в ответ идёт обычная зашифрованная передача
+     * (`apu-file1`) лично просителю. Последнее поле - подписанный ключ
+     * обмена просителя: участники группы могли никогда не обмениваться
+     * файлами, а без закреплённого ключа получателя конверт с ключом файла
+     * не запечатать. Прошлые версии вид не знают и молча отбрасывают.
+     */
+    const val KIND_FILE_WANT = "fwant"
+    /**
+     * «Файл у меня» (рой, этап 9): `fhave|groupId|sha256|b64(messageId)` -
+     * участник, получивший файл целиком, говорит нескольким соседям, что у
+     * него теперь можно просить. Так раздача расходится от автора по
+     * группе, как куски поста по сидам.
+     */
+    const val KIND_FILE_HAVE = "fhave"
+
+    /** Ключ обмена в `fwant`: как у HELLO файловой передачи. */
+    const val MAX_FILE_WANT_BINDING_BYTES = 512
+
+    /** Идентификатор сообщения в `fwant`/`fhave`: UUID - 36 знаков, с запасом. */
+    const val MAX_FILE_MESSAGE_ID_CHARS = 64
 
     /** Сообщений в одном ответе на `mreq` - столько же, сколько постов досылается новичку канала. */
     const val MAX_MANIFESTS_REQUEST = 20
@@ -463,6 +488,26 @@ object GroupWire {
         ) : Packet()
 
         /**
+         * Просьба прислать файл [sha256], приложенный к сообщению [messageId]
+         * группы (рой, этап 9). [binding] - подписанный ключ обмена
+         * просителя (пусто у пакета без ключа: тогда сид полагается на уже
+         * закреплённый).
+         */
+        data class FileWant(
+            val groupId: String,
+            val sha256: String,
+            val messageId: String,
+            val binding: ByteArray = ByteArray(0),
+        ) : Packet()
+
+        /** Отправитель получил файл [sha256] сообщения [messageId] целиком и готов раздавать. */
+        data class FileHave(
+            val groupId: String,
+            val sha256: String,
+            val messageId: String,
+        ) : Packet()
+
+        /**
          * Возможности узла: сколько места под пересылку он отдаёт (байт).
          * Принимается только от [nodeId] = отправитель (проверка в приёмнике).
          */
@@ -625,6 +670,28 @@ object GroupWire {
         }
         return "$PREFIX|$KIND_MESSAGE_WANT|$groupId|${encode(topicId)}|${encode(messageId)}|$stripe|$stripes|$haveCells"
     }
+
+    /**
+     * «Пришли мне файл» (этап 9). [binding] - мой подписанный ключ обмена
+     * (`FileExchangeKeyStore.publicBinding`), чтобы сид мог закрепить его и
+     * запечатать конверт с ключом файла; пустой - если ключа ещё нет.
+     */
+    fun buildFileWant(groupId: String, sha256: String, messageId: String, binding: ByteArray): String {
+        require(isSha256(sha256)) { "bad file sha256" }
+        require(binding.size <= MAX_FILE_WANT_BINDING_BYTES) { "binding too long" }
+        val bindingCell = if (binding.isEmpty()) "" else Base64.getUrlEncoder().withoutPadding().encodeToString(binding)
+        return "$PREFIX|$KIND_FILE_WANT|$groupId|$sha256|${encode(messageId)}|$bindingCell"
+    }
+
+    /** «Файл у меня» (этап 9): можно просить. */
+    fun buildFileHave(groupId: String, sha256: String, messageId: String): String {
+        require(isSha256(sha256)) { "bad file sha256" }
+        return "$PREFIX|$KIND_FILE_HAVE|$groupId|$sha256|${encode(messageId)}"
+    }
+
+    /** Хэш файла в визитке и просьбах: ровно 64 шестнадцатеричных знака в нижнем регистре. */
+    fun isSha256(value: String): Boolean =
+        value.length == 64 && value.all { it in '0'..'9' || it in 'a'..'f' }
 
     /** «Пришлите счётчики этих постов» - владельцу или администратору канала. */
     fun buildCountersRequest(groupId: String, topicIds: List<String>): String =
@@ -1165,6 +1232,34 @@ object GroupWire {
                 val at = parts[4].toLongOrNull() ?: return null
                 if (offered < 0L || at < 0L) return null
                 Packet.Capabilities(nodeId = groupId, offeredBytes = offered, atMs = at)
+            } else {
+                null
+            }
+
+            KIND_FILE_WANT -> if (parts.size == 6) {
+                val sha = parts[3]
+                val messageId = decode(parts[4]) ?: return null
+                if (!isSha256(sha) || messageId.isBlank() || messageId.length > MAX_FILE_MESSAGE_ID_CHARS) return null
+                val binding = if (parts[5].isEmpty()) {
+                    ByteArray(0)
+                } else {
+                    try {
+                        Base64.getUrlDecoder().decode(parts[5])
+                    } catch (_: IllegalArgumentException) {
+                        return null
+                    }
+                }
+                if (binding.size > MAX_FILE_WANT_BINDING_BYTES) return null
+                Packet.FileWant(groupId, sha, messageId, binding)
+            } else {
+                null
+            }
+
+            KIND_FILE_HAVE -> if (parts.size == 5) {
+                val sha = parts[3]
+                val messageId = decode(parts[4]) ?: return null
+                if (!isSha256(sha) || messageId.isBlank() || messageId.length > MAX_FILE_MESSAGE_ID_CHARS) return null
+                Packet.FileHave(groupId, sha, messageId)
             } else {
                 null
             }

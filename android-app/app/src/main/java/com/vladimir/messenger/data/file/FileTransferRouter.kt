@@ -28,6 +28,12 @@ class FileTransferRouter @Inject constructor(
     private val peerStore: FileExchangePeerStore,
     private val chatRepository: ChatRepository,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
+    /**
+     * Файлы группы роем (этап 9). Через Provider: рой сам зависит от этого
+     * маршрутизатора (готовит и качает передачи), а Dagger кольцо напрямую не
+     * собирает. Берётся только при обработке пакетов, не при создании.
+     */
+    private val groupFiles: javax.inject.Provider<com.vladimir.messenger.data.group.GroupFileSwarm>,
 ) {
     private val appContext: Context
     private val sender: FileTransferSender
@@ -64,15 +70,23 @@ class FileTransferRouter @Inject constructor(
         val identity: LocalExchangeIdentity = AndroidLocalExchangeIdentity(appContext)
         val keyVault: TransferKeyVaultAccess = AndroidTransferKeyVaultAccess(appContext)
         val notifier = FileTransferReceiver.FileChatNotifier(
-            { chatId, senderId, messageId, displayName, mediaType, totalBytes, _ ->
-                chatRepository.saveIncomingMessage(
-                    chatId = chatId,
-                    senderId = senderId,
-                    messageId = messageId,
-                    content = formatPlaceholder(displayName, mediaType, totalBytes),
-                    timestamp = System.currentTimeMillis(),
-                    recipientId = RustBridge.nodeId() ?: "",
-                )
+            { chatId, senderId, messageId, displayName, mediaType, totalBytes, fileSha256 ->
+                // Файл группы (этап 9): карточка уже есть в ленте темы, строка
+                // в личный чат не нужна; рой снимает просьбу и объявляет
+                // соседям «файл у меня».
+                val groupFile = runCatching { groupFiles.get().onFileReceived(chatId, senderId, fileSha256) }
+                    .onFailure { Log.w(TAG, "group file completion hook failed: ${it.message}") }
+                    .getOrDefault(false)
+                if (!groupFile) {
+                    chatRepository.saveIncomingMessage(
+                        chatId = chatId,
+                        senderId = senderId,
+                        messageId = messageId,
+                        content = formatPlaceholder(displayName, mediaType, totalBytes),
+                        timestamp = System.currentTimeMillis(),
+                        recipientId = RustBridge.nodeId() ?: "",
+                    )
+                }
             },
         )
         val directSend: (String, String) -> Boolean = { recipientId, payload ->
@@ -143,6 +157,10 @@ class FileTransferRouter @Inject constructor(
             myNodeId = { RustBridge.nodeId() },
             candidates = { recipientId, totalBytes -> custodyCandidates(recipientId, totalBytes) },
             isOnline = { nodeId -> isPeerOnline(nodeId) },
+            // Файлы группы (этап 9) на хранение не отдаём: см. FileCustodySender.
+            custodyAllowed = { transfer ->
+                runCatching { !groupFiles.get().isGroupChat(transfer.chatId) }.getOrDefault(true)
+            },
         )
         custodySender = custodyLocal
         receiver = FileTransferReceiver(
@@ -201,6 +219,12 @@ class FileTransferRouter @Inject constructor(
                 },
                 onOriginRelease = { transferIdHex, from -> custodyLocal.onOriginRelease(transferIdHex, from) },
             ),
+            // Файл группы (этап 9): предложение от сида ложится в группу, а не
+            // в личный чат; лишнее (файл уже идёт от другого) - отбрасывается.
+            routeOffer = { senderId, fileSha256 ->
+                runCatching { groupFiles.get().routeOffer(senderId, fileSha256) }
+                    .getOrDefault(FileTransferReceiver.OfferRouting.Unknown)
+            },
         )
         // LAN server starts only after sender/receiver exist: an early incoming
         // frame must never hit a half-constructed router.
@@ -242,8 +266,16 @@ class FileTransferRouter @Inject constructor(
             .getOrNull()
         val resolvedChatId = FileTransferChatRouting.resolve(chatId, localChatId)
         if (resolvedChatId == null) {
-            Log.w(TAG, "Direct file packet dropped: no local chat for sender ${senderId.takeLast(8)}")
-            return true
+            // Файл группы (этап 9): сид и проситель могут быть незнакомы, но
+            // состоят в одном сообществе. Метка `direct` идёт в приёмник как
+            // есть: чат для предложения он спрашивает у роя, а в базу метка
+            // не попадает (см. FileTransferReceiver.handleOffer).
+            val sharesGroup = runCatching { groupFiles.get().sharesGroupWith(senderId) }.getOrDefault(false)
+            if (!sharesGroup) {
+                Log.w(TAG, "Direct file packet dropped: no local chat for sender ${senderId.takeLast(8)}")
+                return true
+            }
+            return receiver.onIncomingText(senderId, FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE, messageId, text)
         }
         if (chatId == FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE) {
             Log.i(TAG, "Direct file packet routed to local chat $resolvedChatId")
@@ -459,6 +491,25 @@ class FileTransferRouter @Inject constructor(
         }
         Log.i(TAG, "Purged ${completed.size} completed transfers")
         return completed.size
+    }
+
+    /**
+     * Куски отданной передачи больше не нужны (получатель подтвердил всё):
+     * освободить место, строку истории оставить. Рой файлов группы (этап 9)
+     * зовёт это сразу после подтверждения - у каждого просителя своя копия
+     * (конверт под его ключ), и на большой группе они бы съели диск сида.
+     */
+    fun releaseOutgoingChunks(transferId: String) {
+        runCatching { chunkStore.deleteTransfer(transferId) }
+            .onFailure { Log.w(TAG, "release chunks failed for $transferId: ${it.message}") }
+    }
+
+    /** Убрать передачу целиком: куски, принятую копию, строку. Для незавершённых и лишних. */
+    suspend fun dropTransfer(transferId: String) {
+        runCatching { chunkStore.deleteTransfer(transferId) }
+        runCatching { receivedStore.deleteTransfer(transferId) }
+        runCatching { transferDao.deleteTransfer(transferId) }
+            .onFailure { Log.w(TAG, "drop transfer failed for $transferId: ${it.message}") }
     }
 
     /** Verified plaintext of a completed incoming transfer (app-private storage), if present. */

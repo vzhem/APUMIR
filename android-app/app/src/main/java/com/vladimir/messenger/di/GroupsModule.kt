@@ -95,6 +95,7 @@ object GroupsModule {
         directory: SwarmPeerDirectory,
         counters: com.vladimir.messenger.data.channel.PostCounterRepository,
         shortener: com.vladimir.messenger.data.link.LinkShortener,
+        groupFiles: javax.inject.Provider<com.vladimir.messenger.data.group.GroupFileSwarm>,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -127,6 +128,14 @@ object GroupsModule {
         onPeerCapabilities = { nodeId, offeredBytes ->
             com.vladimir.messenger.data.peer.PeerRatingStore
                 .recordOfferedStorage(context.applicationContext, nodeId, offeredBytes)
+        },
+        // Файлы группы роем (этап 9). Через Provider: рой сам шлёт пакеты
+        // через GroupDelivery и качает через FileTransferRouter, а репозиторий
+        // лишь передаёт ему просьбы - кольца зависимостей так нет.
+        onFileWant = { senderId, packet -> groupFiles.get().onFileWant(senderId, packet) },
+        onFileHave = { senderId, packet -> groupFiles.get().onFileHave(senderId, packet) },
+        onFileCard = { groupId, messageId, authorId, sentAtMs, info ->
+            groupFiles.get().onCardSeen(groupId, messageId, authorId, sentAtMs, info)
         },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,

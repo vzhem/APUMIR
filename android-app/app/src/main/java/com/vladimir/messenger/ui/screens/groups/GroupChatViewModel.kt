@@ -11,7 +11,9 @@ import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -43,6 +45,20 @@ data class GroupChatUiState(
      * запросу, и лента показывает кнопку «Показать ещё N». 0 - нечего.
      */
     val moreComments: Int = 0,
+    // ── Файлы группы (рой, этап 9) ──
+    /** Передачи файлов этой группы (по хэшу файла карточка находит свою). */
+    val transfers: List<com.vladimir.messenger.data.local.entity.FileTransferEntity> = emptyList(),
+    /** Файлы, которые сейчас просим у сидов ([GroupFileMarker.key]). */
+    val pendingFiles: Set<String> = emptySet(),
+    /** Идёт подготовка выбранного файла (хэш, копия). */
+    val isPreparingFile: Boolean = false,
+    /** Файл готов и ждёт отправки вместе с подписью: показывается над полем ввода. */
+    val stagedFile: com.vladimir.messenger.util.GroupFileMarker.Info? = null,
+    /** Можно ли прикреплять файлы: ранг «Круг друзей» и право «Отправка медиа». */
+    val canAttach: Boolean = false,
+    val attachLockedHint: String = "",
+    /** Принятый файл, который человек просит сохранить в папку (системное окно). */
+    val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
 )
 
 @HiltViewModel
@@ -51,6 +67,10 @@ class GroupChatViewModel @Inject constructor(
     private val groupRepository: GroupRepository,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
+    private val groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm,
+    private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
+    private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
@@ -80,14 +100,141 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch { runCatching { groupRepository.requestPosts(groupId) } }
         observeReactions()
         observeCommentCounts()
+        observeTransfers()
         // Закрепы подписываем на выбранную тему, а не на всю группу:
         // observePinned(topicId) стартует вместе с лентой сообщений.
+    }
+
+    // ── Файлы группы (рой, этап 9) ────────────────────────────────────────────
+
+    /** Передачи файлов группы и мои просьбы - карточке файла в ленте. */
+    private fun observeTransfers() {
+        viewModelScope.launch {
+            fileTransferDao.observeForChat(groupId)
+                .flowOn(Dispatchers.IO)
+                .collect { list -> _uiState.update { it.copy(transfers = list) } }
+        }
+        viewModelScope.launch {
+            groupFiles.pendingKeys.collect { keys -> _uiState.update { it.copy(pendingFiles = keys) } }
+        }
+    }
+
+    /**
+     * Право прикреплять: ранг «Круг друзей» (как в личном чате) и право
+     * «Отправка медиа» в этой группе (администраторам - всегда).
+     */
+    private fun refreshAttachRights(me: MemberSummary?, group: GroupSummary?) {
+        val qualified = com.vladimir.messenger.data.referral.ReferralRankStore.qualifiedDirectCount(appContext)
+        val byRank = com.vladimir.messenger.data.file.FileTransferRankPolicy.canSendAttachments(qualified)
+        val role = me?.role ?: GroupRole.MEMBER
+        val mask = group?.memberPermissions?.takeIf { it != 0L } ?: GroupPermissions.Member.DEFAULT
+        val byGroup = GroupRole.isAdminOrOwner(role) ||
+            (me?.isBanned != true && GroupPermissions.has(mask, GroupPermissions.Member.SEND_MEDIA))
+        val hint = when {
+            !byRank ->
+                "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
+                    "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified."
+            !byGroup -> "В этой группе участникам запрещено отправлять файлы"
+            else -> ""
+        }
+        _uiState.update { it.copy(canAttach = byRank && byGroup, attachLockedHint = hint) }
+    }
+
+    fun onAttachLocked() {
+        _uiState.update { it.copy(error = it.attachLockedHint.ifBlank { "Вложения недоступны" }) }
+    }
+
+    /**
+     * Файл выбран в системном окне: посчитать хэш, положить копию для
+     * раздачи и показать карточку над полем ввода. Отправится вместе с
+     * подписью по «Отправить».
+     */
+    fun onFileSelected(uri: android.net.Uri) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canAttach) {
+            onAttachLocked()
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                val previous = _uiState.value.stagedFile
+                val info = groupFiles.stage(groupId, uri)
+                if (previous != null && previous.sha256 != info.sha256) groupFiles.unstage(groupId, previous.sha256)
+                _uiState.update { it.copy(stagedFile = info) }
+            } catch (e: Exception) {
+                android.util.Log.w("GroupChatVM", "group file stage failed", e)
+                _uiState.update { it.copy(error = "Файл не приложен: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /** Убрать приложенный, но ещё не отправленный файл. */
+    fun clearStagedFile() {
+        val staged = _uiState.value.stagedFile ?: return
+        _uiState.update { it.copy(stagedFile = null) }
+        viewModelScope.launch { groupFiles.unstage(groupId, staged.sha256) }
+    }
+
+    /** Нажатие «Скачать» на карточке файла: попросить у автора или соседей. */
+    fun requestFile(message: MessageEntity, info: com.vladimir.messenger.util.GroupFileMarker.Info) {
+        viewModelScope.launch {
+            runCatching { groupFiles.request(groupId, message.id, info, message.senderId, manual = true) }
+                .onFailure { e -> _uiState.update { it.copy(error = "Не удалось запросить файл: ${e.message}") } }
+        }
+    }
+
+    /** Моя авторская копия файла (превью картинки, «Поделиться»). */
+    fun authorCopyFor(sha256: String): java.io.File? = groupFiles.authorCopy(groupId, sha256)
+
+    /** Принятый файл: копия у меня (для «Открыть»/«Поделиться»). */
+    fun receivedFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? =
+        fileTransferRouter.receivedFileFor(transfer)
+
+    fun requestSaveReceivedFile(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return
+        _uiState.update { it.copy(pendingSave = transfer) }
+    }
+
+    fun onSaveTargetPicked(target: android.net.Uri?) {
+        val transfer = _uiState.value.pendingSave
+        _uiState.update { it.copy(pendingSave = null) }
+        if (target == null || transfer == null) return
+        viewModelScope.launch {
+            val ok = runCatching { fileTransferRouter.exportReceivedFile(transfer, target) }.getOrDefault(false)
+            _uiState.update {
+                it.copy(error = if (ok) "Сохранено: ${transfer.displayName}" else "Не удалось сохранить файл")
+            }
+        }
+    }
+
+    /** «Поделиться» принятым файлом (или своей копией) через системное окно. */
+    fun shareFile(file: java.io.File, displayName: String, mediaType: String) {
+        val ctx = appContext
+        viewModelScope.launch {
+            runCatching {
+                val dir = java.io.File(ctx.cacheDir, "shared").apply { mkdirs() }
+                val dst = java.io.File(dir, displayName.ifBlank { file.name })
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { file.copyTo(dst, overwrite = true) }
+                val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", dst)
+                val intent = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType(mediaType.ifBlank { "application/octet-stream" })
+                    .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val chooser = android.content.Intent.createChooser(intent, "Поделиться")
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(chooser)
+            }.onFailure { e -> _uiState.update { it.copy(error = "Не удалось поделиться: ${e.message}") } }
+        }
     }
 
     private fun observeGroup() {
         viewModelScope.launch {
             groupRepository.observeGroup(groupId).collect { summary ->
                 _uiState.update { it.copy(group = summary) }
+                refreshAttachRights(_uiState.value.me, summary)
             }
         }
     }
@@ -122,6 +269,7 @@ class GroupChatViewModel @Inject constructor(
                             .canManageTopics(me?.role ?: GroupRole.MEMBER, me?.permissions ?: 0L),
                     )
                 }
+                refreshAttachRights(me, _uiState.value.group)
             }
         }
     }
@@ -260,12 +408,17 @@ class GroupChatViewModel @Inject constructor(
 
     fun send(text: String) {
         val topicId = _uiState.value.selectedTopicId ?: return
-        if (text.isBlank()) return
+        val staged = _uiState.value.stagedFile
+        if (text.isBlank() && staged == null) return
         _uiState.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
-            groupRepository.sendMessage(groupId, topicId, text)
+            // Файл (этап 9): в сообщении едет визитка и подпись «📎 имя
+            // (размер)» - старые версии видят подпись, новые рисуют карточку;
+            // сам файл участники просят у меня и друг у друга.
+            val body = if (staged == null) text else com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
+            groupRepository.sendMessage(groupId, topicId, body)
                 .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(sending = false) } }
+                .onSuccess { _uiState.update { it.copy(sending = false, stagedFile = null) } }
         }
     }
 

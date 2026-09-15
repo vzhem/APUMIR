@@ -105,13 +105,18 @@ object InlineImage {
     /** Есть ли в тексте прикреплённая картинка (старый способ, целиком). */
     fun hasImage(text: String): Boolean = text.contains("\n$MARKER") || text.startsWith(MARKER)
 
-    /** Служебная ли это строка (любой из трёх маркеров; куски и пометка текста - под маркером кусков). */
+    /**
+     * Служебная ли это строка: три маркера фотографий (куски и пометка
+     * текста - под маркером кусков) и визитка файла группы
+     * (`APUFILE1:`, см. GroupFileMarker; рой, этап 9).
+     */
     fun isServiceLine(line: String): Boolean =
-        line.startsWith(MARKER) || line.startsWith(SET_MARKER) || line.startsWith(PART_MARKER)
+        line.startsWith(MARKER) || line.startsWith(SET_MARKER) || line.startsWith(PART_MARKER) ||
+            line.startsWith(GroupFileMarker.PREFIX)
 
-    /** Служебная строка о фотографиях (не о тексте): при правке слов она сохраняется. */
+    /** Служебная строка о вложениях (фото, файл), а не о тексте: при правке слов она сохраняется. */
     private fun isPhotoServiceLine(line: String): Boolean =
-        line.startsWith(MARKER) || line.startsWith(SET_MARKER)
+        line.startsWith(MARKER) || line.startsWith(SET_MARKER) || line.startsWith(GroupFileMarker.PREFIX)
 
     /** Текст без служебных строк картинок. */
     fun stripImage(text: String): String =

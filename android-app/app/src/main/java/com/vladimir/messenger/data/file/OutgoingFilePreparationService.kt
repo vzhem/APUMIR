@@ -1,6 +1,5 @@
 package com.vladimir.messenger.data.file
 
-import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import com.vladimir.messenger.data.local.dao.FileTransferDao
@@ -100,17 +99,85 @@ class OutgoingFilePreparationService private constructor(
         recipientNodeId: String,
         qualifiedDirectReferrals: Int,
         nowMs: Long = System.currentTimeMillis(),
+    ): PreparedTransfer = prepareSource(
+        Source.Content(source),
+        messageId,
+        chatId,
+        recipientNodeId,
+        qualifiedDirectReferrals,
+        nowMs,
+    )
+
+    /**
+     * То же для файла из своей папки приложения (рой, этап 9: автор раздаёт
+     * копию файла группы, участник - полученный файл). Имя и тип берутся из
+     * визитки файла, а не из провайдера. Ранг не проверяется: раздача
+     * группе - не «отправка вложения», а пересылка того, что группа уже
+     * приняла; сам файл прошёл проверку ранга у автора при отправке.
+     */
+    suspend fun prepareFromFile(
+        source: java.io.File,
+        displayName: String,
+        mediaType: String,
+        messageId: String,
+        chatId: String,
+        recipientNodeId: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): PreparedTransfer = prepareSource(
+        Source.Local(source, displayName, mediaType),
+        messageId,
+        chatId,
+        recipientNodeId,
+        qualifiedDirectReferrals = null,
+        nowMs = nowMs,
+    )
+
+    /** Откуда читать файл: системный провайдер (выбор из окна) или файл приложения. */
+    private sealed class Source {
+        abstract fun open(context: Context): java.io.InputStream
+
+        class Content(val uri: Uri) : Source() {
+            override fun open(context: Context): java.io.InputStream =
+                context.contentResolver.openInputStream(uri)
+                    ?: throw IllegalArgumentException("Cannot reopen selected file")
+        }
+
+        class Local(val file: java.io.File, val displayName: String, val mediaType: String) : Source() {
+            override fun open(context: Context): java.io.InputStream {
+                require(file.isFile) { "Source file is missing" }
+                return file.inputStream()
+            }
+        }
+    }
+
+    private suspend fun prepareSource(
+        source: Source,
+        messageId: String,
+        chatId: String,
+        recipientNodeId: String,
+        /** null - проверка ранга не нужна (раздача файла группы). */
+        qualifiedDirectReferrals: Int?,
+        nowMs: Long,
     ): PreparedTransfer = withContext(Dispatchers.IO) {
         require(messageId.isNotBlank() && chatId.isNotBlank()) { "Missing file message binding" }
         val senderNodeId = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .getString("node_id", null)
             ?: throw IllegalStateException("Local identity is unavailable")
-        val inspected = AndroidFileSelection.inspect(context.contentResolver, source)
-        FileTransferRankPolicy.requireCanSend(
-            qualifiedDirectReferrals = qualifiedDirectReferrals,
-            mediaType = inspected.mediaType,
-            sizeBytes = inspected.sizeBytes,
-        )
+        val inspected = when (source) {
+            is Source.Content -> AndroidFileSelection.inspect(context.contentResolver, source.uri)
+            is Source.Local -> FileTransferSourceInspector.inspect(
+                providerDisplayName = source.displayName,
+                providerMediaType = source.mediaType,
+                declaredSize = source.file.length().takeIf { source.file.isFile },
+            ) { source.open(context) }
+        }
+        if (qualifiedDirectReferrals != null) {
+            FileTransferRankPolicy.requireCanSend(
+                qualifiedDirectReferrals = qualifiedDirectReferrals,
+                mediaType = inspected.mediaType,
+                sizeBytes = inspected.sizeBytes,
+            )
+        }
         val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
         val manifest = createFileTransferManifest(
             senderNodeId,
@@ -160,8 +227,12 @@ class OutgoingFilePreparationService private constructor(
             if (inspected.mediaType.startsWith("image/")) {
                 runCatching {
                     val dir = java.io.File(context.noBackupFilesDir, "file_preview/v1")
+                    val previewUri = when (source) {
+                        is Source.Content -> source.uri
+                        is Source.Local -> Uri.fromFile(source.file)
+                    }
                     com.vladimir.messenger.util.PhotoPreview.write(
-                        context, source, java.io.File(dir, manifest.transferIdHex + ".jpg"),
+                        context, previewUri, java.io.File(dir, manifest.transferIdHex + ".jpg"),
                     )
                 }
             }
@@ -185,14 +256,12 @@ class OutgoingFilePreparationService private constructor(
     }
 
     private suspend fun stageChunks(
-        source: Uri,
+        source: Source,
         manifest: FileTransferManifestFfi,
         expectedSha256: String,
         store: FileTransferChunkStore,
     ) {
-        val resolver: ContentResolver = context.contentResolver
-        val input = resolver.openInputStream(source)
-            ?: throw IllegalArgumentException("Cannot reopen selected file")
+        val input = source.open(context)
         val digest = MessageDigest.getInstance("SHA-256")
         var transferred = 0L
         input.use { stream ->

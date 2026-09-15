@@ -127,6 +127,16 @@ class GroupRepository(
      */
     private val myOfferedStorageBytes: () -> Long = { 0L },
     private val onPeerCapabilities: (nodeId: String, offeredBytes: Long) -> Unit = { _, _ -> },
+    /**
+     * Файлы группы роем (этап 9, GroupFileSwarm): просьба о файле `fwant`,
+     * объявление «файл у меня» `fhave` и новое сообщение с визиткой файла
+     * (`APUFILE1:`), по которой участник решает, тянуть ли файл. По
+     * умолчанию ничего не делают - так живут JVM-тесты.
+     */
+    private val onFileWant: suspend (senderId: String, packet: GroupWire.Packet.FileWant) -> Unit = { _, _ -> },
+    private val onFileHave: suspend (senderId: String, packet: GroupWire.Packet.FileHave) -> Unit = { _, _ -> },
+    private val onFileCard: suspend (groupId: String, messageId: String, authorId: String, sentAtMs: Long, info: com.vladimir.messenger.util.GroupFileMarker.Info) -> Unit =
+        { _, _, _, _, _ -> },
 ) {
 
     /**
@@ -727,8 +737,13 @@ class GroupRepository(
         photos: List<String> = emptyList(),
     ): Result<String> {
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
+        // Визитка файла (этап 9) - служебная строка: из слов её вынимаем и
+        // ставим в конец тела, после пометок о продолжении и фотографиях.
+        val fileCard = com.vladimir.messenger.util.GroupFileMarker.line(text)
         val words = InlineImage.stripImage(text)
-        if (words.isEmpty() && attached.isEmpty()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
+        if (words.isEmpty() && attached.isEmpty() && fileCard == null) {
+            return Result.failure(IllegalArgumentException("Пустое сообщение"))
+        }
         if (words.length > MAX_MESSAGE_CHARS) {
             return Result.failure(IllegalArgumentException("Сообщение длиннее $MAX_MESSAGE_CHARS символов"))
         }
@@ -737,7 +752,8 @@ class GroupRepository(
         if (textTail.size > InlineImage.MAX_TEXT_PARTS) {
             return Result.failure(IllegalArgumentException("Сообщение слишком длинное: сократите текст"))
         }
-        val body = InlineImage.headContent(chunks.first(), 0, textTail.size, attached.size)
+        val head = InlineImage.headContent(chunks.first(), 0, textTail.size, attached.size)
+        val body = if (fileCard == null) head else if (head.isEmpty()) fileCard else head + "\n" + fileCard
         if (body.isEmpty()) return Result.failure(IllegalArgumentException("Пустое сообщение"))
         // Куски фото - по InlineImage.MAX_PART_B64_CHARS на каждый, до трёх на
         // фото. Манифест поста вмещает не больше PostManifest.MAX_PARTS кусков
@@ -2539,6 +2555,16 @@ class GroupRepository(
                     )
                 )
                 rememberSender(packet.groupId, authorId, packet.senderName, now)
+                // Файл, приложенный к сообщению (этап 9): сам файл не пришёл -
+                // только визитка; рой решает, просить ли его у автора сейчас.
+                if (!isMine && !isPart) {
+                    com.vladimir.messenger.util.GroupFileMarker.parse(packet.text)?.let { card ->
+                        backgroundScope.launch {
+                            runCatching { onFileCard(packet.groupId, localId, authorId, sentAt, card) }
+                                .onFailure { Log.w(TAG, "file card hook failed: ${it.message}") }
+                        }
+                    }
+                }
                 // Я сборщик большого канала, а это живой комментарий (или кусок
                 // длинного комментария) от автора: передаю его тем, кто читает
                 // ветку сейчас (этап 4).
@@ -2654,6 +2680,18 @@ class GroupRepository(
             is GroupWire.Packet.PostKeys -> handlePostKeys(senderId, packet)
 
             is GroupWire.Packet.PieceWant -> handlePieceWant(senderId, packet)
+
+            // Файлы группы (этап 9): просьба о файле и «файл у меня» - в фоне,
+            // подготовка передачи читает и шифрует файл целиком.
+            is GroupWire.Packet.FileWant -> backgroundScope.launch {
+                runCatching { onFileWant(senderId, packet) }
+                    .onFailure { Log.w(TAG, "file want failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.FileHave -> backgroundScope.launch {
+                runCatching { onFileHave(senderId, packet) }
+                    .onFailure { Log.w(TAG, "file have failed: ${it.message}") }
+            }
 
             // Счётчики через владельца (этап 3): сводку считает и применяет
             // PostCounterRepository; сеть - в фоне, приём пакетов не ждёт.
@@ -4005,7 +4043,7 @@ class GroupRepository(
         Log.i(TAG, "peers sent group=$groupId members=${members.size} sample=${sample.size} to=$newcomer")
     }
 
-    /** Превью для списков: без служебных строк фотографий. */
+    /** Превью для списков: без служебных строк фотографий и визитки файла. */
     private fun preview(text: String): String {
         val clean = InlineImage.stripImage(text)
         val shown = if (clean.isBlank() && (InlineImage.hasImage(text) || InlineImage.photoCount(text) > 0)) {

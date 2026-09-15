@@ -196,6 +196,17 @@ interface GroupDao {
     suspend fun countMembers(groupId: String): Int
 
     /**
+     * В скольких общих сообществах состоят два узла (рой, этап 9). Файл
+     * группы идёт напрямую от участника, с которым у меня может не быть ни
+     * чата, ни контакта: пакет пускаем, если мы хотя бы в одной группе вместе.
+     */
+    @Query(
+        "SELECT COUNT(*) FROM group_members a JOIN group_members b ON a.groupId = b.groupId " +
+            "WHERE a.nodeId = :me AND b.nodeId = :other AND a.isBanned = 0 AND b.isBanned = 0"
+    )
+    suspend fun countSharedGroups(me: String, other: String): Int
+
+    /**
      * Владельцы и админы всех сообществ, где телефон состоит: ярус
      * «стабильные» в рое (им пакеты уходят раньше прочих незнакомцев).
      */

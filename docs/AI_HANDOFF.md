@@ -78,6 +78,49 @@
    (< v11.70.14) `cap`/`ac`/`cand`/мост/UDP не знают — с ними всё как раньше
    (PCM, текстовый фолбэк).
 
+0o. **v11.70.19 - рой, этап 9: файлы в группах (в работе 2026-09-14; статус
+   выпуска - `START_HERE.md` §3).** Просьба владельца «доделывай систему
+   роя» → `CHANNEL_SWARM_DESIGN.md` §9.3 п.6 «раздача файла сидами группы».
+   Что сделано: (1) `util/GroupFileMarker.kt` - визитка файла последней
+   строкой текста сообщения `APUFILE1:<sha256>:<байт>:<b64url(тип)>:
+   <b64url(имя)>` + подпись «📎 имя (размер)» словами для старых версий
+   (`compose/parse/stripCaption/key`); `InlineImage.isServiceLine` знает
+   визитку (не слова; при правке сохраняется). (2) `GroupWire`: виды
+   `fwant` (`|groupId|sha256|b64(messageId)|b64url(binding)`) и `fhave`
+   (`|groupId|sha256|b64(messageId)`), `Packet.FileWant/FileHave`,
+   `isSha256`. (3) `data/group/GroupFileSwarm.kt` (@Singleton) - три роли:
+   автор (`stage` - копия в `noBackupFilesDir/group_files/v1`,
+   `GroupFileStore`), проситель (`onCardSeen` → `shouldAutoFetch` /
+   `request`, повторы и смена сида в `pump`, `onPeerOnline`), сид
+   (`onFileWant` → проверка членства, закрепление ключа просителя из пакета,
+   очередь до 3 параллельных → `OutgoingFilePreparationService.prepareFromFile`
+   лично просителю; `releaseServed` удаляет куски после COMPLETE;
+   `onFileReceived` → `fhave` шести соседям). Подключение: `GroupRepository`
+   параметры `onFileWant/onFileHave/onFileCard` (`GroupsModule` через
+   `Provider<GroupFileSwarm>` - кольцо зависимостей), `sendMessage` держит
+   визитку в конце `body`, `handleIncoming` зовёт `onFileCard` на чужое
+   сообщение с визиткой; `CoreServerService` зовёт `groupFiles.pump()` в
+   файловом насосе (20 с) и `onPeerOnline` на пульсе. (4) Приём:
+   `FileTransferReceiver.routeOffer` (`OfferRouting.Chat/Duplicate/Unknown`) -
+   чат для предложения по хэшу файла; `FileTransferRouter.routeIncoming`
+   пропускает `direct`-кадр без чата, если отправитель - сосед по группе
+   (`GroupDao.countSharedGroups`); `FileChatNotifier` для чата-группы не
+   пишет строку в личный чат; `FileCustodySender.custodyAllowed` - файлы
+   группы на хранение не идут; `FileTransferRouter.releaseOutgoingChunks/
+   dropTransfer`; `FileTransferDao.getForFile(chatId, sha256)` (без миграции).
+   (5) UI: `GroupChatScreen` - скрепка, карточка над полем ввода, карточка
+   файла в пузыре (`FileCardState`/`GroupFileCard`: «Скачать», ход приёма,
+   «Спросить у другого», «Сохранить в папку», «Поделиться», у автора
+   «Получили: N»); `GroupChatViewModel` - `onFileSelected/clearStagedFile/
+   requestFile/...`, права `canAttach` (ранг + SEND_MEDIA). Тесты:
+   `GroupFileMarkerTest`, `GroupFileStoreTest`, `GroupWireTest` (fwant/fhave),
+   `FileTransferReceiverTest` (4 теста маршрута). На телефонах НЕ проверено;
+   что смотреть - `CHANNEL_SWARM_DESIGN.md` §9.4 «Этап 9». Известные
+   границы: просьбы живут в памяти (после перезапуска - «Скачать» заново);
+   один сид на просьбу (полос между сидами нет); файл канала (пост) через
+   тот же экран комментариев - работает как в группе, но лента канала
+   карточку не рисует.
+
 0n. **v11.70.18 выпущен 2026-09-13 (Latest, тег `e7aec2a`, прогон
    34766279060 с первого раза): контакт-призрак «Contact APUCALL1».**
    Скриншот владельца: в списке чатов личный чат «Contact APUCALL1» с

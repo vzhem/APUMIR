@@ -189,6 +189,14 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE state = 'COMPLETE'")
     suspend fun getCompleted(): List<FileTransferEntity>
 
+    /**
+     * Передачи одного файла в одном чате (рой, этап 9: файл группы). У
+     * автора это исходящие каждому просителю, у участника - его входящая;
+     * по ним карточка файла в ленте показывает ход раздачи и приёма.
+     */
+    @Query("SELECT * FROM file_transfers WHERE chatId = :chatId AND fileSha256 = :fileSha256 ORDER BY createdAtMs ASC")
+    suspend fun getForFile(chatId: String, fileSha256: String): List<FileTransferEntity>
+
     @Transaction
     suspend fun insertNewTransfer(transfer: FileTransferEntity): Boolean =
         insertTransferIgnore(transfer) != -1L

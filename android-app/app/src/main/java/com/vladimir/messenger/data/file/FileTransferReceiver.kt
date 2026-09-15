@@ -39,7 +39,24 @@ class FileTransferReceiver(
     private val nowMs: () -> Long = System::currentTimeMillis,
     /** Хранение чужих файлов и приём через хранителя (этап 7 роя); по умолчанию всё отклоняется. */
     private val custody: CustodyPolicy = CustodyPolicy(),
+    /**
+     * Куда класть новое предложение (рой, этап 9: файл группы). Участник
+     * группы попросил файл у другого участника, и тот шлёт обычную передачу;
+     * общего чата у них может не быть, а прямой кадр несёт вместо чата метку
+     * `direct`. По умолчанию - «не знаю», и решает транспортный чат.
+     */
+    private val routeOffer: suspend (senderId: String, fileSha256Hex: String) -> OfferRouting = { _, _ -> OfferRouting.Unknown },
 ) {
+    /** Ответ на вопрос «куда класть предложение файла с таким хэшем от этого узла». */
+    sealed class OfferRouting {
+        /** Файл группы: строка передачи ложится в этот чат (id группы). */
+        data class Chat(val chatId: String) : OfferRouting()
+        /** Такой файл уже идёт от другого сида: второе предложение не нужно. */
+        object Duplicate : OfferRouting()
+        /** Не файл группы: как обычно, по транспортному чату. */
+        object Unknown : OfferRouting()
+    }
+
     /**
      * Границы политики хранения у третьего телефона. Приёмник сам решает
      * только про подлинность и геометрию; «кого пускать», «сколько места»
@@ -311,7 +328,22 @@ class FileTransferReceiver(
             Log.w(TAG, "File offer for already failed transfer; dropped")
             return
         }
-        val transfer = existing ?: insertIncomingTransfer(manifest, senderId, chatId, now) ?: return
+        // Файл группы (этап 9) ложится в группу, а не в личный чат с сидом;
+        // без чата (отправитель не контакт, файла я не просил) предложение
+        // отбрасывается: метка транспорта в базу попасть не должна.
+        val targetChatId = existing?.chatId ?: when (val route = routeOffer(senderId, manifest.fileSha256Hex)) {
+            is OfferRouting.Chat -> route.chatId
+            OfferRouting.Duplicate -> {
+                Log.i(TAG, "File offer $transferIdHex from ${senderId.takeLast(8)}: same file already coming; dropped")
+                return
+            }
+            OfferRouting.Unknown -> chatId.takeIf { it.isNotBlank() && it != FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE }
+        }
+        if (targetChatId == null) {
+            Log.w(TAG, "File offer $transferIdHex from ${senderId.takeLast(8)} has no chat here; dropped")
+            return
+        }
+        val transfer = existing ?: insertIncomingTransfer(manifest, senderId, targetChatId, now) ?: return
         if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
 
         Log.i(
