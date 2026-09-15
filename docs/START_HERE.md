@@ -49,16 +49,18 @@
 
 ## 3. Где мы сейчас (проверено 2026-09-15, не по памяти)
 
-- Релиз **v11.70.23** готовится (2026-09-15): первая функция ядра после
-  снятия заморозки моста - `core_build_info()` в `lib.udl`/`lib.rs`, строка
-  «Ядро» в Настройках → «О приложении». **Собирается только новым
-  workflow** (шаг «Regenerate uniffi Kotlin bindings from lib.udl» в
-  `scripts/ci/build-release.yml`): владелец должен скопировать файл в
-  `.github/workflows/` ПОСЛЕ `git pull` коммита с этим шагом - его первая
-  копия (2026-09-15) была сделана до него и ничего не изменила. Тег ставить
-  только на коммит, где `.github/workflows/build-release.yml` уже новый.
-  План ядра - `docs/CORE_ROADMAP.md`; код - `AI_HANDOFF.md` 0s.
-- Релиз **v11.70.22** = Latest (`gh api repos/vzhem/APUMIR/releases/latest --jq .tag_name`),
+- Релиз **v11.70.23** = Latest (`gh api repos/vzhem/APUMIR/releases/latest --jq .tag_name`),
+  `app-release.apk` = 37 532 950 байт, sha256 `3757f67e…71e64`, тег на
+  коммите `ca29530`, прогон 35005340748 (2026-09-15, с первого раза);
+  `main` = `551f0d4` = ветка (коммит CI «uniffi bindings + core rebuilt»
+  поверх тега). **Заморозка ядра снята**: workflow (владелец скопировал,
+  `ad70242`) перегенерировал `uniffi/p2p_core/p2p_core.kt` из `lib.udl`,
+  первая новая функция `core_build_info()` видна в мосте, строка «Ядро» в
+  Настройках → «О приложении». Описание - `docs/RELEASE_NOTES_v11.70.23.md`;
+  код - `AI_HANDOFF.md` 0s; план ядра - `docs/CORE_ROADMAP.md`. На
+  телефонах НЕ проверен (ожидается строка «p2p_core 0.1.0 · сборка
+  v11.70.23 · 2 брокера»).
+- Релиз **v11.70.22** (предыдущий Latest),
   `app-release.apk` = 37 531 734 байт, sha256 `49ccc135…5de6`, тег на
   коммите `8c2dbc5`, прогон 34993655917 (2026-09-15, с первого раза);
   `main` = ветка. Описание - `docs/RELEASE_NOTES_v11.70.22.md`: системный
