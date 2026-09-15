@@ -55,6 +55,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Пакета «tools» (старые SDK Tools) в репозитории Google больше нет;
+          # значение по умолчанию «tools platform-tools» валит шаг (2026-09-15).
+          packages: platform-tools
 
       - name: Accept Android licenses
         run: |
