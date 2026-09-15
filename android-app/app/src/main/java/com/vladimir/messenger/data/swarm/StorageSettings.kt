@@ -98,19 +98,24 @@ object StorageSettings {
         val receivedBytes: Long,
         /** Очередь сообщений для узлов, которых нет в сети (ядро, apu_relay.sqlite). */
         val relayBytes: Long,
+        /** Мои копии файлов, приложенных к сообщениям сообществ, для раздачи (рой, этап 9). */
+        val groupFileBytes: Long = 0L,
     ) {
-        val total: Long get() = chunkBytes + receivedBytes + relayBytes
+        val total: Long get() = chunkBytes + receivedBytes + relayBytes + groupFileBytes
     }
 
     fun usage(context: Context): Usage {
         val app = context.applicationContext
         val chunks = sizeOfTree(File(app.noBackupFilesDir, "file_transfers/v1"))
         val received = sizeOfTree(File(app.noBackupFilesDir, "file_received/v1"))
+        // Авторские копии файлов сообществ (GroupFileStore): живут неделю,
+        // раздаются участникам по просьбе - тоже «данные в пути».
+        val groupFiles = sizeOfTree(File(app.noBackupFilesDir, "group_files/v1"))
         var relay = 0L
         for (name in listOf("apu_relay.sqlite", "apu_relay.sqlite-wal", "apu_relay.sqlite-shm")) {
             val file = File(app.filesDir, name)
             if (file.isFile) relay += file.length()
         }
-        return Usage(chunkBytes = chunks, receivedBytes = received, relayBytes = relay)
+        return Usage(chunkBytes = chunks, receivedBytes = received, relayBytes = relay, groupFileBytes = groupFiles)
     }
 }

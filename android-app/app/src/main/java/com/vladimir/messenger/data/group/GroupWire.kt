@@ -146,6 +146,14 @@ object GroupWire {
      * группе, как куски поста по сидам.
      */
     const val KIND_FILE_HAVE = "fhave"
+    /**
+     * «Файла у меня нет» (рой, этап 11): `fnone|groupId|sha256` - ответ сида
+     * на `fwant`, когда копии больше нет (истекла, автор убрал, участник
+     * вышел). Проситель сразу спрашивает следующего, а не ждёт полминуты
+     * тишины. Прошлые версии вид не знают и молча отбрасывают - тогда
+     * работает прежнее ожидание.
+     */
+    const val KIND_FILE_NONE = "fnone"
 
     /** Ключ обмена в `fwant`: как у HELLO файловой передачи. */
     const val MAX_FILE_WANT_BINDING_BYTES = 512
@@ -507,6 +515,12 @@ object GroupWire {
             val messageId: String,
         ) : Packet()
 
+        /** У отправителя файла [sha256] нет (ответ на просьбу): просить надо у другого. */
+        data class FileNone(
+            val groupId: String,
+            val sha256: String,
+        ) : Packet()
+
         /**
          * Возможности узла: сколько места под пересылку он отдаёт (байт).
          * Принимается только от [nodeId] = отправитель (проверка в приёмнике).
@@ -687,6 +701,12 @@ object GroupWire {
     fun buildFileHave(groupId: String, sha256: String, messageId: String): String {
         require(isSha256(sha256)) { "bad file sha256" }
         return "$PREFIX|$KIND_FILE_HAVE|$groupId|$sha256|${encode(messageId)}"
+    }
+
+    /** «Файла у меня нет» (этап 11): ответ на просьбу, спрашивайте другого. */
+    fun buildFileNone(groupId: String, sha256: String): String {
+        require(isSha256(sha256)) { "bad file sha256" }
+        return "$PREFIX|$KIND_FILE_NONE|$groupId|$sha256"
     }
 
     /** Хэш файла в визитке и просьбах: ровно 64 шестнадцатеричных знака в нижнем регистре. */
@@ -1260,6 +1280,12 @@ object GroupWire {
                 val messageId = decode(parts[4]) ?: return null
                 if (!isSha256(sha) || messageId.isBlank() || messageId.length > MAX_FILE_MESSAGE_ID_CHARS) return null
                 Packet.FileHave(groupId, sha, messageId)
+            } else {
+                null
+            }
+
+            KIND_FILE_NONE -> if (parts.size == 4 && isSha256(parts[3])) {
+                Packet.FileNone(groupId, parts[3])
             } else {
                 null
             }

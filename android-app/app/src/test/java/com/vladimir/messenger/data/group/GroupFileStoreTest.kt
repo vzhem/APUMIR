@@ -69,6 +69,23 @@ class GroupFileStoreTest {
         assertFalse(File(root, "g").exists())
     }
 
+    /** Вышел из группы - все её копии убираются, соседняя группа не трогается (этап 11). */
+    @Test
+    fun deleteGroupRemovesOnlyThatGroup() {
+        val other = "4d".repeat(32)
+        ByteArray(3).inputStream().use { store.put("g", sha, "a.bin", it) }
+        ByteArray(3).inputStream().use { store.put("g", other, "b.bin", it) }
+        ByteArray(3).inputStream().use { store.put("h", sha, "a.bin", it) }
+        assertTrue(store.deleteGroup("g"))
+        assertNull(store.file("g", sha))
+        assertNull(store.file("g", other))
+        assertNotNull(store.file("h", sha))
+        assertFalse(File(root, "g").exists())
+        // Повторно и для незнакомой группы - без ошибки.
+        assertTrue(store.deleteGroup("g"))
+        assertTrue(store.deleteGroup("никогда не было"))
+    }
+
     @Test
     fun groupKeyIsFilesystemSafe() {
         assertEquals("abc-DEF_09", store.groupKey("abc-DEF_09"))

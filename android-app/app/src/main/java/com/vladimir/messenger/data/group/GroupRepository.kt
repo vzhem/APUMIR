@@ -135,6 +135,9 @@ class GroupRepository(
      */
     private val onFileWant: suspend (senderId: String, packet: GroupWire.Packet.FileWant) -> Unit = { _, _ -> },
     private val onFileHave: suspend (senderId: String, packet: GroupWire.Packet.FileHave) -> Unit = { _, _ -> },
+    private val onFileNone: suspend (senderId: String, packet: GroupWire.Packet.FileNone) -> Unit = { _, _ -> },
+    /** Группу покинули или удалили: рой убирает её файлы и просьбы (этап 11). */
+    private val onGroupGone: suspend (groupId: String) -> Unit = { _ -> },
     private val onFileCard: suspend (groupId: String, messageId: String, authorId: String, sentAtMs: Long, info: com.vladimir.messenger.util.GroupFileMarker.Info) -> Unit =
         { _, _, _, _, _ -> },
 ) {
@@ -2693,6 +2696,11 @@ class GroupRepository(
                     .onFailure { Log.w(TAG, "file have failed: ${it.message}") }
             }
 
+            is GroupWire.Packet.FileNone -> backgroundScope.launch {
+                runCatching { onFileNone(senderId, packet) }
+                    .onFailure { Log.w(TAG, "file none failed: ${it.message}") }
+            }
+
             // Счётчики через владельца (этап 3): сводку считает и применяет
             // PostCounterRepository; сеть - в фоне, приём пакетов не ждёт.
             is GroupWire.Packet.CountersRequest -> backgroundScope.launch {
@@ -3639,6 +3647,9 @@ class GroupRepository(
         }
         groupDao.deleteMember(groupId, me)
         groupDao.markLeft(groupId)
+        backgroundScope.launch {
+            runCatching { onGroupGone(groupId) }.onFailure { Log.w(TAG, "group files cleanup failed: ${it.message}") }
+        }
         return Result.success(Unit)
     }
 
@@ -3667,6 +3678,9 @@ class GroupRepository(
         messageDao.deleteGroupMessages(groupId)
         manifestDao?.deleteForGroup(groupId)
         groupDao.deleteGroup(groupId)
+        backgroundScope.launch {
+            runCatching { onGroupGone(groupId) }.onFailure { Log.w(TAG, "group files cleanup failed: ${it.message}") }
+        }
     }
 
     suspend fun stats(groupId: String, days: Int = 7): Result<GroupStats> {

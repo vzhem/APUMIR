@@ -977,6 +977,7 @@ private fun SettingsTabContent(
                                 "(куски файлов ${StoragePolicy.format(used.chunkBytes)}" +
                                 (if (held > 0L) ", из них чужих на хранении ${StoragePolicy.format(held)}" else "") +
                                 ", принятые файлы ${StoragePolicy.format(used.receivedBytes)}, " +
+                                (if (used.groupFileBytes > 0L) "мои файлы для раздачи в сообществах ${StoragePolicy.format(used.groupFileBytes)}, " else "") +
                                 "очередь сообщений ${StoragePolicy.format(used.relayBytes)}). " +
                                 "Свободно на телефоне: ${StoragePolicy.format(free)}; последние " +
                                 "${StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES)} не занимаются никогда."

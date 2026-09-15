@@ -85,6 +85,13 @@ class GroupFileStore(private val root: File) {
         return removed
     }
 
+    /** Убрать все копии группы (вышел из группы или её удалили). */
+    fun deleteGroup(groupId: String): Boolean {
+        val group = checkedChild(root, groupKey(groupId))
+        if (!group.exists()) return true
+        return group.deleteRecursively()
+    }
+
     /** Сколько байт лежит в копиях (строка в настройках, диагностика). */
     fun totalBytes(): Long {
         if (!root.isDirectory) return 0L

@@ -879,4 +879,23 @@ class GroupWireTest {
         assertNull(GroupWire.parse("APUGRP1|fhave|g|$sha|"))
         assertNull(GroupWire.parse("APUGRP1|fhave|g|zz|bQ"))
     }
+
+    /** «Файла у меня нет» (этап 11): три ячейки после вида, хэш проверяется. */
+    @Test
+    fun fileNoneRoundTrip() {
+        val sha = "b2".repeat(32)
+        val envelope = GroupWire.buildFileNone("g", sha)
+        assertEquals("APUGRP1|fnone|g|$sha", envelope)
+        val none = GroupWire.parse(envelope) as GroupWire.Packet.FileNone
+        assertEquals("g", none.groupId)
+        assertEquals(sha, none.sha256)
+        assertNull(GroupWire.parse("APUGRP1|fnone|g"))
+        assertNull(GroupWire.parse("APUGRP1|fnone|g|zz"))
+        assertNull(GroupWire.parse("APUGRP1|fnone|g|$sha|extra"))
+        try {
+            GroupWire.buildFileNone("g", "bad")
+            org.junit.Assert.fail("bad sha accepted")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
 }

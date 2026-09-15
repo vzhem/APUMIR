@@ -141,7 +141,12 @@ fun GroupChatScreen(
         uiState.group?.topicsEnabled == true &&
         uiState.topics.isNotEmpty()
     val showTopicsList = hasTopics && !showFeed
-    val selectedTopicName = uiState.topics.firstOrNull { it.id == uiState.selectedTopicId }?.name
+    val selectedTopic = uiState.topics.firstOrNull { it.id == uiState.selectedTopicId }
+    val selectedTopicName = selectedTopic?.name
+    // Внутри темы группы наверху крупно - сама тема (значок и имя), а
+    // название группы уходит в подзаголовок: раньше имя темы шло мелким
+    // серым «дом · 3 участн.», и было не видно, куда зашёл.
+    val topicHeader = !isChannel && hasTopics && showFeed && selectedTopic != null
     val senderNames = remember(uiState.members) {
         uiState.members.associate { it.nodeId to it.displayName }
     }
@@ -194,26 +199,51 @@ fun GroupChatScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
+                            if (topicHeader && selectedTopic != null) {
+                                // Открыта тема: её значок вместо аватара группы.
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFE8EEF5)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    TopicIconView(
+                                        selectedTopic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
+                                        26.dp,
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
                             Column {
                             Text(
-                                uiState.group?.title ?: "Группа",
+                                if (topicHeader && selectedTopic != null) {
+                                    selectedTopic.name
+                                } else {
+                                    uiState.group?.title ?: "Группа"
+                                },
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1E2430),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Text(
                                 // В канале это комментарии к посту: показываем
                                 // название поста, а не число участников -
                                 // человек пришёл из ленты и должен видеть,
                                 // под чем он находится.
-                                if (isChannel) {
-                                    selectedTopicName?.let { "Комментарии - $it" }
+                                when {
+                                    isChannel -> selectedTopicName?.let { "Комментарии - $it" }
                                         ?: "Комментарии"
-                                } else {
-                                    (if (showFeed && selectedTopicName != null) "$selectedTopicName · " else "") +
-                                        (uiState.group?.memberCount ?: 0).toString() + " участн."
+                                    // В теме: «Тема · группа», участники - на
+                                    // списке тем, там они и нужны.
+                                    topicHeader -> "Тема · " + (uiState.group?.title ?: "Группа")
+                                    else -> (uiState.group?.memberCount ?: 0).toString() + " участн."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF5A6472),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             }
                         }
@@ -351,11 +381,26 @@ fun GroupChatScreen(
                         ) {
                             uiState.pinned.forEach { m ->
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Закреплённый файл (этап 9-10): значок по
+                                    // типу и подпись «📎 имя (размер)» - она и
+                                    // так в тексте, служебная строка визитки
+                                    // отрезается вместе со строками фото.
+                                    val pinnedFile = remember(m.content) { GroupFileMarker.parse(m.content) }
+                                    if (pinnedFile != null) {
+                                        Icon(
+                                            fileIconFor(pinnedFile.mediaType),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                    }
                                     Text(
                                         // Без служебных строк фото и длинного текста.
-                                        com.vladimir.messenger.util.InlineImage.stripImage(m.content),
+                                        com.vladimir.messenger.util.InlineImage.stripImage(m.content)
+                                            .ifBlank { pinnedFile?.let { GroupFileMarker.caption(it) }.orEmpty() },
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f),
                                     )
                                     if (uiState.canPin) {
@@ -827,7 +872,11 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
     ) {
-        Box {
+        // Кнопке «Закрепить» справа нужно своё место: пузырь с карточкой
+        // файла растягивается на все 300 dp, и на узком экране (лента рядом
+        // с колонкой тем) кнопка выдавливалась за край - файл нельзя было
+        // закрепить. Вес без заполнения: пузырь занимает не больше остатка.
+        Box(modifier = if (canPin) Modifier.weight(1f, fill = false) else Modifier) {
         Card(
             modifier = Modifier
                 .widthIn(max = 300.dp)
@@ -928,6 +977,17 @@ private fun MessageBubble(
                     onSaveToFavorites()
                 },
             )
+            // Закреп и из меню долгого нажатия - на случай, если кнопка
+            // справа не поместилась или её не заметили.
+            if (canPin) {
+                DropdownMenuItem(
+                    text = { Text(if (message.isPinned) "Открепить" else "Закрепить") },
+                    onClick = {
+                        showMenu = false
+                        onTogglePin()
+                    },
+                )
+            }
         }
         if (showReactions) {
             val mine = reactions.firstOrNull { it.mine }?.emoji

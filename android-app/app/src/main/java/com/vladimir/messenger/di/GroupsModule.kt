@@ -134,6 +134,8 @@ object GroupsModule {
         // лишь передаёт ему просьбы - кольца зависимостей так нет.
         onFileWant = { senderId, packet -> groupFiles.get().onFileWant(senderId, packet) },
         onFileHave = { senderId, packet -> groupFiles.get().onFileHave(senderId, packet) },
+        onFileNone = { senderId, packet -> groupFiles.get().onFileNone(senderId, packet) },
+        onGroupGone = { groupId -> groupFiles.get().onGroupGone(groupId) },
         onFileCard = { groupId, messageId, authorId, sentAtMs, info ->
             groupFiles.get().onCardSeen(groupId, messageId, authorId, sentAtMs, info)
         },

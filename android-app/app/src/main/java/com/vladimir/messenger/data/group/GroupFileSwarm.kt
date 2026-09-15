@@ -173,6 +173,25 @@ class GroupFileSwarm @Inject constructor(
     fun authorCopy(groupId: String, sha256: String): File? =
         runCatching { store.file(groupId, sha256) }.getOrNull()
 
+    /**
+     * Группу покинули или удалили (этап 11): мои копии её файлов и просьбы
+     * о её файлах больше не нужны; известные сиды - тоже. Незавершённые
+     * передачи её файлов убирает обычный срок (7 дней), как и раньше.
+     */
+    suspend fun onGroupGone(groupId: String) {
+        withContext(Dispatchers.IO) { runCatching { store.deleteGroup(groupId) } }
+        val removed = mutex.withLock {
+            val keys = pending.keys.filter { pending[it]?.groupId == groupId }
+            keys.forEach { pending.remove(it) }
+            seeds.keys.removeAll { it.startsWith("$groupId:") }
+            waiting.entries.removeIf { it.value.groupId == groupId }
+            if (keys.isNotEmpty()) publishPending()
+            keys.size
+        }
+        if (removed > 0) persistPending()
+        groupChatMemo.remove(groupId)
+    }
+
     // ── Проситель ────────────────────────────────────────────────────────────
 
     /**
@@ -344,6 +363,41 @@ class GroupFileSwarm @Inject constructor(
     }
 
     /**
+     * Сид ответил «файла у меня нет» (этап 11): вычёркиваю его из сидов
+     * этого файла и, если просьба ждёт именно его, спрашиваю следующего
+     * сразу. Принимается только от того, кого я спрашивал, или от известного
+     * сида - чужой пакет ничего не меняет.
+     */
+    suspend fun onFileNone(senderId: String, packet: GroupWire.Packet.FileNone) {
+        val me = myId() ?: return
+        restoreIfNeeded()
+        val key = GroupFileMarker.key(packet.groupId, packet.sha256)
+        val now = System.currentTimeMillis()
+        val entry = mutex.withLock {
+            val set = seeds[key] ?: return
+            if (senderId !in set) return
+            val entry = pending[key]
+            // Автор остаётся первым в списке (порядок важен для ask), даже
+            // если копии у него сейчас нет: он может вернуть её позже.
+            if (set.first() != senderId) set.remove(senderId)
+            if (entry == null || entry.askedSeed != senderId) return
+            entry.tried.add(senderId)
+            // Следующего спрашиваем, только если он есть: иначе ask пошёл бы
+            // по кругу к тому же узлу, а тот снова ответил бы «нет» - и так
+            // без остановки. Нет других - ждём обычного круга насоса.
+            val hasNext = set.any { it != me && it != senderId && it !in entry.tried }
+            if (!hasNext) {
+                Log.i(TAG, "file none from ${senderId.takeLast(8)} for ${packet.sha256.take(12)}: no other seed yet")
+                return
+            }
+            entry
+        }
+        if (hasLiveTransfer(entry.groupId, entry.sha256, now)) return
+        Log.i(TAG, "file none from ${senderId.takeLast(8)} for ${packet.sha256.take(12)}: asking next seed")
+        ask(entry, now)
+    }
+
+    /**
      * Предложение файла с таким хэшем от этого узла: в группу, если я просил
      * этот файл (у него или у кого угодно из сидов) и передача не идёт.
      * Застрявшая передача (сид пропал на полпути) второе предложение не
@@ -503,6 +557,13 @@ class GroupFileSwarm @Inject constructor(
         }
         if (sourceFor(group.id, packet.sha256) == null) {
             Log.i(TAG, "file want from ${senderId.takeLast(8)} for ${packet.sha256.take(12)}: not here")
+            // Этап 11: сказать просителю сразу, а не оставлять его ждать
+            // полминуты тишины - он спросит следующего сида. Старая версия
+            // просителя пакет молча отбросит и подождёт, как раньше.
+            scope.launch {
+                runCatching { delivery.deliver(group.id, GroupWire.buildFileNone(group.id, packet.sha256), listOf(senderId)) }
+                    .onFailure { Log.w(TAG, "file none reply failed: ${it.message}") }
+            }
             return
         }
         val enqueue = mutex.withLock {
