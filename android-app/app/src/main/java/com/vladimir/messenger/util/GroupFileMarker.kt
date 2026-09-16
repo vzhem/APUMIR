@@ -108,6 +108,28 @@ object GroupFileMarker {
     /** Ключ файла в пределах группы: один и тот же файл в двух группах - два разных дела. */
     fun key(groupId: String, sha256: String): String = "$groupId:$sha256"
 
+    /**
+     * Метка группы в манифесте файла группы (K2, v11.70.25): в поле
+     * получателя вместо адреса узла стоит `grp_<id группы>` - один манифест,
+     * один ключ и одни куски на всех участников, поэтому файл качается
+     * полосами у нескольких сидов. Ядро принимает только буквы, цифры и
+     * `-_.:` (`file_transfer::is_group_scope`); идентификаторы групп - UUID,
+     * а на всякий случай посторонний идентификатор заменяется его хэшем.
+     */
+    const val SCOPE_PREFIX = "grp_"
+
+    fun scope(groupId: String): String {
+        val safe = groupId.isNotEmpty() && groupId.length <= 100 && groupId.all {
+            it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '-' || it == '_' || it == '.' || it == ':'
+        }
+        if (safe) return SCOPE_PREFIX + groupId
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(groupId.toByteArray(StandardCharsets.UTF_8))
+        return SCOPE_PREFIX + digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }.take(32)
+    }
+
+    /** Поле получателя манифеста - метка группы, а не узел. */
+    fun isScope(recipient: String): Boolean = recipient.startsWith(SCOPE_PREFIX)
+
     fun isSha256(value: String): Boolean =
         value.length == 64 && value.all { it in '0'..'9' || it in 'a'..'f' }
 

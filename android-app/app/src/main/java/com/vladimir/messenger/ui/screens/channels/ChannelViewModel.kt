@@ -69,6 +69,8 @@ data class ChannelUiState(
     val transfers: List<com.vladimir.messenger.data.local.entity.FileTransferEntity> = emptyList(),
     /** Файлы, которые сейчас просим у сидов ([com.vladimir.messenger.util.GroupFileMarker.key]). */
     val pendingFiles: Set<String> = emptySet(),
+    /** Скольким подписчикам отдана моя общая копия файла (K2), по ключу файла. */
+    val servedFiles: Map<String, Int> = emptyMap(),
     /** Принятый файл, который человек просит сохранить в папку (системное окно). */
     val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
     /** Файл к новому посту: подготовлен (хэш, копия) и ждёт «Опубликовать». */
@@ -137,6 +139,9 @@ class ChannelViewModel @Inject constructor(
         }
         viewModelScope.launch {
             groupFiles.pendingKeys.collect { keys -> _uiState.update { it.copy(pendingFiles = keys) } }
+        }
+        viewModelScope.launch {
+            groupFiles.servedCounts.collect { counts -> _uiState.update { it.copy(servedFiles = counts) } }
         }
     }
 

@@ -107,6 +107,22 @@ object FileTransferWire {
         return "f${transferIdHex}w${cleanTag(senderTag)}h${cleanTag(holderTag)}s$seq".also(::requireValidMessageId)
     }
 
+    // ── Файл группы полосами от нескольких сидов (K2, v11.70.25) ─────────────
+    // Подтверждение уходит каждому сиду отдельно (иначе сеть отсеяла бы второе
+    // как дубль первого), инвентарь - со своим номером на каждую отправку.
+
+    fun groupAckMessageId(transferIdHex: String, seedTag: String, contiguousChunks: Long): String {
+        requireValidTransferId(transferIdHex)
+        require(contiguousChunks >= 0)
+        return "f${transferIdHex}g${cleanTag(seedTag)}a$contiguousChunks".also(::requireValidMessageId)
+    }
+
+    fun groupWantMessageId(transferIdHex: String, senderTag: String, seedTag: String, seq: Long): String {
+        requireValidTransferId(transferIdHex)
+        require(seq >= 0)
+        return "f${transferIdHex}g${cleanTag(senderTag)}w${cleanTag(seedTag)}s$seq".also(::requireValidMessageId)
+    }
+
     /** Короткая метка узла для id сообщения: хвост адреса без служебных знаков. */
     private fun cleanTag(nodeId: String): String {
         val tag = nodeId.takeLast(8).filter { it in '0'..'9' || it in 'a'..'f' }

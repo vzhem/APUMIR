@@ -94,6 +94,8 @@ data class FileCardState(
             onSave: (FileTransferEntity) -> Unit,
             onShare: (file: java.io.File) -> Unit,
             nowMs: Long = System.currentTimeMillis(),
+            /** Скольким участникам отдана общая копия (K2): у автора строки COMPLETE на каждого больше нет. */
+            servedCount: Int = 0,
         ): FileCardState {
             val mine = transfers.filter { it.fileSha256 == info.sha256 }
             val transfer = mine.firstOrNull { it.direction == "INCOMING" && it.state == "COMPLETE" }
@@ -113,7 +115,7 @@ data class FileCardState(
                 transfer = transfer,
                 pending = GroupFileMarker.key(chatId, info.sha256) in pendingKeys,
                 stalled = stalled,
-                seeded = if (isFromMe) mine.count { it.direction == "OUTGOING" && it.state == "COMPLETE" } else 0,
+                seeded = if (isFromMe) mine.count { it.direction == "OUTGOING" && it.state == "COMPLETE" } + servedCount else 0,
                 previewFile = localFile?.takeIf { info.mediaType.startsWith("image/") },
                 onDownload = onDownload,
                 onSave = if (complete) {

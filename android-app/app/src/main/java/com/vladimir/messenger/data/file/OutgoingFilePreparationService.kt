@@ -132,6 +132,125 @@ class OutgoingFilePreparationService private constructor(
         nowMs = nowMs,
     )
 
+    /**
+     * Общая копия файла ГРУППЫ (K2, v11.70.25): манифест с меткой группы
+     * вместо получателя (`grp_<id>`, ядро `create_group_file_manifest`), один
+     * ключ файла и куски, зашифрованные ОДИН раз. Строка передачи -
+     * `OUTGOING`/`SEEDING` (обычный передатчик её не трогает); куски из неё
+     * отдаёт любому участнику GroupFileSeeder, а ключ каждому просителю
+     * заворачивает [wrapGroupKey]. Повторный вызов для того же файла и
+     * группы возвращает готовую копию, не шифруя заново.
+     *
+     * Возвращает null, если ядро групповых манифестов не умеет (старое
+     * `.so`): тогда рой отдаёт файл по-старому, копией на просителя.
+     */
+    suspend fun prepareGroupCopy(
+        source: java.io.File,
+        displayName: String,
+        mediaType: String,
+        messageId: String,
+        groupId: String,
+        expectedSha256: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): PreparedTransfer? = withContext(Dispatchers.IO) {
+        require(messageId.isNotBlank() && groupId.isNotBlank()) { "Missing file message binding" }
+        transferDao.getForFile(groupId, expectedSha256)
+            .firstOrNull { it.direction == "OUTGOING" && it.state == "SEEDING" && it.expiresAtMs > nowMs }
+            ?.let { row ->
+                if (store.readManifest(row.transferId) != null && transferDao.countChunks(row.transferId) == row.chunkCount) {
+                    return@withContext PreparedTransfer(
+                        transferId = row.transferId,
+                        messageId = row.messageId,
+                        displayName = row.displayName,
+                        mediaType = row.mediaType,
+                        totalBytes = row.totalBytes,
+                        chunkCount = row.chunkCount,
+                        fileSha256 = row.fileSha256,
+                    )
+                }
+                // Недошифрованная копия (приложение убили посреди подготовки): заново.
+                runCatching { store.deleteTransfer(row.transferId) }
+                transferDao.deleteTransfer(row.transferId)
+            }
+        val senderNodeId = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .getString("node_id", null)
+            ?: throw IllegalStateException("Local identity is unavailable")
+        val local = Source.Local(source, displayName, mediaType)
+        val inspected = FileTransferSourceInspector.inspect(
+            providerDisplayName = displayName,
+            providerMediaType = mediaType,
+            declaredSize = source.length().takeIf { source.isFile },
+        ) { local.open(context) }
+        check(inspected.sha256 == expectedSha256) { "Group file copy does not match its card" }
+        val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
+        val manifest = try {
+            uniffi.p2p_core.createGroupFileManifest(
+                senderNodeId,
+                com.vladimir.messenger.util.GroupFileMarker.scope(groupId),
+                inspected.displayName,
+                inspected.mediaType,
+                inspected.sizeBytes.toULong(),
+                inspected.sha256.hexToBytes(),
+                nowMs,
+                expiresAtMs,
+            )
+        } catch (error: Throwable) {
+            // Ядро без K2 (не должно случаться: APK несёт своё ядро) - рой
+            // отдаст по-старому, копией на каждого просителя.
+            android.util.Log.w("OutgoingFilePreparation", "group manifest unavailable: ${error.message}")
+            return@withContext null
+        }
+        val entity = manifest.toEntity(messageId, groupId, "", nowMs).copy(state = "PREPARING")
+        check(transferDao.insertNewTransfer(entity)) { "Transfer ID collision" }
+        try {
+            check(store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)) {
+                "New transfer unexpectedly reused a manifest"
+            }
+            keyAccess.create(manifest.transferIdHex)
+            // Сразу в SEEDING, минуя PREPARED: иначе обычный передатчик успел
+            // бы подхватить строку как личную передачу без конверта.
+            stageChunks(local, manifest, inspected.sha256, store, finalState = "SEEDING")
+            PreparedTransfer(
+                transferId = manifest.transferIdHex,
+                messageId = messageId,
+                displayName = manifest.displayName,
+                mediaType = manifest.mediaType,
+                totalBytes = manifest.fileSize.toLong(),
+                chunkCount = manifest.chunkCount.toLong(),
+                fileSha256 = manifest.fileSha256Hex,
+            )
+        } catch (error: Exception) {
+            val filesRemoved = runCatching { store.deleteTransfer(manifest.transferIdHex) }
+                .getOrDefault(false)
+            if (filesRemoved) transferDao.deleteTransfer(manifest.transferIdHex)
+            throw error
+        }
+    }
+
+    /**
+     * Конверт с ключом общей копии для конкретного просителя (K2): тот же
+     * `create_file_key_envelope`, что и у личной передачи, - подписан моим
+     * ключом обмена, вскрывается только его ключом, привязан к байтам
+     * общего манифеста. Бросает «binding is not pinned», если ключ просителя
+     * ещё не закреплён (рой тогда просит HELLO и повторяет позже).
+     */
+    suspend fun wrapGroupKey(transferId: String, recipientNodeId: String): ByteArray = withContext(Dispatchers.IO) {
+        val exchange = exchangeAccess ?: error("Exchange access unavailable")
+        val manifestBytes = store.readManifest(transferId) ?: error("Group copy manifest missing")
+        val ownBinding = exchange.ownBinding()
+        val recipientBinding = exchange.recipientBinding(recipientNodeId)
+        try {
+            exchange.withSecret { exchangeSecret ->
+                keyAccess.withExisting(transferId) { fileKey ->
+                    createFileKeyEnvelope(ownBinding, recipientBinding, exchangeSecret, manifestBytes, fileKey)
+                }
+            }
+        } finally {
+            ownBinding.fill(0)
+            recipientBinding.fill(0)
+        }
+    }
+
     /** Откуда читать файл: системный провайдер (выбор из окна) или файл приложения. */
     private sealed class Source {
         abstract fun open(context: Context): java.io.InputStream
@@ -260,6 +379,8 @@ class OutgoingFilePreparationService private constructor(
         manifest: FileTransferManifestFfi,
         expectedSha256: String,
         store: FileTransferChunkStore,
+        /** Состояние строки после последнего куска: PREPARED (личная) или SEEDING (общая копия группы, K2). */
+        finalState: String = "PREPARED",
     ) {
         val input = source.open(context)
         val digest = MessageDigest.getInstance("SHA-256")
@@ -312,7 +433,7 @@ class OutgoingFilePreparationService private constructor(
                 check(
                     transferDao.advanceProgress(
                         transferId = manifest.transferIdHex,
-                        state = if (index + 1 == chunkCount) "PREPARED" else "PREPARING",
+                        state = if (index + 1 == chunkCount) finalState else "PREPARING",
                         completedChunks = index + 1,
                         transferredBytes = transferred,
                         updatedAtMs = System.currentTimeMillis(),
@@ -329,7 +450,7 @@ class OutgoingFilePreparationService private constructor(
             check(
                 transferDao.advanceProgress(
                     transferId = manifest.transferIdHex,
-                    state = "PREPARED",
+                    state = finalState,
                     completedChunks = 0,
                     transferredBytes = 0,
                     updatedAtMs = System.currentTimeMillis(),

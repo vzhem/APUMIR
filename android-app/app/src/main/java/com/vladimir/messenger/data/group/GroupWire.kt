@@ -158,6 +158,17 @@ object GroupWire {
     /** Ключ обмена в `fwant`: как у HELLO файловой передачи. */
     const val MAX_FILE_WANT_BINDING_BYTES = 512
 
+    /**
+     * Метка «понимаю групповые манифесты» в `fwant` (K2, v11.70.25):
+     * приписывается к идентификатору сообщения (`<id>#g1`), а не отдельным
+     * полем - телефон до v11.70.25 разбирает `fwant` только из шести полей и
+     * седьмое отбросил бы вместе с просьбой; хвост же он молча переносит в
+     * метку своей исходящей передачи, где он ничему не мешает. Сид новой
+     * версии по метке отдаёт общий манифест (`grp_`, полосы от нескольких
+     * сидов), без метки - прежнюю передачу лично просителю.
+     */
+    const val FILE_WANT_GROUP_MARK = "#g1"
+
     /** Идентификатор сообщения в `fwant`/`fhave`: UUID - 36 знаков, с запасом. */
     const val MAX_FILE_MESSAGE_ID_CHARS = 64
 
@@ -506,6 +517,8 @@ object GroupWire {
             val sha256: String,
             val messageId: String,
             val binding: ByteArray = ByteArray(0),
+            /** Проситель принимает групповой манифест (K2): можно слать общие куски. */
+            val groupCapable: Boolean = false,
         ) : Packet()
 
         /** Отправитель получил файл [sha256] сообщения [messageId] целиком и готов раздавать. */
@@ -690,11 +703,19 @@ object GroupWire {
      * (`FileExchangeKeyStore.publicBinding`), чтобы сид мог закрепить его и
      * запечатать конверт с ключом файла; пустой - если ключа ещё нет.
      */
-    fun buildFileWant(groupId: String, sha256: String, messageId: String, binding: ByteArray): String {
+    fun buildFileWant(
+        groupId: String,
+        sha256: String,
+        messageId: String,
+        binding: ByteArray,
+        groupCapable: Boolean = false,
+    ): String {
         require(isSha256(sha256)) { "bad file sha256" }
         require(binding.size <= MAX_FILE_WANT_BINDING_BYTES) { "binding too long" }
+        require(!messageId.endsWith(FILE_WANT_GROUP_MARK)) { "message id collides with group mark" }
         val bindingCell = if (binding.isEmpty()) "" else Base64.getUrlEncoder().withoutPadding().encodeToString(binding)
-        return "$PREFIX|$KIND_FILE_WANT|$groupId|$sha256|${encode(messageId)}|$bindingCell"
+        val idCell = if (groupCapable) messageId + FILE_WANT_GROUP_MARK else messageId
+        return "$PREFIX|$KIND_FILE_WANT|$groupId|$sha256|${encode(idCell)}|$bindingCell"
     }
 
     /** «Файл у меня» (этап 9): можно просить. */
@@ -1258,7 +1279,9 @@ object GroupWire {
 
             KIND_FILE_WANT -> if (parts.size == 6) {
                 val sha = parts[3]
-                val messageId = decode(parts[4]) ?: return null
+                val rawId = decode(parts[4]) ?: return null
+                val groupCapable = rawId.endsWith(FILE_WANT_GROUP_MARK)
+                val messageId = rawId.removeSuffix(FILE_WANT_GROUP_MARK)
                 if (!isSha256(sha) || messageId.isBlank() || messageId.length > MAX_FILE_MESSAGE_ID_CHARS) return null
                 val binding = if (parts[5].isEmpty()) {
                     ByteArray(0)
@@ -1270,7 +1293,7 @@ object GroupWire {
                     }
                 }
                 if (binding.size > MAX_FILE_WANT_BINDING_BYTES) return null
-                Packet.FileWant(groupId, sha, messageId, binding)
+                Packet.FileWant(groupId, sha, messageId, binding, groupCapable)
             } else {
                 null
             }

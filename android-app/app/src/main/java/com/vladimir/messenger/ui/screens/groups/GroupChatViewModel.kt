@@ -50,6 +50,8 @@ data class GroupChatUiState(
     val transfers: List<com.vladimir.messenger.data.local.entity.FileTransferEntity> = emptyList(),
     /** Файлы, которые сейчас просим у сидов ([GroupFileMarker.key]). */
     val pendingFiles: Set<String> = emptySet(),
+    /** Скольким участникам отдана моя общая копия файла (K2), по ключу файла. */
+    val servedFiles: Map<String, Int> = emptyMap(),
     /** Идёт подготовка выбранного файла (хэш, копия). */
     val isPreparingFile: Boolean = false,
     /** Файл готов и ждёт отправки вместе с подписью: показывается над полем ввода. */
@@ -118,6 +120,9 @@ class GroupChatViewModel @Inject constructor(
         }
         viewModelScope.launch {
             groupFiles.pendingKeys.collect { keys -> _uiState.update { it.copy(pendingFiles = keys) } }
+        }
+        viewModelScope.launch {
+            groupFiles.servedCounts.collect { counts -> _uiState.update { it.copy(servedFiles = counts) } }
         }
     }
 

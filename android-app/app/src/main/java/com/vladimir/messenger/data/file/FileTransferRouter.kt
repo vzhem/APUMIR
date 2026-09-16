@@ -34,11 +34,19 @@ class FileTransferRouter @Inject constructor(
      * собирает. Берётся только при обработке пакетов, не при создании.
      */
     private val groupFiles: javax.inject.Provider<com.vladimir.messenger.data.group.GroupFileSwarm>,
+    /**
+     * Общие копии файлов групп (K2): манифест `grp_`, один ключ, куски
+     * зашифрованы один раз; конверт ключа - каждому просителю свой. Через
+     * Provider по той же причине, что и рой.
+     */
+    private val preparation: javax.inject.Provider<OutgoingFilePreparationService>,
 ) {
     private val appContext: Context
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val custodySender: FileCustodySender
+    /** Раздача общих копий файлов групп полосами нескольким просителям (K2). */
+    val groupSeeder: GroupFileSeeder
     private val transport: PacketTransport
     /**
      * Кто сейчас в сети - по пульсу присутствия (`peer_discovered`), ведёт
@@ -163,6 +171,23 @@ class FileTransferRouter @Inject constructor(
             },
         )
         custodySender = custodyLocal
+        val seederLocal = GroupFileSeeder(
+            transferDao = transferDao,
+            chunkStore = chunkStore,
+            directTransport = directSend,
+            ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
+            wrapKey = { transferIdHex, requester ->
+                // Автору ключ общей копии сделала подготовка; получившему -
+                // приёмник (импорт из конверта сида). Оба лежат в хранилище
+                // ключей под id передачи, и конверт просителю печатается с
+                // байтами общего манифеста.
+                preparation.get().wrapGroupKey(transferIdHex, requester)
+            },
+            mayServe = { row, requester ->
+                runCatching { groupFiles.get().mayServeFile(row.chatId, requester) }.getOrDefault(false)
+            },
+        )
+        groupSeeder = seederLocal
         receiver = FileTransferReceiver(
             transferDao = transferDao,
             chunkStore = chunkStore,
@@ -225,7 +250,21 @@ class FileTransferRouter @Inject constructor(
                 runCatching { groupFiles.get().routeOffer(senderId, fileSha256) }
                     .getOrDefault(FileTransferReceiver.OfferRouting.Unknown)
             },
+            groupSeed = FileTransferReceiver.GroupSeedHooks(
+                onAck = { transferIdHex, from, contiguous -> seederLocal.onAck(transferIdHex, from, contiguous) },
+                onWant = { transferIdHex, from, contiguous, seq, ranges ->
+                    seederLocal.onWant(transferIdHex, from, contiguous, seq, ranges)
+                },
+                onCancel = { transferIdHex, from -> seederLocal.onCancel(transferIdHex, from) },
+                onOfferAccepted = { chatId, seedId, fileSha256, seedCount ->
+                    runCatching { groupFiles.get().onSeedJoined(chatId, seedId, fileSha256, seedCount) }
+                        .onFailure { Log.w(TAG, "group seed hook failed: ${it.message}") }
+                },
+            ),
         )
+        seederLocal.onServed = { transferIdHex, requester ->
+            runCatching { groupFiles.get().onServed(transferIdHex, requester) }
+        }
         // LAN server starts only after sender/receiver exist: an early incoming
         // frame must never hit a half-constructed router.
         lan.startServer()
@@ -362,8 +401,15 @@ class FileTransferRouter @Inject constructor(
             .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
         val summary = sender.pumpOnce()
         pumpCustody()
+        runCatching { groupSeeder.pump() }
+            .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
         return summary
     }
+
+    /** Ключ передачи на месте (для проверки, годится ли строка как источник общей копии, K2). */
+    fun hasTransferKey(transferId: String): Boolean =
+        runCatching { FileTransferKeyVault.mode(appContext, transferId) == FileTransferKeyVault.Mode.READY }
+            .getOrDefault(false)
 
     /**
      * Хранение у третьего телефона (этап 7 роя): своим ожидающим передачам

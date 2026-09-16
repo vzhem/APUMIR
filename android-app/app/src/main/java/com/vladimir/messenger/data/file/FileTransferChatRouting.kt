@@ -19,6 +19,21 @@ internal object FileTransferChatRouting {
     const val CUSTODY_SCOPE = "custody"
 
     /**
+     * Файл группы полосами (K2, v11.70.25): в манифесте вместо получателя
+     * стоит метка группы `grp_<id>` (ядро, `file_transfer::is_group_scope`;
+     * Kotlin строит её в `GroupFileMarker.scope`). Такой манифест один на
+     * всех участников, и предложение с ним принимается от любого сида, у
+     * которого рой просил файл, а не только от того, кто в нём записан
+     * отправителем (это автор).
+     */
+    const val GROUP_SCOPE_PREFIX = "grp_"
+
+    fun isGroupScope(recipient: String): Boolean = recipient.startsWith(GROUP_SCOPE_PREFIX)
+
+    /** Метка группы для её идентификатора - как её строит автор копии. */
+    fun groupScope(groupId: String): String = com.vladimir.messenger.util.GroupFileMarker.scope(groupId)
+
+    /**
      * Returns the recipient's local chat when known. A non-direct transport scope is retained only
      * for the legacy path; the direct sentinel is never allowed to become a Room chat ID.
      */

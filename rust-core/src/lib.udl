@@ -82,6 +82,21 @@ namespace p2p_core {
         i64 created_at_ms,
         i64 expires_at_ms
     );
+    // K2 (v11.70.25): манифест файла ГРУППЫ - получатель заменён меткой группы
+    // `grp_<id>`, ключ и куски одни на всех участников, поэтому один файл
+    // качается полосами у нескольких сидов сразу. Конверт ключа получателю -
+    // прежний create_file_key_envelope с байтами этого манифеста.
+    [Throws=CoreError]
+    FileTransferManifestFfi create_group_file_manifest(
+        string sender_node_id,
+        string group_scope,
+        string display_name,
+        string media_type,
+        u64 file_size,
+        bytes file_sha256,
+        i64 created_at_ms,
+        i64 expires_at_ms
+    );
     [Throws=CoreError]
     FileTransferManifestFfi parse_file_transfer_manifest(bytes manifest_bytes);
     [Throws=CoreError]

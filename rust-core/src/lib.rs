@@ -618,6 +618,59 @@ pub fn create_file_transfer_manifest(
     file_manifest_to_ffi(manifest)
 }
 
+/// K2 (v11.70.25): манифест файла ГРУППЫ - один на всех участников. Вместо
+/// адреса получателя в нём метка группы (`grp_<id>`, см.
+/// `file_transfer::is_group_scope`), поэтому ключ файла и куски у всех сидов
+/// одинаковые: проситель качает разные куски у разных участников и сливает их
+/// в один файл. Ключ файла каждому получателю заворачивается отдельно обычным
+/// `create_file_key_envelope` с байтами этого манифеста.
+pub fn create_group_file_manifest(
+    sender_node_id: String,
+    group_scope: String,
+    display_name: String,
+    media_type: String,
+    file_size: u64,
+    file_sha256: Vec<u8>,
+    created_at_ms: i64,
+    expires_at_ms: i64,
+) -> Result<FileTransferManifestFfi, CoreError> {
+    use crypto::file_transfer::{
+        expected_chunk_count, FileTransferManifestV1, DEFAULT_FILE_CHUNK_BYTES, FILE_HASH_BYTES,
+        FILE_TRANSFER_ID_BYTES, FILE_TRANSFER_VERSION_V3_GROUP,
+    };
+    use rand::{rngs::OsRng, RngCore};
+
+    if file_sha256.len() != FILE_HASH_BYTES {
+        return Err(CoreError::CryptoError {
+            detail: "file SHA-256 must be exactly 32 bytes".to_string(),
+        });
+    }
+    let mut transfer_id = [0u8; FILE_TRANSFER_ID_BYTES];
+    let mut rng = OsRng;
+    while transfer_id.iter().all(|byte| *byte == 0) {
+        rng.fill_bytes(&mut transfer_id);
+    }
+    let manifest = FileTransferManifestV1 {
+        wire_version: FILE_TRANSFER_VERSION_V3_GROUP,
+        transfer_id,
+        sender_node_id,
+        recipient_node_id: group_scope,
+        display_name,
+        media_type,
+        file_size,
+        chunk_size: DEFAULT_FILE_CHUNK_BYTES,
+        chunk_count: expected_chunk_count(file_size, DEFAULT_FILE_CHUNK_BYTES),
+        file_sha256: file_sha256
+            .try_into()
+            .map_err(|_| CoreError::CryptoError {
+                detail: "file SHA-256 must be exactly 32 bytes".to_string(),
+            })?,
+        created_at_ms,
+        expires_at_ms,
+    };
+    file_manifest_to_ffi(manifest)
+}
+
 pub fn parse_file_transfer_manifest(
     manifest_bytes: Vec<u8>,
 ) -> Result<FileTransferManifestFfi, CoreError> {
@@ -865,6 +918,57 @@ mod tests {
             decrypt_file_transfer_chunk(manifest.manifest_bytes, key, 0, ciphertext).unwrap(),
             b"hello"
         );
+    }
+
+    /// K2: групповой манифест разбирается тем же `parse_file_transfer_manifest`,
+    /// куски двух «сидов» с одним ключом совпадают, а метка узла вместо
+    /// группы (и наоборот) отвергается.
+    #[test]
+    fn group_file_manifest_ffi_round_trip() {
+        let manifest = create_group_file_manifest(
+            "pk_0123456789abcdef0123456789abcdef".to_string(),
+            "grp_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d".to_string(),
+            "shared.bin".to_string(),
+            "application/octet-stream".to_string(),
+            7,
+            vec![0x11; 32],
+            1_800_000_000_000,
+            1_800_086_400_000,
+        )
+        .unwrap();
+        let parsed = parse_file_transfer_manifest(manifest.manifest_bytes.clone()).unwrap();
+        assert_eq!(parsed.recipient_node_id, "grp_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d");
+        assert_eq!(parsed.transfer_id_hex, manifest.transfer_id_hex);
+        let key = vec![0x22; 32];
+        let seed_a = encrypt_file_transfer_chunk(manifest.manifest_bytes.clone(), key.clone(), 0, b"seven!!".to_vec()).unwrap();
+        let seed_b = encrypt_file_transfer_chunk(parsed.manifest_bytes.clone(), key.clone(), 0, b"seven!!".to_vec()).unwrap();
+        assert_eq!(seed_a, seed_b);
+        assert_eq!(
+            decrypt_file_transfer_chunk(manifest.manifest_bytes, key, 0, seed_a).unwrap(),
+            b"seven!!"
+        );
+        assert!(create_group_file_manifest(
+            "pk_0123456789abcdef0123456789abcdef".to_string(),
+            "pk_fedcba9876543210fedcba9876543210".to_string(),
+            "shared.bin".to_string(),
+            "application/octet-stream".to_string(),
+            7,
+            vec![0x11; 32],
+            1_800_000_000_000,
+            1_800_086_400_000,
+        )
+        .is_err());
+        assert!(create_file_transfer_manifest(
+            "pk_0123456789abcdef0123456789abcdef".to_string(),
+            "grp_g1".to_string(),
+            "shared.bin".to_string(),
+            "application/octet-stream".to_string(),
+            7,
+            vec![0x11; 32],
+            1_800_000_000_000,
+            1_800_086_400_000,
+        )
+        .is_err());
     }
 
     #[test]

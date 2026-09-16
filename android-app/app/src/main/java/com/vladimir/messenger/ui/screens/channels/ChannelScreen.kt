@@ -275,6 +275,7 @@ fun ChannelScreen(
                                         onDownload = { viewModel.requestFile(post) },
                                         onSave = { viewModel.requestSaveReceivedFile(it) },
                                         onShare = { f -> viewModel.shareFile(f, info.displayName, info.mediaType) },
+                                        servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.channelId, info.sha256)] ?: 0,
                                     )
                                 },
                             )

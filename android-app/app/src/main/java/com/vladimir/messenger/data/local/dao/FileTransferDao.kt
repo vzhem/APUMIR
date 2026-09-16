@@ -197,6 +197,15 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE chatId = :chatId AND fileSha256 = :fileSha256 ORDER BY createdAtMs ASC")
     suspend fun getForFile(chatId: String, fileSha256: String): List<FileTransferEntity>
 
+    /**
+     * Мои групповые копии (K2, v11.70.25): строка `OUTGOING`/`SEEDING` -
+     * файл группы, зашифрованный один раз общим ключом; куски из неё уходят
+     * любому участнику по его просьбе (GroupFileSeeder). Обычный передатчик
+     * такие строки не трогает (состояние не из его списка).
+     */
+    @Query("SELECT * FROM file_transfers WHERE direction = 'OUTGOING' AND state = 'SEEDING'")
+    suspend fun getSeeding(): List<FileTransferEntity>
+
     @Transaction
     suspend fun insertNewTransfer(transfer: FileTransferEntity): Boolean =
         insertTransferIgnore(transfer) != -1L

@@ -463,6 +463,7 @@ fun GroupChatScreen(
                             onDownload = { viewModel.requestFile(message, card) },
                             onSave = { viewModel.requestSaveReceivedFile(it) },
                             onShare = { f -> viewModel.shareFile(f, card.displayName, card.mediaType) },
+                            servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.groupId, card.sha256)] ?: 0,
                         )
                     }
                     MessageBubble(

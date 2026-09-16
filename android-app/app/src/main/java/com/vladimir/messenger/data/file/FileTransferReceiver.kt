@@ -46,7 +46,29 @@ class FileTransferReceiver(
      * `direct`. По умолчанию - «не знаю», и решает транспортный чат.
      */
     private val routeOffer: suspend (senderId: String, fileSha256Hex: String) -> OfferRouting = { _, _ -> OfferRouting.Unknown },
+    /** Раздача общей копии файла группы (K2): подтверждения, инвентарь и отказы просителей - сидеру. */
+    private val groupSeed: GroupSeedHooks = GroupSeedHooks(),
 ) {
+    /**
+     * Границы сидера общей копии файла группы (K2, v11.70.25,
+     * [GroupFileSeeder]). Строка `OUTGOING`/`SEEDING` - не передача одному
+     * получателю, а копия для всех участников: ACK, инвентарь (WANT) и CANCEL
+     * по ней приходят от разных узлов и уходят туда, а не в обычный передатчик.
+     */
+    class GroupSeedHooks(
+        val onAck: suspend (transferIdHex: String, from: String, contiguous: Long) -> Unit = { _, _, _ -> },
+        val onWant: suspend (transferIdHex: String, from: String, contiguous: Long, seq: Long, ranges: List<LongRange>) -> Unit =
+            { _, _, _, _, _ -> },
+        val onCancel: suspend (transferIdHex: String, from: String) -> Unit = { _, _ -> },
+        /**
+         * Я (проситель) принял предложение общей копии от очередного сида:
+         * рой может позвать ещё сидов на полосы этого же файла. [seedCount] -
+         * сколько сидов уже шлют.
+         */
+        val onOfferAccepted: suspend (chatId: String, seedId: String, fileSha256Hex: String, seedCount: Int) -> Unit =
+            { _, _, _, _ -> },
+    )
+
     /** Ответ на вопрос «куда класть предложение файла с таким хэшем от этого узла». */
     sealed class OfferRouting {
         /** Файл группы: строка передачи ложится в этот чат (id группы). */
@@ -112,6 +134,15 @@ class FileTransferReceiver(
     private val holderAskedAt = HashMap<String, MutableMap<String, Long>>()
     /** transferId -> хранитель, говоривший с нами последним: подтверждение идёт ему, остальным - реже. */
     private val lastHolderHeard = HashMap<String, String>()
+    /**
+     * Файл группы полосами (K2): transferId -> сиды, приславшие предложение с
+     * общим манифестом (`grp_`), в порядке появления. Подтверждения и
+     * инвентарь недостающего идут им всем; кто прислал кусок последним и
+     * когда - в [holderSeenAt]/[lastHolderHeard] (те же карты, что у
+     * хранителей: механика дележа одна). Только в памяти: после перезапуска
+     * сиды представятся снова (предложение повторяется каждые полминуты).
+     */
+    private val groupSeeds = HashMap<String, LinkedHashSet<String>>()
     /**
      * Передачи, от которых я отказался (этап 10: файл группы уже идёт от
      * другого сида). Их куски, долетающие следом за предложением, не
@@ -243,6 +274,8 @@ class FileTransferReceiver(
                     handleCustodyAck(senderId, transferIdHex, packet.itemIndex, payload)
                 FileTransferPacketCodec.Type.CUSTODY_WANT ->
                     handleCustodyWant(senderId, transferIdHex, packet.itemIndex, payload)
+                FileTransferPacketCodec.Type.WANT ->
+                    handleGroupWant(senderId, transferIdHex, packet.itemIndex, payload)
             }
         } finally {
             payload.fill(0)
@@ -277,6 +310,12 @@ class FileTransferReceiver(
             return
         }
         val transfer = transferDao.getTransfer(transferIdHex)
+        if (transfer != null && isSeedRow(transfer, senderId)) {
+            // Общая копия файла группы (K2): отказался один проситель, копия
+            // остаётся для остальных - сидер лишь перестаёт слать ему.
+            groupSeed.onCancel(transferIdHex, senderId)
+            return
+        }
         if (transfer == null || transfer.direction != "OUTGOING" || transfer.peerNodeId != senderId) {
             Log.w(TAG, "Unauthorized file CANCEL from ${senderId.takeLast(8)} for $transferIdHex; dropped")
             return
@@ -296,12 +335,15 @@ class FileTransferReceiver(
      */
     suspend fun declineTransfer(transfer: FileTransferEntity) {
         if (transfer.direction != "INCOMING" || transfer.state == "COMPLETE") return
-        mutex.withLock {
+        val seeds = mutex.withLock {
             declined[transfer.transferId] = true
             contiguousPrefixes.remove(transfer.transferId)
             bufferedChunks.remove(transfer.transferId)?.values?.forEach { it.fill(0) }
+            groupSeeds.remove(transfer.transferId)?.toList().orEmpty()
         }
-        sendCancel(transfer.transferId, transfer.chatId, transfer.peerNodeId)
+        // Общая копия (K2): отказ - каждому сиду, что слал полосы.
+        for (seed in seeds) sendCancel(transfer.transferId, transfer.chatId, seed)
+        if (transfer.peerNodeId !in seeds) sendCancel(transfer.transferId, transfer.chatId, transfer.peerNodeId)
     }
 
     /** Отказ от предложения: получателю этот файл уже не нужен (см. [handleCancel]). */
@@ -339,6 +381,12 @@ class FileTransferReceiver(
             return
         }
         val transfer = transferDao.getTransfer(transferIdHex)
+        if (transfer != null && isSeedRow(transfer, senderId)) {
+            // Общая копия файла группы (K2): подтверждения приходят от разных
+            // просителей, окно каждому ведёт сидер.
+            if (contiguousChunks in 0L..transfer.chunkCount) groupSeed.onAck(transferIdHex, senderId, contiguousChunks)
+            return
+        }
         if (transfer == null || transfer.direction != "OUTGOING" || transfer.peerNodeId != senderId) {
             Log.w(TAG, "Unauthorized file ACK from $senderId for $transferIdHex; dropped")
             return
@@ -369,12 +417,18 @@ class FileTransferReceiver(
             return
         }
         val now = nowMs()
-        if (manifest.senderNodeId != senderId) {
+        // Общий манифест файла группы (K2): отправитель в нём - автор копии,
+        // а предложение шлёт любой сид; получатель - метка группы, а не я.
+        // Подлинность сида даёт его подписанный ключ обмена (ниже) и конверт
+        // ключа, запечатанный именно им; принадлежность к группе - рой
+        // (routeOffer): чужому файл не отдадут, а метка сверяется с группой.
+        val groupOffer = FileTransferChatRouting.isGroupScope(manifest.recipientNodeId)
+        if (!groupOffer && manifest.senderNodeId != senderId) {
             Log.w(TAG, "File offer sender mismatch: ${manifest.senderNodeId} != $senderId")
             return
         }
         val myNodeId = identity.myNodeId()
-        if (myNodeId == null || manifest.recipientNodeId != myNodeId) {
+        if (myNodeId == null || (!groupOffer && manifest.recipientNodeId != myNodeId)) {
             Log.w(TAG, "File offer addressed to another node; dropped")
             return
         }
@@ -395,7 +449,11 @@ class FileTransferReceiver(
 
         val transferIdHex = manifest.transferIdHex
         val existing = transferDao.getTransfer(transferIdHex)
-        if (existing != null && (existing.direction != "INCOMING" || existing.peerNodeId != senderId)) {
+        // Общая копия (K2): один и тот же transferId приходит от нескольких
+        // сидов - второй сид не конфликт, а ещё один источник тех же кусков.
+        val sameGroupTransfer = groupOffer && existing != null && existing.direction == "INCOMING" &&
+            existing.fileSha256 == manifest.fileSha256Hex
+        if (existing != null && !sameGroupTransfer && (existing.direction != "INCOMING" || existing.peerNodeId != senderId)) {
             Log.w(TAG, "File offer conflicts with local transfer row; dropped")
             return
         }
@@ -403,6 +461,12 @@ class FileTransferReceiver(
             Log.w(TAG, "File offer for already failed transfer; dropped")
             return
         }
+        if (groupOffer && existing?.state == "COMPLETE") {
+            // Уже всё есть (сид опоздал): ему достаточно итогового подтверждения.
+            sendGroupAck(transferIdHex, senderId, existing.chunkCount)
+            return
+        }
+        val knownGroupSeed = groupOffer && groupSeeds[transferIdHex]?.contains(senderId) == true
         // Файл группы (этап 9) ложится в группу, а не в личный чат с сидом;
         // без чата (отправитель не контакт, файла я не просил) предложение
         // отбрасывается: метка транспорта в базу попасть не должна.
@@ -415,28 +479,74 @@ class FileTransferReceiver(
                 sendCancel(transferIdHex, route.chatId, senderId)
                 return
             }
-            OfferRouting.Unknown -> chatId.takeIf { it.isNotBlank() && it != FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE }
+            OfferRouting.Unknown -> if (groupOffer) {
+                null // общий манифест принимается только по слову роя
+            } else {
+                chatId.takeIf { it.isNotBlank() && it != FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE }
+            }
         }
         if (targetChatId == null) {
             Log.w(TAG, "File offer $transferIdHex from ${senderId.takeLast(8)} has no chat here; dropped")
             return
+        }
+        if (groupOffer && manifest.recipientNodeId != FileTransferChatRouting.groupScope(targetChatId)) {
+            Log.w(TAG, "Group file offer $transferIdHex carries scope of another group; dropped")
+            return
+        }
+        if (groupOffer && existing != null && !knownGroupSeed) {
+            // Ещё один сид той же общей копии (K2): тот же transferId, те же
+            // куски. Рой подтверждает, что сид - участник или тот, кого я
+            // просил («файл идёт» здесь не отказ, а «да, это тот файл»);
+            // чужому - ничего.
+            if (routeOffer(senderId, manifest.fileSha256Hex) is OfferRouting.Unknown) {
+                Log.w(TAG, "Group file offer $transferIdHex from a stranger ${senderId.takeLast(8)}; dropped")
+                return
+            }
+            val seeds = groupSeeds[transferIdHex].orEmpty()
+            if (seeds.size >= MAX_GROUP_SEEDS) {
+                Log.i(TAG, "Group file offer $transferIdHex from ${senderId.takeLast(8)}: enough seeds already; declined")
+                sendCancel(transferIdHex, targetChatId, senderId)
+                return
+            }
         }
         val transfer = existing ?: insertIncomingTransfer(manifest, senderId, targetChatId, now) ?: return
         if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
         // Раньше отказывались, теперь берём (первый сид пропал): куски снова нужны.
         declined.remove(transferIdHex)
 
+        var newSeed = false
+        if (groupOffer) {
+            val seeds = groupSeeds.getOrPut(transferIdHex) { LinkedHashSet<String>() }
+            if (senderId !in seeds) {
+                seeds.add(senderId)
+                newSeed = true
+                inventorySentAt.remove(transferIdHex) // новый сид - инвентарь всем сразу
+            }
+            lastHolderHeard[transferIdHex] = senderId
+        }
         Log.i(
             TAG,
             "File offer accepted: $transferIdHex from $senderId " +
-                "(${manifest.displayName}, ${manifest.fileSize} B, ${manifest.chunkCount} chunks)",
+                "(${manifest.displayName}, ${manifest.fileSize} B, ${manifest.chunkCount} chunks" +
+                (if (groupOffer) "; group seeds=${groupSeeds[transferIdHex]?.size ?: 0}" else "") + ")",
         )
         chunkStore.storeManifest(transferIdHex, offer.manifest)
-        chunkStore.storeKeyEnvelope(transferIdHex, offer.keyEnvelope)
+        if (groupOffer) {
+            // Конверт у каждого сида свой (свежий nonce, его подпись): хранится
+            // первый, ключ из него уже в хранилище; остальные несут тот же ключ.
+            if (chunkStore.readKeyEnvelope(transferIdHex) == null) chunkStore.storeKeyEnvelope(transferIdHex, offer.keyEnvelope)
+        } else {
+            chunkStore.storeKeyEnvelope(transferIdHex, offer.keyEnvelope)
+        }
         if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) {
             openAndImportKey(transferIdHex, offer)
         }
         recoverDurableProgress(transferIdHex)
+        if (groupOffer && newSeed) {
+            val count = groupSeeds[transferIdHex]?.size ?: 1
+            runCatching { groupSeed.onOfferAccepted(targetChatId, senderId, manifest.fileSha256Hex, count) }
+                .onFailure { Log.w(TAG, "group offer hook failed: ${it.message}") }
+        }
 
         // Chunks may have arrived before the offer: ingest them now.
         bufferedChunks.remove(transferIdHex)?.let { buffered ->
@@ -474,12 +584,48 @@ class FileTransferReceiver(
             Log.w(TAG, "Plain chunk for custody transfer $transferIdHex from ${senderId.takeLast(8)}; dropped")
             return
         }
+        if (transfer.direction == "OUTGOING") {
+            // Своей исходящей (в том числе общей копии группы, K2) куски не шлют.
+            Log.w(TAG, "Plain chunk for own outgoing $transferIdHex from ${senderId.takeLast(8)}; dropped")
+            return
+        }
+        if (transfer.state == "COMPLETE" && groupSeeds[transferIdHex] == null &&
+            chunkStore.readManifest(transferIdHex)?.let { GroupFileSeeder.isGroupManifest(it) } == true
+        ) {
+            // Файл уже собран из полос, а этот сид ещё шлёт: итоговое
+            // подтверждение ему лично, чтобы он закрыл плечо (K2).
+            sendGroupAck(transferIdHex, senderId, transfer.chunkCount)
+            return
+        }
+        // Файл группы полосами (K2): кусок от сида проверяется сразу ключом
+        // файла - испорченный или подложный (сид не тот) не ложится на диск и
+        // не портит сборку, а его сид выбывает из дележа.
+        val seedsOfTransfer = groupSeeds[transferIdHex]
+        if (seedsOfTransfer != null && seedsOfTransfer.isNotEmpty()) {
+            if (senderId !in seedsOfTransfer) {
+                Log.w(TAG, "Group chunk $chunkIndex for $transferIdHex from unexpected ${senderId.takeLast(8)}; dropped")
+                return
+            }
+            if (!verifyGroupChunk(transferIdHex, chunkIndex, ciphertext)) {
+                Log.w(TAG, "Group chunk $chunkIndex for $transferIdHex from ${senderId.takeLast(8)} failed authentication; seed dropped")
+                seedsOfTransfer.remove(senderId)
+                return
+            }
+        }
         // Кусок пришёл напрямую от отправителя, хотя файл идёт и через
         // хранителя: с этого момента подтверждаем обоим (см. sendFileAck).
         if (transfer.direction == "INCOMING" && transfer.custodianNodeId.isNotBlank() &&
             senderId == transfer.peerNodeId
         ) {
             directFromOrigin.add(transferIdHex)
+        }
+        // Файл группы полосами (K2): кто прислал кусок - тому подтверждение
+        // (им он отмеряет окно), остальным сидам - с инвентарём.
+        groupSeeds[transferIdHex]?.let { seeds ->
+            if (senderId in seeds) {
+                holderSeenAt.getOrPut(transferIdHex) { HashMap<String, Long>() }[senderId] = nowMs()
+                lastHolderHeard[transferIdHex] = senderId
+            }
         }
         ingestChunkCiphertext(transferIdHex, chunkIndex, ciphertext)
     }
@@ -648,6 +794,7 @@ class FileTransferReceiver(
             holderSeenAt.remove(transferIdHex)
             holderAskedAt.remove(transferIdHex)
             lastHolderHeard.remove(transferIdHex)
+            val finalSeeds = groupSeeds.remove(transferIdHex)
             notifier.onFileReceived(
                 chatId = fresh.chatId,
                 senderId = fresh.peerNodeId,
@@ -657,7 +804,13 @@ class FileTransferReceiver(
                 totalBytes = manifest.fileSize.toLong(),
                 fileSha256 = manifest.fileSha256Hex,
             )
-            sendFileAck(transferIdHex, manifest.chunkCount.toLong())
+            if (finalSeeds.isNullOrEmpty()) {
+                sendFileAck(transferIdHex, manifest.chunkCount.toLong())
+            } else {
+                // Итоговое подтверждение - каждому сиду общей копии: по нему
+                // сидер закрывает полосу просителю (K2).
+                for (seed in finalSeeds) sendGroupAck(transferIdHex, seed, manifest.chunkCount.toLong())
+            }
         } catch (error: Exception) {
             // abort() is a no-op after a successful commit (Writer guards its finished state).
             writer.abort()
@@ -727,6 +880,11 @@ class FileTransferReceiver(
 
     private suspend fun sendFileAck(transferIdHex: String, contiguousChunks: Long) {
         val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        val seeds = groupSeeds[transferIdHex]?.toList().orEmpty()
+        if (seeds.isNotEmpty() && transfer.direction == "INCOMING") {
+            sendGroupAcks(transfer, seeds, contiguousChunks)
+            return
+        }
         // Приём через хранителя: окно двигает подтверждение ЕМУ, а
         // отправителю (он, скорее всего, не в сети - потому и хранитель)
         // уходит только итоговое, чтобы не забивать очередь ретранслятора
@@ -780,6 +938,162 @@ class FileTransferReceiver(
         }.onFailure { error ->
             Log.w(TAG, "File ACK send failed for $transferIdHex: ${error.message}")
         }
+    }
+
+    // ── Файл группы полосами от нескольких сидов (K2, v11.70.25) ─────────────
+
+    /**
+     * Строка, из которой я раздаю общую копию файла группы: моя авторская
+     * (`OUTGOING`/`SEEDING`) или полученная целиком (`INCOMING`/`COMPLETE` -
+     * приём окончен, подтверждения и инвентарь по ней могут приходить только
+     * от просителей). Что именно я отдаю (и отдаю ли), решает сидер: у
+     * личной передачи манифест не групповой, и плеча он не откроет.
+     */
+    private fun isSeedRow(transfer: FileTransferEntity, @Suppress("UNUSED_PARAMETER") from: String): Boolean =
+        (transfer.direction == "OUTGOING" && transfer.state == "SEEDING") ||
+            (transfer.direction == "INCOMING" && transfer.state == "COMPLETE")
+
+    /** Кусок общей копии подлинный: расшифровывается ключом файла под общим манифестом. */
+    private fun verifyGroupChunk(transferIdHex: String, chunkIndex: Long, ciphertext: ByteArray): Boolean {
+        val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return false
+        if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) return true // ключ ещё не пришёл: проверит сборка
+        return runCatching {
+            keyVault.withExistingKey(transferIdHex) { fileKey ->
+                crypto.decryptChunk(manifestBytes, fileKey, chunkIndex, ciphertext).fill(0)
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Подтверждения сидам общей копии: каждому - своё (id с меткой сида,
+     * иначе сеть отсеет второе как дубль), на каждый кусок - тому, кто его
+     * прислал; остальным - вместе с инвентарём и по завершении. С двумя и
+     * более сидами перед подтверждением уходит инвентарь недостающего
+     * ([sendGroupInventory]): недостающее делится полосами, и сиды шлют
+     * разные куски. Один сид инвентаря не получает: он идёт от префикса, как
+     * обычная передача.
+     */
+    private suspend fun sendGroupAcks(transfer: FileTransferEntity, seeds: List<String>, contiguousChunks: Long) {
+        val transferIdHex = transfer.transferId
+        val complete = contiguousChunks >= transfer.chunkCount
+        var inventoryNow = false
+        if (seeds.size > 1 && !complete) {
+            val now = nowMs()
+            val last = inventorySentAt[transferIdHex]
+            if (last == null || now - last >= INVENTORY_INTERVAL_MS) {
+                inventorySentAt[transferIdHex] = now
+                inventoryNow = true
+                sendGroupInventory(transfer, seeds, contiguousChunks)
+            }
+        }
+        val from = lastHolderHeard[transferIdHex]
+        for (seed in seeds) {
+            if (complete || inventoryNow || from == null || seed == from) {
+                sendGroupAck(transferIdHex, seed, contiguousChunks)
+            }
+        }
+    }
+
+    private suspend fun sendGroupAck(transferIdHex: String, seed: String, contiguousChunks: Long) {
+        val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        runCatching {
+            val packet = FileTransferPacketCodec.encode(
+                FileTransferPacketCodec.Packet(
+                    FileTransferPacketCodec.Type.ACK,
+                    hexToBytes(transferIdHex),
+                    contiguousChunks,
+                    0,
+                    1,
+                    byteArrayOf(1),
+                )
+            )
+            transport.send(
+                FileTransferWire.groupAckMessageId(transferIdHex, seed, contiguousChunks),
+                transfer.chatId,
+                seed,
+                FileTransferWire.encodeEncodedPacket(packet),
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "Group file ACK send failed for $transferIdHex: ${error.message}")
+        }
+    }
+
+    /**
+     * Инвентарь недостающего каждому сиду общей копии - та же арифметика, что
+     * у нескольких хранителей ([sendInventory]): полосы по номеру куска между
+     * живыми сидами (от кого куски идут или кого ещё не просили), первое окно
+     * первого сида не делится.
+     */
+    private suspend fun sendGroupInventory(transfer: FileTransferEntity, seeds: List<String>, contiguousChunks: Long) {
+        val me = identity.myNodeId() ?: return
+        val transferIdHex = transfer.transferId
+        val have = chunkStore.storedChunkIndices(transferIdHex).toHashSet()
+        val missing = ArrayList<Long>()
+        var index = contiguousChunks
+        while (index < transfer.chunkCount && missing.size < MAX_INVENTORY_CHUNKS) {
+            if (index !in have) missing += index
+            index++
+        }
+        if (missing.isEmpty()) return
+        val now = nowMs()
+        val first = wantSeq[transferIdHex] == null
+        val seq = maxOf(now, (wantSeq[transferIdHex] ?: -1L) + 1)
+        wantSeq[transferIdHex] = seq
+        val seen = holderSeenAt[transferIdHex].orEmpty()
+        val asked = holderAskedAt.getOrPut(transferIdHex) { HashMap<String, Long>() }
+        val active = seeds.indices.filter { position ->
+            val seed = seeds[position]
+            val askedAt = asked[seed] ?: return@filter true
+            now - maxOf(askedAt, seen[seed] ?: 0L) < HOLDER_STALE_MS
+        }
+        val reservedEnd = if (first) contiguousChunks + FileCustodySender.windowChunks(transfer.chunkSize) else 0L
+        val stripes = FileCustodyPdu.assign(missing.toLongArray(), seeds.size, active, reservedFor = 0, reservedEnd = reservedEnd)
+        for ((position, seed) in seeds.withIndex()) {
+            val ranges = FileCustodyPdu.compressRanges(stripes[position])
+            if (ranges.isNotEmpty()) asked[seed] = now
+            runCatching {
+                val packet = FileTransferPacketCodec.encode(
+                    FileTransferPacketCodec.Packet(
+                        FileTransferPacketCodec.Type.WANT,
+                        hexToBytes(transferIdHex),
+                        contiguousChunks,
+                        0,
+                        1,
+                        FileCustodyPdu.encodeWant(seq, ranges),
+                    )
+                )
+                transport.send(
+                    FileTransferWire.groupWantMessageId(transferIdHex, me, seed, seq),
+                    transfer.chatId,
+                    seed,
+                    FileTransferWire.encodeEncodedPacket(packet),
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "Group WANT send failed for $transferIdHex: ${error.message}")
+            }
+        }
+    }
+
+    /** Проситель общей копии прислал инвентарь: что именно слать ему (K2). */
+    private suspend fun handleGroupWant(
+        senderId: String,
+        transferIdHex: String,
+        contiguousChunks: Long,
+        payload: ByteArray,
+    ) {
+        val want = runCatching { FileCustodyPdu.decodeWant(payload) }.getOrNull()
+        if (want == null) {
+            Log.w(TAG, "Malformed group WANT payload for $transferIdHex; dropped")
+            return
+        }
+        val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        if (!isSeedRow(transfer, senderId)) {
+            Log.w(TAG, "Group WANT for $transferIdHex from ${senderId.takeLast(8)} is not for a seeding copy; dropped")
+            return
+        }
+        if (contiguousChunks !in 0L..transfer.chunkCount) return
+        groupSeed.onWant(transferIdHex, senderId, contiguousChunks, want.seq, want.ranges)
     }
 
     // ── Хранение у третьего телефона (этап 7 роя) ──────────────────────────
@@ -1308,5 +1622,7 @@ class FileTransferReceiver(
         const val INVENTORY_INTERVAL_MS = 10_000L
         /** Хранитель, от которого столько не было кусков (а просили), в дележе не участвует. */
         const val HOLDER_STALE_MS = 45_000L
+        /** Сидов общей копии файла группы (K2), у которых качаем одновременно; лишние предложения - без ответа. */
+        const val MAX_GROUP_SEEDS = 4
     }
 }

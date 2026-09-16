@@ -66,12 +66,20 @@ import kotlinx.coroutines.withContext
  * памяти (проситель повторит сам). Начатые передачи продолжаются сами: сид
  * повторяет предложение, пока проситель не подтвердит всё.
  *
- * Полос одного файла от нескольких сидов нет и быть не может без ядра:
- * куски шифруются ключом передачи, а конверт с ключом - под получателя,
- * поэтому куски от двух сидов не взаимозаменяемы. Вместо полос - быстрый
- * запасной сид: не ответил первый за [REASK_FAST_MS] - спрашиваем второго,
- * а лишнее предложение получатель отклоняет пакетом CANCEL, и сид
- * освобождает место (см. FileTransferReceiver).
+ * Полосы от нескольких сидов (K2, v11.70.25, `docs/CORE_ROADMAP.md`). У
+ * файла группы теперь ОБЩИЙ манифест с меткой группы вместо получателя
+ * (`grp_<id>`, ядро `create_group_file_manifest`), один ключ и одни куски:
+ * автор шифрует файл один раз ([OutgoingFilePreparationService.prepareGroupCopy]),
+ * получивший файл раздаёт прямо из своей входящей (куски и ключ у него
+ * остались), и все сиды отдают байт в байт одно и то же. Проситель шлёт
+ * `fwant` с меткой `#g1` («понимаю общие манифесты») сразу нескольким сидам
+ * ([STRIPE_SEEDS]); каждый отвечает предложением с общим манифестом и
+ * конвертом ключа под ключ просителя, приёмник принимает их все в одну
+ * передачу, делит недостающее инвентарём (WANT) и сливает файл по sha256
+ * (FileTransferReceiver). Чем больше участников уже скачали файл, тем
+ * быстрее он приходит следующему. Сид старой версии метку не понимает и
+ * отвечает прежней личной передачей - приёмник берёт её как раньше (один
+ * источник), а лишние предложения отклоняет CANCEL.
  */
 @Singleton
 class GroupFileSwarm @Inject constructor(
@@ -105,6 +113,8 @@ class GroupFileSwarm @Inject constructor(
         var attempts: Int = 0
         /** Кого уже спрашивал в этом круге: следующий - другой сид. */
         val tried = LinkedHashSet<String>()
+        /** Сиды, которые уже шлют полосы общей копии (K2): их не переспрашиваем. */
+        val striping = LinkedHashSet<String>()
     }
 
     /** Просьбы с диска прочитаны (один раз за запуск, при первом обращении). */
@@ -117,6 +127,8 @@ class GroupFileSwarm @Inject constructor(
         val messageId: String,
         val requester: String,
         val sinceMs: Long,
+        /** Проситель понимает общие манифесты (K2): отдать из общей копии, когда освободится плечо. */
+        val shared: Boolean = false,
     )
 
     private val pending = LinkedHashMap<String, Pending>()
@@ -136,6 +148,10 @@ class GroupFileSwarm @Inject constructor(
     private val _pendingKeys = MutableStateFlow<Set<String>>(emptySet())
     /** Ключи файлов ([GroupFileMarker.key]), которые сейчас просим: карточка показывает «Запрошено…». */
     val pendingKeys: StateFlow<Set<String>> = _pendingKeys.asStateFlow()
+
+    private val _servedCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    /** Скольким участникам отдана моя общая копия файла (K2), по ключу файла; карточка автора: «Получили: N». */
+    val servedCounts: StateFlow<Map<String, Int>> = _servedCounts.asStateFlow()
 
     // ── Автор ────────────────────────────────────────────────────────────────
 
@@ -180,6 +196,14 @@ class GroupFileSwarm @Inject constructor(
      */
     suspend fun onGroupGone(groupId: String) {
         withContext(Dispatchers.IO) { runCatching { store.deleteGroup(groupId) } }
+        // Общие копии её файлов (K2) больше не раздаём: плечи и строки долой.
+        runCatching {
+            for (row in transferDao.getSeeding()) {
+                if (row.chatId != groupId) continue
+                router.groupSeeder.forget(row.transferId)
+                router.dropTransfer(row.transferId)
+            }
+        }.onFailure { Log.w(TAG, "drop group copies failed: ${it.message}") }
         val removed = mutex.withLock {
             val keys = pending.keys.filter { pending[it]?.groupId == groupId }
             keys.forEach { pending.remove(it) }
@@ -325,24 +349,87 @@ class GroupFileSwarm @Inject constructor(
         val others = runCatching { directory.order(known.drop(1).filter { it != me }) }
             .getOrDefault(known.drop(1))
         val order = others + author
-        val seed = order.firstOrNull { it !in entry.tried } ?: run {
+        val seed = order.firstOrNull { it !in entry.tried && it !in entry.striping } ?: run {
             entry.tried.clear()
-            order.first()
+            order.firstOrNull { it !in entry.striping } ?: return
         }
-        entry.tried.add(seed)
+        // Полосы (K2): вместе с первым сидом просим ещё до STRIPE_SEEDS - 1
+        // других; каждый ответит предложением общей копии, и куски пойдут от
+        // всех сразу. Сид старой версии ответит личной передачей: приёмник
+        // возьмёт первую и откажет остальным (CANCEL), как в этапе 10.
+        val extra = order.filter { it != seed && it !in entry.tried && it !in entry.striping }
+            .take((STRIPE_SEEDS - 1 - entry.striping.size).coerceAtLeast(0))
+        val targets = listOf(seed) + extra
+        entry.tried.addAll(targets)
         entry.askedSeed = seed
         entry.askedAtMs = now
         entry.attempts++
         persistPending()
         val binding = runCatching { FileExchangeKeyStore.publicBinding(appContext) }.getOrNull() ?: ByteArray(0)
-        val envelope = GroupWire.buildFileWant(entry.groupId, entry.sha256, entry.messageId, binding)
-        val report = delivery.deliver(entry.groupId, envelope, listOf(seed))
+        val envelope = GroupWire.buildFileWant(entry.groupId, entry.sha256, entry.messageId, binding, groupCapable = true)
+        val report = delivery.deliver(entry.groupId, envelope, targets)
         Log.i(
             TAG,
-            "file want sent key=${entry.sha256.take(12)} to=${seed.takeLast(8)} attempt=${entry.attempts} " +
-                "delivered=${report.delivered}/${report.attempted}",
+            "file want sent key=${entry.sha256.take(12)} to=${targets.joinToString(",") { it.takeLast(8) }} " +
+                "attempt=${entry.attempts} delivered=${report.delivered}/${report.attempted}",
         )
     }
+
+    /**
+     * Приёмник принял предложение общей копии от ещё одного сида (K2):
+     * запомнить, что он шлёт полосы, и, пока сидов меньше [STRIPE_SEEDS],
+     * позвать следующего известного - каждый новый сид ускоряет приём.
+     */
+    suspend fun onSeedJoined(chatId: String, seedId: String, fileSha256: String, seedCount: Int) {
+        restoreIfNeeded()
+        val key = GroupFileMarker.key(chatId, fileSha256)
+        rememberSeed(key, seedId, first = false)
+        val next = mutex.withLock {
+            val entry = pending[key] ?: return
+            entry.striping.add(seedId)
+            if (seedCount >= STRIPE_SEEDS) return
+            val me = myId()
+            seeds[key]?.firstOrNull { it != me && it !in entry.striping && it !in entry.tried } ?: return
+        }
+        val entry = mutex.withLock { pending[key] } ?: return
+        entry.tried.add(next)
+        val binding = runCatching { FileExchangeKeyStore.publicBinding(appContext) }.getOrNull() ?: ByteArray(0)
+        val envelope = GroupWire.buildFileWant(entry.groupId, entry.sha256, entry.messageId, binding, groupCapable = true)
+        // В фоне: сюда приходят из приёмника под его замком.
+        scope.launch {
+            runCatching { delivery.deliver(entry.groupId, envelope, listOf(next)) }
+                .onFailure { Log.w(TAG, "stripe want to ${next.takeLast(8)} failed: ${it.message}") }
+        }
+        Log.i(TAG, "stripe: seed ${seedId.takeLast(8)} joined ${fileSha256.take(12)} ($seedCount), asked ${next.takeLast(8)} too")
+    }
+
+    /** Сидер отдал просителю весь файл общей копии (K2): он теперь тоже сид. */
+    suspend fun onServed(transferIdHex: String, requester: String) {
+        val row = transferDao.getTransfer(transferIdHex) ?: return
+        if (!isGroupChat(row.chatId)) return
+        val key = GroupFileMarker.key(row.chatId, row.fileSha256)
+        rememberSeed(key, requester, first = false)
+        if (row.direction == "OUTGOING") {
+            _servedCounts.value = _servedCounts.value + (key to router.groupSeeder.servedCount(transferIdHex))
+        }
+    }
+
+    /**
+     * Можно ли отдавать файл группы [groupId] узлу [requester]: то же правило,
+     * что у просьбы (`fwant`) - участник, не забанен; в открытом сообществе и
+     * незнакомый. Сидер спрашивает, поднимая плечо по подтверждению после
+     * перезапуска, когда просьбы роя уже нет.
+     */
+    suspend fun mayServeFile(groupId: String, requester: String): Boolean {
+        val me = myId() ?: return false
+        if (requester == me || !requester.startsWith("pk_")) return false
+        val group = groupDao.getGroupById(groupId) ?: return false
+        if (groupDao.getMember(group.id, me) == null) return false
+        val member = groupDao.getMember(group.id, requester)
+        if (member?.isBanned == true) return false
+        return member != null || group.isPublic
+    }
+
 
     /** Сколько сидов файла известно, кроме меня. */
     private suspend fun knownSeedCount(entry: Pending): Int {
@@ -545,6 +632,10 @@ class GroupFileSwarm @Inject constructor(
                 com.vladimir.messenger.data.security.MessageSealer.remember(appContext, senderId, packet.binding)
             }.onFailure { Log.w(TAG, "requester binding not pinned (${senderId.takeLast(8)}): ${it.message}") }
         }
+        // Полосы (K2): проситель понимает общие манифесты - отдаём из общей
+        // копии (авторской или своей входящей), а не готовим личную.
+        if (packet.groupCapable && serveShared(group.id, packet, senderId, now) != Shared.NONE) return
+        // Общей копии нет (файл получен старой личной передачей) - по-старому.
         // Уже отдаю ему этот файл: не дублировать. Ждал его в сети - разбудить.
         val existing = transferDao.getForFile(group.id, packet.sha256)
             .firstOrNull { it.direction == "OUTGOING" && it.peerNodeId == senderId && it.state !in FINISHED_STATES }
@@ -575,6 +666,82 @@ class GroupFileSwarm @Inject constructor(
         serveWaiting()
     }
 
+    private enum class Shared { SENT, NO_KEY, UNREACHABLE, BUSY, NONE }
+
+    /** Подготовка общей копии - по одной на файл: две просьбы разом не должны родить две копии. */
+    private val prepLocks = ConcurrentHashMap<String, Mutex>()
+
+    /**
+     * Отдать просителю общую копию (K2). Источник - моя авторская копия
+     * (`SEEDING`; готовится один раз из файла в [GroupFileStore]) или моя
+     * входящая, собранная из общего манифеста (куски и ключ остались от
+     * приёма). NONE - общей копии нет и сделать нечего: файл получен по
+     * старой личной передаче или его вообще нет.
+     */
+    private suspend fun serveShared(groupId: String, packet: GroupWire.Packet.FileWant, requester: String, now: Long): Shared {
+        val seeder = router.groupSeeder
+        val source = prepLocks.getOrPut(GroupFileMarker.key(groupId, packet.sha256)) { Mutex() }.withLock {
+            sharedSource(groupId, packet, now)
+        } ?: return Shared.NONE
+        return when (seeder.offer(source, requester)) {
+            com.vladimir.messenger.data.file.GroupFileSeeder.OfferResult.SENT -> Shared.SENT
+            com.vladimir.messenger.data.file.GroupFileSeeder.OfferResult.NO_KEY -> {
+                // Ключа просителя нет (в просьбе его не было или он не прошёл):
+                // попросим HELLO; проситель повторит просьбу сам.
+                router.requestExchangeBinding(requester)
+                Shared.NO_KEY
+            }
+            com.vladimir.messenger.data.file.GroupFileSeeder.OfferResult.UNREACHABLE -> {
+                Log.i(TAG, "stripe: ${requester.takeLast(8)} not reachable directly for ${packet.sha256.take(12)}")
+                Shared.UNREACHABLE
+            }
+            com.vladimir.messenger.data.file.GroupFileSeeder.OfferResult.BUSY -> {
+                // Все плечи заняты: в очередь, serveWaiting дойдёт до него.
+                val serveKey = GroupFileMarker.key(groupId, packet.sha256) + "|" + requester
+                mutex.withLock {
+                    if (waiting.size < MAX_WAITING) waiting[serveKey] = Waiting(groupId, packet.sha256, packet.messageId, requester, now, shared = true)
+                }
+                Shared.BUSY
+            }
+        }
+    }
+
+    /** Строка общей копии файла (готовая или только что подготовленная автором); null - её нет. */
+    private suspend fun sharedSource(
+        groupId: String,
+        packet: GroupWire.Packet.FileWant,
+        now: Long,
+    ): com.vladimir.messenger.data.local.entity.FileTransferEntity? {
+        val seeder = router.groupSeeder
+        val rows = transferDao.getForFile(groupId, packet.sha256)
+        var source = rows.firstOrNull { seeder.canSeed(it, router::hasTransferKey) }
+        if (source == null) {
+            // Автор: общая копия ещё не готовилась (первая просьба) - готовим
+            // из авторского файла; это долго (хэш + шифрование), но один раз.
+            val own = runCatching { store.file(groupId, packet.sha256) }.getOrNull()
+            if (own == null || !own.isFile) return null
+            val info = cardInfo(groupId, packet.sha256)
+                ?: GroupFileMarker.Info(packet.sha256, own.length(), "application/octet-stream", own.name)
+            val prepared = try {
+                preparation.prepareGroupCopy(
+                    source = own,
+                    displayName = info.displayName,
+                    mediaType = info.mediaType,
+                    messageId = packet.messageId,
+                    groupId = groupId,
+                    expectedSha256 = packet.sha256,
+                    nowMs = now,
+                )
+            } catch (error: Exception) {
+                Log.w(TAG, "group copy prepare failed for ${packet.sha256.take(12)}: ${error.message}")
+                return null
+            } ?: return null
+            source = transferDao.getTransfer(prepared.transferId) ?: return null
+            Log.i(TAG, "group copy ready ${packet.sha256.take(12)} transfer=${prepared.transferId} (${prepared.chunkCount} chunks)")
+        }
+        return source
+    }
+
     /** Где лежит файл: авторская копия или полученный от других. */
     private suspend fun sourceFor(groupId: String, sha256: String): Pair<File, GroupFileMarker.Info>? {
         val info = cardInfo(groupId, sha256)
@@ -592,14 +759,24 @@ class GroupFileSwarm @Inject constructor(
     private suspend fun serveWaiting() {
         val now = System.currentTimeMillis()
         val active = activeSeeding(now)
-        val free = MAX_PARALLEL_SEEDS - active
-        if (free <= 0) return
+        var free = MAX_PARALLEL_SEEDS - active
+        // Общие копии (K2) считаются по плечам сидера, личные - по передачам.
+        var freeShared = com.vladimir.messenger.data.file.GroupFileSeeder.MAX_LEGS - router.groupSeeder.activeLegs()
+        if (free <= 0 && freeShared <= 0) return
         val batch = mutex.withLock {
             waiting.entries.removeIf { now - it.value.sinceMs > WAITING_TTL_MS }
             val picked = ArrayList<Waiting>()
             val iterator = waiting.entries.iterator()
-            while (iterator.hasNext() && picked.size < free) {
-                picked.add(iterator.next().value)
+            while (iterator.hasNext()) {
+                val item = iterator.next().value
+                if (item.shared) {
+                    if (freeShared <= 0) continue
+                    freeShared--
+                } else {
+                    if (free <= 0) continue
+                    free--
+                }
+                picked.add(item)
                 iterator.remove()
             }
             picked
@@ -612,6 +789,10 @@ class GroupFileSwarm @Inject constructor(
         transferDao.getActiveOutgoing(now).count { it.transferId in seeded || isGroupChat(it.chatId) }
 
     private suspend fun serve(item: Waiting, now: Long): Boolean {
+        if (item.shared) {
+            val packet = GroupWire.Packet.FileWant(item.groupId, item.sha256, item.messageId, ByteArray(0), groupCapable = true)
+            return serveShared(item.groupId, packet, item.requester, now) == Shared.SENT
+        }
         val source = sourceFor(item.groupId, item.sha256) ?: return false
         val (file, info) = source
         return try {
@@ -879,6 +1060,8 @@ class GroupFileSwarm @Inject constructor(
         private const val TAG = "GroupFileSwarm"
         /** Столько передач отдаю одновременно как сид; остальные просьбы ждут. */
         const val MAX_PARALLEL_SEEDS = 3
+        /** Полосы (K2): у стольких сидов просим один файл одновременно (приёмник принимает до MAX_GROUP_SEEDS). */
+        const val STRIPE_SEEDS = 3
         /** Очередь чужих просьб и её срок. */
         const val MAX_WAITING = 200
         const val WAITING_TTL_MS = 6L * 60 * 60 * 1000

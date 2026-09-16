@@ -9,7 +9,18 @@ use sha2::{Digest, Sha256};
 
 pub const FILE_TRANSFER_VERSION_V1: u8 = 1;
 pub const FILE_TRANSFER_VERSION_V2: u8 = 2;
+/// K2 (v11.70.25): манифест файла ГРУППЫ. Поле `recipient_node_id` несёт не
+/// адрес получателя, а метку группы (`grp_<id>`), поэтому манифест - и,
+/// значит, ключ файла и шифротекст каждого куска (nonce = transfer_id‖index,
+/// aad = sha256(манифеста)‖index) - один на всех участников: любой сид отдаёт
+/// байт в байт те же куски, и проситель может качать полосами у нескольких
+/// сразу. Ключ файла заворачивается на каждого получателя отдельно тем же
+/// конвертом (`file_key_envelope.rs`), что и раньше.
+pub const FILE_TRANSFER_VERSION_V3_GROUP: u8 = 3;
 pub const CURRENT_FILE_TRANSFER_VERSION: u8 = FILE_TRANSFER_VERSION_V2;
+/// Метка группы в манифесте V3: `grp_` + идентификатор группы (безопасные знаки).
+pub const GROUP_SCOPE_PREFIX: &str = "grp_";
+pub const MAX_GROUP_SCOPE_BYTES: usize = 128;
 pub const FILE_TRANSFER_ID_BYTES: usize = 16;
 pub const FILE_KEY_BYTES: usize = 32;
 pub const FILE_HASH_BYTES: usize = 32;
@@ -69,14 +80,23 @@ pub enum FileTransferError {
 }
 
 impl FileTransferManifestV1 {
+    /// Манифест файла группы (V3): получатель - метка группы, а не узел.
+    pub fn is_group(&self) -> bool {
+        self.wire_version == FILE_TRANSFER_VERSION_V3_GROUP
+    }
+
     pub fn validate(&self) -> Result<(), FileTransferError> {
         if self.transfer_id.iter().all(|byte| *byte == 0) {
             return Err(FileTransferError::InvalidTransferId);
         }
-        if !is_legacy_node_id(&self.sender_node_id)
-            || !is_legacy_node_id(&self.recipient_node_id)
-            || self.sender_node_id == self.recipient_node_id
-        {
+        let peers_ok = if self.is_group() {
+            is_legacy_node_id(&self.sender_node_id) && is_group_scope(&self.recipient_node_id)
+        } else {
+            is_legacy_node_id(&self.sender_node_id)
+                && is_legacy_node_id(&self.recipient_node_id)
+                && self.sender_node_id != self.recipient_node_id
+        };
+        if !peers_ok {
             return Err(FileTransferError::InvalidPeer);
         }
         if !is_safe_display_name(&self.display_name) {
@@ -87,7 +107,7 @@ impl FileTransferManifestV1 {
         }
         if !matches!(
             self.wire_version,
-            FILE_TRANSFER_VERSION_V1 | FILE_TRANSFER_VERSION_V2
+            FILE_TRANSFER_VERSION_V1 | FILE_TRANSFER_VERSION_V2 | FILE_TRANSFER_VERSION_V3_GROUP
         ) || (self.wire_version == FILE_TRANSFER_VERSION_V1
             && (self.file_size > LEGACY_V1_MAX_FILE_BYTES
                 || self.chunk_count > u64::from(u32::MAX)))
@@ -162,7 +182,7 @@ impl FileTransferManifestV1 {
         let wire_version = cursor.u8()?;
         if !matches!(
             wire_version,
-            FILE_TRANSFER_VERSION_V1 | FILE_TRANSFER_VERSION_V2
+            FILE_TRANSFER_VERSION_V1 | FILE_TRANSFER_VERSION_V2 | FILE_TRANSFER_VERSION_V3_GROUP
         ) {
             return Err(FileTransferError::MalformedManifest);
         }
@@ -390,6 +410,18 @@ impl<'a> ManifestCursor<'a> {
     }
 }
 
+/// Метка группы в манифесте V3: `grp_` и дальше только буквы, цифры, `-`,
+/// `_`, `.` и `:` (Kotlin строит её так же - `GroupFileScope`). Ничего
+/// секретного в ней нет: идентификатор группы и так едет в каждом пакете.
+pub fn is_group_scope(value: &str) -> bool {
+    value.len() > GROUP_SCOPE_PREFIX.len()
+        && value.len() <= MAX_GROUP_SCOPE_BYTES
+        && value.starts_with(GROUP_SCOPE_PREFIX)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+}
+
 fn is_legacy_node_id(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix("pk_") else {
         return false;
@@ -570,6 +602,39 @@ mod tests {
             legacy_too_large.validate(),
             Err(FileTransferError::InvalidGeometry)
         );
+    }
+
+    /// K2: манифест группы - один на всех, куски у разных сидов совпадают
+    /// байт в байт, а V2 с меткой группы вместо получателя не проходит.
+    #[test]
+    fn group_manifest_round_trip_and_identical_chunks_across_seeds() {
+        let mut group = manifest(u64::from(DEFAULT_FILE_CHUNK_BYTES) + 5);
+        group.wire_version = FILE_TRANSFER_VERSION_V3_GROUP;
+        group.recipient_node_id = "grp_9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d".to_string();
+        assert!(group.is_group());
+        let bytes = group.canonical_bytes().unwrap();
+        let decoded = FileTransferManifestV1::from_canonical_bytes(&bytes).unwrap();
+        assert_eq!(decoded, group);
+        let key = [0x36; 32];
+        let plaintext = vec![9; DEFAULT_FILE_CHUNK_BYTES as usize];
+        // Два сида с тем же манифестом и ключом файла: одинаковый шифротекст.
+        let seed_a = encrypt_file_chunk_v1(&group, &key, 0, &plaintext).unwrap();
+        let seed_b = encrypt_file_chunk_v1(&decoded, &key, 0, &plaintext).unwrap();
+        assert_eq!(seed_a, seed_b);
+        assert_eq!(decrypt_file_chunk_v1(&group, &key, 1, b"hello").unwrap_err(), FileTransferError::InvalidChunkLength);
+        assert_eq!(decrypt_file_chunk_v1(&decoded, &key, 0, &seed_a).unwrap(), plaintext);
+
+        let mut bad_scope = group.clone();
+        bad_scope.recipient_node_id = "grp_".to_string();
+        assert_eq!(bad_scope.validate(), Err(FileTransferError::InvalidPeer));
+        let mut bad_scope = group.clone();
+        bad_scope.recipient_node_id = "grp_a|b".to_string();
+        assert_eq!(bad_scope.validate(), Err(FileTransferError::InvalidPeer));
+        let mut legacy_with_scope = group;
+        legacy_with_scope.wire_version = FILE_TRANSFER_VERSION_V2;
+        assert_eq!(legacy_with_scope.validate(), Err(FileTransferError::InvalidPeer));
+        assert!(is_group_scope("grp_g1"));
+        assert!(!is_group_scope("pk_0123456789abcdef0123456789abcdef"));
     }
 
     #[test]
