@@ -878,8 +878,10 @@ mod tests {
         });
 
         assert!(transport.send("pk_x", Some(server_addr), b"1".to_vec()).await);
+        // Даём серверу дочитать первый кадр до закрытия соединения.
+        tokio::time::sleep(Duration::from_millis(300)).await;
         transport.forget("pk_x");
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(transport.send("pk_x", Some(server_addr), b"2".to_vec()).await);
 
         let (m1, m2) = tokio::time::timeout(Duration::from_secs(5), server_task)
