@@ -39,6 +39,9 @@ use stun_codec::{Message, MessageClass, MessageDecoder, MessageEncoder, Transact
 /// Таймаут ожидания ответа от STUN-сервера.
 pub const STUN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Magic cookie STUN (RFC 5389 §6) - байты 4..8 каждого сообщения.
+pub const STUN_MAGIC_COOKIE: [u8; 4] = [0x21, 0x12, 0xA4, 0x42];
+
 /// Список публичных STUN-серверов (пробуются по очереди).
 pub const DEFAULT_STUN_SERVERS: &[&str] = &[
     "stun.cloudflare.com:3478",
@@ -104,44 +107,15 @@ impl StunClient {
         socket.set_read_timeout(Some(STUN_TIMEOUT))?;
         socket.set_write_timeout(Some(STUN_TIMEOUT))?;
 
-        // Создаём STUN Binding Request
-        let transaction_id = TransactionId::new(rand::random());
-        let message: Message<Attribute> =
-            Message::new(MessageClass::Request, BINDING, transaction_id);
-
-        // Кодируем в байты
-        let mut encoder = MessageEncoder::new();
-        let request_bytes = encoder
-            .encode_into_bytes(message)
-            .map_err(|e| IceError::StunEncoding(e.to_string()))?;
-
         // Отправляем запрос
+        let request_bytes = encode_binding_request()?;
         socket.send_to(&request_bytes, server_socket)?;
 
         // Читаем ответ
         let mut buf = [0u8; 2048];
         let (n, _from) = socket.recv_from(&mut buf).map_err(|_| IceError::Timeout)?;
 
-        // Декодируем STUN-ответ
-        let mut decoder = MessageDecoder::<Attribute>::new();
-        let response = decoder
-            .decode_from_bytes(&buf[..n])
-            .map_err(|e| IceError::StunDecoding(e.to_string()))?
-            .map_err(|e| IceError::StunDecoding(format!("{:?}", e)))?;
-
-        // Извлекаем адрес — сначала пробуем XOR-Mapped (RFC 5389),
-        // потом обычный MappedAddress (RFC 3489, старый)
-        let addr = response
-            .get_attribute::<XorMappedAddress>()
-            .map(|a| a.address())
-            .or_else(|| {
-                response
-                    .get_attribute::<MappedAddress>()
-                    .map(|a| a.address())
-            })
-            .ok_or(IceError::NoAddressInResponse)?;
-
-        Ok(addr)
+        decode_binding_response(&buf[..n])
     }
 
     /// Попробовать все STUN-серверы по очереди, вернуть первый успешный.
@@ -163,6 +137,56 @@ impl StunClient {
         }
         Err(IceError::AllServersFailed)
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STUN ПОВЕРХ ЧУЖОГО СОКЕТА
+// ═══════════════════════════════════════════════════════════════════
+//
+// Раньше внешний адрес узнавали через отдельный временный сокет. Такой
+// адрес бесполезен: NAT заводит отображение для ТОГО сокета, а слушает
+// телефон на другом (QUIC, порт 7777). Чтобы адрес в presence был
+// настоящим, запрос должен уходить с самого QUIC-сокета - для этого
+// кодирование и разбор вынесены в отдельные функции (см.
+// `network::direct_transport`).
+
+/// Собрать STUN Binding Request (RFC 5389). Возвращает байты датаграммы.
+pub fn encode_binding_request() -> IceResult<Vec<u8>> {
+    let transaction_id = TransactionId::new(rand::random());
+    let message: Message<Attribute> = Message::new(MessageClass::Request, BINDING, transaction_id);
+    let mut encoder = MessageEncoder::new();
+    encoder
+        .encode_into_bytes(message)
+        .map_err(|e| IceError::StunEncoding(e.to_string()))
+}
+
+/// Разобрать ответ STUN-сервера и вынуть отражённый (внешний) адрес.
+///
+/// Сначала XOR-MAPPED-ADDRESS (RFC 5389), потом MAPPED-ADDRESS (RFC 3489).
+pub fn decode_binding_response(bytes: &[u8]) -> IceResult<SocketAddr> {
+    let mut decoder = MessageDecoder::<Attribute>::new();
+    let response = decoder
+        .decode_from_bytes(bytes)
+        .map_err(|e| IceError::StunDecoding(e.to_string()))?
+        .map_err(|e| IceError::StunDecoding(format!("{:?}", e)))?;
+
+    response
+        .get_attribute::<XorMappedAddress>()
+        .map(|a| a.address())
+        .or_else(|| {
+            response
+                .get_attribute::<MappedAddress>()
+                .map(|a| a.address())
+        })
+        .ok_or(IceError::NoAddressInResponse)
+}
+
+/// Похожа ли датаграмма на STUN (RFC 7983 / RFC 9443): первые два бита
+/// нулевые (у QUIC всегда выставлен fixed bit 0x40) и на месте magic cookie.
+pub fn looks_like_stun(datagram: &[u8]) -> bool {
+    datagram.len() >= 20
+        && (datagram[0] & 0xC0) == 0
+        && datagram[4..8] == STUN_MAGIC_COOKIE
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -193,6 +217,23 @@ impl ResolveFirst for &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_binding_request_looks_like_stun() {
+        let request = encode_binding_request().unwrap();
+        assert!(request.len() >= 20, "заголовок STUN - 20 байт");
+        assert!(looks_like_stun(&request));
+        // Первый байт QUIC всегда несёт fixed bit 0x40 - за STUN не сойдёт.
+        let mut quic_like = request.clone();
+        quic_like[0] |= 0x40;
+        assert!(!looks_like_stun(&quic_like));
+        assert!(!looks_like_stun(&request[..19]));
+    }
+
+    #[test]
+    fn test_decode_rejects_garbage() {
+        assert!(decode_binding_response(&[0u8; 8]).is_err());
+    }
 
     #[test]
     fn test_default_stun_servers_not_empty() {

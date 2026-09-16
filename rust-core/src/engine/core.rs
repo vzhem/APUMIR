@@ -8,7 +8,7 @@ use crate::ffi::storage_ffi::StorageManagerFfi;
 use crate::storage::models::MessageStatus;
 
 use super::events::{CoreEvent, EventBus};
-use crate::network::connection_pool::ConnectionPool;
+use crate::network::direct_transport::DirectTransport;
 use crate::network::router::Router;
 use crate::network::dht::{RoutingTable, DhtNodeInfo};
 use crate::network::relay::RelayManager;
@@ -335,7 +335,9 @@ pub struct P2PCore {
     runtime: Option<tokio::runtime::Runtime>,
     peer_addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
     public_addr: Arc<Mutex<Option<SocketAddr>>>,
-    connection_pool: Arc<ConnectionPool>,
+    /// K1: один QUIC-endpoint на движок (пул соединений, keep-alive, STUN
+    /// с порта 7777). `None` до `start()` и после `stop()`.
+    direct: Arc<Mutex<Option<DirectTransport>>>,
     router: Option<Arc<Router>>,
     dht: Option<Arc<Mutex<RoutingTable>>>,
     relay: Option<Arc<RelayManager>>,
@@ -360,7 +362,7 @@ impl P2PCore {
             runtime: None,
             peer_addrs: Arc::new(Mutex::new(HashMap::new())),
             public_addr: Arc::new(Mutex::new(None)),
-            connection_pool: Arc::new(ConnectionPool::new(256)),
+            direct: Arc::new(Mutex::new(None)),
             router: None,
             dht: None,
             relay: None,
@@ -508,20 +510,68 @@ impl P2PCore {
 
                 let events_quic = Arc::clone(&events_arc);
                 let network_quic = Arc::clone(&network_arc);
-                let node_id_quic = node_id.clone();
+                let direct_slot = Arc::clone(&self.direct);
+                let public_addr_stun = Arc::clone(&public_addr_arc);
 
                 let events_mdns = Arc::clone(&events_arc);
                 let network_mdns = Arc::clone(&network_arc);
                 let peer_addrs_mdns = Arc::clone(&peer_addrs_arc);
                 let node_id_mdns = node_id.clone();
                 let display_mdns = display_name.clone();
+                let direct_mdns = Arc::clone(&self.direct);
+                let public_addr_mdns = Arc::clone(&public_addr_arc);
 
                 let events_tcp = Arc::clone(&events_arc);
                 let network_tcp = Arc::clone(&network_arc);
 
-                runtime.spawn(async move {
-                    Self::run_quic_listener(events_quic, network_quic, node_id_quic, quic_port).await;
+                // K1: общий QUIC-endpoint поднимаем СИНХРОННО внутри runtime,
+                // чтобы к моменту возврата из start() рукоятка уже лежала в
+                // self.direct и первая же отправка шла через пул.
+                //
+                // Входящие кадры разбирает тот же код, что и раньше
+                // (handle_direct_frame); по возвращённому отправителю
+                // транспорт усыновляет входящее соединение.
+                let on_frame: crate::network::direct_transport::FrameHandler =
+                    Arc::new(move |payload: Vec<u8>| {
+                        Self::handle_direct_frame(&events_quic, &network_quic, payload)
+                    });
+                let handle = runtime.handle().clone();
+                // Отдельный поток: block_on запрещён изнутри другого runtime
+                // (тесты), а из потока Kotlin - можно; так работает везде.
+                let transport = std::thread::scope(|scope| {
+                    scope
+                        .spawn(move || {
+                            handle.block_on(Self::open_direct_transport(quic_port, on_frame))
+                        })
+                        .join()
+                        .unwrap_or(None)
                 });
+
+                // Порт, который объявляем соседям по Wi-Fi: обычно 7777, но
+                // если он занят (быстрый перезапуск) - тот, что достался.
+                let advertised_port = transport
+                    .as_ref()
+                    .map(|(t, _)| t.local_addr().port())
+                    .unwrap_or(quic_port);
+
+                match transport {
+                    Some((transport, side)) => {
+                        *direct_slot.lock().unwrap() = Some(transport);
+                        // STUN с того же сокета: отражённый адрес = адрес,
+                        // на котором мы реально слушаем.
+                        runtime.spawn(async move {
+                            Self::run_stun_discovery(public_addr_stun, Some(side)).await;
+                        });
+                    }
+                    None => {
+                        // Endpoint не поднялся: прямой путь недоступен,
+                        // остаются брокер и relay. STUN - по-старому, с
+                        // временного сокета, чтобы presence всё же нёс адрес.
+                        runtime.spawn(async move {
+                            Self::run_stun_discovery(public_addr_stun, None).await;
+                        });
+                    }
+                }
 
                 runtime.spawn(async move {
                     Self::run_tcp_listener(events_tcp, network_tcp, 7778).await;
@@ -565,109 +615,102 @@ impl P2PCore {
                         peer_addrs_mdns,
                         node_id_mdns,
                         display_mdns,
-                        quic_port,
+                        advertised_port,
                         dht2,
                         queue2,
+                        direct_mdns,
+                        public_addr_mdns,
                     ).await;
                 });
 
-                
-                // STUN: discover external address
-                let public_addr_stun = Arc::clone(&public_addr_arc);
-                runtime.spawn(async move {
-                    Self::run_stun_discovery(public_addr_stun).await;
-                });
-self.runtime = Some(runtime);
+
+                self.runtime = Some(runtime);
                 tracing::info!("Async runtime started (mDNS + QUIC)");
             }
         }
     }
 
-    async fn run_quic_listener(
-        events: Arc<EventBus>,
-        network: Arc<NetworkManagerFfi>,
-        _node_id: String,
-        port: u16,
-    ) {
-        use crate::network::quic_client::QuicClient;
-        use std::net::{IpAddr, Ipv4Addr};
-
-        let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
-
-        let client = match QuicClient::new(bind_addr) {
-            Ok(c) => {
-                tracing::info!("QUIC listener started on {:?}", c.local_address());
-                network.set_status(NetworkStatus::Connecting);
-                c
-            }
-            Err(e) => {
-                tracing::error!("QUIC listener failed to start: {}", e);
-                return;
-            }
-        };
-
-        loop {
-            match client.accept().await {
+    /// Поднять общий QUIC-endpoint: порт `quic_port` (несколько попыток -
+    /// после быстрого перезапуска старый сокет освобождается не мгновенно),
+    /// иначе любой свободный порт: соседям по Wi-Fi он уйдёт через mDNS, а
+    /// всем остальным - через STUN с этого же сокета.
+    async fn open_direct_transport(
+        quic_port: u16,
+        on_frame: crate::network::direct_transport::FrameHandler,
+    ) -> Option<(DirectTransport, crate::network::quic_client::UdpSideChannel)> {
+        let any = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
+        let mut last_error = String::new();
+        for attempt in 0..6u32 {
+            let port = if attempt < 5 { quic_port } else { 0 };
+            match DirectTransport::start(SocketAddr::new(any, port), Arc::clone(&on_frame)) {
+                Ok((transport, side)) => {
+                    if port == 0 {
+                        tracing::warn!(
+                            "DIRECT: port {} busy ({}), using {}",
+                            quic_port,
+                            last_error,
+                            transport.local_addr()
+                        );
+                    } else {
+                        tracing::info!("DIRECT: shared QUIC endpoint on {}", transport.local_addr());
+                    }
+                    return Some((transport, side));
+                }
                 Err(e) => {
-                    tracing::warn!("QUIC accept error: {}", e);
-                    break;
-                }
-                Ok(conn) => {
-                    let peer_addr = conn.remote_address().to_string();
-                    tracing::info!("QUIC: incoming connection from {}", peer_addr);
-
-                    let events2 = Arc::clone(&events);
-                    let network2 = Arc::clone(&network);
-
-                    tokio::spawn(async move {
-                        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(15));
-        ping_interval.tick().await; // skip first immediate tick
-
-    loop {
-                            match conn.receive_message().await {
-                                Err(_) => break,
-                                Ok(payload) => {
-                                    let decoded = String::from_utf8_lossy(&payload);
-                                    let parts: Vec<&str> = decoded.splitn(4, '|').collect();
-
-                                    // Отправитель обязан быть узлом (pk_…): строка без
-                                    // конверта (голый APUCALL1|ab|…) иначе разбиралась как
-                                    // сообщение от узла «APUCALL1», и телефон заводил
-                                    // контакт-призрак. Тот же страж - на TCP и MQTT ниже.
-                                    if parts.len() == 4 && parts[0].starts_with("pk_") {
-                                        let sender_id = parts[0].to_string();
-                                        let message_id = parts[1].to_string();
-                                        let chat_id = parts[2].to_string();
-                                        let text = parts[3].to_string();
-
-                                        tracing::info!(
-                                            "QUIC: received message from {} in chat {} text={}",
-                                            sender_id, chat_id, text
-                                        );
-
-                                        network2.add_peer(PeerInfo::new(
-                                            sender_id.clone(),
-                                            "Unknown".into(),
-                                        ));
-                                        network2.touch_peer(&sender_id);
-                                        network2.set_status(NetworkStatus::Connected);
-
-                                        events2.emit(CoreEvent::MessageReceived {
-                                            message_id,
-                                            chat_id,
-                                            sender_id,
-                                            text,
-                                            timestamp: crate::storage::models::now_ms(),
-                                        });
-                                    } else {
-                                        tracing::warn!("QUIC: invalid payload format: {}", decoded);
-                                    }
-                                }
-                            }
-                        }
-                    });
+                    last_error = e;
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
             }
+        }
+        tracing::error!("DIRECT: shared QUIC endpoint failed: {}", last_error);
+        None
+    }
+
+    /// Разбор одного входящего кадра прямого канала (QUIC).
+    ///
+    /// Возвращает идентификатор отправителя (`pk_…`), если кадр принят -
+    /// по нему `DirectTransport` усыновляет входящее соединение, чтобы наш
+    /// ответ ушёл по уже пробитому пути.
+    fn handle_direct_frame(
+        events: &EventBus,
+        network: &NetworkManagerFfi,
+        payload: Vec<u8>,
+    ) -> Option<String> {
+        let decoded = String::from_utf8_lossy(&payload);
+        let parts: Vec<&str> = decoded.splitn(4, '|').collect();
+
+        // Отправитель обязан быть узлом (pk_…): строка без
+        // конверта (голый APUCALL1|ab|…) иначе разбиралась как
+        // сообщение от узла «APUCALL1», и телефон заводил
+        // контакт-призрак. Тот же страж - на TCP и MQTT.
+        if parts.len() == 4 && parts[0].starts_with("pk_") {
+            let sender_id = parts[0].to_string();
+            let message_id = parts[1].to_string();
+            let chat_id = parts[2].to_string();
+            let text = parts[3].to_string();
+
+            tracing::info!(
+                "QUIC: received message from {} in chat {} ({} bytes)",
+                sender_id,
+                chat_id,
+                text.len()
+            );
+
+            network.add_peer(PeerInfo::new(sender_id.clone(), "Unknown".into()));
+            network.touch_peer(&sender_id);
+            network.set_status(NetworkStatus::Connected);
+
+            events.emit(CoreEvent::MessageReceived {
+                message_id,
+                chat_id,
+                sender_id: sender_id.clone(),
+                text,
+                timestamp: crate::storage::models::now_ms(),
+            });
+            Some(sender_id)
+        } else {
+            tracing::warn!("QUIC: invalid payload format ({} bytes)", payload.len());
+            None
         }
     }
 
@@ -680,6 +723,8 @@ self.runtime = Some(runtime);
         port: u16,
         dht: Option<Arc<Mutex<RoutingTable>>>,
         dht_queue: Option<Arc<crate::network::message_queue::MessageQueue>>,
+        direct: Arc<Mutex<Option<DirectTransport>>>,
+        public_addr: Arc<Mutex<Option<SocketAddr>>>,
     ) {
         use crate::network::mdns::MdnsService;
         use std::time::Duration;
@@ -692,20 +737,24 @@ self.runtime = Some(runtime);
             }
         };
 
-        // STUN: get external address for mDNS TXT record
+        // Внешний адрес для TXT-записи mDNS берём из общего STUN (K1: он
+        // спрашивается с QUIC-сокета, см. run_stun_discovery). Раньше здесь
+        // был отдельный запрос с временного сокета - его адрес был бесполезен.
+        // Даём STUN несколько секунд на первый ответ.
         let public_addr_str = {
-            use crate::network::ice::StunClient;
-            let stun_servers: &[&str] = &["stun.cloudflare.com:3478", "stun.nextcloud.com:443"];
-            match tokio::task::spawn_blocking(move || {
-                StunClient::get_external_address_from_any(stun_servers)
-            }).await {
-                Ok(Ok(addr)) => {
-                    tracing::info!("mDNS-STUN: external = {}", addr);
-                    Some(addr.to_string())
+            let mut waited = 0u32;
+            loop {
+                let current = public_addr.lock().unwrap().map(|a| a.to_string());
+                if current.is_some() || waited >= 6 {
+                    break current;
                 }
-                _ => None,
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                waited += 1;
             }
         };
+        if let Some(ref a) = public_addr_str {
+            tracing::info!("mDNS: external addr for TXT = {}", a);
+        }
 
         if let Err(e) = mdns.publish_self(&node_id, port, &display_name, 1, public_addr_str.as_deref()).await {
             tracing::warn!("mDNS publish failed: {}", e);
@@ -720,6 +769,9 @@ self.runtime = Some(runtime);
         loop {
             if last_publish.elapsed() >= Duration::from_secs(60) {
                 let _ = mdns.unpublish().await;
+                // Адрес перечитываем: STUN мог ответить позже старта или
+                // адрес сменился вместе с сетью.
+                let public_addr_str = public_addr.lock().unwrap().map(|a| a.to_string());
                 match mdns
                     .publish_self(&node_id, port, &display_name, 1, public_addr_str.as_deref())
                     .await
@@ -772,20 +824,26 @@ self.runtime = Some(runtime);
                             rid.copy_from_slice(&rhash);
                             let queue2 = Arc::clone(queue);
                             let peer_addr2 = peer_addr;
+                            let direct_retry = Arc::clone(&direct);
+                            let peer_id_retry = peer_id.clone();
                             tokio::spawn(async move {
                                 let msgs = queue2.dequeue_for(&rid).await;
                                 if !msgs.is_empty() {
                                     tracing::info!("Retrying {} queued messages for peer", msgs.len());
                                     for msg in msgs {
                                         let payload = String::from_utf8_lossy(&msg.payload).to_string();
-                                        let client = crate::network::quic_client::QuicClient::new(
-                                            std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
-                                        );
-                                        if let Ok(client) = client {
-                                            if let Ok(conn) = client.connect(peer_addr2, "p2p-messenger").await {
-                                                let _ = conn.send_message(payload.as_bytes()).await;
-                                                tracing::info!("Queued message delivered to peer");
+                                        // K1: через общий endpoint и пул, а не
+                                        // новый сокет на каждое сообщение.
+                                        let transport = direct_retry.lock().unwrap().clone();
+                                        match transport {
+                                            Some(t) => {
+                                                if t.send(&peer_id_retry, Some(peer_addr2), payload.into_bytes()).await {
+                                                    tracing::info!("Queued message delivered to peer");
+                                                }
                                             }
+                                            None => tracing::warn!(
+                                                "Queued message not delivered: direct transport is down"
+                                            ),
                                         }
                                     }
                                 }
@@ -2314,24 +2372,39 @@ self.runtime = Some(runtime);
     }
     async fn run_stun_discovery(
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
+        mut side: Option<crate::network::quic_client::UdpSideChannel>,
     ) {
-        use crate::network::ice::{StunClient, DEFAULT_STUN_SERVERS};
+        use crate::network::direct_transport::stun_via_side_channel;
+        use crate::network::ice::{StunClient, DEFAULT_STUN_SERVERS, STUN_TIMEOUT};
 
         // Повторяем периодически: одна попытка при старте часто приходится на
         // момент, когда сети ещё нет, а внешний адрес меняется при переходе
         // Wi-Fi <-> мобильный интернет. Без обновления телефон остаётся
         // недостижимым до перезапуска приложения.
+        //
+        // K1: запрос уходит с общего QUIC-сокета (порт 7777), поэтому
+        // отражённый адрес - это адрес, на котором мы действительно слушаем.
+        // Заодно эти датаграммы раз в минуту освежают отображение на NAT.
+        // Без бокового канала (endpoint не поднялся) - старый путь через
+        // временный сокет: адрес хуже, чем никакой, только для брокера.
         let mut backoff_secs = 15u64;
         loop {
             tracing::info!("STUN: discovering external address...");
 
-            let result = tokio::task::spawn_blocking(|| {
-                StunClient::get_external_address_from_any(DEFAULT_STUN_SERVERS)
-            })
-            .await;
+            let result: Option<SocketAddr> = match side.as_mut() {
+                Some(channel) => {
+                    stun_via_side_channel(channel, DEFAULT_STUN_SERVERS, STUN_TIMEOUT).await
+                }
+                None => tokio::task::spawn_blocking(|| {
+                    StunClient::get_external_address_from_any(DEFAULT_STUN_SERVERS).ok()
+                })
+                .await
+                .ok()
+                .flatten(),
+            };
 
             match result {
-                Ok(Ok(addr)) => {
+                Some(addr) => {
                     let changed = {
                         let mut guard = public_addr.lock().unwrap();
                         let changed = *guard != Some(addr);
@@ -2341,14 +2414,13 @@ self.runtime = Some(runtime);
                     if changed {
                         tracing::info!("STUN: my external address = {}", addr);
                     }
-                    backoff_secs = 120;
+                    // Раз в минуту, а не в две: отображение на NAT у
+                    // мобильных операторов живёт 30-60 с, и этот же запрос
+                    // держит его тёплым для входящих соединений.
+                    backoff_secs = 55;
                 }
-                Ok(Err(e)) => {
-                    tracing::warn!("STUN: all servers failed: {}", e);
-                    backoff_secs = std::cmp::min(backoff_secs.saturating_mul(2), 120);
-                }
-                Err(e) => {
-                    tracing::warn!("STUN: task panicked: {}", e);
+                None => {
+                    tracing::warn!("STUN: all servers failed");
                     backoff_secs = std::cmp::min(backoff_secs.saturating_mul(2), 120);
                 }
             }
@@ -2437,10 +2509,10 @@ self.runtime = Some(runtime);
         };
         let public_addr = self.public_addr.lock().unwrap();
         match *public_addr {
-            Some(addr) => {
-                let quic_addr = std::net::SocketAddr::new(addr.ip(), 7778);
-                format!("p2pm://connect?node={}&addr={}", node_id, quic_addr)
-            }
+            // K1: адрес из STUN спрошен с самого QUIC-сокета, значит порт в
+            // нём - настоящее внешнее отображение нашего QUIC. Раньше сюда
+            // подставлялся TCP 7778 при IP от чужого сокета.
+            Some(addr) => format!("p2pm://connect?node={}&addr={}", node_id, addr),
             None => format!("p2pm://connect?node={}", node_id),
         }
     }
@@ -2482,6 +2554,11 @@ self.runtime = Some(runtime);
     pub fn stop(&mut self) {
         self.network.stop();
         self.mqtt_outbound_tx = None;
+        // K1: закрываем общий endpoint до остановки runtime, чтобы порт 7777
+        // освободился сразу и повторный start() смог его занять.
+        if let Some(transport) = self.direct.lock().unwrap().take() {
+            transport.shutdown();
+        }
         if let Some(rt) = self.runtime.take() {
             rt.shutdown_background();
         }
@@ -2607,25 +2684,18 @@ self.runtime = Some(runtime);
                 .copied()
                 .or_else(|| addrs.get(&format!("{}_public", recipient_id)).copied())
         };
-        let addr = match addr_opt {
-            Some(a) => a,
-            None => return false,
-        };
         // Формат должен совпадать с sendMessage: sender|msgId|chatId|text
         // Получатель парсит 4 части и routes по text (файловый хендлер смотрит на префикс apu-file1)
         let msg_id = uuid::Uuid::new_v4().to_string();
         let wire_payload = format!("{}|{}|direct|{}", sender_id, msg_id, payload);
-        match &self.runtime {
-            Some(rt) => {
-                tracing::debug!(
-                    "FILE STREAM: direct QUIC to {} ({} bytes)",
-                    recipient_id,
-                    wire_payload.len()
-                );
-                rt.block_on(async move { Self::send_via_quic(addr, wire_payload).await })
-            }
-            None => false,
-        }
+        tracing::debug!(
+            "FILE STREAM: direct QUIC to {} ({} bytes)",
+            recipient_id,
+            wire_payload.len()
+        );
+        // K1: адрес может быть неизвестен - тогда сработает только живое
+        // соединение из пула (узел сам дозвонился до нас).
+        self.send_via_quic(&recipient_id, addr_opt, wire_payload)
     }
 
     pub fn send_message(
@@ -2659,16 +2729,13 @@ self.runtime = Some(runtime);
                 .or_else(|| addrs.get(&format!("{}_public", recipient_id)).copied())
         };
 
-        let direct_send_ok = if let Some(addr) = addr_opt {
-            if let Some(rt) = &self.runtime {
-                let payload = format!("{}|{}|{}|{}", sender_id, message_id, chat_id, text);
-                tracing::info!("send_via_quic: to {}", recipient_id);
-                rt.block_on(async move { Self::send_via_quic(addr, payload).await })
-            } else {
-                false
-            }
-        } else {
-            false
+        // K1: без известного адреса прямой путь всё ещё возможен - по
+        // живому соединению из пула (узел сам дозвонился до нас; для узла
+        // за симметричным NAT это единственный прямой путь).
+        let direct_send_ok = {
+            let payload = format!("{}|{}|{}|{}", sender_id, message_id, chat_id, text);
+            tracing::info!("send_via_quic: to {}", recipient_id);
+            self.send_via_quic(&recipient_id, addr_opt, payload)
         };
 
         if direct_send_ok {
@@ -2857,58 +2924,23 @@ self.runtime = Some(runtime);
         });
         false
     }
-    async fn send_via_quic(addr: SocketAddr, payload: String) -> bool {
-        use crate::network::quic_client::QuicClient;
-        use std::net::{IpAddr, Ipv4Addr};
-        use std::time::Duration;
-
-        let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-        tracing::info!("QUIC send start to {} payload={}", addr, payload);
-
-        let client = match QuicClient::new(bind_addr) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!("QUIC client create failed: {}", e);
-                return false;
-            }
+    /// Прямая отправка через общий QUIC-endpoint (K1).
+    ///
+    /// До v11.70.24 здесь на КАЖДОЕ сообщение создавался новый endpoint
+    /// (новый сокет + сертификат + рукопожатие TLS) и вызывающий поток ждал
+    /// до 10 с под `block_on`. Теперь кадр уходит в `DirectTransport`:
+    /// соединение берётся из пула (или открывается один раз и живёт с
+    /// keep-alive), а поток ждёт ответ не дольше `DIRECT_SEND_BUDGET`.
+    ///
+    /// `true` = получатель подтвердил приём стрима (семантика прежняя).
+    fn send_via_quic(&self, peer_id: &str, addr: Option<SocketAddr>, payload: String) -> bool {
+        let transport = self.direct.lock().unwrap().clone();
+        let Some(transport) = transport else {
+            tracing::warn!("QUIC send to {} skipped: direct transport is down", peer_id);
+            return false;
         };
-
-        let conn = match tokio::time::timeout(
-            Duration::from_secs(5),
-            client.connect(addr, "p2p-messenger"),
-        ).await {
-            Ok(Ok(c)) => {
-                tracing::info!("QUIC connect ok to {}", addr);
-                c
-            }
-            Ok(Err(e)) => {
-                tracing::warn!("QUIC connect failed to {}: {}", addr, e);
-                return false;
-            }
-            Err(_) => {
-                tracing::warn!("QUIC connect timeout to {}", addr);
-                return false;
-                    // TCP fallback
-            }
-        };
-
-        match tokio::time::timeout(
-            Duration::from_secs(5),
-            conn.send_message(payload.as_bytes()),
-        ).await {
-            Ok(Ok(_)) => {
-                tracing::info!("QUIC send ok to {}", addr);
-                true
-            }
-            Ok(Err(e)) => {
-                tracing::warn!("QUIC send failed to {}: {}", addr, e);
-                false
-            }
-            Err(_) => {
-                tracing::warn!("QUIC send timeout to {}", addr);
-                false
-            }
-        }
+        tracing::info!("QUIC send start to {} at {:?} ({} bytes)", peer_id, addr, payload.len());
+        transport.send_blocking(peer_id, addr, payload.into_bytes())
     }
 
     pub fn receive_message(

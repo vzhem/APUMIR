@@ -4,6 +4,7 @@
 //!
 //! - **quic_client**       — QUIC-соединения через библиотеку `quinn`
 //! - **connection_pool**   — пул активных соединений (переиспользование)
+//! - **direct_transport**  — один QUIC-endpoint на движок: пул + keep-alive + STUN с порта 7777 (K1)
 //! - **mdns**              — обнаружение узлов в локальной сети
 //! - **dht**               — Kademlia DHT (следующий этап)
 //! - **ice**               — NAT Traversal (следующий этап)
@@ -18,6 +19,7 @@ pub mod adaptive_polling;
 pub mod connection_manager;
 pub mod connection_pool;
 pub mod dht;
+pub mod direct_transport;
 pub mod fallback_chain;
 pub mod file_control;
 pub mod file_custody;

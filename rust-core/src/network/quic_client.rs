@@ -16,16 +16,40 @@
 //! - Клиент принимает ЛЮБОЙ сертификат (аутентификация на E2E уровне через Ed25519)
 //! - Простой API: `send_message()`, `receive_message()`
 
+use std::io::{self, IoSliceMut};
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
-use quinn::{ClientConfig, Connection, Endpoint, RecvStream, SendStream, ServerConfig};
+use quinn::udp::{RecvMeta, Transmit};
+use quinn::{
+    AsyncUdpSocket, ClientConfig, Connection, Endpoint, RecvStream, SendStream, ServerConfig,
+    UdpPoller,
+};
+// `Runtime` нужен только для вызова `wrap_udp_socket` на `dyn Runtime`.
+use quinn::Runtime as _;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+
+use super::ice::looks_like_stun;
 
 const INTERACTIVE_STREAM_PRIORITY: i32 = 20;
 const FILE_CONTROL_STREAM_PRIORITY: i32 = 10;
 const FILE_DATA_STREAM_PRIORITY: i32 = -10;
+
+/// Соединение без единого пакета столько секунд считается умершим.
+///
+/// Было 300 с: мёртвый собеседник (телефон выключили) пять минут числился
+/// живым в пуле, и каждая отправка ему упиралась в таймаут. Клиентская
+/// сторона шлёт keep-alive раз в [`KEEP_ALIVE_INTERVAL_SECS`], так что
+/// живое соединение под этот срок не попадает никогда.
+pub const MAX_IDLE_TIMEOUT_SECS: u64 = 60;
+
+/// Период QUIC keep-alive (PING) с клиентской стороны. Держит открытым
+/// отображение UDP на NAT (у большинства домашних и мобильных NAT срок
+/// 30 с и больше) и позволяет пулу переиспользовать соединение.
+pub const KEEP_ALIVE_INTERVAL_SECS: u64 = 20;
 
 // ═══════════════════════════════════════════════════════════════════
 // ОШИБКИ
@@ -188,6 +212,13 @@ impl QuicConnection {
         self.inner.close_reason().is_some()
     }
 
+    /// Устойчивый номер соединения (не меняется при миграции адреса).
+    /// Нужен пулу, чтобы удалить именно «своё» умершее соединение, а не
+    /// новое, успевшее лечь под тот же ключ.
+    pub fn stable_id(&self) -> usize {
+        self.inner.stable_id()
+    }
+
     /// Open the one ordered bidirectional stream owned by an F4 file session.
     pub(crate) async fn open_file_session_stream(
         &self,
@@ -258,6 +289,140 @@ impl QuicConnection {
 // QUIC CLIENT — фабрика соединений
 // ═══════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════
+// ОБЩИЙ UDP-СОКЕТ: QUIC + STUN С ОДНОГО ПОРТА
+// ═══════════════════════════════════════════════════════════════════
+
+/// Датаграмма, не относящаяся к QUIC (сейчас - только ответы STUN).
+pub type SideDatagram = (SocketAddr, Vec<u8>);
+
+/// Обёртка над сокетом quinn, которая отводит STUN-ответы в боковой канал.
+///
+/// Зачем: внешний адрес имеет смысл только для ТОГО сокета, с которого
+/// его спросили - NAT заводит отображение на пару «локальный порт →
+/// внешний порт». Раньше STUN ходил с временного сокета, и в presence
+/// попадал внешний порт, за которым никто не слушал. Теперь запрос STUN
+/// уходит с самого QUIC-сокета (порт 7777), и ответ возвращается сюда же;
+/// эта обёртка вынимает его из потока входящих датаграмм до того, как
+/// quinn попробует разобрать его как QUIC-пакет.
+pub struct SharedUdpSocket {
+    inner: Arc<dyn AsyncUdpSocket>,
+    side_tx: tokio::sync::mpsc::Sender<SideDatagram>,
+}
+
+/// Ёмкость бокового канала. Канал ограничен намеренно: чужие/запоздалые
+/// STUN-подобные датаграммы не должны копиться, пока их никто не читает;
+/// лишнее просто отбрасывается, а перед каждым запросом канал вычищается
+/// (`UdpSideChannel::drain`).
+const SIDE_CHANNEL_CAPACITY: usize = 64;
+
+impl std::fmt::Debug for SharedUdpSocket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedUdpSocket").finish_non_exhaustive()
+    }
+}
+
+impl AsyncUdpSocket for SharedUdpSocket {
+    fn create_io_poller(self: Arc<Self>) -> Pin<Box<dyn UdpPoller>> {
+        Arc::clone(&self.inner).create_io_poller()
+    }
+
+    fn try_send(&self, transmit: &Transmit<'_>) -> io::Result<()> {
+        self.inner.try_send(transmit)
+    }
+
+    fn poll_recv(
+        &self,
+        cx: &mut Context<'_>,
+        bufs: &mut [IoSliceMut<'_>],
+        meta: &mut [RecvMeta],
+    ) -> Poll<io::Result<usize>> {
+        let count = std::task::ready!(self.inner.poll_recv(cx, bufs, meta))?;
+        let limit = count.min(meta.len()).min(bufs.len());
+        for i in 0..limit {
+            let len = meta[i].len;
+            // GRO может склеить несколько датаграмм в один буфер (len >
+            // stride); STUN-ответ всегда приходит отдельной датаграммой,
+            // склейки не трогаем - quinn сам отбросит непонятное.
+            let coalesced = meta[i].stride != 0 && meta[i].stride < len;
+            if len == 0 || len > bufs[i].len() || coalesced {
+                continue;
+            }
+            if looks_like_stun(&bufs[i][..len]) {
+                let _ = self.side_tx.try_send((meta[i].addr, bufs[i][..len].to_vec()));
+                // Пустая датаграмма: quinn пропускает записи с len == 0.
+                meta[i].len = 0;
+                meta[i].stride = 0;
+            }
+        }
+        Poll::Ready(Ok(count))
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.inner.local_addr()
+    }
+
+    fn max_transmit_segments(&self) -> usize {
+        self.inner.max_transmit_segments()
+    }
+
+    fn max_receive_segments(&self) -> usize {
+        self.inner.max_receive_segments()
+    }
+
+    fn may_fragment(&self) -> bool {
+        self.inner.may_fragment()
+    }
+}
+
+/// Боковой канал общего сокета: отправка сырых датаграмм с QUIC-порта и
+/// приём того, что обёртка отвела от quinn (ответы STUN).
+pub struct UdpSideChannel {
+    socket: Arc<SharedUdpSocket>,
+    rx: tokio::sync::mpsc::Receiver<SideDatagram>,
+}
+
+impl UdpSideChannel {
+    /// Отправить датаграмму с того же порта, на котором слушает QUIC.
+    ///
+    /// Ждёт готовности сокета к записи так же, как это делает quinn
+    /// (до первого тика реактора tokio `try_send` отвечает `WouldBlock`).
+    pub async fn send_to(&self, destination: SocketAddr, contents: &[u8]) -> io::Result<()> {
+        let transmit = Transmit {
+            destination,
+            ecn: None,
+            contents,
+            segment_size: None,
+            src_ip: None,
+        };
+        let mut poller = Arc::clone(&self.socket).create_io_poller();
+        loop {
+            match self.socket.try_send(&transmit) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    std::future::poll_fn(|cx| poller.as_mut().poll_writable(cx)).await?;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Следующая отведённая датаграмма; `None` - сокет закрыт.
+    pub async fn recv(&mut self) -> Option<SideDatagram> {
+        self.rx.recv().await
+    }
+
+    /// Выбросить всё накопившееся (перед новым STUN-запросом).
+    pub fn drain(&mut self) {
+        while self.rx.try_recv().is_ok() {}
+    }
+
+    /// Локальный адрес общего сокета.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.socket.local_addr()
+    }
+}
+
 /// Основной клиент QUIC для приложения.
 ///
 /// Держит:
@@ -305,6 +470,56 @@ impl QuicClient {
         })
     }
 
+    /// То же, что [`QuicClient::new`], но сокет общий: вместе с клиентом
+    /// возвращается [`UdpSideChannel`] для STUN с того же порта.
+    ///
+    /// Вызывать внутри tokio-runtime (quinn берёт runtime из контекста).
+    pub fn new_with_side_channel(bind_addr: SocketAddr) -> QuicResult<(Self, UdpSideChannel)> {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        let (cert, key) = generate_self_signed_cert()?;
+        let server_config = make_server_config(cert, key)?;
+        let client_config = make_client_config()?;
+
+        let std_socket = std::net::UdpSocket::bind(bind_addr)
+            .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
+        let runtime: Arc<dyn quinn::Runtime> = quinn::default_runtime().ok_or_else(|| {
+            QuicClientError::EndpointCreation("no async runtime in scope".to_string())
+        })?;
+        let inner = runtime
+            .wrap_udp_socket(std_socket)
+            .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
+
+        let (side_tx, side_rx) = tokio::sync::mpsc::channel(SIDE_CHANNEL_CAPACITY);
+        let shared = Arc::new(SharedUdpSocket { inner, side_tx });
+        let socket_for_quinn: Arc<dyn AsyncUdpSocket> = Arc::clone(&shared);
+
+        let mut endpoint = Endpoint::new_with_abstract_socket(
+            quinn::EndpointConfig::default(),
+            Some(server_config),
+            socket_for_quinn,
+            runtime,
+        )
+        .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
+        endpoint.set_default_client_config(client_config);
+
+        let local_addr = endpoint
+            .local_addr()
+            .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
+
+        let side = UdpSideChannel {
+            socket: shared,
+            rx: side_rx,
+        };
+        Ok((
+            QuicClient {
+                endpoint,
+                local_addr,
+            },
+            side,
+        ))
+    }
+
     /// Локальный адрес на котором мы слушаем.
     pub fn local_address(&self) -> SocketAddr {
         self.local_addr
@@ -333,6 +548,24 @@ impl QuicClient {
         Ok(QuicConnection::new(connection))
     }
 
+    /// Принять следующее входящее соединение, НЕ дожидаясь рукопожатия.
+    ///
+    /// Возвращает future рукопожатия, которую вызывающий доводит в
+    /// отдельной задаче: так медленный или враждебный клиент не задерживает
+    /// приём остальных. `None` - endpoint закрыт.
+    pub async fn accept_pending(&self) -> Option<quinn::Connecting> {
+        loop {
+            let incoming = self.endpoint.accept().await?;
+            match incoming.accept() {
+                Ok(connecting) => return Some(connecting),
+                Err(e) => {
+                    tracing::warn!("QUIC: incoming rejected: {}", e);
+                    continue;
+                }
+            }
+        }
+    }
+
     /// Принять следующее входящее соединение.
     ///
     /// Обычно вызывается в цикле в отдельной задаче.
@@ -358,6 +591,12 @@ impl QuicClient {
         self.endpoint.close(0u32.into(), b"shutdown");
         // Ждём завершения всех соединений (с таймаутом)
         let _ = tokio::time::timeout(Duration::from_secs(5), self.endpoint.wait_idle()).await;
+    }
+
+    /// Закрыть endpoint, не дожидаясь собеседников (для `stop()` движка:
+    /// вызывающий поток держит мьютекс ядра, ждать до 5 с там нельзя).
+    pub fn close_now(&self) {
+        self.endpoint.close(0u32.into(), b"shutdown");
     }
 }
 
@@ -438,7 +677,9 @@ fn make_server_config(
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_uni_streams(256_u32.into());
     transport.max_concurrent_bidi_streams(256_u32.into());
-    transport.max_idle_timeout(Some(Duration::from_secs(300).try_into().unwrap()));
+    transport.max_idle_timeout(Some(
+        Duration::from_secs(MAX_IDLE_TIMEOUT_SECS).try_into().unwrap(),
+    ));
 
     let mut server_config = ServerConfig::with_crypto(Arc::new(quic_server_config));
     server_config.transport_config(Arc::new(transport));
@@ -466,7 +707,12 @@ fn make_client_config() -> QuicResult<ClientConfig> {
 
     // Настройки транспорта
     let mut transport = quinn::TransportConfig::default();
-    transport.max_idle_timeout(Some(Duration::from_secs(300).try_into().unwrap()));
+    transport.max_idle_timeout(Some(
+        Duration::from_secs(MAX_IDLE_TIMEOUT_SECS).try_into().unwrap(),
+    ));
+    // Keep-alive шлёт только инициатор соединения: так на пару узлов
+    // приходится один PING за период, а не два.
+    transport.keep_alive_interval(Some(Duration::from_secs(KEEP_ALIVE_INTERVAL_SECS)));
     transport.max_concurrent_uni_streams(256_u32.into());
     transport.max_concurrent_bidi_streams(256_u32.into());
     client_config.transport_config(Arc::new(transport));
@@ -748,5 +994,50 @@ mod tests {
 
         server_task.await.unwrap();
         println!("✅ Двусторонняя связь: PING → PONG");
+    }
+
+    /// Общий сокет: QUIC-соединение через него работает, а STUN-подобная
+    /// датаграмма на тот же порт уходит в боковой канал, а не в quinn.
+    #[tokio::test]
+    async fn test_shared_socket_routes_stun_aside_and_quic_through() {
+        let (server, mut side) = QuicClient::new_with_side_channel(any_port()).unwrap();
+        let server = Arc::new(server);
+        let server_addr = server.local_address();
+        assert_eq!(side.local_addr().unwrap(), server_addr);
+
+        // 1. Обычное QUIC-соединение через общий сокет.
+        let client = QuicClient::new(any_port()).unwrap();
+        let server_clone = Arc::clone(&server);
+        let server_task = tokio::spawn(async move {
+            let conn = server_clone.accept().await.unwrap();
+            conn.receive_message().await.unwrap()
+        });
+        let conn = client.connect(server_addr, "p2p-messenger").await.unwrap();
+        conn.send_message(b"via shared socket").await.unwrap();
+        assert_eq!(server_task.await.unwrap(), b"via shared socket");
+
+        // 2. Датаграмма с сигнатурой STUN - в боковой канал.
+        let stun_like = crate::network::ice::encode_binding_request().unwrap();
+        let plain = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        plain.send_to(&stun_like, server_addr).unwrap();
+        let (from, bytes) = tokio::time::timeout(Duration::from_secs(3), side.recv())
+            .await
+            .expect("боковой канал должен получить датаграмму")
+            .expect("канал открыт");
+        assert_eq!(from, plain.local_addr().unwrap());
+        assert_eq!(bytes, stun_like);
+
+        // 3. И обратно: отправка с QUIC-порта через боковой канал.
+        side.send_to(plain.local_addr().unwrap(), b"hello from 7777")
+            .await
+            .unwrap();
+        plain
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut buf = [0u8; 64];
+        let (n, from) = plain.recv_from(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"hello from 7777");
+        assert_eq!(from, server_addr);
+        println!("✅ Общий сокет: QUIC проходит, STUN отводится в сторону");
     }
 }

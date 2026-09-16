@@ -208,6 +208,24 @@ impl ConnectionPool {
         }
     }
 
+    /// Удалить соединение из пула, только если под ключом лежит ИМЕННО оно
+    /// (по `stable_id`). Нужно при ошибке отправки: пока мы закрывали
+    /// умершее соединение, под тот же ключ могло лечь новое (усыновлённое
+    /// входящее) - его трогать нельзя.
+    pub async fn remove_if_same(&self, node_key: &[u8], stable_id: usize) -> bool {
+        let mut entries = self.entries.lock().await;
+        let same = entries
+            .get(node_key)
+            .map(|entry| entry.connection.stable_id() == stable_id)
+            .unwrap_or(false);
+        if same {
+            if let Some(entry) = entries.remove(node_key) {
+                entry.connection.close(b"removed from pool");
+            }
+        }
+        same
+    }
+
     /// Количество активных соединений.
     pub async fn len(&self) -> usize {
         self.entries.lock().await.len()

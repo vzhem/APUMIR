@@ -79,6 +79,88 @@
    (< v11.70.14) `cap`/`ac`/`cand`/мост/UDP не знают — с ними всё как раньше
    (PCM, текстовый фолбэк).
 
+0t. **v11.70.24 - ядро, этап K1: один QUIC-endpoint на движок, пул
+   соединений, keep-alive, STUN с порта 7777 (в работе 2026-09-15; статус
+   выпуска - `START_HERE.md` §3).** Только Rust, мост (`lib.udl`) не
+   менялся - контракт 26 тот же, Kotlin не трогали. Что было: `send_via_quic`
+   на КАЖДОЕ сообщение создавал `QuicClient::new(0.0.0.0:0)` (сокет +
+   самоподписанный сертификат + рукопожатие TLS) под `rt.block_on` в потоке
+   вызывающего до 10 с; слушатель 7777 был отдельным endpoint'ом; STUN
+   спрашивался с третьего, временного сокета (адрес в presence - порт, за
+   которым никто не слушал); `generate_invite` подставлял TCP 7778;
+   `ConnectionPool` создавался и не использовался. Что стало:
+   - `network/direct_transport.rs` (новый): `DirectTransport::start(bind,
+     on_frame)` внутри runtime → `QuicClient::new_with_side_channel` (один
+     endpoint для входящих и исходящих), `run_accept_loop` (рукопожатие
+     каждого входящего в своей задаче с таймаутом 10 с - раньше `break` на
+     первой ошибке глушил приём), `read_loop` на КАЖДОМ соединении
+     (входящем и исходящем; ошибка одного стрима не рвёт соединение),
+     цикл команд → «полоса» (mpsc 64) на узел: кадры одному узлу по порядку,
+     разные узлы параллельно; `send_one`: соединение из пула → `send_message`
+     с `STREAM_TIMEOUT` 5 с; при ошибке на соединении из пула - закрыть,
+     `remove_if_same(stable_id)` и одна повторная попытка по новому
+     (`CONNECT_TIMEOUT` 4 с); `FAIL_FAST_WINDOW` 15 с - повторные кадры на
+     только что недоступный адрес получают `false` сразу; кадр, простоявший
+     в полосе дольше бюджета, не отправляется (вызывающий уже ушёл на
+     брокер). **Усыновление входящих:** первый разобранный кадр от `pk_X`
+     кладёт входящее соединение в пул под ключом `X` - ответ `X` идёт по
+     нему, адрес не нужен (`send(..., addr: None, ...)`); для узла за
+     симметричным NAT это единственный прямой путь. `send_blocking` (поток
+     Kotlin): `try_send` команды + `std::sync::mpsc::recv_timeout`
+     (`DIRECT_SEND_BUDGET` 10 с), никакого `block_on`. Семантика `bool` =
+     получатель подтвердил приём стрима (`stopped()`), как раньше.
+   - `quic_client.rs`: `SharedUdpSocket` (`AsyncUdpSocket` поверх сокета
+     quinn: датаграммы с сигнатурой STUN - первые два бита 0 и magic cookie
+     `21 12 A4 42` - уходят в боковой канал, quinn видит `len = 0`),
+     `UdpSideChannel::{send_to (ждёт writable через UdpPoller), recv, drain}`,
+     `QuicClient::new_with_side_channel` (`Endpoint::new_with_abstract_socket`
+     + `quinn::default_runtime()` - только внутри tokio-контекста),
+     `accept_pending()` (→ `Connecting` без ожидания рукопожатия),
+     `close_now()`, `QuicConnection::stable_id()`. Транспорт:
+     `MAX_IDLE_TIMEOUT_SECS` 60 (было 300), `keep_alive_interval` 20 с у
+     клиента (инициатор шлёт PING, сервер нет - один PING на пару).
+   - `ice.rs`: `encode_binding_request()`, `decode_binding_response()`,
+     `looks_like_stun()`, `STUN_MAGIC_COOKIE`; `StunClient::get_external_address`
+     переписан через них (поведение прежнее).
+   - `connection_pool.rs`: `remove_if_same(key, stable_id)`.
+   - `engine/core.rs`: поле `direct: Arc<Mutex<Option<DirectTransport>>>`
+     вместо `connection_pool`; в `start_async_runtime` endpoint поднимается
+     синхронно (`std::thread::scope` + `handle.block_on(open_direct_transport)`
+     - в отдельном потоке, потому что `block_on` изнутри чужого runtime
+     паникует в тестах): 5 попыток порта 7777 с паузой 200 мс, затем любой
+     порт (`advertised_port` уходит в mDNS); `run_quic_listener` заменён на
+     `handle_direct_frame(events, network, payload) -> Option<sender>` (тот
+     же разбор `sender|msgId|chatId|text` со стражем `pk_`);
+     `run_stun_discovery(public_addr, Option<UdpSideChannel>)` - с боковым
+     каналом через `stun_via_side_channel` (сервер за сервером,
+     `STUN_TIMEOUT` 5 с каждый, `drain` перед запросом), период 55 с при
+     успехе (заодно греет NAT); без канала - старый путь; mDNS больше не
+     делает свой STUN, берёт `public_addr` (ждёт до 6 с) и перечитывает при
+     каждой ре-публикации; повтор из `MessageQueue` при появлении mDNS-соседа
+     - через `DirectTransport::send`; `send_message`/`send_direct_payload`
+     вызывают `send_via_quic(peer_id, Option<addr>, payload)` даже без адреса
+     (пул); `stop()` закрывает endpoint до `shutdown_background`;
+     `generate_invite` отдаёт STUN-адрес как есть (порт QUIC), без 7778.
+   - Тесты (запускаются только на ПК с cargo / в CI после K6):
+     `direct_transport::tests` (пул переиспользуется; ответ по усыновлённому
+     входящему без адреса; без адреса и соединения - `false` сразу;
+     недоступный узел - `false` в бюджет; блокирующая отправка с чужого
+     потока; быстрый повторный отказ; `forget`), `quic_client::tests::
+     test_shared_socket_routes_stun_aside_and_quic_through`, `ice::tests`
+     (сигнатура STUN, мусор). Компилятора в песочнице нет - первый
+     компилятор = CI тега; ошибки Rust смотреть по шагу «Build native core».
+   - Совместимость: кадры и ALPN `p2p-msg-v1` те же; старые телефоны видят
+     обычного QUIC-клиента, который не закрывает соединение; их 300-секундный
+     idle против наших 60 с - соединение закроет наша сторона, старая молча
+     переоткроет при следующем сообщении. Keep-alive от старых телефонов нет,
+     поэтому усыновлённое соединение от старой версии живёт до 60 с тишины.
+   - Что проверить на телефонах: logcat `DIRECT: shared QUIC endpoint on
+     0.0.0.0:7777`, `STUN(7777): … sees us as <ip:7777-ish>`, `DIRECT: sent …
+     (pooled)` на втором сообщении, `DIRECT: adopted inbound connection from
+     pk_…`; сообщения через интернет между двумя мобильными сетями (раньше
+     почти всегда шли через брокер); файл в группе - скорость и отсутствие
+     «Приложение не отвечает».
+
 0s. **v11.70.23 - первая функция ядра через перегенерированный мост
    (выпущен 2026-09-15: тег на `ca29530`, прогон 35005340748 с первого
    раза; шаг генерации мостa прошёл, CI закоммитил мост и ядро в main -
