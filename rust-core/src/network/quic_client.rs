@@ -28,8 +28,6 @@ use quinn::{
     AsyncUdpSocket, ClientConfig, Connection, Endpoint, RecvStream, SendStream, ServerConfig,
     UdpPoller,
 };
-// `Runtime` нужен только для вызова `wrap_udp_socket` на `dyn Runtime`.
-use quinn::Runtime as _;
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 
 use super::ice::looks_like_stun;
@@ -492,7 +490,10 @@ impl QuicClient {
 
         let (side_tx, side_rx) = tokio::sync::mpsc::channel(SIDE_CHANNEL_CAPACITY);
         let shared = Arc::new(SharedUdpSocket { inner, side_tx });
-        let socket_for_quinn: Arc<dyn AsyncUdpSocket> = Arc::clone(&shared);
+        // Приведение к трейт-объекту: сначала клон конкретного Arc, затем
+        // unsized coercion (Arc::clone(&x) сам тип не меняет).
+        let shared_clone = Arc::clone(&shared);
+        let socket_for_quinn: Arc<dyn AsyncUdpSocket> = shared_clone;
 
         let mut endpoint = Endpoint::new_with_abstract_socket(
             quinn::EndpointConfig::default(),
