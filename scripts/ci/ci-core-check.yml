@@ -56,16 +56,30 @@ jobs:
       # lib.udl должен собираться генератором: если он сломан, CI тега
       # оставит устаревший мост и старый .so - это ломает приложение на
       # старте по контрольным суммам. Пишем во временный каталог, ничего в
-      # репозитории не меняя.
+      # репозитории не меняя. Команда - ровно та же, что в build-release.yml
+      # на теге, только каталог вывода другой.
       - name: uniffi: lib.udl собирается в Kotlin-биндинги
         working-directory: ./rust-core
         run: |
           mkdir -p ../target/uniffi-check
-          cargo run --release --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
+          cargo run --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
             generate src/lib.udl --language kotlin --config uniffi.toml \
             --out-dir ../target/uniffi-check --no-format
-          test -s ../target/uniffi-check/p2p_core.kt
-          grep -q "ffi_p2p_core_uniffi_contract_version" ../target/uniffi-check/p2p_core.kt
+          BIND=$(find ../target/uniffi-check -name p2p_core.kt | head -1)
+          test -n "$BIND"
+          test -s "$BIND"
+          grep -q "ffi_p2p_core_uniffi_contract_version" "$BIND"
+          echo "bindings: $BIND ($(wc -c < "$BIND") bytes)"
+          # Версия контракта зависит только от линии uniffi. Если она уехала
+          # относительно файла в git, то на теге останется старый мост с новым
+          # .so - приложение упадёт на старте. Это предупреждение, а не
+          # остановка: перегенерировать файл негде, это делает CI на теге.
+          NEWV=$(grep -o 'bindings_contract_version = [0-9]*' "$BIND" | grep -o '[0-9]*$')
+          OLDV=$(grep -o 'bindings_contract_version = [0-9]*' ../android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt | grep -o '[0-9]*$')
+          echo "contract version: в git = $OLDV, сгенерировано = $NEWV"
+          if [ "$NEWV" != "$OLDV" ]; then
+            echo "::warning::линия uniffi изменилась ($OLDV -> $NEWV): на теге останется мост из git - перед релизом это надо перегенерировать"
+          fi
 
       # Тесты ядра (K6 в плане): пока отдельным шагом и не блокирующим,
       # чтобы сначала набрать статистику. Падать от них релиз не должен.
