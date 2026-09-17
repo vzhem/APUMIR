@@ -18,6 +18,10 @@ use crate::network::presence_scope::{
     direct_presence_payload, parse_direct_presence, PresenceMode, PresenceScope,
     BEACON_INTERVAL_MS, DIRECT_PRESENCE_PREFIX, MAX_OWN_PER_ROUND,
 };
+use crate::network::address_lookup::{
+    parse_query, parse_reply, query_payload, reply_payload, sort_closer, AddressLookup,
+    LOOKUP_QUERY_PREFIX, LOOKUP_REPLY_PREFIX, MAX_ASK_PEERS, MAX_CLOSER_NODES,
+};
 use crate::network::message_queue::MessageQueue;
 use crate::network::offline_send::prepare_offline_relay;
 use crate::network::relay_queue::{
@@ -353,6 +357,9 @@ pub struct P2PCore {
     presence_scope: Arc<PresenceScope>,
     /// K4: сигнал потоку личного presence остановиться (`stop()`).
     presence_task_stop: Arc<std::sync::atomic::AtomicBool>,
+    /// K4-2: поиск адреса по nodeId без брокера (DHT наружу): очередь
+    /// ответов и расписание вопросов, см. `network::address_lookup`.
+    address_lookup: Arc<AddressLookup>,
     message_queue: Option<Arc<MessageQueue>>,
     relay_queue: Option<Arc<RelayQueue>>,
     relay_custody: Option<Arc<RelayCustody>>,
@@ -380,6 +387,7 @@ impl P2PCore {
             presence: None,
             presence_scope: Arc::new(PresenceScope::new()),
             presence_task_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            address_lookup: Arc::new(AddressLookup::new()),
             message_queue: None,
             relay_queue: None,
             relay_custody: None,
@@ -532,6 +540,11 @@ impl P2PCore {
                 let network_quic = Arc::clone(&network_arc);
                 let direct_slot = Arc::clone(&self.direct);
                 let public_addr_stun = Arc::clone(&public_addr_arc);
+                // K4-2: приёмнику кадров нужны таблица адресов, расписание
+                // поиска и свой публичный адрес (ответ «это я»).
+                let peer_addrs_quic = Arc::clone(&peer_addrs_arc);
+                let address_lookup_quic = Arc::clone(&self.address_lookup);
+                let public_addr_quic = Arc::clone(&public_addr_arc);
 
                 let events_mdns = Arc::clone(&events_arc);
                 let network_mdns = Arc::clone(&network_arc);
@@ -553,7 +566,15 @@ impl P2PCore {
                 // транспорт усыновляет входящее соединение.
                 let on_frame: crate::network::direct_transport::FrameHandler =
                     Arc::new(move |payload: Vec<u8>| {
-                        Self::handle_direct_frame(&events_quic, &network_quic, payload)
+                        let our_addr = *public_addr_quic.lock().unwrap();
+                        Self::handle_direct_frame(
+                            &events_quic,
+                            &network_quic,
+                            &peer_addrs_quic,
+                            &address_lookup_quic,
+                            our_addr,
+                            payload,
+                        )
                     });
                 let handle = runtime.handle().clone();
                 // Отдельный поток: block_on запрещён изнутри другого runtime
@@ -697,6 +718,9 @@ impl P2PCore {
     fn handle_direct_frame(
         events: &EventBus,
         network: &NetworkManagerFfi,
+        peer_addrs: &Arc<Mutex<HashMap<String, SocketAddr>>>,
+        lookup: &Arc<AddressLookup>,
+        our_addr: Option<SocketAddr>,
         payload: Vec<u8>,
     ) -> Option<String> {
         // K4-1: личный presence «своим» (см. `network::presence_scope`).
@@ -755,6 +779,118 @@ impl P2PCore {
                     return None;
                 }
             }
+        }
+
+        // K4-2: вопрос «где узел …?» - поиск адреса напрямую, без брокера
+        // (см. `network::address_lookup`). Отвечаем адресом цели, если знаем
+        // его, и всегда - кольцом ближайших по XOR-расстоянию узлов, чтобы
+        // спрашивающий мог продолжить поиск сам.
+        if payload.starts_with(LOOKUP_QUERY_PREFIX.as_bytes()) {
+            let decoded = String::from_utf8_lossy(&payload);
+            let Some(query) = parse_query(&decoded) else {
+                tracing::debug!("QUIC: malformed address query dropped");
+                return None;
+            };
+            let Some(our_id) = network.local_node_id() else {
+                return None;
+            };
+            if query.target_id == our_id {
+                // Спрашивают про нас: отвечаем своим публичным адресом, если
+                // STUN его уже нашёл. Кольцо соседей тут не нужно.
+                if let Some(own) = our_addr {
+                    lookup.queue_reply(
+                        &query.from_id,
+                        reply_payload(&our_id, &query.target_id, Some(own), &[]),
+                    );
+                }
+                return Some(query.from_id);
+            }
+            let answer = {
+                let addrs = peer_addrs.lock().unwrap();
+                addrs.get(&query.target_id).copied()
+            };
+            // Кандидатов собираем обычным циклом: с цепочками итераторов тут
+            // легко промахнуться типом (`&&String` против `String`), а собрать
+            // надо ровно `Vec<(String, SocketAddr)>`.
+            let mut candidates: Vec<(String, SocketAddr)> = Vec::new();
+            {
+                let addrs = peer_addrs.lock().unwrap();
+                for (node_id, node_addr) in addrs.iter() {
+                    if !node_id.starts_with("pk_") {
+                        continue;
+                    }
+                    if node_id == &query.from_id || node_id == &query.target_id {
+                        continue;
+                    }
+                    candidates.push((node_id.clone(), *node_addr));
+                }
+            }
+            let closer: Vec<(String, SocketAddr)> = sort_closer(&query.target_id, candidates)
+                .into_iter()
+                .take(MAX_CLOSER_NODES)
+                .collect();
+            tracing::info!(
+                "DHT K4: query from {} about {} - {} address, {} closer node(s)",
+                query.from_id,
+                query.target_id,
+                if answer.is_some() { "known" } else { "unknown" },
+                closer.len()
+            );
+            lookup.queue_reply(
+                &query.from_id,
+                reply_payload(&our_id, &query.target_id, answer, &closer),
+            );
+            // Отправителя возвращаем: транспорт усыновит входящее соединение,
+            // и ответ уйдёт по нему даже за строгим NAT.
+            return Some(query.from_id);
+        }
+
+        // K4-2: ответ на наш вопрос - запоминаем адреса. Своих адресов не
+        // перетираем: присутствие узла и mDNS авторитетнее чужого ответа
+        // (иначе один вредный узел мог бы увести наши отправки в сторону).
+        if payload.starts_with(LOOKUP_REPLY_PREFIX.as_bytes()) {
+            let decoded = String::from_utf8_lossy(&payload);
+            let Some(reply) = parse_reply(&decoded) else {
+                tracing::debug!("QUIC: malformed address reply dropped");
+                return None;
+            };
+            let mut recorded = 0usize;
+            {
+                let mut addrs = peer_addrs.lock().unwrap();
+                if let Some(target_addr) = reply.addr {
+                    if reply.target_id != reply.from_id && !addrs.contains_key(&reply.target_id) {
+                        addrs.insert(reply.target_id.clone(), target_addr);
+                        recorded += 1;
+                    }
+                }
+                for (node_id, node_addr) in reply.closer.iter() {
+                    if node_id == &reply.from_id || node_id == &reply.target_id {
+                        continue;
+                    }
+                    if addrs.contains_key(node_id) {
+                        continue;
+                    }
+                    addrs.insert(node_id.clone(), *node_addr);
+                    recorded += 1;
+                }
+            }
+            lookup.forget(&reply.target_id);
+            network.touch_peer(&reply.from_id);
+            if recorded > 0 {
+                tracing::info!(
+                    "DHT K4: {} answered about {}, remembered {} address(es)",
+                    reply.from_id,
+                    reply.target_id,
+                    recorded
+                );
+            } else {
+                tracing::info!(
+                    "DHT K4: {} does not know {}, asking the next peer",
+                    reply.from_id,
+                    reply.target_id
+                );
+            }
+            return Some(reply.from_id);
         }
 
         // K3: бинарный кадр файла (магик APUF, `file_wire`). В кадре нет
@@ -1131,6 +1267,68 @@ impl P2PCore {
         }
     }
 
+    /// K4-2: кого и о чём спросить, чтобы найти адреса «своих», которых мы
+    /// ещё не знаем по адресу.
+    ///
+    /// Возвращает готовые к отправке тройки (кому, куда, что). Спрашиваем не
+    /// больше [`MAX_ASK_PEERS`] соседей и не чаще кулдауна на цель (см.
+    /// [`AddressLookup::should_ask`]) - иначе поиск превратился бы в поток
+    /// вопросов. Спрашиваем только «своих»: чужие нам адресов не расскажут,
+    /// а трафик в большой сети экономить нужно.
+    fn plan_address_queries(
+        scope: &Arc<PresenceScope>,
+        lookup: &Arc<AddressLookup>,
+        peer_addrs: &Arc<Mutex<HashMap<String, SocketAddr>>>,
+        our_id: &str,
+        now_ms: i64,
+        missing: &[String],
+    ) -> Vec<(String, SocketAddr, Vec<u8>)> {
+        if missing.is_empty() {
+            return Vec::new();
+        }
+        let mut ask_peers: Vec<(String, SocketAddr)> = Vec::new();
+        {
+            let addrs = peer_addrs.lock().unwrap();
+            for (peer_id, peer_addr) in addrs.iter() {
+                if ask_peers.len() >= MAX_ASK_PEERS {
+                    break;
+                }
+                if !peer_id.starts_with("pk_") || !scope.is_own(peer_id) {
+                    continue;
+                }
+                let mut is_missing = false;
+                for target_id in missing.iter() {
+                    if target_id == peer_id {
+                        is_missing = true;
+                        break;
+                    }
+                }
+                if is_missing {
+                    continue;
+                }
+                ask_peers.push((peer_id.clone(), *peer_addr));
+            }
+        }
+        if ask_peers.is_empty() {
+            return Vec::new();
+        }
+        let mut planned: Vec<(String, SocketAddr, Vec<u8>)> = Vec::new();
+        for target_id in missing.iter() {
+            if !lookup.should_ask(target_id, now_ms) {
+                continue;
+            }
+            lookup.mark_asked(target_id, now_ms);
+            for (peer_id, peer_addr) in ask_peers.iter() {
+                planned.push((
+                    peer_id.clone(),
+                    *peer_addr,
+                    query_payload(our_id, target_id).into_bytes(),
+                ));
+            }
+        }
+        planned
+    }
+
     /// K4-1: личный presence «своим» по прямому QUIC.
     ///
     /// Поток просыпается каждые [`OWN_PRESENCE_TICK_SECS`], но рассылает не
@@ -1140,11 +1338,17 @@ impl P2PCore {
     /// владельца и на старых сборках не меняется.
     fn spawn_own_presence_task(&mut self, node_id: String) {
         const OWN_PRESENCE_TICK_SECS: u64 = 5;
+        // Сколько тиков между вопросами про адреса (12 * 5 с = минута).
+        const OWN_LOOKUP_TICKS: u64 = 12;
+        // Сколько готовых ответов поиска отправляем за один тик.
+        const OWN_REPLIES_PER_TICK: usize = 8;
+        let mut ticks: u64 = 0;
 
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.presence_task_stop = Arc::clone(&stop);
 
         let scope = Arc::clone(&self.presence_scope);
+        let lookup = Arc::clone(&self.address_lookup);
         let direct = Arc::clone(&self.direct);
         let peer_addrs = Arc::clone(&self.peer_addrs);
         let public_addr = Arc::clone(&self.public_addr);
@@ -1158,22 +1362,7 @@ impl P2PCore {
                 if stop.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
-                // Режим выбирается по числу известных узлов: в маленькой сети
-                // не вмешиваемся, в большой - не льём в общий эфир.
-                if PresenceMode::for_peers(network.peer_count()) != PresenceMode::Scoped {
-                    continue;
-                }
-                let now_ms = crate::storage::models::now_ms();
-                if !scope.own_due(now_ms) {
-                    continue;
-                }
-                let recipients = scope.next_batch(MAX_OWN_PER_ROUND);
-                if recipients.is_empty() {
-                    continue;
-                }
-                let total = recipients.len();
-                scope.mark_own(now_ms);
-
+                ticks = ticks.wrapping_add(1);
                 // Рукоятку берём копией и замок сразу отпускаем: иначе
                 // блокирующая отправка (до 10 с на узел) держала бы `stop()`
                 // и FFI-вызовы отправки.
@@ -1181,38 +1370,97 @@ impl P2PCore {
                 let Some(transport) = transport else {
                     continue;
                 };
+                let now_ms = crate::storage::models::now_ms();
+
+                // K4-2: ответы на чужие вопросы «где узел …?» уходят всегда,
+                // в том числе в маленькой сети: адрес находится без брокера.
+                // Кладёт их в очередь приёмник кадров, отправляет - этот поток.
+                let mut replies_sent = 0usize;
+                for (peer_id, reply) in lookup.take_replies(OWN_REPLIES_PER_TICK) {
+                    let addr = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        addrs.get(&peer_id).copied()
+                    };
+                    if transport.send_blocking(&peer_id, addr, reply) {
+                        replies_sent += 1;
+                    }
+                }
+                if replies_sent > 0 {
+                    tracing::info!("DHT K4: {} address answer(s) sent", replies_sent);
+                }
+
+                // В маленькой сети (режим Broadcast) личный presence не
+                // вмешивается: объявление идёт в общий топик, как до K4.
+                let scoped =
+                    PresenceMode::for_peers(network.peer_count()) == PresenceMode::Scoped;
                 let addr_str = {
                     let pa = public_addr.lock().unwrap();
                     pa.map(|a| a.to_string())
                 };
-                let payload = direct_presence_payload(
-                    &node_id,
-                    &display_name,
-                    addr_str.as_deref(),
-                    addr_str.is_some(),
-                    now_ms,
-                )
-                .into_bytes();
 
-                let mut sent = 0usize;
-                for peer_id in recipients {
-                    let addr = {
+                // Раз в минуту смотрим, у кого из «своих» адреса нет, и
+                // спрашиваем соседей напрямую - без брокера. Идёт и в
+                // маленькой сети: это просто ещё одна возможность найти
+                // адрес, когда брокер молчит.
+                if ticks % OWN_LOOKUP_TICKS == 0 {
+                    let candidates = scope.next_batch(MAX_OWN_PER_ROUND);
+                    let missing: Vec<String> = {
                         let addrs = peer_addrs.lock().unwrap();
-                        addrs
-                            .get(&peer_id)
-                            .copied()
-                            .or_else(|| addrs.get(&format!("{}_public", peer_id)).copied())
+                        candidates
+                            .into_iter()
+                            .filter(|peer_id| {
+                                !addrs.contains_key(peer_id)
+                                    && !addrs.contains_key(&format!("{}_public", peer_id))
+                            })
+                            .collect()
                     };
-                    if transport.send_blocking(&peer_id, addr, payload.clone()) {
-                        sent += 1;
+                    for (peer_id, peer_addr, payload) in Self::plan_address_queries(
+                        &scope,
+                        &lookup,
+                        &peer_addrs,
+                        &node_id,
+                        now_ms,
+                        &missing,
+                    ) {
+                        let _ = transport.send_blocking(&peer_id, Some(peer_addr), payload);
                     }
                 }
-                tracing::info!(
-                    "PRESENCE K4: personal presence sent to {}/{} own peer(s); shared beacon every {} min",
-                    sent,
-                    total,
-                    BEACON_INTERVAL_MS / 60_000
-                );
+
+                if scoped && scope.own_due(now_ms) {
+                    let recipients = scope.next_batch(MAX_OWN_PER_ROUND);
+                    if !recipients.is_empty() {
+                        let total = recipients.len();
+                        scope.mark_own(now_ms);
+                        let payload = direct_presence_payload(
+                            &node_id,
+                            &display_name,
+                            addr_str.as_deref(),
+                            addr_str.is_some(),
+                            now_ms,
+                        )
+                        .into_bytes();
+
+                        let mut sent = 0usize;
+                        for peer_id in recipients {
+                            let addr = {
+                                let addrs = peer_addrs.lock().unwrap();
+                                addrs
+                                    .get(&peer_id)
+                                    .copied()
+                                    .or_else(|| addrs.get(&format!("{}_public", peer_id)).copied())
+                            };
+                            if transport.send_blocking(&peer_id, addr, payload.clone()) {
+                                sent += 1;
+                            }
+                        }
+                        tracing::info!(
+                            "PRESENCE K4: personal presence sent to {}/{} own peer(s); shared beacon every {} min",
+                            sent,
+                            total,
+                            BEACON_INTERVAL_MS / 60_000
+                        );
+                    }
+                }
             });
         if let Err(error) = spawned {
             tracing::warn!("PRESENCE K4: own presence thread not started: {}", error);
@@ -3486,7 +3734,10 @@ mod tests {
         .unwrap();
         assert!(frame.starts_with(FILE_WIRE_MAGIC.as_slice()));
 
-        let adopted = P2PCore::handle_direct_frame(&events, &network, frame);
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        let adopted =
+            P2PCore::handle_direct_frame(&events, &network, &peer_addrs, &lookup, None, frame);
         assert!(adopted.is_none(), "в кадре нет отправителя - усыновления нет");
 
         let event = events.drain().into_iter().next().unwrap();
@@ -3523,7 +3774,10 @@ mod tests {
         .unwrap();
         // Магик на месте, длина обрублена.
         let broken = frame[..frame.len() - 3].to_vec();
-        assert!(P2PCore::handle_direct_frame(&events, &network, broken).is_none());
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        assert!(P2PCore::handle_direct_frame(&events, &network, &peer_addrs, &lookup, None, broken)
+            .is_none());
         assert!(events.is_empty());
     }
 
@@ -3531,14 +3785,89 @@ mod tests {
     fn direct_frame_keeps_legacy_text_envelope() {
         let events = EventBus::with_defaults();
         let network = NetworkManagerFfi::new();
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
         let adopted = P2PCore::handle_direct_frame(
             &events,
             &network,
+            &peer_addrs,
+            &lookup,
+            None,
             b"pk_2222222222222222222222222222222222222222222222222222222222222222|mid|chat|привет"
                 .to_vec(),
         );
         assert_eq!(adopted.as_deref(), Some("pk_2222222222222222222222222222222222222222222222222222222222222222"));
         assert_eq!(events.len(), 1);
+    }
+
+    /// K4-2: вопрос «где узел …?» про нас самих уходит в очередь ответов с
+    /// нашим публичным адресом.
+    #[test]
+    fn direct_frame_answers_address_query_about_ourselves() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let our_id = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let asker = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        assert!(network.start(our_id.to_string()));
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        let our_addr = "203.0.113.5:7777".parse::<SocketAddr>().unwrap();
+
+        let adopted = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            &peer_addrs,
+            &lookup,
+            Some(our_addr),
+            query_payload(asker, our_id).into_bytes(),
+        );
+
+        assert_eq!(adopted.as_deref(), Some(asker), "ответ уйдёт по усыновлённому соединению");
+        let replies = lookup.take_replies(4);
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].0, asker);
+        let parsed = parse_reply(std::str::from_utf8(&replies[0].1).unwrap())
+            .expect("ответ должен разбираться");
+        assert_eq!(parsed.target_id, our_id);
+        assert_eq!(parsed.addr, Some(our_addr));
+    }
+
+    /// K4-2: ответ на наш вопрос запоминает адреса, но не перетирает те, что
+    /// уже известны (их дали присутствие узла или mDNS).
+    #[test]
+    fn direct_frame_remembers_addresses_from_lookup_answer() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let responder = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        let target = "pk_4444444444444444444444444444444444444444444444444444444444444444";
+        let other = "pk_5555555555555555555555555555555555555555555555555555555555555555";
+        let known = "pk_6666666666666666666666666666666666666666666666666666666666666666";
+        let target_addr = "198.51.100.7:7777".parse::<SocketAddr>().unwrap();
+        let other_addr = "198.51.100.8:7777".parse::<SocketAddr>().unwrap();
+        let stale_addr = "198.51.100.9:7777".parse::<SocketAddr>().unwrap();
+
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        peer_addrs.lock().unwrap().insert(known.to_string(), stale_addr);
+        let lookup = Arc::new(AddressLookup::new());
+        lookup.mark_asked(target, crate::storage::models::now_ms());
+
+        let frame = reply_payload(
+            responder,
+            target,
+            Some(target_addr),
+            &[(other.to_string(), other_addr), (known.to_string(), target_addr)],
+        )
+        .into_bytes();
+        let adopted =
+            P2PCore::handle_direct_frame(&events, &network, &peer_addrs, &lookup, None, frame);
+
+        assert_eq!(adopted.as_deref(), Some(responder));
+        let addrs = peer_addrs.lock().unwrap();
+        assert_eq!(addrs.get(target).copied(), Some(target_addr));
+        assert_eq!(addrs.get(other).copied(), Some(other_addr));
+        assert_eq!(addrs.get(known).copied(), Some(stale_addr), "известный адрес не перетираем");
+        drop(addrs);
+        assert!(lookup.should_ask(target, crate::storage::models::now_ms()), "расписание очищено");
     }
 
     #[test]

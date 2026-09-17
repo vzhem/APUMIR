@@ -16,6 +16,7 @@
 //! - **adaptive_polling**  — экспоненциальный backoff (следующий этап)
 
 pub mod adaptive_polling;
+pub mod address_lookup;
 pub mod connection_manager;
 pub mod connection_pool;
 pub mod dht;
@@ -46,6 +47,9 @@ pub mod wire;
 
 // Реэкспорты для удобства
 pub use connection_pool::{ConnectionPool, ConnectionPoolError};
+pub use address_lookup::{
+    parse_query, parse_reply, query_payload, reply_payload, AddressLookup,
+};
 pub use dht::{bucket_index, xor_distance, Bucket, DhtNodeInfo, RoutingTable};
 pub use ice::{IceError, StunClient, DEFAULT_STUN_SERVERS};
 pub use mdns::{DiscoveredNode, MdnsError, MdnsService};
