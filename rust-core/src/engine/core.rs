@@ -18,6 +18,12 @@ use crate::network::presence_scope::{
     direct_presence_payload, parse_direct_presence, PresenceMode, PresenceScope,
     BEACON_INTERVAL_MS, DIRECT_PRESENCE_PREFIX, MAX_OWN_PER_ROUND,
 };
+use crate::network::custody_relay::{
+    ack_payload, deliver_payload, delivered_message, drop_payload, held_from_envelope,
+    offer_payload, parse_ack, parse_drop, parse_envelope_frame, CustodyAck, CustodyHold,
+    CustodyOffers, CUSTODY_ACK_PREFIX, CUSTODY_DELIVER_PREFIX, CUSTODY_DROP_PREFIX,
+    CUSTODY_OFFER_PREFIX,
+};
 use crate::network::address_lookup::{
     parse_query, parse_reply, query_payload, reply_payload, sort_closer, AddressLookup,
     LOOKUP_QUERY_PREFIX, LOOKUP_REPLY_PREFIX, MAX_ASK_PEERS, MAX_CLOSER_NODES,
@@ -368,6 +374,14 @@ pub struct P2PCore {
     /// K4-2: поиск адреса по nodeId без брокера (DHT наружу): очередь
     /// ответов и расписание вопросов, см. `network::address_lookup`.
     address_lookup: Arc<AddressLookup>,
+    /// K5-1: копии чужих сообщений, которые держим мы, пока получатель не
+    /// появится (см. `network::custody_relay`).
+    custody_hold: Arc<CustodyHold>,
+    /// K5-1: наши сообщения, которым ищем хранителей-соседей.
+    custody_offers: Arc<CustodyOffers>,
+    /// K5-1: владелец разрешил держать чужое (по умолчанию нет: телефон
+    /// не занимает место чужими файлами и сообщениями без согласия).
+    custody_enabled: Arc<std::sync::atomic::AtomicBool>,
     message_queue: Option<Arc<MessageQueue>>,
     relay_queue: Option<Arc<RelayQueue>>,
     relay_custody: Option<Arc<RelayCustody>>,
@@ -396,6 +410,9 @@ impl P2PCore {
             presence_scope: Arc::new(PresenceScope::new()),
             presence_task_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             address_lookup: Arc::new(AddressLookup::new()),
+            custody_hold: Arc::new(CustodyHold::new()),
+            custody_offers: Arc::new(CustodyOffers::new()),
+            custody_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             message_queue: None,
             relay_queue: None,
             relay_custody: None,
@@ -553,6 +570,11 @@ impl P2PCore {
                 let peer_addrs_quic = Arc::clone(&peer_addrs_arc);
                 let address_lookup_quic = Arc::clone(&self.address_lookup);
                 let public_addr_quic = Arc::clone(&public_addr_arc);
+                // K5-1: приёмнику кадров нужны хранилище копий, очередь
+                // предложений и разрешение владельца на кастодию.
+                let custody_hold_quic = Arc::clone(&self.custody_hold);
+                let custody_offers_quic = Arc::clone(&self.custody_offers);
+                let custody_enabled_quic = Arc::clone(&self.custody_enabled);
 
                 let events_mdns = Arc::clone(&events_arc);
                 let network_mdns = Arc::clone(&network_arc);
@@ -575,11 +597,16 @@ impl P2PCore {
                 let on_frame: crate::network::direct_transport::FrameHandler =
                     Arc::new(move |payload: Vec<u8>| {
                         let our_addr = *public_addr_quic.lock().unwrap();
+                        let custody_enabled = custody_enabled_quic
+                            .load(std::sync::atomic::Ordering::Relaxed);
                         Self::handle_direct_frame(
                             &events_quic,
                             &network_quic,
                             &peer_addrs_quic,
                             &address_lookup_quic,
+                            &custody_hold_quic,
+                            &custody_offers_quic,
+                            custody_enabled,
                             our_addr,
                             payload,
                         )
@@ -726,11 +753,15 @@ impl P2PCore {
     /// Возвращает идентификатор отправителя (`pk_…`), если кадр принят -
     /// по нему `DirectTransport` усыновляет входящее соединение, чтобы наш
     /// ответ ушёл по уже пробитому пути.
+    #[allow(clippy::too_many_arguments)]
     fn handle_direct_frame(
         events: &EventBus,
         network: &NetworkManagerFfi,
         peer_addrs: &Arc<Mutex<HashMap<String, SocketAddr>>>,
         lookup: &Arc<AddressLookup>,
+        hold: &Arc<CustodyHold>,
+        offers: &Arc<CustodyOffers>,
+        custody_enabled: bool,
         our_addr: Option<SocketAddr>,
         payload: Vec<u8>,
     ) -> Option<String> {
@@ -902,6 +933,123 @@ impl P2PCore {
                 );
             }
             return Some(reply.from_id);
+        }
+
+        // K5-1: кастодия у соседей (см. `network::custody_relay`). Здесь три
+        // роли: нам предлагают подержать чужое сообщение, нам отвечают на
+        // наше предложение и нам отдают копию, которую держал сосед.
+        if payload.starts_with(CUSTODY_OFFER_PREFIX.as_bytes()) {
+            let decoded = String::from_utf8_lossy(&payload);
+            let Some(held) = parse_envelope_frame(
+                &decoded,
+                CUSTODY_OFFER_PREFIX,
+                crate::storage::models::now_ms(),
+            ) else {
+                tracing::debug!("CUSTODY: malformed offer frame dropped");
+                return None;
+            };
+            // Своё же сообщение обратно не берём: мы его и отправили.
+            if Some(held.origin.as_str()) == network.local_node_id().as_deref() {
+                return None;
+            }
+            // Нам предлагают то, что адресовано нам самим - это не кастодия,
+            // а доставка: показываем сообщение и подтверждаем.
+            if held.recipient == network.local_node_id().unwrap_or_default() {
+                if hold.note_delivered(&held.msg_id) {
+                    if let Some((msg_id, origin, chat_scope, text)) =
+                        delivered_message(&held.envelope)
+                    {
+                        events.emit(CoreEvent::MessageReceived {
+                            message_id: msg_id,
+                            chat_id: chat_scope,
+                            sender_id: origin,
+                            text,
+                            timestamp: crate::storage::models::now_ms(),
+                        });
+                    }
+                }
+                return Some(held.origin);
+            }
+            let decision = hold.hold(held.clone(), custody_enabled);
+            tracing::info!(
+                "CUSTODY K5: offer {} for {} from {} -> {}",
+                held.msg_id,
+                held.recipient,
+                held.origin,
+                decision.as_str()
+            );
+            // Ответ шлём отправителю: он должен знать, сколько копий взяли.
+            // Отправляет его поток presence - приёмник кадров не блокируется.
+            if decision == CustodyAck::Accepted {
+                hold.queue_outbound(&held.origin, ack_payload(&held.msg_id, decision));
+            } else {
+                hold.queue_outbound(&held.origin, ack_payload(&held.msg_id, decision));
+            }
+            return Some(held.origin);
+        }
+
+        if payload.starts_with(CUSTODY_ACK_PREFIX.as_bytes()) {
+            let decoded = String::from_utf8_lossy(&payload);
+            if let Some((msg_id, ack)) = parse_ack(&decoded) {
+                let enough = offers.note_ack(&msg_id, ack);
+                tracing::info!(
+                    "CUSTODY K5: answer for {} -> {} (copies enough: {})",
+                    msg_id,
+                    ack.as_str(),
+                    enough
+                );
+            } else {
+                tracing::debug!("CUSTODY: malformed ack frame dropped");
+            }
+            return None;
+        }
+
+        if payload.starts_with(CUSTODY_DELIVER_PREFIX.as_bytes()) {
+            let decoded = String::from_utf8_lossy(&payload);
+            let Some(held) = parse_envelope_frame(
+                &decoded,
+                CUSTODY_DELIVER_PREFIX,
+                crate::storage::models::now_ms(),
+            ) else {
+                tracing::debug!("CUSTODY: malformed delivery frame dropped");
+                return None;
+            };
+            // Доставка только для нас; чужие копии не принимаем.
+            if held.recipient != network.local_node_id().unwrap_or_default() {
+                return None;
+            }
+            // Двое соседей могли принести одно и то же сообщение: второе
+            // показывать не нужно, но соединение всё равно усыновляем.
+            if hold.note_delivered(&held.msg_id) {
+                if let Some((msg_id, origin, chat_scope, text)) = delivered_message(&held.envelope) {
+                    tracing::info!("CUSTODY K5: delivered {} from {} via peer", msg_id, origin);
+                    events.emit(CoreEvent::MessageReceived {
+                        message_id: msg_id,
+                        chat_id: chat_scope,
+                        sender_id: origin,
+                        text,
+                        timestamp: crate::storage::models::now_ms(),
+                    });
+                }
+            }
+            return Some(held.origin);
+        }
+
+        if payload.starts_with(CUSTODY_DROP_PREFIX.as_bytes()) {
+            let decoded = String::from_utf8_lossy(&payload);
+            match parse_drop(&decoded) {
+                Some(msg_id) => {
+                    let removed = hold.remove(&msg_id);
+                    offers.remove(&msg_id);
+                    tracing::info!(
+                        "CUSTODY K5: {} reported delivered, our copy removed: {}",
+                        msg_id,
+                        removed
+                    );
+                }
+                None => tracing::debug!("CUSTODY: malformed drop frame dropped"),
+            }
+            return None;
         }
 
         // K3: бинарный кадр файла (магик APUF, `file_wire`). В кадре нет
@@ -1362,6 +1510,8 @@ impl P2PCore {
 
         let scope = Arc::clone(&self.presence_scope);
         let lookup = Arc::clone(&self.address_lookup);
+        let hold = Arc::clone(&self.custody_hold);
+        let offers = Arc::clone(&self.custody_offers);
         let direct = Arc::clone(&self.direct);
         let peer_addrs = Arc::clone(&self.peer_addrs);
         let public_addr = Arc::clone(&self.public_addr);
@@ -1436,6 +1586,95 @@ impl P2PCore {
                         &missing,
                     ) {
                         let _ = transport.send_blocking(&peer_id, Some(peer_addr), payload);
+                    }
+                }
+
+                // K5-1: кастодия у соседей (см. `network::custody_relay`).
+                // Сначала уходит то, что хранитель должен ответить (ack) и
+                // отдать (deliver): кадры готовит приёмник, отправляет этот
+                // поток - блокирующая отправка не должна занимать runtime.
+                for (peer_id, frame) in hold.take_outbound(OWN_REPLIES_PER_TICK) {
+                    let addr = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        addrs.get(&peer_id).copied()
+                    };
+                    let _ = transport.send_blocking(&peer_id, addr, frame);
+                }
+                hold.purge_expired(now_ms);
+                offers.purge_expired(now_ms);
+
+                // Копии, которые держим, отдаём тем получателям, кто сейчас
+                // в сети. Отдали - копию убираем и говорим автору, что
+                // искать хранителей дальше не нужно.
+                let mut delivered_items = 0usize;
+                for recipient in hold.recipients() {
+                    let addr = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        addrs.get(&recipient).copied()
+                    };
+                    let Some(addr) = addr else {
+                        continue;
+                    };
+                    for item in hold.take_for_recipient(&recipient, 8) {
+                        if !hold.note_delivered(&item.msg_id) {
+                            continue;
+                        }
+                        if transport.send_blocking(
+                            &recipient,
+                            Some(addr),
+                            deliver_payload(&item.envelope).into_bytes(),
+                        ) {
+                            delivered_items += 1;
+                            hold.remove(&item.msg_id);
+                            if item.origin.starts_with("pk_") {
+                                hold.queue_outbound(&item.origin, drop_payload(&item.msg_id));
+                            }
+                        }
+                    }
+                }
+                if delivered_items > 0 {
+                    tracing::info!(
+                        "CUSTODY K5: {} held message(s) delivered to their recipients",
+                        delivered_items
+                    );
+                }
+
+                // Раз в минуту предлагаем свои офлайн-сообщения соседям:
+                // спрашиваем только «своих» (контакты, участники групп) и не
+                // больше двух копий на сообщение.
+                if ticks % OWN_LOOKUP_TICKS == 0 && offers.pending_len() > 0 {
+                    let candidates: Vec<String> = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        let mut list: Vec<String> = Vec::new();
+                        for (peer_id, _) in addrs.iter() {
+                            if list.len() >= MAX_ASK_PEERS {
+                                break;
+                            }
+                            if !peer_id.starts_with("pk_") || !scope.is_own(peer_id) {
+                                continue;
+                            }
+                            list.push(peer_id.clone());
+                        }
+                        list
+                    };
+                    if !candidates.is_empty() {
+                        for (msg_id, envelope, peer) in offers.next_offers(&candidates) {
+                            let addr = {
+                                let addrs = peer_addrs.lock().unwrap();
+                                addrs.get(&peer).copied()
+                            };
+                            let sent = transport.send_blocking(
+                                &peer,
+                                addr,
+                                offer_payload(&envelope).into_bytes(),
+                            );
+                            tracing::info!(
+                                "CUSTODY K5: offer {} to {} sent: {}",
+                                msg_id,
+                                peer,
+                                sent
+                            );
+                        }
                     }
                 }
 
@@ -3410,6 +3649,20 @@ impl P2PCore {
                                 message_id,
                                 recipient_id
                             );
+                            // K5-1: ту же копию предлагаем соседям по прямому
+                            // каналу. Брокер может быть недоступен - тогда
+                            // сообщение донесёт тот, кто увидит получателя.
+                            if let Some(held) = held_from_envelope(
+                                &prepared.envelope,
+                                crate::storage::models::now_ms(),
+                            ) {
+                                if self.custody_offers.enqueue(held) {
+                                    tracing::info!(
+                                        "CUSTODY K5: {} queued for neighbour custody",
+                                        message_id
+                                    );
+                                }
+                            }
                             true
                         }
                         Ok(false) => {
@@ -3631,6 +3884,22 @@ impl P2PCore {
     /// брокера пишет только редкий маяк, когда узлов в сети много. В
     /// маленькой сети список ни на что не влияет: рассылка идёт как раньше.
     /// Возвращает, сколько узлов принято (себя и пустые строки отбрасываем).
+    /// K5-1: разрешить или запретить держать чужие сообщения.
+    ///
+    /// По умолчанию кастодия выключена: телефон не занимает место чужими
+    /// сообщениями без согласия владельца. Включённая кастодия означает, что
+    /// мы держим копии для «своих» (контакты, участники групп) и отдаём их,
+    /// когда получатель появится в сети.
+    pub fn set_custody_enabled(&mut self, enabled: bool) -> bool {
+        self.custody_enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!(
+            "CUSTODY K5: neighbour custody {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        enabled
+    }
+
     /// K4-3: свой MQTT-брокер из настроек приложения.
     ///
     /// Встраивать можно до `start()`: адрес читается, когда поднимается
@@ -3789,8 +4058,11 @@ mod tests {
 
         let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
         let lookup = Arc::new(AddressLookup::new());
-        let adopted =
-            P2PCore::handle_direct_frame(&events, &network, &peer_addrs, &lookup, None, frame);
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+        let adopted = P2PCore::handle_direct_frame(
+            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None, frame,
+        );
         assert!(adopted.is_none(), "в кадре нет отправителя - усыновления нет");
 
         let event = events.drain().into_iter().next().unwrap();
@@ -3829,8 +4101,12 @@ mod tests {
         let broken = frame[..frame.len() - 3].to_vec();
         let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
         let lookup = Arc::new(AddressLookup::new());
-        assert!(P2PCore::handle_direct_frame(&events, &network, &peer_addrs, &lookup, None, broken)
-            .is_none());
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+        assert!(P2PCore::handle_direct_frame(
+            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None, broken
+        )
+        .is_none());
         assert!(events.is_empty());
     }
 
@@ -3840,11 +4116,16 @@ mod tests {
         let network = NetworkManagerFfi::new();
         let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
         let lookup = Arc::new(AddressLookup::new());
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
         let adopted = P2PCore::handle_direct_frame(
             &events,
             &network,
             &peer_addrs,
             &lookup,
+            &hold,
+            &offers,
+            false,
             None,
             b"pk_2222222222222222222222222222222222222222222222222222222222222222|mid|chat|привет"
                 .to_vec(),
@@ -3866,11 +4147,16 @@ mod tests {
         let lookup = Arc::new(AddressLookup::new());
         let our_addr = "203.0.113.5:7777".parse::<SocketAddr>().unwrap();
 
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
         let adopted = P2PCore::handle_direct_frame(
             &events,
             &network,
             &peer_addrs,
             &lookup,
+            &hold,
+            &offers,
+            false,
             Some(our_addr),
             query_payload(asker, our_id).into_bytes(),
         );
@@ -3911,8 +4197,11 @@ mod tests {
             &[(other.to_string(), other_addr), (known.to_string(), target_addr)],
         )
         .into_bytes();
-        let adopted =
-            P2PCore::handle_direct_frame(&events, &network, &peer_addrs, &lookup, None, frame);
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+        let adopted = P2PCore::handle_direct_frame(
+            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None, frame,
+        );
 
         assert_eq!(adopted.as_deref(), Some(responder));
         let addrs = peer_addrs.lock().unwrap();
@@ -3921,6 +4210,213 @@ mod tests {
         assert_eq!(addrs.get(known).copied(), Some(stale_addr), "известный адрес не перетираем");
         drop(addrs);
         assert!(lookup.should_ask(target, crate::storage::models::now_ms()), "расписание очищено");
+    }
+
+    /// K5-1: предложение подержать чужое сообщение принимается, копия
+    /// остаётся у нас, автору уходит подтверждение.
+    #[test]
+    fn direct_frame_holds_offered_message() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        assert!(network.start(us.to_string()));
+        let envelope = crate::network::wire::build_relay(
+            "m1",
+            recipient,
+            origin,
+            "chat",
+            3600,
+            0,
+            "привет".as_bytes(),
+        );
+
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+        let adopted = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            &peer_addrs,
+            &lookup,
+            &hold,
+            &offers,
+            true,
+            None,
+            offer_payload(&envelope).into_bytes(),
+        );
+
+        assert_eq!(adopted.as_deref(), Some(origin), "соединение усыновляем");
+        assert_eq!(hold.held_len(), 1, "копия осталась у нас");
+        assert!(hold.contains("m1"));
+        let outbound = hold.take_outbound(4);
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].0, origin);
+        assert_eq!(
+            String::from_utf8_lossy(&outbound[0].1),
+            "cust|ack|m1|ok",
+            "автору уходит подтверждение"
+        );
+        assert!(events.is_empty(), "получателю мы ничего не показываем");
+    }
+
+    /// K5-1: без разрешения владельца чужие сообщения не берём.
+    #[test]
+    fn direct_frame_refuses_custody_when_disabled() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        assert!(network.start(us.to_string()));
+        let envelope = crate::network::wire::build_relay(
+            "m1",
+            recipient,
+            origin,
+            "chat",
+            3600,
+            0,
+            "привет".as_bytes(),
+        );
+
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+        let _ = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            &peer_addrs,
+            &lookup,
+            &hold,
+            &offers,
+            false,
+            None,
+            offer_payload(&envelope).into_bytes(),
+        );
+
+        assert_eq!(hold.held_len(), 0);
+        let outbound = hold.take_outbound(4);
+        assert_eq!(
+            String::from_utf8_lossy(&outbound[0].1),
+            "cust|ack|m1|refused"
+        );
+    }
+
+    /// K5-1: сосед отдаёт копию - получатель видит обычное сообщение, и
+    /// только один раз, даже если копий было две.
+    #[test]
+    fn direct_frame_shows_delivered_message_once() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let custodian = "pk_4444444444444444444444444444444444444444444444444444444444444444";
+        assert!(network.start(us.to_string()));
+        let envelope = crate::network::wire::build_relay(
+            "m1",
+            us,
+            origin,
+            "chat",
+            3600,
+            0,
+            "привет".as_bytes(),
+        );
+
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+
+        let adopted = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            &peer_addrs,
+            &lookup,
+            &hold,
+            &offers,
+            false,
+            None,
+            deliver_payload(&envelope).into_bytes(),
+        );
+        assert_eq!(adopted.as_deref(), Some(origin));
+        assert_eq!(events.len(), 1, "сообщение показано один раз");
+        match events.drain().into_iter().next().unwrap() {
+            CoreEvent::MessageReceived { message_id, sender_id, text, .. } => {
+                assert_eq!(message_id, "m1");
+                assert_eq!(sender_id, origin);
+                assert_eq!(text, "привет");
+            }
+            other => panic!("ожидается message_received, пришло {:?}", other),
+        }
+
+        // Вторая копия от другого хранителя: сообщение не показываем снова.
+        let _ = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            &peer_addrs,
+            &lookup,
+            &hold,
+            &offers,
+            false,
+            None,
+            deliver_payload(&envelope).into_bytes(),
+        );
+        assert!(events.is_empty(), "дубль от второго хранителя подавлен");
+        let _ = custodian;
+    }
+
+    /// K5-1: узнали, что получателю уже доставлено, - копию убираем.
+    #[test]
+    fn direct_frame_removes_copy_on_drop() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        assert!(network.start(us.to_string()));
+        let envelope = crate::network::wire::build_relay(
+            "m1",
+            recipient,
+            origin,
+            "chat",
+            3600,
+            0,
+            "привет".as_bytes(),
+        );
+        let peer_addrs = Arc::new(Mutex::new(HashMap::new()));
+        let lookup = Arc::new(AddressLookup::new());
+        let hold = Arc::new(CustodyHold::new());
+        let offers = Arc::new(CustodyOffers::new());
+
+        let _ = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            &peer_addrs,
+            &lookup,
+            &hold,
+            &offers,
+            true,
+            None,
+            offer_payload(&envelope).into_bytes(),
+        );
+        assert!(hold.contains("m1"));
+
+        let _ = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            &peer_addrs,
+            &lookup,
+            &hold,
+            &offers,
+            true,
+            None,
+            drop_payload("m1").into_bytes(),
+        );
+        assert!(!hold.contains("m1"), "копия убрана");
+        assert_eq!(hold.held_len(), 0);
     }
 
     #[test]

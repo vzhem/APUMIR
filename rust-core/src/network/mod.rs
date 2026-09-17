@@ -18,6 +18,7 @@
 pub mod adaptive_polling;
 pub mod address_lookup;
 pub mod connection_manager;
+pub mod custody_relay;
 pub mod connection_pool;
 pub mod dht;
 pub mod direct_transport;
@@ -47,6 +48,12 @@ pub mod wire;
 
 // Реэкспорты для удобства
 pub use connection_pool::{ConnectionPool, ConnectionPoolError};
+pub use custody_relay::{
+    ack_payload, deliver_payload, delivered_message, drop_payload, held_from_envelope,
+    offer_payload, parse_ack, parse_drop, parse_envelope_frame, CustodyAck, CustodyHold,
+    CustodyOffers, HeldEnvelope, CUSTODY_ACK_PREFIX, CUSTODY_DELIVER_PREFIX,
+    CUSTODY_DROP_PREFIX, CUSTODY_OFFER_PREFIX,
+};
 pub use address_lookup::{
     parse_query, parse_reply, query_payload, reply_payload, AddressLookup,
 };
