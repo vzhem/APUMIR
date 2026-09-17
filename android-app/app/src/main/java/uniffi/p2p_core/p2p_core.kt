@@ -901,6 +901,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_direct_payload(`ptr`: Pointer,`recipientId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_send_file_chunk(`ptr`: Pointer,`recipientId`: RustBuffer.ByValue,`transferIdHex`: RustBuffer.ByValue,`chunkIndex`: Long,`chunkOffset`: Int,`ciphertextChunkLen`: Int,`ciphertextRange`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`recipientId`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message_mqtt(`ptr`: Pointer,`toNodeId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1882,6 +1884,8 @@ public interface P2pCoreHandleInterface {
     
     fun `sendDirectPayload`(`recipientId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
     
+    fun `sendFileChunk`(`recipientId`: kotlin.String, `transferIdHex`: kotlin.String, `chunkIndex`: kotlin.Long, `chunkOffset`: kotlin.UInt, `ciphertextChunkLen`: kotlin.UInt, `ciphertextRange`: kotlin.ByteArray): kotlin.Boolean
+    
     fun `sendMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean
     
     fun `sendMessageMqtt`(`toNodeId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
@@ -2225,6 +2229,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `sendFileChunk`(`recipientId`: kotlin.String, `transferIdHex`: kotlin.String, `chunkIndex`: kotlin.Long, `chunkOffset`: kotlin.UInt, `ciphertextChunkLen`: kotlin.UInt, `ciphertextRange`: kotlin.ByteArray): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_send_file_chunk(
+        it, FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`transferIdHex`),FfiConverterLong.lower(`chunkIndex`),FfiConverterUInt.lower(`chunkOffset`),FfiConverterUInt.lower(`ciphertextChunkLen`),FfiConverterByteArray.lower(`ciphertextRange`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `sendMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithPointer {
@@ -2377,7 +2393,13 @@ data class CoreEventFfi (
     var `text`: kotlin.String?, 
     var `status`: kotlin.String?, 
     var `timestamp`: kotlin.Long?, 
-    var `isLocal`: kotlin.Boolean?
+    var `isLocal`: kotlin.Boolean?,
+    // K3: бинарный кусок файла (eventType "file_chunk_received").
+    var `transferId`: kotlin.String?,
+    var `chunkIndex`: kotlin.Long?,
+    var `chunkOffset`: kotlin.UInt?,
+    var `ciphertextChunkLen`: kotlin.UInt?,
+    var `payload`: kotlin.ByteArray?
 ) {
     
     companion object
@@ -2400,6 +2422,11 @@ public object FfiConverterTypeCoreEventFfi: FfiConverterRustBuffer<CoreEventFfi>
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalLong.read(buf),
             FfiConverterOptionalBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalUInt.read(buf),
+            FfiConverterOptionalByteArray.read(buf),
         )
     }
 
@@ -2414,7 +2441,12 @@ public object FfiConverterTypeCoreEventFfi: FfiConverterRustBuffer<CoreEventFfi>
             FfiConverterOptionalString.allocationSize(value.`text`) +
             FfiConverterOptionalString.allocationSize(value.`status`) +
             FfiConverterOptionalLong.allocationSize(value.`timestamp`) +
-            FfiConverterOptionalBoolean.allocationSize(value.`isLocal`)
+            FfiConverterOptionalBoolean.allocationSize(value.`isLocal`) +
+            FfiConverterOptionalString.allocationSize(value.`transferId`) +
+            FfiConverterOptionalLong.allocationSize(value.`chunkIndex`) +
+            FfiConverterOptionalUInt.allocationSize(value.`chunkOffset`) +
+            FfiConverterOptionalUInt.allocationSize(value.`ciphertextChunkLen`) +
+            FfiConverterOptionalByteArray.allocationSize(value.`payload`)
     )
 
     override fun write(value: CoreEventFfi, buf: ByteBuffer) {
@@ -2429,6 +2461,11 @@ public object FfiConverterTypeCoreEventFfi: FfiConverterRustBuffer<CoreEventFfi>
             FfiConverterOptionalString.write(value.`status`, buf)
             FfiConverterOptionalLong.write(value.`timestamp`, buf)
             FfiConverterOptionalBoolean.write(value.`isLocal`, buf)
+            FfiConverterOptionalString.write(value.`transferId`, buf)
+            FfiConverterOptionalLong.write(value.`chunkIndex`, buf)
+            FfiConverterOptionalUInt.write(value.`chunkOffset`, buf)
+            FfiConverterOptionalUInt.write(value.`ciphertextChunkLen`, buf)
+            FfiConverterOptionalByteArray.write(value.`payload`, buf)
     }
 }
 
@@ -2824,6 +2861,64 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
+    override fun read(buf: ByteBuffer): kotlin.UInt? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UInt?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UInt?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalByteArray: FfiConverterRustBuffer<kotlin.ByteArray?> {
+    override fun read(buf: ByteBuffer): kotlin.ByteArray? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterByteArray.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.ByteArray?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterByteArray.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.ByteArray?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterByteArray.write(value, buf)
         }
     }
 }

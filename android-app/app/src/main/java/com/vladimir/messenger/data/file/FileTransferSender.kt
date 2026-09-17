@@ -34,6 +34,13 @@ class FileTransferSender(
      */
     private val onDirectSend: (peerId: String, bytes: Long, millis: Long, ok: Boolean) -> Unit =
         { _, _, _, _ -> },
+    /**
+     * K3: бинарный канал — (recipientId, transferIdHex, chunkIndex,
+     * chunkOffset, ciphertextChunkLen, ciphertextRange) -> доставлено ли
+     * APUF-кадр. Используется, только если получатель подтвердил FCAP
+     * ([markBinaryCapable]); иначе куски идут текстовыми фрагментами.
+     */
+    private val binaryTransport: ((String, String, Long, Int, Int, ByteArray) -> Boolean)? = null,
 ) {
     /** Получатель офлайн — файл ждёт когда он появится (только прямая доставка). */
     class RecipientOfflineException(val transferId: String) : Exception("Recipient offline")
@@ -48,6 +55,23 @@ class FileTransferSender(
     private val ackedContiguous = ConcurrentHashMap<String, Long>()
     private val lastPumpAt = ConcurrentHashMap<String, Long>()
     private val lastPumpAcked = ConcurrentHashMap<String, Long>()
+    /**
+     * K3: передачи, чей получатель подтвердил FCAP (понимает APUF-кадры).
+     * Значение — максимальная нагрузка кадра получателя (из его FCAP).
+     */
+    private val binaryCapable = ConcurrentHashMap<String, Int>()
+
+    /**
+     * K3: получатель принял наше предложение и ответил FCAP: с следующего
+     * цикла куски этой передачи идут бинарными APUF-кадрами по прямому
+     * QUIC. Вызывается из FileTransferReceiver (событие FCAP).
+     */
+    suspend fun markBinaryCapable(transferIdHex: String, maxFramePayload: Int) {
+        FileTransferWire.requireValidTransferId(transferIdHex)
+        if (maxFramePayload in 1..Int.MAX_VALUE) {
+            binaryCapable.putIfAbsent(transferIdHex, maxFramePayload)
+        }
+    }
 
     /**
      * Receiver file-ACK: remembers the confirmed contiguous prefix (window advance) and, when the
@@ -124,6 +148,9 @@ class FileTransferSender(
         // 2) Windowed chunks beyond the receiver-confirmed contiguous prefix.
         val acked = ackedContiguous[transferIdHex] ?: 0L
         if (transfer.chunkCount > 0L && acked >= transfer.chunkCount) return sentPackets
+        // K3: получатель подтвердил FCAP — куски уезжают бинарными
+        // APUF-кадрами, окно меряется байтами, а не фрагментами.
+        val useBinary = binaryTransport != null && binaryCapable.containsKey(transferIdHex)
         val fragmentsPerChunk = maxOf(
             1,
             (transfer.chunkSize + FileTransferChunkStore.AEAD_TAG_BYTES +
@@ -137,22 +164,37 @@ class FileTransferSender(
         } else {
             MAX_INFLIGHT_MESSAGES
         }
-        val windowChunks = maxOf(1, inflightBudget / fragmentsPerChunk)
-        val windowEnd = minOf(transfer.chunkCount, acked + windowChunks.toLong())
+        val windowChunks = if (useBinary) {
+            // Связующее окно QUIC — пара мегабайт: слать больше — значит
+            // просто остановиться на пото-контроле. Получатель гонит ACK
+            // на каждый собранный кусок, окно движется быстро.
+            maxOf(
+                1L,
+                BINARY_INFLIGHT_BYTES /
+                    (transfer.chunkSize.toLong() + FileTransferChunkStore.AEAD_TAG_BYTES).coerceAtLeast(1L),
+            )
+        } else {
+            maxOf(1L, (inflightBudget / fragmentsPerChunk).toLong())
+        }
+        val windowEnd = minOf(transfer.chunkCount, acked + windowChunks)
         for (chunkIndex in acked until windowEnd) {
             val ciphertext = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
                 ?: throw IllegalStateException("Chunk $chunkIndex missing for $transferIdHex")
             try {
-                sentPackets += sendItem(
-                    FileTransferPacketCodec.Type.CHUNK,
-                    transferIdHex,
-                    itemIndex = chunkIndex,
-                    payload = ciphertext,
-                    messageIdFor = { fragment ->
-                        FileTransferWire.chunkMessageId(transferIdHex, chunkIndex, fragment)
-                    },
-                    transfer = transfer,
-                )
+                sentPackets += if (useBinary) {
+                    sendBinaryChunk(transfer, transferIdHex, chunkIndex, ciphertext)
+                } else {
+                    sendItem(
+                        FileTransferPacketCodec.Type.CHUNK,
+                        transferIdHex,
+                        itemIndex = chunkIndex,
+                        payload = ciphertext,
+                        messageIdFor = { fragment ->
+                            FileTransferWire.chunkMessageId(transferIdHex, chunkIndex, fragment)
+                        },
+                        transfer = transfer,
+                    )
+                }
             } finally {
                 ciphertext.fill(0)
             }
@@ -205,6 +247,68 @@ class FileTransferSender(
         return fragments.size
     }
 
+    /**
+     * K3: весь зашифрованный кусок — бинарными APUF-кадрами по прямому
+     * QUIC (без base64, без потолка брокера). Кусок делится на диапазоны
+     * под лимит кадра получателя; каждый диапазон — отдельный стрим, и
+     * порядок не важен: приёмник клеит их по (chunkIndex, offset, len).
+     *
+     * Возвращает число кадров. Любое недоставленное — [RecipientOfflineException]
+     * (как в текстовом пути): передача замирает и повторится со следующего
+     * цикла; принятые диапазоны приёмник просто перезапишет (идемпотентно).
+     */
+    private fun sendBinaryChunk(
+        transfer: FileTransferEntity,
+        transferIdHex: String,
+        chunkIndex: Long,
+        ciphertext: ByteArray,
+    ): Int {
+        val transport = checkNotNull(binaryTransport) { "binary transport unset" }
+        val maxFramePayload = binaryCapable[transferIdHex]
+            ?: FileTransferWire.BINARY_MAX_FRAME_PAYLOAD
+        val maxRange = (maxFramePayload - FileTransferWire.BINARY_CHUNK_PREFIX_BYTES)
+            .coerceIn(1, maxFramePayload)
+        val startedAt = nowMs()
+        var ok = false
+        var frames = 0
+        try {
+            var offset = 0
+            while (offset < ciphertext.size) {
+                val end = minOf(ciphertext.size, offset + maxRange)
+                val range = ciphertext.copyOfRange(offset, end)
+                val delivered = runCatching {
+                    transport.invoke(
+                        transfer.peerNodeId,
+                        transferIdHex,
+                        chunkIndex,
+                        offset,
+                        ciphertext.size,
+                        range,
+                    )
+                }.getOrDefault(false)
+                if (!delivered) {
+                    Log.i(TAG, "Recipient not directly reachable (binary) — pausing transfer")
+                    throw RecipientOfflineException(transferIdHex)
+                }
+                frames++
+                offset = end
+            }
+            ok = true
+            return frames
+        } finally {
+            // Скорость и надёжность узла берём из настоящей отправки —
+            // весь кусок одним наблюдением (аналог фрагментного пути).
+            runCatching {
+                onDirectSend(
+                    transfer.peerNodeId,
+                    ciphertext.size.toLong(),
+                    (nowMs() - startedAt).coerceAtLeast(1),
+                    ok,
+                )
+            }
+        }
+    }
+
     private suspend fun advance(
         transfer: FileTransferEntity,
         newState: String,
@@ -243,5 +347,10 @@ class FileTransferSender(
         // 30s: re-pumps are cheap (deterministic IDs, local dedup) and lossy channels open
         // short windows — the 2-minute cadence kept transfers waiting far longer than needed.
         const val REPUMP_INTERVAL_MS = 30_000L
+        // K3: сколько шифртекста (без обёртки кадра) допускается в полёте
+        // по бинарному каналу. Жёсткий предел всё равно держит пото-контроль
+        // QUIC; это лишь окно нашего насоса, чтобы писать вперёд на разумную
+        // длину, а не «на весь файл».
+        const val BINARY_INFLIGHT_BYTES = 2 * 1024 * 1024
     }
 }

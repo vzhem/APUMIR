@@ -409,6 +409,44 @@ object RustBridge {
         false
     }
 
+    /**
+     * K3: бинарный кусок файла по прямому QUIC-каналу. Ядро собирает APUF-кадр
+     * и уезжает им одним стримом с приоритетом данных.
+     *
+     * В отличие от [sendDirectPayload] содержимое НЕ запечатывается
+     * MessageSealer: байты уже зашифрованы ключом передачи (AES-GCM, ключ
+     * зашит в конверт получателю), двойное запечатывание кадр сломало бы.
+     *
+     * @param ciphertextChunkLen полная длина зашифрованного куска (с тегом)
+     * @param ciphertext диапазон внутри куска, начиная с [chunkOffset]
+     * @return true = получатель подтвердил приём стрима;
+     *         false = недоступен напрямую (ждём следующего цикла)
+     */
+    fun sendFileChunk(
+        recipientId: String,
+        transferIdHex: String,
+        chunkIndex: Long,
+        chunkOffset: Int,
+        ciphertextChunkLen: Int,
+        ciphertext: ByteArray,
+    ): Boolean = try {
+        val handle = engine ?: return false
+        handle.sendFileChunk(
+            recipientId,
+            transferIdHex,
+            chunkIndex,
+            chunkOffset.toUInt(),
+            ciphertextChunkLen.toUInt(),
+            ciphertext,
+        )
+    } catch (e: Throwable) {
+        // Полный catch (Throwable): мост может быть перегенерирован CI под
+        // старое ядро — тогда метод физически отсутствует, и файл должен
+        // уехать текстовым путём, а не ронять передачу.
+        Log.w(TAG, "sendFileChunk failed: ${e.message}")
+        false
+    }
+
     /** «Любая сеть»: MQTT снова напрямую. */
     fun clearMqttSocks5Proxy() = try {
         uniffi.p2p_core.clearMqttSocks5Proxy()

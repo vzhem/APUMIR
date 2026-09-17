@@ -110,6 +110,23 @@ class FileTransferPacketCodecTest {
     }
 
     @Test
+    fun fcapPacketRoundTripCarriesMaxFramePayload() {
+        val payload = byteArrayOf(0, 0, 4, 0) // 1024
+        val encoded = FileTransferPacketCodec.fragment(
+            FileTransferPacketCodec.Type.FCAP,
+            transferId,
+            0,
+            payload,
+        ).single()
+        val packet = FileTransferPacketCodec.decode(encoded)
+        assertEquals(FileTransferPacketCodec.Type.FCAP, packet.type)
+        assertArrayEquals(transferId, packet.transferId)
+        assertEquals(0L, packet.itemIndex)
+        assertArrayEquals(payload, packet.payload)
+        assertEquals(FileTransferPacketCodec.Type.FCAP, FileTransferPacketCodec.Type.fromWire(10))
+    }
+
+    @Test
     fun malformedAndOversizedInputsFailClosed() {
         expectFailure {
             FileTransferPacketCodec.fragment(

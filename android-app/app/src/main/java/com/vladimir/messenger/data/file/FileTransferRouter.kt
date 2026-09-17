@@ -132,6 +132,22 @@ class FileTransferRouter @Inject constructor(
                 }
             }
         }
+        // K3: бинарный путь кусков — только прямой QUIC (LAN-TCP остаётся
+        // на текстовые фрагменты): ядро собирает APUF-кадр и уезжает им
+        // стримом с приоритетом данных.
+        val binarySend: (String, String, Long, Int, Int, ByteArray) -> Boolean =
+            { recipientId, transferIdHex, chunkIndex, chunkOffset, chunkLen, range ->
+                runCatching {
+                    com.vladimir.messenger.data.RustBridge.sendFileChunk(
+                        recipientId,
+                        transferIdHex,
+                        chunkIndex,
+                        chunkOffset,
+                        chunkLen,
+                        range,
+                    )
+                }.getOrDefault(false)
+            }
         val senderLocal = FileTransferSender(
             transferDao = transferDao,
             chunkStore = chunkStore,
@@ -155,6 +171,7 @@ class FileTransferRouter @Inject constructor(
                 }
             },
             directTransport = directSend,
+            binaryTransport = binarySend,
         )
         sender = senderLocal
         val custodyLocal = FileCustodySender(
@@ -261,6 +278,11 @@ class FileTransferRouter @Inject constructor(
                         .onFailure { Log.w(TAG, "group seed hook failed: ${it.message}") }
                 },
             ),
+            // K3: собеседник подтвердил, что принимает APUF-кадры — передатчик
+            // переводит нашу исходящую передачу на бинарный канал.
+            onFcap = { transferIdHex, from, maxFramePayload ->
+                senderLocal.markBinaryCapable(transferIdHex, maxFramePayload)
+            },
         )
         seederLocal.onServed = { transferIdHex, requester ->
             runCatching { groupFiles.get().onServed(transferIdHex, requester) }
@@ -320,6 +342,26 @@ class FileTransferRouter @Inject constructor(
             Log.i(TAG, "Direct file packet routed to local chat $resolvedChatId")
         }
         return receiver.onIncomingText(senderId, resolvedChatId, messageId, text)
+    }
+
+    /**
+     * K3: бинарный диапазон зашифрованного куска из ядра (событие
+     * "file_chunk_received"). В кадре нет текста/чата/отправителя —
+     * адресация по transferId, а подлинность гарантирует AES-GCM тег
+     * целого куска. Служебный путь, не переписки: чат не нужен.
+     */
+    suspend fun onBinaryChunk(
+        transferIdHex: String,
+        chunkIndex: Long,
+        chunkOffset: Int,
+        ciphertextChunkLen: Int,
+        ciphertextRange: ByteArray,
+    ) {
+        runCatching {
+            receiver.onBinaryChunk(transferIdHex, chunkIndex, chunkOffset, ciphertextChunkLen, ciphertextRange)
+        }.onFailure { error ->
+            Log.w(TAG, "Binary file chunk for $transferIdHex dropped: ${error.message}")
+        }
     }
 
     /**

@@ -56,6 +56,7 @@ class FileTransferReceiverTest {
     private fun receiver(
         gateway: FakeFileCryptoGateway = crypto(),
         routeOffer: suspend (String, String) -> FileTransferReceiver.OfferRouting = { _, _ -> FileTransferReceiver.OfferRouting.Unknown },
+        onFcap: (suspend (String, String, Int) -> Unit)? = null,
     ) = FileTransferReceiver(
         transferDao = dao,
         chunkStore = chunkStore,
@@ -69,7 +70,24 @@ class FileTransferReceiverTest {
         notifier = notifier,
         nowMs = { 500_000L },
         routeOffer = routeOffer,
+        onFcap = onFcap ?: { _, _, _ -> },
     )
+
+    /** K3: бинарный диапазон куска через то же «окно», что у ядра (событие). */
+    private suspend fun binaryChunk(
+        receiver: FileTransferReceiver,
+        chunkIndex: Long,
+        offset: Int,
+        cipher: ByteArray,
+    ) {
+        receiver.onBinaryChunk(transferIdHex, chunkIndex, offset, cipher.size, cipher)
+    }
+
+    private fun sentFcaps(): List<FileTransferPacketCodec.Packet> = transportSends.mapNotNull { text ->
+        runCatching {
+            FileTransferPacketCodec.decode(FileTransferWire.decodeToEncodedPacket(text))
+        }.getOrNull()
+    }.filter { it.type == FileTransferPacketCodec.Type.FCAP }
 
     private fun offerTexts(): List<String> {
         val pdu = FileOfferPdu.encode(ByteArray(96) { 1 }, ByteArray(220) { 2 }, ByteArray(96) { 3 })
@@ -394,6 +412,146 @@ class FileTransferReceiverTest {
         val receiver = receiver(routeOffer = { _, _ -> FileTransferReceiver.OfferRouting.Unknown })
         deliver(receiver, offerTexts())
         assertEquals(chatId, dao.getTransfer(transferIdHex)!!.chatId)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // K3: бинарные APUF-кадры и FCAP
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Test
+    fun acceptedPersonalOfferAnswersWithFcap() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+
+        val fcaps = sentFcaps()
+        assertEquals(1, fcaps.size)
+        assertEquals(FileTransferWire.BINARY_MAX_FRAME_PAYLOAD, fcapMaxFrame(fcaps.first()))
+    }
+
+    @Test
+    fun binaryChunksCompleteIncomingTransfer() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+
+        // Каждый кусок — один APUF-кадр целиком (без дробления).
+        for (index in 0L until 3L) {
+            val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index))
+            binaryChunk(receiver, index, 0, cipher)
+        }
+
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+        assertEquals(3L, acksReceived.last().second)
+        assertTrue(notifier.events.isNotEmpty())
+    }
+
+    @Test
+    fun binaryRangesReassembleOutOfOrder() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+
+        val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
+        val mid = cipher.size / 2
+        binaryChunk(receiver, 0, mid, cipher.copyOfRange(mid, cipher.size))
+        // Второй диапазон ещё нет — окна не сдвинулось (первое ACK - от оффера).
+        assertEquals(0L, acksReceived.last().second)
+        binaryChunk(receiver, 0, 0, cipher.copyOfRange(0, mid))
+        assertEquals(1L, acksReceived.last().second)
+
+        for (index in 1L until 3L) {
+            binaryChunk(receiver, index, 0, FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index)))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    @Test
+    fun overlappingBinaryRangeIsIgnored() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+
+        val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
+        binaryChunk(receiver, 0, 0, cipher)
+        assertEquals(1L, acksReceived.last().second)
+        // «Дубль» с пересечением уже принятого: игнорируется, кусок не ломается.
+        binaryChunk(receiver, 0, 100, cipher.copyOfRange(100, 300))
+        assertEquals(1L, acksReceived.last().second)
+        assertEquals("TRANSFERRING", dao.getTransfer(transferIdHex)!!.state)
+
+        for (index in 1L until 3L) {
+            binaryChunk(receiver, index, 0, FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index)))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    @Test
+    fun binaryChunkBeforeOfferIsBufferedUntilOffer() = runTest {
+        val receiver = receiver()
+        val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
+        binaryChunk(receiver, 0, 0, cipher)
+        assertNull(dao.getTransfer(transferIdHex))
+
+        deliver(receiver, offerTexts())
+        assertEquals(1L, acksReceived.last().second)
+
+        for (index in 1L until 3L) {
+            binaryChunk(receiver, index, 0, FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index)))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    @Test
+    fun binaryRangeBeyondChunkBoundsIsDropped() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+
+        val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
+        // Диапазон «вылезает» за конец куска — брак.
+        binaryChunk(receiver, 0, cipher.size - 10, cipher.copyOfRange(0, 64))
+        assertEquals(0L, acksReceived.last().second)
+    }
+
+    @Test
+    fun fcapFromPeerIsDeliveredToSender() = runTest {
+        val seen = mutableListOf<Triple<String, String, Int>>()
+        val receiver = receiver(onFcap = { tid, from, maxFrame -> seen += Triple(tid, from, maxFrame) })
+        insertOutgoingForAck()
+        deliver(receiver, listOf(fcapText(byteArrayOf(0, 0, 4, 0))))
+
+        assertEquals(listOf(Triple(transferIdHex, senderId, 1024)), seen)
+    }
+
+    @Test
+    fun fcapFromStrangerIsDropped() = runTest {
+        val seen = mutableListOf<String>()
+        val receiver = receiver(onFcap = { tid, _, _ -> seen += tid })
+        insertOutgoingForAck() // peer = senderId
+        deliver(receiver, listOf(fcapText(byteArrayOf(0, 0, 4, 0))), from = "pk_" + "ef".repeat(16))
+
+        assertEquals(0, seen.size)
+    }
+
+    private fun fcapText(payload: ByteArray): String =
+        FileTransferWire.encodeEncodedPacket(
+            FileTransferPacketCodec.encode(
+                FileTransferPacketCodec.Packet(
+                    FileTransferPacketCodec.Type.FCAP,
+                    transferIdBytes,
+                    0L,
+                    0,
+                    1,
+                    payload,
+                ),
+            ),
+        )
+
+    private fun fcapMaxFrame(packet: FileTransferPacketCodec.Packet): Int =
+        ((packet.payload[0].toInt() and 0xff) shl 24) or
+            ((packet.payload[1].toInt() and 0xff) shl 16) or
+            ((packet.payload[2].toInt() and 0xff) shl 8) or
+            (packet.payload[3].toInt() and 0xff)
+
+    private fun chunkPlaintext(index: Long): ByteArray {
+        val start = index * chunkSize
+        return plaintext.copyOfRange(start, minOf(plaintext.size, start + chunkSize))
     }
 
     private fun sha256(bytes: ByteArray): String =

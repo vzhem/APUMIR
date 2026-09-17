@@ -144,6 +144,36 @@ impl QuicConnection {
         Ok(())
     }
 
+    /// Отправить бинарный кадр файла (K3): тот же формат «длина + payload»
+    /// и тот же uni-стрим на кадр, но стрим получает низкий приоритет
+    /// [`FILE_DATA_STREAM_PRIORITY`] — интерактивные сообщения и служебные
+    /// кадры файла не ждут за кусками данных.
+    ///
+    /// Старые телефоны принимают такой стрим без изменений (для них это
+    /// очередное сообщение) и молча отбрасывают кадр: магик `APUF` не
+    /// разбирается их движком как конверт `sender|…`.
+    pub async fn send_file_data(&self, payload: &[u8]) -> QuicResult<()> {
+        let mut send = self
+            .inner
+            .open_uni()
+            .await
+            .map_err(|e| QuicClientError::StreamOpen(e.to_string()))?;
+        Self::prioritize_file_data_stream(&send)?;
+
+        write_length_prefixed(&mut send, payload).await?;
+
+        send.finish()
+            .map_err(|e| QuicClientError::SendFailed(e.to_string()))?;
+
+        // FIN должен быть подтверждён, иначе данные теряются, когда
+        // endpoint сбросит соединение (то же, что в `send_message`).
+        send.stopped()
+            .await
+            .map_err(|e| QuicClientError::SendFailed(e.to_string()))?;
+
+        Ok(())
+    }
+
     /// Принять одно сообщение (ожидает открытия входящего uni stream).
     pub async fn receive_message(&self) -> QuicResult<Vec<u8>> {
         // Принимаем входящий uni-directional stream
@@ -899,6 +929,63 @@ mod tests {
         assert_eq!(received, expected);
 
         println!("✅ 1 MB сообщение прошло через QUIC");
+    }
+
+    /// K3: бинарный кадр файла тем же стримом «длина + payload», но с
+    /// приоритетом данных — байты доходят, соединение переживает кадр.
+    #[tokio::test]
+    async fn test_send_file_data_delivers_bytes() {
+        let server = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server.local_address();
+        let client = QuicClient::new(any_port()).unwrap();
+
+        let frame: Vec<u8> = (0..=255u8).chain(vec![b'F'; 300_000]).collect();
+        let expected = frame.clone();
+
+        let server_clone = Arc::clone(&server);
+        let server_task = tokio::spawn(async move {
+            let conn = server_clone.accept().await.unwrap();
+            let received = conn.receive_message().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            received
+        });
+
+        let client_conn = client.connect(server_addr, "p2p-messenger").await.unwrap();
+        client_conn.send_file_data(&frame).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let received = server_task.await.unwrap();
+        assert_eq!(received, expected);
+        println!("✅ Бинарный кадр данных (300 КБ) прошёл через QUIC-стрим");
+    }
+
+    /// Данные не блокируют интерактивные кадры на том же соединении:
+    /// пока кадр данных ещё в стриме, следующее сообщение отправляется.
+    #[tokio::test]
+    async fn test_interactive_message_follows_file_data_on_same_connection() {
+        let server = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server.local_address();
+        let client = QuicClient::new(any_port()).unwrap();
+
+        let server_clone = Arc::clone(&server);
+        let server_task = tokio::spawn(async move {
+            let conn = server_clone.accept().await.unwrap();
+            let data = conn.receive_message().await.unwrap();
+            let text = conn.receive_message().await.unwrap();
+            (data, text)
+        });
+
+        let client_conn = client.connect(server_addr, "p2p-messenger").await.unwrap();
+        client_conn.send_file_data(&vec![0xABu8; 150_000]).await.unwrap();
+        client_conn.send_message(b"hello after data").await.unwrap();
+
+        let (data, text) = tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(data, vec![0xABu8; 150_000]);
+        assert_eq!(text, b"hello after data");
+        println!("✅ Данные и интерактивный кадр сосуществуют на соединении");
     }
 
     #[tokio::test]

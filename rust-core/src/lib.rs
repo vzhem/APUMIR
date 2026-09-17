@@ -76,6 +76,14 @@ pub struct CoreEventFfi {
     pub status: Option<String>,
     pub timestamp: Option<i64>,
     pub is_local: Option<bool>,
+    // K3: бинарный кусок файла (event_type = "file_chunk_received").
+    // Отправителя в APUF-кадре нет: получатель сверяет transfer_id со
+    // своей передачей, подлинность байтов проверяет AES-GCM тег куска.
+    pub transfer_id: Option<String>,
+    pub chunk_index: Option<i64>,
+    pub chunk_offset: Option<u32>,
+    pub ciphertext_chunk_len: Option<u32>,
+    pub payload: Option<Vec<u8>>,
 }
 
 /// РЎС‚Р°С‚СѓСЃ СЃРѕРѕР±С‰РµРЅРёСЏ РґР»СЏ Kotlin
@@ -118,6 +126,34 @@ impl P2PCoreHandle {
     /// Параллельный QUIC-поток: прямая отправка БЕЗ relay queue.
     pub fn send_direct_payload(&self, recipient_id: String, payload: String) -> bool {
         self.inner.lock().unwrap().send_direct_payload(recipient_id, payload)
+    }
+
+    /// K3: бинарный кусок файла по прямому QUIC-каналу (APUF-кадр).
+    /// `true` = получатель подтвердил приём стрима; `false` = не удалось —
+    /// вызывающий ждёт следующего цикла (передача не прерывается).
+    pub fn send_file_chunk(
+        &self,
+        recipient_id: String,
+        transfer_id_hex: String,
+        chunk_index: i64,
+        chunk_offset: u32,
+        ciphertext_chunk_len: u32,
+        ciphertext_range: Vec<u8>,
+    ) -> bool {
+        if chunk_index < 0 {
+            return false;
+        }
+        self.inner
+            .lock()
+            .unwrap()
+            .send_file_chunk(
+                recipient_id,
+                transfer_id_hex,
+                chunk_index as u64,
+                chunk_offset,
+                ciphertext_chunk_len,
+                ciphertext_range,
+            )
     }
 
     pub fn node_id(&self) -> Option<String> {
@@ -810,6 +846,11 @@ fn event_to_ffi(e: CoreEvent) -> CoreEventFfi {
         status: None,
         timestamp: None,
         is_local: None,
+        transfer_id: None,
+        chunk_index: None,
+        chunk_offset: None,
+        ciphertext_chunk_len: None,
+        payload: None,
     };
 
     match e {
@@ -844,6 +885,19 @@ fn event_to_ffi(e: CoreEvent) -> CoreEventFfi {
             ffi.sender_id = Some(sender_id);
             ffi.text = Some(text);
             ffi.timestamp = Some(timestamp);
+        }
+        CoreEvent::FileChunkReceived {
+            transfer_id,
+            chunk_index,
+            chunk_offset,
+            ciphertext_chunk_len,
+            ciphertext,
+        } => {
+            ffi.transfer_id = Some(transfer_id);
+            ffi.chunk_index = Some(chunk_index as i64);
+            ffi.chunk_offset = Some(chunk_offset);
+            ffi.ciphertext_chunk_len = Some(ciphertext_chunk_len);
+            ffi.payload = Some(ciphertext);
         }
         CoreEvent::MessageStatusChanged { message_id, status } => {
             ffi.message_id = Some(message_id);

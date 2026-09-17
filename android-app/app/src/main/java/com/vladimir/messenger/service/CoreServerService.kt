@@ -539,16 +539,27 @@ class CoreServerService : Service() {
         eventPollingJob = serviceScope.launch {
             Log.i(TAG, "Event polling started")
             while (isActive) {
-                try {
+                // K3: события файловых кусков приходят пучками (пока файл
+                // льётся стримами). Пока очередь не пуста - работаем
+                // коротким шагом, иначе куски ждали бы полные POLL_INTERVAL_MS
+                // и ACK-окно отправителя почти не двигалось. В простое шаг
+                // прежний (POLL_INTERVAL_MS), пустые опросы дёшевы.
+                val busy = try {
                     val events = RustBridge.drainEvents()
                     events.forEach { event -> handleEvent(event) }
+                    RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
+                } catch (ex: Exception) {
+                    Log.e(TAG, "Event polling error", ex)
+                    false
+                }
+                try {
                     val status = RustBridge.networkStatus()
                     val peers = RustBridge.connectedPeers()
                     updateNotification(notificationText(status, peers))
                 } catch (ex: Exception) {
-                    Log.e(TAG, "Event polling error", ex)
+                    Log.e(TAG, "Status polling error", ex)
                 }
-                delay(POLL_INTERVAL_MS)
+                delay(if (busy) BUSY_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
             }
         }
 
@@ -580,6 +591,36 @@ class CoreServerService : Service() {
         Log.d(TAG, "📥 Event: ${event.eventType}")
         Log.d(TAG, "📥 Event: ${event.eventType}")
         when (event.eventType) {
+            // K3: бинарный кусок файла по прямому QUIC (APUF-кадр из ядра).
+            // Это не сообщение переписки: текста, чата и отправителя в
+            // кадре нет — адресация по transferId, подлинность подтверждает
+            // AES-GCM тег целого куска в приёмнике. Служебный, быстрый путь.
+            "file_chunk_received" -> {
+                val transferIdHex = event.transferId
+                val chunkIndex = event.chunkIndex
+                val chunkOffset = event.chunkOffset
+                val ciphertextChunkLen = event.ciphertextChunkLen
+                val ciphertextRange = event.payload
+                if (transferIdHex == null || chunkIndex == null || chunkOffset == null ||
+                    ciphertextChunkLen == null || ciphertextRange == null
+                ) {
+                    Log.w(TAG, "file_chunk_received missing fields; dropped")
+                    return
+                }
+                runCatching {
+                    fileTransferRouter.onBinaryChunk(
+                        transferIdHex,
+                        chunkIndex,
+                        chunkOffset.toInt(),
+                        ciphertextChunkLen.toInt(),
+                        ciphertextRange,
+                    )
+                }.onFailure { ex ->
+                    Log.w(TAG, "file_chunk_received handling failed: ${ex.message}")
+                }
+                return
+            }
+
             "message_received" -> {
                 val originalTs = event.timestamp
                 val ts = originalTs ?: System.currentTimeMillis()
@@ -1058,6 +1099,10 @@ class CoreServerService : Service() {
     companion object {
         const val EXTRA_DISPLAY_NAME = "display_name"
         const val POLL_INTERVAL_MS = 5000L
+        // K3: шаг опроса, пока события приходят пучком (идёт файл): кусок
+        // не ждёт следующего полного цикла, ACK-окно отправителя движется.
+        private const val BUSY_POLL_INTERVAL_MS = 100L
+        private const val BUSY_BATCH = 8
         /** Под каким именем нас уже записал справочник. */
         private const val REGISTRY_NAME_KEY = "registry_registered_name"
         /** Когда записал. */
