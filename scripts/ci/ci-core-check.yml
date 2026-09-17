@@ -1,0 +1,75 @@
+name: Core compile check
+
+# Проверка ядра на каждом pull request и по кнопке (workflow_dispatch).
+#
+# Зачем. Ни у владельца, ни в песочнице Arena нет Rust-тулчейна: раньше
+# ошибка компиляции в rust-core находилась только на теге - то есть уже
+# после того, как релиз собран и (при плохом раскладе) опубликован. Здесь
+# тот же компилятор и та же линия фич, что в build-release.yml, но без NDK,
+# без APK и без публикации: собирается только `cargo check`.
+#
+# Это ничего не публикует и не трогает релизы: релиз по-прежнему запускает
+# только пуш тега vX.Y.Z (build-release.yml).
+on:
+  pull_request:
+    paths:
+      - 'rust-core/**'
+      - 'tools/uniffi-bindgen/**'
+      - '.github/workflows/ci-core-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: cargo check + uniffi contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-core/target
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('rust-core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-check-
+
+      # Та же линия фич, что и в релизе (build-release.yml): иначе проверка
+      # компилировала бы не то, что собирается в APK.
+      - name: cargo check (release, mqtt-dual-broker)
+        working-directory: ./rust-core
+        run: cargo check --release --features mqtt-dual-broker
+
+      # lib.udl должен собираться генератором: если он сломан, CI тега
+      # оставит устаревший мост и старый .so - это ломает приложение на
+      # старте по контрольным суммам. Пишем во временный каталог, ничего в
+      # репозитории не меняя.
+      - name: uniffi: lib.udl собирается в Kotlin-биндинги
+        working-directory: ./rust-core
+        run: |
+          mkdir -p ../target/uniffi-check
+          cargo run --release --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
+            generate src/lib.udl --language kotlin --config uniffi.toml \
+            --out-dir ../target/uniffi-check --no-format
+          test -s ../target/uniffi-check/p2p_core.kt
+          grep -q "ffi_p2p_core_uniffi_contract_version" ../target/uniffi-check/p2p_core.kt
+
+      # Тесты ядра (K6 в плане): пока отдельным шагом и не блокирующим,
+      # чтобы сначала набрать статистику. Падать от них релиз не должен.
+      - name: cargo test (lib, не блокирующий)
+        working-directory: ./rust-core
+        continue-on-error: true
+        run: cargo test --release --features mqtt-dual-broker --lib

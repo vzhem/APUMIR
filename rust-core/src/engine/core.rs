@@ -14,6 +14,10 @@ use crate::network::router::Router;
 use crate::network::dht::{RoutingTable, DhtNodeInfo};
 use crate::network::relay::RelayManager;
 use crate::network::presence::PresenceManager;
+use crate::network::presence_scope::{
+    direct_presence_payload, parse_direct_presence, PresenceMode, PresenceScope,
+    BEACON_INTERVAL_MS, DIRECT_PRESENCE_PREFIX, MAX_OWN_PER_ROUND,
+};
 use crate::network::message_queue::MessageQueue;
 use crate::network::offline_send::prepare_offline_relay;
 use crate::network::relay_queue::{
@@ -343,6 +347,12 @@ pub struct P2PCore {
     dht: Option<Arc<Mutex<RoutingTable>>>,
     relay: Option<Arc<RelayManager>>,
     presence: Option<Arc<PresenceManager>>,
+    /// K4: «свои» (контакты, участники групп, переписка) и расписание
+    /// presence: редкий маяк в общий топик вместо объявления всем каждую
+    /// минуту, личный presence «своим» — прямо по QUIC.
+    presence_scope: Arc<PresenceScope>,
+    /// K4: сигнал потоку личного presence остановиться (`stop()`).
+    presence_task_stop: Arc<std::sync::atomic::AtomicBool>,
     message_queue: Option<Arc<MessageQueue>>,
     relay_queue: Option<Arc<RelayQueue>>,
     relay_custody: Option<Arc<RelayCustody>>,
@@ -368,6 +378,8 @@ impl P2PCore {
             dht: None,
             relay: None,
             presence: None,
+            presence_scope: Arc::new(PresenceScope::new()),
+            presence_task_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             message_queue: None,
             relay_queue: None,
             relay_custody: None,
@@ -474,6 +486,13 @@ impl P2PCore {
         }
 
         self.start_async_runtime(node_id.clone());
+
+        // K4: отдельный поток личного presence «своим». Поток, а не задача
+        // tokio: отправка идёт блокирующим вызовом транспорта (до 10 с на
+        // узел), и она не должна ни держать замок `self.direct`, ни занимать
+        // рабочий поток runtime. Каждый запуск получает свой флаг остановки,
+        // поэтому поток предыдущего запуска не может «ожить» при рестарте.
+        self.spawn_own_presence_task(node_id.clone());
 
         self.state = EngineState::Running;
         self.events.emit(CoreEvent::EngineStarted {
@@ -588,6 +607,8 @@ impl P2PCore {
                 let queue_mqtt = queue2.clone();
                 let relay_queue_mqtt = relay_queue2.clone();
                 let relay_custody_mqtt = relay_custody2.clone();
+                // K4: тому же циклу нужен список «своих» и расписание маяка.
+                let presence_scope_mqtt = Arc::clone(&self.presence_scope);
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -604,6 +625,7 @@ impl P2PCore {
                             queue_mqtt,
                             relay_queue_mqtt,
                             relay_custody_mqtt,
+                            presence_scope_mqtt,
                             mqtt_outbound_rx,
                         ).await;
                     });
@@ -677,6 +699,64 @@ impl P2PCore {
         network: &NetworkManagerFfi,
         payload: Vec<u8>,
     ) -> Option<String> {
+        // K4-1: личный presence «своим» (см. `network::presence_scope`).
+        // Кадр - текстовая строка «ppres|…», первое поле не `pk_…`, поэтому
+        // старые сборки молча отбрасывают его тем же стражем, что и любой
+        // чужой кадр: правило N ↔ N-1 не нарушено, старый отправитель идёт в
+        // общий топик, как раньше.
+        if payload.starts_with(DIRECT_PRESENCE_PREFIX.as_bytes()) {
+            let decoded = String::from_utf8_lossy(&payload);
+            match parse_direct_presence(&decoded) {
+                Some(presence) => {
+                    // Версия формата и срок годности - та же арифметика, что и
+                    // в обработчике presence из брокера: старое не берём.
+                    if presence.version
+                        + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                        <= crate::config::defaults::PRESENCE_VERSION
+                    {
+                        tracing::info!(
+                            "PRESENCE K4: ignored personal presence from {} - version {} is too old",
+                            presence.node_id,
+                            presence.version
+                        );
+                        return None;
+                    }
+                    let age_ms = crate::storage::models::now_ms()
+                        .saturating_sub(presence.sent_at_ms);
+                    if age_ms > crate::config::defaults::PRESENCE_MAX_AGE_MS {
+                        tracing::info!(
+                            "PRESENCE K4: ignored personal presence from {} - {}h old",
+                            presence.node_id,
+                            age_ms / 3_600_000
+                        );
+                        return None;
+                    }
+                    tracing::info!(
+                        "PRESENCE K4: personal presence from {} ({}) addr={}",
+                        presence.display_name,
+                        presence.node_id,
+                        presence
+                            .addr
+                            .map(|a| a.to_string())
+                            .unwrap_or_else(|| "unknown".into())
+                    );
+                    network.add_peer(PeerInfo::new(
+                        presence.node_id.clone(),
+                        presence.display_name.clone(),
+                    ));
+                    network.touch_peer(&presence.node_id);
+                    network.set_status(NetworkStatus::Connected);
+                    // Отправителя возвращаем: транспорт усыновит входящее
+                    // соединение, и ответ уйдёт по нему даже за строгим NAT.
+                    return Some(presence.node_id);
+                }
+                None => {
+                    tracing::debug!("QUIC: malformed personal presence frame dropped");
+                    return None;
+                }
+            }
+        }
+
         // K3: бинарный кадр файла (магик APUF, `file_wire`). В кадре нет
         // отправителя — получатель определяет его по transferId и
         // направлению своей передачи, а подлинность байтов гарантирует
@@ -1051,6 +1131,94 @@ impl P2PCore {
         }
     }
 
+    /// K4-1: личный presence «своим» по прямому QUIC.
+    ///
+    /// Поток просыпается каждые [`OWN_PRESENCE_TICK_SECS`], но рассылает не
+    /// чаще [`crate::network::presence_scope::OWN_INTERVAL_MS`]. В маленькой
+    /// сети (режим [`PresenceMode::Broadcast`]) он не делает ничего: presence
+    /// уходит в общий топик ровно как до K4, поэтому поведение на телефонах
+    /// владельца и на старых сборках не меняется.
+    fn spawn_own_presence_task(&mut self, node_id: String) {
+        const OWN_PRESENCE_TICK_SECS: u64 = 5;
+
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.presence_task_stop = Arc::clone(&stop);
+
+        let scope = Arc::clone(&self.presence_scope);
+        let direct = Arc::clone(&self.direct);
+        let peer_addrs = Arc::clone(&self.peer_addrs);
+        let public_addr = Arc::clone(&self.public_addr);
+        let network = Arc::clone(&self.network);
+        let display_name = self.config.display_name.clone();
+
+        let spawned = std::thread::Builder::new()
+            .name("apu-own-presence".into())
+            .spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(OWN_PRESENCE_TICK_SECS));
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                // Режим выбирается по числу известных узлов: в маленькой сети
+                // не вмешиваемся, в большой - не льём в общий эфир.
+                if PresenceMode::for_peers(network.peer_count()) != PresenceMode::Scoped {
+                    continue;
+                }
+                let now_ms = crate::storage::models::now_ms();
+                if !scope.own_due(now_ms) {
+                    continue;
+                }
+                let recipients = scope.next_batch(MAX_OWN_PER_ROUND);
+                if recipients.is_empty() {
+                    continue;
+                }
+                let total = recipients.len();
+                scope.mark_own(now_ms);
+
+                // Рукоятку берём копией и замок сразу отпускаем: иначе
+                // блокирующая отправка (до 10 с на узел) держала бы `stop()`
+                // и FFI-вызовы отправки.
+                let transport = direct.lock().unwrap().clone();
+                let Some(transport) = transport else {
+                    continue;
+                };
+                let addr_str = {
+                    let pa = public_addr.lock().unwrap();
+                    pa.map(|a| a.to_string())
+                };
+                let payload = direct_presence_payload(
+                    &node_id,
+                    &display_name,
+                    addr_str.as_deref(),
+                    addr_str.is_some(),
+                    now_ms,
+                )
+                .into_bytes();
+
+                let mut sent = 0usize;
+                for peer_id in recipients {
+                    let addr = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        addrs
+                            .get(&peer_id)
+                            .copied()
+                            .or_else(|| addrs.get(&format!("{}_public", peer_id)).copied())
+                    };
+                    if transport.send_blocking(&peer_id, addr, payload.clone()) {
+                        sent += 1;
+                    }
+                }
+                tracing::info!(
+                    "PRESENCE K4: personal presence sent to {}/{} own peer(s); shared beacon every {} min",
+                    sent,
+                    total,
+                    BEACON_INTERVAL_MS / 60_000
+                );
+            });
+        if let Err(error) = spawned {
+            tracing::warn!("PRESENCE K4: own presence thread not started: {}", error);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn run_mqtt_transport(
         events: Arc<EventBus>,
@@ -1062,6 +1230,7 @@ impl P2PCore {
         queue: Option<Arc<MessageQueue>>,
         relay_queue: Option<Arc<RelayQueue>>,
         relay_custody: Option<Arc<RelayCustody>>,
+        presence_scope: Arc<PresenceScope>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
@@ -2267,6 +2436,10 @@ impl P2PCore {
                             // Получаем и показываем только адресованные этому телефону сообщения.
                             if recipient_id == node_id {
                                 tracing::info!("MQTT: message from {} to me", sender_id);
+                                // K4-1: тот, кто нам пишет, - «свой»: дальше
+                                // presence ему уйдёт лично, а не через общий
+                                // топик (в маленькой сети это ничего не меняет).
+                                presence_scope.add_own(sender_id, Some(node_id.as_str()));
                                 let ts = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap_or_default()
@@ -2338,27 +2511,66 @@ impl P2PCore {
                     pa.map(|a| a.to_string())
                 };
                 let current_is_relay = current_addr.is_some();
-                if let Err(e) = transport
-                    .publish_presence(&display_name, current_addr.as_deref(), current_is_relay)
-                    .await
-                {
-                    tracing::warn!("MQTT: periodic presence request failed: {}", e);
+
+                // K4-1: в большой сети объявление в общий топик перестаёт быть
+                // ежеминутным и становится редким маяком. Он остаётся retained,
+                // поэтому новый узел, подписавшись, сразу получает последний
+                // адрес - дожидаться конца окна не нужно. В маленькой сети
+                // (режим Broadcast) поведение прежнее, до K4.
+                let presence_mode = PresenceMode::for_peers(known_peers.len());
+                let now_ms = crate::storage::models::now_ms();
+                // Своё объявление «свежее», если оно вернулось из брокера не
+                // позже срока протухания. В режиме маяка срок другой: между
+                // объявлениями проходит BEACON_INTERVAL_MS, и старый порог
+                // (три пропуска по минуте) давал бы вечное предупреждение.
+                let self_presence_fresh = match self_presence_seen_at {
+                    Some(seen_at) => {
+                        seen_at.elapsed().as_secs() <= PEER_STALE_SECS
+                            || (presence_mode == PresenceMode::Scoped
+                                && seen_at.elapsed().as_millis() as i64
+                                    <= BEACON_INTERVAL_MS + 60_000)
+                    }
+                    None => false,
+                };
+                let publish_shared = match presence_mode {
+                    PresenceMode::Broadcast => true,
+                    // Маяк по расписанию; если нас в общем списке нет вовсе -
+                    // публикуем сразу, не дожидаясь конца окна.
+                    PresenceMode::Scoped => {
+                        presence_scope.beacon_due(now_ms) || !self_presence_fresh
+                    }
+                };
+                if publish_shared {
+                    if presence_mode == PresenceMode::Scoped {
+                        presence_scope.mark_beacon(now_ms);
+                    }
+                    if let Err(e) = transport
+                        .publish_presence(&display_name, current_addr.as_deref(), current_is_relay)
+                        .await
+                    {
+                        tracing::warn!("MQTT: periodic presence request failed: {}", e);
+                    }
+                    if presence_mode == PresenceMode::Scoped {
+                        tracing::info!(
+                            "PRESENCE K4: shared beacon published (scoped mode, {} known peer(s), own={}, next in {} min)",
+                            known_peers.len(),
+                            presence_scope.own_len(),
+                            BEACON_INTERVAL_MS / 60_000
+                        );
+                    }
                 }
                 // Себя в общем списке тоже отмечаем. Если наше объявление не
                 // возвращается из брокера дольше срока протухания, значит нас
                 // для сети нет - пишем в лог, чтобы это было видно в отчёте.
-                match self_presence_seen_at {
-                    Some(seen_at) if seen_at.elapsed().as_secs() <= PEER_STALE_SECS => {
-                        tracing::info!(
-                            "PRESENCE: self is listed online, addr {}",
-                            current_addr.as_deref().unwrap_or("unknown")
-                        );
-                    }
-                    _ => {
-                        tracing::warn!(
-                            "PRESENCE: self is missing from the shared list, re-announcing"
-                        );
-                    }
+                if self_presence_fresh {
+                    tracing::info!(
+                        "PRESENCE: self is listed online, addr {}",
+                        current_addr.as_deref().unwrap_or("unknown")
+                    );
+                } else {
+                    tracing::warn!(
+                        "PRESENCE: self is missing from the shared list, re-announcing"
+                    );
                 }
                 // === GOSSIP: broadcast known peers to the network ===
                 // Реже, чем presence: список знакомых меняется медленно.
@@ -2473,6 +2685,10 @@ impl P2PCore {
     /// FFI для этого не завести - привязки лежат в репозитории готовыми и
     /// сборкой не перегенерируются, поэтому развилка сделана здесь.
     pub fn send_message_mqtt(&self, to_node_id: &str, payload: &str) -> bool {
+        // K4-1: получатель групповой рассылки - тоже «свой» (участник моей
+        // группы или контакт): ему адресованный presence, а не общий эфир.
+        self.presence_scope
+            .add_own(to_node_id, self.node_id_str.as_deref());
         if let Some(message_id) = payload.strip_prefix("ack|") {
             if let Some(sender) = self.mqtt_outbound_tx.as_ref() {
                 let queued = sender
@@ -2591,6 +2807,10 @@ impl P2PCore {
     pub fn stop(&mut self) {
         self.network.stop();
         self.mqtt_outbound_tx = None;
+        // K4: гасим поток личного presence (он проснётся не позже чем через
+        // шаг сна и увидит флаг).
+        self.presence_task_stop
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         // K1: закрываем общий endpoint до остановки runtime, чтобы порт 7777
         // освободился сразу и повторный start() смог его занять.
         if let Some(transport) = self.direct.lock().unwrap().take() {
@@ -2809,6 +3029,12 @@ impl P2PCore {
             Some(id) => id,
             None => return false,
         };
+
+        // K4-1: с кем есть переписка - тот «свой»: ему presence уйдёт лично,
+        // а не через общий топик. Так список «своих» наполняется сам, даже
+        // если приложение ещё не передало контакты отдельным вызовом.
+        self.presence_scope
+            .add_own(&recipient_id, self.node_id_str.as_deref());
 
         let _ = self.storage.save_message(
             message_id.clone(),
@@ -3133,6 +3359,18 @@ impl P2PCore {
 
     pub fn add_contact(&self, user_id: String, display_name: String) -> bool {
         self.storage.save_user(user_id, display_name, false).is_ok()
+    }
+
+    /// K4-1: «свои» для presence - контакты и участники моих групп.
+    ///
+    /// Их ядро знает и обслуживает лично (прямой канал), а в общий топик
+    /// брокера пишет только редкий маяк, когда узлов в сети много. В
+    /// маленькой сети список ни на что не влияет: рассылка идёт как раньше.
+    /// Возвращает, сколько узлов принято (себя и пустые строки отбрасываем).
+    pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {
+        let count = self.presence_scope.set_own(ids, self.node_id_str.as_deref());
+        tracing::info!("PRESENCE K4: audience set, {} own peer(s)", count);
+        count as u32
     }
 }
 

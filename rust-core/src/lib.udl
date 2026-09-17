@@ -182,6 +182,12 @@ interface P2PCoreHandle {
     void stop();
     boolean is_running();
 
+    // K4-1: «свои» для presence - контакты и участники моих групп. Ядро шлёт
+    // им личный presence напрямую по QUIC, а в общий топик брокера пишет
+    // только редкий маяк (раз в 10 минут) и лишь когда узлов в сети много
+    // (меньше 50 - поведение прежнее, до K4). Возвращает число принятых.
+    u32 set_presence_audience(sequence<string> ids);
+
     string? node_id();
     string? public_key();
 

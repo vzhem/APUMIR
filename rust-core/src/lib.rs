@@ -156,6 +156,12 @@ impl P2PCoreHandle {
             )
     }
 
+    /// K4-1: «свои» для presence (контакты и участники моих групп).
+    /// Их ядро обслуживает лично, а в общий топик пишет редкий маяк.
+    pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {
+        self.inner.lock().unwrap().set_presence_audience(ids)
+    }
+
     pub fn node_id(&self) -> Option<String> {
         self.inner.lock().unwrap().node_id()
     }

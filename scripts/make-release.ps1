@@ -66,11 +66,23 @@ try {
         Write-Output $Dirty
         exit 1
     }
-    $Unpushed = (& git log --oneline "@{u}..HEAD" 2>&1 | Out-String).Trim()
-    if ($Unpushed -ne '' -and $Unpushed -notmatch 'no upstream|unknown revision') {
-        Write-Output 'FATAL: there are commits that are not on origin yet:'
-        Write-Output $Unpushed
-        exit 1
+    # `git log @{u}..HEAD` на ветке без upstream пишет в stderr, а PowerShell
+    # 5.1 при ErrorActionPreference='Stop' превращает stderr нативной команды
+    # в терминальную ошибку: скрипт падал с NativeCommandError вместо
+    # понятного сообщения (ветки сессии Arena живут без upstream - это норма).
+    # Поэтому upstream проверяем заранее, а вывод читаем через cmd: его stderr
+    # не попадает в поток ошибок PowerShell.
+    $null = cmd /c "git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>nul"
+    if ($LASTEXITCODE -eq 0) {
+        $Unpushed = (cmd /c "git log --oneline @{u}..HEAD 2>nul" | Out-String).Trim()
+        if ($Unpushed -ne '') {
+            Write-Output 'FATAL: there are commits that are not on origin yet:'
+            Write-Output $Unpushed
+            exit 1
+        }
+    } else {
+        Write-Output 'note: the branch has no upstream - the unpushed-commits check is skipped'
+        Write-Output '      (a tag is still protected by the origin/main and previous-tag checks below)'
     }
 
     # ---- tag checks ---------------------------------------------------------

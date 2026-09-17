@@ -36,6 +36,7 @@ pub mod message_queue;
 pub mod nat_types;
 pub mod offline_send;
 pub mod presence;
+pub mod presence_scope;
 pub mod quic_client;
 pub mod relay;
 pub mod relay_queue;
@@ -52,6 +53,7 @@ pub use message_queue::{
     MessageQueue, QueueError, QueuedMessage, DEFAULT_MESSAGE_TTL, MAX_RETRY_COUNT,
 };
 pub use presence::{GossipDecision, KnownNode, PresenceManager, DEFAULT_GOSSIP_TTL};
+pub use presence_scope::{parse_direct_presence, DirectPresence, PresenceMode, PresenceScope};
 pub use quic_client::{QuicClient, QuicClientError, QuicConnection};
 pub use relay::{DropReason, RelayAction, RelayError, RelayManager, RelayStats};
 pub use router::{RouteDecision, Router, RoutingRecord, DEFAULT_TTL};

@@ -161,6 +161,10 @@ enum Command {
 }
 
 /// Общее состояние транспорта.
+/// K4: `Clone` нужен движку, чтобы отдать рукоятку отдельному потоку
+/// личного presence, не держа замок `Option<DirectTransport>` на время
+/// блокирующей отправки (до [`DIRECT_SEND_BUDGET`] на узел).
+#[derive(Clone)]
 struct Shared {
     client: Arc<QuicClient>,
     pool: Arc<ConnectionPool>,
@@ -187,6 +191,10 @@ impl Shared {
 }
 
 /// Рукоятка транспорта: живёт в `P2PCore`, клонируется дёшево.
+#[derive(Clone)]
+/// K4: рукоятка клонируется (канал команд + общий `Arc`), поэтому движок
+/// может держать свою копию в отдельном потоке presence и в то же время
+/// отдавать `Option<DirectTransport>` из-под замка в FFI-вызовах.
 #[derive(Clone)]
 pub struct DirectTransport {
     tx: mpsc::Sender<Command>,
