@@ -78,6 +78,16 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install --locked cargo-ndk
 
+      # K6: тесты ядра. Правило этапа - падение тестов означает, что релиза
+      # нет: лучше остановиться до APK, чем выпустить сборку с ошибками в
+      # ядре. Скрипт лежит в репозитории (scripts/ci/release-tests.sh), так
+      # что правила тестов меняются обычным коммитом; сам шаг ставится в
+      # воркфлоу один раз скриптом scripts/install-release-workflow.ps1.
+      # Здесь же ставятся хостовые пакеты для нативных зависимостей ядра
+      # (aws-lc-rs, rusqlite bundled) - в этом прогоне их не ставит NDK.
+      - name: Core tests (K6)
+        run: bash scripts/ci/release-tests.sh
+
       - name: Build native core from source (all ABIs)
         working-directory: ./rust-core
         run: cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ../android-app/app/src/main/jniLibs build --release --features mqtt-dual-broker
