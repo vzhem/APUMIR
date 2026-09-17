@@ -80,13 +80,12 @@
    (PCM, текстовый фолбэк).
 
 0u. **v11.70.25 - ядро, этап K2: файл группы полосами от нескольких сидов
-   (код готов 2026-09-16; выпущен ли и sha256 - `START_HERE.md` §3; карта
+   (выпущен 2026-09-17, Latest; размер и sha256 - `START_HERE.md` §3; карта
    протокола и проверка на телефонах - `CHANNEL_SWARM_DESIGN.md` §9.4 «Этап
-   K2»; план - `CORE_ROADMAP.md` K2).** Первый компилятор кода K2 (Rust +
-   Kotlin) - CI тега: смотреть шаги «Build native core», «Regenerate uniffi
-   Kotlin bindings» (новая функция `create_group_file_manifest` должна
-   попасть в `p2p_core.kt`, иначе Gradle упадёт на
-   `OutgoingFilePreparationService.prepareGroupCopy`) и Gradle. Что где:
+   K2»; план - `CORE_ROADMAP.md` K2).** CI собрал с первого раза (прогон
+   35174302441): Rust, перегенерация моста (`createGroupFileManifest`
+   появилась в `p2p_core.kt`, коммит CI `472f42a` в `main`) и Gradle. На
+   телефонах НЕ проверен. Что где:
    - Rust: `crypto/file_transfer.rs` - `FILE_TRANSFER_VERSION_V3_GROUP`=3,
      `GROUP_SCOPE_PREFIX`/`MAX_GROUP_SCOPE_BYTES`, `is_group()`,
      `is_group_scope()`; `validate()` для V3 требует отправителя `pk_` и
