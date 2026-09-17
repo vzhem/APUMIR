@@ -1,5 +1,5 @@
 param(
-    [string[]]$Branch = @(),
+    [string]$Branch = 'arena/01a0b097-apumir',
     [switch]$DryRun
 )
 
@@ -17,10 +17,12 @@ param(
 # from the clone avoids hand-copying YAML through the browser: indentation in
 # YAML is unforgiving.
 #
-# The script can be run from the clone or from a downloaded copy: the repo
-# root is taken from the script location, or from the current folder when the
-# script sits outside the clone. It mirrors the target branch, adds the file,
-# commits and pushes, then returns to the branch that was checked out before.
+# The script never touches the working copy that is checked out. It fetches
+# the branch, opens a temporary git worktree for it (works even if the clone
+# has uncommitted changes), puts the workflow in place, commits, pushes and
+# removes the worktree. Run it from the clone or from a downloaded copy: the
+# repo root is taken from the script location, otherwise from the current
+# folder.
 #
 # What the check does: `cargo check --release --features mqtt-dual-broker` and
 # a uniffi generation check of lib.udl on every pull request. No APK, no
@@ -32,7 +34,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$DefaultBranch = 'arena/01a0b097-apumir'
 $WorkflowPath = '.github/workflows/ci-core-check.yml'
 $SourceRel = 'scripts/ci/ci-core-check.yml'
 
@@ -51,91 +52,100 @@ function Find-RepoRoot {
     return ''
 }
 
-function Branch-Exists([string]$Name) {
-    $out = (& git branch --list $Name | Out-String).Trim()
-    return ($out -ne '')
+# Service git calls: their stderr must not become a terminating error, because
+# PowerShell 5.1 turns native stderr into NativeCommandError while
+# ErrorActionPreference is 'Stop'.
+function Invoke-Quiet([string]$Exe, [string[]]$Arguments) {
+    $Old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Exe @Arguments 2>$null | Out-Null
+    }
+    catch { }
+    finally {
+        $ErrorActionPreference = $Old
+    }
 }
 
 Write-Output "===== core compile check ====="
 
 $RepoRoot = Find-RepoRoot
 if ($RepoRoot -eq '') {
-    Stop-With 'no git clone found: run the script from the clone root (C:\APU-M8), or pass a folder that contains .git'
+    Stop-With 'no git clone found: run the script from the clone root (C:\APU-M8)'
 }
-Write-Output "clone: $RepoRoot"
+Write-Output "clone:  $RepoRoot"
+Write-Output "branch: $Branch"
 
 Push-Location $RepoRoot
+$Worktree = ''
+$Created = $false
 try {
-    $Target = if ($Branch.Count -gt 0) { $Branch[0] } else { $DefaultBranch }
-
-    $Dirty = (& git status --porcelain | Out-String).Trim()
-    if ($Dirty -ne '') {
-        Write-Output $Dirty
-        Stop-With 'the working tree is not clean - commit or stash the changes first'
-    }
-
-    $Back = (& git rev-parse --abbrev-ref HEAD | Out-String).Trim()
-    Write-Output "current branch: $Back"
-    Write-Output "target branch:  $Target"
-
     Write-Output 'fetching origin...'
     & git fetch origin
     if ($LASTEXITCODE -ne 0) { Stop-With 'git fetch failed - check the network' }
 
-    $Remote = (& git rev-parse --verify --quiet "refs/remotes/origin/$Target" | Out-String).Trim()
-    if ($Remote -eq '') { Stop-With "origin has no branch $Target - did the pull request get closed?" }
+    $Remote = (& git rev-parse --verify --quiet "refs/remotes/origin/$Branch" | Out-String).Trim()
+    if ($Remote -eq '') { Stop-With "origin has no branch $Branch - is the pull request still open?" }
 
     if ($DryRun) {
         Write-Output ''
-        Write-Output "DRY RUN: would put $SourceRel into $WorkflowPath on $Target and push."
+        Write-Output "DRY RUN: would put $SourceRel into $WorkflowPath on $Branch and push it."
         Write-Output 'nothing was changed.'
         exit 0
     }
 
-    if ($Back -ne $Target) {
-        Write-Output "switching to $Target (a local mirror of origin/$Target)..."
-        & git checkout -B $Target "origin/$Target"
-        if ($LASTEXITCODE -ne 0) { Stop-With "git checkout $Target failed" }
-    }
+    $Worktree = Join-Path $env:TEMP 'apu-m8-ci-check'
+    if (Test-Path -LiteralPath $Worktree) { Remove-Item -LiteralPath $Worktree -Recurse -Force }
+    Invoke-Quiet 'git' @('worktree', 'prune')
 
-    $Source = Join-Path $RepoRoot $SourceRel
+    Write-Output "opening a temporary working folder: $Worktree"
+    & git worktree add --detach $Worktree "origin/$Branch"
+    if ($LASTEXITCODE -ne 0) { Stop-With 'git worktree add failed' }
+    $Created = $true
+
+    $Source = Join-Path $Worktree $SourceRel
     if (-not (Test-Path -LiteralPath $Source)) {
         Stop-With "no source file $Source - is the pull-request branch complete?"
     }
 
-    $Dir = Split-Path -Parent (Join-Path $RepoRoot $WorkflowPath)
+    $Dir = Split-Path -Parent (Join-Path $Worktree $WorkflowPath)
     if (-not (Test-Path -LiteralPath $Dir)) { $null = New-Item -ItemType Directory -Path $Dir -Force }
-    Copy-Item -LiteralPath $Source -Destination (Join-Path $RepoRoot $WorkflowPath) -Force
+    Copy-Item -LiteralPath $Source -Destination (Join-Path $Worktree $WorkflowPath) -Force
     Write-Output "copied: $SourceRel -> $WorkflowPath"
 
-    $Count = (& git status --porcelain | Measure-Object -Line).Lines
-    if ($Count -eq 0) {
-        Write-Output "RESULT: nothing to do - $WorkflowPath is already in place on $Target."
-        if ($Back -ne $Target) { & git checkout $Back | Out-Null }
+    Push-Location $Worktree
+    try {
+        $Changes = (& git status --porcelain | Out-String).Trim()
+        if ($Changes -eq '') {
+            Write-Output "RESULT: nothing to do - $WorkflowPath is already in place on $Branch."
+            exit 0
+        }
+
+        & git add $WorkflowPath
+        if ($LASTEXITCODE -ne 0) { Stop-With 'git add failed' }
+
+        & git commit -m 'ci: core compile check on pull requests (ci-core-check.yml)'
+        if ($LASTEXITCODE -ne 0) { Stop-With 'git commit failed' }
+
+        & git push origin "HEAD:refs/heads/$Branch"
+        if ($LASTEXITCODE -ne 0) { Stop-With 'git push failed - push the commit manually' }
+
+        Write-Output ''
+        Write-Output 'RESULT: the workflow is in place and pushed into the pull request.'
+        Write-Output 'On GitHub it shows up as the "Core compile check" action and starts'
+        Write-Output 'by itself; the compile result appears in the pull request checks.'
         exit 0
     }
-
-    & git add $WorkflowPath
-    if ($LASTEXITCODE -ne 0) { Stop-With 'git add failed' }
-
-    & git commit -m 'ci: core compile check on pull requests (ci-core-check.yml)'
-    if ($LASTEXITCODE -ne 0) { Stop-With 'git commit failed' }
-
-    & git push origin $Target
-    if ($LASTEXITCODE -ne 0) { Stop-With 'git push failed - push the commit manually' }
-
-    if ($Back -ne $Target) {
-        Write-Output "returning to $Back..."
-        & git checkout $Back | Out-Null
-        if ($LASTEXITCODE -ne 0) { Write-Output "NOTE: could not switch back to $Back - do it manually." }
+    finally {
+        Pop-Location
     }
-
-    Write-Output ''
-    Write-Output 'RESULT: the workflow is in place and pushed into the pull request.'
-    Write-Output 'The check starts by itself on the next pull-request update;'
-    Write-Output 'on GitHub it shows up as the "Core compile check" action.'
-    exit 0
 }
 finally {
+    if ($Created -and $Worktree -ne '') {
+        Invoke-Quiet 'git' @('worktree', 'remove', '--force', $Worktree)
+        if (Test-Path -LiteralPath $Worktree) { Remove-Item -LiteralPath $Worktree -Recurse -Force }
+        Invoke-Quiet 'git' @('worktree', 'prune')
+        Write-Output 'temporary working folder removed'
+    }
     Pop-Location
 }
