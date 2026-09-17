@@ -11,6 +11,10 @@ name: Core compile check
 # Это ничего не публикует и не трогает релизы: релиз по-прежнему запускает
 # только пуш тега vX.Y.Z (build-release.yml).
 #
+# Сборка здесь хостовая (x86_64-unknown-linux-gnu), а не под Android: ядру
+# нужны нативные зависимости (aws-lc-rs, rusqlite bundled), им - cmake и
+# C-компилятор хоста. В релизной сборке их нет, потому что там всё делает NDK.
+#
 # Почему отчёт пишется в комментарий к pull request: хосты с логами прогона
 # (results-receiver.actions.githubusercontent.com) недоступны из песочницы
 # Arena, а комментарий читается обычным API. Владелец видит ту же ошибку
@@ -43,8 +47,6 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # Нативные зависимости ядра (aws-lc-rs, rusqlite bundled) собираются
-      # на хосте: свой C-компилятор, cmake и openssl нужны им.
       - name: System packages for native dependencies
         run: |
           sudo apt-get update -qq
@@ -61,6 +63,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-check-
 
+      # Каталог для отчёта создаём заранее: если его нет, `tee` падает сразу и
+      # роняет шаг раньше компилятора (эта ошибка уже стоила одного прогона).
+      - name: Prepare the report directory
+        run: mkdir -p "$GITHUB_WORKSPACE/target"
+
       - name: Versions (for the report)
         run: |
           rustc --version
@@ -74,14 +81,16 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          cargo check --release --features mqtt-dual-broker 2>&1 | tee ../target/ci-check.log
+          cargo check --release --features mqtt-dual-broker 2>&1 | tee "$GITHUB_WORKSPACE/target/ci-check.log"
 
       # lib.udl должен собираться генератором: если он сломан, CI тега
       # оставит устаревший мост и старый .so - это ломает приложение на
       # старте по контрольным суммам. Пишем во временный каталог, ничего в
       # репозитории не меняя. Команда - ровно та же, что в build-release.yml
-      # на теге, только каталог вывода другой.
+      # на теге, только каталог вывода другой. Генератор - отдельный крейт,
+      # он не зависит от ядра, поэтому шаг идёт даже после ошибки выше.
       - name: uniffi bindings from lib.udl (Kotlin)
+        if: always()
         working-directory: ./rust-core
         run: |
           set -o pipefail
@@ -105,36 +114,59 @@ jobs:
             if [ "$NEWV" != "$OLDV" ]; then
               echo "::warning::uniffi line changed ($OLDV -> $NEWV): the tag build would keep the bindings from git - regenerate before the release"
             fi
-          } 2>&1 | tee -a ../target/ci-check.log
+          } 2>&1 | tee -a "$GITHUB_WORKSPACE/target/ci-check.log"
 
       # Тесты ядра (K6 в плане): пока отдельным шагом и не блокирующим,
       # чтобы сначала набрать статистику. Падать от них релиз не должен.
       - name: cargo test (lib, non-blocking)
-        working-directory: ./rust-core
+        if: always()
         continue-on-error: true
+        working-directory: ./rust-core
         run: |
           set -o pipefail
-          cargo test --release --features mqtt-dual-broker --lib 2>&1 | tee -a ../target/ci-check.log
+          cargo test --release --features mqtt-dual-broker --lib 2>&1 | tee -a "$GITHUB_WORKSPACE/target/ci-check.log" || true
+          echo "cargo test finished"
 
-      # Хвост вывода прямо на странице прогона: владельцу не нужно
-      # скачивать лог, чтобы увидеть ошибку.
+      # Полный лог - на вкладке Actions этого прогона (30 дней): владельцу
+      # не нужно разбирать экран, если понадобится глубина.
+      - name: Upload the full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: ci-check-log
+          path: target/ci-check.log
+          if-no-files-found: warn
+
+      # Хвост вывода прямо на странице прогона.
       - name: Show the tail of the output
         if: failure()
-        run: tail -c 4000 target/ci-check.log || true
+        run: tail -c 4000 "$GITHUB_WORKSPACE/target/ci-check.log" || true
 
-      # И тот же хвост - комментарием к pull request: из песочницы Arena
-      # логи прогона не скачиваются, а комментарий читается через API.
+      # И тот же разбор ошибки - комментарием к pull request: из песочницы
+      # Arena логи прогона не скачиваются, а комментарий читается через API.
       - name: Report the failure into the pull request
         if: failure() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          LOG=target/ci-check.log
+          LOG="$GITHUB_WORKSPACE/target/ci-check.log"
           {
-            echo "Проверка ядра не прошла (прогон ${GITHUB_RUN_ID}). Последние 4000 символов вывода:"
+            echo "Проверка ядра не прошла (прогон ${GITHUB_RUN_ID})."
             echo
-            echo '```'
-            if [ -f "$LOG" ]; then tail -c 4000 "$LOG"; else echo "log file not found: $LOG"; fi
-            echo '```'
+            if [ -f "$LOG" ]; then
+              echo "Строки с ошибками компилятора:"
+              echo
+              echo '```'
+              grep -n -m 3 -A 14 -E '^error' "$LOG" || echo '(строк, начинающихся со слова error, в выводе нет)'
+              echo '```'
+              echo "Последние 3000 символов вывода:"
+              echo
+              echo '```'
+              tail -c 3000 "$LOG"
+              echo '```'
+            else
+              echo "Файл отчёта не найден - смотрите шаги прогона на GitHub."
+            fi
           } > /tmp/report.md
           gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/report.md
