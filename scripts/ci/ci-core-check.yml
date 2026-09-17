@@ -1,24 +1,18 @@
 name: Core compile check
 
-# Проверка ядра на каждом pull request и по кнопке (workflow_dispatch).
+# Тонкая обёртка: вся проверка живёт в scripts/ci/ci-core-check.sh.
 #
-# Зачем. Ни у владельца, ни в песочнице Arena нет Rust-тулчейна: раньше
-# ошибка компиляции в rust-core находилась только на теге - то есть уже
-# после того, как релиз собран и (при плохом раскладе) опубликован. Здесь
-# тот же компилятор и та же линия фич, что в build-release.yml, но без NDK,
-# без APK и без публикации: собирается только `cargo check`.
+# Зачем так. Файл воркфлоу агент запушить не может (у GitHub-приложения Arena
+# нет права `workflows`), его один раз ставит владелец скриптом
+# scripts/install-ci-core-check.ps1. Логика проверки лежит в скрипте в
+# репозитории, поэтому её можно менять обычными пушами — без новых установок.
 #
-# Это ничего не публикует и не трогает релизы: релиз по-прежнему запускает
-# только пуш тега vX.Y.Z (build-release.yml).
+# Что проверяем: `cargo check --release --features mqtt-dual-broker` (та же
+# линия фич, что в релизе), сборку моста из lib.udl генератором uniffi и
+# `cargo test --lib`. Ничего не публикует: релиз запускает только тег
+# (build-release.yml).
 #
-# Сборка здесь хостовая (x86_64-unknown-linux-gnu), а не под Android: ядру
-# нужны нативные зависимости (aws-lc-rs, rusqlite bundled), им - cmake и
-# C-компилятор хоста. В релизной сборке их нет, потому что там всё делает NDK.
-#
-# Почему отчёт пишется в комментарий к pull request: хосты с логами прогона
-# (results-receiver.actions.githubusercontent.com) недоступны из песочницы
-# Arena, а комментарий читается обычным API. Владелец видит ту же ошибку
-# прямо в pull request, без скачивания логов.
+# Подробности и переменные окружения — в шапке scripts/ci/ci-core-check.sh.
 on:
   pull_request:
     paths:
@@ -47,11 +41,6 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: System packages for native dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq pkg-config libssl-dev cmake clang nasm
-
       - name: Cache cargo registry and target
         uses: actions/cache@v4
         with:
@@ -63,110 +52,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-check-
 
-      # Каталог для отчёта создаём заранее: если его нет, `tee` падает сразу и
-      # роняет шаг раньше компилятора (эта ошибка уже стоила одного прогона).
-      - name: Prepare the report directory
-        run: mkdir -p "$GITHUB_WORKSPACE/target"
-
-      - name: Versions (for the report)
-        run: |
-          rustc --version
-          cargo --version
-          nproc
-
-      # Та же линия фич, что и в релизе (build-release.yml): иначе проверка
-      # компилировала бы не то, что собирается в APK. Вывод пишем в файл -
-      # из него собирается отчёт в pull request.
-      - name: cargo check (release, mqtt-dual-broker)
-        working-directory: ./rust-core
-        run: |
-          set -o pipefail
-          cargo check --release --features mqtt-dual-broker 2>&1 | tee "$GITHUB_WORKSPACE/target/ci-check.log"
-
-      # lib.udl должен собираться генератором: если он сломан, CI тега
-      # оставит устаревший мост и старый .so - это ломает приложение на
-      # старте по контрольным суммам. Пишем во временный каталог, ничего в
-      # репозитории не меняя. Команда - ровно та же, что в build-release.yml
-      # на теге, только каталог вывода другой. Генератор - отдельный крейт,
-      # он не зависит от ядра, поэтому шаг идёт даже после ошибки выше.
-      - name: uniffi bindings from lib.udl (Kotlin)
-        if: always()
-        working-directory: ./rust-core
-        run: |
-          set -o pipefail
-          {
-            mkdir -p ../target/uniffi-check
-            cargo run --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
-              generate src/lib.udl --language kotlin --config uniffi.toml \
-              --out-dir ../target/uniffi-check --no-format
-            BIND=$(find ../target/uniffi-check -name p2p_core.kt | head -1)
-            test -n "$BIND"
-            test -s "$BIND"
-            grep -q "ffi_p2p_core_uniffi_contract_version" "$BIND"
-            echo "bindings: $BIND ($(wc -c < "$BIND") bytes)"
-            # Версия контракта зависит только от линии uniffi. Если она уехала
-            # относительно файла в git, то на теге останется старый мост с новым
-            # .so - приложение упадёт на старте. Это предупреждение, а не
-            # остановка: перегенерировать файл негде, это делает CI на теге.
-            NEWV=$(grep -o 'bindings_contract_version = [0-9]*' "$BIND" | grep -o '[0-9]*$')
-            OLDV=$(grep -o 'bindings_contract_version = [0-9]*' ../android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt | grep -o '[0-9]*$')
-            echo "contract version: in git = $OLDV, generated = $NEWV"
-            if [ "$NEWV" != "$OLDV" ]; then
-              echo "::warning::uniffi line changed ($OLDV -> $NEWV): the tag build would keep the bindings from git - regenerate before the release"
-            fi
-          } 2>&1 | tee -a "$GITHUB_WORKSPACE/target/ci-check.log"
-
-      # Тесты ядра (K6 в плане): пока отдельным шагом и не блокирующим,
-      # чтобы сначала набрать статистику. Падать от них релиз не должен.
-      - name: cargo test (lib, non-blocking)
-        if: always()
-        continue-on-error: true
-        working-directory: ./rust-core
-        run: |
-          set -o pipefail
-          cargo test --release --features mqtt-dual-broker --lib 2>&1 | tee -a "$GITHUB_WORKSPACE/target/ci-check.log" || true
-          echo "cargo test finished"
-
-      # Полный лог - на вкладке Actions этого прогона (30 дней): владельцу
-      # не нужно разбирать экран, если понадобится глубина.
-      - name: Upload the full log
-        if: always()
-        uses: actions/upload-artifact@v4
-        continue-on-error: true
-        with:
-          name: ci-check-log
-          path: target/ci-check.log
-          if-no-files-found: warn
-
-      # Хвост вывода прямо на странице прогона.
-      - name: Show the tail of the output
-        if: failure()
-        run: tail -c 4000 "$GITHUB_WORKSPACE/target/ci-check.log" || true
-
-      # И тот же разбор ошибки - комментарием к pull request: из песочницы
-      # Arena логи прогона не скачиваются, а комментарий читается через API.
-      - name: Report the failure into the pull request
-        if: failure() && github.event_name == 'pull_request'
+      # Единственный шаг с логикой: скрипт сам ставит системные пакеты,
+      # компилирует, генерирует мост, гоняет тесты и отчитывается. При
+      # падении он печатает хвост лога здесь и оставляет комментарий к PR.
+      - name: Run the core check
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          LOG="$GITHUB_WORKSPACE/target/ci-check.log"
-          {
-            echo "Проверка ядра не прошла (прогон ${GITHUB_RUN_ID})."
-            echo
-            if [ -f "$LOG" ]; then
-              echo "Строки с ошибками компилятора:"
-              echo
-              echo '```'
-              grep -n -m 3 -A 14 -E '^error' "$LOG" || echo '(строк, начинающихся со слова error, в выводе нет)'
-              echo '```'
-              echo "Последние 3000 символов вывода:"
-              echo
-              echo '```'
-              tail -c 3000 "$LOG"
-              echo '```'
-            else
-              echo "Файл отчёта не найден - смотрите шаги прогона на GitHub."
-            fi
-          } > /tmp/report.md
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/report.md
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci/ci-core-check.sh
