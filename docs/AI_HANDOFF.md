@@ -79,6 +79,87 @@
    (< v11.70.14) `cap`/`ac`/`cand`/мост/UDP не знают — с ними всё как раньше
    (PCM, текстовый фолбэк).
 
+0u. **v11.70.25 - ядро, этап K2: файл группы полосами от нескольких сидов
+   (код готов 2026-09-16; выпущен ли и sha256 - `START_HERE.md` §3; карта
+   протокола и проверка на телефонах - `CHANNEL_SWARM_DESIGN.md` §9.4 «Этап
+   K2»; план - `CORE_ROADMAP.md` K2).** Первый компилятор кода K2 (Rust +
+   Kotlin) - CI тега: смотреть шаги «Build native core», «Regenerate uniffi
+   Kotlin bindings» (новая функция `create_group_file_manifest` должна
+   попасть в `p2p_core.kt`, иначе Gradle упадёт на
+   `OutgoingFilePreparationService.prepareGroupCopy`) и Gradle. Что где:
+   - Rust: `crypto/file_transfer.rs` - `FILE_TRANSFER_VERSION_V3_GROUP`=3,
+     `GROUP_SCOPE_PREFIX`/`MAX_GROUP_SCOPE_BYTES`, `is_group()`,
+     `is_group_scope()`; `validate()` для V3 требует отправителя `pk_` и
+     получателя `grp_…`, для V1/V2 - как раньше (метка группы там =
+     `InvalidPeer`); `from_canonical_bytes` принимает 3. Шифрование кусков
+     не менялось - совместимость V1/V2 полная. `lib.rs` -
+     `create_group_file_manifest` (копия `create_file_transfer_manifest` с
+     версией 3) + тест `group_file_manifest_ffi_round_trip`; `lib.udl` -
+     объявление перед `parse_file_transfer_manifest`.
+   - Kotlin, провод: `FileTransferPacketCodec.Type.WANT(9)` (payload =
+     `FileCustodyPdu.encodeWant`, itemIndex = мой непрерывный префикс);
+     `FileTransferWire.groupAckMessageId` (`f<tid>g<seedTag>a<n>`) и
+     `groupWantMessageId` (`f<tid>g<meTag>w<seedTag>s<seq>`);
+     `GroupWire.FILE_WANT_GROUP_MARK`=`#g1` в хвосте id сообщения `fwant`
+     → `Packet.FileWant.groupCapable`; `GroupFileMarker.SCOPE_PREFIX/scope()/
+     isScope()`; `FileTransferChatRouting.GROUP_SCOPE_PREFIX/isGroupScope()/
+     groupScope()`; `FileTransferDao.getSeeding()` (+ `FakeFileTransferDao`).
+   - Автор: `OutgoingFilePreparationService.prepareGroupCopy(file, name,
+     mime, messageId, groupId, sha256)` - строка `OUTGOING`, состояние
+     `PREPARING` → сразу `SEEDING` (минуя `PREPARED`, чтобы
+     `FileTransferSender.getActiveOutgoing` её не подхватил), `peerNodeId`
+     пустой, готовая копия переиспользуется (ключ, манифест и все куски на
+     месте), недоделанная - стирается и делается заново; возвращает null,
+     если ядро без функции. `wrapGroupKey(transferId, requester)` - конверт
+     под просителя (бросает «binding is not pinned», если его ключ не
+     закреплён).
+   - Сид: `data/file/GroupFileSeeder.kt` - `offer(row, requester) →
+     SENT/NO_KEY/UNREACHABLE/BUSY`, `onAck/onWant/onCancel/pump/forget`,
+     `canSeed(row, keyReady)`, `isGroupManifest(bytes)` (разбор
+     канонических байт без ядра), `MAX_LEGS`=6, `OFFER_TIMEOUT_MS` 2 мин,
+     `STALL_TIMEOUT_MS` 10 мин, `mayServe` (рой: участник, не забанен) для
+     плеч, поднятых по ACK/WANT после перезапуска. Создаётся в
+     `FileTransferRouter` (новый параметр конструктора
+     `preparation: Provider<OutgoingFilePreparationService>` - цикл Dagger
+     через Provider, как у роя), качается в `pumpOutgoing`.
+   - Приёмник (`FileTransferReceiver`): `GroupSeedHooks(onAck, onWant,
+     onCancel, onOfferAccepted)`; `groupSeeds` (память); `isSeedRow` =
+     `OUTGOING/SEEDING` или `INCOMING/COMPLETE` - ACK/WANT/CANCEL по таким
+     строкам уходят сидеру; `handleOffer`: манифест с меткой группы
+     принимается от любого сида, если `routeOffer` не `Unknown`, метка ==
+     `groupScope(chatId)`, тот же transferId = ещё один сид (до
+     `MAX_GROUP_SEEDS`=4, лишним CANCEL), конверт хранится первый, ключ
+     импортируется один раз; `handleChunk`: кусок общей копии только от
+     известного сида и только после `verifyGroupChunk` (расшифровка
+     ключом файла; провал = сид вычёркивается); `sendFileAck` →
+     `sendGroupAcks` (ACK тому, кто прислал кусок; всем - при инвентаре и
+     по завершении) и `sendGroupInventory` (`FileCustodyPdu.assign`,
+     `HOLDER_STALE_MS` для живости, `INVENTORY_INTERVAL_MS` 10 с);
+     `finalizeTransfer` - итоговый ACK каждому сиду; `declineTransfer` -
+     CANCEL каждому сиду.
+   - Рой (`GroupFileSwarm`): `ask` шлёт `fwant#g1` одному сиду (как
+     раньше); `onSeedJoined` (из приёмника, только по предложению с общим
+     манифестом) зовёт следующего, пока сидов < `STRIPE_SEEDS`=3
+     (`Pending.striping` - кто уже шлёт полосы; при простое ≥ `STALL_MS`
+     очищается, чтобы переспросить);
+     `onFileWant` при `groupCapable` → `serveShared` (`sharedSource`:
+     готовая общая строка или `prepareGroupCopy` под `prepLocks`; `BUSY` →
+     `waiting` с `shared = true`, `serveWaiting` считает такие по плечам
+     сидера, личные - по передачам); `onServed` → `rememberSeed` +
+     `servedCounts` (StateFlow) → `GroupChatUiState/ChannelUiState.
+     servedFiles` → `FileCardState.of(servedCount)`; `mayServeFile`;
+     `onGroupGone` стирает общие копии группы.
+   - Совместимость: старый сид `#g1` не понимает (хвост остаётся в его
+     `messageId` исходящей строки - безвредно) и отдаёт личную копию -
+     приёмник берёт её как раньше; старый проситель метку не шлёт - новый
+     сид идёт по старому пути (`serveShared` не зовётся). `Type.WANT` и
+     манифест V3 старые телефоны молча отбрасывают, но им их никто не шлёт.
+   - Не сделано в K2: инвентарь идёт через обычный транспорт (LAN/брокер) -
+     как у хранителей; личные файлы остаются V2; ретрансляция общей копии
+     хранителями (этап 7) с V3 не проверялась (общий манифест хранитель
+     переслать не сможет - `handleForwardedOffer` требует отправителя =
+     origin; для файлов групп хранители и не используются).
+
 0t. **v11.70.24 - ядро, этап K1: один QUIC-endpoint на движок, пул
    соединений, keep-alive, STUN с порта 7777 (выпущен 2026-09-16, Latest;
    тег/прогон/sha256 - `START_HERE.md` §3). Первая компиляция кода K1

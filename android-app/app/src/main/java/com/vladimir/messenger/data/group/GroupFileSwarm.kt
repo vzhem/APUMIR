@@ -72,14 +72,15 @@ import kotlinx.coroutines.withContext
  * автор шифрует файл один раз ([OutgoingFilePreparationService.prepareGroupCopy]),
  * получивший файл раздаёт прямо из своей входящей (куски и ключ у него
  * остались), и все сиды отдают байт в байт одно и то же. Проситель шлёт
- * `fwant` с меткой `#g1` («понимаю общие манифесты») сразу нескольким сидам
- * ([STRIPE_SEEDS]); каждый отвечает предложением с общим манифестом и
- * конвертом ключа под ключ просителя, приёмник принимает их все в одну
- * передачу, делит недостающее инвентарём (WANT) и сливает файл по sha256
- * (FileTransferReceiver). Чем больше участников уже скачали файл, тем
- * быстрее он приходит следующему. Сид старой версии метку не понимает и
+ * `fwant` с меткой `#g1` («понимаю общие манифесты») одному сиду; тот
+ * отвечает предложением с общим манифестом и конвертом ключа под ключ
+ * просителя, приёмник его принимает и зовёт [onSeedJoined] - проситель
+ * просит следующего сида, и так до [STRIPE_SEEDS]; приёмник принимает их
+ * всех в одну передачу, делит недостающее инвентарём (WANT) и сливает файл
+ * по sha256 (FileTransferReceiver). Чем больше участников уже скачали файл,
+ * тем быстрее он приходит следующему. Сид старой версии метку не понимает и
  * отвечает прежней личной передачей - приёмник берёт её как раньше (один
- * источник), а лишние предложения отклоняет CANCEL.
+ * источник), других сидов при этом не зовут.
  */
 @Singleton
 class GroupFileSwarm @Inject constructor(
@@ -353,25 +354,25 @@ class GroupFileSwarm @Inject constructor(
             entry.tried.clear()
             order.firstOrNull { it !in entry.striping } ?: return
         }
-        // Полосы (K2): вместе с первым сидом просим ещё до STRIPE_SEEDS - 1
-        // других; каждый ответит предложением общей копии, и куски пойдут от
-        // всех сразу. Сид старой версии ответит личной передачей: приёмник
-        // возьмёт первую и откажет остальным (CANCEL), как в этапе 10.
-        val extra = order.filter { it != seed && it !in entry.tried && it !in entry.striping }
-            .take((STRIPE_SEEDS - 1 - entry.striping.size).coerceAtLeast(0))
-        val targets = listOf(seed) + extra
-        entry.tried.addAll(targets)
+        // Полосы (K2): просим одного, как раньше; когда его предложение с
+        // ОБЩИМ манифестом принято, приёмник зовёт onSeedJoined, и тот просит
+        // следующего - и так до STRIPE_SEEDS. Сид старой версии отвечает
+        // личной передачей: общего манифеста нет, других не зовём (иначе
+        // два-три старых телефона зря шифровали бы по полной копии, а
+        // приёмник отказывал бы лишним CANCEL, как в этапе 10).
+        entry.tried.add(seed)
         entry.askedSeed = seed
         entry.askedAtMs = now
         entry.attempts++
         persistPending()
         val binding = runCatching { FileExchangeKeyStore.publicBinding(appContext) }.getOrNull() ?: ByteArray(0)
         val envelope = GroupWire.buildFileWant(entry.groupId, entry.sha256, entry.messageId, binding, groupCapable = true)
-        val report = delivery.deliver(entry.groupId, envelope, targets)
+        val report = delivery.deliver(entry.groupId, envelope, listOf(seed))
         Log.i(
             TAG,
-            "file want sent key=${entry.sha256.take(12)} to=${targets.joinToString(",") { it.takeLast(8) }} " +
-                "attempt=${entry.attempts} delivered=${report.delivered}/${report.attempted}",
+            "file want sent key=${entry.sha256.take(12)} to=${seed.takeLast(8)} attempt=${entry.attempts} " +
+                "delivered=${report.delivered}/${report.attempted}" +
+                (if (entry.striping.isNotEmpty()) " striping=${entry.striping.size}" else ""),
         )
     }
 
@@ -722,7 +723,7 @@ class GroupFileSwarm @Inject constructor(
             if (own == null || !own.isFile) return null
             val info = cardInfo(groupId, packet.sha256)
                 ?: GroupFileMarker.Info(packet.sha256, own.length(), "application/octet-stream", own.name)
-            val prepared = try {
+            val prepared: OutgoingFilePreparationService.PreparedTransfer? = try {
                 preparation.prepareGroupCopy(
                     source = own,
                     displayName = info.displayName,
@@ -734,8 +735,9 @@ class GroupFileSwarm @Inject constructor(
                 )
             } catch (error: Exception) {
                 Log.w(TAG, "group copy prepare failed for ${packet.sha256.take(12)}: ${error.message}")
-                return null
-            } ?: return null
+                null
+            }
+            if (prepared == null) return null
             source = transferDao.getTransfer(prepared.transferId) ?: return null
             Log.i(TAG, "group copy ready ${packet.sha256.take(12)} transfer=${prepared.transferId} (${prepared.chunkCount} chunks)")
         }
@@ -882,6 +884,9 @@ class GroupFileSwarm @Inject constructor(
             // Передача идёт (куски приходят): сид повторяет предложение сам.
             // Стоит дольше STALL_MS - сид пропал, спрашиваем следующего.
             if (rows.any { now - it.updatedAtMs < STALL_MS }) continue
+            // Полосы (K2): раз стоит, сиды, что слали полосы, пропали - их
+            // можно спрашивать снова наравне с остальными.
+            entry.striping.clear()
             if (entry.attempts >= MAX_ATTEMPTS) {
                 mutex.withLock { pending.remove(key); publishPending() }
                 changed = true
@@ -933,6 +938,7 @@ class GroupFileSwarm @Inject constructor(
             if (hasLiveTransfer(entry.groupId, entry.sha256, now)) continue
             entry.tried.clear()
             entry.tried.addAll(mutex.withLock { seeds[GroupFileMarker.key(entry.groupId, entry.sha256)]?.filter { it != nodeId }.orEmpty() })
+            entry.striping.remove(nodeId) // вернулся - пусть шлёт полосу заново (K2)
             ask(entry, now)
         }
     }
@@ -1060,7 +1066,7 @@ class GroupFileSwarm @Inject constructor(
         private const val TAG = "GroupFileSwarm"
         /** Столько передач отдаю одновременно как сид; остальные просьбы ждут. */
         const val MAX_PARALLEL_SEEDS = 3
-        /** Полосы (K2): у стольких сидов просим один файл одновременно (приёмник принимает до MAX_GROUP_SEEDS). */
+        /** Полосы (K2): до стольких сидов зовём на один файл, по одному по мере принятия предложений (приёмник берёт до MAX_GROUP_SEEDS). */
         const val STRIPE_SEEDS = 3
         /** Очередь чужих просьб и её срок. */
         const val MAX_WAITING = 200

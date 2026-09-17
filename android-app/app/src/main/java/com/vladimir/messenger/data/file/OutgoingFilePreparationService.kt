@@ -157,7 +157,8 @@ class OutgoingFilePreparationService private constructor(
         transferDao.getForFile(groupId, expectedSha256)
             .firstOrNull { it.direction == "OUTGOING" && it.state == "SEEDING" && it.expiresAtMs > nowMs }
             ?.let { row ->
-                if (store.readManifest(row.transferId) != null && transferDao.countChunks(row.transferId) == row.chunkCount) {
+                val keyReady = runCatching { keyAccess.withExisting(row.transferId) { } }.isSuccess
+                if (keyReady && store.readManifest(row.transferId) != null && transferDao.countChunks(row.transferId) == row.chunkCount) {
                     return@withContext PreparedTransfer(
                         transferId = row.transferId,
                         messageId = row.messageId,
@@ -168,7 +169,8 @@ class OutgoingFilePreparationService private constructor(
                         fileSha256 = row.fileSha256,
                     )
                 }
-                // Недошифрованная копия (приложение убили посреди подготовки): заново.
+                // Недошифрованная копия (приложение убили посреди подготовки) или
+                // потерянный ключ: заново.
                 runCatching { store.deleteTransfer(row.transferId) }
                 transferDao.deleteTransfer(row.transferId)
             }

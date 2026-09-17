@@ -461,7 +461,7 @@ class FileTransferReceiver(
             Log.w(TAG, "File offer for already failed transfer; dropped")
             return
         }
-        if (groupOffer && existing?.state == "COMPLETE") {
+        if (groupOffer && existing != null && existing.state == "COMPLETE") {
             // Уже всё есть (сид опоздал): ему достаточно итогового подтверждения.
             sendGroupAck(transferIdHex, senderId, existing.chunkCount)
             return
@@ -573,7 +573,8 @@ class FileTransferReceiver(
         ciphertext: ByteArray,
     ) {
         val transfer = transferDao.getTransfer(transferIdHex)
-        if (transfer == null || chunkStore.readManifest(transferIdHex) == null) {
+        val manifestBytes = chunkStore.readManifest(transferIdHex)
+        if (transfer == null || manifestBytes == null) {
             if (declined.containsKey(transferIdHex)) return
             bufferOrDropChunk(transferIdHex, chunkIndex, ciphertext)
             return
@@ -589,26 +590,27 @@ class FileTransferReceiver(
             Log.w(TAG, "Plain chunk for own outgoing $transferIdHex from ${senderId.takeLast(8)}; dropped")
             return
         }
-        if (transfer.state == "COMPLETE" && groupSeeds[transferIdHex] == null &&
-            chunkStore.readManifest(transferIdHex)?.let { GroupFileSeeder.isGroupManifest(it) } == true
-        ) {
+        val groupManifest = GroupFileSeeder.isGroupManifest(manifestBytes)
+        if (groupManifest && transfer.state == "COMPLETE") {
             // Файл уже собран из полос, а этот сид ещё шлёт: итоговое
             // подтверждение ему лично, чтобы он закрыл плечо (K2).
             sendGroupAck(transferIdHex, senderId, transfer.chunkCount)
             return
         }
-        // Файл группы полосами (K2): кусок от сида проверяется сразу ключом
-        // файла - испорченный или подложный (сид не тот) не ложится на диск и
-        // не портит сборку, а его сид выбывает из дележа.
-        val seedsOfTransfer = groupSeeds[transferIdHex]
-        if (seedsOfTransfer != null && seedsOfTransfer.isNotEmpty()) {
-            if (senderId !in seedsOfTransfer) {
+        if (groupManifest) {
+            // Файл группы полосами (K2): кусок проверяется сразу ключом файла
+            // - испорченный или подложный не ложится на диск и не портит
+            // сборку, а приславший его сид выбывает из дележа. Сиды известны
+            // только в памяти: после перезапуска кусок до повторного
+            // предложения принимается от любого, но только подлинный.
+            val seedsOfTransfer = groupSeeds[transferIdHex]
+            if (!seedsOfTransfer.isNullOrEmpty() && senderId !in seedsOfTransfer) {
                 Log.w(TAG, "Group chunk $chunkIndex for $transferIdHex from unexpected ${senderId.takeLast(8)}; dropped")
                 return
             }
-            if (!verifyGroupChunk(transferIdHex, chunkIndex, ciphertext)) {
+            if (!verifyGroupChunk(manifestBytes, transferIdHex, chunkIndex, ciphertext)) {
                 Log.w(TAG, "Group chunk $chunkIndex for $transferIdHex from ${senderId.takeLast(8)} failed authentication; seed dropped")
-                seedsOfTransfer.remove(senderId)
+                seedsOfTransfer?.remove(senderId)
                 return
             }
         }
@@ -954,8 +956,7 @@ class FileTransferReceiver(
             (transfer.direction == "INCOMING" && transfer.state == "COMPLETE")
 
     /** Кусок общей копии подлинный: расшифровывается ключом файла под общим манифестом. */
-    private fun verifyGroupChunk(transferIdHex: String, chunkIndex: Long, ciphertext: ByteArray): Boolean {
-        val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return false
+    private fun verifyGroupChunk(manifestBytes: ByteArray, transferIdHex: String, chunkIndex: Long, ciphertext: ByteArray): Boolean {
         if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) return true // ключ ещё не пришёл: проверит сборка
         return runCatching {
             keyVault.withExistingKey(transferIdHex) { fileKey ->

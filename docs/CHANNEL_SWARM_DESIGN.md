@@ -952,8 +952,61 @@ onGroupGone`: `GroupFileStore.deleteGroup` (все копии группы), п�
 нажатия), значок файла в списке закреплённых. Тесты: `GroupWireTest.
 fileNoneRoundTrip`, `GroupFileStoreTest.deleteGroupRemovesOnlyThatGroup`.
 
-Дальше: ядро - FFI подписи (убрать Java-библиотеку), куски по QUIC напрямую
-там, где адрес известен; полосы кусков файла группы между несколькими
-сидами (нужен ключ куска, не привязанный к получателю, - изменение
-`file_key_envelope.rs` и перегенерация uniffi); подписанные квитанции
-хранения (этап 7, §D).
+Этап K2 (v11.70.25, ядро; план - `CORE_ROADMAP.md`): **полосы одного файла
+от нескольких сидов.** Ключ куска больше не привязан к получателю: у файла
+группы ОБЩИЙ манифест версии 3 (`rust-core/src/crypto/file_transfer.rs`,
+`FILE_TRANSFER_VERSION_V3_GROUP`), в поле получателя которого стоит метка
+группы `grp_<id>` (`GroupFileMarker.scope`; ядро принимает только буквы,
+цифры и `-_.:`, до 128 байт), а не адрес узла. Шифрование кусков прежнее
+(nonce = transfer_id‖index, aad = sha256(манифеста)‖index), поэтому все сиды
+отдают байт в байт одинаковый шифротекст; ключ файла каждому просителю
+заворачивается прежним `create_file_key_envelope` с байтами общего
+манифеста. Новая функция моста `create_group_file_manifest(sender,
+group_scope, name, mime, size, sha256, created, expires)` (`lib.udl`).
+Kotlin: (1) **проситель** шлёт `fwant` с меткой `#g1` в хвосте id сообщения
+(`GroupWire.FILE_WANT_GROUP_MARK`; старый сид метку не понимает и отдаёт
+личную копию, старый проситель метку не ставит - шестое поле не менялось)
+одному сиду, как раньше; при принятии предложения с ОБЩИМ манифестом
+(`GroupSeedHooks.onOfferAccepted` → `GroupFileSwarm.onSeedJoined`) зовёт
+следующего, пока сидов < `STRIPE_SEEDS`=3 (старый сид общего манифеста не
+шлёт - других не зовут, лишних копий никто не шифрует); приёмник (`FileTransferReceiver.handleOffer`)
+принимает предложение с меткой группы от любого сида, которого одобрил рой
+(`routeOffer`: `Chat`/`Duplicate` = «да, тот файл», `Unknown` = чужой,
+отбросить), сверяет метку с группой чата, ведёт ОДНУ строку `INCOMING` на
+transferId (он у всех сидов один), помнит сидов в `groupSeeds` (не больше
+`MAX_GROUP_SEEDS`=4, лишним - CANCEL), каждый кусок проверяет ключом файла
+до записи (`verifyGroupChunk`; подложный кусок = сид вычёркивается),
+подтверждает каждому сиду отдельно (`f<tid>g<sid>a<n>`), при двух и более
+сидах раз в 10 с шлёт каждому инвентарь недостающего пакетом `Type.WANT`
+(9) - полосы по 8 кусков через `FileCustodyPdu.assign`, первое окно
+первого сида не делится; по завершении - итоговый ACK всем сидам.
+(2) **Сид** - `data/file/GroupFileSeeder.kt`: источник - авторская строка
+`OUTGOING`/`SEEDING` (`OutgoingFilePreparationService.prepareGroupCopy`:
+готовится один раз на файл и группу под `prepLocks`, куски шифруются один
+раз, обычный передатчик состояние `SEEDING` не трогает) или своя входящая
+`COMPLETE` с общим манифестом (куски и ключ остались от приёма -
+`canSeed`); на каждого просителя плечо: предложение (конверт ключа под его
+ключ обмена - `wrapGroupKey`), куски после первого ACK окном
+`FileCustodySender.windowChunks` или по инвентарю (`onWant`); `MAX_LEGS`=6
+плеч (лишние просьбы - в очередь `waiting` с `shared = true`), плечо без
+ACK 2 мин или молчащее 10 мин снимается; полный ACK → `onServed` → рой
+запоминает просителя сидом и считает раздачи (`servedCounts` → «Получили:
+N» на карточке автора). ACK/WANT/CANCEL по строке-источнику приёмник
+отдаёт сидеру (`GroupSeedHooks`), а не передатчику. `getSeeding()` в DAO;
+истёкшие общие копии автора стираются раз в 10 мин; при выходе из группы -
+сразу (`onGroupGone`). Тесты Rust: `file_transfer::tests::
+group_manifest_round_trip_and_identical_chunks_across_seeds`,
+`lib::tests::group_file_manifest_ffi_round_trip` (гоняются только на ПК с
+cargo / в CI после K6). Как проверить (три телефона): A кладёт файл, B
+скачивает (в логе A `group copy ready … transfer=…`, `seed: offered …`, у B
+`File offer accepted … group seeds=1`); C нажимает «Скачать» - в логе C
+`file want sent … to=<B>`, `File offer accepted … group seeds=1`, `stripe:
+seed … joined … asked <A> too`, `File offer accepted … group seeds=2`, на A
+и B `seed: … wants N chunk(s) … from me`,
+файл у C «Получено ✓», на A и B `seed: … fully delivered`; карточка у A
+«Получили: 2». Смешанные версии: старый телефон в любой роли получает и
+отдаёт по-старому.
+
+Дальше: ядро - куски по QUIC напрямую (K3), presence/DHT (K4), кастодия у
+соседей (K5), тесты ядра в CI (K6) - `CORE_ROADMAP.md`; FFI подписи (убрать
+Java-библиотеку); подписанные квитанции хранения (этап 7, §D).

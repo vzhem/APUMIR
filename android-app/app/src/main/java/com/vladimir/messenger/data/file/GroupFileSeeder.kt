@@ -78,7 +78,7 @@ class GroupFileSeeder(
     /** transferId -> просители, подтвердившие весь файл (для карточки автора; только память). */
     private val served = ConcurrentHashMap<String, MutableSet<String>>()
     /** Сообщить рою: просителю отдан весь файл (он сам теперь сид). */
-    @Volatile var onServed: (transferIdHex: String, requester: String) -> Unit = { _, _ -> }
+    @Volatile var onServed: suspend (transferIdHex: String, requester: String) -> Unit = { _, _ -> }
     @Volatile private var lastSweepAt = 0L
 
     /** Скольким просителям отдан весь файл этой копии. */
@@ -153,7 +153,13 @@ class GroupFileSeeder(
             val key = legKey(transferIdHex, from)
             if (contiguous >= row.chunkCount) {
                 val leg = legs.remove(key)
-                val first = served.getOrPut(transferIdHex) { ConcurrentHashMap.newKeySet() }.add(from)
+                if (leg == null) {
+                    // Плеча не было (перезапуск или чужое подтверждение): считаем
+                    // только участника, которому файл вообще можно было отдать.
+                    val manifest = runCatching { chunkStore.readManifest(transferIdHex) }.getOrNull() ?: return
+                    if (!isGroupManifest(manifest) || !runCatching { mayServe(row, from) }.getOrDefault(false)) return
+                }
+                val first = served.getOrPut(transferIdHex) { ConcurrentHashMap.newKeySet<String>() }.add(from)
                 if (leg != null || first) {
                     Log.i(TAG, "seed: $transferIdHex fully delivered to ${from.takeLast(8)} (served=${servedCount(transferIdHex)})")
                 }

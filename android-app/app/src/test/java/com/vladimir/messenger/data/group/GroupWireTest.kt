@@ -847,6 +847,28 @@ class GroupWireTest {
         assertEquals(0, bare.binding.size)
     }
 
+    /** K2: метка «понимаю общие манифесты» едет в хвосте id и снимается при разборе. */
+    @Test
+    fun fileWantGroupMarkRoundTrip() {
+        val sha = "0f".repeat(32)
+        val marked = GroupWire.buildFileWant("g", sha, "msg-2", ByteArray(0), groupCapable = true)
+        assertEquals(6, marked.split('|').size)
+        val want = GroupWire.parse(marked) as GroupWire.Packet.FileWant
+        assertTrue(want.groupCapable)
+        assertEquals("msg-2", want.messageId)
+        val plain = GroupWire.parse(GroupWire.buildFileWant("g", sha, "msg-2", ByteArray(0))) as GroupWire.Packet.FileWant
+        assertTrue(!plain.groupCapable)
+        assertEquals("msg-2", plain.messageId)
+        // Старый разбор (до v11.70.25) увидел бы id вместе с меткой - она не должна ломать длину и знаки.
+        val raw = java.util.Base64.getUrlDecoder().decode(marked.split('|')[4]).toString(Charsets.UTF_8)
+        assertEquals("msg-2" + GroupWire.FILE_WANT_GROUP_MARK, raw)
+        try {
+            GroupWire.buildFileWant("g", sha, "id" + GroupWire.FILE_WANT_GROUP_MARK, ByteArray(0))
+            org.junit.Assert.fail("id colliding with the mark accepted")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
     @Test
     fun fileWantRejectsGarbage() {
         val sha = "0f".repeat(32)

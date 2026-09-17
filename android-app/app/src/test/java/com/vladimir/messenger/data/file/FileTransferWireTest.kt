@@ -68,6 +68,26 @@ class FileTransferWireTest {
         assertEquals(5, ids.toSet().size)
     }
 
+    /** K2: подтверждение и инвентарь каждому сиду общей копии - свои id, иначе сеть отсеет второе как дубль. */
+    @Test
+    fun groupMessageIdsDifferPerSeedAndStayDelimiterSafe() {
+        val seedA = "pk_" + "ab".repeat(16)
+        val seedB = "pk_" + "cd".repeat(16)
+        val me = "pk_" + "ef".repeat(16)
+        val ackA = FileTransferWire.groupAckMessageId(transferIdHex, seedA, 12)
+        val ackB = FileTransferWire.groupAckMessageId(transferIdHex, seedB, 12)
+        val wantA = FileTransferWire.groupWantMessageId(transferIdHex, me, seedA, 5)
+        val wantB = FileTransferWire.groupWantMessageId(transferIdHex, me, seedB, 5)
+        val ids = listOf(ackA, ackB, wantA, wantB, FileTransferWire.ackMessageId(transferIdHex, 12))
+        assertEquals(5, ids.toSet().size)
+        ids.forEach { id ->
+            assertTrue(id.length <= FileTransferWire.MAX_MESSAGE_ID_BYTES)
+            assertFalse(id.contains('|'))
+        }
+        assertEquals(ackA, FileTransferWire.groupAckMessageId(transferIdHex, seedA, 12))
+        assertEquals(FileTransferPacketCodec.Type.WANT, FileTransferPacketCodec.Type.fromWire(9))
+    }
+
     @Test
     fun invalidTransferIdRejected() {
         try {

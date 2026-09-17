@@ -86,4 +86,20 @@ class GroupFileMarkerTest {
         assertFalse(GroupFileMarker.isSha256(sha.uppercase()))
         assertFalse(GroupFileMarker.isSha256(sha.dropLast(1)))
     }
+
+    /** K2: метка группы в манифесте - только знаки, которые принимает ядро (`is_group_scope`). */
+    @Test
+    fun groupScopeIsSafeForTheCore() {
+        val uuid = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        assertEquals("grp_$uuid", GroupFileMarker.scope(uuid))
+        assertTrue(GroupFileMarker.isScope(GroupFileMarker.scope(uuid)))
+        assertFalse(GroupFileMarker.isScope("pk_" + "ab".repeat(16)))
+        val odd = GroupFileMarker.scope("id with spaces|and|bars")
+        assertTrue(odd.startsWith("grp_"))
+        assertEquals("grp_".length + 32, odd.length)
+        assertTrue(odd.drop(4).all { it in '0'..'9' || it in 'a'..'f' })
+        assertEquals(odd, GroupFileMarker.scope("id with spaces|and|bars"))
+        assertTrue(GroupFileMarker.scope("x".repeat(100)).length <= 128)
+        assertTrue(GroupFileMarker.scope("x".repeat(101)).length <= 128)
+    }
 }
