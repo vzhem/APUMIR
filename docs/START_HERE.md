@@ -49,6 +49,14 @@
 
 ## 3. Где мы сейчас (проверено 2026-09-17, не по памяти)
 
+- **В работе (нет в релизах):** ядро, этап K3 из `docs/CORE_ROADMAP.md` —
+  куски ЛИЧНЫХ файлов бинарными APUF-кадрами по прямому QUIC (приоритет
+  данных, без base64/брокера): Rust (`send_file_chunk`, событие
+  `file_chunk_received`, `JobKind::FileData`), Kotlin (FCAP-рукопожатие,
+  сборка диапазонов, быстрый поллинг событий), код готов 2026-09-17 на
+  ветке `arena/01a0af3e-apumir` (PR #6). Релиз — только после явного
+  разрешения владельца (следующий номер после v11.70.26). Карта —
+  `AI_HANDOFF.md` 0v. Дальше по плану: K4, K5, K6 (`CORE_ROADMAP.md` §2).
 - Релиз **v11.70.26** = Latest (`gh api repos/vzhem/APUMIR/releases/latest --jq .tag_name`),
   `app-release.apk` = 37 930 406 байт, sha256 `da9f173c…8c1ed` (digest ассета
   из GitHub API), тег на коммите `5eea3b7` (= кончик `main`), прогон

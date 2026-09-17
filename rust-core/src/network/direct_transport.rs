@@ -97,6 +97,21 @@ const LANE_QUEUE_CAPACITY: usize = 64;
 /// `None`. По нему пул усыновляет входящее соединение.
 pub type FrameHandler = Arc<dyn Fn(Vec<u8>) -> Option<String> + Send + Sync + 'static>;
 
+/// Какой стрим открыть под кадр.
+///
+/// K3: бинарные кадры файлов (`APUF`, `file_wire`) идут с приоритетом
+/// данных (FILE_DATA_STREAM_PRIORITY в `quic_client.rs`) и не ждут за
+/// собой интерактивные сообщения; формат стрима (длина + payload) и
+/// семантика ответа не меняются — старые телефоны принимают такой стрим
+/// как очередное сообщение и молча отбрасывают неразобранный кадр.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JobKind {
+    /// Текстовый кадр `sender|msgId|chatId|text` (сообщения, пакеты).
+    Interactive,
+    /// Бинарный кадр файла (K3).
+    FileData,
+}
+
 /// Куда вернуть результат отправки.
 enum Reply {
     /// Поток вне runtime (Kotlin → uniffi): ждёт на синхронном канале.
@@ -125,6 +140,7 @@ struct SendJob {
     /// усыновлённому входящему от узла за симметричным NAT).
     addr: Option<SocketAddr>,
     payload: Vec<u8>,
+    kind: JobKind,
     reply: Reply,
     /// Когда поставлена в очередь. Если вызывающий уже отчаялся ждать
     /// (прошло больше [`DIRECT_SEND_BUDGET`]), кадр не отправляем: он уже
@@ -219,12 +235,34 @@ impl DirectTransport {
         addr: Option<SocketAddr>,
         payload: Vec<u8>,
     ) -> bool {
+        self.send_with_kind_blocking(peer_id, addr, payload, JobKind::Interactive)
+    }
+
+    /// K3: бинарный кадр файла (см. [`JobKind::FileData`]). Семантика
+    /// ответа та же, что у [`DirectTransport::send_blocking`].
+    pub fn send_file_blocking(
+        &self,
+        peer_id: &str,
+        addr: Option<SocketAddr>,
+        payload: Vec<u8>,
+    ) -> bool {
+        self.send_with_kind_blocking(peer_id, addr, payload, JobKind::FileData)
+    }
+
+    fn send_with_kind_blocking(
+        &self,
+        peer_id: &str,
+        addr: Option<SocketAddr>,
+        payload: Vec<u8>,
+        kind: JobKind,
+    ) -> bool {
         let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
         let command = Command::Send {
             peer_id: peer_id.to_string(),
             job: SendJob {
                 addr,
                 payload,
+                kind,
                 reply: Reply::Blocking(reply_tx),
                 enqueued_at: Instant::now(),
             },
@@ -251,12 +289,23 @@ impl DirectTransport {
     /// Асинхронная отправка (для задач внутри runtime, например повторов из
     /// очереди при появлении соседа по mDNS).
     pub async fn send(&self, peer_id: &str, addr: Option<SocketAddr>, payload: Vec<u8>) -> bool {
+        self.send_with_kind(peer_id, addr, payload, JobKind::Interactive).await
+    }
+
+    async fn send_with_kind(
+        &self,
+        peer_id: &str,
+        addr: Option<SocketAddr>,
+        payload: Vec<u8>,
+        kind: JobKind,
+    ) -> bool {
         let (reply_tx, reply_rx) = oneshot::channel();
         let command = Command::Send {
             peer_id: peer_id.to_string(),
             job: SendJob {
                 addr,
                 payload,
+                kind,
                 reply: Reply::Async(reply_tx),
                 enqueued_at: Instant::now(),
             },
@@ -468,7 +517,7 @@ fn spawn_lane(peer_id: &str, shared: &Arc<Shared>) -> PeerLane {
                     continue;
                 }
             }
-            let outcome = send_one(&shared, &peer_id, job.addr, &job.payload).await;
+            let outcome = send_one(&shared, &peer_id, job.addr, &job.payload, job.kind).await;
             unreachable = match (outcome, job.addr) {
                 (SendOutcome::ConnectFailed, Some(addr)) => Some((addr, Instant::now())),
                 (SendOutcome::Sent, _) => None,
@@ -512,6 +561,7 @@ async fn send_one(
     peer_id: &str,
     addr: Option<SocketAddr>,
     payload: &[u8],
+    kind: JobKind,
 ) -> SendOutcome {
     let key = peer_id.as_bytes().to_vec();
     for attempt in 1..=2u8 {
@@ -520,7 +570,13 @@ async fn send_one(
         };
         let conn = acquired.conn;
         let mut timed_out = false;
-        match tokio::time::timeout(STREAM_TIMEOUT, conn.send_message(payload)).await {
+        let write = async {
+            match kind {
+                JobKind::Interactive => conn.send_message(payload).await,
+                JobKind::FileData => conn.send_file_data(payload).await,
+            }
+        };
+        match tokio::time::timeout(STREAM_TIMEOUT, write).await {
             Ok(Ok(())) => {
                 tracing::info!(
                     "DIRECT: sent {} bytes to {} at {} ({})",
@@ -769,6 +825,38 @@ mod tests {
         assert_eq!(first, b"one");
         assert_eq!(second, b"two");
         println!("✅ Второй кадр ушёл по соединению из пула");
+    }
+
+    /// K3: бинарный кадр файла уезжает тем же образом (пул, один кадр =
+    /// один стрим), байты доходят без искажений — сервер видит магик APUF.
+    #[tokio::test]
+    async fn file_frame_goes_through_pool_as_binary() {
+        let (transport, _side) = DirectTransport::start(any_port(), noop_handler()).unwrap();
+        let server = Arc::new(QuicClient::new(any_port()).unwrap());
+        let server_addr = server.local_address();
+
+        let mut frame = vec![b'A', b'P', b'U', b'F', 1, 2, 0, 0, 0, 0, 0, 25];
+        frame.extend_from_slice(&vec![0xA5u8; 13_000]);
+
+        let server_clone = Arc::clone(&server);
+        let server_task = tokio::spawn(async move {
+            let conn = server_clone.accept().await.unwrap();
+            let first = conn.receive_message().await.unwrap();
+            let second = conn.receive_message().await.unwrap();
+            (first, second)
+        });
+
+        assert!(transport.send_file_blocking("pk_peer", Some(server_addr), frame.clone()));
+        // Второй кадр тому же узлу — по тому же соединению из пула.
+        assert!(transport.send_file_blocking("pk_peer", Some(server_addr), frame.clone()));
+
+        let (first, second) = tokio::time::timeout(Duration::from_secs(5), server_task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first, frame);
+        assert_eq!(second, frame);
+        println!("✅ Бинарные кадры APUF прошли через транспорт (пул)");
     }
 
     /// Двусторонность: A дозвонился до B, B отвечает A по тому же

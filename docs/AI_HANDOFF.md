@@ -159,6 +159,67 @@
      переслать не сможет - `handleForwardedOffer` требует отправителя =
      origin; для файлов групп хранители и не используются).
 
+0v. **K3 - ядро: куски личных файлов бинарными APUF-кадрами по прямому
+   QUIC (код готов 2026-09-17 на ветке `arena/01a0af3e-apumir`, PR #6;
+   РЕЛИЗА ЕЩЁ НЕТ — ждёт явного разрешения владельца; следующий номер
+   после v11.70.26). На телефонах НЕ проверено, в CI НЕ собрано (компилятор
+   = CI тега, как всегда). Что где:**
+   - Rust, провод: `file_wire.rs` (кодек F4-B1, магик `APUF`, НЕ менялся —
+     подключён): кадр = `magic[4]|ver|type|flags|len|payload`; ChunkData =
+     `transfer_id[16]|chunk_index:u64|chunk_offset:u32|cipher_len:u32|
+     data_len:u32|диапазон`; предел 256 КиБ; range-кадры (диапазоны куска)
+     с первого дня. `quic_client.rs`: `send_file_data` (тот же стрим
+     «длина + payload», но `prioritize_file_data_stream` = приоритет -10).
+     `direct_transport.rs`: `JobKind::{Interactive,FileData}`,
+     `send_file_blocking`, `send_one` шлёт кадр нужным стримом; пул,
+     усыновление, бюджеты — прежние.
+   - Rust, ядро: `engine/core.rs` — `handle_direct_frame` первым делом
+     пробует `FileFrameV1::decode` при магике `APUF`: ChunkData → событие
+     `FileChunkReceived` (отправителя в кадре нет → `None`, усыновления
+     нет); Capabilities — тихо; ошибка — warn+`None`. `send_file_chunk`
+     (FFI) собирает кадр из аргументов и шлёт `send_file_via_quic`.
+     `events.rs`: вариант + тип `file_chunk_received`.
+   - Мост: `lib.udl` — `send_file_chunk(recipient, transferIdHex,
+     chunkIndex, offset, cipherLen, range)` и +5 полей `CoreEventFfi`
+     (transferId, chunkIndex, chunkOffset, ciphertextChunkLen, payload).
+     `p2p_core.kt` (git-копия) дополнен ВРУЧНУЮ под новый UDL: новые
+     поля/метод/конвертеры `FfiConverterOptionalUInt`/`OptionalByteArray`;
+     checksum для нового метода в git-копий НЕТ (константу считает только
+     bindgen) — на релизе CI перегенерирует файл, и это не важно; если CI
+     перегенерацию не сделает — проверить, что git-копия работает
+     (вызовы идут, событие читается).
+   - Kotlin, провод: `FileTransferPacketCodec.Type.FCAP(10)` (payload 4 Б
+     BE max_frame_payload; пустой = дефолт 256 КиБ),
+     `FileTransferWire.fcapMessageId` (`f<tid>cap`), константы
+     `BINARY_MAX_FRAME_PAYLOAD=256*1024`, `BINARY_CHUNK_PREFIX_BYTES=36`.
+   - Kotlin, отправитель: `FileTransferSender.binaryTransport` (
+     (peer, tid, chunkIndex, offset, cipherLen, range) -> bool),
+     `markBinaryCapable` (по FCAP), окно = `BINARY_INFLIGHT_BYTES`
+     (2 МиБ) / размер куска; кусок делится на диапазоны ≤ кадр, каждый —
+     вызов `RustBridge.sendFileChunk`; любой `false` →
+     `RecipientOfflineException` (перерыв, повтор с префикса ACK;
+     принятые диапазоны идемпотентны). БЕЗ FCAP — прежний текстовый путь.
+   - Kotlin, приёмник: `FileTransferReceiver.onBinaryChunk` —
+     `BinaryChunkAssembler` (буфер expectedLen, пересечения = брак, дубль
+     точный = ок), при сборке — обычный `handleChunk` (AEAD, диск, ACK);
+     до оффера — `bufferOrDropChunk`; CUSTODY/OUTGOING/групповые — drop;
+     FCAP: `handleFcap` (только от адресата нашей OUTGOING) →
+     `onFcap` → `sender.markBinaryCapable`; `sendFcap` — в конце
+     принятого ЛИЧНОГО оффера (групповым не шлём).
+   - Kotlin, сервис: `CoreServerService` — ветка `file_chunk_received`
+     (UInt→Int, null-полей нет → drop); поллинг: пока очередь не пуста или
+     партия ≥ 8 — шаг 100 мс, иначе 5 с (как было).
+   - Совместимость N↔N-1: старые телефоны APUF-стрим принимают как
+     «сообщение», первое поле не `pk_…` → отбрасывают (страж
+     от призраков); FCAP (`Type.FCAP`) — неизвестный тип → молча drop.
+     Новые без FCAP-ответа партнёра — текстовый путь, как было. Формат
+     старых кадров не тронут.
+   - Тесты: Rust (quic_client ×2, direct_transport ×1, core: hex-пары +
+     APUF-входящий ×4), JVM (Sender ×4, Receiver ×7, Codec ×1, Wire ×1).
+     Локальной компиляции нет (в песочнице ни cargo, ни Gradle): первый
+     компилятор — CI тега; JVM-тесты уходят в `groups-build-gate.ps1`
+     на машине владельца (`testDebugUnitTest`).
+
 0t. **v11.70.24 - ядро, этап K1: один QUIC-endpoint на движок, пул
    соединений, keep-alive, STUN с порта 7777 (выпущен 2026-09-16, Latest;
    тег/прогон/sha256 - `START_HERE.md` §3). Первая компиляция кода K1

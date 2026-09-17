@@ -4,6 +4,7 @@ import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import java.nio.file.Files
 import kotlinx.coroutines.test.runTest
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -24,12 +25,30 @@ class FileTransferSenderTest {
 
     private val binding = ByteArray(96) { 7 }
 
-    private fun sender() = FileTransferSender(
+    // K3: бинарный канал в тестах — запись вызовов, доставка «по требованию».
+    data class BinaryCall(
+        val peer: String,
+        val transferId: String,
+        val chunkIndex: Long,
+        val offset: Int,
+        val chunkLen: Int,
+        val range: ByteArray,
+    )
+    private val binarySends = mutableListOf<BinaryCall>()
+    private var binaryDeliver = true
+    private val binaryTransport: (String, String, Long, Int, Int, ByteArray) -> Boolean =
+        { peer, transferId, chunkIndex, offset, chunkLen, range ->
+            binarySends += BinaryCall(peer, transferId, chunkIndex, offset, chunkLen, range.copyOf())
+            binaryDeliver
+        }
+
+    private fun sender(withBinary: Boolean = false) = FileTransferSender(
         transferDao = dao,
         chunkStore = chunkStore,
         transport = transport,
         ownBindingProvider = { binding.copyOf() },
         nowMs = { now },
+        binaryTransport = if (withBinary) binaryTransport else null,
     )
 
     @Before
@@ -210,5 +229,88 @@ class FileTransferSenderTest {
         assertEquals(0, summary.transfersPumped)
         assertEquals(1, summary.failures)
         assertEquals("PREPARED", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // K3: бинарные APUF-кадры (FCAP + прямой QUIC)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Test
+    fun markedTransferSendsBinaryFramesNotText() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 1024, totalBytes = 2100))
+        stage(chunkCount = 2, chunkSize = 1024, lastChunkBytes = 1076 - 16)
+
+        val s = sender(withBinary = true)
+        s.markBinaryCapable(transferIdHex, FileTransferWire.BINARY_MAX_FRAME_PAYLOAD)
+        s.pumpOnce()
+
+        // Оффер — по надёжному текстовому пути (как всегда), куски — бинарные.
+        assertTrue(transportSends.any { it.first == FileTransferWire.offerMessageId(transferIdHex, 0) })
+        assertTrue(transportSends.none { Regex("c\\d+f\\d+$").containsMatchIn(it.first) })
+        assertEquals(2, binarySends.size)
+
+        val full0 = chunkStore.readEncryptedChunk(transferIdHex, 0)!!
+        val full1 = chunkStore.readEncryptedChunk(transferIdHex, 1)!!
+        assertEquals(listOf(0L, 1L), binarySends.map { it.chunkIndex })
+        assertEquals(0, binarySends[0].offset)
+        assertEquals(full0.size, binarySends[0].chunkLen)
+        assertArrayEquals(full0, binarySends[0].range)
+        assertArrayEquals(full1, binarySends[1].range)
+        assertEquals("SENT", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    @Test
+    fun bigChunkSplitsIntoBoundedApuFrames() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 1, chunkSize = 600_000, totalBytes = 600_000))
+        stage(chunkCount = 1, chunkSize = 600_000, lastChunkBytes = 600_000)
+
+        val s = sender(withBinary = true)
+        s.markBinaryCapable(transferIdHex, FileTransferWire.BINARY_MAX_FRAME_PAYLOAD)
+        s.pumpOnce()
+
+        val maxRange = FileTransferWire.BINARY_MAX_FRAME_PAYLOAD - FileTransferWire.BINARY_CHUNK_PREFIX_BYTES
+        val full = chunkStore.readEncryptedChunk(transferIdHex, 0)!!
+        assertEquals((full.size + maxRange - 1) / maxRange, binarySends.size)
+        var offset = 0
+        val rebuilt = ArrayList<Byte>(full.size)
+        for (call in binarySends) {
+            assertEquals(offset, call.offset)
+            assertEquals(full.size, call.chunkLen)
+            assertEquals(minOf(maxRange, full.size - offset), call.range.size)
+            rebuilt.addAll(call.range.toList())
+            offset += call.range.size
+        }
+        assertEquals(full.size, offset)
+        assertArrayEquals(full, rebuilt.toByteArray())
+    }
+
+    @Test
+    fun binaryTransferWithoutFcapStaysOnTextPath() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 1, chunkSize = 1024, totalBytes = 1024))
+        stage(chunkCount = 1, chunkSize = 1024, lastChunkBytes = 1024)
+
+        // Бинарный канал есть, но FCAP не было — куски текстовыми фрагментами.
+        sender(withBinary = true).pumpOnce()
+
+        assertEquals(0, binarySends.size)
+        assertTrue(transportSends.any { it.first == FileTransferWire.chunkMessageId(transferIdHex, 0, 0) })
+    }
+
+    @Test
+    fun binaryFailurePausesTransferLikeOfflineRecipient() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 1024, totalBytes = 2048))
+        stage(chunkCount = 2, chunkSize = 1024, lastChunkBytes = 1024)
+        binaryDeliver = false
+
+        sender(withBinary = true).run {
+            markBinaryCapable(transferIdHex, FileTransferWire.BINARY_MAX_FRAME_PAYLOAD)
+            pumpOnce()
+        }
+
+        assertEquals("WAITING_RECIPIENT", dao.getTransfer(transferIdHex)!!.state)
+        // Оффер ушёл (передачу принять есть что), текстовых кусков не было.
+        assertTrue(transportSends.any { it.first == FileTransferWire.offerMessageId(transferIdHex, 0) })
+        assertTrue(transportSends.none { Regex("c\\d+f\\d+$").containsMatchIn(it.first) })
+        assertTrue(binarySends.isNotEmpty())
     }
 }

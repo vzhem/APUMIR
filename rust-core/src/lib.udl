@@ -167,6 +167,13 @@ dictionary CoreEventFfi {
     string? status;
     i64? timestamp;
     boolean? is_local;
+    // K3: бинарный кусок файла (event_type "file_chunk_received"):
+    // transfer_id = 32 знака hex, payload = диапазон шифртекста куска.
+    string? transfer_id;
+    i64? chunk_index;
+    u32? chunk_offset;
+    u32? ciphertext_chunk_len;
+    bytes? payload;
 };
 
 interface P2PCoreHandle {
@@ -193,6 +200,23 @@ interface P2PCoreHandle {
 
     // Parallel QUIC file stream: direct send WITHOUT relay queue (bulk transfer).
     boolean send_direct_payload(string recipient_id, string payload);
+
+    // K3: бинарный кусок файла по прямому QUIC-каналу. Ядро собирает из
+    // аргументов APUF-кадр (file_wire) и уезжает им одним стримом с
+    // приоритетом данных: без base64, без потолка брокера. До K3 такого
+    // кадра не было; телефоны до K3 принимают стрим и молча отбрасывают.
+    // chunk_offset + длина ciphertext_range - диапазон ВНУТРИ целого
+    // зашифрованного куска (его полная длина - ciphertext_chunk_len).
+    // true = получатель подтвердил приём стрима; false = недоступен
+    // напрямую (вызывающий ждёт следующего цикла, передача не прерывается).
+    boolean send_file_chunk(
+        string recipient_id,
+        string transfer_id_hex,
+        i64 chunk_index,
+        u32 chunk_offset,
+        u32 ciphertext_chunk_len,
+        bytes ciphertext_range
+    );
 
     void receive_message(
         string message_id,

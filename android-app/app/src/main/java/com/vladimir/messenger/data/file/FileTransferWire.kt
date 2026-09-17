@@ -15,6 +15,13 @@ object FileTransferWire {
     const val MAX_WIRE_CHARS = 48 * 1024
     const val MAX_MESSAGE_ID_BYTES = 128
 
+    // K3: APUF-кадр (rust-core/src/network/file_wire.rs). 256 КиБ — предел
+    // полезной нагрузки кадра; 36 байт — префикс куска внутри кадра
+    // (transfer_id[16] + chunk_index:u64 + chunk_offset:u32 +
+    // ciphertext_chunk_len:u32 + data_len:u32).
+    const val BINARY_MAX_FRAME_PAYLOAD = 256 * 1024
+    const val BINARY_CHUNK_PREFIX_BYTES = 36
+
     fun isFilePacketText(text: String): Boolean =
         text.length <= MAX_WIRE_CHARS && text.startsWith(PREFIX)
 
@@ -121,6 +128,12 @@ object FileTransferWire {
         requireValidTransferId(transferIdHex)
         require(seq >= 0)
         return "f${transferIdHex}g${cleanTag(senderTag)}w${cleanTag(seedTag)}s$seq".also(::requireValidMessageId)
+    }
+
+    /** FCAP (K3): один на передачу, повтор сеть отсеет как дубль. */
+    fun fcapMessageId(transferIdHex: String): String {
+        requireValidTransferId(transferIdHex)
+        return "f${transferIdHex}cap".also(::requireValidMessageId)
     }
 
     /** Короткая метка узла для id сообщения: хвост адреса без служебных знаков. */

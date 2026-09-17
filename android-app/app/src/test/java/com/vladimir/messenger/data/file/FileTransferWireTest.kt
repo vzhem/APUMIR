@@ -89,6 +89,23 @@ class FileTransferWireTest {
     }
 
     @Test
+    fun fcapMessageIdIsDeterministicAndUnique() {
+        val id = FileTransferWire.fcapMessageId(transferIdHex)
+        assertEquals("f${transferIdHex}cap", id)
+        assertEquals(id, FileTransferWire.fcapMessageId(transferIdHex))
+        assertTrue(id.length <= FileTransferWire.MAX_MESSAGE_ID_BYTES)
+        assertFalse(id.contains('|'))
+        // Отличается от всех прочих id передачи с тем же хвостом.
+        val others = listOf(
+            FileTransferWire.offerMessageId(transferIdHex, 0),
+            FileTransferWire.ackMessageId(transferIdHex, 1),
+            FileTransferWire.cancelMessageId(transferIdHex),
+        )
+        assertEquals(others.toSet().size + 1, (others + id).toSet().size)
+        assertEquals(FileTransferPacketCodec.Type.FCAP, FileTransferPacketCodec.Type.fromWire(10))
+    }
+
+    @Test
     fun invalidTransferIdRejected() {
         try {
             FileTransferWire.offerMessageId("not-hex", 0)

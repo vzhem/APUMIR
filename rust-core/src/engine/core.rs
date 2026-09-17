@@ -9,6 +9,7 @@ use crate::storage::models::MessageStatus;
 
 use super::events::{CoreEvent, EventBus};
 use crate::network::direct_transport::DirectTransport;
+use crate::network::file_wire::{FileChunkDataV1, FileFrameV1, FILE_WIRE_MAGIC};
 use crate::network::router::Router;
 use crate::network::dht::{RoutingTable, DhtNodeInfo};
 use crate::network::relay::RelayManager;
@@ -676,6 +677,42 @@ impl P2PCore {
         network: &NetworkManagerFfi,
         payload: Vec<u8>,
     ) -> Option<String> {
+        // K3: бинарный кадр файла (магик APUF, `file_wire`). В кадре нет
+        // отправителя — получатель определяет его по transferId и
+        // направлению своей передачи, а подлинность байтов гарантирует
+        // AES-GCM тег целого куска (подложный кадр не расшифруется).
+        // Усыновлять соединение по такому кадру нечего: возвращаем None.
+        // Телефоны до K3 этот магик не знают: кадр не проходит проверку
+        // конверта ниже (первое поле не `pk_…`) и молча отбрасывается.
+        if payload.len() >= 12 && payload[..4] == FILE_WIRE_MAGIC[..] {
+            match FileFrameV1::decode(&payload) {
+                Ok(FileFrameV1::ChunkData(chunk)) => {
+                    events.emit(CoreEvent::FileChunkReceived {
+                        transfer_id: bytes_to_hex(&chunk.transfer_id),
+                        chunk_index: chunk.chunk_index,
+                        chunk_offset: chunk.chunk_offset,
+                        ciphertext_chunk_len: chunk.ciphertext_chunk_len,
+                        ciphertext: chunk.ciphertext,
+                    });
+                    return None;
+                }
+                Ok(FileFrameV1::Capabilities(capabilities)) => {
+                    // Кадры возможностей пока никто не шлёт по этому каналу
+                    // (переговоры в ядре ещё не задействованы) — принимаем
+                    // тихо, чтобы будущая версия не роняла приём.
+                    tracing::debug!(
+                        "QUIC: file capabilities frame (max payload {} bytes) accepted",
+                        capabilities.max_frame_payload_bytes
+                    );
+                    return None;
+                }
+                Err(e) => {
+                    tracing::warn!("QUIC: invalid APUF frame ({} bytes): {}", payload.len(), e);
+                    return None;
+                }
+            }
+        }
+
         let decoded = String::from_utf8_lossy(&payload);
         let parts: Vec<&str> = decoded.splitn(4, '|').collect();
 
@@ -2698,6 +2735,65 @@ impl P2PCore {
         self.send_via_quic(&recipient_id, addr_opt, wire_payload)
     }
 
+    /// K3: бинарный кусок файла по прямому QUIC-каналу.
+    ///
+    /// `ciphertext_range` — диапазон внутри ЦЕЛОГО зашифрованного куска
+    /// (от `chunk_offset` длиной `ciphertext_range.len()`, весь кусок =
+    /// `ciphertext_chunk_len` байт). Ядро собирает из аргументов APUF-кадр
+    /// `FileFrameV1::ChunkData` (`file_wire`) и уезжает им одним стримом с
+    /// приоритетом данных. `true` = получатель подтвердил приём стрима;
+    /// `false` = отправитель недоступен напрямую (вызывающий оставляет
+    /// передачу ждать следующего цикла).
+    pub fn send_file_chunk(
+        &self,
+        recipient_id: String,
+        transfer_id_hex: String,
+        chunk_index: u64,
+        chunk_offset: u32,
+        ciphertext_chunk_len: u32,
+        ciphertext_range: Vec<u8>,
+    ) -> bool {
+        if !self.state.is_running() {
+            return false;
+        }
+        let Some(transfer_id) = hex_to_transfer_id(&transfer_id_hex) else {
+            tracing::warn!("FILE CHUNK: bad transfer id '{}'", transfer_id_hex);
+            return false;
+        };
+        let chunk = FileChunkDataV1 {
+            transfer_id,
+            chunk_index,
+            chunk_offset,
+            ciphertext_chunk_len,
+            ciphertext: ciphertext_range,
+        };
+        let frame = match FileFrameV1::ChunkData(chunk).encode() {
+            Ok(frame) => frame,
+            Err(e) => {
+                tracing::warn!("FILE CHUNK: frame build failed for {}: {}", transfer_id_hex, e);
+                return false;
+            }
+        };
+        let addr_opt = {
+            let addrs = self.peer_addrs.lock().unwrap();
+            addrs
+                .get(&recipient_id)
+                .copied()
+                .or_else(|| addrs.get(&format!("{}_public", recipient_id)).copied())
+        };
+        tracing::info!(
+            "FILE CHUNK: APUF frame {} bytes (chunk {} offset {} of {}) to {}",
+            frame.len(),
+            chunk_index,
+            chunk_offset,
+            ciphertext_chunk_len,
+            recipient_id
+        );
+        // K1: адрес может быть неизвестен - тогда сработает только живое
+        // соединение из пула (узел сам дозвонился до нас).
+        self.send_file_via_quic(&recipient_id, addr_opt, frame)
+    }
+
     pub fn send_message(
         &self,
         message_id: String,
@@ -2943,6 +3039,21 @@ impl P2PCore {
         transport.send_blocking(peer_id, addr, payload.into_bytes())
     }
 
+    /// K3: бинарный кадр файла уходит стримом с приоритетом данных.
+    fn send_file_via_quic(
+        &self,
+        peer_id: &str,
+        addr: Option<SocketAddr>,
+        frame: Vec<u8>,
+    ) -> bool {
+        let transport = self.direct.lock().unwrap().clone();
+        let Some(transport) = transport else {
+            tracing::warn!("FILE CHUNK to {} skipped: direct transport is down", peer_id);
+            return false;
+        };
+        transport.send_file_blocking(peer_id, addr, frame)
+    }
+
     pub fn receive_message(
         &self,
         message_id: String,
@@ -3025,6 +3136,37 @@ impl P2PCore {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// K3: hex-помощники APUF-кадров (крейт hex в зависимостях нет)
+// ═══════════════════════════════════════════════════════════════════
+
+/// 16 байт идентификатора передачи из строки 32 знака lowercase hex.
+fn hex_to_transfer_id(hex: &str) -> Option<[u8; 16]> {
+    if hex.len() != 32 {
+        return None;
+    }
+    let mut out = [0u8; 16];
+    for (slot, pair) in out.iter_mut().zip(hex.as_bytes().chunks(2)) {
+        *slot = u8::from_str_radix(
+            std::str::from_utf8(pair).ok()?,
+            16,
+        )
+        .ok()?;
+    }
+    Some(out)
+}
+
+/// Байты как строка lowercase hex (идентификатор передачи в событии).
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3070,6 +3212,95 @@ mod tests {
         assert_eq!(entries.get("m2").map(String::as_str), Some("pk_b"));
         assert_eq!(entries.get("m3").map(String::as_str), Some("pk_c"));
         assert_eq!(order.len(), 2);
+    }
+
+    // --- K3: APUF-кадры и hex-помощники ---
+
+    #[test]
+    fn hex_transfer_id_round_trip() {
+        let hex = "0123456789abcdef0123456789abcdef";
+        let id = hex_to_transfer_id(hex).unwrap();
+        assert_eq!(id[0], 0x01);
+        assert_eq!(id[15], 0xef);
+        assert_eq!(bytes_to_hex(&id), hex);
+    }
+
+    #[test]
+    fn hex_transfer_id_rejects_bad_input() {
+        assert!(hex_to_transfer_id("").is_none());
+        assert!(hex_to_transfer_id("0123").is_none());
+        assert!(hex_to_transfer_id("zz23456789abcdef0123456789abcdef").is_none());
+        assert!(hex_to_transfer_id("0123456789abcdef0123456789abcde").is_none());
+    }
+
+    #[test]
+    fn direct_frame_accepts_apuf_chunk_as_event() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let frame = FileFrameV1::ChunkData(FileChunkDataV1 {
+            transfer_id: [0x42; 16],
+            chunk_index: 7,
+            chunk_offset: 0,
+            ciphertext_chunk_len: 5,
+            ciphertext: vec![1, 2, 3, 4, 5],
+        })
+        .encode()
+        .unwrap();
+        assert!(frame.starts_with(FILE_WIRE_MAGIC.as_slice()));
+
+        let adopted = P2PCore::handle_direct_frame(&events, &network, frame);
+        assert!(adopted.is_none(), "в кадре нет отправителя - усыновления нет");
+
+        let event = events.drain().into_iter().next().unwrap();
+        match event {
+            CoreEvent::FileChunkReceived {
+                transfer_id,
+                chunk_index,
+                chunk_offset,
+                ciphertext_chunk_len,
+                ciphertext,
+            } => {
+                assert_eq!(transfer_id, "42424242424242424242424242424242");
+                assert_eq!(chunk_index, 7);
+                assert_eq!(chunk_offset, 0);
+                assert_eq!(ciphertext_chunk_len, 5);
+                assert_eq!(ciphertext, vec![1, 2, 3, 4, 5]);
+            }
+            other => panic!("ожидается file_chunk_received, пришло {:?}", other),
+        }
+    }
+
+    #[test]
+    fn direct_frame_rejects_truncated_apuf_without_event() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let frame = FileFrameV1::ChunkData(FileChunkDataV1 {
+            transfer_id: [0x42; 16],
+            chunk_index: 0,
+            chunk_offset: 0,
+            ciphertext_chunk_len: 5,
+            ciphertext: vec![1, 2, 3, 4, 5],
+        })
+        .encode()
+        .unwrap();
+        // Магик на месте, длина обрублена.
+        let broken = frame[..frame.len() - 3].to_vec();
+        assert!(P2PCore::handle_direct_frame(&events, &network, broken).is_none());
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn direct_frame_keeps_legacy_text_envelope() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let adopted = P2PCore::handle_direct_frame(
+            &events,
+            &network,
+            b"pk_2222222222222222222222222222222222222222222222222222222222222222|mid|chat|привет"
+                .to_vec(),
+        );
+        assert_eq!(adopted.as_deref(), Some("pk_2222222222222222222222222222222222222222222222222222222222222222"));
+        assert_eq!(events.len(), 1);
     }
 
     #[test]

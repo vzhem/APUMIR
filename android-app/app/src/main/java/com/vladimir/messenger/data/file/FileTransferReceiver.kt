@@ -48,6 +48,13 @@ class FileTransferReceiver(
     private val routeOffer: suspend (senderId: String, fileSha256Hex: String) -> OfferRouting = { _, _ -> OfferRouting.Unknown },
     /** Раздача общей копии файла группы (K2): подтверждения, инвентарь и отказы просителей - сидеру. */
     private val groupSeed: GroupSeedHooks = GroupSeedHooks(),
+    /**
+     * K3: FCAP от собеседника (он принял наше предложение и понимает
+     * APUF-кадры). Вызывается, когда МЫ отправитель: передатчик переводит
+     * передачу на бинарный канал с следующего цикла.
+     */
+    private val onFcap: suspend (transferIdHex: String, from: String, maxFramePayload: Int) -> Unit =
+        { _, _, _ -> },
 ) {
     /**
      * Границы сидера общей копии файла группы (K2, v11.70.25,
@@ -276,9 +283,74 @@ class FileTransferReceiver(
                     handleCustodyWant(senderId, transferIdHex, packet.itemIndex, payload)
                 FileTransferPacketCodec.Type.WANT ->
                     handleGroupWant(senderId, transferIdHex, packet.itemIndex, payload)
+                FileTransferPacketCodec.Type.FCAP ->
+                    handleFcap(senderId, transferIdHex, payload)
             }
         } finally {
             payload.fill(0)
+        }
+    }
+
+    /**
+     * K3: собеседник (получатель нашего предложения) подтвердил, что
+     * понимает бинарные APUF-кадры. Принимаем только от адресата нашей
+     * исходящей передачи; чужой FCAP - мусор (как и чужой ACK).
+     */
+    private suspend fun handleFcap(senderId: String, transferIdHex: String, payload: ByteArray) {
+        val transfer = transferDao.getTransfer(transferIdHex)
+        if (transfer == null || transfer.direction != "OUTGOING" || transfer.peerNodeId != senderId) {
+            Log.w(TAG, "File FCAP for unknown/foreign transfer $transferIdHex from ${senderId.takeLast(8)}; dropped")
+            return
+        }
+        val maxFramePayload = when (payload.size) {
+            0 -> FileTransferWire.BINARY_MAX_FRAME_PAYLOAD
+            4 -> ((payload[0].toInt() and 0xff) shl 24) or
+                ((payload[1].toInt() and 0xff) shl 16) or
+                ((payload[2].toInt() and 0xff) shl 8) or
+                (payload[3].toInt() and 0xff)
+            else -> {
+                Log.w(TAG, "Malformed FCAP payload (${payload.size} bytes) from ${senderId.takeLast(8)}; dropped")
+                return
+            }
+        }
+        runCatching { onFcap(transferIdHex, senderId, maxFramePayload) }
+            .onFailure { Log.w(TAG, "FCAP hook failed for $transferIdHex: ${it.message}") }
+        Log.i(TAG, "File transfer $transferIdHex is binary-capable (max frame ${maxFramePayload})")
+    }
+
+    /**
+     * K3: сообщить отправителю, что приёмник понимает APUF-кадры. Текстовый
+     * пакет (маленький, с дедупликацией): старому отправителю FCAP неизвестен
+     * и будет молча отброшен — он продолжит слать текстовые фрагменты, и
+     * ничего не теряется.
+     */
+    private fun sendFcap(transferIdHex: String, to: String, chatId: String) {
+        runCatching {
+            val maxFrame = FileTransferWire.BINARY_MAX_FRAME_PAYLOAD
+            val payload = byteArrayOf(
+                (maxFrame ushr 24).toByte(),
+                (maxFrame ushr 16).toByte(),
+                (maxFrame ushr 8).toByte(),
+                maxFrame.toByte(),
+            )
+            val packet = FileTransferPacketCodec.encode(
+                FileTransferPacketCodec.Packet(
+                    FileTransferPacketCodec.Type.FCAP,
+                    hexToBytes(transferIdHex),
+                    0L,
+                    0,
+                    1,
+                    payload,
+                )
+            )
+            transport.send(
+                FileTransferWire.fcapMessageId(transferIdHex),
+                chatId,
+                to,
+                FileTransferWire.encodeEncodedPacket(packet),
+            )
+        }.onFailure { error ->
+            Log.w(TAG, "File FCAP send failed for $transferIdHex: ${error.message}")
         }
     }
 
@@ -556,6 +628,13 @@ class FileTransferReceiver(
             }
         }
 
+        // K3: личным файлам — сказать отправителю про бинарный канал.
+        // Файлы группы (K2) по нему не ходят: рою нужна личность сида,
+        // которой в APUF-кадре нет, — остаются на текстовых фрагментах.
+        if (!groupOffer) {
+            sendFcap(transferIdHex, senderId, targetChatId)
+        }
+
         val contiguous = contiguousReceived(transferIdHex)
         sendFileAck(transferIdHex, contiguous)
         val fresh = transferDao.getTransfer(transferIdHex) ?: return
@@ -563,6 +642,117 @@ class FileTransferReceiver(
             finalizeTransfer(fresh, manifest)
         } else if (fresh.state == "OFFERED") {
             advance(fresh, newState = "TRANSFERRING")
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // K3: бинарные диапазоны зашифрованных кусков (APUF, событие
+    // "file_chunk_received" из ядра)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Сборка одного куска из APUF-диапазонов. Диапазоны приходят разными
+     * стримами и могут задержаться: порядок и дубли не имеют значения,
+     * пересечения — брак (отправитель так не шлёт, а «так» — либо шум,
+     * либо проба).
+     */
+    private class BinaryChunkAssembler(val expectedLen: Int) {
+        val buffer = ByteArray(expectedLen)
+        private val covered = mutableListOf<LongRange>()
+        private var coveredBytes = 0L
+
+        val isComplete: Boolean
+            get() = coveredBytes == expectedLen.toLong()
+
+        /** @return false — диапазон вне куска или пересекается с принятым. */
+        fun addRange(offset: Int, data: ByteArray): Boolean {
+            if (data.isEmpty()) return false
+            val start = offset.toLong()
+            val end = start + data.size.toLong()
+            if (end > expectedLen.toLong()) return false
+            for (range in covered) {
+                if (start < range.end && range.start < end) return false
+            }
+            data.copyInto(buffer, offset)
+            covered += start until end
+            coveredBytes += data.size.toLong()
+            return true
+        }
+    }
+
+    private val binaryAssemblers = LinkedHashMap<String, BinaryChunkAssembler>()
+
+    /**
+     * K3: бинарный диапазон зашифрованного куска по прямому QUIC-каналу.
+     *
+     * Отправителя в кадре нет: личный кусок адресован собеседнику
+     * передачи (peerNodeId) — это единственная адресация, которую мы
+     * здесь проверяем. Подложные диапазоны не соберутся в подлинный
+     * шифртекст: AES-GCM тег целого куска проверяется в
+     * [ingestChunkCiphertext], и испорченный кусок на диск не ложится.
+     */
+    suspend fun onBinaryChunk(
+        transferIdHex: String,
+        chunkIndex: Long,
+        chunkOffset: Int,
+        ciphertextChunkLen: Int,
+        ciphertextRange: ByteArray,
+    ) {
+        if (chunkIndex < 0L || chunkOffset < 0 || ciphertextChunkLen <= 0 || ciphertextRange.isEmpty()) return
+        if (ciphertextChunkLen < FileTransferChunkStore.AEAD_TAG_BYTES + 1) {
+            Log.w(TAG, "Binary chunk for $transferIdHex too short (${ciphertextChunkLen}); dropped")
+            return
+        }
+        if (ciphertextRange.size > ciphertextChunkLen - chunkOffset) {
+            Log.w(TAG, "Binary range for $transferIdHex exceeds chunk bounds; dropped")
+            return
+        }
+        mutex.withLock {
+            if (declined.containsKey(transferIdHex)) return
+            val key = "$transferIdHex|$chunkIndex"
+            var assembler = binaryAssemblers[key]
+            if (assembler == null || assembler.expectedLen != ciphertextChunkLen) {
+                assembler?.buffer?.fill(0)
+                assembler = BinaryChunkAssembler(ciphertextChunkLen).also {
+                    binaryAssemblers[key] = it
+                    evictBinaryAssemblers()
+                }
+            }
+            if (!assembler.addRange(chunkOffset, ciphertextRange)) {
+                Log.w(TAG, "Binary range overlap for $key at offset $chunkOffset; dropped")
+                return
+            }
+            if (!assembler.isComplete) return
+            // Кусок собран целиком: дальше ровно тот же путь, что и для
+            // склеенных текстовых фрагментов — аутентификация, диск, ACK.
+            val assembled = assembler.buffer
+            binaryAssemblers.remove(key)
+            evictBinaryAssemblers()
+            val transfer = transferDao.getTransfer(transferIdHex)
+            if (transfer == null || transfer.direction != "INCOMING") {
+                // Оффер ещё не дошёл (или это не наша передача): кусок
+                // ждёт оффера в том же буфере, что и текстовые.
+                bufferOrDropChunk(transferIdHex, chunkIndex, assembled)
+            } else {
+                val manifestBytes = chunkStore.readManifest(transferIdHex)
+                if (manifestBytes != null && GroupFileSeeder.isGroupManifest(manifestBytes)) {
+                    Log.w(TAG, "Binary chunk of group transfer $transferIdHex; group files ride the text path")
+                } else {
+                    handleChunk(transfer.peerNodeId, transferIdHex, chunkIndex, assembled)
+                }
+            }
+            assembled.fill(0)
+        }
+    }
+
+    private fun evictBinaryAssemblers() {
+        while (binaryAssemblers.size > MAX_BUFFERED_CHUNKS ||
+            binaryAssemblers.values.sumOf { it.buffer.size.toLong() } > MAX_BUFFERED_CHUNK_BYTES
+        ) {
+            val oldestKey = binaryAssemblers.keys.firstOrNull() ?: break
+            val assembler = binaryAssemblers.remove(oldestKey)
+            assembler?.buffer?.fill(0)
+            Log.w(TAG, "Evicted binary chunk assembler $oldestKey")
         }
     }
 
