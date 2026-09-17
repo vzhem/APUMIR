@@ -293,6 +293,9 @@ pub struct EngineConfig {
     pub existing_private_key: Option<String>,
     pub event_bus_size: usize,
     pub quic_port: u16,
+    /// K4-3: свой MQTT-брокер из настроек (`host:port` или `mqtt://host:port`).
+    /// Идёт первым, публичные - запасной путь. `None` - поведение прежнее.
+    pub own_broker: Option<String>,
 }
 
 impl Default for EngineConfig {
@@ -305,6 +308,7 @@ impl Default for EngineConfig {
             existing_private_key: None,
             event_bus_size: 1000,
             quic_port: 7777,
+            own_broker: None,
         }
     }
 }
@@ -313,9 +317,13 @@ impl EngineConfig {
     pub fn new(display_name: String) -> Self {
         Self {
             display_name,
+            // K4-3: на телефоне адрес приходит из приложения (мост), на
+            // компьютере и в тестах удобно задать переменной окружения.
+            own_broker: std::env::var("APU_MQTT_BROKER").ok(),
             ..Default::default()
         }
     }
+
 
     pub fn with_db(mut self, path: String) -> Self {
         self.db_path = Some(path);
@@ -630,6 +638,8 @@ impl P2PCore {
                 let relay_custody_mqtt = relay_custody2.clone();
                 // K4: тому же циклу нужен список «своих» и расписание маяка.
                 let presence_scope_mqtt = Arc::clone(&self.presence_scope);
+                // K4-3: свой брокер из настроек (если задан) - первым.
+                let own_broker_mqtt = self.own_broker_endpoint();
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -647,6 +657,7 @@ impl P2PCore {
                             relay_queue_mqtt,
                             relay_custody_mqtt,
                             presence_scope_mqtt,
+                            own_broker_mqtt,
                             mqtt_outbound_rx,
                         ).await;
                     });
@@ -1204,6 +1215,7 @@ impl P2PCore {
         node_id: &str,
         display_name: &str,
         shared_state: Arc<crate::network::mqtt_transport::MqttSharedRuntimeState>,
+        own_broker: Option<(String, u16)>,
     ) -> Result<crate::network::mqtt_transport::MqttTransport, String> {
         use crate::network::mqtt_transport::MqttTransport;
 
@@ -1214,6 +1226,7 @@ impl P2PCore {
             node_id,
             display_name,
             shared_state,
+            own_broker,
         )
         .await?;
         match tokio::time::timeout(MQTT_SESSION_READY_TIMEOUT, transport.subscribe()).await {
@@ -1479,6 +1492,7 @@ impl P2PCore {
         relay_queue: Option<Arc<RelayQueue>>,
         relay_custody: Option<Arc<RelayCustody>>,
         presence_scope: Arc<PresenceScope>,
+        own_broker: Option<(String, u16)>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
@@ -1526,6 +1540,7 @@ impl P2PCore {
                 &node_id,
                 &display_name,
                 Arc::clone(&mqtt_shared_state),
+                own_broker.clone(),
             )
             .await {
                 Ok(transport) => {
@@ -1778,6 +1793,7 @@ impl P2PCore {
                             &node_id,
                             &display_name,
                             Arc::clone(&mqtt_shared_state),
+                            own_broker.clone(),
                         )
                         .await {
                             Ok(recovered_transport) => break recovered_transport,
@@ -3615,6 +3631,43 @@ impl P2PCore {
     /// брокера пишет только редкий маяк, когда узлов в сети много. В
     /// маленькой сети список ни на что не влияет: рассылка идёт как раньше.
     /// Возвращает, сколько узлов принято (себя и пустые строки отбрасываем).
+    /// K4-3: свой MQTT-брокер из настроек приложения.
+    ///
+    /// Встраивать можно до `start()`: адрес читается, когда поднимается
+    /// MQTT-сессия. `true` - адрес принят (`host:port`, можно с `mqtt://`).
+    pub fn set_own_broker(&mut self, text: String) -> bool {
+        let parsed =
+            crate::network::multi_broker::parse_broker_endpoint(&text);
+        match parsed {
+            Some((host, port)) => {
+                self.config.own_broker = Some(format!("{}:{}", host, port));
+                tracing::info!("MQTT OWN BROKER: задан {}:{}", host, port);
+                true
+            }
+            None => {
+                // Пустая строка - это «выключить свой брокер», а не ошибка.
+                if text.trim().is_empty() {
+                    self.config.own_broker = None;
+                    tracing::info!("MQTT OWN BROKER: выключен, только публичные");
+                    return true;
+                }
+                tracing::warn!(
+                    "MQTT OWN BROKER: адрес {:?} не разобран, оставляю как было",
+                    text
+                );
+                false
+            }
+        }
+    }
+
+    /// Свой брокер, разобранный в `(host, port)`.
+    fn own_broker_endpoint(&self) -> Option<(String, u16)> {
+        self.config
+            .own_broker
+            .as_deref()
+            .and_then(crate::network::multi_broker::parse_broker_endpoint)
+    }
+
     pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {
         let count = self.presence_scope.set_own(ids, self.node_id_str.as_deref());
         tracing::info!("PRESENCE K4: audience set, {} own peer(s)", count);

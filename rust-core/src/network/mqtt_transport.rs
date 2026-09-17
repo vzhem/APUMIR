@@ -12,6 +12,7 @@ use rumqttc::{AsyncClient, Event, EventLoop, LastWill, MqttOptions, Packet, QoS}
 use tokio::sync::{mpsc, oneshot, Mutex, OwnedSemaphorePermit};
 
 use crate::network::mqtt_backpressure::{await_mqtt_request, MqttRequestError};
+use crate::network::multi_broker::{probe_broker, MultiBroker};
 #[cfg(feature = "mqtt-dual-broker")]
 use crate::network::mqtt_dedup::MqttDuplicateFilter;
 #[cfg(feature = "mqtt-dual-broker")]
@@ -346,22 +347,66 @@ async fn socks5_bridge_endpoint(target_host: &str, target_port: u16) -> Option<(
 
 impl MqttTransport {
     pub async fn connect(node_id: &str, display_name: &str) -> Result<Self, String> {
+        Self::connect_with_own_broker(node_id, display_name, None).await
+    }
+
+    /// Подключение со своим брокером из настроек (K4-3).
+    ///
+    /// Свой брокер (например, сервер владельца) идёт первым, но перед этим
+    /// проверяется строгим таймаутом: не ответил - сразу уходим на публичные,
+    /// не подвешивая запуск. Публичные остаются запасным путём, как раньше.
+    pub async fn connect_with_own_broker(
+        node_id: &str,
+        display_name: &str,
+        own_broker: Option<(String, u16)>,
+    ) -> Result<Self, String> {
         let shared_state = Arc::new(MqttSharedRuntimeState::new(
             MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
         ));
-        Self::connect_with_shared_state(node_id, display_name, shared_state).await
+        Self::connect_with_shared_state(node_id, display_name, shared_state, own_broker).await
     }
 
     pub(crate) async fn connect_with_shared_state(
         node_id: &str,
         _display_name: &str,
         shared_state: Arc<MqttSharedRuntimeState>,
+        own_broker: Option<(String, u16)>,
     ) -> Result<Self, String> {
         let client_id = format!("p2pm_{}", &node_id[..16.min(node_id.len())]);
-        let (broker_host, broker_port) = MQTT_BROKERS
+        let brokers = MultiBroker::with_own(own_broker);
+        // K4-3: перебираем кандидатов (свой брокер первым) и берём первого,
+        // кто отвечает в пределах строгого таймаута. Если не ответил никто,
+        // оставляем публичного по умолчанию: переподключение - дело rumqttc,
+        // и повторять перебор на каждом круге не нужно.
+        let (default_host, default_port) = MQTT_BROKERS
             .first()
             .copied()
             .ok_or_else(|| "No MQTT brokers configured".to_string())?;
+        let mut chosen: Option<(String, u16)> = None;
+        let own_is_first = brokers.own().is_some();
+        for (index, (host, port)) in brokers.candidates().into_iter().enumerate() {
+            // Пробуем своего брокера и не больше двух публичных: каждый
+            // молчащий адрес - это ещё BROKER_PROBE_TIMEOUT ожидания на старте.
+            if index >= 3 {
+                break;
+            }
+            let is_own = own_is_first && index == 0;
+            if probe_broker(&host, port).await {
+                if is_own {
+                    tracing::info!("MQTT OWN BROKER: основной брокер {}:{}", host, port);
+                }
+                chosen = Some((host, port));
+                break;
+            }
+            if is_own {
+                brokers.mark_own_failed();
+            }
+        }
+        // Никто не ответил: остаётся публичный по умолчанию - rumqttc будет
+        // переподключаться к нему сам, как и до K4-3.
+        let (chosen_host, chosen_port) = chosen
+            .unwrap_or_else(|| (default_host.to_string(), default_port));
+        let (broker_host, broker_port) = (chosen_host.as_str(), chosen_port);
         let (host, port) = socks5_bridge_endpoint(broker_host, broker_port)
             .await
             .unwrap_or((broker_host.to_string(), broker_port));
