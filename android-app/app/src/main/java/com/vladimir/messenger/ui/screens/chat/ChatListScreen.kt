@@ -8,6 +8,7 @@ package com.vladimir.messenger.ui.screens.chat
 // FAB для добавления нового контакта.
 // =============================================================================
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
@@ -148,6 +149,15 @@ fun ChatListScreen(
         if (target >= 0 && target != pagerState.currentPage && !pagerState.isScrollInProgress) {
             pagerState.scrollToPage(target)
         }
+    }
+
+    // «Назад» (смахивание от правого края или кнопка) на главном экране не
+    // закрывает приложение: «Группы», «Каналы» и «Чаты» - всё та же главная
+    // страница, поэтому жест возвращает на вкладку «Все». Приложение
+    // закрывается как обычно, только когда уже стоишь на «Все»
+    // (владелец, 2026-09-17).
+    BackHandler(enabled = pagerState.settledPage != 0) {
+        pagerScope.launch { pagerState.animateScrollToPage(0) }
     }
 
     // Подложка на весь экран, в том числе под верхней панелью.
