@@ -15,6 +15,7 @@ on:
     paths:
       - 'rust-core/**'
       - 'tools/uniffi-bindgen/**'
+      - 'scripts/ci/**'
       - '.github/workflows/ci-core-check.yml'
   workflow_dispatch:
 
