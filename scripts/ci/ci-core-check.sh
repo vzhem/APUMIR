@@ -73,7 +73,43 @@ begin() {
     say "=== $1 ==="
 }
 
+TESTS_DIGEST=/tmp/apu-ci-tests-digest.txt
+: > "$TESTS_DIGEST"
+
+# Разбор падения тестов. Хвост лога для этого бесполезен: тесты печатают
+# отладочные журналы (mdns, MQTT), в которых имя упавшего теста тонет.
+# Здесь из лога вынимаются ровно имя теста, файл:строка и текст panic.
+tests_digest() {
+    local failed panics result
+    failed="$(grep -E '^test .+ \.\.\. FAILED' "$LOG" | sed -E 's/^test //; s/ \.\.\. FAILED$//' | head -40)"
+    if [ -z "$failed" ]; then
+        failed="$(sed -n '/^failures:$/,/^test result:/p' "$LOG" | sed -n 's/^    //p' | sort -u | head -40)"
+    fi
+    panics="$(grep -n -A 4 -E 'panicked at' "$LOG" | head -80)"
+    result="$(grep -E '^test result:' "$LOG" | tail -3)"
+    {
+        if [ -n "$failed" ]; then
+            echo "Упавшие тесты ($(echo "$failed" | grep -c .)):"
+            echo "$failed" | sed 's/^/  - /'
+        else
+            echo "Упавшие тесты (0):"
+            echo "  (список пуст — падение до запуска тестов)"
+        fi
+        echo
+        echo "Причины (panic):"
+        if [ -n "$panics" ]; then echo "$panics"; else echo "  (строк panicked нет)"; fi
+        echo
+        echo "Итоги прогона тестов:"
+        if [ -n "$result" ]; then echo "$result"; else echo "  (строк test result нет)"; fi
+    } > "$TESTS_DIGEST"
+}
+
 report() {
+    if [ -s "$TESTS_DIGEST" ]; then
+        say ""
+        say "--- разбор тестов ---"
+        cat "$TESTS_DIGEST" | tee -a "$LOG"
+    fi
     # Хвост лога на странице прогона: видно без скачивания артефактов.
     say ""
     say "--- последние 4000 символов вывода ---"
@@ -92,16 +128,31 @@ comment_to_pr() {
         echo '```'
         grep -n -m 3 -A 14 -E '^error(\[|:| )' "$LOG" || echo '(строк с ошибками компилятора в выводе нет)'
         echo '```'
+        if [ -s "$TESTS_DIGEST" ]; then
+            echo "Упавшие тесты и причины:"
+            echo
+            echo '```'
+            head -80 "$TESTS_DIGEST"
+            echo '```'
+        fi
         echo "Предупреждения компилятора (первые строки):"
         echo
         echo '```'
         grep -n -m 5 -A 3 -E '^warning' "$LOG" || echo '(предупреждений нет)'
         echo '```'
-        echo "Последние 3000 символов вывода:"
-        echo
-        echo '```'
-        tail -c 3000 "$LOG"
-        echo '```'
+        if [ -s "$TESTS_DIGEST" ]; then
+            echo "Последние 1200 символов вывода:"
+            echo
+            echo '```'
+            tail -c 1200 "$LOG"
+            echo '```'
+        else
+            echo "Последние 3000 символов вывода:"
+            echo
+            echo '```'
+            tail -c 3000 "$LOG"
+            echo '```'
+        fi
     } > "$text_file"
     gh pr comment "$PR_NUMBER" --body-file "$text_file" || say "не удалось оставить комментарий к PR"
 }
@@ -170,9 +221,12 @@ say "binding step: $([ "$BINDING_OK" = 1 ] && echo OK || echo FAILED)"
 # ── 4. тесты ядра ──────────────────────────────────────────────────────────
 begin "cargo test (lib)"
 TESTS_OK=0
-if (cd rust-core && cargo test --release --features mqtt-dual-broker --lib >>"$LOG" 2>&1); then
+# RUST_LOG=warn: иначе отладочные журналы (mdns, MQTT) забивают вывод и по
+# комментарию к PR невозможно понять, какой тест упал.
+if (cd rust-core && RUST_LOG=warn cargo test --release --features mqtt-dual-broker --lib >>"$LOG" 2>&1); then
     TESTS_OK=1
 fi
+tests_digest
 strip_ansi
 say "тесты: $([ "$TESTS_OK" = 1 ] && echo OK || echo FAILED)"
 grep -E "^test result:" "$LOG" | tail -5 | tee -a /dev/null >/dev/null || true
