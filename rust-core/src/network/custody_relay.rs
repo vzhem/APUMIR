@@ -210,7 +210,6 @@ pub fn parse_drop(payload: &str) -> Option<String> {
 ///
 /// Замок обычный (не async): секции короткие, внутри нет `await`. Пишет
 /// приёмник кадров, читает поток presence (он отдаёт сообщения получателям).
-#[derive(Default)]
 pub struct CustodyHold {
     held: Mutex<Vec<HeldEnvelope>>,
     /// Кадры, которые надо отправить (ответы `ack`, отдача `deliver`):
