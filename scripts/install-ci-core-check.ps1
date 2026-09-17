@@ -52,6 +52,29 @@ function Find-RepoRoot {
     return ''
 }
 
+# GitHub rejects a whole workflow file when a step name holds ": " without
+# quotes (YAML reads it as a nested mapping) - and it does that silently: the
+# run appears with the file path instead of the workflow name and no job log.
+# That already cost one pointless install round on 2026-09-17, so the file is
+# checked here, before the push.
+function Assert-StepNamesLookSane([string]$Path) {
+    $problems = @()
+    $num = 0
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8)) {
+        $num++
+        if ($line.TrimStart().StartsWith('#')) { continue }
+        $m = [regex]::Match($line, "^\s*-\s*name:\s+(\S.*)$")
+        if (-not $m.Success) { continue }
+        $value = $m.Groups[1].Value.TrimEnd()
+        $first = $value.Substring(0, 1)
+        if ($first -eq '"' -or $first -eq "'") { continue }
+        if ($value.Contains(': ')) {
+            $problems += "line ${num}: step name contains ': ' without quotes -> $value"
+        }
+    }
+    return $problems
+}
+
 # Service git calls: their stderr must not become a terminating error, because
 # PowerShell 5.1 turns native stderr into NativeCommandError while
 # ErrorActionPreference is 'Stop'.
@@ -112,6 +135,12 @@ try {
     if (-not (Test-Path -LiteralPath $Dir)) { $null = New-Item -ItemType Directory -Path $Dir -Force }
     Copy-Item -LiteralPath $Source -Destination (Join-Path $Worktree $WorkflowPath) -Force
     Write-Output "copied: $SourceRel -> $WorkflowPath"
+
+    $Problems = Assert-StepNamesLookSane (Join-Path $Worktree $WorkflowPath)
+    if ($Problems.Count -gt 0) {
+        Write-Output $Problems
+        Stop-With 'the workflow file is not installable: fix the step names above (quotes around a name that holds a colon)'
+    }
 
     Push-Location $Worktree
     try {
