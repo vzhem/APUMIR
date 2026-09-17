@@ -45,8 +45,19 @@ FAILED_STEP=""
 
 say() { echo "$*" | tee -a "$LOG"; }
 
+# Вывод cargo приходит в цвете; в отчёте (и в поиске строк с ошибками) цвета
+# только мешают: без них `^error` находится, а читать проще.
+strip_ansi() {
+    sed -i 's/\x1b\[[0-9;]*[A-Za-z]//g' "$LOG" 2>/dev/null || true
+}
+
 begin() {
-    FAILED_STEP="$1"
+    # Имя шага не перетирает уже случившуюся неудачу: иначе отчёт называл бы
+    # последний запущенный шаг вместо упавшего (так и вышло в прогоне
+    # 35284307701 - «шаг: cargo test», хотя падала компиляция).
+    if [ "$FAILED" = 0 ] || [ -z "$FAILED_STEP" ]; then
+        FAILED_STEP="$1"
+    fi
     say ""
     say "=== $1 ==="
 }
@@ -68,7 +79,7 @@ comment_to_pr() {
         echo "Строки с ошибками компилятора:"
         echo
         echo '```'
-        grep -n -m 3 -A 14 -E '^error' "$LOG" || echo '(строк, начинающихся со слова error, в выводе нет)'
+        grep -n -m 3 -A 14 -E '^error(\[|:| )' "$LOG" || echo '(строк с ошибками компилятора в выводе нет)'
         echo '```'
         echo "Последние 3000 символов вывода:"
         echo
@@ -105,6 +116,7 @@ else
     FAILED=1
     FAILED_STEP="cargo check"
 fi
+strip_ansi
 
 # ── 3. генерация моста из lib.udl ──────────────────────────────────────────
 begin "uniffi bindings from lib.udl"
@@ -136,6 +148,7 @@ if [ "$BINDING_OK" = 0 ] && [ "$FAILED" = 0 ]; then
     FAILED=1
     FAILED_STEP="uniffi bindings from lib.udl"
 fi
+strip_ansi
 say "binding step: $([ "$BINDING_OK" = 1 ] && echo OK || echo FAILED)"
 
 # ── 4. тесты ядра ──────────────────────────────────────────────────────────
@@ -144,6 +157,7 @@ TESTS_OK=0
 if (cd rust-core && cargo test --release --features mqtt-dual-broker --lib >>"$LOG" 2>&1); then
     TESTS_OK=1
 fi
+strip_ansi
 say "тесты: $([ "$TESTS_OK" = 1 ] && echo OK || echo FAILED)"
 grep -E "^test result:" "$LOG" | tail -5 | tee -a /dev/null >/dev/null || true
 if [ "$TESTS_OK" = 0 ]; then
