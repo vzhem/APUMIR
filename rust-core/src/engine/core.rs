@@ -4045,12 +4045,16 @@ mod tests {
     fn direct_frame_accepts_apuf_chunk_as_event() {
         let events = EventBus::with_defaults();
         let network = NetworkManagerFfi::new();
+        // Длина шифртекста обязана лежать в протокольных границах
+        // (минимум = тег AES-GCM + 1 байт): слишком короткий кусок не
+        // кодируется, и в событие ему попадать неоткуда.
+        let ciphertext_expected = vec![1u8; 32];
         let frame = FileFrameV1::ChunkData(FileChunkDataV1 {
             transfer_id: [0x42; 16],
             chunk_index: 7,
             chunk_offset: 0,
-            ciphertext_chunk_len: 5,
-            ciphertext: vec![1, 2, 3, 4, 5],
+            ciphertext_chunk_len: ciphertext_expected.len() as u32,
+            ciphertext: ciphertext_expected.clone(),
         })
         .encode()
         .unwrap();
@@ -4077,8 +4081,8 @@ mod tests {
                 assert_eq!(transfer_id, "42424242424242424242424242424242");
                 assert_eq!(chunk_index, 7);
                 assert_eq!(chunk_offset, 0);
-                assert_eq!(ciphertext_chunk_len, 5);
-                assert_eq!(ciphertext, vec![1, 2, 3, 4, 5]);
+                assert_eq!(ciphertext_chunk_len, 32);
+                assert_eq!(ciphertext, ciphertext_expected);
             }
             other => panic!("ожидается file_chunk_received, пришло {:?}", other),
         }
@@ -4092,8 +4096,8 @@ mod tests {
             transfer_id: [0x42; 16],
             chunk_index: 0,
             chunk_offset: 0,
-            ciphertext_chunk_len: 5,
-            ciphertext: vec![1, 2, 3, 4, 5],
+            ciphertext_chunk_len: 32,
+            ciphertext: vec![1u8; 32],
         })
         .encode()
         .unwrap();

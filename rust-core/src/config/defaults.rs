@@ -241,11 +241,21 @@ mod tests {
     #[test]
     fn test_presence_version_filter() {
         assert!(presence_version_accepted(PRESENCE_VERSION));
-        assert!(presence_version_accepted(1));
-        assert!(!presence_version_accepted(0));
-        assert!(!presence_version_accepted(
-            PRESENCE_VERSION.saturating_sub(PRESENCE_VERSION_TOLERANCE)
-        ));
+        // Граница отбраковки: принимаем всё, что отстало меньше чем на
+        // TOLERANCE версий. Раньше здесь были записаны числа «на глазок»
+        // (версия 0 обязана отбраковываться) - они перестали быть верными,
+        // когда PRESENCE_VERSION стал равен 2: отставание версии 0 - это два
+        // шага, меньше допуска, и такая запись проходит фильтр. Ровно эту
+        // арифметику использует обработчик presence, поэтому проверяем
+        // границу, а не выдуманные числа.
+        if PRESENCE_VERSION >= PRESENCE_VERSION_TOLERANCE {
+            let last_rejected = PRESENCE_VERSION - PRESENCE_VERSION_TOLERANCE;
+            assert!(!presence_version_accepted(last_rejected));
+            assert!(presence_version_accepted(last_rejected + 1));
+        } else {
+            // Допуск больше текущей версии: отбраковывать пока нечего.
+            assert!(presence_version_accepted(0));
+        }
         println!("✅ Фильтр версий presence работает");
     }
 
