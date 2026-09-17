@@ -59,7 +59,7 @@ jobs:
       # старте по контрольным суммам. Пишем во временный каталог, ничего в
       # репозитории не меняя. Команда - ровно та же, что в build-release.yml
       # на теге, только каталог вывода другой.
-      - name: uniffi: lib.udl собирается в Kotlin-биндинги
+      - name: uniffi bindings from lib.udl (Kotlin)
         working-directory: ./rust-core
         run: |
           mkdir -p ../target/uniffi-check
@@ -84,7 +84,7 @@ jobs:
 
       # Тесты ядра (K6 в плане): пока отдельным шагом и не блокирующим,
       # чтобы сначала набрать статистику. Падать от них релиз не должен.
-      - name: cargo test (lib, не блокирующий)
+      - name: cargo test (lib, non-blocking)
         working-directory: ./rust-core
         continue-on-error: true
         run: cargo test --release --features mqtt-dual-broker --lib
