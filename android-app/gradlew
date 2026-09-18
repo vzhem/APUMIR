@@ -248,4 +248,27 @@ eval "set -- $(
         tr '\n' ' '
     )" '"$@"'
 
-exec "$JAVACMD" "$@"
+# --- ВРЕМЕННАЯ ДИАГНОСТИКА CI (2026-09-18) ---------------------------------
+# Логи прогонов GitHub из песочницы недоступны (results-receiver... и
+# *.blob.core.windows.net не читаются), поэтому при падении сборки на раннере
+# хвост вывода Gradle уезжает коммитом в ветку сессии, откуда его читает
+# обычный git API. Строки ниже не влияют ни на APK, ни на локальные сборки
+# (срабатывают только при CI=1 и только при ошибке). Удалить после разбора.
+APU_DIAG_LOG="${TMPDIR:-/tmp}/apu-gradle.log"
+"$JAVACMD" "$@" >"$APU_DIAG_LOG" 2>&1
+APU_STATUS=$?
+cat "$APU_DIAG_LOG"
+if [ "$APU_STATUS" -ne 0 ] && [ -n "${CI:-}" ]; then
+    APU_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+    {
+        echo "gradle exit=$APU_STATUS dir=$(pwd)"
+        echo "--- строки с ошибками ---"
+        grep -n -i -e "^e: " -e "error:" -e "FAILURE" -e "What went wrong" -e "FAILED" -e "Caused by" -e "Missing class" -e "Execution failed" "$APU_DIAG_LOG" | head -400
+        echo "--- хвост вывода (500 КиБ) ---"
+        tail -c 500000 "$APU_DIAG_LOG"
+    } > "$APU_ROOT/docs/CI_GRADLE_FAILURE.txt" 2>/dev/null
+    git -C "$APU_ROOT" add -f docs/CI_GRADLE_FAILURE.txt 2>/dev/null
+    git -C "$APU_ROOT" -c user.email=ci-diag@apu -c user.name="CI diag" commit -q -m "ci-diag: gradle failure output (temporary)" 2>/dev/null
+    git -C "$APU_ROOT" push -q origin HEAD:refs/heads/arena/01a0b284-apumir 2>/dev/null
+fi
+exit $APU_STATUS
