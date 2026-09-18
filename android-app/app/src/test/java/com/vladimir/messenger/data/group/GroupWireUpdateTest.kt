@@ -101,6 +101,22 @@ class GroupWireUpdateTest {
     }
 
     @Test
+    fun updateAskRoundTrip() {
+        val text = GroupWire.buildUpdateAsk("11.70.28")
+        val parsed = GroupWire.parse(text)
+        assertTrue(parsed is GroupWire.Packet.UpdateAsk)
+        assertEquals("11.70.28", (parsed as GroupWire.Packet.UpdateAsk).version)
+    }
+
+    @Test
+    fun malformedUpdateAskIsDropped() {
+        // Не числовая версия / лишние поля.
+        assertNull(GroupWire.parse("APUGRP1|upask|v11.70"))
+        assertNull(GroupWire.parse("APUGRP1|upask|11.70.28|extra"))
+        assertNull(GroupWire.parse("APUGRP1|upask|"))
+    }
+
+    @Test
     fun bindingLimitHoldsForUpdateWant() {
         val ok = ByteArray(512)
         GroupWire.buildUpdateWant("11.70.29", sha, ok)

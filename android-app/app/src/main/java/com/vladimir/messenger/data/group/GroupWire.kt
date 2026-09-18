@@ -174,6 +174,14 @@ object GroupWire {
      * сида. Старые телефоны вид не знают и молча отбрасывают.
      */
     const val KIND_UPDATE_NONE = "upnone"
+    /**
+     * «У тебя есть что-нибудь новее, чем моя версия?» (рой APK):
+     * `upask|моя_версия`. Шлёт телефон по кнопке «Проверить новую версию»
+     * известным узлам; сид, у которого версия новее, отвечает одним `upk`
+     * именно этому узлу (не всем). Старые телефоны вид не знают и молча
+     * отбрасывают — ответ им просто не придёт.
+     */
+    const val KIND_UPDATE_ASK = "upask"
 
     /** Ключ обмена в `fwant`: как у HELLO файловой передачи. */
     const val MAX_FILE_WANT_BINDING_BYTES = 512
@@ -587,6 +595,15 @@ object GroupWire {
         ) : Packet()
 
         /**
+         * «У тебя есть обновление новее моей версии [version]?» (рой APK):
+         * запрос кнопки «Проверить новую версию». Сид отвечает одним
+         * [UpdatePack], если его версия новее.
+         */
+        data class UpdateAsk(
+            val version: String,
+        ) : Packet()
+
+        /**
          * Возможности узла: сколько места под пересылку он отдаёт (байт).
          * Принимается только от [nodeId] = отправитель (проверка в приёмнике).
          */
@@ -804,6 +821,12 @@ object GroupWire {
         require(isUpdateVersion(version)) { "bad update version" }
         require(isSha256(sha256)) { "bad file sha256" }
         return "$PREFIX|$KIND_UPDATE_NONE|$version|$sha256"
+    }
+
+    /** «Есть что-нибудь новее моей версии?» (рой APK): кнопка «Проверить». */
+    fun buildUpdateAsk(myVersion: String): String {
+        require(isUpdateVersion(myVersion)) { "bad update version" }
+        return "$PREFIX|$KIND_UPDATE_ASK|$myVersion"
     }
 
     /** Хэш файла в визитке и просьбах: ровно 64 шестнадцатеричных знака в нижнем регистре. */
@@ -1441,6 +1464,12 @@ object GroupWire {
 
             KIND_UPDATE_NONE -> if (parts.size == 4 && isUpdateVersion(parts[2]) && isSha256(parts[3])) {
                 Packet.UpdateNone(parts[2], parts[3])
+            } else {
+                null
+            }
+
+            KIND_UPDATE_ASK -> if (parts.size == 3 && isUpdateVersion(parts[2])) {
+                Packet.UpdateAsk(parts[2])
             } else {
                 null
             }

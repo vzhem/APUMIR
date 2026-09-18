@@ -365,6 +365,42 @@ class ApkSeeder @Inject constructor(
         }
     }
 
+    /**
+     * Узел спрашивает «есть что-нибудь новее моей версии?» (`upask`) —
+     * кнопка «Проверить новую версию» на его телефоне. Если моя раздача
+     * новее его версии — отвечаю одним `upk` ИМЕННО этому узлу (не всем:
+     * обычный веер объявлений он уже получает по расписанию).
+     */
+    suspend fun onUpdateAsk(senderId: String, packet: GroupWire.Packet.UpdateAsk) {
+        val info = store.loadSeed() ?: return
+        if (!ApkUpdate.isNewer(info.version, packet.version)) return
+        runCatching {
+            delivery.deliver(
+                ApkUpdate.CHAT_ID,
+                GroupWire.buildUpdatePack(info.version, info.sha256, info.sizeBytes, System.currentTimeMillis()),
+                listOf(senderId),
+            )
+        }.onFailure { Log.w(TAG, "update ask reply failed: ${it.message}") }
+        Log.i(TAG, "update ask from ${senderId.takeLast(8)} (v${packet.version}): answered v${info.version}")
+    }
+
+    /**
+     * «Проверить новую версию» на телефоне: шлём `upask` со своей версией
+     * всем известным узлам; кто раздаёт новее — объявится `upk` (карточка
+     * в настройках обновится сама). Возвращает, сколько узлов опрашено.
+     */
+    suspend fun askNeighbors(): Int {
+        val version = ApkUpdate.normalize(currentAppVersion())
+        if (ApkUpdate.parseVersion(version) == null) return 0
+        val targets = knownNodes()
+        if (targets.isEmpty()) return 0
+        runCatching {
+            delivery.deliver(ApkUpdate.CHAT_ID, GroupWire.buildUpdateAsk(version), targets)
+        }.onFailure { Log.w(TAG, "update ask fan-out failed: ${it.message}") }
+        Log.i(TAG, "update asked ${targets.size} node(s) for something newer than v$version")
+        return targets.size
+    }
+
     /** Начать качать объявленную версию (карточка «Скачать»). */
     suspend fun requestUpdate(nodeId: String) {
         val offer = _offers.value.firstOrNull { it.nodeId == nodeId } ?: return

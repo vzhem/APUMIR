@@ -39,11 +39,22 @@ class SettingsViewModel @Inject constructor(
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     private val apkSeeder: com.vladimir.messenger.data.update.ApkSeeder,
+    private val updateChecker: com.vladimir.messenger.service.UpdateChecker,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     private var lastGossipTrigger: Long = 0L
     val uiState = _uiState.asStateFlow()
+
+    /** Идёт ли ручная проверка обновлений (кнопка «Проверить»). */
+    private val _updatesChecking = MutableStateFlow(false)
+    val updatesChecking: kotlinx.coroutines.flow.StateFlow<Boolean>
+        get() = _updatesChecking.asStateFlow()
+
+    /** Официальный релиз (GitHub), найденный проверкой; null — не найден. */
+    private val _officialRelease = MutableStateFlow<com.vladimir.messenger.service.UpdateChecker.ReleaseInfo?>(null)
+    val officialRelease: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.service.UpdateChecker.ReleaseInfo?>
+        get() = _officialRelease.asStateFlow()
 
     // ── Рой APK (docs/UPDATE_SEEDING.md): карточка «Обновления» ─────────────
 
@@ -119,6 +130,50 @@ class SettingsViewModel @Inject constructor(
     /** Установить скачанное обновление (системный диалог). */
     fun onInstallUpdate() {
         viewModelScope.launch { runCatching { apkSeeder.installReady() } }
+    }
+
+    /**
+     * Кнопка «Проверить новую версию»: (1) спрашиваем соседей — `upask`
+     * всем известным узлам, кто раздаёт новее, объявится `upk`; (2)
+     * перечитываем принятые APK; (3) смотрим официальный релиз на GitHub.
+     * Итог — тостом; найденный релиз — строкой в карточке.
+     */
+    fun onCheckForUpdates() {
+        if (_updatesChecking.value) return
+        viewModelScope.launch {
+            _updatesChecking.value = true
+            apkSeeder.refreshReceivedApks()
+            val asked = runCatching { apkSeeder.askNeighbors() }.getOrDefault(0)
+            val currentVersion = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
+            }.getOrDefault("0")
+            val release = runCatching { updateChecker.checkForUpdate(currentVersion) }.getOrNull()
+            _officialRelease.value = release
+            _updatesChecking.value = false
+            val message = when {
+                release != null -> "Есть новая версия v${release.version.removePrefix("v")} — скачайте или ждите соседей"
+                asked > 0 -> "Спрошено у $asked соседей; новых объявлений пока нет"
+                else -> "Обновлений не найдено (соседей в сети нет или они на этой же версии)"
+            }
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Скачать официальный релиз (DownloadManager; установка из «Загрузок»). */
+    fun onDownloadOfficialRelease() {
+        val release = _officialRelease.value ?: return
+        runCatching { updateChecker.downloadApk(release) }
+            .onSuccess {
+                android.widget.Toast.makeText(
+                    context,
+                    "Скачивание началось. После завершения установите из «Загрузок» " +
+                        "и отметьте файл в «Обновлениях», чтобы раздать соседям",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+            .onFailure {
+                android.widget.Toast.makeText(context, "Не удалось начать скачивание: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
     }
 
     private fun toastIf(message: String) {

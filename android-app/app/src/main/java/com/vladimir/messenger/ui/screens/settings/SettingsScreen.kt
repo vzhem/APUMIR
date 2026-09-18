@@ -1123,6 +1123,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     val download by viewModel.apkDownload.collectAsStateWithLifecycle()
     val ready by viewModel.apkReady.collectAsStateWithLifecycle()
     val receivedApks by viewModel.apkReceivedApks.collectAsStateWithLifecycle()
+    val checking by viewModel.updatesChecking.collectAsStateWithLifecycle()
+    val official by viewModel.officialRelease.collectAsStateWithLifecycle()
     var markTarget by remember { mutableStateOf<MarkTarget?>(null) }
 
     val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1153,12 +1155,13 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 onClick = viewModel::onStopUpdateSeed,
             )
         }
-        // Предложение соседа: лучший (самый новый) первый.
+        // Предложение соседа: лучший (самый новый) первый. Версия — на
+        // самой кнопке: «Скачать v…».
         val best = offers.firstOrNull()
         if (best != null && download == null && ready == null) {
             SettingsItem(
-                icon    = Icons.Default.SystemUpdate,
-                title   = "Новая версия v${best.version}",
+                icon    = Icons.Default.Download,
+                title   = "Скачать v${best.version}",
                 subtitle = if (offers.size > 1) {
                     "Раздают ${offers.size} соседа; ${com.vladimir.messenger.data.swarm.StoragePolicy.format(best.sizeBytes)}"
                 } else {
@@ -1182,12 +1185,22 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             )
         }
         // Готово к установке (раздача уже идёт — новая версия расходится).
+        // Кнопка показывает, ЧТО поставит: «Обновить до vX».
         ready?.let { r ->
             SettingsItem(
-                icon    = Icons.Default.PlayArrow,
-                title   = "Версия v${r.version} готова",
+                icon    = Icons.Default.SystemUpdate,
+                title   = "Обновить до v${r.version}",
                 subtitle = "${r.name}, ${com.vladimir.messenger.data.swarm.StoragePolicy.format(r.sizeBytes)}; уже раздаётся соседям",
                 onClick = viewModel::onInstallUpdate,
+            )
+        }
+        // Официальный релиз, найденный кнопкой «Проверить новую версию».
+        official?.let { rel ->
+            SettingsItem(
+                icon    = Icons.Default.CloudDownload,
+                title   = "Скачать официальный v${rel.version.removePrefix("v")}",
+                subtitle = "С GitHub; после установки отметьте файл в этом разделе, чтобы раздать соседям",
+                onClick = viewModel::onDownloadOfficialRelease,
             )
         }
         // Принятые APK: «раздать полученный» (сценарий: APK переслан с ПК).
@@ -1212,6 +1225,15 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             title   = "Отметить APK как обновление",
             subtitle = "Файл проверяется (это APK, версия новее текущей) и раздаётся всем, у кого ниже версия",
             onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
+        )
+        // «Проверить новую версию»: спросить соседей (upask) + посмотреть
+        // официальный релиз. Пока идёт — кнопка замирает на «Проверяю…».
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        SettingsItem(
+            icon    = Icons.Default.Refresh,
+            title   = if (checking) "Проверяю…" else "Проверить новую версию",
+            subtitle = "Спросит соседей в сети и посмотрит официальный релиз",
+            onClick = if (checking) null else viewModel::onCheckForUpdates,
         )
     }
 

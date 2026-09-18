@@ -146,6 +146,7 @@ object GroupsModule {
         onUpdatePack = { senderId, packet -> apkSeeder.get().onUpdatePack(senderId, packet) },
         onUpdateWant = { senderId, packet -> apkSeeder.get().onUpdateWant(senderId, packet) },
         onUpdateNone = { senderId, packet -> apkSeeder.get().onUpdateNone(senderId, packet) },
+        onUpdateAsk = { senderId, packet -> apkSeeder.get().onUpdateAsk(senderId, packet) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

@@ -142,13 +142,14 @@ class GroupRepository(
         { _, _, _, _, _ -> },
     /**
      * Рой APK (docs/UPDATE_SEEDING.md): объявление «я раздаю обновление»
-     * `upk`, просьба «пришли мне обновление» `upwant` и ответ «нет этой
-     * версии» `upnone`. По умолчанию ничего не делают — так живут
-     * JVM-тесты.
+     * `upk`, просьба «пришли мне обновление» `upwant`, ответ «нет этой
+     * версии» `upnone` и запрос «есть что-нибудь новее?» `upask`. По
+     * умолчанию ничего не делают — так живут JVM-тесты.
      */
     private val onUpdatePack: suspend (senderId: String, packet: GroupWire.Packet.UpdatePack) -> Unit = { _, _ -> },
     private val onUpdateWant: suspend (senderId: String, packet: GroupWire.Packet.UpdateWant) -> Unit = { _, _ -> },
     private val onUpdateNone: suspend (senderId: String, packet: GroupWire.Packet.UpdateNone) -> Unit = { _, _ -> },
+    private val onUpdateAsk: suspend (senderId: String, packet: GroupWire.Packet.UpdateAsk) -> Unit = { _, _ -> },
 ) {
 
     /**
@@ -2725,6 +2726,13 @@ class GroupRepository(
             is GroupWire.Packet.UpdateNone -> backgroundScope.launch {
                 runCatching { onUpdateNone(senderId, packet) }
                     .onFailure { Log.w(TAG, "update none failed: ${it.message}") }
+            }
+
+            // «Проверить новую версию»: узел спрашивает, есть ли у нас что-то
+            // новее его версии; сид ответит одним `upk` ему лично.
+            is GroupWire.Packet.UpdateAsk -> backgroundScope.launch {
+                runCatching { onUpdateAsk(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update ask failed: ${it.message}") }
             }
 
             // Счётчики через владельца (этап 3): сводку считает и применяет
