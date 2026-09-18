@@ -1,7 +1,97 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+
+/// Порт MQTT по умолчанию: если адрес задан без порта.
+pub const DEFAULT_MQTT_PORT: u16 = 1883;
+
+/// Сколько ждём ответа порта при выборе брокера.
+///
+/// Это «строгий таймаут» из правил работы с внешними ресурсами
+/// (`docs/CORE_ROADMAP.md`, раздел 3): свой брокер может быть выключен или
+/// недоступен из мобильной сети, и приложение не должно ждать его дольше,
+/// чем нужно, чтобы перейти на публичный.
+pub const BROKER_PROBE_TIMEOUT: Duration = Duration::from_secs(6);
+
+/// Разобрать адрес брокера из настроек.
+///
+/// Принимаем то, что человек напишет руками: `mqtt://host:1883`,
+/// `host:1883`, просто `host` (тогда порт по умолчанию). Пустая строка и
+/// чужие схемы (`http://`, `ws://`) не принимаются: молча ходить не туда
+/// хуже, чем честно остаться на публичных брокерах.
+pub fn parse_broker_endpoint(text: &str) -> Option<(String, u16)> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let without_scheme = match trimmed.split_once("://") {
+        None => trimmed,
+        Some((scheme, rest)) => {
+            if !scheme.eq_ignore_ascii_case("mqtt") && !scheme.eq_ignore_ascii_case("tcp") {
+                return None;
+            }
+            rest
+        }
+    };
+    let without_path = without_scheme
+        .split(['/', '#', '?'])
+        .next()
+        .unwrap_or(without_scheme)
+        .trim();
+    if without_path.is_empty() {
+        return None;
+    }
+    let (host, port) = match without_path.rsplit_once(':') {
+        Some((host, port_text)) => {
+            let port: u16 = port_text.trim().parse().ok()?;
+            (host.trim(), port)
+        }
+        None => (without_path, DEFAULT_MQTT_PORT),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    // Квадратные скобки IPv6 оставляем как есть: так адрес понимает и
+    // `TcpStream::connect`, и подключение брокера.
+    Some((host.to_string(), port))
+}
+
+/// Отвечает ли порт брокера в пределах [`BROKER_PROBE_TIMEOUT`].
+///
+/// Проверяем именно соединение (MQTT-hello не шлём): задача - быстро
+/// отличить «там что-то есть» от «там никого нет», не поднимая сессию.
+/// Ошибка разбора адреса - тоже `false`: значит, идём на публичный брокер.
+pub async fn probe_broker(host: &str, port: u16) -> bool {
+    match tokio::time::timeout(
+        BROKER_PROBE_TIMEOUT,
+        tokio::net::TcpStream::connect((host, port)),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => {
+            drop(stream);
+            true
+        }
+        Ok(Err(error)) => {
+            tracing::info!(
+                "MQTT OWN BROKER: {}:{} не ответил ({}), идём на публичный",
+                host,
+                port,
+                error
+            );
+            false
+        }
+        Err(_) => {
+            tracing::info!(
+                "MQTT OWN BROKER: {}:{} молчит дольше {} с, идём на публичный",
+                host,
+                port,
+                BROKER_PROBE_TIMEOUT.as_secs()
+            );
+            false
+        }
+    }
+}
 
 /// Список публичных MQTT broker (без авторизации)
 const BROKERS: &[(&str, u16)] = &[
@@ -15,7 +105,12 @@ const BROKERS: &[(&str, u16)] = &[
 /// Менеджер нескольких MQTT broker.
 /// Автоматически переключается на следующий при падении.
 pub struct MultiBroker {
-    /// Индекс текущего broker
+    /// Свой брокер из настроек (например, свой Worker/сервер владельца).
+    /// Идёт первым, пока отвечает.
+    own: Option<(String, u16)>,
+    /// Свой брокер не ответил: больше к нему не возвращаемся.
+    own_failed: AtomicBool,
+    /// Индекс текущего публичного broker
     current: AtomicUsize,
     /// Время последнего успешного соединения
     last_success: Mutex<Instant>,
@@ -28,11 +123,58 @@ pub struct MultiBroker {
 impl MultiBroker {
     pub fn new() -> Self {
         Self {
+            own: None,
+            own_failed: AtomicBool::new(false),
             current: AtomicUsize::new(0),
             last_success: Mutex::new(Instant::now()),
             errors: AtomicUsize::new(0),
             max_errors: 3,
         }
+    }
+
+    /// Менеджер со своим брокером из настроек: он идёт первым, публичные -
+    /// запасной путь. `None` - поведение прежнее, только публичные.
+    pub fn with_own(own: Option<(String, u16)>) -> Self {
+        let mut broker = Self::new();
+        broker.own = own;
+        broker
+    }
+
+    /// Свой брокер из настроек, если он задан.
+    pub fn own(&self) -> Option<(&str, u16)> {
+        self.own.as_ref().map(|(host, port)| (host.as_str(), *port))
+    }
+
+    /// Отметить, что свой брокер не отвечает: дальше только публичные.
+    pub fn mark_own_failed(&self) {
+        if !self.own_failed.swap(true, Ordering::Relaxed) {
+            if let Some((host, port)) = self.own.as_ref() {
+                tracing::warn!(
+                    "MQTT: свой брокер {}:{} недоступен, переходим на публичные",
+                    host,
+                    port
+                );
+            }
+        }
+    }
+
+    /// Свой брокер сейчас в игре?
+    pub fn own_is_usable(&self) -> bool {
+        self.own.is_some() && !self.own_failed.load(Ordering::Relaxed)
+    }
+
+    /// Порядок перебора: свой брокер первым, затем публичные.
+    pub fn candidates(&self) -> Vec<(String, u16)> {
+        let mut list: Vec<(String, u16)> = Vec::with_capacity(BROKERS.len() + 1);
+        if self.own_is_usable() {
+            if let Some((host, port)) = self.own.as_ref() {
+                list.push((host.clone(), *port));
+            }
+        }
+        for (host, port) in BROKERS.iter() {
+            list.push(((*host).to_string(), *port));
+        }
+        list
     }
 
     /// Текущий broker (host, port)
@@ -106,5 +248,78 @@ impl MultiBroker {
 impl Default for MultiBroker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn broker_endpoint_forms_are_accepted() {
+        assert_eq!(
+            parse_broker_endpoint("mqtt://broker.example.com:1883"),
+            Some(("broker.example.com".to_string(), 1883))
+        );
+        assert_eq!(
+            parse_broker_endpoint("broker.example.com:8883"),
+            Some(("broker.example.com".to_string(), 8883))
+        );
+        assert_eq!(
+            parse_broker_endpoint("  broker.example.com  "),
+            Some(("broker.example.com".to_string(), DEFAULT_MQTT_PORT))
+        );
+        assert_eq!(
+            parse_broker_endpoint("tcp://10.0.0.5:1883/"),
+            Some(("10.0.0.5".to_string(), 1883))
+        );
+    }
+
+    #[test]
+    fn broken_broker_endpoints_are_rejected() {
+        for text in [
+            "",
+            "   ",
+            "http://broker.example.com:1883",
+            "ws://broker.example.com",
+            ":1883",
+            "broker.example.com:not-a-port",
+            "broker.example.com:99999",
+        ] {
+            assert_eq!(parse_broker_endpoint(text), None, "принято: {text:?}");
+        }
+    }
+
+    #[test]
+    fn own_broker_goes_first_and_public_ones_stay_as_bundle() {
+        let own = ("my-broker.example.com".to_string(), 1883);
+        let broker = MultiBroker::with_own(Some(own.clone()));
+        assert_eq!(broker.own(), Some(("my-broker.example.com", 1883)));
+        let candidates = broker.candidates();
+        assert_eq!(candidates.first().cloned(), Some(own));
+        assert_eq!(candidates.len(), BROKERS.len() + 1);
+        assert!(broker.own_is_usable());
+    }
+
+    #[test]
+    fn failed_own_broker_steps_aside_for_the_public_list() {
+        let broker = MultiBroker::with_own(Some(("my-broker.example.com".to_string(), 1883)));
+        broker.mark_own_failed();
+        assert!(!broker.own_is_usable());
+        assert_eq!(broker.candidates().len(), BROKERS.len());
+        assert_eq!(
+            broker.candidates().first().cloned(),
+            Some((BROKERS[0].0.to_string(), BROKERS[0].1))
+        );
+        // Без своего брокера поведение прежнее.
+        let plain = MultiBroker::new();
+        assert_eq!(plain.candidates().len(), BROKERS.len());
+        assert_eq!(plain.own(), None);
+    }
+
+    #[test]
+    fn probe_timeout_stays_strict() {
+        assert!(BROKER_PROBE_TIMEOUT >= Duration::from_secs(3));
+        assert!(BROKER_PROBE_TIMEOUT <= Duration::from_secs(10));
     }
 }

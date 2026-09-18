@@ -161,6 +161,10 @@ enum Command {
 }
 
 /// Общее состояние транспорта.
+/// K4: `Clone` нужен движку, чтобы отдать рукоятку отдельному потоку
+/// личного presence, не держа замок `Option<DirectTransport>` на время
+/// блокирующей отправки (до [`DIRECT_SEND_BUDGET`] на узел).
+#[derive(Clone)]
 struct Shared {
     client: Arc<QuicClient>,
     pool: Arc<ConnectionPool>,
@@ -187,6 +191,10 @@ impl Shared {
 }
 
 /// Рукоятка транспорта: живёт в `P2PCore`, клонируется дёшево.
+///
+/// K4: клонируется (канал команд + общий `Arc`), поэтому движок может
+/// держать свою копию в отдельном потоке presence и в то же время отдавать
+/// `Option<DirectTransport>` из-под замка в FFI-вызовах.
 #[derive(Clone)]
 pub struct DirectTransport {
     tx: mpsc::Sender<Command>,
@@ -829,7 +837,13 @@ mod tests {
 
     /// K3: бинарный кадр файла уезжает тем же образом (пул, один кадр =
     /// один стрим), байты доходят без искажений — сервер видит магик APUF.
-    #[tokio::test]
+    ///
+    /// Отправка блокирующая, поэтому зовём её со своего потока
+    /// (`std::thread::spawn`), а не из тела асинхронного теста: в
+    /// однопоточном рантайме блокирующий вызов ждёт ответа, который должен
+    /// выдать таск на том же самом потоке, — так тест сам себя запирает и
+    /// получает `false` по бюджету. Так же, как из Kotlin через uniffi.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn file_frame_goes_through_pool_as_binary() {
         let (transport, _side) = DirectTransport::start(any_port(), noop_handler()).unwrap();
         let server = Arc::new(QuicClient::new(any_port()).unwrap());
@@ -846,9 +860,18 @@ mod tests {
             (first, second)
         });
 
-        assert!(transport.send_file_blocking("pk_peer", Some(server_addr), frame.clone()));
-        // Второй кадр тому же узлу — по тому же соединению из пула.
-        assert!(transport.send_file_blocking("pk_peer", Some(server_addr), frame.clone()));
+        let sender = transport.clone();
+        let frames = frame.clone();
+        let (first_sent, second_sent) = std::thread::spawn(move || {
+            let first = sender.send_file_blocking("pk_peer", Some(server_addr), frames.clone());
+            // Второй кадр тому же узлу — по тому же соединению из пула.
+            let second = sender.send_file_blocking("pk_peer", Some(server_addr), frames);
+            (first, second)
+        })
+        .join()
+        .unwrap();
+        assert!(first_sent, "первый кадр файла не ушёл");
+        assert!(second_sent, "второй кадр файла не ушёл по соединению из пула");
 
         let (first, second) = tokio::time::timeout(Duration::from_secs(5), server_task)
             .await

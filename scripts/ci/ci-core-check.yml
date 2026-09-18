@@ -1,0 +1,62 @@
+name: Core compile check
+
+# Тонкая обёртка: вся проверка живёт в scripts/ci/ci-core-check.sh.
+#
+# Зачем так. Файл воркфлоу агент запушить не может (у GitHub-приложения Arena
+# нет права `workflows`), его один раз ставит владелец скриптом
+# scripts/install-ci-core-check.ps1. Логика проверки лежит в скрипте в
+# репозитории, поэтому её можно менять обычными пушами — без новых установок.
+#
+# Что проверяем: `cargo check --release --features mqtt-dual-broker` (та же
+# линия фич, что в релизе), сборку моста из lib.udl генератором uniffi и
+# `cargo test --lib`. Ничего не публикует: релиз запускает только тег
+# (build-release.yml).
+#
+# Подробности и переменные окружения — в шапке scripts/ci/ci-core-check.sh.
+on:
+  pull_request:
+    paths:
+      - 'rust-core/**'
+      - 'tools/uniffi-bindgen/**'
+      - 'scripts/ci/**'
+      - '.github/workflows/ci-core-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ci-core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: cargo check + uniffi contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-core/target
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('rust-core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-check-
+
+      # Единственный шаг с логикой: скрипт сам ставит системные пакеты,
+      # компилирует, генерирует мост, гоняет тесты и отчитывается. При
+      # падении он печатает хвост лога здесь и оставляет комментарий к PR.
+      - name: Run the core check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci/ci-core-check.sh

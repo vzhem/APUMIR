@@ -16,7 +16,9 @@
 //! - **adaptive_polling**  — экспоненциальный backoff (следующий этап)
 
 pub mod adaptive_polling;
+pub mod address_lookup;
 pub mod connection_manager;
+pub mod custody_relay;
 pub mod connection_pool;
 pub mod dht;
 pub mod direct_transport;
@@ -24,6 +26,7 @@ pub mod fallback_chain;
 pub mod file_control;
 pub mod file_custody;
 pub mod file_custody_receipt;
+pub mod file_custody_relay;
 pub mod file_custody_replication;
 pub mod file_identity;
 pub mod file_path;
@@ -36,6 +39,7 @@ pub mod message_queue;
 pub mod nat_types;
 pub mod offline_send;
 pub mod presence;
+pub mod presence_scope;
 pub mod quic_client;
 pub mod relay;
 pub mod relay_queue;
@@ -45,6 +49,15 @@ pub mod wire;
 
 // Реэкспорты для удобства
 pub use connection_pool::{ConnectionPool, ConnectionPoolError};
+pub use custody_relay::{
+    ack_payload, deliver_payload, delivered_message, drop_payload, held_from_envelope,
+    offer_payload, parse_ack, parse_drop, parse_envelope_frame, CustodyAck, CustodyHold,
+    CustodyOffers, HeldEnvelope, CUSTODY_ACK_PREFIX, CUSTODY_DELIVER_PREFIX,
+    CUSTODY_DROP_PREFIX, CUSTODY_OFFER_PREFIX,
+};
+pub use address_lookup::{
+    parse_query, parse_reply, query_payload, reply_payload, AddressLookup,
+};
 pub use dht::{bucket_index, xor_distance, Bucket, DhtNodeInfo, RoutingTable};
 pub use ice::{IceError, StunClient, DEFAULT_STUN_SERVERS};
 pub use mdns::{DiscoveredNode, MdnsError, MdnsService};
@@ -52,6 +65,7 @@ pub use message_queue::{
     MessageQueue, QueueError, QueuedMessage, DEFAULT_MESSAGE_TTL, MAX_RETRY_COUNT,
 };
 pub use presence::{GossipDecision, KnownNode, PresenceManager, DEFAULT_GOSSIP_TTL};
+pub use presence_scope::{parse_direct_presence, DirectPresence, PresenceMode, PresenceScope};
 pub use quic_client::{QuicClient, QuicClientError, QuicConnection};
 pub use relay::{DropReason, RelayAction, RelayError, RelayManager, RelayStats};
 pub use router::{RouteDecision, Router, RoutingRecord, DEFAULT_TTL};

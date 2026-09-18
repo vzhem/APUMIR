@@ -53,3 +53,5 @@ cloudflare-worker/node_modules/
 Thumbs.db
 .DS_Store
 
+# Артефакты локальных прогонов (лог проверки ядра и т.п.)
+target/
