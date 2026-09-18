@@ -36,13 +36,22 @@ object ApkUpdate {
     // ── Версии ──────────────────────────────────────────────────────────────
 
     /**
+     * Привести версию к числовому виду: убрать пробелы, префикс `v` и
+     * хвосты `-beta`/`+abc` (как `UpdateChecker.isVersionNewer`).
+     */
+    fun normalize(value: String): String =
+        value.trim().removePrefix("v").removePrefix("V").substringBefore('-').substringBefore('+')
+
+    /**
      * Разобрать числовую версию (`11.70.29`): 1–4 компонента, не длиннее
      * 4 знаков; null — не версия. То же строгое числовое, что
-     * `GroupWire.isUpdateVersion` в пакетах роя.
+     * `GroupWire.isUpdateVersion` в пакетах роя. Префикс `v` прощается
+     * ([normalize]).
      */
     fun parseVersion(value: String): List<Int>? {
-        if (value.isEmpty() || value.length > 23) return null
-        val parts = value.split('.')
+        val clean = normalize(value)
+        if (clean.isEmpty() || clean.length > 23) return null
+        val parts = clean.split('.')
         if (parts.size !in 1..4) return null
         return parts.map { part ->
             if (part.isEmpty() || part.length > 4 || part.any { it !in '0'..'9' }) return null

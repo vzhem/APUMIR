@@ -1,4 +1,4 @@
-﻿package com.vladimir.messenger.ui.screens.settings
+package com.vladimir.messenger.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -38,11 +38,93 @@ class SettingsViewModel @Inject constructor(
     private val proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
+    private val apkSeeder: com.vladimir.messenger.data.update.ApkSeeder,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     private var lastGossipTrigger: Long = 0L
     val uiState = _uiState.asStateFlow()
+
+    // ── Рой APK (docs/UPDATE_SEEDING.md): карточка «Обновления» ─────────────
+
+    /** Моя раздача обновления (сидер — синглтон, потоки живые). */
+    val apkSeed: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.SeedUi?>
+        get() = apkSeeder.seed
+
+    /** Объявления соседей: только версии новее моей, лучшие первыми. */
+    val apkOffers: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.Offer>>
+        get() = apkSeeder.offers
+
+    /** Приём обновления: ход в байтах. */
+    val apkDownload: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.Download?>
+        get() = apkSeeder.download
+
+    /** Скачанное обновление: можно ставить, раздача уже идёт. */
+    val apkReady: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.Ready?>
+        get() = apkSeeder.ready
+
+    /** Принятые APK-файлы: кандидаты на «отметить как обновление». */
+    val apkReceivedApks: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.ReceivedApk>>
+        get() = apkSeeder.receivedApks
+
+    /** Обозрел экран: перечитать список принятых APK (не чаще 5 минут в сидере). */
+    fun onUpdatesAppeared() = apkSeeder.refreshReceivedApks()
+
+    /**
+     * Пометить выбранный (SAF) APK как версию [version] и раздавать её.
+     * autoReseed=true: после установки и перезапуска раздача продолжается.
+     */
+    fun onMarkApkFileAsUpdate(uri: android.net.Uri, version: String) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val temp = java.io.File.createTempFile("apu_update_", ".apk", context.cacheDir)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        temp.outputStream().use { output -> input.copyTo(output) }
+                    } ?: return@withContext "Не удалось открыть файл"
+                    apkSeeder.markAsSeed(temp, version, autoReseed = true)
+                        .also { temp.delete() }
+                } catch (error: Exception) {
+                    "Ошибка: ${error.message}"
+                }
+            }
+            toastIf(result)
+        }
+    }
+
+    /** Раздавать уже принятый APK (из чата) как версию [version]. */
+    fun onMarkReceivedApkAsUpdate(transferId: String, version: String) {
+        viewModelScope.launch {
+            val result = runCatching { apkSeeder.markReceivedApkAsSeed(transferId, version, autoReseed = true) }
+                .getOrElse { "Ошибка: ${it.message}" }
+            toastIf(result)
+        }
+    }
+
+    /** Остановить раздачу: объявление и копия долой. */
+    fun onStopUpdateSeed() {
+        viewModelScope.launch { runCatching { apkSeeder.unmark() } }
+    }
+
+    /** Начать качать версию, которую раздаёт узел [nodeId]. */
+    fun onDownloadUpdateFrom(nodeId: String) {
+        viewModelScope.launch { runCatching { apkSeeder.requestUpdate(nodeId) } }
+    }
+
+    /** Остановить приём обновления. */
+    fun onCancelUpdateDownload() {
+        viewModelScope.launch { runCatching { apkSeeder.cancelDownload() } }
+    }
+
+    /** Установить скачанное обновление (системный диалог). */
+    fun onInstallUpdate() {
+        viewModelScope.launch { runCatching { apkSeeder.installReady() } }
+    }
+
+    private fun toastIf(message: String) {
+        if (message.isBlank()) return
+        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+    }
 
     /**
      * Свои сердечки. Голоса приходят по сети в любой момент, поэтому счётчик

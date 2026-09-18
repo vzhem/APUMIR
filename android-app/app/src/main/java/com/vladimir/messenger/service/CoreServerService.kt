@@ -63,6 +63,7 @@ class CoreServerService : Service() {
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm
+    @Inject lateinit var apkSeeder: com.vladimir.messenger.data.update.ApkSeeder
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
@@ -581,6 +582,14 @@ class CoreServerService : Service() {
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group file pump error: ${ex.message}")
                 }
+                // Рой APK (docs/UPDATE_SEEDING.md): повторить просьбы о
+                // новой версии, обновить карточку «Обновления», объявить
+                // о своей раздаче.
+                try {
+                    apkSeeder.pump()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Apk seeder pump error: ${ex.message}")
+                }
                 delay(FILE_PUMP_INTERVAL_MS)
             }
         }
@@ -850,6 +859,10 @@ class CoreServerService : Service() {
                     if (!lightTouch) {
                         runCatching { groupFiles.onPeerOnline(peerId) }
                             .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
+                        // Обновление, которое я жду, может раздавать именно
+                        // этот узел: спросить сразу, не дожидаясь круга.
+                        runCatching { apkSeeder.onPeerOnline(peerId) }
+                            .onFailure { Log.w(TAG, "apk seeder presence failed: ${it.message}") }
                     }
                 }
 

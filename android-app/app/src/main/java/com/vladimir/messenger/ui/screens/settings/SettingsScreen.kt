@@ -994,6 +994,14 @@ private fun SettingsTabContent(
             // снова, когда восстановление ключей будет работать целиком.
 
             // ----------------------------------------------------------------
+            // ОБНОВЛЕНИЯ: APK-файл приложения раздаётся телефонами роем
+            // (docs/UPDATE_SEEDING.md) — без сервера, по кусочкам, как файлы
+            // групп. Новая версия видна тем, у кого версия ниже.
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Обновления") }
+            item { ApkUpdatesCard(viewModel) }
+
+            // ----------------------------------------------------------------
             // О ПРИЛОЖЕНИИ
             // ----------------------------------------------------------------
             item { SettingsSectionTitle("О приложении") }
@@ -1089,6 +1097,181 @@ private fun SettingsItem(
             )
         }
     }
+}
+
+/**
+ * Карточка «Обновления» (docs/UPDATE_SEEDING.md): APK раздаётся телефонами
+ * роем, как файлы групп. Состояние живое (StateFlow сидера): моя раздача,
+ * предложения соседей (только версии новее моей), приём, готовое к установке
+ * и принятые APK-файлы.
+ */
+/**
+ * Что помечать как обновление: выбранный в проводнике APK (uri) или принятый
+ * файл (transferId). Версию человек подтверждает в диалоге.
+ */
+private data class MarkTarget(
+    val title: String,
+    val versionGuess: String,
+    val uri: android.net.Uri?,
+    val transferId: String?,
+)
+
+@Composable
+private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
+    val seed by viewModel.apkSeed.collectAsStateWithLifecycle()
+    val offers by viewModel.apkOffers.collectAsStateWithLifecycle()
+    val download by viewModel.apkDownload.collectAsStateWithLifecycle()
+    val ready by viewModel.apkReady.collectAsStateWithLifecycle()
+    val receivedApks by viewModel.apkReceivedApks.collectAsStateWithLifecycle()
+    var markTarget by remember { mutableStateOf<MarkTarget?>(null) }
+
+    val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            markTarget = MarkTarget("Отметить файл как обновление", "", uri, null)
+        }
+    }
+
+    LaunchedEffect(Unit) { viewModel.onUpdatesAppeared() }
+
+    SettingsCard {
+        // Моя раздача.
+        seed?.let { s ->
+            SettingsItem(
+                icon    = Icons.Default.Share,
+                title   = if (s.preparing) {
+                    "Готовлю раздачу обновления v${s.version}"
+                } else {
+                    "Раздаю обновление v${s.version}"
+                },
+                subtitle = "${s.name}, ${com.vladimir.messenger.data.swarm.StoragePolicy.format(s.sizeBytes)}; получили: ${s.served}",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsItem(
+                icon    = Icons.Default.Close,
+                title   = "Остановить раздачу",
+                subtitle = "Убрать объявление и локальную копию",
+                onClick = viewModel::onStopUpdateSeed,
+            )
+        }
+        // Предложение соседа: лучший (самый новый) первый.
+        val best = offers.firstOrNull()
+        if (best != null && download == null && ready == null) {
+            SettingsItem(
+                icon    = Icons.Default.SystemUpdate,
+                title   = "Новая версия v${best.version}",
+                subtitle = if (offers.size > 1) {
+                    "Раздают ${offers.size} соседа; ${com.vladimir.messenger.data.swarm.StoragePolicy.format(best.sizeBytes)}"
+                } else {
+                    "Раздаёт сосед; ${com.vladimir.messenger.data.swarm.StoragePolicy.format(best.sizeBytes)}"
+                },
+                onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
+            )
+        }
+        // Приём идёт.
+        download?.let { d ->
+            SettingsItem(
+                icon    = Icons.Default.Download,
+                title   = "Принимаю v${d.version}",
+                subtitle = "${com.vladimir.messenger.data.swarm.StoragePolicy.format(d.receivedBytes)} из ${com.vladimir.messenger.data.swarm.StoragePolicy.format(d.totalBytes)}",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsItem(
+                icon    = Icons.Default.Close,
+                title   = "Остановить приём",
+                onClick = viewModel::onCancelUpdateDownload,
+            )
+        }
+        // Готово к установке (раздача уже идёт — новая версия расходится).
+        ready?.let { r ->
+            SettingsItem(
+                icon    = Icons.Default.PlayArrow,
+                title   = "Версия v${r.version} готова",
+                subtitle = "${r.name}, ${com.vladimir.messenger.data.swarm.StoragePolicy.format(r.sizeBytes)}; уже раздаётся соседям",
+                onClick = viewModel::onInstallUpdate,
+            )
+        }
+        // Принятые APK: «раздать полученный» (сценарий: APK переслан с ПК).
+        receivedApks.forEach { apk ->
+            SettingsItem(
+                icon    = Icons.Default.InsertDriveFile,
+                title   = apk.displayName,
+                subtitle = "Получен, ${com.vladimir.messenger.data.swarm.StoragePolicy.format(apk.sizeBytes)}",
+                onClick = {
+                    markTarget = MarkTarget(
+                        title        = "Раздать полученный APK",
+                        versionGuess = apk.versionGuess ?: "",
+                        uri          = null,
+                        transferId   = apk.transferId,
+                    )
+                },
+            )
+        }
+        // Пометить файл (с ПК / из проводника).
+        SettingsItem(
+            icon    = Icons.Default.FileOpen,
+            title   = "Отметить APK как обновление",
+            subtitle = "Файл проверяется (это APK, версия новее текущей) и раздаётся всем, у кого ниже версия",
+            onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
+        )
+    }
+
+    markTarget?.let { target ->
+        ApkVersionDialog(
+            title          = target.title,
+            initialVersion = target.versionGuess,
+            onConfirm = { version ->
+                markTarget = null
+                if (target.uri != null) {
+                    viewModel.onMarkApkFileAsUpdate(target.uri, version)
+                } else {
+                    target.transferId?.let { id -> viewModel.onMarkReceivedApkAsUpdate(id, version) }
+                }
+            },
+            onDismiss = { markTarget = null },
+        )
+    }
+}
+
+/**
+ * Диалог подтверждения версии обновления: числовая (например 11.70.29),
+ * должна быть новее текущей. Если версия не угадана из имени файла —
+ * человек вводит сам.
+ */
+@Composable
+private fun ApkVersionDialog(
+    title: String,
+    initialVersion: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var version by remember { mutableStateOf(initialVersion) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                Text(
+                    "Числовая версия, например 11.70.29. Должна быть новее текущей — иначе файл не станет обновлением.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value        = version,
+                    onValueChange = { version = it },
+                    singleLine = true,
+                    label      = { Text("Версия") },
+                    modifier   = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(version) }) { Text("Раздавать") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
 }
 
 @Composable

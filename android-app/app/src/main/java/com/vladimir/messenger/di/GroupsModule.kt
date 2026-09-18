@@ -96,6 +96,9 @@ object GroupsModule {
         counters: com.vladimir.messenger.data.channel.PostCounterRepository,
         shortener: com.vladimir.messenger.data.link.LinkShortener,
         groupFiles: javax.inject.Provider<com.vladimir.messenger.data.group.GroupFileSwarm>,
+        // Рой APK (обновление роем, docs/UPDATE_SEEDING.md): те же кольца,
+        // что у файлов группы, — через Provider.
+        apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -139,6 +142,10 @@ object GroupsModule {
         onFileCard = { groupId, messageId, authorId, sentAtMs, info ->
             groupFiles.get().onCardSeen(groupId, messageId, authorId, sentAtMs, info)
         },
+        // Рой APK: пакеты обновления — в сидер (docs/UPDATE_SEEDING.md).
+        onUpdatePack = { senderId, packet -> apkSeeder.get().onUpdatePack(senderId, packet) },
+        onUpdateWant = { senderId, packet -> apkSeeder.get().onUpdateWant(senderId, packet) },
+        onUpdateNone = { senderId, packet -> apkSeeder.get().onUpdateNone(senderId, packet) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

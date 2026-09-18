@@ -31,8 +31,13 @@ class ApkUpdateTest {
     @Test
     fun versionParseRejectsNonNumeric() {
         assertEquals(listOf(11, 70, 29), ApkUpdate.parseVersion("11.70.29"))
-        assertNull(ApkUpdate.parseVersion("v11.70"))
-        assertNull(ApkUpdate.parseVersion("11.70.29-beta"))
+        assertEquals(listOf(11, 70), ApkUpdate.parseVersion("v11.70"))
+        // Префикс v и хвосты -beta/+abc прощаются (как в UpdateChecker):
+        // хранится и раздаётся уже нормализованное числовое.
+        assertEquals(listOf(11, 70, 29), ApkUpdate.parseVersion("11.70.29-beta"))
+        assertEquals(listOf(11, 70, 29), ApkUpdate.parseVersion("v11.70.29"))
+        assertNull(ApkUpdate.parseVersion("v"))
+        assertNull(ApkUpdate.parseVersion("11.70.2x9"))
         assertNull(ApkUpdate.parseVersion("11..70"))
         assertNull(ApkUpdate.parseVersion("11.70.29.1.2"))
         assertNull(ApkUpdate.parseVersion("12345"))

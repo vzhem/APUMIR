@@ -40,6 +40,13 @@ class FileTransferRouter @Inject constructor(
      * Provider по той же причине, что и рой.
      */
     private val preparation: javax.inject.Provider<OutgoingFilePreparationService>,
+    /**
+     * Рой APK (обновление роем, docs/UPDATE_SEEDING.md). Через Provider по
+     * той же причине, что и рой файлов: сидер зависит от этого маршрутизатора
+     * (готовит и качает передачи), и кольцо Dagger не собирает напрямую.
+     * Берётся только при обработке предложений и завершении передачи.
+     */
+    private val apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
 ) {
     private val appContext: Context
     private val sender: FileTransferSender
@@ -79,13 +86,23 @@ class FileTransferRouter @Inject constructor(
         val keyVault: TransferKeyVaultAccess = AndroidTransferKeyVaultAccess(appContext)
         val notifier = FileTransferReceiver.FileChatNotifier(
             { chatId, senderId, messageId, displayName, mediaType, totalBytes, fileSha256 ->
+                // Рой APK (docs/UPDATE_SEEDING.md): файл в виртуальное
+                // сообщество «apkseed» — строка в чат не нужна; сидер сам
+                // отметит «получено» и сразу начнёт раздавать соседям.
+                val apkUpdate = runCatching { apkSeeder.get().onFileReceived(chatId, senderId, fileSha256) }
+                    .onFailure { Log.w(TAG, "apk update completion hook failed: ${it.message}") }
+                    .getOrDefault(false)
                 // Файл группы (этап 9): карточка уже есть в ленте темы, строка
                 // в личный чат не нужна; рой снимает просьбу и объявляет
                 // соседям «файл у меня».
-                val groupFile = runCatching { groupFiles.get().onFileReceived(chatId, senderId, fileSha256) }
-                    .onFailure { Log.w(TAG, "group file completion hook failed: ${it.message}") }
-                    .getOrDefault(false)
-                if (!groupFile) {
+                val groupFile = if (!apkUpdate) {
+                    runCatching { groupFiles.get().onFileReceived(chatId, senderId, fileSha256) }
+                        .onFailure { Log.w(TAG, "group file completion hook failed: ${it.message}") }
+                        .getOrDefault(false)
+                } else {
+                    false
+                }
+                if (!apkUpdate && !groupFile) {
                     chatRepository.saveIncomingMessage(
                         chatId = chatId,
                         senderId = senderId,
@@ -201,7 +218,18 @@ class FileTransferRouter @Inject constructor(
                 preparation.get().wrapGroupKey(transferIdHex, requester)
             },
             mayServe = { row, requester ->
-                runCatching { groupFiles.get().mayServeFile(row.chatId, requester) }.getOrDefault(false)
+                if (row.chatId == com.vladimir.messenger.data.update.ApkUpdate.CHAT_ID) {
+                    // Рой APK (docs/UPDATE_SEEDING.md): «членства в группе»
+                    // нет — куски может взять любой проситель. Сидер сам уже
+                    // проверил версию и sha; правило «только младшим версиям»
+                    // держит проситель (старшие сами не просят).
+                    runCatching {
+                        val me = RustBridge.nodeId()
+                        requester != me && requester.startsWith("pk_")
+                    }.getOrDefault(false)
+                } else {
+                    runCatching { groupFiles.get().mayServeFile(row.chatId, requester) }.getOrDefault(false)
+                }
             },
         )
         groupSeeder = seederLocal
@@ -264,8 +292,17 @@ class FileTransferRouter @Inject constructor(
             // Файл группы (этап 9): предложение от сида ложится в группу, а не
             // в личный чат; лишнее (файл уже идёт от другого) - отбрасывается.
             routeOffer = { senderId, fileSha256 ->
-                runCatching { groupFiles.get().routeOffer(senderId, fileSha256) }
+                val groupRouting = runCatching { groupFiles.get().routeOffer(senderId, fileSha256) }
                     .getOrDefault(FileTransferReceiver.OfferRouting.Unknown)
+                if (groupRouting !is FileTransferReceiver.OfferRouting.Unknown) {
+                    groupRouting
+                } else {
+                    // Рой APK (docs/UPDATE_SEEDING.md): рой групп этого файла
+                    // не знает — принимает в сообщество «apkseed» сидер, и
+                    // только если я сам запрашивал это обновление.
+                    runCatching { apkSeeder.get().routeApkOffer(senderId, fileSha256) }
+                        .getOrDefault(FileTransferReceiver.OfferRouting.Unknown)
+                }
             },
             groupSeed = FileTransferReceiver.GroupSeedHooks(
                 onAck = { transferIdHex, from, contiguous -> seederLocal.onAck(transferIdHex, from, contiguous) },
