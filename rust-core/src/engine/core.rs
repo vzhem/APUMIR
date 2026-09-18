@@ -49,6 +49,7 @@ use crate::network::wire::MeshEnvelope;
 use crate::storage::relay_at_rest::{self as at_rest, RelayAtRestKeySource};
 use crate::storage::relay_store::RelayStore;
 use crate::network::adaptive_polling::AdaptivePolling;
+use crate::resilience::AddressBook;
 
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
 
@@ -480,6 +481,10 @@ pub struct P2PCore {
     /// K4-2: поиск адреса по nodeId без брокера (DHT наружу): очередь
     /// ответов и расписание вопросов, см. `network::address_lookup`.
     address_lookup: Arc<AddressLookup>,
+    /// Азбука адресов (docs/ADDRESS_BOOK.md): постоянный файл
+    /// `apu_peer_addresses.json` рядом с relay-базой. `None`-путь у
+    /// движка без durability — тогда азбука в памяти и не пишется.
+    address_book: Arc<AddressBook>,
     /// K5-1: копии чужих сообщений, которые держим мы, пока получатель не
     /// появится (см. `network::custody_relay`).
     custody_hold: Arc<CustodyHold>,
@@ -519,6 +524,16 @@ impl P2PCore {
             presence_scope: Arc::new(PresenceScope::new()),
             presence_task_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             address_lookup: Arc::new(AddressLookup::new()),
+            // Файл азбуки живёт рядом с relay-базой (тот же app-private
+            // каталог, что Android передаёт в `create_engine_durable`).
+            // Без базы — память, save отключён.
+            address_book: Arc::new(AddressBook::open(
+                config
+                    .relay_db_path
+                    .as_ref()
+                    .and_then(|p| std::path::Path::new(p).parent().map(|d| d.to_path_buf()))
+                    .map(|d| d.join("apu_peer_addresses.json")),
+            )),
             custody_hold: Arc::new(CustodyHold::new()),
             custody_offers: Arc::new(CustodyOffers::new()),
             custody_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -584,6 +599,20 @@ impl P2PCore {
         });
 
         self.node_id_str = Some(node_id.clone());
+
+        // Азбука адресов: загруженные при открытии записи сразу
+        // становятся известными адресами. Дальше личное presence
+        // (K4-1, «свои» засеивает Kotlin) стучит им в первую же минуту,
+        // а онлайн-ответившие возвращают СВЕЖИЕ адреса — файл
+        // обновляется (docs/ADDRESS_BOOK.md).
+        {
+            let seeded = self.address_book.seed_addrs();
+            if !seeded.is_empty() {
+                let n = seeded.len();
+                self.peer_addrs.lock().unwrap().extend(seeded);
+                tracing::info!("ADDRESS BOOK: seeded {} address(es) into peer_addrs", n);
+            }
+        }
 
         // Initialize network stack modules
         {
@@ -679,6 +708,8 @@ impl P2PCore {
                 // поиска и свой публичный адрес (ответ «это я»).
                 let peer_addrs_quic = Arc::clone(&peer_addrs_arc);
                 let address_lookup_quic = Arc::clone(&self.address_lookup);
+                // Азбука адресов: узнали адрес — записали (docs/ADDRESS_BOOK.md).
+                let address_book_quic = Arc::clone(&self.address_book);
                 let public_addr_quic = Arc::clone(&public_addr_arc);
                 // K5-1: приёмнику кадров нужны хранилище копий, очередь
                 // предложений и разрешение владельца на кастодию.
@@ -697,6 +728,7 @@ impl P2PCore {
                 let display_mdns = display_name.clone();
                 let direct_mdns = Arc::clone(&self.direct);
                 let public_addr_mdns = Arc::clone(&public_addr_arc);
+                let address_book_mdns = Arc::clone(&self.address_book);
 
                 let events_tcp = Arc::clone(&events_arc);
                 let network_tcp = Arc::clone(&network_arc);
@@ -736,16 +768,33 @@ impl P2PCore {
                             &custody_offers_quic,
                             custody_enabled,
                             our_addr,
+                            &address_book_quic,
                             payload,
                         )
                     });
+                // Азбука адресов (docs/ADDRESS_BOOK.md): входящее
+                // соединение = самый свежий адрес пира; записываем и в
+                // память (peer_addrs), и в файл.
+                let peer_addrs_inbound = Arc::clone(&peer_addrs_arc);
+                let address_book_inbound = Arc::clone(&self.address_book);
+                let on_inbound = Arc::new(move |sender: &str, addr: SocketAddr| {
+                    peer_addrs_inbound
+                        .lock()
+                        .unwrap()
+                        .insert(sender.to_string(), addr);
+                    address_book_inbound.record(sender, addr);
+                });
                 let handle = runtime.handle().clone();
                 // Отдельный поток: block_on запрещён изнутри другого runtime
                 // (тесты), а из потока Kotlin - можно; так работает везде.
                 let transport = std::thread::scope(|scope| {
                     scope
                         .spawn(move || {
-                            handle.block_on(Self::open_direct_transport(quic_port, on_frame))
+                            handle.block_on(Self::open_direct_transport(
+                                quic_port,
+                                on_frame,
+                                Some(on_inbound),
+                            ))
                         })
                         .join()
                         .unwrap_or(None)
@@ -793,6 +842,8 @@ impl P2PCore {
                 let relay_custody_mqtt = relay_custody2.clone();
                 // K4: тому же циклу нужен список «своих» и расписание маяка.
                 let presence_scope_mqtt = Arc::clone(&self.presence_scope);
+                // Азбука адресов: публичный адрес из брокер-presence — тоже наш.
+                let address_book_mqtt = Arc::clone(&self.address_book);
                 // K4-3: свой брокер из настроек (если задан) - первым.
                 let own_broker_mqtt = self.own_broker_endpoint();
                 std::thread::spawn(move || {
@@ -813,6 +864,7 @@ impl P2PCore {
                             relay_custody_mqtt,
                             presence_scope_mqtt,
                             own_broker_mqtt,
+                            address_book_mqtt,
                             mqtt_outbound_rx,
                         ).await;
                     });
@@ -830,6 +882,7 @@ impl P2PCore {
                         queue2,
                         direct_mdns,
                         public_addr_mdns,
+                        address_book_mdns,
                     ).await;
                 });
 
@@ -847,12 +900,17 @@ impl P2PCore {
     async fn open_direct_transport(
         quic_port: u16,
         on_frame: crate::network::direct_transport::FrameHandler,
+        on_inbound: Option<crate::network::direct_transport::InboundHandler>,
     ) -> Option<(DirectTransport, crate::network::quic_client::UdpSideChannel)> {
         let any = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
         let mut last_error = String::new();
         for attempt in 0..6u32 {
             let port = if attempt < 5 { quic_port } else { 0 };
-            match DirectTransport::start(SocketAddr::new(any, port), Arc::clone(&on_frame)) {
+            match DirectTransport::start_with_inbound(
+                SocketAddr::new(any, port),
+                Arc::clone(&on_frame),
+                on_inbound.clone(),
+            ) {
                 Ok((transport, side)) => {
                     if port == 0 {
                         tracing::warn!(
@@ -1098,6 +1156,7 @@ impl P2PCore {
         offers: &Arc<CustodyOffers>,
         custody_enabled: bool,
         our_addr: Option<SocketAddr>,
+        address_book: &Arc<AddressBook>,
         payload: Vec<u8>,
     ) -> Option<String> {
         // K4-1: личный presence «своим» (см. `network::presence_scope`).
@@ -1238,6 +1297,8 @@ impl P2PCore {
                     if reply.target_id != reply.from_id && !addrs.contains_key(&reply.target_id) {
                         addrs.insert(reply.target_id.clone(), target_addr);
                         recorded += 1;
+                        // Азбука адресов: адрес из DHT-ответа — тоже наш.
+                        address_book.record(&reply.target_id, target_addr);
                     }
                 }
                 for (node_id, node_addr) in reply.closer.iter() {
@@ -1249,6 +1310,7 @@ impl P2PCore {
                     }
                     addrs.insert(node_id.clone(), *node_addr);
                     recorded += 1;
+                    address_book.record(node_id, *node_addr);
                 }
             }
             lookup.forget(&reply.target_id);
@@ -1472,6 +1534,7 @@ impl P2PCore {
         dht_queue: Option<Arc<crate::network::message_queue::MessageQueue>>,
         direct: Arc<Mutex<Option<DirectTransport>>>,
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
+        address_book: Arc<AddressBook>,
     ) {
         use crate::network::mdns::MdnsService;
         use std::time::Duration;
@@ -1547,6 +1610,7 @@ impl P2PCore {
                         tracing::info!("mDNS: discovered peer {} at {}", peer_id, peer_addr);
 
                         peer_addrs.lock().unwrap().insert(peer_id.clone(), peer_addr);
+                        address_book.record(&peer_id, peer_addr);
 
                         // Update DHT routing table
                         if let Some(ref dht_table) = dht {
@@ -1599,6 +1663,7 @@ impl P2PCore {
                         // Also register under mDNS full name (old chats may use it as contactId)
                         if node.node_id_hex.is_some() {
                             peer_addrs.lock().unwrap().insert(node.full_name.clone(), peer_addr);
+                            address_book.record(&node.full_name, peer_addr);
                         }
 
                         network.add_peer(PeerInfo::new(peer_id.clone(), peer_name.clone()));
@@ -1612,6 +1677,7 @@ impl P2PCore {
                             if let Ok(pub_addr) = pa.parse::<SocketAddr>() {
                                 let key = format!("{}_public", peer_id);
                                 peer_addrs.lock().unwrap().insert(key, pub_addr);
+                                address_book.record(&key, pub_addr);
                                 tracing::info!("mDNS: public addr for {} = {}", peer_id, pub_addr);
                             }
                         }
@@ -2185,6 +2251,7 @@ impl P2PCore {
         relay_custody: Option<Arc<RelayCustody>>,
         presence_scope: Arc<PresenceScope>,
         own_broker: Option<(String, u16)>,
+        address_book: Arc<AddressBook>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
@@ -2620,6 +2687,9 @@ impl P2PCore {
                                     let mut addrs = peer_addrs.lock().unwrap();
                                     addrs.insert(peer_id.to_string(), addr);
                                     addrs.insert(format!("{}_public", peer_id), addr);
+                                    // Азбука адресов: свежий адрес из presence.
+                                    address_book.record(peer_id, addr);
+                                    address_book.record(&format!("{}_public", peer_id), addr);
                                     tracing::info!(
                                         "MQTT: public addr for {} = {}",
                                         peer_id,
@@ -3752,6 +3822,7 @@ impl P2PCore {
             None => return false,
         };
         self.peer_addrs.lock().unwrap().insert(node_id.clone(), addr);
+        self.address_book.record(node_id, addr);
         tracing::info!("Invite: added peer {} at {}", node_id, addr);
         self.events.emit(CoreEvent::PeerDiscovered {
             peer_id: node_id.clone(),
@@ -3775,6 +3846,9 @@ impl P2PCore {
         if let Some(rt) = self.runtime.take() {
             rt.shutdown_background();
         }
+        // Азбука адресов: последние адреса дожили до конца — сохраняем
+        // (docs/ADDRESS_BOOK.md). В памяти без файла — молча проходим.
+        self.address_book.flush();
         self.state = EngineState::Stopped;
         self.events.emit(CoreEvent::EngineStopped);
     }
@@ -4622,7 +4696,8 @@ mod tests {
         let hold = Arc::new(CustodyHold::new());
         let offers = Arc::new(CustodyOffers::new());
         let adopted = P2PCore::handle_direct_frame(
-            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None, frame,
+            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None,
+            &Arc::new(crate::resilience::AddressBook::open(None)), frame,
         );
         assert!(adopted.is_none(), "в кадре нет отправителя - усыновления нет");
 
@@ -4665,7 +4740,8 @@ mod tests {
         let hold = Arc::new(CustodyHold::new());
         let offers = Arc::new(CustodyOffers::new());
         assert!(P2PCore::handle_direct_frame(
-            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None, broken
+            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None,
+            &Arc::new(crate::resilience::AddressBook::open(None)), broken
         )
         .is_none());
         assert!(events.is_empty());
@@ -4688,6 +4764,7 @@ mod tests {
             &offers,
             false,
             None,
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             // Русский текст - обычной строкой: в байтовом литерале Rust
             // (b"...") не-ASCII символы запрещены, и это ломало сборку
             // тестов (нашла проверка компиляции на pull request).
@@ -4723,6 +4800,7 @@ mod tests {
             &offers,
             false,
             Some(our_addr),
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             query_payload(asker, our_id).into_bytes(),
         );
 
@@ -4765,7 +4843,8 @@ mod tests {
         let hold = Arc::new(CustodyHold::new());
         let offers = Arc::new(CustodyOffers::new());
         let adopted = P2PCore::handle_direct_frame(
-            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None, frame,
+            &events, &network, &peer_addrs, &lookup, &hold, &offers, false, None,
+            &Arc::new(crate::resilience::AddressBook::open(None)), frame,
         );
 
         assert_eq!(adopted.as_deref(), Some(responder));
@@ -4810,6 +4889,7 @@ mod tests {
             &offers,
             true,
             None,
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             offer_payload(&envelope).into_bytes(),
         );
 
@@ -5228,6 +5308,7 @@ mod tests {
             &offers,
             false,
             None,
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             offer_payload(&envelope).into_bytes(),
         );
 
@@ -5273,6 +5354,7 @@ mod tests {
             &offers,
             false,
             None,
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             deliver_payload(&envelope).into_bytes(),
         );
         assert_eq!(adopted.as_deref(), Some(origin));
@@ -5296,6 +5378,7 @@ mod tests {
             &offers,
             false,
             None,
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             deliver_payload(&envelope).into_bytes(),
         );
         assert!(events.is_empty(), "дубль от второго хранителя подавлен");
@@ -5334,6 +5417,7 @@ mod tests {
             &offers,
             true,
             None,
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             offer_payload(&envelope).into_bytes(),
         );
         assert!(hold.contains("m1"));
@@ -5347,6 +5431,7 @@ mod tests {
             &offers,
             true,
             None,
+            &Arc::new(crate::resilience::AddressBook::open(None)),
             drop_payload("m1").into_bytes(),
         );
         assert!(!hold.contains("m1"), "копия убрана");

@@ -97,6 +97,13 @@ const LANE_QUEUE_CAPACITY: usize = 64;
 /// `None`. По нему пул усыновляет входящее соединение.
 pub type FrameHandler = Arc<dyn Fn(Vec<u8>) -> Option<String> + Send + Sync + 'static>;
 
+/// Хук адреса (docs/ADDRESS_BOOK.md): реальный адрес входящего
+/// соединения — самый свежий адрес, который вообще возможен. Срабатывает
+/// при «усыновлении» (новое входящее соединение от узла, с которым живого
+/// уже нет). По умолчанию нет — старые вызовы `start()` ведут себя как
+/// раньше.
+pub type InboundHandler = Arc<dyn Fn(&str, SocketAddr) + Send + Sync + 'static>;
+
 /// Какой стрим открыть под кадр.
 ///
 /// K3: бинарные кадры файлов (`APUF`, `file_wire`) идут с приоритетом
@@ -169,6 +176,9 @@ struct Shared {
     client: Arc<QuicClient>,
     pool: Arc<ConnectionPool>,
     on_frame: FrameHandler,
+    /// Хук адреса входящего соединения (docs/ADDRESS_BOOK.md). `None` —
+    /// без азбуки (старые вызовы, тесты).
+    on_inbound: Option<InboundHandler>,
 }
 
 impl Shared {
@@ -180,11 +190,19 @@ impl Shared {
             return;
         }
         match self.pool.insert(key, conn.clone()).await {
-            Ok(()) => tracing::info!(
-                "DIRECT: adopted inbound connection from {} at {}",
-                sender,
-                conn.remote_address()
-            ),
+            Ok(()) => {
+                let remote = conn.remote_address();
+                tracing::info!(
+                    "DIRECT: adopted inbound connection from {} at {}",
+                    sender,
+                    remote
+                );
+                // Азбука адресов: реальный адрес соединения записываем
+                // (раньше он жил только в пуле и умирал с ним).
+                if let Some(ref on_inbound) = self.on_inbound {
+                    on_inbound(sender, remote);
+                }
+            }
             Err(e) => tracing::debug!("DIRECT: inbound from {} not pooled: {}", sender, e),
         }
     }
@@ -203,12 +221,25 @@ pub struct DirectTransport {
 
 impl DirectTransport {
     /// Поднять транспорт внутри уже работающего tokio-runtime: общий
-    /// endpoint, приём входящих соединений, цикл команд.
+    /// endpoint, приём входящих соединений, цикл команд. Без хука адреса
+    /// (азбука адресов) — см. [`DirectTransport::start_with_inbound`].
     ///
     /// Возвращает рукоятку и боковой канал общего сокета (для STUN).
     pub fn start(
         bind_addr: SocketAddr,
         on_frame: FrameHandler,
+    ) -> Result<(Self, UdpSideChannel), String> {
+        Self::start_with_inbound(bind_addr, on_frame, None)
+    }
+
+    /// То же, что [`DirectTransport::start`], но с необязательным хуком
+    /// адреса входящего соединения (docs/ADDRESS_BOOK.md): при
+    /// «усыновлении» движок узнаёт реальный адрес пира и записывает его в
+    /// азбуку. `None` — как `start()`.
+    pub fn start_with_inbound(
+        bind_addr: SocketAddr,
+        on_frame: FrameHandler,
+        on_inbound: Option<InboundHandler>,
     ) -> Result<(Self, UdpSideChannel), String> {
         let (client, side) =
             QuicClient::new_with_side_channel(bind_addr).map_err(|e| e.to_string())?;
@@ -219,6 +250,7 @@ impl DirectTransport {
                 POOL_IDLE_TIMEOUT,
             )),
             on_frame,
+            on_inbound,
         });
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
         tokio::spawn(run_accept_loop(Arc::clone(&shared)));
