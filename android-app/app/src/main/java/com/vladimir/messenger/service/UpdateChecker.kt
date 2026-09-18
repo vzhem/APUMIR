@@ -44,6 +44,46 @@ class UpdateChecker @Inject constructor(
         val publishedAt: String,
     )
 
+    /** Завершённая загрузка APK: наш файл обновления из DownloadManager. */
+    data class CompletedDownload(
+        val downloadId: Long,
+        val title: String,
+        val file: File,
+    )
+
+    /**
+     * Успешные загрузки APK по данным DownloadManager (наши «APU v…» и любой
+     * другой APK, который мы сами ставили в очередь). Раздел «Обновления»
+     * забирает их автоматически: файл сам встаёт в карточку и начинает
+     * раздаваться соседям (docs/UPDATE_SEEDING.md).
+     */
+    fun completedApkDownloads(): List<CompletedDownload> {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+            ?: return emptyList()
+        val result = mutableListOf<CompletedDownload>()
+        runCatching {
+            val cursor = manager.query(DownloadManager.Query().setFilterByStatus(DownloadManager.STATUS_SUCCESSFUL))
+            cursor?.use {
+                val idIdx = it.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+                val titleIdx = it.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                val uriIdx = it.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                val mimeIdx = it.getColumnIndex(DownloadManager.COLUMN_MIME_TYPE)
+                while (it.moveToNext()) {
+                    val mime = if (mimeIdx >= 0) it.getString(mimeIdx).orEmpty() else ""
+                    val title = if (titleIdx >= 0) it.getString(titleIdx).orEmpty() else ""
+                    val isApk = mime == "application/vnd.android.package-archive" ||
+                        title.startsWith("APU v")
+                    if (!isApk) continue
+                    val localUri = if (uriIdx >= 0) it.getString(uriIdx) ?: continue else continue
+                    val file = runCatching { File(java.net.URI(localUri)) }
+                        .getOrElse { File(localUri.removePrefix("file://")) }
+                    if (file.isFile) result += CompletedDownload(it.getLong(idIdx), title, file)
+                }
+            }
+        }.onFailure { Log.w(TAG, "query completed downloads failed: ${it.message}") }
+        return result
+    }
+
     /**
      * Проверить наличие новой версии.
      * @return ReleaseInfo если есть обновление, null если текущая версия актуальна

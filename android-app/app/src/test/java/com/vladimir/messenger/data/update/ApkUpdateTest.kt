@@ -118,6 +118,20 @@ class ApkUpdateTest {
         assertEquals("37.0 МБ", ApkUpdate.formatSize(38_797_312L))
     }
 
+    // ── Версия из имени файла (автозаполнение в настройках) ─────────────────
+
+    @Test
+    fun versionFromNameFindsFirstNumericVersion() {
+        assertEquals("11.70.29", ApkUpdate.versionFromName("APU-v11.70.29.apk"))
+        assertEquals("11.70.29", ApkUpdate.versionFromName("APU 11.70.29 beta.apk"))
+        assertEquals("11.16", ApkUpdate.versionFromName("P2P-Messenger-11.16.apk"))
+        assertEquals("1.2.3.4", ApkUpdate.versionFromName("app-1.2.3.4-release.apk"))
+        // Цифры без точек или вовсе без версии — не версия.
+        assertNull(ApkUpdate.versionFromName("archive.zip"))
+        assertNull(ApkUpdate.versionFromName("backup-20260918.apk"))
+        assertNull(ApkUpdate.versionFromName("без версии.apk"))
+    }
+
     // ── Хранилище ───────────────────────────────────────────────────────────
 
     private val sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -203,6 +217,75 @@ class ApkUpdateTest {
             assertTrue(store.loadOffers().isEmpty())
             File(root, ApkUpdate.REQUEST_FILE).writeText("APUREQ1\n11.70.29|zz")
             assertNull(store.loadPending())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    // ── Уже взятые в раздел скачанные файлы ─────────────────────────────────
+
+    @Test
+    fun adoptedRoundTripAndReplacement() {
+        val root = Files.createTempDirectory("apu-apk-adopted-").toFile()
+        try {
+            val store = ApkUpdateStore(root)
+            assertTrue(store.loadAdopted().isEmpty())
+
+            val first = ApkUpdateStore.Adopted(
+                "/storage/emulated/0/Download/APU-v11.70.29.apk",
+                "APU-v11.70.29.apk",
+                sha,
+                37_930_406L,
+                111L,
+            )
+            store.addAdopted(first)
+            assertEquals(listOf(first), store.loadAdopted())
+
+            // Повторный забор того же файла не дублирует запись...
+            store.addAdopted(first.copy(atMs = 222L))
+            assertEquals(listOf(first.copy(atMs = 222L)), store.loadAdopted())
+
+            // ...а новый файл встаёт в конец (новее — последним).
+            val second = first.copy(path = "/storage/emulated/0/Download/APU-v11.70.30.apk")
+            store.addAdopted(second)
+            assertEquals(listOf(first.copy(atMs = 222L), second), store.loadAdopted())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun adoptedEvictsOldestBeyondCap() {
+        val root = Files.createTempDirectory("apu-apk-adopted-cap-").toFile()
+        try {
+            val store = ApkUpdateStore(root)
+            for (index in 0 until ApkUpdateStore.MAX_ADOPTED + 4) {
+                store.addAdopted(
+                    ApkUpdateStore.Adopted(
+                        "/Download/file" + index + ".apk",
+                        "file" + index + ".apk",
+                        sha,
+                        1L,
+                        index.toLong(),
+                    ),
+                )
+            }
+            val loaded = store.loadAdopted()
+            assertEquals(ApkUpdateStore.MAX_ADOPTED, loaded.size)
+            assertEquals("/Download/file4.apk", loaded.first().path)
+            assertEquals("/Download/file" + (ApkUpdateStore.MAX_ADOPTED + 3) + ".apk", loaded.last().path)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun corruptedAdoptedFileDoesNotThrow() {
+        val root = Files.createTempDirectory("apu-apk-adopted-corrupt-").toFile()
+        try {
+            val store = ApkUpdateStore(root)
+            File(root, ApkUpdateStore.ADOPTED_FILE).writeText("APUADOPT1\nсломано|zz|1|1\n")
+            assertTrue(store.loadAdopted().isEmpty())
         } finally {
             root.deleteRecursively()
         }

@@ -1106,14 +1106,14 @@ private fun SettingsItem(
  * и принятые APK-файлы.
  */
 /**
- * Что помечать как обновление: выбранный в проводнике APK (uri) или принятый
- * файл (transferId). Версию человек подтверждает в диалоге.
+ * Что помечать как обновление: принятый файл (transferId). Файл из
+ * проводника идёт отдельным путём (SettingsViewModel.ApkPickUi): имя и
+ * версия читаются из самого файла автоматически.
  */
 private data class MarkTarget(
     val title: String,
     val versionGuess: String,
-    val uri: android.net.Uri?,
-    val transferId: String?,
+    val transferId: String,
 )
 
 @Composable
@@ -1125,11 +1125,13 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     val receivedApks by viewModel.apkReceivedApks.collectAsStateWithLifecycle()
     val checking by viewModel.updatesChecking.collectAsStateWithLifecycle()
     val official by viewModel.officialRelease.collectAsStateWithLifecycle()
+    val apkPick by viewModel.apkPick.collectAsStateWithLifecycle()
     var markTarget by remember { mutableStateOf<MarkTarget?>(null) }
 
     val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            markTarget = MarkTarget("Отметить файл как обновление", "", uri, null)
+            // Имя и версия возьмутся из самого файла — покажем их в диалоге.
+            viewModel.onApkPicked(uri)
         }
     }
 
@@ -1145,7 +1147,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 } else {
                     "Раздаю обновление v${s.version}"
                 },
-                subtitle = "${s.name}, ${com.vladimir.messenger.data.swarm.StoragePolicy.format(s.sizeBytes)}; получили: ${s.served}",
+                subtitle = "${s.name}, ${StoragePolicy.format(s.sizeBytes)}; получили: ${s.served}",
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsItem(
@@ -1155,27 +1157,24 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 onClick = viewModel::onStopUpdateSeed,
             )
         }
-        // Предложение соседа: лучший (самый новый) первый. Версия — на
-        // самой кнопке: «Скачать v…».
-        val best = offers.firstOrNull()
-        if (best != null && download == null && ready == null) {
+        // Готово к установке (раздача уже идёт — новая версия расходится).
+        // Кнопка показывает, ЧТО поставит: «Обновить до vX». Появляется и
+        // сама — когда скачанный с сайта файл встал в раздел.
+        ready?.let { r ->
             SettingsItem(
-                icon    = Icons.Default.Download,
-                title   = "Скачать v${best.version}",
-                subtitle = if (offers.size > 1) {
-                    "Раздают ${offers.size} соседа; ${com.vladimir.messenger.data.swarm.StoragePolicy.format(best.sizeBytes)}"
-                } else {
-                    "Раздаёт сосед; ${com.vladimir.messenger.data.swarm.StoragePolicy.format(best.sizeBytes)}"
-                },
-                onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
+                icon    = Icons.Default.SystemUpdate,
+                title   = "Обновить до v${r.version}",
+                subtitle = "${r.name}, ${StoragePolicy.format(r.sizeBytes)}; уже раздаётся соседям",
+                onClick = viewModel::onInstallUpdate,
             )
         }
-        // Приём идёт.
+        // Приём идёт: куски собираются со всех сидов этой версии.
         download?.let { d ->
             SettingsItem(
                 icon    = Icons.Default.Download,
                 title   = "Принимаю v${d.version}",
-                subtitle = "${com.vladimir.messenger.data.swarm.StoragePolicy.format(d.receivedBytes)} из ${com.vladimir.messenger.data.swarm.StoragePolicy.format(d.totalBytes)}",
+                subtitle = StoragePolicy.format(d.receivedBytes) + " из " + StoragePolicy.format(d.totalBytes) +
+                    "; кусками от " + offers.size.coerceAtLeast(1).toString() + " сосед(ей)",
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SettingsItem(
@@ -1184,46 +1183,78 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 onClick = viewModel::onCancelUpdateDownload,
             )
         }
-        // Готово к установке (раздача уже идёт — новая версия расходится).
-        // Кнопка показывает, ЧТО поставит: «Обновить до vX».
-        ready?.let { r ->
-            SettingsItem(
-                icon    = Icons.Default.SystemUpdate,
-                title   = "Обновить до v${r.version}",
-                subtitle = "${r.name}, ${com.vladimir.messenger.data.swarm.StoragePolicy.format(r.sizeBytes)}; уже раздаётся соседям",
-                onClick = viewModel::onInstallUpdate,
+        // Выбор, откуда качать. Проверка нашла обновление И на официальном
+        // сайте, И у соседей в сети — показываем обе кнопки рядом.
+        val best = offers.firstOrNull()
+        val bothSources = official != null && best != null && download == null && ready == null
+        if (bothSources) {
+            Text(
+                "Обновление найдено в двух местах — выберите, откуда скачать:",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
             )
-        }
-        // Официальный релиз, найденный кнопкой «Проверить новую версию».
-        official?.let { rel ->
             SettingsItem(
                 icon    = Icons.Default.CloudDownload,
-                title   = "Скачать официальный v${rel.version.removePrefix("v")}",
-                subtitle = "С GitHub; после установки отметьте файл в этом разделе, чтобы раздать соседям",
+                title   = "С официального сайта v" + official!!.version.removePrefix("v"),
+                subtitle = "Через интернет (GitHub); файл сам встанет в этот раздел",
                 onClick = viewModel::onDownloadOfficialRelease,
             )
+            SettingsItem(
+                icon    = Icons.Default.Download,
+                title   = "По сети v" + best.version,
+                subtitle = "Кусками от " + offers.size + " сосед(ей) — без интернета",
+                onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
+            )
+        } else {
+            // Предложение соседа: лучший (самый новый) первый. Версия — на
+            // самой кнопке: «Скачать v…».
+            if (best != null && download == null && ready == null) {
+                SettingsItem(
+                    icon    = Icons.Default.Download,
+                    title   = "Скачать v" + best.version,
+                    subtitle = if (offers.size > 1) {
+                        "Раздают " + offers.size + " соседа; " + StoragePolicy.format(best.sizeBytes)
+                    } else {
+                        "Раздаёт сосед; " + StoragePolicy.format(best.sizeBytes)
+                    },
+                    onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
+                )
+            }
+            // Официальный релиз, найденный кнопкой «Проверить новую версию».
+            official?.let { rel ->
+                SettingsItem(
+                    icon    = Icons.Default.CloudDownload,
+                    title   = "Скачать официальный v" + rel.version.removePrefix("v"),
+                    subtitle = "С GitHub; файл сам встанет в этот раздел и начнёт раздаваться",
+                    onClick = viewModel::onDownloadOfficialRelease,
+                )
+            }
         }
         // Принятые APK: «раздать полученный» (сценарий: APK переслан с ПК).
         receivedApks.forEach { apk ->
             SettingsItem(
                 icon    = Icons.Default.InsertDriveFile,
                 title   = apk.displayName,
-                subtitle = "Получен, ${com.vladimir.messenger.data.swarm.StoragePolicy.format(apk.sizeBytes)}",
+                subtitle = buildString {
+                    append("Получен, ")
+                    append(StoragePolicy.format(apk.sizeBytes))
+                    apk.versionGuess?.let { append(", версия ")
+                        append(it) }
+                },
                 onClick = {
                     markTarget = MarkTarget(
                         title        = "Раздать полученный APK",
                         versionGuess = apk.versionGuess ?: "",
-                        uri          = null,
                         transferId   = apk.transferId,
                     )
                 },
             )
         }
-        // Пометить файл (с ПК / из проводника).
+        // Пометить файл (с ПК / из проводника): имя и версия читаются сами.
         SettingsItem(
             icon    = Icons.Default.FileOpen,
             title   = "Отметить APK как обновление",
-            subtitle = "Файл проверяется (это APK, версия новее текущей) и раздаётся всем, у кого ниже версия",
+            subtitle = "Имя и версия возьмутся из файла; проверим (это APK, версия новее текущей) и раздаём всем, у кого ниже версия",
             onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
         )
         // «Проверить новую версию»: спросить соседей (upask) + посмотреть
@@ -1243,21 +1274,33 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             initialVersion = target.versionGuess,
             onConfirm = { version ->
                 markTarget = null
-                if (target.uri != null) {
-                    viewModel.onMarkApkFileAsUpdate(target.uri, version)
-                } else {
-                    target.transferId?.let { id -> viewModel.onMarkReceivedApkAsUpdate(id, version) }
-                }
+                viewModel.onMarkReceivedApkAsUpdate(target.transferId, version)
             },
             onDismiss = { markTarget = null },
         )
+    }
+
+    // Файл выбран в проводнике: имя и версия читаются из него самого.
+    apkPick?.let { pick ->
+        if (pick.error == null) {
+            ApkVersionDialog(
+                title          = "Раздавать этот файл как обновление?",
+                fileName       = pick.displayName,
+                sizeText       = StoragePolicy.format(pick.sizeBytes),
+                initialVersion = pick.version ?: "",
+                reading        = pick.tempPath == null,
+                onConfirm = { version -> viewModel.onApkPickConfirm(version) },
+                onDismiss = { viewModel.onApkPickCancel() },
+            )
+        }
     }
 }
 
 /**
  * Диалог подтверждения версии обновления: числовая (например 11.70.29),
- * должна быть новее текущей. Если версия не угадана из имени файла —
- * человек вводит сам.
+ * должна быть новее текущей. Версия подставляется сама (из имени или из
+ * самого APK); человек может исправить. [reading] — файл ещё копируется,
+ * версия вот-вот заполнится.
  */
 @Composable
 private fun ApkVersionDialog(
@@ -1265,15 +1308,42 @@ private fun ApkVersionDialog(
     initialVersion: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
+    fileName: String? = null,
+    sizeText: String? = null,
+    reading: Boolean = false,
 ) {
-    var version by remember { mutableStateOf(initialVersion) }
+    var version by remember(initialVersion) { mutableStateOf(initialVersion) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             Column {
+                if (fileName != null) {
+                    Text(
+                        fileName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (sizeText != null) {
+                    Text(
+                        "Размер: " + sizeText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (reading) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "Читаю версию из файла…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    "Числовая версия, например 11.70.29. Должна быть новее текущей — иначе файл не станет обновлением.",
+                    "Числовая версия, например 11.70.29. Должна быть новее текущей — иначе файл не станет обновлением. " +
+                        "Обычно она уже подставлена из файла.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1288,7 +1358,10 @@ private fun ApkVersionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(version) }) { Text("Раздавать") }
+            TextButton(
+                onClick = { onConfirm(version) },
+                enabled = !reading && version.isNotBlank(),
+            ) { Text("Раздавать") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }

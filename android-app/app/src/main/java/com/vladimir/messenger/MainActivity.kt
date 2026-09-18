@@ -367,10 +367,10 @@ class MainActivity : ComponentActivity() {
                             checker.downloadApk(currentUpdate)
                             updateRelease = null
                             
-                            // Показать подсказку "откройте Downloads"
+                            // Показать подсказку: файл сам встанет в настройки
                             android.widget.Toast.makeText(
                                 applicationContext,
-                                "Скачивание началось. После завершения откройте Downloads для установки.",
+                                "Скачивание началось. Когда файл скачается, он сам появится в «Настройки → Обновления».",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         },
