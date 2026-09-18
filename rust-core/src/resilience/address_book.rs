@@ -68,7 +68,7 @@ impl AddressBook {
                     Ok(file) => {
                         if file.v == BOOK_VERSION {
                             let now_ms = crate::storage::models::now_ms();
-                            for mut entry in file.entries {
+                            for entry in file.entries {
                                 if now_ms.saturating_sub(entry.seen) > ENTRY_TTL_MS {
                                     continue;
                                 }
@@ -213,6 +213,7 @@ impl AddressBook {
             list.sort_by_key(|e| e.seen);
             list.drain(0..(list.len() - MAX_ENTRIES));
         }
+        let count = list.len();
         let file = FileV1 {
             v: BOOK_VERSION,
             entries: list,
@@ -226,7 +227,7 @@ impl AddressBook {
         fs::write(&tmp, text).map_err(|e| format!("write tmp: {e}"))?;
         fs::rename(&tmp, p).map_err(|e| format!("rename: {e}"))?;
         self.last_save_ms.store(now_ms, Ordering::Relaxed);
-        tracing::info!("ADDRESS BOOK: saved {} entries to {}", list.len(), p.display());
+        tracing::info!("ADDRESS BOOK: saved {} entries to {}", count, p.display());
         Ok(())
     }
 }
@@ -350,7 +351,7 @@ mod tests {
         assert_eq!(book.len(), MAX_ENTRIES);
         // Старейшие отвалены, самые свежие на месте.
         assert!(!book.seed_addrs().contains_key("pk_00000"));
-        assert!(book.seed_addrs().contains_key(format!("pk_{:05}", MAX_ENTRIES + 49)));
+        assert!(book.seed_addrs().contains_key(&format!("pk_{:05}", MAX_ENTRIES + 49)));
         let _ = fs::remove_file(path);
     }
 
