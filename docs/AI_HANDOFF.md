@@ -349,6 +349,45 @@
    `FileUdpChannels: ufseek sent to …`, `FileUdpChannel: udp
    candidates …`, `FileUdpChannel: udp punched for …`. Симметричный NAT
    с двух концов — штатно скатится в брокер (медленно).
+0z. **Азбука адресов — постоянный файл + посев «своих» (задача
+   владельца 2026-09-18; карта — `docs/ADDRESS_BOOK.md`).** Сделано на
+   ветке `arena/01a0b3cb-apumir`, БЕЗ РЕЛИЗА. Суть: ядро само ведёт
+   файл `<filesDir>/apu_peer_addresses.json` (рядом с
+   `apu_relay.sqlite`, путь уже есть у движка — FFI не добавлялось):
+   JSON v1 `{"v":1,"entries":[{id,addr,seen}]}`, запись tmp+rename,
+   TTL 30 дней, потолок 1000 записей (самые свежие), save не чаще
+   раза в 15 с + flush при `stop()`; при `start()` файл грузится и
+   засевает `peer_addrs`. Пишут 7 точек: DHT-ответ (цель + ≤3
+   ближайших), mDNS (LAN / alias / публичный), брокер-presence,
+   invite-привязка и НОВОЕ — входящее QUIC-соединение (хук `on_inbound`
+   при усыновлении: реальный адрес соединения раньше хранился только
+   в пуле и терялся). Kotlin одно: после `Engine OK`
+   `CoreServerService` засевает список «своих» СУЩЕСТВУЮЩИМ методом
+   `set_presence_audience` (был в UDL, 0 вызовов) — контакты ∪
+   проверенные обмены ∪ владельцы/админы групп (`SwarmPeerDirectory.
+   audienceIds()`); личное presence в ≤60 с стучит сохранённым адресам,
+   онлайн-соседи отвечают presence со СВЕЖИМ адресом — файл
+   обновляется. Новых кадров и новых FFI-функций НЕТ. Где:
+   - `rust-core/src/resilience/address_book.rs` (новый) — модуль
+     `AddressBook` (open/seed/record/flush, prune, атомарный save,
+     unit-тесты).
+   - `rust-core/src/engine/core.rs` — поле `address_book`, seed в
+     `start()`, flush в `stop()`, `record()` в 6 точках, `on_inbound`
+     при старте `DirectTransport`.
+   - `rust-core/src/network/direct_transport.rs` — `on_inbound`
+     (необязательный колбэк, по умолчанию нет).
+   - `data/RustBridge.kt` — `setPresenceAudience(ids)` (try/catch+лог).
+   - `data/swarm/SwarmPeerDirectory.kt` — `audienceIds()`.
+   - `service/CoreServerService.kt` — посев после старта движка.
+   Проверено в песочнице: JVM-диагностика Kotlin-части (без новых
+   ошибок); Rust — БЕЗ компилятора (нет cargo), unit-тесты модуля
+   будут ходить в CI. **Первый настоящий компилятор — CI; на
+   телефонах НЕ проверено.** Для проверки: два телефона, один
+   перезапустить (или убить/установить заново), через минуту —
+   `ADDRESS BOOK: loaded N entries`, `PRESENCE K4: personal presence
+   sent to X/Y own peer(s)` с X>0 (было 0 у чистого старта), файл
+   `files/apu_peer_addresses.json` растёт и обновляет `seen`; лог
+   записи — `ADDRESS BOOK`.
 0w. **K4 - ядро: presence «своим», поиск адреса без брокера, свой брокер
    из настроек (K4-1, K4-2 и кодовая часть K4-3 готовы 2026-09-17 на ветке
    `arena/01a0b097-apumir`; РЕЛИЗА НЕТ - ждёт явного разрешения владельца;
