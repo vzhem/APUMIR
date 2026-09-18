@@ -263,7 +263,7 @@ mod tests {
             book.record("pk_b_public", "203.0.113.5:443".parse().unwrap());
             book.flush();
         }
-        let book = AddressBook::open(Some(path));
+        let book = AddressBook::open(Some(path.clone()));
         assert_eq!(book.len(), 2);
         let seed = book.seed_addrs();
         assert_eq!(seed.get("pk_a"), Some(&"10.0.0.1:443".parse::<SocketAddr>().unwrap()));
