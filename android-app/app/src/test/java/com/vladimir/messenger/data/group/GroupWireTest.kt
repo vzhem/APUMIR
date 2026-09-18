@@ -920,4 +920,43 @@ class GroupWireTest {
         } catch (_: IllegalArgumentException) {
         }
     }
+
+    /**
+     * Смена владельца: добровольная передача и наследование доходят целиком.
+     * Владелец с «|» в идентификаторе обязан выжить (base64url).
+     */
+    @Test
+    fun ownerClaimRoundTrip() {
+        val give = GroupWire.parse(
+            GroupWire.buildOwnerClaim("grp1", "pk_new|1", "pk_old|2", 1234L, voluntary = true)
+        ) as GroupWire.Packet.OwnerClaim
+        assertEquals("grp1", give.groupId)
+        assertEquals("pk_new|1", give.newOwnerId)
+        assertEquals("pk_old|2", give.previousOwnerId)
+        assertEquals(1234L, give.atMs)
+        assertTrue(give.voluntary)
+
+        val take = GroupWire.parse(
+            GroupWire.buildOwnerClaim("grp1", "pk_admin", "pk_old", 0L, voluntary = false)
+        ) as GroupWire.Packet.OwnerClaim
+        assertFalse(take.voluntary)
+        assertEquals(0L, take.atMs)
+    }
+
+    /** Битые пакеты смены владельца не парсятся: чужой режим и лишние части. */
+    @Test
+    fun ownerClaimRejectsGarbage() {
+        val newOwner = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("pk_new".toByteArray(Charsets.UTF_8))
+        val oldOwner = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("pk_old".toByteArray(Charsets.UTF_8))
+        // Незнакомый режим.
+        assertNull(GroupWire.parse("APUGRP1|own|grp1|$newOwner|$oldOwner|123|steal"))
+        // Не хватает полей (нет времени и режима).
+        assertNull(GroupWire.parse("APUGRP1|own|grp1|$newOwner|$oldOwner"))
+        // Лишняя часть - конверт другой версии.
+        assertNull(GroupWire.parse("APUGRP1|own|grp1|$newOwner|$oldOwner|123|give|x"))
+        // Пустой наследник.
+        assertNull(GroupWire.parse("APUGRP1|own|grp1||$oldOwner|123|give"))
+    }
 }

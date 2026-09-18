@@ -132,6 +132,12 @@ object GroupsModule {
             com.vladimir.messenger.data.peer.PeerRatingStore
                 .recordOfferedStorage(context.applicationContext, nodeId, offeredBytes)
         },
+        // Наследование владения: «владелец удалился» видно по долгому молчанию
+        // (GroupOwnership). Берём наблюдения этого телефона из рейтинга узлов.
+        peerLastSeenMs = { nodeId ->
+            com.vladimir.messenger.data.peer.PeerRatingStore
+                .statsFor(context.applicationContext, nodeId)?.lastSeenMs?.takeIf { it > 0L }
+        },
         // Файлы группы роем (этап 9). Через Provider: рой сам шлёт пакеты
         // через GroupDelivery и качает через FileTransferRouter, а репозиторий
         // лишь передаёт ему просьбы - кольца зависимостей так нет.

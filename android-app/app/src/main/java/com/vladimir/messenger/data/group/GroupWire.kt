@@ -252,6 +252,24 @@ object GroupWire {
      */
     const val KIND_COMMENT_COUNTS = "cinf"
 
+    /**
+     * Смена владельца группы или канала: `own|groupId|b64(новый)|b64(прежний)|время|режим`.
+     *
+     * Два режима. `give` - добровольная передача: шлёт сам владелец, получатели
+     * верят, только если прежний владелец в пакете совпадает с их владельцем.
+     * `take` - наследование после пропажи владельца: шлёт администратор
+     * (или участник, если администраторов нет), получатели верят, только если
+     * их владелец молчит дольше срока. Старые телефоны вид не знают и молча
+     * отбрасывают - остаются с прежним владельцем, как раньше.
+     */
+    const val KIND_OWNER = "own"
+
+    /** Режим пакета [KIND_OWNER]: добровольная передача от нынешнего владельца. */
+    const val OWNER_MODE_GIVE = "give"
+
+    /** Режим пакета [KIND_OWNER]: наследование прав после пропавшего владельца. */
+    const val OWNER_MODE_TAKE = "take"
+
     /** Комментариев в одном ответе сборщика (и в первом окне «последние»). */
     const val MAX_COMMENT_BACKFILL = 20
 
@@ -635,6 +653,23 @@ object GroupWire {
             /** Канал, а не группа. У старых конвертов поля нет - это группа. */
             val isChannel: Boolean = false,
         ) : Packet()
+
+        /**
+         * Смена владельца группы или канала.
+         *
+         * [voluntary] = true - «give»: нынешний владелец сам передаёт права
+         * (пакет шлёт он сам). [voluntary] = false - «take»: администратор
+         * (или участник без администраторов) забирает права владельца,
+         * который пропал. Получатель решает, верить ли, по своей копии
+         * состава и по молчанию своего владельца (GroupOwnership).
+         */
+        data class OwnerClaim(
+            val groupId: String,
+            val newOwnerId: String,
+            val previousOwnerId: String,
+            val atMs: Long,
+            val voluntary: Boolean,
+        ) : Packet()
     }
 
     data class RosterEntry(val nodeId: String, val displayName: String, val role: String)
@@ -988,6 +1023,27 @@ object GroupWire {
 
     fun buildGroupDeleted(groupId: String): String =
         "$PREFIX|$KIND_GROUP_DELETED|$groupId"
+
+    /**
+     * Смена владельца. Ровно 7 частей, чтобы все поля были обязательными:
+     * без прежнего владельца получатель не смог бы отличить свежую передачу
+     * от устаревшей.
+     *
+     * @param voluntary true - «give» (шлёт сам владелец), false - «take».
+     */
+    fun buildOwnerClaim(
+        groupId: String,
+        newOwnerId: String,
+        previousOwnerId: String,
+        atMs: Long,
+        voluntary: Boolean,
+    ): String {
+        require(newOwnerId.isNotBlank()) { "blank new owner" }
+        require(previousOwnerId.isNotBlank()) { "blank previous owner" }
+        val mode = if (voluntary) OWNER_MODE_GIVE else OWNER_MODE_TAKE
+        return "$PREFIX|$KIND_OWNER|$groupId|${encode(newOwnerId)}|" +
+            "${encode(previousOwnerId)}|${atMs.coerceAtLeast(0L)}|$mode"
+    }
 
     fun buildRoster(groupId: String, entries: List<RosterEntry>): String {
         val csv = entries.joinToString(";") {
@@ -1355,6 +1411,28 @@ object GroupWire {
                         isPublic = isPublic == "1",
                         topicsEnabled = topics == "1",
                         isChannel = isChannel,
+                    )
+                }
+            } else {
+                null
+            }
+
+            KIND_OWNER -> if (parts.size == 7) {
+                val newOwnerId = decode(parts[3]).orEmpty()
+                val previousOwnerId = decode(parts[4]).orEmpty()
+                val atMs = parts[5].toLongOrNull() ?: 0L
+                val mode = parts[6]
+                if (newOwnerId.isBlank() || previousOwnerId.isBlank() ||
+                    (mode != OWNER_MODE_GIVE && mode != OWNER_MODE_TAKE)
+                ) {
+                    null
+                } else {
+                    Packet.OwnerClaim(
+                        groupId = groupId,
+                        newOwnerId = newOwnerId,
+                        previousOwnerId = previousOwnerId,
+                        atMs = atMs,
+                        voluntary = mode == OWNER_MODE_GIVE,
                     )
                 }
             } else {
