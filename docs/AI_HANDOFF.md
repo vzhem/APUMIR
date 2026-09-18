@@ -325,6 +325,30 @@
    файла. Тесты: `ApkUpdateTest` + `versionFromName`, adopted round-trip/
    вытеснение/битый файл. struct_check по 9 файлам — чисто; настоящий
    компилятор — только CI владельца.
+
+   **Выпущено: v11.74.0 (2026-09-18, Latest, APK 39 053 574 байт;
+   sha256 — на странице релиза; на телефонах НЕ проверено).** Порядок
+   выпуска, отработавший здесь: (1) пробный тег `v0.0.0-sandbox-checkN`
+   на том же коммите — CI реально компилирует, релиз-prerelease телефоны
+   не видят; после проверки release и тег удалить; (2) настоящий тег
+   `v11.74.0` на том же коммите — зелёный гарантирован; (3) promote:
+   `gh release edit --notes-file docs/RELEASE_NOTES_v11.74.0.md`,
+   `--prerelease=false`, затем `--draft=true` → 10 с → `--draft=false`
+   (иначе /releases/latest не смещается — грабля v11.20.0), проверка
+   `/releases/latest`. ГРАБЛЯ №1 (ловится только настоящей компиляцией):
+   sandbox-проверки структуру ловят, но не «Unresolved reference» — в
+   первом прогоне пало `DownloadManager.COLUMN_MIME_TYPE` (нет такого
+   константа; правильно `COLUMN_MEDIA_TYPE`). ГРАБЛЯ №2/открытие:
+   журнал Actions из песочницы не читается (results-receiver и
+   release-assets закрыты), НО аннотации check-run читаются:
+   `gh api repos/vzhem/APUMIR/actions/runs/<id>/jobs` → job id →
+   `gh api repos/vzhem/APUMIR/check-runs/<job_id>/annotations` — там
+   строки `e: файл:строка: Unresolved reference …`. Смарт-каст-грабля:
+   условие в локальной переменной (`val both = a != null && b != null`)
+   НЕ даёт smart cast внутри `if (both)` — делегированные
+   collectAsState-свойства тоже; нужны локальные копии. Тег стоял на
+   ветке arena (не на main) — сборке это не мешает (v11.73.0 так же);
+   догнать main — sync-main.ps1 владельца.
 0y. **Рой и «торрент» через мобильную связь (задача владельца
    2026-09-18; карта — `docs/SWARM_MOBILE.md`).** Сделано на ветке
    `arena/01a0b3cb-apumir`, БЕЗ РЕЛИЗА. Почему раньше не работало:
