@@ -67,7 +67,7 @@ class UpdateChecker @Inject constructor(
                 val idIdx = it.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
                 val titleIdx = it.getColumnIndex(DownloadManager.COLUMN_TITLE)
                 val uriIdx = it.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-                val mimeIdx = it.getColumnIndex(DownloadManager.COLUMN_MIME_TYPE)
+                val mimeIdx = it.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE)
                 while (it.moveToNext()) {
                     val mime = if (mimeIdx >= 0) it.getString(mimeIdx).orEmpty() else ""
                     val title = if (titleIdx >= 0) it.getString(titleIdx).orEmpty() else ""
