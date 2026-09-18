@@ -227,6 +227,14 @@ impl PresenceScope {
         self.own.lock().unwrap().len()
     }
 
+    /// Весь список «своих» (копия). Для срочного рассылания: когда
+    /// поменялся СОБСТВЕННЫЙ адрес, personal presence со свежим адресом
+    /// должен уйти ВСЕМ «своим» сразу, без 32-пакетного круга.
+    /// Курсор не трогаем — обычный цикл продолжит со своей позиции.
+    pub fn all_own(&self) -> Vec<String> {
+        self.own.lock().unwrap().clone()
+    }
+
     /// «Свой» ли узел.
     pub fn is_own(&self, node_id: &str) -> bool {
         self.own
@@ -367,5 +375,20 @@ mod tests {
             scope.add_own(&format!("pk_{:04}", i), None);
         }
         assert!(scope.own_len() <= MAX_OWN);
+    }
+
+    #[test]
+    fn all_own_returns_copy_without_touching_cursor() {
+        let scope = PresenceScope::new();
+        scope.set_own(
+            vec!["pk_aaa".into(), "pk_bbb".into(), "pk_ccc".into()],
+            Some("pk_aaa"),
+        );
+        // «Я» (pk_aaa) отфильтрован set_own: в списке два других.
+        assert_eq!(scope.own_len(), 2);
+        let all = scope.all_own();
+        assert_eq!(all, vec!["pk_bbb".to_string(), "pk_ccc".to_string()]);
+        // Повторный вызов — та же копия (список не истрачивается).
+        assert_eq!(scope.all_own(), all);
     }
 }

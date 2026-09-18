@@ -478,6 +478,12 @@ pub struct P2PCore {
     presence_scope: Arc<PresenceScope>,
     /// K4: сигнал потоку личного presence остановиться (`stop()`).
     presence_task_stop: Arc<std::sync::atomic::AtomicBool>,
+    /// Задача владельца 2026-09-18: поменялся СОБСТВЕННЫЙ адрес (STUN:
+    /// перезагрузка, смена сети, новый NAT) — поток личного presence
+    /// должен СРАЗУ, минуя 60-секундный цикл и 32-пакетный круг, расслать
+    /// personal presence со свежим адресом ВСЕМ «своим». Ставит STUN,
+    /// снимает presence-поток после рассылки.
+    own_addr_changed: Arc<std::sync::atomic::AtomicBool>,
     /// K4-2: поиск адреса по nodeId без брокера (DHT наружу): очередь
     /// ответов и расписание вопросов, см. `network::address_lookup`.
     address_lookup: Arc<AddressLookup>,
@@ -532,6 +538,7 @@ impl P2PCore {
             presence: None,
             presence_scope: Arc::new(PresenceScope::new()),
             presence_task_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            own_addr_changed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             address_lookup: Arc::new(AddressLookup::new()),
             address_book: Arc::new(AddressBook::open(address_book_path)),
             custody_hold: Arc::new(CustodyHold::new()),
@@ -704,6 +711,7 @@ impl P2PCore {
                 let network_quic = Arc::clone(&network_arc);
                 let direct_slot = Arc::clone(&self.direct);
                 let public_addr_stun = Arc::clone(&public_addr_arc);
+                let own_addr_changed_stun = Arc::clone(&self.own_addr_changed);
                 // K4-2: приёмнику кадров нужны таблица адресов, расписание
                 // поиска и свой публичный адрес (ответ «это я»).
                 let peer_addrs_quic = Arc::clone(&peer_addrs_arc);
@@ -813,7 +821,12 @@ impl P2PCore {
                         // STUN с того же сокета: отражённый адрес = адрес,
                         // на котором мы реально слушаем.
                         runtime.spawn(async move {
-                            Self::run_stun_discovery(public_addr_stun, Some(side)).await;
+                            Self::run_stun_discovery(
+                                public_addr_stun,
+                                own_addr_changed_stun,
+                                Some(side),
+                            )
+                            .await;
                         });
                     }
                     None => {
@@ -821,7 +834,12 @@ impl P2PCore {
                         // остаются брокер и relay. STUN - по-старому, с
                         // временного сокета, чтобы presence всё же нёс адрес.
                         runtime.spawn(async move {
-                            Self::run_stun_discovery(public_addr_stun, None).await;
+                            Self::run_stun_discovery(
+                                public_addr_stun,
+                                own_addr_changed_stun,
+                                None,
+                            )
+                            .await;
                         });
                     }
                 }
@@ -1206,6 +1224,27 @@ impl P2PCore {
                     ));
                     network.touch_peer(&presence.node_id);
                     network.set_status(NetworkStatus::Connected);
+                    // Адрес из кадра — самозаявка отправителя (тот же
+                    // уровень авторитета, что у брокер-presence: его
+                    // адрес знает только он). Именно так доходит срочная
+                    // рассылка «мой адрес поменялся» (задача владельца
+                    // 2026-09-18): получатель записывает свежий адрес в
+                    // память и в азбуку. mDNS и брокер продолжат
+                    // обновлять адрес, как и раньше.
+                    if let Some(addr) = presence.addr {
+                        let public_key = format!("{}_public", presence.node_id);
+                        let mut addrs = peer_addrs.lock().unwrap();
+                        addrs.insert(presence.node_id.clone(), addr);
+                        addrs.insert(public_key.clone(), addr);
+                        drop(addrs);
+                        address_book.record(&presence.node_id, addr);
+                        address_book.record(&public_key, addr);
+                        tracing::info!(
+                            "PRESENCE K4: fresh addr from {} = {}",
+                            presence.node_id,
+                            addr
+                        );
+                    }
                     // Отправителя возвращаем: транспорт усыновит входящее
                     // соединение, и ответ уйдёт по нему даже за строгим NAT.
                     return Some(presence.node_id);
@@ -1920,6 +1959,7 @@ impl P2PCore {
         let peer_addrs = Arc::clone(&self.peer_addrs);
         let public_addr = Arc::clone(&self.public_addr);
         let network = Arc::clone(&self.network);
+        let addr_changed = Arc::clone(&self.own_addr_changed);
         let display_name = self.config.display_name.clone();
 
         let spawned = std::thread::Builder::new()
@@ -1964,6 +2004,47 @@ impl P2PCore {
                     let pa = public_addr.lock().unwrap();
                     pa.map(|a| a.to_string())
                 };
+
+                // Задача владельца 2026-09-18: СОБСТВЕННЫЙ адрес поменялся
+                // (STUN поднял флаг: перезагрузка, смена сети, новый NAT) —
+                // СРАЗУ рассказываем ВСЕМ «своим», не дожидаясь
+                // 60-секундного цикла и без 32-пакетного круга. Работает и
+                // в маленькой сети, где обычный личный presence выключен:
+                // каждый онлайн-получатель записывает свежий адрес в свою
+                // азбуку, и после рестарта они стучат уже к нему.
+                if addr_str.is_some()
+                    && addr_changed.swap(false, std::sync::atomic::Ordering::Relaxed)
+                {
+                    let own = scope.all_own();
+                    if !own.is_empty() {
+                        let payload = direct_presence_payload(
+                            &node_id,
+                            &display_name,
+                            addr_str.as_deref(),
+                            true,
+                            now_ms,
+                        )
+                        .into_bytes();
+                        let mut sent = 0usize;
+                        for peer_id in &own {
+                            let addr = {
+                                let addrs = peer_addrs.lock().unwrap();
+                                addrs
+                                    .get(peer_id)
+                                    .copied()
+                                    .or_else(|| addrs.get(&format!("{}_public", peer_id)).copied())
+                            };
+                            if transport.send_blocking(peer_id, addr, payload.clone()) {
+                                sent += 1;
+                            }
+                        }
+                        tracing::info!(
+                            "PRESENCE K4: own address changed — immediate personal presence sent to {}/{} own peer(s)",
+                            sent,
+                            own.len()
+                        );
+                    }
+                }
 
                 // Раз в минуту смотрим, у кого из «своих» адреса нет, и
                 // спрашиваем соседей напрямую - без брокера. Идёт и в
@@ -3647,6 +3728,7 @@ impl P2PCore {
     }
     async fn run_stun_discovery(
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
+        addr_changed_flag: Arc<std::sync::atomic::AtomicBool>,
         mut side: Option<crate::network::quic_client::UdpSideChannel>,
     ) {
         use crate::network::direct_transport::stun_via_side_channel;
@@ -3687,7 +3769,17 @@ impl P2PCore {
                         changed
                     };
                     if changed {
-                        tracing::info!("STUN: my external address = {}", addr);
+                        // Задача владельца: свой адрес поменялся (или
+                        // узнался впервые после старта) — СРАЗУ рассказываем
+                        // всем «своим»: presence-поток снимет флаг и
+                        // рассылает personal presence со свежим адресом,
+                        // минуя 60-секундный цикл.
+                        addr_changed_flag
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        tracing::info!(
+                            "STUN: my external address changed = {} — immediate presence to all own",
+                            addr
+                        );
                     }
                     // Раз в минуту, а не в две: отображение на NAT у
                     // мобильных операторов живёт 30-60 с, и этот же запрос
