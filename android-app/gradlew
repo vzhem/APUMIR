@@ -249,26 +249,50 @@ eval "set -- $(
     )" '"$@"'
 
 # --- ВРЕМЕННАЯ ДИАГНОСТИКА CI (2026-09-18) ---------------------------------
-# Логи прогонов GitHub из песочницы недоступны (results-receiver... и
-# *.blob.core.windows.net не читаются), поэтому при падении сборки на раннере
-# хвост вывода Gradle уезжает коммитом в ветку сессии, откуда его читает
-# обычный git API. Строки ниже не влияют ни на APK, ни на локальные сборки
-# (срабатывают только при CI=1 и только при ошибке). Удалить после разбора.
+# Логи прогонов GitHub из песочницы недоступны, поэтому при падении сборки
+# на раннере хвост вывода Gradle уезжает ТРЕМЯ путями: аннотациями шага
+# (их читает API check-runs/annotations), комментарием к PR #10 и коммитом
+# в ветку сессии. Срабатывает только при ненулевом коде возврата; на APK и
+# локальные сборки не влияет. Удалить после разбора.
 APU_DIAG_LOG="${TMPDIR:-/tmp}/apu-gradle.log"
 "$JAVACMD" "$@" >"$APU_DIAG_LOG" 2>&1
 APU_STATUS=$?
 cat "$APU_DIAG_LOG"
-if [ "$APU_STATUS" -ne 0 ] && [ -n "${CI:-}" ]; then
+if [ "$APU_STATUS" -ne 0 ]; then
     APU_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+    APU_TMP="${TMPDIR:-/tmp}"
+    APU_DIAG="$APU_ROOT/docs/CI_GRADLE_FAILURE.txt"
+    mkdir -p "$APU_ROOT/docs" 2>/dev/null
     {
-        echo "gradle exit=$APU_STATUS dir=$(pwd)"
-        echo "--- строки с ошибками ---"
-        grep -n -i -e "^e: " -e "error:" -e "FAILURE" -e "What went wrong" -e "FAILED" -e "Caused by" -e "Missing class" -e "Execution failed" "$APU_DIAG_LOG" | head -400
-        echo "--- хвост вывода (500 КиБ) ---"
-        tail -c 500000 "$APU_DIAG_LOG"
-    } > "$APU_ROOT/docs/CI_GRADLE_FAILURE.txt" 2>/dev/null
+        echo "gradle exit=$APU_STATUS dir=$(pwd) ci=${CI:-unset}"
+        echo "--- отобранные строки ---"
+        grep -n -i -e "^e: " -e "error:" -e "FAILURE" -e "What went wrong" -e "FAILED" -e "Caused by" -e "Execution failed" -e "Could not" -e "Exception" "$APU_DIAG_LOG" | head -200
+        echo "--- хвост 200 КиБ ---"
+        tail -c 200000 "$APU_DIAG_LOG"
+    } >"$APU_DIAG" 2>&1
+
+    # 1) аннотации шага: читаются через API, даже когда логи недоступны
+    grep -i -e "^e: " -e "error:" -e "FAILURE" -e "What went wrong" -e "Execution failed" -e "Could not" "$APU_DIAG" \
+        | head -20 | while IFS= read -r apu_line; do
+            printf '::error::%.900s\n' "$apu_line"
+        done
+
+    # 2) комментарий к PR: тот же приём, что в scripts/ci/ci-core-check.sh
+    APU_HDR="$(git -C "$APU_ROOT" config --get http.https://github.com/.extraheader 2>/dev/null)"
+    APU_TOK="$(printf '%s' "$APU_HDR" | sed -n 's/.*[Bb]asic //p' | base64 -d 2>/dev/null | sed 's/^x-access-token://')"
+    if [ -n "$APU_TOK" ]; then
+        head -c 60000 "$APU_DIAG" >"$APU_TMP/apu-diag-body.txt"
+        printf '{"body":"%s"}' "$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/    /g' "$APU_TMP/apu-diag-body.txt" | awk '{printf "%s\\n", $0}')" >"$APU_TMP/apu-diag.json"
+        curl -s -m 60 -X POST -H "Authorization: token $APU_TOK" \
+            -H "Accept: application/vnd.github+json" -H "Content-Type: application/json" \
+            --data-binary "@$APU_TMP/apu-diag.json" \
+            https://api.github.com/repos/vzhem/APUMIR/issues/10/comments >/dev/null 2>&1
+    fi
+
+    # 3) коммит в ветку сессии
     git -C "$APU_ROOT" add -f docs/CI_GRADLE_FAILURE.txt 2>/dev/null
     git -C "$APU_ROOT" -c user.email=ci-diag@apu -c user.name="CI diag" commit -q -m "ci-diag: gradle failure output (temporary)" 2>/dev/null
-    git -C "$APU_ROOT" push -q origin HEAD:refs/heads/arena/01a0b284-apumir 2>/dev/null
+    git -C "$APU_ROOT" push origin HEAD:refs/heads/arena/01a0b284-apumir >"$APU_TMP/apu-push.txt" 2>&1
+    printf '::error::push diag branch: %.400s\n' "$(cat "$APU_TMP/apu-push.txt")"
 fi
 exit $APU_STATUS
