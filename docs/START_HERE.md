@@ -20,6 +20,7 @@
 | `IDENTITY_VAULT_SETUP.md` | хранилище личности на Cloudflare Worker: что нажимать владельцу | действующий |
 | `MESH_DELIVERY.md` | доставка + **раздел про сквозное шифрование переписки** | действующий |
 | `CHANNEL_SWARM_DESIGN.md` | раздача постов канала роем «как торрент» для 10 000+ подписчиков: пакеты, подпись манифеста, этапы | **проект, ждёт решений владельца** |
+| `UPDATE_SEEDING.md` | раздача обновления (APK) роем: виртуальное сообщество `apkseed`, пакеты `upk`/`upwant`/`upnone`, авто-раздача после установки | **проект (2026-09-18), в работе** |
 | `WALLPAPER_ICONS.md` | каталог 109 значков фирменных обоев | действующий |
 | `PC_TRANSFER.md`, `RESTORE_ON_NEW_PC.md`, `FLASH_BACKUP_RUNBOOK.md`, `BACKUP_AND_CLEAN_PC_RECOVERY.md`, `NEXT_AI_CHAT_BOOTSTRAP.md` | — | заглушки, заменены |
 

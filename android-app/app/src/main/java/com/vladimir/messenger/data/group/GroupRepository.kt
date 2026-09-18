@@ -140,6 +140,15 @@ class GroupRepository(
     private val onGroupGone: suspend (groupId: String) -> Unit = { _ -> },
     private val onFileCard: suspend (groupId: String, messageId: String, authorId: String, sentAtMs: Long, info: com.vladimir.messenger.util.GroupFileMarker.Info) -> Unit =
         { _, _, _, _, _ -> },
+    /**
+     * Рой APK (docs/UPDATE_SEEDING.md): объявление «я раздаю обновление»
+     * `upk`, просьба «пришли мне обновление» `upwant` и ответ «нет этой
+     * версии» `upnone`. По умолчанию ничего не делают — так живут
+     * JVM-тесты.
+     */
+    private val onUpdatePack: suspend (senderId: String, packet: GroupWire.Packet.UpdatePack) -> Unit = { _, _ -> },
+    private val onUpdateWant: suspend (senderId: String, packet: GroupWire.Packet.UpdateWant) -> Unit = { _, _ -> },
+    private val onUpdateNone: suspend (senderId: String, packet: GroupWire.Packet.UpdateNone) -> Unit = { _, _ -> },
 ) {
 
     /**
@@ -2699,6 +2708,23 @@ class GroupRepository(
             is GroupWire.Packet.FileNone -> backgroundScope.launch {
                 runCatching { onFileNone(senderId, packet) }
                     .onFailure { Log.w(TAG, "file none failed: ${it.message}") }
+            }
+
+            // Рой APK (docs/UPDATE_SEEDING.md): объявление, просьба и отказ —
+            // в фоне; куски самого APK идут файловой машиной (K2), не здесь.
+            is GroupWire.Packet.UpdatePack -> backgroundScope.launch {
+                runCatching { onUpdatePack(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update pack failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.UpdateWant -> backgroundScope.launch {
+                runCatching { onUpdateWant(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update want failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.UpdateNone -> backgroundScope.launch {
+                runCatching { onUpdateNone(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update none failed: ${it.message}") }
             }
 
             // Счётчики через владельца (этап 3): сводку считает и применяет

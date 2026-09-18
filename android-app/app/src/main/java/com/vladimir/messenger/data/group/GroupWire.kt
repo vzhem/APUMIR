@@ -154,6 +154,26 @@ object GroupWire {
      * работает прежнее ожидание.
      */
     const val KIND_FILE_NONE = "fnone"
+    /**
+     * «Я раздаю обновление» (рой APK, `docs/UPDATE_SEEDING.md`):
+     * `upk|версия|sha256|байт|atMs`. Шлёт сид всем известным узлам, как `cap`:
+     * только от самого узла, без эпидемии. Версия — числовая (11.70.29):
+     * телефоны с такой же или новой версией объявление игнорируют, так что
+     * файл расходится «всем, у кого ниже версия». Старые телефоны вид не
+     * знают и молча отбрасывают.
+     */
+    const val KIND_UPDATE_PACK = "upk"
+    /**
+     * «Пришли мне обновление» (рой APK): `upwant|версия|sha256|b64(привязка)`.
+     * [привязка] — подписанный ключ обмена просителя (как у `fwant`), чтобы
+     * сид закрепил его и запечатал конверт с ключом файла.
+     */
+    const val KIND_UPDATE_WANT = "upwant"
+    /**
+     * «У меня нет этой версии» (рой APK): ответ на `upwant`, проси у другого
+     * сида. Старые телефоны вид не знают и молча отбрасывают.
+     */
+    const val KIND_UPDATE_NONE = "upnone"
 
     /** Ключ обмена в `fwant`: как у HELLO файловой передачи. */
     const val MAX_FILE_WANT_BINDING_BYTES = 512
@@ -171,6 +191,8 @@ object GroupWire {
 
     /** Идентификатор сообщения в `fwant`/`fhave`: UUID - 36 знаков, с запасом. */
     const val MAX_FILE_MESSAGE_ID_CHARS = 64
+    /** Версия в пакетах роя APK: `9999.9999.9999.9999` — предел поля. */
+    const val MAX_UPDATE_VERSION_CHARS = 23
 
     /** Сообщений в одном ответе на `mreq` - столько же, сколько постов досылается новичку канала. */
     const val MAX_MANIFESTS_REQUEST = 20
@@ -535,6 +557,36 @@ object GroupWire {
         ) : Packet()
 
         /**
+         * Отправитель раздаёт обновление APU версии [version]
+         * (рой APK, `docs/UPDATE_SEEDING.md`): файл с [sha256] размером
+         * [sizeBytes]. Объявление несёт сам сид, повторять его дальше
+         * не нужно (как у `cap`).
+         */
+        data class UpdatePack(
+            val version: String,
+            val sha256: String,
+            val sizeBytes: Long,
+            val atMs: Long,
+        ) : Packet()
+
+        /**
+         * Просьба о обновлении версии [version] ([sha256]). [binding] —
+         * подписанный ключ обмена просителя (пусто, если ещё нет: сид
+         * ответит отказом, проситель повторит, когда HELLO дойдёт).
+         */
+        data class UpdateWant(
+            val version: String,
+            val sha256: String,
+            val binding: ByteArray = ByteArray(0),
+        ) : Packet()
+
+        /** У отправителя версии обновления [version] нет (ответ на [UpdateWant]). */
+        data class UpdateNone(
+            val version: String,
+            val sha256: String,
+        ) : Packet()
+
+        /**
          * Возможности узла: сколько места под пересылку он отдаёт (байт).
          * Принимается только от [nodeId] = отправитель (проверка в приёмнике).
          */
@@ -730,9 +782,50 @@ object GroupWire {
         return "$PREFIX|$KIND_FILE_NONE|$groupId|$sha256"
     }
 
+    /** «Я раздаю обновление» (рой APK): версия, файл и его размер. */
+    fun buildUpdatePack(version: String, sha256: String, sizeBytes: Long, atMs: Long): String {
+        require(isUpdateVersion(version)) { "bad update version" }
+        require(isSha256(sha256)) { "bad file sha256" }
+        require(sizeBytes in 0L..MAX_UPDATE_SIZE_BYTES) { "bad update size" }
+        return "$PREFIX|$KIND_UPDATE_PACK|$version|$sha256|${sizeBytes.coerceAtLeast(0L)}|${atMs.coerceAtLeast(0L)}"
+    }
+
+    /** «Пришли мне обновление» (рой APK): версия, файл, моя привязка. */
+    fun buildUpdateWant(version: String, sha256: String, binding: ByteArray): String {
+        require(isUpdateVersion(version)) { "bad update version" }
+        require(isSha256(sha256)) { "bad file sha256" }
+        require(binding.size <= MAX_FILE_WANT_BINDING_BYTES) { "binding too long" }
+        val bindingCell = if (binding.isEmpty()) "" else Base64.getUrlEncoder().withoutPadding().encodeToString(binding)
+        return "$PREFIX|$KIND_UPDATE_WANT|$version|$sha256|$bindingCell"
+    }
+
+    /** «У меня нет этой версии» (рой APK): ответ на просьбу, спрашивайте другого. */
+    fun buildUpdateNone(version: String, sha256: String): String {
+        require(isUpdateVersion(version)) { "bad update version" }
+        require(isSha256(sha256)) { "bad file sha256" }
+        return "$PREFIX|$KIND_UPDATE_NONE|$version|$sha256"
+    }
+
     /** Хэш файла в визитке и просьбах: ровно 64 шестнадцатеричных знака в нижнем регистре. */
     fun isSha256(value: String): Boolean =
         value.length == 64 && value.all { it in '0'..'9' || it in 'a'..'f' }
+
+    /** Размер APK для раздачи: не гигабайты - это приложение, а не образ. */
+    const val MAX_UPDATE_SIZE_BYTES = 4L * 1024 * 1024 * 1024
+
+    /**
+     * Версия обновления в пакетах роя APK: 1–4 числовых компонента через
+     * точку (`11.70.29`), не длиннее [MAX_UPDATE_VERSION_CHARS]. Строго
+     * числовая: в ней ходят сравнения, а человек её в пакет не вводит.
+     */
+    fun isUpdateVersion(value: String): Boolean {
+        if (value.isEmpty() || value.length > MAX_UPDATE_VERSION_CHARS) return false
+        val parts = value.split('.')
+        if (parts.size !in 1..4) return false
+        return parts.all { part ->
+            part.isNotEmpty() && part.length <= 4 && part.all { it in '0'..'9' }
+        }
+    }
 
     /** «Пришлите счётчики этих постов» - владельцу или администратору канала. */
     fun buildCountersRequest(groupId: String, topicIds: List<String>): String =
@@ -1309,6 +1402,45 @@ object GroupWire {
 
             KIND_FILE_NONE -> if (parts.size == 4 && isSha256(parts[3])) {
                 Packet.FileNone(groupId, parts[3])
+            } else {
+                null
+            }
+
+            // Рой APK (docs/UPDATE_SEEDING.md): «группа» в этих пакетах —
+            // версия обновления, её и занимаем слотом parts[2].
+            KIND_UPDATE_PACK -> if (parts.size == 6) {
+                val version = parts[2]
+                val size = parts[4].toLongOrNull() ?: return null
+                val at = parts[5].toLongOrNull() ?: return null
+                if (!isUpdateVersion(version) || !isSha256(parts[3]) ||
+                    size !in 0L..MAX_UPDATE_SIZE_BYTES || at < 0
+                ) {
+                    return null
+                }
+                Packet.UpdatePack(version, parts[3], size, at)
+            } else {
+                null
+            }
+
+            KIND_UPDATE_WANT -> if (parts.size == 5) {
+                if (!isUpdateVersion(parts[2]) || !isSha256(parts[3])) return null
+                val binding = if (parts[4].isEmpty()) {
+                    ByteArray(0)
+                } else {
+                    try {
+                        Base64.getUrlDecoder().decode(parts[4])
+                    } catch (_: IllegalArgumentException) {
+                        return null
+                    }
+                }
+                if (binding.size > MAX_FILE_WANT_BINDING_BYTES) return null
+                Packet.UpdateWant(parts[2], parts[3], binding)
+            } else {
+                null
+            }
+
+            KIND_UPDATE_NONE -> if (parts.size == 4 && isUpdateVersion(parts[2]) && isSha256(parts[3])) {
+                Packet.UpdateNone(parts[2], parts[3])
             } else {
                 null
             }
