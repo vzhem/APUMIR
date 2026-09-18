@@ -1185,9 +1185,11 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         }
         // Выбор, откуда качать. Проверка нашла обновление И на официальном
         // сайте, И у соседей в сети — показываем обе кнопки рядом.
+        // Локальные копии: делегированные свойства не умнее cast'ов, а
+        // условие в переменной не даёт smart cast для best.
+        val officialNow = official
         val best = offers.firstOrNull()
-        val bothSources = official != null && best != null && download == null && ready == null
-        if (bothSources) {
+        if (officialNow != null && best != null && download == null && ready == null) {
             Text(
                 "Обновление найдено в двух местах — выберите, откуда скачать:",
                 style = MaterialTheme.typography.bodyMedium,
@@ -1195,7 +1197,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             )
             SettingsItem(
                 icon    = Icons.Default.CloudDownload,
-                title   = "С официального сайта v" + official!!.version.removePrefix("v"),
+                title   = "С официального сайта v" + officialNow.version.removePrefix("v"),
                 subtitle = "Через интернет (GitHub); файл сам встанет в этот раздел",
                 onClick = viewModel::onDownloadOfficialRelease,
             )

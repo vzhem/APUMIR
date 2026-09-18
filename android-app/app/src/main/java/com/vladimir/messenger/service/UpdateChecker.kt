@@ -74,7 +74,8 @@ class UpdateChecker @Inject constructor(
                     val isApk = mime == "application/vnd.android.package-archive" ||
                         title.startsWith("APU v")
                     if (!isApk) continue
-                    val localUri = if (uriIdx >= 0) it.getString(uriIdx) ?: continue else continue
+                    if (uriIdx < 0) continue
+                    val localUri = it.getString(uriIdx) ?: continue
                     val file = runCatching { File(java.net.URI(localUri)) }
                         .getOrElse { File(localUri.removePrefix("file://")) }
                     if (file.isFile) result += CompletedDownload(it.getLong(idIdx), title, file)
