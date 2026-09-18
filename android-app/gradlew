@@ -262,6 +262,7 @@ if [ "$APU_STATUS" -ne 0 ]; then
     APU_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
     APU_TMP="${TMPDIR:-/tmp}"
     APU_DIAG="$APU_ROOT/docs/CI_GRADLE_FAILURE.txt"
+    mkdir -p "$APU_ROOT/docs" 2>/dev/null
     {
         echo "gradle exit=$APU_STATUS dir=$(pwd) ci=${CI:-unset}"
         echo "--- отобранные строки ---"
