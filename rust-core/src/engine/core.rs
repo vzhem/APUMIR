@@ -506,6 +506,15 @@ pub struct P2PCore {
 
 impl P2PCore {
     pub fn new(config: EngineConfig) -> Self {
+        // Файл азбуки живёт рядом с relay-базой (тот же app-private каталог,
+        // что Android передаёт в `create_engine_durable`). Без базы —
+        // память, save отключён. Путь считаем ДО литерала: `config`
+        // переезжает в структуру.
+        let address_book_path = config
+            .relay_db_path
+            .as_ref()
+            .and_then(|p| std::path::Path::new(p).parent().map(|d| d.to_path_buf()))
+            .map(|d| d.join("apu_peer_addresses.json"));
         Self {
             state: EngineState::Uninitialized,
             config,
@@ -524,16 +533,7 @@ impl P2PCore {
             presence_scope: Arc::new(PresenceScope::new()),
             presence_task_stop: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             address_lookup: Arc::new(AddressLookup::new()),
-            // Файл азбуки живёт рядом с relay-базой (тот же app-private
-            // каталог, что Android передаёт в `create_engine_durable`).
-            // Без базы — память, save отключён.
-            address_book: Arc::new(AddressBook::open(
-                config
-                    .relay_db_path
-                    .as_ref()
-                    .and_then(|p| std::path::Path::new(p).parent().map(|d| d.to_path_buf()))
-                    .map(|d| d.join("apu_peer_addresses.json")),
-            )),
+            address_book: Arc::new(AddressBook::open(address_book_path)),
             custody_hold: Arc::new(CustodyHold::new()),
             custody_offers: Arc::new(CustodyOffers::new()),
             custody_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1676,7 +1676,7 @@ impl P2PCore {
                         if let Some(ref pa) = node.public_addr {
                             if let Ok(pub_addr) = pa.parse::<SocketAddr>() {
                                 let key = format!("{}_public", peer_id);
-                                peer_addrs.lock().unwrap().insert(key, pub_addr);
+                                peer_addrs.lock().unwrap().insert(key.clone(), pub_addr);
                                 address_book.record(&key, pub_addr);
                                 tracing::info!("mDNS: public addr for {} = {}", peer_id, pub_addr);
                             }
@@ -3822,7 +3822,7 @@ impl P2PCore {
             None => return false,
         };
         self.peer_addrs.lock().unwrap().insert(node_id.clone(), addr);
-        self.address_book.record(node_id, addr);
+        self.address_book.record(&node_id, addr);
         tracing::info!("Invite: added peer {} at {}", node_id, addr);
         self.events.emit(CoreEvent::PeerDiscovered {
             peer_id: node_id.clone(),
