@@ -324,7 +324,7 @@ class FileTransferReceiver(
      * и будет молча отброшен — он продолжит слать текстовые фрагменты, и
      * ничего не теряется.
      */
-    private fun sendFcap(transferIdHex: String, to: String, chatId: String) {
+    private suspend fun sendFcap(transferIdHex: String, to: String, chatId: String) {
         runCatching {
             val maxFrame = FileTransferWire.BINARY_MAX_FRAME_PAYLOAD
             val payload = byteArrayOf(
