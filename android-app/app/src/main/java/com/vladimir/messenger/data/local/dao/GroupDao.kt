@@ -119,6 +119,13 @@ interface GroupDao {
     @Query("UPDATE groups SET topicsEnabled = :enabled WHERE id = :groupId")
     suspend fun updateTopicsEnabled(groupId: String, enabled: Boolean)
 
+    /**
+     * Смена владельца группы (передача прав или наследование после пропажи).
+     * Только UPDATE: перезапись строки стёрла бы участников и темы каскадом.
+     */
+    @Query("UPDATE groups SET ownerId = :ownerId WHERE id = :groupId")
+    suspend fun updateGroupOwner(groupId: String, ownerId: String)
+
     @Query("UPDATE groups SET isLeft = 1 WHERE id = :groupId")
     suspend fun markLeft(groupId: String)
 

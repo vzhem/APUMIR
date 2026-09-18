@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupPermissions
+import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.GroupStats
 import com.vladimir.messenger.data.group.InviteSummary
@@ -214,8 +215,12 @@ fun GroupAdminScreen(
 
                 AdminTab.Admins -> AdminsTab(
                     members = uiState.members,
+                    isOwner = uiState.isOwner,
+                    ownership = uiState.ownership,
                     onToggleAdmin = viewModel::toggleAdmin,
                     onTogglePermission = viewModel::setAdminPermission,
+                    onTransferOwnership = viewModel::transferOwnership,
+                    onClaimOwnership = viewModel::claimOwnership,
                 )
 
                 AdminTab.Members -> MembersTab(
@@ -573,12 +578,45 @@ private fun DeleteGroupDialog(
 @Composable
 private fun AdminsTab(
     members: List<MemberSummary>,
+    isOwner: Boolean,
+    ownership: GroupRepository.OwnershipState?,
     onToggleAdmin: (String, Boolean) -> Unit,
     onTogglePermission: (String, Long, Boolean) -> Unit,
+    onTransferOwnership: (String) -> Unit,
+    onClaimOwnership: () -> Unit,
 ) {
     val admins = members.filter { it.role == GroupRole.OWNER || it.role == GroupRole.ADMIN }
+    // Передача владения - шаг серьёзный: спрашиваем подтверждение по имени.
+    var transferTarget by remember { mutableStateOf<MemberSummary?>(null) }
 
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Наследование: владелец долго не выходил на связь - администратору
+        // (а без администраторов и участнику) предлагаем забрать права.
+        if (ownership?.canClaim == true) {
+            item {
+                ApuBubble {
+                    Column {
+                        val silentDays = (ownership.silenceMs ?: 0L) / (24L * 60 * 60 * 1000)
+                        Text(
+                            if (ownership.noAdmins) {
+                                "Владелец не выходил на связь $silentDays дн., администраторов в группе нет."
+                            } else {
+                                "Владелец не выходил на связь $silentDays дн."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "Вы можете стать владельцем группы. Владелец сохранит права администратора, если вернётся.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        TextButton(onClick = onClaimOwnership) {
+                            Text("Стать владельцем")
+                        }
+                    }
+                }
+            }
+        }
         item {
             ApuBubble {
                 Text(
@@ -644,10 +682,44 @@ private fun AdminsTab(
                                 Text("Снять администратора")
                             }
                         }
+                        // Передача владения: только владелец и только другому
+                        // администратору (наследование после удаления владельца
+                        // работает и без этой кнопки).
+                        if (isOwner && !admin.isMe) {
+                            HorizontalDivider()
+                            TextButton(onClick = { transferTarget = admin }) {
+                                Text("Передать владение")
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    transferTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { transferTarget = null },
+            title = { Text("Передать владение?") },
+            text = {
+                Text(
+                    "«${target.displayName.ifBlank { target.nodeId }}» станет владельцем группы. " +
+                        "Вы останетесь администратором со всеми правами. Отменить передачу нельзя - " +
+                        "новый владелец сам решит, кому передавать дальше."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        transferTarget = null
+                        onTransferOwnership(target.nodeId)
+                    },
+                ) { Text("Передать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { transferTarget = null }) { Text("Отмена") }
+            },
+        )
     }
 }
 

@@ -38,6 +38,8 @@ data class GroupAdminUiState(
     val canChangeInfo: Boolean = false,
     /** Создавать, отзывать и удалять ссылки-приглашения: только владелец и админы с правом приглашать. */
     val canManageInvites: Boolean = false,
+    /** Картина владения: молчит ли владелец и могу ли я забрать права (наследование). */
+    val ownership: GroupRepository.OwnershipState? = null,
     val error: String? = null,
     val notice: String? = null,
 )
@@ -69,6 +71,9 @@ class GroupAdminViewModel @Inject constructor(
                 val role = me?.role ?: GroupRole.MEMBER
                 val myMask = me?.permissions ?: 0L
                 val memberMask = summary?.memberPermissions ?: GroupPermissions.Member.DEFAULT
+                // Владение смотрим вместе с составом: молчание владельца и
+                // право на наследование зависят от моей роли в группе.
+                val ownership = runCatching { groupRepository.ownershipState(groupId) }.getOrNull()
                 _uiState.update { state ->
                     state.copy(
                         group = summary,
@@ -76,6 +81,7 @@ class GroupAdminViewModel @Inject constructor(
                         isOwner = role == GroupRole.OWNER,
                         canChangeInfo = GroupPermissions.canChangeInfo(role, myMask, memberMask),
                         canManageInvites = GroupPermissions.canManageInvites(role, myMask),
+                        ownership = ownership,
                         // Берём сохранённую политику группы: раньше здесь всегда
                         // подставлялся DEFAULT, и вкладка «Разрешения» показывала
                         // не то, что реально включено.
@@ -251,6 +257,28 @@ class GroupAdminViewModel @Inject constructor(
             groupRepository.setMemberBlocked(groupId, nodeId, true)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 .onSuccess { _uiState.update { it.copy(notice = "Участник исключён") } }
+        }
+    }
+
+    /**
+     * Добровольная передача владения администратору. UI обязан спросить
+     * подтверждение: обратной передачи «в один тап» нет - бывший владелец
+     * становится администратором.
+     */
+    fun transferOwnership(nodeId: String) {
+        viewModelScope.launch {
+            groupRepository.transferOwnership(groupId, nodeId)
+                .onSuccess { _uiState.update { it.copy(notice = "Владение передано") } }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Наследование: забрать владение у владельца, который долго молчал. */
+    fun claimOwnership() {
+        viewModelScope.launch {
+            groupRepository.claimOwnership(groupId)
+                .onSuccess { _uiState.update { it.copy(notice = "Вы теперь владелец группы") } }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 

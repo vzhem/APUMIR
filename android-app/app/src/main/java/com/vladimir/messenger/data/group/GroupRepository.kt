@@ -150,6 +150,14 @@ class GroupRepository(
     private val onUpdateWant: suspend (senderId: String, packet: GroupWire.Packet.UpdateWant) -> Unit = { _, _ -> },
     private val onUpdateNone: suspend (senderId: String, packet: GroupWire.Packet.UpdateNone) -> Unit = { _, _ -> },
     private val onUpdateAsk: suspend (senderId: String, packet: GroupWire.Packet.UpdateAsk) -> Unit = { _, _ -> },
+    /**
+     * Когда узел последний раз выходил на связь по наблюдениям ЭТОГО телефона
+     * (`PeerRatingStore`), миллисекунды эпохи; null - этот телефон его ни
+     * разу не видел. Нужно наследованию владения: «владелец удалился» здесь
+     * видно только по долгому молчанию (GroupOwnership). По умолчанию null -
+     * так живут JVM-тесты, и захват прав в них недоступен.
+     */
+    private val peerLastSeenMs: suspend (nodeId: String) -> Long? = { null },
 ) {
 
     /**
@@ -2989,6 +2997,8 @@ class GroupRepository(
                 Log.i(TAG, "kicked from group=${packet.groupId} by=$senderId")
             }
 
+            is GroupWire.Packet.OwnerClaim -> handleOwnerClaim(senderId, packet)
+
             is GroupWire.Packet.Directory -> handleDirectory(packet, senderId)
 
             is GroupWire.Packet.Nick -> handleNick(packet, senderId)
@@ -3523,6 +3533,246 @@ class GroupRepository(
         }
         return Result.success(Unit)
     }
+
+    // ── Владение: передача и наследование ─────────────────────────────────────
+
+    /** Что экрану группы видно про владение: кто владеет сейчас и могу ли я забрать права. */
+    data class OwnershipState(
+        val ownerId: String,
+        /** Владелец - я сам: мне доступна передача прав, но не захват. */
+        val iAmOwner: Boolean,
+        /** Владелец устранился от группы: молчал дольше срока. */
+        val ownerMissing: Boolean,
+        /** Сколько владелец молчит (мс); null - этот телефон его ни разу не видел. */
+        val silenceMs: Long?,
+        /** Сколько молчания нужно моей роли, чтобы забрать права (мс); null - мне нельзя. */
+        val requiredSilenceMs: Long?,
+        /** Могу ли я прямо сейчас стать владельцем. */
+        val canClaim: Boolean,
+        /** В группе нет ни одного администратора - наследовать могут участники. */
+        val noAdmins: Boolean,
+    )
+
+    /**
+     * Картина владения для экрана администрирования. Молчание владельца
+     * берётся из рейтинга узлов этого телефона: если я его ни разу не видел,
+     * захват запрещён - незнакомый владелец не «удалившийся».
+     */
+    suspend fun ownershipState(groupId: String): OwnershipState {
+        val group = groupDao.getGroupById(groupId) ?: return OwnershipState(
+            ownerId = "", iAmOwner = false, ownerMissing = false,
+            silenceMs = null, requiredSilenceMs = null, canClaim = false, noAdmins = false,
+        )
+        val me = myId().orEmpty()
+        val mine = groupDao.getMember(groupId, me)
+        val members = groupDao.getMembers(groupId)
+        val adminsExist = members.any { it.role == GroupRole.ADMIN && !it.isBanned }
+        val myRole = mine?.role ?: GroupRole.MEMBER
+        val required = GroupOwnership.requiredSilenceMs(myRole, adminsExist)
+        val lastSeen = if (group.ownerId.isBlank() || group.ownerId == me) {
+            null
+        } else {
+            runCatching { peerLastSeenMs(group.ownerId) }.getOrNull()
+        }
+        val silence = lastSeen?.let { (clock() - it).coerceAtLeast(0L) }
+        val missing = lastSeen != null && required != null && (clock() - lastSeen) > required
+        val canClaim = mine != null && !mine.isBanned && !GroupRole.isOwner(myRole) &&
+            required != null && lastSeen != null && (clock() - lastSeen) > required
+        return OwnershipState(
+            ownerId = group.ownerId,
+            iAmOwner = group.ownerId == me,
+            ownerMissing = missing,
+            silenceMs = silence,
+            requiredSilenceMs = required,
+            canClaim = canClaim,
+            noAdmins = !adminsExist,
+        )
+    }
+
+    /**
+     * Добровольная передача владения администратору. Делает только владелец;
+     * наследник - действующий администратор этой группы. У всех участников
+     * после пакета `own` новый владелец и роли: наследник - OWNER, бывший
+     * владелец - ADMIN со всеми правами.
+     */
+    suspend fun transferOwnership(groupId: String, newOwnerId: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (group.ownerId != me) {
+            return Result.failure(SecurityException("Передать владение может только владелец"))
+        }
+        if (newOwnerId == me) {
+            return Result.failure(IllegalArgumentException("Вы уже владелец"))
+        }
+        val successor = groupDao.getMember(groupId, newOwnerId)
+            ?: return Result.failure(IllegalStateException("Участник не найден"))
+        if (successor.role != GroupRole.ADMIN) {
+            return Result.failure(IllegalArgumentException("Передать владение можно только администратору"))
+        }
+        if (successor.isBanned) {
+            return Result.failure(IllegalArgumentException("Участник ограничен"))
+        }
+        val at = clock()
+        applyOwnerChange(groupId, previousOwnerId = me, newOwnerId = newOwnerId, atMs = at)
+        val envelope = GroupWire.buildOwnerClaim(
+            groupId = groupId,
+            newOwnerId = newOwnerId,
+            previousOwnerId = me,
+            atMs = at,
+            voluntary = true,
+        )
+        broadcast(groupId, envelope, excludeSelf = true)
+        publishRoster(groupId, adminsChanged = true)
+        return Result.success(Unit)
+    }
+
+    /**
+     * Захват владения у пропавшего владельца. Доступен администратору после
+     * [GroupOwnership.ADMIN_SILENCE_MS] молчания владельца, а если
+     * администраторов нет - любому участнику после
+     * [GroupOwnership.MEMBER_SILENCE_MS]. Получатели верят заявке по своим
+     * собственным часам молчания, поэтому каждый проверяет меня так же, как
+     * я проверял бы себя.
+     */
+    suspend fun claimOwnership(groupId: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (group.ownerId == me) {
+            return Result.failure(IllegalArgumentException("Вы уже владелец"))
+        }
+        val mine = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (mine.isBanned) {
+            return Result.failure(SecurityException("Участник ограничен"))
+        }
+        val members = groupDao.getMembers(groupId)
+        val adminsExist = members.any { it.role == GroupRole.ADMIN && !it.isBanned }
+        val required = GroupOwnership.requiredSilenceMs(mine.role, adminsExist)
+            ?: return Result.failure(SecurityException("Забрать владение могут администраторы, а без них - участники"))
+        val lastSeen = runCatching { peerLastSeenMs(group.ownerId) }.getOrNull()
+        if (lastSeen == null) {
+            return Result.failure(IllegalStateException("Этот телефон ничего не знает о владельце - захват невозможен"))
+        }
+        if (clock() - lastSeen <= required) {
+            val days = required / DAY_MS
+            return Result.failure(IllegalStateException("Владелец на связи: права можно забрать только после $days дней молчания"))
+        }
+        val at = clock()
+        applyOwnerChange(groupId, previousOwnerId = group.ownerId, newOwnerId = me, atMs = at)
+        val envelope = GroupWire.buildOwnerClaim(
+            groupId = groupId,
+            newOwnerId = me,
+            previousOwnerId = group.ownerId,
+            atMs = at,
+            voluntary = false,
+        )
+        broadcast(groupId, envelope, excludeSelf = true)
+        publishRoster(groupId, adminsChanged = true)
+        return Result.success(Unit)
+    }
+
+    /**
+     * Применить смену владельца локально: строка группы - UPDATE (не
+     * перезапись!), наследник - OWNER, прежний владелец - ADMIN со всеми
+     * правами. Участника-наследника могло не быть в моей (неполной) копии
+     * состава большого канала - тогда он появится здесь же.
+     */
+    private suspend fun applyOwnerChange(groupId: String, previousOwnerId: String, newOwnerId: String, atMs: Long) {
+        val now = clock()
+        val successor = groupDao.getMember(groupId, newOwnerId)
+        if (successor == null) {
+            groupDao.insertMember(
+                GroupMemberEntity(
+                    groupId = groupId,
+                    nodeId = newOwnerId,
+                    displayName = "",
+                    role = GroupRole.OWNER,
+                    joinedAtMs = now,
+                    permissions = GroupPermissions.Admin.ALL,
+                )
+            )
+        } else {
+            groupDao.insertMember(
+                successor.copy(role = GroupRole.OWNER, permissions = GroupPermissions.Admin.ALL)
+            )
+        }
+        val former = groupDao.getMember(groupId, previousOwnerId)
+        if (former != null && previousOwnerId != newOwnerId && former.role == GroupRole.OWNER) {
+            groupDao.insertMember(
+                former.copy(role = GroupOwnership.FORMER_OWNER_ROLE, permissions = GroupPermissions.Admin.ALL)
+            )
+        }
+        groupDao.updateGroupOwner(groupId, newOwnerId)
+        Log.i(TAG, "owner changed group=$groupId from=$previousOwnerId to=$newOwnerId")
+    }
+
+    /**
+     * Приём пакета `own`. Верим только двум людям: прежнему владельцу
+     * (добровольная передача) и самому наследнику (наследование), - и только
+     * если «прежний владелец» в пакете совпадает с владельцем в моей копии
+     * группы. Захват у живого владельца невозможен: проверяю молчание по
+     * СВОИМ часам так же строго, как проверял бы собственную заявку.
+     */
+    private suspend fun handleOwnerClaim(senderId: String, packet: GroupWire.Packet.OwnerClaim) {
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        val me = myId().orEmpty()
+        if (packet.newOwnerId == packet.previousOwnerId) return
+        if (packet.previousOwnerId != group.ownerId) {
+            // Устаревшая или чужая заявка: мой владелец уже другой. Исключение -
+            // спор двух наследников: решает меньший nodeId (детерминированно).
+            val keep = !packet.voluntary &&
+                packet.newOwnerId == senderId &&
+                group.ownerId != me &&
+                GroupOwnership.shouldReplaceClaimer(group.ownerId, packet.newOwnerId) &&
+                run {
+                    val members = groupDao.getMembers(packet.groupId)
+                    val claimer = members.firstOrNull { it.nodeId == senderId }
+                    val adminsExist = members.any {
+                        it.role == GroupRole.ADMIN && it.nodeId != senderId && !it.isBanned
+                    }
+                    claimer != null && !claimer.isBanned && run {
+                        val required = GroupOwnership.requiredSilenceMs(claimer.role, adminsExist)
+                        val lastSeen = ownerLastSeen(group.ownerId)
+                        required != null && lastSeen != null && clock() - lastSeen >= required
+                    }
+                }
+            if (keep) {
+                applyOwnerChange(packet.groupId, previousOwnerId = group.ownerId, newOwnerId = packet.newOwnerId, atMs = packet.atMs)
+            }
+            return
+        }
+        if (packet.voluntary) {
+            // Передача от нынешнего владельца - верим только ему самому.
+            if (senderId != group.ownerId) return
+        } else {
+            // Наследование: говорит наследник своими словами, я проверяю его
+            // роль и молчание владельца по своей копии состава.
+            if (senderId != packet.newOwnerId) return
+            val claimer = groupDao.getMember(packet.groupId, senderId) ?: return
+            if (claimer.isBanned) return
+            val members = groupDao.getMembers(packet.groupId)
+            val adminsExist = members.any { it.role == GroupRole.ADMIN && it.nodeId != senderId && !it.isBanned }
+            val required = GroupOwnership.requiredSilenceMs(claimer.role, adminsExist) ?: return
+            val lastSeen = ownerLastSeen(group.ownerId) ?: return
+            if (clock() - lastSeen < required) {
+                Log.i(TAG, "owner claim rejected: owner active group=${packet.groupId} claimer=$senderId")
+                return
+            }
+        }
+        applyOwnerChange(packet.groupId, previousOwnerId = group.ownerId, newOwnerId = packet.newOwnerId, atMs = packet.atMs)
+        // Передаю заявку дальше: состав у каждого свой, и веер наследника
+        // мог до кого-то не дойти. Гаснет само: телефон, уже принявший смену,
+        // второй раз заявку не применяет и дальше не передаёт.
+        runCatching { broadcast(packet.groupId, GroupWire.buildOwnerClaim(
+            packet.groupId, packet.newOwnerId, packet.previousOwnerId, packet.atMs, packet.voluntary,
+        ), excludeSelf = true) }
+        publishRoster(packet.groupId, adminsChanged = true)
+    }
+
+    private suspend fun ownerLastSeen(nodeId: String): Long? =
+        if (nodeId.isBlank()) null else runCatching { peerLastSeenMs(nodeId) }.getOrNull()
 
     // ── Публичная / частная группа ────────────────────────────────────────────
 
