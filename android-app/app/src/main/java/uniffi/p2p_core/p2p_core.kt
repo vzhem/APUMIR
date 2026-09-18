@@ -836,6 +836,20 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -869,6 +883,8 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_drain_events(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_file_custody_usage_bytes(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     fun uniffi_p2p_core_fn_method_p2pcorehandle_generate_invite(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_get_chats(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -883,6 +899,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_node_id(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_offer_file_chunk_for_custody(`ptr`: Pointer,`recipientId`: RustBuffer.ByValue,`transferIdHex`: RustBuffer.ByValue,`chunkIndex`: Long,`chunkOffset`: Int,`ciphertextChunkLen`: Int,`ciphertextRange`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_available(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_p2p_core_fn_method_p2pcorehandle_on_network_lost(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -907,6 +925,14 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message_mqtt(`ptr`: Pointer,`toNodeId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_set_custody_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_set_file_custody_enabled(`ptr`: Pointer,`enabled`: Byte,`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_set_own_broker(`ptr`: Pointer,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_set_presence_audience(`ptr`: Pointer,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
     fun uniffi_p2p_core_fn_method_p2pcorehandle_start(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_stop(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -1175,6 +1201,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_drain_events(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_file_custody_usage_bytes(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_generate_invite(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_get_chats(
@@ -1188,6 +1216,8 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_network_status(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_node_id(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_offer_file_chunk_for_custody(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_on_network_available(
     ): Short
@@ -1207,9 +1237,19 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_direct_payload(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_file_chunk(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_message(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_message_mqtt(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_custody_enabled(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_file_custody_enabled(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_own_broker(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_presence_audience(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_start(
     ): Short
@@ -1354,6 +1394,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_drain_events() != 49976.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_file_custody_usage_bytes() != 48583.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_generate_invite() != 45106.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1373,6 +1416,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_node_id() != 29054.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_offer_file_chunk_for_custody() != 56053.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_on_network_available() != 60050.toShort()) {
@@ -1402,10 +1448,25 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_direct_payload() != 23175.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_file_chunk() != 50369.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_message() != 20737.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_message_mqtt() != 54189.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_custody_enabled() != 44669.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_file_custody_enabled() != 64686.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_own_broker() != 38529.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_presence_audience() != 50797.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_start() != 13964.toShort()) {
@@ -1852,6 +1913,8 @@ public interface P2pCoreHandleInterface {
     
     fun `drainEvents`(): List<CoreEventFfi>
     
+    fun `fileCustodyUsageBytes`(): kotlin.ULong
+    
     fun `generateInvite`(): kotlin.String
     
     fun `getChats`(): List<ChatFfi>
@@ -1865,6 +1928,8 @@ public interface P2pCoreHandleInterface {
     fun `networkStatus`(): kotlin.String
     
     fun `nodeId`(): kotlin.String?
+    
+    fun `offerFileChunkForCustody`(`recipientId`: kotlin.String, `transferIdHex`: kotlin.String, `chunkIndex`: kotlin.Long, `chunkOffset`: kotlin.UInt, `ciphertextChunkLen`: kotlin.UInt, `ciphertextRange`: kotlin.ByteArray): kotlin.Boolean
     
     fun `onNetworkAvailable`()
     
@@ -1889,6 +1954,14 @@ public interface P2pCoreHandleInterface {
     fun `sendMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean
     
     fun `sendMessageMqtt`(`toNodeId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
+    
+    fun `setCustodyEnabled`(`enabled`: kotlin.Boolean): kotlin.Boolean
+    
+    fun `setFileCustodyEnabled`(`enabled`: kotlin.Boolean, `dbPath`: kotlin.String): kotlin.Boolean
+    
+    fun `setOwnBroker`(`hostPort`: kotlin.String): kotlin.Boolean
+    
+    fun `setPresenceAudience`(`ids`: List<kotlin.String>): kotlin.UInt
     
     fun `start`(): kotlin.Boolean
     
@@ -2040,6 +2113,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `fileCustodyUsageBytes`(): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_file_custody_usage_bytes(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
     override fun `generateInvite`(): kotlin.String {
             return FfiConverterString.lift(
     callWithPointer {
@@ -2118,6 +2203,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_node_id(
         it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `offerFileChunkForCustody`(`recipientId`: kotlin.String, `transferIdHex`: kotlin.String, `chunkIndex`: kotlin.Long, `chunkOffset`: kotlin.UInt, `ciphertextChunkLen`: kotlin.UInt, `ciphertextRange`: kotlin.ByteArray): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_offer_file_chunk_for_custody(
+        it, FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`transferIdHex`),FfiConverterLong.lower(`chunkIndex`),FfiConverterUInt.lower(`chunkOffset`),FfiConverterUInt.lower(`ciphertextChunkLen`),FfiConverterByteArray.lower(`ciphertextRange`),_status)
 }
     }
     )
@@ -2265,6 +2362,54 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `setCustodyEnabled`(`enabled`: kotlin.Boolean): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_set_custody_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `setFileCustodyEnabled`(`enabled`: kotlin.Boolean, `dbPath`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_set_file_custody_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),FfiConverterString.lower(`dbPath`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `setOwnBroker`(`hostPort`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_set_own_broker(
+        it, FfiConverterString.lower(`hostPort`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `setPresenceAudience`(`ids`: List<kotlin.String>): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_set_presence_audience(
+        it, FfiConverterSequenceString.lower(`ids`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `start`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithPointer {
@@ -2393,12 +2538,11 @@ data class CoreEventFfi (
     var `text`: kotlin.String?, 
     var `status`: kotlin.String?, 
     var `timestamp`: kotlin.Long?, 
-    var `isLocal`: kotlin.Boolean?,
-    // K3: бинарный кусок файла (eventType "file_chunk_received").
-    var `transferId`: kotlin.String?,
-    var `chunkIndex`: kotlin.Long?,
-    var `chunkOffset`: kotlin.UInt?,
-    var `ciphertextChunkLen`: kotlin.UInt?,
+    var `isLocal`: kotlin.Boolean?, 
+    var `transferId`: kotlin.String?, 
+    var `chunkIndex`: kotlin.Long?, 
+    var `chunkOffset`: kotlin.UInt?, 
+    var `ciphertextChunkLen`: kotlin.UInt?, 
     var `payload`: kotlin.ByteArray?
 ) {
     
@@ -2775,6 +2919,38 @@ public object FfiConverterTypeMessageStatusFfi: FfiConverterRustBuffer<MessageSt
 /**
  * @suppress
  */
+public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
+    override fun read(buf: ByteBuffer): kotlin.UInt? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UInt?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UInt?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUInt.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalLong: FfiConverterRustBuffer<kotlin.Long?> {
     override fun read(buf: ByteBuffer): kotlin.Long? {
         if (buf.get().toInt() == 0) {
@@ -2865,34 +3041,8 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
     }
 }
 
-/**
- * @suppress
- */
-public object FfiConverterOptionalUInt: FfiConverterRustBuffer<kotlin.UInt?> {
-    override fun read(buf: ByteBuffer): kotlin.UInt? {
-        if (buf.get().toInt() == 0) {
-            return null
-        }
-        return FfiConverterUInt.read(buf)
-    }
 
-    override fun allocationSize(value: kotlin.UInt?): ULong {
-        if (value == null) {
-            return 1UL
-        } else {
-            return 1UL + FfiConverterUInt.allocationSize(value)
-        }
-    }
 
-    override fun write(value: kotlin.UInt?, buf: ByteBuffer) {
-        if (value == null) {
-            buf.put(0)
-        } else {
-            buf.put(1)
-            FfiConverterUInt.write(value, buf)
-        }
-    }
-}
 
 /**
  * @suppress
@@ -2951,6 +3101,34 @@ public object FfiConverterOptionalTypeCoreEventFfi: FfiConverterRustBuffer<CoreE
         } else {
             buf.put(1)
             FfiConverterTypeCoreEventFfi.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
+    override fun read(buf: ByteBuffer): List<kotlin.String> {
+        val len = buf.getInt()
+        return List<kotlin.String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.String>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterString.write(it, buf)
         }
     }
 }
