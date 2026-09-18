@@ -63,6 +63,7 @@ class CoreServerService : Service() {
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm
+    @Inject lateinit var swarmPeerDirectory: com.vladimir.messenger.data.swarm.SwarmPeerDirectory
     @Inject lateinit var apkSeeder: com.vladimir.messenger.data.update.ApkSeeder
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
@@ -285,6 +286,20 @@ class CoreServerService : Service() {
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+
+                // Азбука адресов (docs/ADDRESS_BOOK.md): засевать «свои»,
+                // чтобы в первую же минуту после старта личное presence
+                // стукнуло к сохранённым адресам, а онлайн-соседи ответили
+                // presence со СВЕЖИМ адресом — файл актуализируется.
+                serviceScope.launch {
+                    runCatching {
+                        val ids = swarmPeerDirectory.audienceIds()
+                        RustBridge.setPresenceAudience(ids)
+                        Log.i(TAG, "Presence audience seeded: ${ids.size} ids")
+                    }.onFailure {
+                        Log.w(TAG, "Presence audience seed failed: ${it.message}")
+                    }
+                }
 
                 // Прокси-автопилот: первичный цикл при старте — проверить пул, убрать мёртвых,
                 // выбрать и подключить лучшего (без принудительного сбора).

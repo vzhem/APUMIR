@@ -379,10 +379,22 @@
    - `data/RustBridge.kt` — `setPresenceAudience(ids)` (try/catch+лог).
    - `data/swarm/SwarmPeerDirectory.kt` — `audienceIds()`.
    - `service/CoreServerService.kt` — посев после старта движка.
-   Проверено в песочнице: JVM-диагностика Kotlin-части (без новых
-   ошибок); Rust — БЕЗ компилятора (нет cargo), unit-тесты модуля
-   будут ходить в CI. **Первый настоящий компилятор — CI; на
-   телефонах НЕ проверено.** Для проверки: два телефона, один
+   **ВАЖНО, перед первой сборкой (разовый шаг на ПК владельца):**
+   `set_presence_audience` давно в `lib.udl` (K4-1), но закоммиченный
+   сгенерированный `android-app/.../uniffi/p2p_core/p2p_core.kt` НЕ
+   перегенерировали с тех пор — в нём нет `setPresenceAudience`, и
+   приложение не скомпилируется, пока не перегенерировать:
+   `cargo run --manifest-path ..\tools\uniffi-bindgen\Cargo.toml -- generate src/lib.udl --language kotlin --config uniffi.toml --out-dir ..\android-app\app\src\main\java`
+   (из каталога rust-core; то, что делали раньше). Ручную правку
+   сгенерированного файла НЕ делать — ABI должна совпасть с .so.
+   Проверено в песочнице: JVM-диагностика Kotlin-части — ровно 1 новая
+   строка `unresolved reference 'setPresenceAudience'` (исчезает после
+   перегенерации выше) + 1 новый FP того же класса «suspend … can only
+   be called from a coroutine», что 185 уже в baseline (вызов внутри
+   `serviceScope.launch`); Rust — БЕЗ компилятора (нет cargo),
+   unit-тесты модуля будут ходить в CI. **Первый настоящий
+   компилятор — CI; на телефонах НЕ проверено.** Для проверки: два
+   телефона, один
    перезапустить (или убить/установить заново), через минуту —
    `ADDRESS BOOK: loaded N entries`, `PRESENCE K4: personal presence
    sent to X/Y own peer(s)` с X>0 (было 0 у чистого старта), файл

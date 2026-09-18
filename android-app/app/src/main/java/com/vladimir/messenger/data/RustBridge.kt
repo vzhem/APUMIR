@@ -213,6 +213,25 @@ object RustBridge {
         }
     }
 
+    /**
+     * K4-1 / docs/ADDRESS_BOOK.md: «свои» для личного presence. Движок в
+     * первую же минуту стучит этим узлам сохранённым адресам, а
+     * онлайн-ответившие возвращают свежий адрес — азбука адресов
+     * актуализируется. Возвращает сколько движок реально удержал (лимит
+     * 256); ошибка или отсутствие движка — 0.
+     */
+    fun setPresenceAudience(ids: List<String>): UInt {
+        if (ids.isEmpty()) return 0u
+        return try {
+            val taken = engine?.setPresenceAudience(ids) ?: 0u
+            android.util.Log.i(TAG, "Presence audience: ${ids.size} passed, $taken kept")
+            taken
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "setPresenceAudience failed: ${e.message}")
+            0u
+        }
+    }
+
     fun onNetworkAvailable() {
         try { engine?.onNetworkAvailable() }
         catch (ex: Exception) { Log.e(TAG, "onNetworkAvailable error", ex) }

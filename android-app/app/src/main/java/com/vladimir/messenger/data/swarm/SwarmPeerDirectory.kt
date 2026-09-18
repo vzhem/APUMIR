@@ -54,6 +54,19 @@ class SwarmPeerDirectory @Inject constructor(
     suspend fun order(candidates: List<String>): List<String> =
         SwarmPolicy.order(candidates, knowledge())
 
+    /**
+     * «Свои» для личного presence (K4-1, docs/ADDRESS_BOOK.md):
+     * контакты ∪ проверенные обмены ∪ владельцы/админы групп. Движок по
+     * этому списку стучит сохранённым адресам сразу после старта, а
+     * онлайн-соседи отвечают presence со свежим адресом — азбука
+     * адресов актуализируется. Дедуп/фильтр `pk_…`/«не я» делает движок.
+     */
+    suspend fun audienceIds(): List<String> {
+        val k = knowledge()
+        return (k.contacts + k.verified + k.privileged)
+            .filter { it.isNotBlank() }
+    }
+
     /** Забыть кэш: после добавления контакта или смены роли, если нужно сразу. */
     suspend fun invalidate() {
         mutex.withLock { cachedAtMs = 0L }
