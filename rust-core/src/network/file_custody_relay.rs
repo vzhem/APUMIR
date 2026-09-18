@@ -633,6 +633,9 @@ impl FileCustodyOffers {
     }
 
     /// Запомнить ответ хранителя. `true` - копий уже достаточно.
+    ///
+    /// Список подтверждений намеренно не растёт дальше цели: цель - две
+    /// копии, а поток подтверждений от чужого узла не должен копить память.
     pub fn note_ack(
         &self,
         unit_id: &str,
@@ -644,7 +647,8 @@ impl FileCustodyOffers {
             return false;
         }
         if ack == FileCustodyAck::Stored {
-            let accepted = inner.accepted.entry(unit_id.to_owned()).or_default();
+            // Заимствования идут по очереди: держать два входа в одну и ту же
+            // карту разом нельзя (ошибка E0499 - ровно на этом и споткнулись).
             if let Some(receipt) = receipt {
                 // Квитанции храним для показа владельцу и для плана
                 // репликации; больше двух копий нам не нужно.
@@ -653,7 +657,10 @@ impl FileCustodyOffers {
                     list.push(receipt);
                 }
             }
-            accepted.push("stored".to_owned());
+            let accepted = inner.accepted.entry(unit_id.to_owned()).or_default();
+            if accepted.len() < MAX_FILE_CUSTODY_PEERS {
+                accepted.push("stored".to_owned());
+            }
         }
         inner
             .accepted
