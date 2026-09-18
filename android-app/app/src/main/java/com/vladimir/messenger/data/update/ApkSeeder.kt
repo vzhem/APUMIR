@@ -683,9 +683,16 @@ class ApkSeeder @Inject constructor(
         scope.launch { runCatching { announce() } }
     }
 
-    /** Установить скачанное обновление (FileProvider, как у UpdateChecker). */
-    suspend fun installReady() {
-        val readyInfo = _ready.value ?: return
+    /**
+     * Установить скачанное обновление (FileProvider, как у UpdateChecker).
+     * Возвращает текст ошибки для карточки: пусто — установщик запущен.
+     * Ошибки НЕ молчат: молчаливый отказ выглядит как «кнопка не работает»
+     * (так и было: файл принятого обновления лежит в noBackupFilesDir,
+     * которого не было в file_paths.xml — getUriForFile бросал, корутина
+     * умирала молча).
+     */
+    suspend fun installReady(): String {
+        val readyInfo = _ready.value ?: return "Обновление уже установлено — карточка устарела"
         // Файл обновления: принятая копия (строка INCOMING/COMPLETE) или
         // скачанный с сайта файл, взятый в раздел автоматически.
         val file: File? = readyInfo.transferId.takeIf { it.isNotBlank() }
@@ -693,21 +700,30 @@ class ApkSeeder @Inject constructor(
             ?.takeIf { it.isFile }
             ?: readyInfo.sourcePath?.let { path -> File(path) }?.takeIf { it.isFile }
         if (file == null) {
-            Log.w(TAG, "install refused: update file not found")
-            return
+            Log.w(TAG, "install refused: update file not found (transfer=${readyInfo.transferId}, source=${readyInfo.sourcePath})")
+            return "Файл обновления не найден на телефоне — скачайте заново"
         }
         if (ApkUpdate.sha256OfFile(file) != readyInfo.sha256) {
             Log.w(TAG, "install refused: file sha changed")
-            return
+            return "Файл изменился после скачивания — обновление не запущено"
         }
-        val authority = "${appContext.packageName}.fileprovider"
-        val uri = FileProvider.getUriForFile(appContext, authority, file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return runCatching {
+            val authority = "${appContext.packageName}.fileprovider"
+            val uri = FileProvider.getUriForFile(appContext, authority, file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            appContext.startActivity(intent)
+            Log.i(TAG, "install intent started for v${readyInfo.version}")
+            ""
+        }.getOrElse { error ->
+            Log.e(TAG, "install intent failed: ${error.message}")
+            // Нет права «устанавливать неизвестные приложения» — Android
+            // отклоняет запуск установщика; просим включить его для APU.
+            "Android не открыл установщик: ${error.message}. " +
+                "Разрешите APU «устанавливать неизвестные приложения» в настройках системы"
         }
-        runCatching { appContext.startActivity(intent) }
-            .onFailure { Log.e(TAG, "install intent failed: ${it.message}") }
     }
 
     /** Список принятых APK (для «Раздать полученный») — не чаще, чем в помпе. */

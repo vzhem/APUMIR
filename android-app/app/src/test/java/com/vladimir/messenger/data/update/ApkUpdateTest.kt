@@ -290,4 +290,29 @@ class ApkUpdateTest {
             root.deleteRecursively()
         }
     }
+
+    // ── FileProvider: установка принятого APK из внутренней памяти ──────────
+
+    /**
+     * Принятый по сети APK лежит в `noBackupFilesDir/file_received/...`,
+     * а он НЕ под files/ и не под cache/. Без `<root-path>` в file_paths.xml
+     * `FileProvider.getUriForFile` бросает «Failed to find configured root»,
+     * и кнопка «Обновить до vX» молча ничего не делает (грабля v11.74.0).
+     * Рабочая директория JVM-тестов Gradle — каталог модуля (android-app/app).
+     */
+    @Test
+    fun fileProviderPathsCoverInternalStorage() {
+        var file = File("src/main/res/xml/file_paths.xml")
+        var attempts = 0
+        while (!file.isFile && attempts < 6) {
+            file = File("..", file.path)
+            attempts++
+        }
+        check(file.isFile) { "file_paths.xml не найден от " + File(".").absolutePath }
+        val content = file.readText()
+        assertTrue(
+            "В file_paths.xml нет <root-path>: установка APK из noBackupFilesDir молча падает",
+            content.contains("<root-path"),
+        )
+    }
 }

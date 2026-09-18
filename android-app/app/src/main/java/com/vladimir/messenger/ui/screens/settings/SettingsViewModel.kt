@@ -207,9 +207,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { runCatching { apkSeeder.cancelDownload() } }
     }
 
-    /** Установить скачанное обновление (системный диалог). */
+    /** Установить скачанное обновление (системный диалог). Ошибка — тостом. */
     fun onInstallUpdate() {
-        viewModelScope.launch { runCatching { apkSeeder.installReady() } }
+        viewModelScope.launch {
+            val result = runCatching { apkSeeder.installReady() }
+                .getOrElse { "Не удалось запустить установку: ${it.message}" }
+            toastIf(result)
+        }
     }
 
     /**
