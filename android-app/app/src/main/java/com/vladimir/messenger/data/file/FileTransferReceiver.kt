@@ -671,7 +671,10 @@ class FileTransferReceiver(
             val end = start + data.size.toLong()
             if (end > expectedLen.toLong()) return false
             for (range in covered) {
-                if (start < range.end && range.start < end) return false
+                // Диапазоны полуоткрытые [start, end): `covered` хранит
+                // LongRange (закрытый, endInclusive = end-1), поэтому
+                // пересечение проверяем через endInclusive.
+                if (start <= range.endInclusive && range.start < end) return false
             }
             data.copyInto(buffer, offset)
             covered += start until end
