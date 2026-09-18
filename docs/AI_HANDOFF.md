@@ -335,7 +335,21 @@
    `gh release edit --notes-file docs/RELEASE_NOTES_v11.74.0.md`,
    `--prerelease=false`, затем `--draft=true` → 10 с → `--draft=false`
    (иначе /releases/latest не смещается — грабля v11.20.0), проверка
-   `/releases/latest`. ГРАБЛЯ №1 (ловится только настоящей компиляцией):
+   `/releases/latest`. **Выпущен фикс v11.74.1 (2026-09-18, Latest, APK 39 053 602 байт, с
+   явного разрешения владельца):** жалоба «кнопка „Обновить до vX" не
+   реагирует» — причина: принятый по сети APK лежит в
+   `noBackupFilesDir/file_received/…`, которого НЕ БЫЛО в
+   `res/xml/file_paths.xml` (покрыты только external/cache/files) →
+   `FileProvider.getUriForFile` бросал «Failed to find configured root»
+   ВНЕ runCatching → корутина молча умирала. Фикс: `<root-path name="root"
+   path="."/>` в file_paths.xml + `installReady` возвращает текст ошибки
+   (тост в настройках; молчаливых отказов больше нет) + регресс-тест
+   `fileProviderPathsCoverInternalStorage` (JVM: читает file_paths.xml от
+   working dir модуля). Ещё грабля между сессиями: платформа пересобирает
+   песочницу — история ветки схлопывается в один коммит поверх базового,
+   а на origin остаётся прежняя цепочка; пуш тогда отклоняется — лечится
+   `git reset --hard origin/<ветка>` + перенос файлов фикса
+   (`git checkout <бэкап> -- файлы`). ГРАБЛЯ №1 (ловится только настоящей компиляцией):
    sandbox-проверки структуру ловят, но не «Unresolved reference» — в
    первом прогоне пало `DownloadManager.COLUMN_MIME_TYPE` (нет такого
    константа; правильно `COLUMN_MEDIA_TYPE`). ГРАБЛЯ №2/открытие:
