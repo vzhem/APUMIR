@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use crate::crypto::keys::ED25519_PUBLIC_KEY_SIZE;
 use crate::ffi::crypto_ffi::CryptoManager;
 use crate::ffi::network_ffi::{NetworkManagerFfi, NetworkStatus, PeerInfo};
 use crate::ffi::storage_ffi::StorageManagerFfi;
@@ -24,6 +25,17 @@ use crate::network::custody_relay::{
     CustodyOffers, CUSTODY_ACK_PREFIX, CUSTODY_DELIVER_PREFIX, CUSTODY_DROP_PREFIX,
     CUSTODY_OFFER_PREFIX,
 };
+use crate::network::file_custody::{FileCustodyError, FileCustodyPeer, FileCustodyPolicy, FileCustodyStore};
+use crate::network::file_custody_relay::{
+    ack_payload as file_ack_payload, custody_origin_node_id as file_custody_origin_node_id,
+    deliver_payload as file_deliver_payload, drop_payload as file_drop_payload,
+    parse_ack_frame as parse_file_ack_frame,
+    parse_deliver_frame as parse_file_deliver_frame, parse_drop_frame as parse_file_drop_frame,
+    parse_offer_frame as parse_file_offer_frame, FileCustodyAck, FileCustodyHold,
+    FileCustodyOffers, FileCustodyUnit, FILE_CUSTODY_ACK_PREFIX, FILE_CUSTODY_DELIVER_PREFIX,
+    FILE_CUSTODY_DROP_PREFIX, FILE_CUSTODY_OFFER_PREFIX, MAX_FILE_CUSTODY_DELIVERIES_PER_TICK,
+    MAX_FILE_CUSTODY_HELD_BYTES, MAX_FILE_CUSTODY_HELD_UNITS,
+};
 use crate::network::address_lookup::{
     parse_query, parse_reply, query_payload, reply_payload, sort_closer, AddressLookup,
     LOOKUP_QUERY_PREFIX, LOOKUP_REPLY_PREFIX, MAX_ASK_PEERS, MAX_CLOSER_NODES,
@@ -39,6 +51,11 @@ use crate::storage::relay_store::RelayStore;
 use crate::network::adaptive_polling::AdaptivePolling;
 
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
+
+/// K5-2: сколько чужого держим по времени. Совпадает с политикой склада по
+/// умолчанию (неделя): дольше держать кусок зашифрованного файла смысла нет -
+/// отправитель за это время либо доставит его, либо начнёт заново.
+const MAX_FILE_CUSTODY_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 
 #[derive(Debug)]
 enum MqttOutboundCommand {
@@ -348,6 +365,95 @@ impl EngineConfig {
     }
 }
 
+/// K5-2: всё, что нужно файловой кастодии в движке.
+///
+/// Владение разделено так: `hold` - то, что нам предложили и мы держим
+/// (сколько, кому и что отдать), `offers` - то, что мы сами пристраиваем
+/// соседям, `store` - постоянный склад с подписанными квитанциями
+/// (`network::file_custody`), `db_path` - файл склада, `enabled` - согласие
+/// владельца.
+///
+/// Склад открывается лениво, при первом использовании: пока владелец не
+/// разрешил кастодию, файл базы не создаётся вообще.
+struct FileCustodyHub {
+    hold: FileCustodyHold,
+    offers: FileCustodyOffers,
+    store: Mutex<Option<Arc<FileCustodyStore>>>,
+    db_path: Mutex<Option<String>>,
+    enabled: std::sync::atomic::AtomicBool,
+}
+
+impl FileCustodyHub {
+    fn new() -> Self {
+        Self {
+            hold: FileCustodyHold::new(),
+            offers: FileCustodyOffers::new(),
+            store: Mutex::new(None),
+            db_path: Mutex::new(None),
+            enabled: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Разрешение владельца и путь склада. Вызывается до `start()`; пустой
+    /// путь - хранилище только в памяти (переживёт до перезапуска).
+    fn enable(&self, enabled: bool, db_path: String) -> bool {
+        *self.db_path.lock().unwrap() = if db_path.trim().is_empty() {
+            None
+        } else {
+            Some(db_path.trim().to_owned())
+        };
+        self.enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+        enabled
+    }
+
+    /// Склад, открывая его при первой надобности.
+    fn store(&self) -> Option<Arc<FileCustodyStore>> {
+        if let Some(store) = self.store.lock().unwrap().clone() {
+            return Some(store);
+        }
+        // Режим `ContactsOnly`: кладём только от «своих», а кого считать
+        // своим, решает движок (см. `PresenceScope`). Остальные пределы
+        // склада - по умолчанию.
+        let policy = FileCustodyPolicy {
+            mode: crate::network::file_custody::FileCustodyMode::ContactsOnly,
+            ..Default::default()
+        };
+        let path = self.db_path.lock().unwrap().clone();
+        let opened = match path {
+            Some(path) => FileCustodyStore::open(path, policy),
+            None => FileCustodyStore::open_in_memory(policy),
+        };
+        match opened {
+            Ok(store) => {
+                let store = Arc::new(store);
+                *self.store.lock().unwrap() = Some(Arc::clone(&store));
+                Some(store)
+            }
+            Err(error) => {
+                tracing::warn!("FILE CUSTODY K5: cannot open the store: {}", error);
+                None
+            }
+        }
+    }
+
+    /// Уже открытый склад (без создания файла базы).
+    fn existing_store(&self) -> Option<Arc<FileCustodyStore>> {
+        self.store.lock().unwrap().clone()
+    }
+
+    /// Сколько места занимает чужое (для настроек приложения).
+    fn usage_bytes(&self) -> u64 {
+        self.existing_store()
+            .and_then(|store| store.usage_bytes().ok())
+            .unwrap_or(0)
+    }
+}
+
 pub struct P2PCore {
     state: EngineState,
     config: EngineConfig,
@@ -382,6 +488,9 @@ pub struct P2PCore {
     /// K5-1: владелец разрешил держать чужое (по умолчанию нет: телефон
     /// не занимает место чужими файлами и сообщениями без согласия).
     custody_enabled: Arc<std::sync::atomic::AtomicBool>,
+    /// K5-2: файловая кастодия - куски файлов у соседей с подписанными
+    /// квитанциями (см. `network::file_custody_relay` и `network::file_custody`).
+    file_custody: Arc<FileCustodyHub>,
     message_queue: Option<Arc<MessageQueue>>,
     relay_queue: Option<Arc<RelayQueue>>,
     relay_custody: Option<Arc<RelayCustody>>,
@@ -413,6 +522,7 @@ impl P2PCore {
             custody_hold: Arc::new(CustodyHold::new()),
             custody_offers: Arc::new(CustodyOffers::new()),
             custody_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            file_custody: Arc::new(FileCustodyHub::new()),
             message_queue: None,
             relay_queue: None,
             relay_custody: None,
@@ -575,6 +685,10 @@ impl P2PCore {
                 let custody_hold_quic = Arc::clone(&self.custody_hold);
                 let custody_offers_quic = Arc::clone(&self.custody_offers);
                 let custody_enabled_quic = Arc::clone(&self.custody_enabled);
+                // K5-2: файловая кастодия разбирает свои кадры отдельным
+                // обработчиком (см. `handle_file_custody_frame`).
+                let file_custody_quic = Arc::clone(&self.file_custody);
+                let file_custody_scope_quic = Arc::clone(&self.presence_scope);
 
                 let events_mdns = Arc::clone(&events_arc);
                 let network_mdns = Arc::clone(&network_arc);
@@ -596,6 +710,20 @@ impl P2PCore {
                 // транспорт усыновляет входящее соединение.
                 let on_frame: crate::network::direct_transport::FrameHandler =
                     Arc::new(move |payload: Vec<u8>| {
+                        // K5-2: кадры файловой кастодии (`fcust|…`) - сюда.
+                        if payload.starts_with(FILE_CUSTODY_OFFER_PREFIX.as_bytes())
+                            || payload.starts_with(FILE_CUSTODY_ACK_PREFIX.as_bytes())
+                            || payload.starts_with(FILE_CUSTODY_DELIVER_PREFIX.as_bytes())
+                            || payload.starts_with(FILE_CUSTODY_DROP_PREFIX.as_bytes())
+                        {
+                            return Self::handle_file_custody_frame(
+                                &events_quic,
+                                &network_quic,
+                                &file_custody_scope_quic,
+                                &file_custody_quic,
+                                payload,
+                            );
+                        }
                         let our_addr = *public_addr_quic.lock().unwrap();
                         let custody_enabled = custody_enabled_quic
                             .load(std::sync::atomic::Ordering::Relaxed);
@@ -754,6 +882,213 @@ impl P2PCore {
     /// по нему `DirectTransport` усыновляет входящее соединение, чтобы наш
     /// ответ ушёл по уже пробитому пути.
     #[allow(clippy::too_many_arguments)]
+    /// K5-2: кадры файловой кастодии (`fcust|…`).
+    ///
+    /// Четыре роли, как и у сообщений в K5-1: нам предлагают подержать кусок,
+    /// нам отвечают на наше предложение, нам отдают кусок, который держал
+    /// сосед, и нам говорят, что копия больше не нужна. Разбор вынесен в
+    /// отдельную функцию: у файловой кастодии свои проверки (размер, срок,
+    /// «свои»), а общий обработчик кадров остаётся прежним.
+    ///
+    /// Возвращаем то же, что и общий обработчик: узел, чьё входящее
+    /// соединение стоит усыновить (`None` - нечего).
+    fn handle_file_custody_frame(
+        events: &EventBus,
+        network: &NetworkManagerFfi,
+        scope: &PresenceScope,
+        hub: &Arc<FileCustodyHub>,
+        payload: Vec<u8>,
+    ) -> Option<String> {
+        let our_id = network.local_node_id().unwrap_or_default();
+        let decoded = String::from_utf8_lossy(&payload);
+
+        // Нам предлагают подержать кусок чужого файла.
+        if let Some(unit) = parse_file_offer_frame(&decoded) {
+            // Своё же предложение обратно не берём: мы и есть автор.
+            if unit.origin_node_id == our_id || unit.recipient_node_id == our_id {
+                return None;
+            }
+            let now = crate::storage::models::now_ms();
+            if unit.expires_at_ms <= now {
+                tracing::debug!("FILE CUSTODY K5: offer {} is already expired", unit.unit_id);
+                return None;
+            }
+            // Держим только «своим» (контакты, участники групп) и только по
+            // разрешению владельца; срок не длиннее недели, место ограничено.
+            let ack = if !hub.is_enabled() || !scope.is_own(&unit.origin_node_id) {
+                FileCustodyAck::Refused
+            } else if unit.expires_at_ms - now > MAX_FILE_CUSTODY_TTL_MS {
+                FileCustodyAck::Refused
+            } else if hub.hold.held_len() >= MAX_FILE_CUSTODY_HELD_UNITS
+                || hub.hold.held_bytes().saturating_add(unit.frame.len())
+                    > MAX_FILE_CUSTODY_HELD_BYTES
+            {
+                FileCustodyAck::Full
+            } else {
+                FileCustodyAck::Stored
+            };
+
+            let (ack, receipt) = if ack == FileCustodyAck::Stored {
+                match Self::store_offered_unit(hub, &unit, now) {
+                    (FileCustodyAck::Stored, receipt) => {
+                        if !hub.hold.hold(unit.clone()) {
+                            tracing::warn!(
+                                "FILE CUSTODY K5: {} stored but not indexed for delivery",
+                                unit.unit_id
+                            );
+                        }
+                        (FileCustodyAck::Stored, receipt)
+                    }
+                    (other, _) => (other, None),
+                }
+            } else {
+                (ack, None)
+            };
+
+            tracing::info!(
+                "FILE CUSTODY K5: offer {} for {} from {} -> {}",
+                unit.unit_id,
+                unit.recipient_node_id,
+                unit.origin_node_id,
+                ack.as_str()
+            );
+            // Ответ шлёт поток presence: приёмник кадров не блокируем.
+            hub.hold.queue_outbound(
+                &unit.origin_node_id,
+                file_ack_payload(&unit.unit_id, ack, receipt.as_deref()),
+            );
+            return Some(unit.origin_node_id);
+        }
+
+        // Нам отвечают на наше предложение.
+        if let Some((unit_id, ack, receipt)) = parse_file_ack_frame(&decoded) {
+            let enough = hub.offers.note_ack(&unit_id, ack, receipt);
+            tracing::info!(
+                "FILE CUSTODY K5: answer for {} -> {} (copies enough: {})",
+                unit_id,
+                ack.as_str(),
+                enough
+            );
+            return None;
+        }
+
+        // Сосед отдаёт кусок, который держал для нас.
+        if let Some((origin, recipient, unit_id, chunk)) =
+            parse_file_deliver_frame(&decoded)
+        {
+            if recipient != our_id {
+                return None;
+            }
+            // Двое соседей могли принести один и тот же кусок: второй раз
+            // показывать его приложению не нужно. Соединение всё равно
+            // усыновляем - сосед нам ещё пригодится.
+            if hub.hold.note_delivered(&unit_id) {
+                tracing::info!("FILE CUSTODY K5: delivered {} from {}", unit_id, origin);
+                events.emit(CoreEvent::FileChunkReceived {
+                    transfer_id: bytes_to_hex(&chunk.transfer_id),
+                    chunk_index: chunk.chunk_index,
+                    chunk_offset: chunk.chunk_offset,
+                    ciphertext_chunk_len: chunk.ciphertext_chunk_len,
+                    ciphertext: chunk.ciphertext,
+                });
+            }
+            return Some(origin);
+        }
+
+        // Копия больше не нужна: её отдали получателю.
+        if let Some(unit_id) = parse_file_drop_frame(&decoded) {
+            let stopped = hub.offers.remove(&unit_id);
+            let dropped = hub.hold.remove(&unit_id);
+            tracing::info!(
+                "FILE CUSTODY K5: {} delivered elsewhere (stopped offering: {}, dropped local copy: {})",
+                unit_id,
+                stopped,
+                dropped
+            );
+            return None;
+        }
+
+        None
+    }
+
+    /// Положить предложенный кусок на склад и получить подписанную квитанцию.
+    ///
+    /// Квитанция подписывается установленной личностью устройства - той же,
+    /// что подписывает направленные приглашения. Без неё брать кусок нельзя:
+    /// автор просил именно доказательство хранения, а не «ладно».
+    fn store_offered_unit(
+        hub: &Arc<FileCustodyHub>,
+        unit: &FileCustodyUnit,
+        now_ms: i64,
+    ) -> (FileCustodyAck, Option<Vec<u8>>) {
+        let Some(store) = hub.store() else {
+            return (FileCustodyAck::Refused, None);
+        };
+        let Some(signer) = crate::crypto::signing_identity::installed_signing_identity() else {
+            tracing::info!("FILE CUSTODY K5: no signing identity installed, refusing to store");
+            return (FileCustodyAck::Refused, None);
+        };
+        let custodian_node_id = format!("pk_{}", signer.key_id());
+        // Квитанция требует, чтобы автор, хранитель и получатель были разными.
+        if custodian_node_id == unit.origin_node_id || custodian_node_id == unit.recipient_node_id {
+            return (FileCustodyAck::Refused, None);
+        }
+        let chunk = match FileFrameV1::decode(&unit.frame) {
+            Ok(FileFrameV1::ChunkData(chunk)) => chunk,
+            _ => return (FileCustodyAck::Refused, None),
+        };
+        // На складе автор значится под своей личностью кастодии: квитанция
+        // связывает имя и ключ попарно (`pk_` + sha256 ключа), а сетевое имя
+        // автора к подписи отношения не имеет.
+        let origin = FileCustodyPeer {
+            node_id: file_custody_origin_node_id(&unit.origin_custody_public_key),
+            ed25519_public_key: unit.origin_custody_public_key,
+        };
+        match store.store_range_with_signed_receipt(
+            &origin,
+            true,
+            &unit.recipient_node_id,
+            &chunk,
+            now_ms,
+            unit.expires_at_ms,
+            &custodian_node_id,
+            &*signer,
+        ) {
+            Ok(outcome) => match outcome.receipt().encode() {
+                Ok(receipt) => {
+                    tracing::info!(
+                        "FILE CUSTODY K5: stored {} for {} from {}",
+                        unit.unit_id,
+                        unit.recipient_node_id,
+                        unit.origin_node_id
+                    );
+                    (FileCustodyAck::Stored, Some(receipt))
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "FILE CUSTODY K5: receipt for {} cannot be encoded: {}",
+                        unit.unit_id,
+                        error
+                    );
+                    (FileCustodyAck::Refused, None)
+                }
+            },
+            Err(error) => {
+                let ack = match error {
+                    FileCustodyError::GlobalQuotaExceeded
+                    | FileCustodyError::OriginQuotaExceeded
+                    | FileCustodyError::TransferLimitExceeded
+                    | FileCustodyError::RangeLimitExceeded
+                    | FileCustodyError::RateLimitExceeded
+                    | FileCustodyError::DiskFull => FileCustodyAck::Full,
+                    _ => FileCustodyAck::Refused,
+                };
+                tracing::info!("FILE CUSTODY K5: cannot store {}: {}", unit.unit_id, error);
+                (ack, None)
+            }
+        }
+    }
+
     fn handle_direct_frame(
         events: &EventBus,
         network: &NetworkManagerFfi,
@@ -1512,6 +1847,9 @@ impl P2PCore {
         let lookup = Arc::clone(&self.address_lookup);
         let hold = Arc::clone(&self.custody_hold);
         let offers = Arc::clone(&self.custody_offers);
+        // K5-2: файловая кастодия - тот же поток отдаёт куски получателям и
+        // предлагает свои куски соседям.
+        let file_custody = Arc::clone(&self.file_custody);
         let direct = Arc::clone(&self.direct);
         let peer_addrs = Arc::clone(&self.peer_addrs);
         let public_addr = Arc::clone(&self.public_addr);
@@ -1671,6 +2009,121 @@ impl P2PCore {
                             tracing::info!(
                                 "CUSTODY K5: offer {} to {} sent: {}",
                                 msg_id,
+                                peer,
+                                sent
+                            );
+                        }
+                    }
+                }
+
+                // K5-2: файловая кастодия. Порядок тот же, что у сообщений:
+                // сначала ответы (квитанции и отказы), потом куски тем, кто
+                // появился в сети, потом свои предложения соседям.
+                for (peer_id, frame) in file_custody.hold.take_outbound(OWN_REPLIES_PER_TICK) {
+                    let addr = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        addrs.get(&peer_id).copied()
+                    };
+                    let _ = transport.send_blocking(&peer_id, addr, frame);
+                }
+                file_custody.hold.purge_expired(now_ms);
+                file_custody.offers.purge_expired(now_ms);
+                // Просроченное на складе убираем раз в минуту: место на
+                // телефоне не должно зарастать чужими кусками.
+                if ticks % OWN_LOOKUP_TICKS == 0 {
+                    if let Some(store) = file_custody.existing_store() {
+                        match store.purge_expired(now_ms) {
+                            Ok((ranges, tombstones)) if ranges > 0 || tombstones > 0 => {
+                                tracing::info!(
+                                    "FILE CUSTODY K5: purged {} expired range(s), {} tombstone(s)",
+                                    ranges,
+                                    tombstones
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(error) => tracing::warn!(
+                                "FILE CUSTODY K5: purge failed: {}",
+                                error
+                            ),
+                        }
+                    }
+                }
+
+                // Куски, которые держим, отдаём тем получателям, кто сейчас в
+                // сети. Убираем копию только после успешной отправки.
+                let mut delivered_units = 0usize;
+                for recipient in file_custody.hold.recipients() {
+                    let addr = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        addrs.get(&recipient).copied()
+                    };
+                    let Some(addr) = addr else {
+                        continue;
+                    };
+                    for unit in file_custody
+                        .hold
+                        .pending_for_recipient(&recipient, MAX_FILE_CUSTODY_DELIVERIES_PER_TICK)
+                    {
+                        let payload = file_deliver_payload(
+                            &unit.origin_node_id,
+                            &unit.recipient_node_id,
+                            &unit.unit_id,
+                            &unit.frame,
+                        );
+                        if transport.send_blocking(&recipient, Some(addr), payload.into_bytes()) {
+                            delivered_units += 1;
+                            file_custody.hold.remove(&unit.unit_id);
+                            if unit.origin_node_id.starts_with("pk_") {
+                                file_custody
+                                    .hold
+                                    .queue_outbound(
+                                        &unit.origin_node_id,
+                                        file_drop_payload(&unit.unit_id),
+                                    );
+                            }
+                        }
+                    }
+                }
+                if delivered_units > 0 {
+                    tracing::info!(
+                        "FILE CUSTODY K5: {} held file range(s) delivered to their recipients",
+                        delivered_units
+                    );
+                }
+
+                // Свои куски предлагаем «своим» соседям, пока не наберём
+                // двух хранителей. По одному предложению за круг: куски
+                // тяжёлые, гнать их пачкой нельзя.
+                if file_custody.offers.pending_len() > 0
+                    && ticks % OWN_LOOKUP_TICKS == 0
+                {
+                    let candidates: Vec<String> = {
+                        let addrs = peer_addrs.lock().unwrap();
+                        let mut list: Vec<String> = Vec::new();
+                        for (peer_id, _) in addrs.iter() {
+                            if list.len() >= MAX_ASK_PEERS {
+                                break;
+                            }
+                            if !peer_id.starts_with("pk_") || !scope.is_own(peer_id) {
+                                continue;
+                            }
+                            list.push(peer_id.clone());
+                        }
+                        list
+                    };
+                    if !candidates.is_empty() {
+                        for (unit_id, peer, payload) in
+                            file_custody.offers.next_offers(&candidates)
+                        {
+                            let addr = {
+                                let addrs = peer_addrs.lock().unwrap();
+                                addrs.get(&peer).copied()
+                            };
+                            let sent =
+                                transport.send_blocking(&peer, addr, payload.into_bytes());
+                            tracing::info!(
+                                "FILE CUSTODY K5: offer {} to {} sent: {}",
+                                unit_id,
                                 peer,
                                 sent
                             );
@@ -3900,6 +4353,108 @@ impl P2PCore {
         enabled
     }
 
+    /// K5-2: разрешение владельца на файловую кастодию и файл склада.
+    ///
+    /// Как и у сообщений (K5-1), по умолчанию выключено: телефон не занимает
+    /// место чужими кусками файлов без согласия владельца. Включённая
+    /// кастодия означает, что мы держим зашифрованные куски файлов «своих» и
+    /// отдаём их, когда получатель появится в сети, а автору отвечаем
+    /// подписанной квитанцией. Пустой путь - склад только в памяти.
+    ///
+    /// Вызывать можно до и после `start()`: склад открывается при первой
+    /// надобности, поэтому выключенная кастодия не создаёт файл базы вовсе.
+    pub fn set_file_custody_enabled(&mut self, enabled: bool, db_path: String) -> bool {
+        let accepted = self.file_custody.enable(enabled, db_path);
+        tracing::info!(
+            "FILE CUSTODY K5: file custody {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+        accepted
+    }
+
+    /// K5-2: сколько места занимает чужое (для настроек приложения).
+    pub fn file_custody_usage_bytes(&self) -> u64 {
+        self.file_custody.usage_bytes()
+    }
+
+    /// K5-2: отдать кусок файла соседям на хранение.
+    ///
+    /// Кусок - тот же, что уходит прямым каналом (`send_file_chunk`): байты
+    /// уже зашифрованы ключом файла, ядро их не читает и ключей не видит.
+    /// `false` = предложение не принято (кастодия выключена, нет установленной
+    /// личности подписи или кусок не прошёл проверку формы) - вызывающему не
+    /// нужно ждать доставки.
+    #[allow(clippy::too_many_arguments)]
+    pub fn offer_file_chunk_for_custody(
+        &mut self,
+        recipient_id: String,
+        transfer_id_hex: String,
+        chunk_index: u64,
+        chunk_offset: u32,
+        ciphertext_chunk_len: u32,
+        ciphertext: Vec<u8>,
+    ) -> bool {
+        if !self.file_custody.is_enabled() {
+            tracing::info!("FILE CUSTODY K5: custody is off, chunk not offered");
+            return false;
+        }
+        let Some(our_id) = self.node_id_str.clone() else {
+            tracing::warn!("FILE CUSTODY K5: engine is not started, chunk not offered");
+            return false;
+        };
+        // Куски подписываются личностью устройства (той же, что подписывает
+        // направленные приглашения): без неё квитанции не будет, а брать
+        // кусок без квитанции никто не станет.
+        let Some(signer) = crate::crypto::signing_identity::installed_signing_identity() else {
+            tracing::info!("FILE CUSTODY K5: no signing identity, chunk not offered");
+            return false;
+        };
+        let custody_key: [u8; ED25519_PUBLIC_KEY_SIZE] = match signer.public_key().try_into() {
+            Ok(key) => key,
+            Err(_) => return false,
+        };
+        let Some(transfer_id) = hex_to_transfer_id(&transfer_id_hex) else {
+            return false;
+        };
+        let frame = match FileFrameV1::ChunkData(FileChunkDataV1 {
+            transfer_id,
+            chunk_index,
+            chunk_offset,
+            ciphertext_chunk_len,
+            ciphertext,
+        })
+        .encode()
+        {
+            Ok(frame) => frame,
+            Err(error) => {
+                tracing::warn!("FILE CUSTODY K5: chunk for {} is invalid: {}", recipient_id, error);
+                return false;
+            }
+        };
+        let expires_at_ms = crate::storage::models::now_ms() + MAX_FILE_CUSTODY_TTL_MS;
+        let Some(unit) = FileCustodyUnit::from_parts(
+            &our_id,
+            custody_key,
+            &recipient_id,
+            expires_at_ms,
+            frame,
+        ) else {
+            tracing::warn!(
+                "FILE CUSTODY K5: chunk for {} did not pass the frame check",
+                recipient_id
+            );
+            return false;
+        };
+        let queued = self.file_custody.offers.enqueue(unit.clone());
+        tracing::info!(
+            "FILE CUSTODY K5: chunk {} for {} queued for neighbour custody: {}",
+            unit.unit_id,
+            unit.recipient_node_id,
+            queued
+        );
+        queued
+    }
+
     /// K4-3: свой MQTT-брокер из настроек приложения.
     ///
     /// Встраивать можно до `start()`: адрес читается, когда поднимается
@@ -3978,6 +4533,8 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Кадр предложения строит автор - в движке он нужен только тестам.
+    use crate::network::file_custody_relay::offer_payload as file_offer_payload;
 
     fn make_engine() -> P2PCore {
         P2PCore::with_defaults()
@@ -4268,6 +4825,375 @@ mod tests {
             "автору уходит подтверждение"
         );
         assert!(events.is_empty(), "получателю мы ничего не показываем");
+    }
+
+    // ── K5-2: файловая кастодия ────────────────────────────────────────────
+
+    /// Ключ кастодии автора и кадр куска для тестов K5-2.
+    fn file_custody_test_frame(seed: u8, index: u64) -> Vec<u8> {
+        let ciphertext = vec![seed; 64];
+        FileFrameV1::ChunkData(FileChunkDataV1 {
+            transfer_id: [seed; 16],
+            chunk_index: index,
+            chunk_offset: 0,
+            ciphertext_chunk_len: ciphertext.len() as u32,
+            ciphertext,
+        })
+        .encode()
+        .unwrap()
+    }
+
+    /// Установить личность подписи (её же зовёт приложение): имя кастодии
+    /// выводится из ключа, поэтому квитанция сходится попарно.
+    fn install_file_custody_identity(
+        seed: u8,
+    ) -> (String, [u8; ED25519_PUBLIC_KEY_SIZE]) {
+        let legacy = "pk_4444444444444444444444444444444444444444444444444444444444444444";
+        let identity =
+            crate::crypto::signing_identity::install_signing_identity(1, legacy.to_string(), &[seed; 32])
+                .unwrap();
+        let key: [u8; ED25519_PUBLIC_KEY_SIZE] = identity.public_key().try_into().unwrap();
+        (format!("pk_{}", identity.key_id()), key)
+    }
+
+    /// K5-2: автор предлагает кусок - хранитель кладёт его на склад и
+    /// отвечает подписанной квитанцией.
+    #[test]
+    fn file_custody_offer_is_stored_with_signed_receipt() {
+        let _guard = crate::crypto::signing_identity::signing_identity_registry_guard();
+        crate::crypto::signing_identity::clear_signing_identity();
+
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        assert!(network.start(us.to_string()));
+
+        let (custodian_id, custodian_key) = install_file_custody_identity(7);
+        let scope = PresenceScope::new();
+        assert_eq!(scope.set_own(vec![origin.to_string()], Some(us)), 1);
+        let hub = Arc::new(FileCustodyHub::new());
+        assert!(hub.enable(true, String::new()), "владелец разрешил кастодию");
+
+        let custody_key = [0x5A; ED25519_PUBLIC_KEY_SIZE];
+        let unit = FileCustodyUnit::from_parts(
+            origin,
+            custody_key,
+            recipient,
+            crate::storage::models::now_ms() + 3_600_000,
+            file_custody_test_frame(0x11, 5),
+        )
+        .unwrap();
+
+        let adopted = P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            file_offer_payload(&unit).into_bytes(),
+        );
+
+        assert_eq!(adopted.as_deref(), Some(origin), "соединение усыновляем");
+        assert_eq!(hub.hold.held_len(), 1, "кусок остался у нас");
+        assert!(hub.hold.contains(&unit.unit_id));
+        assert!(hub.usage_bytes() > 0, "кусок лёг на склад");
+        assert!(events.is_empty(), "получателю мы ничего не показываем");
+
+        let outbound = hub.hold.take_outbound(4);
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].0, origin, "квитанция уходит автору");
+        let (acked_id, ack, receipt) =
+            parse_file_ack_frame(&String::from_utf8_lossy(&outbound[0].1)).unwrap();
+        assert_eq!(acked_id, unit.unit_id);
+        assert_eq!(ack, FileCustodyAck::Stored);
+
+        // Квитанция подписана нами и сходится со всеми ожиданиями получателя.
+        let receipt = crate::network::file_custody_receipt::SignedFileCustodyReceiptV1::decode(
+            &receipt.unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receipt.custodian_node_id, custodian_id);
+        assert_eq!(receipt.origin_node_id, file_custody_origin_node_id(&custody_key));
+        receipt
+            .verify_active_at(
+                &custodian_id,
+                &custodian_key,
+                &file_custody_origin_node_id(&custody_key),
+                &custody_key,
+                recipient,
+                crate::storage::models::now_ms(),
+            )
+            .expect("квитанция должна проверяться");
+
+        crate::crypto::signing_identity::clear_signing_identity();
+    }
+
+    /// K5-2: без разрешения владельца чужие куски не берём.
+    #[test]
+    fn file_custody_offer_is_refused_when_disabled() {
+        let _guard = crate::crypto::signing_identity::signing_identity_registry_guard();
+        crate::crypto::signing_identity::clear_signing_identity();
+
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        assert!(network.start(us.to_string()));
+        install_file_custody_identity(9);
+        let scope = PresenceScope::new();
+        scope.set_own(vec![origin.to_string()], Some(us));
+        let hub = Arc::new(FileCustodyHub::new());
+
+        let unit = FileCustodyUnit::from_parts(
+            origin,
+            [0x5A; ED25519_PUBLIC_KEY_SIZE],
+            recipient,
+            crate::storage::models::now_ms() + 3_600_000,
+            file_custody_test_frame(0x12, 1),
+        )
+        .unwrap();
+
+        let _ = P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            file_offer_payload(&unit).into_bytes(),
+        );
+
+        assert_eq!(hub.hold.held_len(), 0, "выключенная кастодия ничего не берёт");
+        let outbound = hub.hold.take_outbound(4);
+        let (_, ack, receipt) =
+            parse_file_ack_frame(&String::from_utf8_lossy(&outbound[0].1)).unwrap();
+        assert_eq!(ack, FileCustodyAck::Refused);
+        assert!(receipt.is_none(), "отказ квитанции не несёт");
+
+        crate::crypto::signing_identity::clear_signing_identity();
+    }
+
+    /// K5-2: куски чужих (не «своих») не берём даже с разрешением.
+    #[test]
+    fn file_custody_offer_is_refused_for_strangers() {
+        let _guard = crate::crypto::signing_identity::signing_identity_registry_guard();
+        crate::crypto::signing_identity::clear_signing_identity();
+
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_1111111111111111111111111111111111111111111111111111111111111111";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        assert!(network.start(us.to_string()));
+        install_file_custody_identity(11);
+        // Своих нет вовсе: автор нам никто.
+        let scope = PresenceScope::new();
+        let hub = Arc::new(FileCustodyHub::new());
+        assert!(hub.enable(true, String::new()));
+
+        let unit = FileCustodyUnit::from_parts(
+            origin,
+            [0x5A; ED25519_PUBLIC_KEY_SIZE],
+            recipient,
+            crate::storage::models::now_ms() + 3_600_000,
+            file_custody_test_frame(0x13, 1),
+        )
+        .unwrap();
+
+        let _ = P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            file_offer_payload(&unit).into_bytes(),
+        );
+
+        assert_eq!(hub.hold.held_len(), 0, "чужим кускам места не даём");
+        let outbound = hub.hold.take_outbound(4);
+        let (_, ack, _) = parse_file_ack_frame(&String::from_utf8_lossy(&outbound[0].1)).unwrap();
+        assert_eq!(ack, FileCustodyAck::Refused);
+
+        crate::crypto::signing_identity::clear_signing_identity();
+    }
+
+    /// K5-2: кусок, который держал сосед, приходит получателю тем же
+    /// событием, что и кусок по прямому каналу (K3), и повторно не
+    /// показывается.
+    #[test]
+    fn file_custody_delivery_reaches_the_recipient_once() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        let origin = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let holder = "pk_5555555555555555555555555555555555555555555555555555555555555555";
+        assert!(network.start(us.to_string()));
+
+        let scope = PresenceScope::new();
+        let hub = Arc::new(FileCustodyHub::new());
+        let unit = FileCustodyUnit::from_parts(
+            origin,
+            [0x5A; ED25519_PUBLIC_KEY_SIZE],
+            us,
+            crate::storage::models::now_ms() + 3_600_000,
+            file_custody_test_frame(0x21, 4),
+        )
+        .unwrap();
+        let payload = file_deliver_payload(
+            &unit.origin_node_id,
+            &unit.recipient_node_id,
+            &unit.unit_id,
+            &unit.frame,
+        );
+
+        let adopted = P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            payload.clone().into_bytes(),
+        );
+        assert_eq!(adopted.as_deref(), Some(origin), "соединение соседа усыновляем");
+
+        let delivered = events.drain();
+        assert_eq!(delivered.len(), 1);
+        match &delivered[0] {
+            CoreEvent::FileChunkReceived {
+                transfer_id,
+                chunk_index,
+                ciphertext,
+                ..
+            } => {
+                assert_eq!(transfer_id, &bytes_to_hex(&[0x21u8; 16]));
+                assert_eq!(*chunk_index, 4);
+                assert_eq!(ciphertext.len(), 64);
+            }
+            other => panic!("ожидается file_chunk_received, пришло {:?}", other),
+        }
+
+        // Второй хранитель приносит тот же кусок: показывать нечего.
+        let _ = P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            payload.into_bytes(),
+        );
+        assert!(events.is_empty(), "один кусок показываем один раз");
+    }
+
+    /// K5-2: подтверждения и «копия больше не нужна» на стороне автора.
+    #[test]
+    fn file_custody_ack_and_drop_clear_the_author_queue() {
+        let events = EventBus::with_defaults();
+        let network = NetworkManagerFfi::new();
+        let us = "pk_2222222222222222222222222222222222222222222222222222222222222222";
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        assert!(network.start(us.to_string()));
+
+        let scope = PresenceScope::new();
+        let hub = Arc::new(FileCustodyHub::new());
+        assert!(hub.enable(true, String::new()));
+        let unit = FileCustodyUnit::from_parts(
+            us,
+            [0x5A; ED25519_PUBLIC_KEY_SIZE],
+            recipient,
+            crate::storage::models::now_ms() + 3_600_000,
+            file_custody_test_frame(0x31, 2),
+        )
+        .unwrap();
+        assert!(hub.offers.enqueue(unit.clone()));
+        assert_eq!(hub.offers.pending_len(), 1);
+
+        // Первый хранитель подтвердил: копий пока мало.
+        let first = file_ack_payload(&unit.unit_id, FileCustodyAck::Stored, Some(&[7u8; 200]));
+        assert!(P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            first.into_bytes()
+        )
+        .is_none());
+        assert_eq!(hub.offers.accepted_for(&unit.unit_id), 1);
+        assert_eq!(hub.offers.receipts_for(&unit.unit_id).len(), 1);
+
+        // Второй подтвердил: копий достаточно.
+        let second = file_ack_payload(&unit.unit_id, FileCustodyAck::Stored, Some(&[8u8; 200]));
+        let _ = P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            second.into_bytes(),
+        );
+        assert_eq!(hub.offers.accepted_for(&unit.unit_id), 2);
+        assert_eq!(hub.offers.receipts_for(&unit.unit_id).len(), 2);
+
+        // Кусок отдали получателю: копия больше не нужна.
+        let drop = file_drop_payload(&unit.unit_id);
+        let _ = P2PCore::handle_file_custody_frame(
+            &events,
+            &network,
+            &scope,
+            &hub,
+            drop.into_bytes(),
+        );
+        assert_eq!(hub.offers.pending_len(), 0);
+        assert_eq!(hub.offers.accepted_for(&unit.unit_id), 0);
+    }
+
+    /// K5-2: предложение куска без разрешения владельца не принимается, а
+    /// до запуска движка - тем более (некому его отправлять).
+    #[test]
+    fn file_custody_offer_requires_enabled_started_engine() {
+        let _guard = crate::crypto::signing_identity::signing_identity_registry_guard();
+        crate::crypto::signing_identity::clear_signing_identity();
+
+        let recipient = "pk_3333333333333333333333333333333333333333333333333333333333333333";
+        let ciphertext = vec![0x44u8; 64];
+        let mut engine = make_engine();
+        assert!(
+            !engine.offer_file_chunk_for_custody(
+                recipient.to_string(),
+                bytes_to_hex(&[0x44u8; 16]),
+                0,
+                0,
+                64,
+                ciphertext.clone(),
+            ),
+            "кастодия выключена - предложение не принимаем"
+        );
+        assert_eq!(engine.file_custody_usage_bytes(), 0);
+        assert!(engine.set_file_custody_enabled(true, String::new()));
+
+        install_file_custody_identity(13);
+        assert!(
+            !engine.offer_file_chunk_for_custody(
+                recipient.to_string(),
+                bytes_to_hex(&[0x44u8; 16]),
+                0,
+                0,
+                64,
+                ciphertext.clone(),
+            ),
+            "движок не запущен: имени узла ещё нет"
+        );
+        engine.start();
+        assert!(
+            engine.offer_file_chunk_for_custody(
+                recipient.to_string(),
+                bytes_to_hex(&[0x44u8; 16]),
+                0,
+                0,
+                64,
+                ciphertext,
+            ),
+            "запущенный движок с личностью и разрешением принимает кусок"
+        );
+        assert_eq!(engine.file_custody.offers.pending_len(), 1);
+        engine.stop();
+
+        crate::crypto::signing_identity::clear_signing_identity();
     }
 
     /// K5-1: без разрешения владельца чужие сообщения не берём.

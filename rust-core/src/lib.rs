@@ -165,6 +165,55 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().set_custody_enabled(enabled)
     }
 
+    /// K5-2: разрешение на файловую кастодию и файл склада.
+    ///
+    /// Выключено по умолчанию (как и кастодия сообщений K5-1). Включённое:
+    /// телефон держит зашифрованные куски файлов «своих» (контакты, участники
+    /// групп) и отдаёт их, когда получатель появится в сети, а автору
+    /// отвечает подписанной квитанцией. Пустой `db_path` - склад только в
+    /// памяти. Файл базы создаётся при первой надобности, поэтому выключенная
+    /// кастодия ничего на диск не пишет.
+    pub fn set_file_custody_enabled(&self, enabled: bool, db_path: String) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .set_file_custody_enabled(enabled, db_path)
+    }
+
+    /// K5-2: сколько места занимают чужие куски файлов (для настроек).
+    pub fn file_custody_usage_bytes(&self) -> u64 {
+        self.inner.lock().unwrap().file_custody_usage_bytes()
+    }
+
+    /// K5-2: отдать кусок файла соседям на хранение.
+    ///
+    /// Кусок тот же, что уходит прямым каналом (`send_file_chunk`): байты уже
+    /// зашифрованы ключом файла, ядро их не читает. `false` = предложение не
+    /// принято (кастодия выключена, нет личности подписи, кусок не прошёл
+    /// проверку): вызывающему не нужно ждать - путь через брокер и прямой
+    /// канал остаётся прежним.
+    pub fn offer_file_chunk_for_custody(
+        &self,
+        recipient_id: String,
+        transfer_id_hex: String,
+        chunk_index: i64,
+        chunk_offset: u32,
+        ciphertext_chunk_len: u32,
+        ciphertext_range: Vec<u8>,
+    ) -> bool {
+        if chunk_index < 0 {
+            return false;
+        }
+        self.inner.lock().unwrap().offer_file_chunk_for_custody(
+            recipient_id,
+            transfer_id_hex,
+            chunk_index as u64,
+            chunk_offset,
+            ciphertext_chunk_len,
+            ciphertext_range,
+        )
+    }
+
     /// K4-3: свой MQTT-брокер (например, сервер владельца) из настроек.
     /// Вызывать до `start()`: адрес читается, когда поднимается MQTT-сессия.
     /// Если брокер не ответит в пределах строгого таймаута, ядро само уйдёт
