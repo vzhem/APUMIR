@@ -3,6 +3,7 @@ package com.vladimir.messenger.data
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.file.FileTransferWire
+import com.vladimir.messenger.data.file.FileUdpWire
 import com.vladimir.messenger.data.file.LanDirectChannel
 import com.vladimir.messenger.data.security.MessageSealer
 import kotlinx.coroutines.launch
@@ -271,6 +272,11 @@ object RustBridge {
         // канал не поднимается, и связь скатывается в одну сторону.
         // Секрета в нём нет - это адрес в локальной сети.
         if (LanDirectChannel.isLanSignalText(text)) return text
+        // APUUDP1 - служебные сигналы UDP-канала файловой передачи (мобильная,
+        // docs/SWARM_MOBILE.md): кандидаты NAT-пробивания. Как APULAN1: адрес +
+        // публичная (подписанная) привязка, секрета нет; транспортный слой
+        // разбирает их до расшифровки.
+        if (FileUdpWire.isUdpSignalText(text)) return text
         val context = appContext ?: return text
         val sealed = MessageSealer.seal(context, recipientId, text)
         if (sealed == null) {

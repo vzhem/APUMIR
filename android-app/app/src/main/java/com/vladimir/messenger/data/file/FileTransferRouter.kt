@@ -9,6 +9,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -62,6 +65,48 @@ class FileTransferRouter @Inject constructor(
      */
     private val onlinePeers = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private lateinit var lanChannel: LanDirectChannel
+    /**
+     * UDP-каналы файловых пакетов через интернет (мобильная связь,
+     * docs/SWARM_MOBILE.md): один канал на собеседника, пробивание NAT,
+     * обмен кандидатами сигналами `ufseek`/`ufcand` через брокера.
+     */
+    private lateinit var udpChannels: FileUdpChannels
+    /**
+     * Последний прямой режим на собеседника: `lan`|`udp`|`quic`|`broker`.
+     * APUF-кадры (K3) идут только по QUIC: если прямой режим — UDP,
+     * бинарный путь не включаем (и понижаем уже включённый).
+     */
+    private val lastDirectMode = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun isPeerViaUdp(nodeId: String): Boolean = lastDirectMode[nodeId] == "udp"
+
+    /**
+     * K3: бинарный путь кусков — APUF-кадр уезжает стримом только по прямому
+     * QUIC (LAN-TCP остаётся на текстовые фрагменты). Если прямой режим на
+     * узле — UDP (мобильная, docs/SWARM_MOBILE.md), передачу понижаем в
+     * текстовый путь: те же фрагменты, но по UDP. Ссылка на [sender]
+     * разрешается в момент вызова (после init), поэтому это свойство класса,
+     * а не локальный лямбда в init.
+     */
+    private val binarySend: (String, String, Long, Int, Int, ByteArray) -> Boolean =
+        { recipientId, transferIdHex, chunkIndex, chunkOffset, chunkLen, range ->
+            if (isPeerViaUdp(recipientId)) {
+                // Понижение — и дальше текстовый путь.
+                sender.demoteBinary(transferIdHex)
+                false
+            } else {
+                runCatching {
+                    RustBridge.sendFileChunk(
+                        recipientId,
+                        transferIdHex,
+                        chunkIndex,
+                        chunkOffset,
+                        chunkLen,
+                        range,
+                    )
+                }.getOrDefault(false)
+            }
+        }
     private lateinit var chunkStore: FileTransferChunkStore
     private val receivedStore: ReceivedFileStore
     private val lastHelloAt = HashMap<String, Long>()
@@ -79,6 +124,39 @@ class FileTransferRouter @Inject constructor(
             routeIncoming(senderId, chatId, messageId, text)
         }
         lanChannel = lan
+        // Мобильная связь (docs/SWARM_MOBILE.md): UDP-каналы с пробиванием
+        // NAT для файловых пакетов. Сигналы `ufseek`/`ufcand` идут через
+        // durable-брокера (доходят по мобильной), данные — прямым UDP.
+        // Приёмный путь у пакетов один: routeIncoming (как у LAN/брокера).
+        udpChannels = FileUdpChannels(
+            myBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
+            sendSignal = { recipientId, signalText ->
+                runCatching {
+                    RustBridge.sendMessage(
+                        "udp-sig-" + System.nanoTime(),
+                        FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
+                        recipientId,
+                        signalText,
+                    )
+                }.getOrDefault(false)
+            },
+            verifyPeerBinding = { nodeId, binding ->
+                runCatching {
+                    uniffi.p2p_core.verifyFileExchangeBinding(binding) &&
+                        uniffi.p2p_core.fileExchangeBindingNodeId(binding) == nodeId
+                }.getOrDefault(false)
+            },
+            onDataPacket = { peerId, packetText ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    routeIncoming(
+                        senderId = peerId,
+                        chatId = FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
+                        messageId = "udp-" + System.nanoTime(),
+                        text = packetText,
+                    )
+                }
+            },
+        )
         val switchingTransport: PacketTransport = SwitchingPacketTransport(transportLocal, lan)
         transport = switchingTransport
         val crypto: FileCryptoGateway = FfiFileCryptoGateway()
@@ -140,31 +218,53 @@ class FileTransferRouter @Inject constructor(
                 }
             }
             if (lanOk) {
+                lastDirectMode[recipientId] = "lan"
                 true
             } else {
-                try {
-                    com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
-                } catch (_: Exception) {
-                    false
+                // Мобильная связь (docs/SWARM_MOBILE.md): если UDP-канал
+                // пробит — через него (тот же текст, что по LAN). Пока
+                // пробиваем — ensureRequested отправит ufseek (троттлинг
+                // внутри), а пакет уедет дальше по цепочке.
+                udpChannels.ensureRequested(recipientId)
+                if (udpChannels.trySend(recipientId, payload)) {
+                    lastDirectMode[recipientId] = "udp"
+                    true
+                } else {
+                    val quicOk = try {
+                        com.vladimir.messenger.data.RustBridge.sendDirectPayload(recipientId, payload)
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (quicOk) {
+                        lastDirectMode[recipientId] = "quic"
+                        true
+                    } else {
+                        // Прямого нет вовсе: если собеседник в сети по
+                        // presence — через durable-брокера (по мобильной
+                        // медленно, но передача не «умирает»). Оффлайновый
+                        // собеседник не грузим: пауза как раньше.
+                        if (isPeerOnline(recipientId)) {
+                            val viaBroker = runCatching {
+                                runBlocking {
+                                    transportLocal.send(
+                                        "frag-" + System.nanoTime(),
+                                        FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
+                                        recipientId,
+                                        payload,
+                                    )
+                                }
+                            }.getOrDefault(false)
+                            if (viaBroker) {
+                                lastDirectMode[recipientId] = "broker"
+                            }
+                            viaBroker
+                        } else {
+                            false
+                        }
+                    }
                 }
             }
         }
-        // K3: бинарный путь кусков — только прямой QUIC (LAN-TCP остаётся
-        // на текстовые фрагменты): ядро собирает APUF-кадр и уезжает им
-        // стримом с приоритетом данных.
-        val binarySend: (String, String, Long, Int, Int, ByteArray) -> Boolean =
-            { recipientId, transferIdHex, chunkIndex, chunkOffset, chunkLen, range ->
-                runCatching {
-                    com.vladimir.messenger.data.RustBridge.sendFileChunk(
-                        recipientId,
-                        transferIdHex,
-                        chunkIndex,
-                        chunkOffset,
-                        chunkLen,
-                        range,
-                    )
-                }.getOrDefault(false)
-            }
         val senderLocal = FileTransferSender(
             transferDao = transferDao,
             chunkStore = chunkStore,
@@ -318,7 +418,14 @@ class FileTransferRouter @Inject constructor(
             // K3: собеседник подтвердил, что принимает APUF-кадры — передатчик
             // переводит нашу исходящую передачу на бинарный канал.
             onFcap = { transferIdHex, from, maxFramePayload ->
-                senderLocal.markBinaryCapable(transferIdHex, maxFramePayload)
+                // K3+UDP (docs/SWARM_MOBILE.md): APUF-кадры идут только по
+                // прямому QUIC. Если прямой режим на узле — UDP, бинарный
+                // путь не включаем (текстовые фрагменты по UDP).
+                if (isPeerViaUdp(from)) {
+                    Log.i(TAG, "FCAP $transferIdHex from ${from.takeLast(8)}: peer via UDP, binary path off")
+                } else {
+                    senderLocal.markBinaryCapable(transferIdHex, maxFramePayload)
+                }
             },
         )
         seederLocal.onServed = { transferIdHex, requester ->
@@ -334,6 +441,16 @@ class FileTransferRouter @Inject constructor(
     suspend fun routeIncoming(senderId: String, chatId: String, messageId: String, text: String): Boolean {
         if (LanDirectChannel.isLanSignalText(text)) {
             handleLanSignal(senderId, text)
+            return true
+        }
+        // Сигналы UDP-канала файловой передачи (мобильная, docs/SWARM_MOBILE.md):
+        // `ufseek`/`ufcand` несут кандидаты NAT-пробивания. Идут по durable-пути
+        // (доходят по мобильной); канальное состояние меняется в менеджере.
+        if (FileUdpWire.isUdpSignalText(text)) {
+            val signal = FileUdpWire.parseUdpSignal(text)
+            if (signal != null) {
+                udpChannels.onUdpSignal(senderId, signal)
+            }
             return true
         }
         if (FileTransferWire.isHelloText(text)) {

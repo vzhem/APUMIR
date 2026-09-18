@@ -74,6 +74,18 @@ class FileTransferSender(
     }
 
     /**
+     * docs/SWARM_MOBILE.md: прямой режим на узле — UDP (мобильная). APUF-кадры
+     * идут только по QUIC: снимаем бинарную метку, чтобы следующий цикл
+     * пумпа шёл текстовыми фрагментами (те же данные, но по UDP). Вызывается
+     * из FileTransferRouter.binarySend.
+     */
+    fun demoteBinary(transferIdHex: String) {
+        if (binaryCapable.remove(transferIdHex) != null) {
+            Log.i(TAG, "Transfer $transferIdHex demoted to text path (peer via UDP)")
+        }
+    }
+
+    /**
      * Receiver file-ACK: remembers the confirmed contiguous prefix (window advance) and, when the
      * receiver confirms the whole file, flips the transfer COMPLETE. The local chunk copies stay
      * on disk until TTL cleanup; no SENT/DELIVERED claim is inferred from transport accepts.
