@@ -1130,7 +1130,7 @@ impl MqttTransport {
                         )
                         .await
                         {
-                            break reason;
+                            break reason.to_string();
                         }
                     }
                     Ok(Event::Incoming(Packet::ConnAck(_))) => {
@@ -1154,7 +1154,8 @@ impl MqttTransport {
                             .await
                             .is_err()
                         {
-                            break "core notification channel closed while forwarding ConnAck";
+                            break "core notification channel closed while forwarding ConnAck"
+                                .to_string();
                         }
                         eventloop_liveness.mark_notification_forwarded();
                         if let Some(sender) = initial_connack_tx.take() {
