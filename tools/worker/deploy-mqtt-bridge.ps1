@@ -15,7 +15,7 @@
 # Steps:
 #   1) ask for the API token and verify it;
 #   2) find the three KV namespaces (APU_VAULT, REGISTRY, RELAY);
-#   3) download worker.js from the v11.74.2 release tag (size check);
+#   3) download worker.js from the v11.74.8 release tag (content check);
 #   4) deploy with migration new_sqlite_classes MqttBridge and the
 #      MQTT_BRIDGE binding (KV bindings preserved).
 # ============================================================================
@@ -27,7 +27,7 @@ $ErrorActionPreference = "Stop"
 
 $Account   = "caf1ba3a42dc32ef36978d9ca2bce5ad"
 $Script    = "p2p-relay"
-$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.7/tools/worker/p2p_relay_worker.js"
+$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.8/tools/worker/p2p_relay_worker.js"
 
 Write-Host "=== 1/5 Token ===" -ForegroundColor Cyan
 if ([string]::IsNullOrWhiteSpace($Token)) {
@@ -70,6 +70,13 @@ Write-Host "=== 4/5 Downloading worker.js ===" -ForegroundColor Cyan
 Invoke-WebRequest -Uri $WorkerUrl -OutFile "worker.js"
 $lines = (Get-Content "worker.js").Count
 Write-Host ("  worker.js: $lines lines (expected about 792)")
+if (Select-String -Path "worker.js" -Pattern "addrbook/put" -Quiet) {
+  Write-Host "  OK: /addrbook endpoints present (backup of the address book)"
+} else {
+  Write-Host "ERROR: downloaded worker.js has NO /addrbook endpoints - the script URL and the worker tag are out of sync." -ForegroundColor Red
+  Write-Host "Deploy aborted. Fetch the deploy script from the same tag/commit as the worker and retry." -ForegroundColor Red
+  exit 1
+}
 if ($lines -lt 700) {
     Write-Host "ERROR: file looks truncated, download failed." -ForegroundColor Red
     exit 1
