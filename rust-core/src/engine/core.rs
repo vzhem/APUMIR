@@ -3515,6 +3515,59 @@ impl P2PCore {
                                 }
                             }
                         }
+                    } else if evt.payload.starts_with(
+                        crate::network::presence_scope::DIRECT_PRESENCE_PREFIX,
+                    ) {
+                        // Адрес в конверте (владелец, 2026-09-19): отправитель,
+                        // у которого не вышел прямой путь, прикладывает к
+                        // сообщению личный presence со своим свежим адресом.
+                        // Записываем адрес сразу - ответ уходит без поиска.
+                        // Старые сборки такой кадр молча пропускают (не
+                        // четыре поля с pk_ первым), N-1 не страдает.
+                        let decoded = String::from_utf8_lossy(&evt.payload);
+                        if let Some(presence) =
+                            crate::network::presence_scope::parse_direct_presence(&decoded)
+                        {
+                            if presence.node_id != node_id
+                                && presence.version
+                                    + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                                    > crate::config::defaults::PRESENCE_VERSION
+                            {
+                                let age_ms = crate::storage::models::now_ms()
+                                    .saturating_sub(presence.sent_at_ms);
+                                if age_ms <= crate::config::defaults::PRESENCE_MAX_AGE_MS {
+                                    tracing::info!(
+                                        "PRESENCE K4-MQTT: personal presence from {} addr={}",
+                                        presence.node_id,
+                                        presence
+                                            .addr
+                                            .map(|a| a.to_string())
+                                            .unwrap_or_else(|| "unknown".into())
+                                    );
+                                    network.add_peer(PeerInfo::new(
+                                        presence.node_id.clone(),
+                                        presence.display_name.clone(),
+                                    ));
+                                    network.touch_peer(&presence.node_id);
+                                    if let Some(addr) = presence.addr {
+                                        let public_key =
+                                            format!("{}_public", presence.node_id);
+                                        {
+                                            let mut addrs = peer_addrs.lock().unwrap();
+                                            addrs.insert(presence.node_id.clone(), addr);
+                                            addrs.insert(public_key.clone(), addr);
+                                        }
+                                        address_book.record(&presence.node_id, addr);
+                                        address_book.record(&public_key, addr);
+                                        tracing::info!(
+                                            "PRESENCE K4-MQTT: fresh addr from {} = {}",
+                                            presence.node_id,
+                                            addr
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         // Формат тела: senderId|messageId|chatId|text - ровно то,
                         // что строит отправитель (см. send_message/legacy_payload).
@@ -4371,6 +4424,32 @@ impl P2PCore {
                     message_id
                 ),
             }
+        }
+
+        // Адрес в конверте (владелец, 2026-09-19): прямой путь не вышел -
+        // расскажем получателю свой свежий адрес тем же брокерным путём,
+        // что и само сообщение. Получатель (новая сборка) запишет адрес
+        // сразу и ответит напрямую; старые сборки кадр молча пропустят.
+        let my_addr = *self.public_addr.lock().unwrap();
+        let ppres = crate::network::presence_scope::direct_presence_payload(
+            &sender_id,
+            &self.config.display_name,
+            my_addr.map(|a| a.to_string()).as_deref(),
+            my_addr.is_some(),
+            crate::storage::models::now_ms(),
+        );
+        if let Some(outbound) = self.mqtt_outbound_tx.as_ref() {
+            let queued = outbound.try_send(MqttOutboundCommand::MeshRelay {
+                recipient: recipient_id.clone(),
+                envelope: ppres,
+                message_id: format!("ppres-{}", message_id),
+            })
+            .is_ok();
+            tracing::info!(
+                "MESH origin: address-in-envelope ppres to {} queued={}",
+                recipient_id,
+                queued
+            );
         }
 
         let _ = self
