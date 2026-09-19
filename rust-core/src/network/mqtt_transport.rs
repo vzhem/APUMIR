@@ -918,7 +918,7 @@ impl MqttTransport {
             .take()
             .ok_or_else(|| "MQTT event channel unavailable".to_string())?;
         let (initial_connack_tx, initial_connack_rx) = oneshot::channel::<()>();
-        let (eventloop_exit_tx, mut eventloop_exit_rx) = oneshot::channel::<&'static str>();
+        let (eventloop_exit_tx, mut eventloop_exit_rx) = oneshot::channel::<String>();
         let eventloop_liveness = Arc::clone(&self.liveness);
         let eventloop_shared_state = Arc::clone(&self.shared_state);
         #[cfg(feature = "mqtt-dual-broker")]
