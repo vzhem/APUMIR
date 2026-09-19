@@ -140,14 +140,15 @@ class AddressBookBackup @Inject constructor(
             ?: return@withContext ""
         val privateKey = privateKey() ?: return@withContext ""
         val sealed = botApi.fetchAddressBook(shelfFor(nodeId)) ?: return@withContext ""
-        val plain = decrypt(sealed, privateKey)
+        val plainBytes = decrypt(sealed, privateKey)
             ?: return@withContext "copy-decrypt-failed"
-        val parsed = runCatching { JSONObject(plain) }.getOrNull()
+        val plainText = String(plainBytes, Charsets.UTF_8)
+        val parsed = runCatching { JSONObject(plainText) }.getOrNull()
         if (parsed == null || !parsed.has("entries")) return@withContext "copy-invalid"
         val tmp = File(file.parentFile, "$FILE_NAME.tmp")
-        tmp.writeText(plain)
+        tmp.writeText(plainText)
         if (!tmp.renameTo(file)) {
-            file.writeText(plain)
+            file.writeText(plainText)
             tmp.delete()
         }
         prefs().edit().putLong(KEY_LAST_RESTORE_AT, System.currentTimeMillis()).apply()
@@ -166,15 +167,16 @@ class AddressBookBackup @Inject constructor(
         val privateKey = privateKey() ?: return@withContext "Личность ещё не создана"
         val sealed = botApi.fetchAddressBook(shelfFor(nodeId))
             ?: return@withContext "На сервере копии нет (или сервер недоступен)"
-        val plain = decrypt(sealed, privateKey)
+        val plainBytes = decrypt(sealed, privateKey)
             ?: return@withContext "Копия не открылась вашим ключом"
-        val parsed = runCatching { JSONObject(plain) }.getOrNull()
+        val plainText = String(plainBytes, Charsets.UTF_8)
+        val parsed = runCatching { JSONObject(plainText) }.getOrNull()
         if (parsed == null || !parsed.has("entries")) return@withContext "Копия повреждена"
         val file = bookFile(context)
         val tmp = File(file.parentFile, "$FILE_NAME.tmp")
-        tmp.writeText(plain)
+        tmp.writeText(plainText)
         if (!tmp.renameTo(file)) {
-            file.writeText(plain)
+            file.writeText(plainText)
             tmp.delete()
         }
         prefs().edit().putLong(KEY_LAST_RESTORE_AT, System.currentTimeMillis()).apply()
