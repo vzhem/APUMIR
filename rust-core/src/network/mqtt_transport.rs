@@ -307,11 +307,7 @@ async fn forward_incoming_publish(
 /// `None` — конфиг не собрался (страховка: остаётся прежний прямой TCP).
 fn wss_bridge_transport() -> Option<rumqttc::Transport> {
     let mut roots = rustls::RootCertStore::empty();
-    roots.extend(
-        webpki_roots::TLS_SERVER_ROOTS
-            .iter()
-            .map(|anchor| anchor.to_trust_anchor()),
-    );
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = rustls::ClientConfig::builder_with_provider(
         std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
     )
