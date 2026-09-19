@@ -66,9 +66,13 @@
 // (при первом деплое Cloudflare сам предложит миграцию «new class»).
 import { connect } from "cloudflare:sockets";
 
+// ВАЖНО: hivemq первым - ровно как в ядре (rust-core multi_broker BROKERS).
+// Прямые клиенты выбирают hivemq; если бы мост вёл на другой брокер,
+// «мостовые» и «прямые» телефоны оказались бы в разных роях и перестали
+// бы видеть сообщения друг друга (баг 2026-09-19, v11.74.4/5).
 const MQTT_UPSTREAMS = [
-  { hostname: "broker.emqx.io", port: 8883 },
   { hostname: "broker.hivemq.com", port: 8883 },
+  { hostname: "broker.emqx.io", port: 8883 },
   { hostname: "test.mosquitto.org", port: 8883 },
 ];
 

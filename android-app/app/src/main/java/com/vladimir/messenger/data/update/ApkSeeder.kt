@@ -266,15 +266,20 @@ class ApkSeeder @Inject constructor(
         val sha = ApkUpdate.sha256OfFile(source)
         replaceSeedIfDifferent(sha)
         // Копия: исходный файл — чужой (из чата, из папок), раздаём свою.
+        // Самосев: источник — собственный APK, копия совпадает с ним —
+        // копирование пропускаем (копировать файл на себя нельзя).
         val copy = File(seedRoot, "$sha.apk")
+        val selfSource = source.absolutePath == copy.absolutePath
         val temporary = File(seedRoot, "$sha.apk.tmp")
         check(seedRoot.mkdirs() || seedRoot.isDirectory) { "Cannot create seed directory" }
         try {
-            Files.copy(source.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            try {
-                Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-                Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            if (!selfSource) {
+                Files.copy(source.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                try {
+                    Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
             }
         } catch (error: Exception) {
             temporary.delete()
@@ -685,6 +690,14 @@ class ApkSeeder @Inject constructor(
         val row = transferDao.getForFile(ApkUpdate.CHAT_ID, info.sha256)
             .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
         if (row == null) {
+            if (ApkUpdate.isSame(info.version, currentAppVersion())) {
+                // Самосев своей версии: строка может временно отсутствовать
+                // (подготовка после перезапуска). Не стираем запись - её
+                // достроит ensureSelfSeeding, иначе карточка мигала
+                // «появилась/пропала» (владелец, 2026-09-19).
+                _seed.value = SeedUi(info.version, info.name, info.sizeBytes, null, 0, preparing = true)
+                return
+            }
             Log.i(TAG, "auto reseed: copy of v${info.version} not found, seed cleared")
             store.saveSeed(null)
             _seed.value = null
@@ -707,11 +720,21 @@ class ApkSeeder @Inject constructor(
         val seed = store.loadSeed()
         if (seed != null) {
             val seedVsCurrent = ApkUpdate.compareVersions(seed.version, current)
-            if (seedVsCurrent == null || seedVsCurrent >= 0) return
-            dropSeedCopy(seed)
-            store.saveSeed(null)
-            _seed.value = null
-            Log.i(TAG, "self-seed: прежняя раздача v${seed.version} устарела, снимаю")
+            if (seedVsCurrent != null && seedVsCurrent == 0) {
+                // Раздаю ровно свою версию: проверяю, что строка раздачи жива.
+                val row = transferDao.getForFile(ApkUpdate.CHAT_ID, seed.sha256)
+                    .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
+                if (row != null) return
+                Log.i(TAG, "self-seed: строка раздачи v$current потеряна - достраиваю")
+                // Падаем ниже: пересоберём копию и строку заново.
+            } else if (seedVsCurrent == null || seedVsCurrent > 0) {
+                return
+            } else {
+                dropSeedCopy(seed)
+                store.saveSeed(null)
+                _seed.value = null
+                Log.i(TAG, "self-seed: прежняя раздача v${seed.version} устарела, снимаю")
+            }
         }
         val source = File(appContext.applicationInfo.sourceDir)
         if (!source.isFile) return

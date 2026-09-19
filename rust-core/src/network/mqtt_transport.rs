@@ -91,7 +91,11 @@ static MQTT_POLL_ERROR_STREAK: AtomicU64 = AtomicU64::new(0);
 static MQTT_WSS_STABLE_SINCE_MS: AtomicU64 = AtomicU64::new(0);
 const MQTT_FAILOVER_TCP_ERRORS: u64 = 4;
 const MQTT_FAILOVER_WSS_ERRORS: u64 = 6;
-const MQTT_WSS_REVIEW_AFTER_MS: u64 = 30 * 60 * 1000;
+const MQTT_WSS_REVIEW_AFTER_MS: u64 = 5 * 60 * 1000;
+/// Как часто на стабильном мосте пробуем прямой TCP (CONACK-проба).
+/// Ответил - сеть стала нормальной, возвращаемся; нет - сидим на мосте.
+const MQTT_DIRECT_PROBE_EVERY_MS: u64 = 60 * 1000;
+static MQTT_LAST_DIRECT_PROBE_MS: AtomicU64 = AtomicU64::new(0);
 
 /// Короткий хвост для core_build_info: « · MQTT: … » или пусто, если движок
 /// ещё не выбирал брокера. Строку читает человек на экране настроек.
@@ -1056,12 +1060,41 @@ impl MqttTransport {
             let mut reconnect_backoff_secs = 1u64;
             let mut initial_connack_tx = Some(initial_connack_tx);
             let exit_reason = loop {
-                // Полчаса стабильного моста - сеть могла смениться (Wi-Fi):
-                // пробуем вернуться на прямой TCP.
-                if MQTT_WSS_ACTIVE.load(Ordering::Relaxed) {
+                // Стабильный мост - сеть могла смениться (Wi-Fi). Раз в минуту
+                // пробяем прямой TCP настоящим рукопожатием: ответил -
+                // возвращаемся (это же снимает «расщепление роя», когда
+                // мостовые и прямые телефоны сидят на разных брокерах).
+                if MQTT_WSS_ACTIVE.load(Ordering::Relaxed)
+                    && MQTT_PREFER_WSS.load(Ordering::Relaxed)
+                {
+                    let now_ms = unix_ms();
+                    let due = now_ms.saturating_sub(
+                        MQTT_LAST_DIRECT_PROBE_MS.load(Ordering::Relaxed),
+                    ) >= MQTT_DIRECT_PROBE_EVERY_MS;
+                    if due {
+                        MQTT_LAST_DIRECT_PROBE_MS.store(now_ms, Ordering::Relaxed);
+                        if let Some((probe_host, probe_port)) = MQTT_BROKERS.first().copied() {
+                            if crate::network::multi_broker::probe_broker(
+                                probe_host,
+                                probe_port,
+                            )
+                            .await
+                            {
+                                MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
+                                MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
+                                tracing::info!(
+                                    "MQTT FAILOVER REVIEW: прямой {}:{} отвечает на CONNACK - возвращаюсь с моста",
+                                    probe_host,
+                                    probe_port
+                                );
+                                break "direct TCP answering again after WSS failover; retrying direct"
+                                    .to_string();
+                            }
+                        }
+                    }
                     let stable_since = MQTT_WSS_STABLE_SINCE_MS.load(Ordering::Relaxed);
                     if stable_since > 0
-                        && unix_ms().saturating_sub(stable_since) >= MQTT_WSS_REVIEW_AFTER_MS
+                        && now_ms.saturating_sub(stable_since) >= MQTT_WSS_REVIEW_AFTER_MS
                     {
                         MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
                         MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
