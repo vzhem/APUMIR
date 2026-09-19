@@ -99,7 +99,6 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
     var showMyQrDialog by remember { mutableStateOf(false) }
-    var showMqttDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
     // Вкладок больше нет: профиль - отдельный пункт в списке настроек и
@@ -613,6 +612,10 @@ private fun SettingsTabContent(
     onProfileBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
 ) {
+    // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
+    // локальные для этого экрана.
+    var showMqttDialog by remember { mutableStateOf(false) }
+    val mqttClipboard = LocalClipboardManager.current
     // Бегунок справа: видно, где мы в длинном списке.
     val settingsScrollState = rememberLazyListState()
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1059,7 +1062,7 @@ private fun SettingsTabContent(
             text = { Text(mqttText) },
             confirmButton = {
                 TextButton(onClick = {
-                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(mqttText))
+                    mqttClipboard.setText(androidx.compose.ui.text.AnnotatedString(mqttText))
                     showMqttDialog = false
                 }) { Text("Скопировать") }
             },
