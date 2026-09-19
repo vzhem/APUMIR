@@ -1,10 +1,7 @@
 //! # MQTT Transport — децентрализованный bootstrap + presence + relay
 
-use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(feature = "mqtt-dual-broker")]
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-#[cfg(feature = "mqtt-dual-broker")]
 use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
 
@@ -34,6 +31,104 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
     ("broker.emqx.io", 1883),
 ];
 
+// ── Диагностика MQTT-линка (видна в Настройках → «О приложении») ─────────
+// Глобальный статус последнего/текущего брокерного подключения: что выбрано
+// (tcp / wss-мост), когда был последний ConnAck, какая ошибка была последней.
+// Никаких секретов: показывается человеку на его же телефоне.
+
+struct MqttLinkStatus {
+    mode: StdMutex<String>,
+    mode_at_ms: AtomicU64,
+    last_connack_ms: AtomicU64,
+    last_error: StdMutex<String>,
+    last_error_ms: AtomicU64,
+}
+
+static MQTT_LINK: MqttLinkStatus = MqttLinkStatus {
+    mode: StdMutex::new(String::new()),
+    mode_at_ms: AtomicU64::new(0),
+    last_connack_ms: AtomicU64::new(0),
+    last_error: StdMutex::new(String::new()),
+    last_error_ms: AtomicU64::new(0),
+};
+
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn mqtt_link_set_mode(mode: String) {
+    if let Ok(mut slot) = MQTT_LINK.mode.lock() {
+        *slot = mode;
+    }
+    MQTT_LINK.mode_at_ms.store(unix_ms(), Ordering::Relaxed);
+}
+
+fn mqtt_link_mark_connack() {
+    MQTT_LINK.last_connack_ms.store(unix_ms(), Ordering::Relaxed);
+}
+
+fn mqtt_link_set_error(error: String) {
+    if let Ok(mut slot) = MQTT_LINK.last_error.lock() {
+        *slot = error;
+    }
+    MQTT_LINK.last_error_ms.store(unix_ms(), Ordering::Relaxed);
+}
+
+/// Память о том, что прямой TCP в этой сети режется (рукопожатие проходит,
+/// а данные умирают): следующий выбор брокера начинается сразу с WSS-моста.
+/// Ставится автоматически серией ошибок подряд, снимается после получаса
+/// стабильной работы моста - тогда пробуем прямой путь снова.
+static MQTT_PREFER_WSS: AtomicBool = AtomicBool::new(false);
+/// Работает ли текущая сессия через WSS-мост (для цикла eventloop).
+static MQTT_WSS_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Подряд идущие ошибки poll: 4 на TCP = «путь режется, переходим на мост»,
+/// 6 на WSS = «и мост не идёт, возвращаемся к прямому» (сеть могла смениться).
+static MQTT_POLL_ERROR_STREAK: AtomicU64 = AtomicU64::new(0);
+/// Когда WSS-сессия стала стабильной (первое Ok после последней ошибки).
+static MQTT_WSS_STABLE_SINCE_MS: AtomicU64 = AtomicU64::new(0);
+const MQTT_FAILOVER_TCP_ERRORS: u64 = 4;
+const MQTT_FAILOVER_WSS_ERRORS: u64 = 6;
+const MQTT_WSS_REVIEW_AFTER_MS: u64 = 30 * 60 * 1000;
+
+/// Короткий хвост для core_build_info: « · MQTT: … » или пусто, если движок
+/// ещё не выбирал брокера. Строку читает человек на экране настроек.
+pub fn mqtt_link_summary() -> String {
+    let mode = MQTT_LINK
+        .mode
+        .lock()
+        .map(|slot| slot.clone())
+        .unwrap_or_default();
+    if mode.is_empty() {
+        return String::new();
+    }
+    let now = unix_ms();
+    let mut out = format!(" · MQTT: {}", mode);
+    let last_ok = MQTT_LINK.last_connack_ms.load(Ordering::Relaxed);
+    if last_ok > 0 {
+        out += &format!(", ConnAck {} с назад", (now.saturating_sub(last_ok)) / 1000);
+    } else {
+        out += ", ConnAck ещё не было";
+    }
+    let error = MQTT_LINK
+        .last_error
+        .lock()
+        .map(|slot| slot.clone())
+        .unwrap_or_default();
+    if !error.is_empty() {
+        let error_at = MQTT_LINK.last_error_ms.load(Ordering::Relaxed);
+        let short: String = error.chars().take(110).collect();
+        out += &format!(
+            ", ошибка {} с назад: {}",
+            (now.saturating_sub(error_at)) / 1000,
+            short
+        );
+    }
+    out
+}
+
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 const MQTT_EVENT_BUFFER: usize = 256;
 const MQTT_CLIENT_REQUEST_BUFFER: usize = 100;
@@ -42,6 +137,18 @@ const MQTT_RECONNECT_BACKOFF_MAX_SECS: u64 = 30;
 const SECONDARY_BROKER_HOST: &str = "broker.emqx.io";
 #[cfg(feature = "mqtt-dual-broker")]
 const SECONDARY_BROKER_PORT: u16 = 1883;
+
+/// WSS-мост через наш relay-домен (белый список мобильных сетей, задача
+/// владельца 2026-09-18). «Жёсткая» сеть пускает только HTTPS-443 на
+/// разрешённые хосты: наш workers.dev там есть, TCP-1883 иностранных
+/// брокеров — нет. Когда НИ ОДИН TCP-кандидат не ответил на пробу,
+/// подключаемся сюда по WebSocket+TLS: Cloudflare-мост (/mqtt в
+/// tools/worker/p2p_relay_worker.js) доводит поток до настоящих брокеров.
+/// На обычной сети ветка не выполняется: кто-то из TCP отвечает раньше.
+// Адрес для MqttOptions при WSS-транспорте - ПОЛНЫЙ URL: rumqttc сам
+// достаёт из него домен и порт (split_url), путь остаётся на мосту.
+const WSS_BRIDGE_URL: &str = "wss://p2p-relay.1985vzhem.workers.dev/mqtt";
+const WSS_BRIDGE_PORT: u16 = 443;
 const MQTT_REQUEST_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(5);
 const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
 const MQTT_LIVENESS_STALL_AFTER: Duration = Duration::from_secs(90);
@@ -290,6 +397,24 @@ async fn forward_incoming_publish(
     Ok(())
 }
 
+/// TLS-конфигурация для WSS-моста: публичные корневые сертификаты Mozilla
+/// (webpki-roots), провайдер aws-lc-rs — тот же, что у остального стека.
+/// `None` — конфиг не собрался (страховка: остаётся прежний прямой TCP).
+fn wss_bridge_transport() -> Option<rumqttc::Transport> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = rustls::ClientConfig::builder_with_provider(
+        std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
+    )
+    .with_safe_default_protocol_versions()
+    .ok()?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    Some(rumqttc::Transport::Wss(rumqttc::TlsConfiguration::Rustls(
+        std::sync::Arc::new(config),
+    )))
+}
+
 /// «Любая сеть»: если через FFI установлен SOCKS5-прокси, поднимаем ЛОКАЛЬНЫЙ мост
 /// (127.0.0.1:0): брокерские подключения движка приходят в мост, а мост качает байты
 /// через SOCKS5-туннель к реальному брокеру. Работает с любой версией rumqttc
@@ -378,12 +503,18 @@ impl MqttTransport {
         // кто отвечает в пределах строгого таймаута. Если не ответил никто,
         // оставляем публичного по умолчанию: переподключение - дело rumqttc,
         // и повторять перебор на каждом круге не нужно.
-        let (default_host, default_port) = MQTT_BROKERS
+        // Проверяем, что список брокеров не пуст (сами значения больше не
+        // нужны: дефолтной TCP-целью при полном молчании стал WSS-мост).
+        MQTT_BROKERS
             .first()
             .copied()
             .ok_or_else(|| "No MQTT brokers configured".to_string())?;
         let mut chosen: Option<(String, u16)> = None;
+        let forced_wss = MQTT_PREFER_WSS.load(Ordering::Relaxed);
         let own_is_first = brokers.own().is_some();
+        // Пропускаем пробы, если раньше сеть уже порезала прямой TCP:
+        // сразу WSS-мост (перезапуск сессии вернётся сюда же).
+        if !forced_wss {
         for (index, (host, port)) in brokers.candidates().into_iter().enumerate() {
             // Пробуем своего брокера и не больше двух публичных: каждый
             // молчащий адрес - это ещё BROKER_PROBE_TIMEOUT ожидания на старте.
@@ -402,14 +533,46 @@ impl MqttTransport {
                 brokers.mark_own_failed();
             }
         }
-        // Никто не ответил: остаётся публичный по умолчанию - rumqttc будет
-        // переподключаться к нему сам, как и до K4-3.
-        let (chosen_host, chosen_port) = chosen
-            .unwrap_or_else(|| (default_host.to_string(), default_port));
+        }
+        // Никто не ответил: если это обычная сеть с временно молчащими
+        // брокерами, остаёмся на публичном по умолчанию; но чаще это
+        // «жёсткая» мобильная сеть с белым списком - TCP-1883 туда не
+        // проходит вовсе. Тогда идём через WSS-мост нашего relay-домена:
+        // TLS-443 к workers.dev белый список пускает, а мост на Cloudflare
+        // доводит поток до настоящих брокеров; rumqttc переподключается
+        // сам, так что возвращение прямых брокеров видно только в логах.
+        let mut wss_bridge = false;
+        let (chosen_host, chosen_port) = match chosen {
+            Some(pair) => pair,
+            None => {
+                wss_bridge = true;
+                (WSS_BRIDGE_URL.to_string(), WSS_BRIDGE_PORT)
+            }
+        };
         let (broker_host, broker_port) = (chosen_host.as_str(), chosen_port);
-        let (host, port) = socks5_bridge_endpoint(broker_host, broker_port)
-            .await
-            .unwrap_or((broker_host.to_string(), broker_port));
+        let (host, port) = if wss_bridge {
+            // SOCKS5-туннель и WSS-мост - два разных обхода; в WSS-ветке
+            // локальный мост не нужен.
+            (broker_host.to_string(), broker_port)
+        } else {
+            socks5_bridge_endpoint(broker_host, broker_port)
+                .await
+                .unwrap_or((broker_host.to_string(), broker_port))
+        };
+        MQTT_POLL_ERROR_STREAK.store(0, Ordering::Relaxed);
+        MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
+        MQTT_WSS_ACTIVE.store(wss_bridge, Ordering::Relaxed);
+        mqtt_link_set_mode(if wss_bridge {
+            if forced_wss {
+                "wss-мост relay-домена (сеть режет прямой TCP - проверено)".to_string()
+            } else {
+                "wss-мост relay-домена (прямые брокеры не ответили)".to_string()
+            }
+        } else if host == "127.0.0.1" {
+            format!("tcp {}:{} через SOCKS5-мост", broker_host, broker_port)
+        } else {
+            format!("tcp {}:{}", host, port)
+        });
 
         // Creating AsyncClient only creates a bounded local request channel; real readiness still
         // requires ConnAck followed by a queued wildcard subscription request.
@@ -420,6 +583,15 @@ impl MqttTransport {
             if host == "127.0.0.1" { " (via SOCKS5 bridge)" } else { "" }
         );
         let mut opts = MqttOptions::new(&client_id, &host, port);
+        if wss_bridge {
+            match wss_bridge_transport() {
+                Some(transport) => {
+                    opts.set_transport(transport);
+                    tracing::info!("MQTT: restricted network, primary via WSS bridge {}:{}", host, port);
+                }
+                None => tracing::warn!("MQTT: WSS bridge chosen but TLS setup failed; plain TCP as before"),
+            }
+        }
         opts.set_keep_alive(Duration::from_secs(60));
         opts.set_clean_session(true);
         // Last Will: брокер сам сотрёт retained presence, когда телефон пропадёт
@@ -442,17 +614,27 @@ impl MqttTransport {
         let (secondary_client, secondary_eventloop, secondary_liveness, secondary_ready) = {
             let suffix = &node_id[..16.min(node_id.len())];
             let secondary_client_id = format!("p2pm_emqx_{suffix}");
-            let (secondary_host, secondary_port) = socks5_bridge_endpoint(
-                SECONDARY_BROKER_HOST,
-                SECONDARY_BROKER_PORT,
-            )
-            .await
-            .unwrap_or((
-                SECONDARY_BROKER_HOST.to_string(),
-                SECONDARY_BROKER_PORT,
-            ));
+            let (secondary_host, secondary_port) = if wss_bridge {
+                (WSS_BRIDGE_URL.to_string(), WSS_BRIDGE_PORT)
+            } else {
+                socks5_bridge_endpoint(SECONDARY_BROKER_HOST, SECONDARY_BROKER_PORT)
+                    .await
+                    .unwrap_or((
+                        SECONDARY_BROKER_HOST.to_string(),
+                        SECONDARY_BROKER_PORT,
+                    ))
+            };
             let mut secondary_options =
                 MqttOptions::new(secondary_client_id, &secondary_host, secondary_port);
+            if wss_bridge {
+                match wss_bridge_transport() {
+                    Some(transport) => {
+                        secondary_options.set_transport(transport);
+                        tracing::info!("MQTT: restricted network, secondary via WSS bridge {}:{}", secondary_host, secondary_port);
+                    }
+                    None => tracing::warn!("MQTT: secondary WSS bridge chosen but TLS setup failed; plain TCP as before"),
+                }
+            }
             secondary_options.set_keep_alive(Duration::from_secs(60));
             secondary_options.set_clean_session(true);
             secondary_options.set_last_will(LastWill::new(
@@ -823,6 +1005,7 @@ impl MqttTransport {
                             has_connected_once = true;
                             secondary_ready.store(false, Ordering::Release);
                             secondary_liveness.mark_connack();
+                            mqtt_link_mark_connack();
                             secondary_liveness.mark_forwarding();
                             if secondary_event_tx
                                 .send(MqttNotification::SecondaryConnectionAcknowledged)
@@ -849,6 +1032,7 @@ impl MqttTransport {
                         }
                         Err(error) => {
                             secondary_ready.store(false, Ordering::Release);
+                            mqtt_link_set_error(format!("вторичный (emqx): {}", error));
                             secondary_liveness.mark_poll_error();
                             secondary_liveness.mark_backoff();
                             tracing::warn!(
@@ -872,6 +1056,22 @@ impl MqttTransport {
             let mut reconnect_backoff_secs = 1u64;
             let mut initial_connack_tx = Some(initial_connack_tx);
             let exit_reason = loop {
+                // Полчаса стабильного моста - сеть могла смениться (Wi-Fi):
+                // пробуем вернуться на прямой TCP.
+                if MQTT_WSS_ACTIVE.load(Ordering::Relaxed) {
+                    let stable_since = MQTT_WSS_STABLE_SINCE_MS.load(Ordering::Relaxed);
+                    if stable_since > 0
+                        && unix_ms().saturating_sub(stable_since) >= MQTT_WSS_REVIEW_AFTER_MS
+                    {
+                        MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
+                        MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
+                        tracing::info!(
+                            "MQTT FAILOVER REVIEW: wss стабилен {} мин - перезапускаю сессию на прямом TCP",
+                            MQTT_WSS_REVIEW_AFTER_MS / 60000
+                        );
+                        break "WSS stable for review interval; retrying direct TCP".to_string();
+                    }
+                }
                 // The first ConnAck remains pollable even with inherited pending events. After it,
                 // reserve one core-owned slot before each poll. A critical packet transfers that
                 // permit into the queue; all other packet types release it at the end of the arm.
@@ -908,6 +1108,15 @@ impl MqttTransport {
                 match poll_result {
                     Ok(Event::Incoming(Packet::Publish(publish))) => {
                         reconnect_backoff_secs = 1;
+                        MQTT_POLL_ERROR_STREAK.store(0, Ordering::Relaxed);
+                        if MQTT_WSS_ACTIVE.load(Ordering::Relaxed) {
+                            let _ = MQTT_WSS_STABLE_SINCE_MS.compare_exchange(
+                                0,
+                                unix_ms(),
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            );
+                        }
                         let topic = publish.topic;
                         let payload = publish.payload;
                         if let Err(reason) = forward_incoming_publish(
@@ -926,9 +1135,19 @@ impl MqttTransport {
                     }
                     Ok(Event::Incoming(Packet::ConnAck(_))) => {
                         reconnect_backoff_secs = 1;
+                        MQTT_POLL_ERROR_STREAK.store(0, Ordering::Relaxed);
+                        if MQTT_WSS_ACTIVE.load(Ordering::Relaxed) {
+                            let _ = MQTT_WSS_STABLE_SINCE_MS.compare_exchange(
+                                0,
+                                unix_ms(),
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            );
+                        }
                         #[cfg(feature = "mqtt-dual-broker")]
                         eventloop_primary_ready.store(false, Ordering::Release);
                         eventloop_liveness.mark_connack();
+                        mqtt_link_mark_connack();
                         eventloop_liveness.mark_forwarding();
                         if event_tx
                             .send(MqttNotification::ConnectionAcknowledged)
@@ -944,16 +1163,52 @@ impl MqttTransport {
                     }
                     Ok(_) => {
                         reconnect_backoff_secs = 1;
+                        MQTT_POLL_ERROR_STREAK.store(0, Ordering::Relaxed);
+                        if MQTT_WSS_ACTIVE.load(Ordering::Relaxed) {
+                            let _ = MQTT_WSS_STABLE_SINCE_MS.compare_exchange(
+                                0,
+                                unix_ms(),
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            );
+                        }
                     }
                     Err(e) => {
                         #[cfg(feature = "mqtt-dual-broker")]
                         eventloop_primary_ready.store(false, Ordering::Release);
                         eventloop_liveness.mark_poll_error();
                         eventloop_liveness.mark_backoff();
+                        mqtt_link_set_error(e.to_string());
+                        // Фейловер tcp <-> wss: серия ошибок подряд означает,
+                        // что сеть режет выбранный путь (рукопожатие при этом
+                        // может проходить - так делают белые списки/DPI).
+                        let streak = MQTT_POLL_ERROR_STREAK.fetch_add(1, Ordering::Relaxed) + 1;
+                        let wss_now = MQTT_WSS_ACTIVE.load(Ordering::Relaxed);
+                        if !wss_now && streak >= MQTT_FAILOVER_TCP_ERRORS && !MQTT_PREFER_WSS.load(Ordering::Relaxed) {
+                            MQTT_PREFER_WSS.store(true, Ordering::Relaxed);
+                            mqtt_link_set_mode(
+                                "wss-мост relay-домена (сеть режет прямой TCP - переход)".to_string(),
+                            );
+                            tracing::error!(
+                                "MQTT FAILOVER: {} ошибок poll подряд на прямом TCP - перезапускаю сессию через wss-мост",
+                                streak
+                            );
+                            break "TCP path cut by network (consecutive poll errors); failing over to WSS bridge".to_string();
+                        }
+                        if wss_now && streak >= MQTT_FAILOVER_WSS_ERRORS {
+                            MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
+                            MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
+                            tracing::error!(
+                                "MQTT FAILOVER: {} ошибок poll подряд на WSS-мосте - пробую прямой TCP снова",
+                                streak
+                            );
+                            break "WSS bridge path failing (consecutive poll errors); retrying direct TCP".to_string();
+                        }
                         tracing::warn!(
-                            "MQTT error: {}; retrying in {}s",
+                            "MQTT error: {}; retrying in {}s (streak {})",
                             e,
-                            reconnect_backoff_secs
+                            reconnect_backoff_secs,
+                            streak
                         );
                         tokio::time::sleep(Duration::from_secs(reconnect_backoff_secs)).await;
                         reconnect_backoff_secs = reconnect_backoff_secs
