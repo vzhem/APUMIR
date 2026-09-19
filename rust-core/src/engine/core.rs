@@ -3524,9 +3524,8 @@ impl P2PCore {
                         // Записываем адрес сразу - ответ уходит без поиска.
                         // Старые сборки такой кадр молча пропускают (не
                         // четыре поля с pk_ первым), N-1 не страдает.
-                        let decoded = String::from_utf8_lossy(&evt.payload).into_owned();
                         if let Some(presence) =
-                            crate::network::presence_scope::parse_direct_presence(&decoded)
+                            crate::network::presence_scope::parse_direct_presence(&evt.payload)
                         {
                             if presence.node_id != node_id
                                 && presence.version
