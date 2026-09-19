@@ -109,6 +109,10 @@ export default {
         return await handleLookup(url, env);
       } else if (path === "/version" && request.method === "GET") {
         return await handleVersion(env);
+      } else if (path === "/update/latest" && request.method === "GET") {
+        return await handleUpdateLatest(request);
+      } else if (path === "/update/apk" && request.method === "GET") {
+        return await handleUpdateApk();
       } else if (path === "/health") {
         return json({ status: "ok" });
       } else {
@@ -469,6 +473,67 @@ async function handleVersion(env) {
     update_url:
       "https://github.com/vzhem/APUMIR/releases/download/" + version + "/app-release.apk",
   });
+}
+
+// ---- обновление приложения (белый список мобильных сетей) -------------------
+//
+// На «жёстком» мобильном интернете сеть пускает только хосты из белого
+// списка: наш домен там есть (приглашения и короткие ссылки живут здесь),
+// а GitHub - нет. Телефон спрашивает обновление здесь, а worker сам ходит
+// на GitHub (у Cloudflare своих ограничений нет) и отдаёт сведения и APK
+// потоком СО СВОЕГО домена. Открытого прокси нет: репозиторий и имя файла
+// зашиты намертво, через worker нельзя скачать ничего постороннего.
+
+const RELEASE_REPO = "vzhem/APUMIR";
+const RELEASE_ASSET = "app-release.apk";
+
+async function handleUpdateLatest(request) {
+  let upstream;
+  try {
+    upstream = await fetch("https://api.github.com/repos/" + RELEASE_REPO + "/releases/latest", {
+      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "APU-Relay-Worker" },
+    });
+  } catch (e) {
+    return json({ error: "github unreachable: " + e.message }, 502);
+  }
+  if (!upstream.ok) {
+    return json({ error: "github " + upstream.status }, 502);
+  }
+  const data = await upstream.json();
+  const payload = {
+    tag_name: typeof data.tag_name === "string" ? data.tag_name : "",
+    notes: typeof data.body === "string" ? data.body.slice(0, 4096) : "",
+    published_at: typeof data.published_at === "string" ? data.published_at : "",
+    // APK телефон тоже берёт здесь же: /update/apk отдаёт файл последнего
+    // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
+    apk_url: new URL("/update/apk", request.url).toString(),
+  };
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=300" },
+  });
+}
+
+async function handleUpdateApk() {
+  let upstream;
+  try {
+    upstream = await fetch(
+      "https://github.com/" + RELEASE_REPO + "/releases/latest/download/" + RELEASE_ASSET,
+      { redirect: "follow", headers: { "User-Agent": "APU-Relay-Worker" } }
+    );
+  } catch (e) {
+    return json({ error: "github unreachable: " + e.message }, 502);
+  }
+  if (!upstream.ok || !upstream.body) {
+    return json({ error: "github " + upstream.status }, 502);
+  }
+  const headers = new Headers();
+  headers.set("Content-Type", "application/vnd.android.package-archive");
+  headers.set("Content-Disposition", 'attachment; filename="' + RELEASE_ASSET + '"');
+  const length = upstream.headers.get("content-length");
+  if (length) headers.set("Content-Length", length);
+  headers.set("Cache-Control", "no-store");
+  return new Response(upstream.body, { status: 200, headers: headers });
 }
 
 // ---- общее ------------------------------------------------------------------

@@ -35,6 +35,15 @@ class UpdateChecker @Inject constructor(
         // TODO: заменить на реальные значения
         private const val GITHUB_USER = "vzhem"
         private const val GITHUB_REPO = "APUMIR"
+
+        /**
+         * Наш relay-домен (тот же, что раздаёт приглашения и короткие ссылки:
+         * он у приложения и так живой). На мобильном интернете с белым списком
+         * GitHub недоступен, а этот хост сеть пускает — worker сам ходит на
+         * GitHub и отдаёт сведения (`/update/latest`) и APK (`/update/apk`)
+         * со своего домена. Исходник — tools/worker/p2p_relay_worker.js.
+         */
+        private const val RELAY_BASE = "https://p2p-relay.1985vzhem.workers.dev"
     }
 
     data class ReleaseInfo(
@@ -88,8 +97,19 @@ class UpdateChecker @Inject constructor(
     /**
      * Проверить наличие новой версии.
      * @return ReleaseInfo если есть обновление, null если текущая версия актуальна
+     *
+     * Два пути: (1) напрямую GitHub Releases API; (2) если GitHub недоступен
+     * (мобильный интернет с белым списком хостов, лимит запросов, нет сети) —
+     * через наш relay-домен: worker ходит на GitHub сам и отвечает тем же
+     * сведениями, а APK отдаёт со своего домена (/update/apk). Так обновление
+     * находится и скачивается без VPN в жёстких сетях.
      */
     suspend fun checkForUpdate(currentVersion: String): ReleaseInfo? = withContext(Dispatchers.IO) {
+        checkGitHub(currentVersion) ?: checkViaRelay(currentVersion)
+    }
+
+    /** Прямой запрос к GitHub Releases API (как раньше; null — недоступен). */
+    private suspend fun checkGitHub(currentVersion: String): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
             Log.i(TAG, "Checking for updates. Current: $currentVersion")
             
@@ -146,6 +166,35 @@ class UpdateChecker @Inject constructor(
             }
         } catch (e: Exception) {
             Log.d(TAG, "Check for update skipped (no network)")  // тихая обработка
+            null
+        }
+    }
+
+    /**
+     * Запасной путь: тот же вопрос через наш relay-домен. Отвечает worker
+     * (`/update/latest`): tag_name, notes, published_at и apk_url — ссылка
+     * на `/update/apk` того же домена, чтобы скачивание тоже прошло сквозь
+     * белый список. null — relay недоступен или версии нет/не новее.
+     */
+    private suspend fun checkViaRelay(currentVersion: String): ReleaseInfo? = withContext(Dispatchers.IO) {
+        try {
+            val response = httpGet("$RELAY_BASE/update/latest") ?: return@withContext null
+            val json = JSONObject(response)
+            val latestVersion = json.optString("tag_name", "")
+            if (latestVersion.isBlank() || !isVersionNewer(currentVersion, latestVersion)) {
+                Log.i(TAG, "Relay: no newer version (${latestVersion.ifBlank { "?" }})")
+                return@withContext null
+            }
+            val apkUrl = json.optString("apk_url", "").ifBlank { "$RELAY_BASE/update/apk" }
+            Log.i(TAG, "New version available via relay: $latestVersion")
+            ReleaseInfo(
+                version = latestVersion,
+                downloadUrl = apkUrl,
+                releaseNotes = json.optString("notes", ""),
+                publishedAt = json.optString("published_at", "")
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "Relay update check skipped: ${e.message}")
             null
         }
     }
