@@ -69,7 +69,7 @@ if (-not $VaultId -or -not $RegistryId -or -not $RelayId) {
 Write-Host "=== 4/5 Downloading worker.js ===" -ForegroundColor Cyan
 Invoke-WebRequest -Uri $WorkerUrl -OutFile "worker.js"
 $lines = (Get-Content "worker.js").Count
-Write-Host ("  worker.js: $lines lines (expected about 750)")
+Write-Host ("  worker.js: $lines lines (expected about 792)")
 if ($lines -lt 700) {
     Write-Host "ERROR: file looks truncated, download failed." -ForegroundColor Red
     exit 1
