@@ -77,7 +77,7 @@ pub async fn probe_broker(host: &str, port: u16) -> bool {
         b'r', b'o', b'b', b'e', b'1',
     ];
     let handshake = async {
-        let io_err = |error| error.to_string();
+        let io_err = |error: std::io::Error| error.to_string();
         let mut stream =
             tokio::net::TcpStream::connect((host, port)).await.map_err(io_err)?;
         stream.write_all(CONNECT).await.map_err(io_err)?;
