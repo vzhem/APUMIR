@@ -50,7 +50,9 @@ const SECONDARY_BROKER_PORT: u16 = 1883;
 /// подключаемся сюда по WebSocket+TLS: Cloudflare-мост (/mqtt в
 /// tools/worker/p2p_relay_worker.js) доводит поток до настоящих брокеров.
 /// На обычной сети ветка не выполняется: кто-то из TCP отвечает раньше.
-const WSS_BRIDGE_HOST: &str = "p2p-relay.1985vzhem.workers.dev";
+// Адрес для MqttOptions при WSS-транспорте - ПОЛНЫЙ URL: rumqttc сам
+// достаёт из него домен и порт (split_url), путь остаётся на мосту.
+const WSS_BRIDGE_URL: &str = "wss://p2p-relay.1985vzhem.workers.dev/mqtt";
 const WSS_BRIDGE_PORT: u16 = 443;
 const MQTT_REQUEST_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(5);
 const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
@@ -448,7 +450,7 @@ impl MqttTransport {
             Some(pair) => pair,
             None => {
                 wss_bridge = true;
-                (WSS_BRIDGE_HOST.to_string(), WSS_BRIDGE_PORT)
+                (WSS_BRIDGE_URL.to_string(), WSS_BRIDGE_PORT)
             }
         };
         let (broker_host, broker_port) = (chosen_host.as_str(), chosen_port);
@@ -503,7 +505,7 @@ impl MqttTransport {
             let suffix = &node_id[..16.min(node_id.len())];
             let secondary_client_id = format!("p2pm_emqx_{suffix}");
             let (secondary_host, secondary_port) = if wss_bridge {
-                (WSS_BRIDGE_HOST.to_string(), WSS_BRIDGE_PORT)
+                (WSS_BRIDGE_URL.to_string(), WSS_BRIDGE_PORT)
             } else {
                 socks5_bridge_endpoint(SECONDARY_BROKER_HOST, SECONDARY_BROKER_PORT)
                     .await

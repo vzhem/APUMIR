@@ -121,7 +121,13 @@ export class MqttBridge {
       server.accept();
       server.binaryType = "arraybuffer";
       pump(socket, server);
-      return new Response(null, { status: 101, webSocket: client });
+      // rumqttc (validate_response_headers) требует эхо субпротокола mqtt -
+      // без этого заголовка клиент рвёт соединение сразу после рукопожатия.
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+        headers: { "Sec-WebSocket-Protocol": "mqtt" },
+      });
     } catch (e) {
       return json({ error: "mqtt bridge: " + (e && e.message ? e.message : String(e)) }, 502);
     }
