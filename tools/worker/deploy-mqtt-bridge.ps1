@@ -27,7 +27,7 @@ $ErrorActionPreference = "Stop"
 
 $Account   = "caf1ba3a42dc32ef36978d9ca2bce5ad"
 $Script    = "p2p-relay"
-$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.6/tools/worker/p2p_relay_worker.js"
+$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.7/tools/worker/p2p_relay_worker.js"
 
 Write-Host "=== 1/5 Token ===" -ForegroundColor Cyan
 if ([string]::IsNullOrWhiteSpace($Token)) {

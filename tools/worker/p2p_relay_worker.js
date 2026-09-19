@@ -6,10 +6,9 @@
 //   /version             — сведения об обновлении (как было);
 //   /update/latest       — сведения о последнем релизе (worker сам ходит на GitHub);
 //   /update/apk          — поток APK последнего релиза (белый список мобильных сетей);
-//   /mqtt                — WebSocket-мост к MQTT-брокерам (телефоны в «жёсткой»
-//                          мобильной сети: TLS-443 к нашему домену сеть пускает,
-//                          а TCP-1883 иностранных брокеров — нет). Мост держит
-//                          Durable Object MQTT_BRIDGE (привязка в дашборде);
+//   /mqtt                — НАШ MQTT-брокер (Durable Object MQTT_BRIDGE, привязка
+//                          в дашборде): единый рой для всех телефонов, без
+//                          сторонних брокеров (v11.74.7);
 //   /health              — проверка живости;
 //   /vault/put, /vault/get — хранилище личности;
 //   /i?slug=...          — страница пересланной ссылки старого (длинного) вида:
@@ -59,81 +58,192 @@
 // Существующая привязка REGISTRY используется как раньше.
 // =============================================================================
 
-// Мост для MQTT: WebSocket телефона <-> TLS-сокет к настоящему брокеру.
-// Durable Object нужен, чтобы соединение жило, пока открыты обе стороны.
-// В дашборде Cloudflare (Deploy -> Settings -> Bindings) добавить привязку:
-//   Durable Object Namespace: имя MQTT_BRIDGE, класс MqttBridge
-// (при первом деплое Cloudflare сам предложит миграцию «new class»).
-import { connect } from "cloudflare:sockets";
+// НАШ MQTT-БРОКЕР (задача владельца 2026-09-19, "полноценный
+// маленький сервер"): все телефоны WebSocket'ом сходятся в один
+// Durable Object (idFromName константа), поэтому он сам может
+// раздавать публикации подписчикам - это и есть брокер.
+// Реализован минимальный MQTT 3.1.1 для сигнального трафика
+// роя: CONNECT/CONNACK, SUBSCRIBE/SUBACK, PUBLISH (QoS0 вер; QoS1
+// входящие подтверждаем PUBACK), retain (нужен presence),
+// LastWill, PINGREQ/PINGRESP, дискретные вайлдкарды + #.
+// Старые сборки (v11.74.4/5) попадают сюда же - рой единый.
 
-// ВАЖНО: hivemq первым - ровно как в ядре (rust-core multi_broker BROKERS).
-// Прямые клиенты выбирают hivemq; если бы мост вёл на другой брокер,
-// «мостовые» и «прямые» телефоны оказались бы в разных роях и перестали
-// бы видеть сообщения друг друга (баг 2026-09-19, v11.74.4/5).
-const MQTT_UPSTREAMS = [
-  { hostname: "broker.hivemq.com", port: 8883 },
-  { hostname: "broker.emqx.io", port: 8883 },
-  { hostname: "test.mosquitto.org", port: 8883 },
-];
+const MQTT_MAX_CLIENTS = 400;
+const MQTT_MAX_PUBLISH_BYTES = 256 * 1024;
 
-/** Первое живое TLS-соединение с брокером из списка; иначе — ошибка. */
-async function connectToBroker() {
-  let lastError = null;
-  for (const address of MQTT_UPSTREAMS) {
-    try {
-      const socket = connect(address, { secureTransport: "on", allowHalfOpen: false });
-      await socket.opened;
-      return socket;
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError || new Error("no upstream configured");
+function encLen(n) {
+  const out = [];
+  do { let b = n % 128; n = Math.floor(n / 128); if (n > 0) b += 128; out.push(b); } while (n > 0);
+  return out;
 }
 
-/** Перекачка байтов в обе стороны: WebSocket телефона <-> TLS-сокет брокера. */
-function pump(socket, ws) {
-  const writer = socket.writable.getWriter();
-  ws.addEventListener("message", (event) => {
-    const data = event.data;
-    const bytes = typeof data === "string"
-      ? new TextEncoder().encode(data)
-      : new Uint8Array(data);
-    writer.write(bytes).catch(() => {
-      try { ws.close(1011, "upstream write failed"); } catch (_) {}
-    });
-  });
-  ws.addEventListener("close", () => { try { socket.close(); } catch (_) {} });
-  ws.addEventListener("error", () => { try { socket.close(); } catch (_) {} });
-  socket.readable
-    .pipeTo(new WritableStream({
-      write(chunk) { try { ws.send(chunk); } catch (_) {} },
-      abort() { try { ws.close(1011, "upstream closed"); } catch (_) {} },
-    }))
-    .catch(() => { try { ws.close(1011, "bridge closed"); } catch (_) {} });
+function buildPublish(topic, payload, retain) {
+  const t = new TextEncoder().encode(topic);
+  const body = new Uint8Array(2 + t.length + payload.length);
+  body[0] = t.length >> 8; body[1] = t.length & 255;
+  body.set(t, 2); body.set(payload, 2 + t.length);
+  const head = [0x30 | (retain ? 1 : 0), ...encLen(body.length)];
+  return new Uint8Array([...head, ...body]);
+}
+
+function topicMatch(filter, topic) {
+  if (filter === topic) return true;
+  if (filter === "#") return true;
+  if (filter.endsWith("/#")) {
+    const prefix = filter.slice(0, -2);
+    return topic === prefix || topic.startsWith(prefix + "/");
+  }
+  const f = filter.split("/"); const t = topic.split("/");
+  if (f.length !== t.length) return false;
+  for (let i = 0; i < f.length; i++) {
+    if (f[i] !== "+" && f[i] !== t[i]) return false;
+  }
+  return true;
+}
+
+class MqttClient {
+  constructor(ws) {
+    this.ws = ws;
+    this.subs = [];       // фильтры подписок
+    this.will = null;     // {topic, payload, retain}
+    this.buf = new Uint8Array(0);
+  }
+  send(bytes) { try { this.ws.send(bytes); } catch (_) {} }
 }
 
 export class MqttBridge {
+  constructor() {
+    this.clients = new Set();
+    this.retained = new Map(); // topic -> {topic, payload}
+  }
+
   async fetch(request) {
-    try {
-      // Соединение с брокером ставим ДО ответа 101: если ни один брокер
-      // не доступен, телефон сразу получит ошибку апгрейда и повторит.
-      const socket = await connectToBroker();
-      const pair = new WebSocketPair();
-      const client = pair[0];
-      const server = pair[1];
-      server.accept();
-      server.binaryType = "arraybuffer";
-      pump(socket, server);
-      // rumqttc (validate_response_headers) требует эхо субпротокола mqtt -
-      // без этого заголовка клиент рвёт соединение сразу после рукопожатия.
-      return new Response(null, {
-        status: 101,
-        webSocket: client,
-        headers: { "Sec-WebSocket-Protocol": "mqtt" },
-      });
-    } catch (e) {
-      return json({ error: "mqtt bridge: " + (e && e.message ? e.message : String(e)) }, 502);
+    if (this.clients.size >= MQTT_MAX_CLIENTS) {
+      return json({ error: "broker busy" }, 503);
+    }
+    const pair = new WebSocketPair();
+    const server = pair[1];
+    server.accept();
+    server.binaryType = "arraybuffer";
+    const client = new MqttClient(server);
+    this.clients.add(client);
+    server.addEventListener("message", (event) => {
+      try {
+        const data = event.data;
+        const chunk = typeof data === "string"
+          ? new TextEncoder().encode(data)
+          : new Uint8Array(data);
+        this.feed(client, chunk);
+      } catch (_) { this.drop(client); }
+    });
+    server.addEventListener("close", () => this.drop(client));
+    server.addEventListener("error", () => this.drop(client));
+    // rumqttc требует эхо субпротокола mqtt.
+    return new Response(null, {
+      status: 101,
+      webSocket: pair[0],
+      headers: { "Sec-WebSocket-Protocol": "mqtt" },
+    });
+  }
+
+  drop(client) {
+    if (!this.clients.has(client)) return;
+    this.clients.delete(client);
+    if (client.will) {
+      this.publish(null, client.will.topic, client.will.payload, client.will.retain);
+      client.will = null;
+    }
+  }
+
+  feed(client, chunk) {
+    const buf = new Uint8Array(client.buf.length + chunk.length);
+    buf.set(client.buf); buf.set(chunk, client.buf.length);
+    let pos = 0;
+    while (pos + 2 <= buf.length) {
+      let len = 0, mult = 1, i = pos + 1, byte = 0;
+      do {
+        if (i >= buf.length) { client.buf = buf.slice(pos); return; }
+        byte = buf[i++]; len += (byte & 127) * mult; mult *= 128;
+        if (mult > 128 * 128 * 128 * 2) { this.drop(client); return; }
+      } while (byte & 128);
+      if (pos + 1 + len > buf.length) { client.buf = buf.slice(pos); return; }
+      this.handle(client, buf[pos], buf.slice(i, pos + 1 + len));
+      pos += 1 + len;
+    }
+    client.buf = buf.slice(pos);
+  }
+
+  handle(client, first, body) {
+    const type = first >> 4;
+    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    if (type === 1) { // CONNECT
+      let p = 0;
+      const pnamelen = view.getUint16(p); p += 2 + pnamelen; // "MQTT"
+      p += 1; // level
+      const flags = body[p]; p += 1;
+      p += 2; // keepalive
+      const idlen = view.getUint16(p); p += 2 + idlen; // clientId
+      if (flags & 4) { // will
+        const wtopicLen = view.getUint16(p); const wtopic = new TextDecoder().decode(body.slice(p + 2, p + 2 + wtopicLen)); p += 2 + wtopicLen;
+        const wpayLen = view.getUint16(p); const wpay = body.slice(p + 2, p + 2 + wpayLen); p += 2 + wpayLen;
+        client.will = { topic: wtopic, payload: wpay, retain: (flags & 32) !== 0 };
+      }
+      client.send(new Uint8Array([0x20, 0x02, 0x00, 0x00])); // CONNACK ok
+    } else if (type === 3) { // PUBLISH
+      const qos = (first >> 1) & 3;
+      const retain = (first & 1) !== 0;
+      const tlen = view.getUint16(0);
+      const topic = new TextDecoder().decode(body.slice(2, 2 + tlen));
+      let p = 2 + tlen;
+      if (qos > 0) {
+        const pid = [body[p], body[p + 1]];
+        p += 2;
+        if (qos === 1) client.send(new Uint8Array([0x40, 0x02, pid[0], pid[1]]));
+      }
+      const payload = body.slice(p);
+      if (payload.length > MQTT_MAX_PUBLISH_BYTES) return;
+      this.publish(client, topic, payload, retain);
+    } else if (type === 8) { // SUBSCRIBE
+      const pid = [body[0], body[1]];
+      let p = 2;
+      const granted = [];
+      while (p < body.length) {
+        const flen = view.getUint16(p); p += 2;
+        const filter = new TextDecoder().decode(body.slice(p, p + flen)); p += flen;
+        p += 1; // requested qos
+        client.subs.push(filter);
+        granted.push(0);
+        // Retained: всё совпавшее - сразу (retain бит стоит).
+        for (const entry of this.retained.values()) {
+          if (topicMatch(filter, entry.topic)) {
+            client.send(buildPublish(entry.topic, entry.payload, true));
+          }
+        }
+      }
+      const out = [0x90, ...encLen(2 + granted.length), pid[0], pid[1], ...granted];
+      client.send(new Uint8Array(out));
+    } else if (type === 12) { // PINGREQ
+      client.send(new Uint8Array([0xd0, 0x00]));
+    } else if (type === 14) { // DISCONNECT
+      client.will = null;
+      try { client.ws.close(1000, "bye"); } catch (_) {}
+      this.clients.delete(client);
+    }
+  }
+
+  publish(from, topic, payload, retain) {
+    if (retain) {
+      if (payload.length === 0) this.retained.delete(topic);
+      else this.retained.set(topic, { topic, payload });
+    }
+    if (this.retained.size > 512) {
+      this.retained.delete(this.retained.keys().next().value);
+    }
+    for (const c of this.clients) {
+      if (c === from) continue; // себе эхо не шлем
+      for (const filter of c.subs) {
+        if (topicMatch(filter, topic)) { c.send(buildPublish(topic, payload, false)); break; }
+      }
     }
   }
 }

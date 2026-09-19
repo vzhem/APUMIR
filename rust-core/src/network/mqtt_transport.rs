@@ -89,6 +89,14 @@ static MQTT_WSS_ACTIVE: AtomicBool = AtomicBool::new(false);
 static MQTT_POLL_ERROR_STREAK: AtomicU64 = AtomicU64::new(0);
 /// Когда WSS-сессия стала стабильной (первое Ok после последней ошибки).
 static MQTT_WSS_STABLE_SINCE_MS: AtomicU64 = AtomicU64::new(0);
+/// Когда наш брокер на relay-домене последний раз не ответил на ConnAck
+/// (0 = не отказывал никогда). После отказа час идём на публичных, потом
+/// снова пробуем наш (worker мог обновиться/ожить).
+static MQTT_OWN_FAILED_AT_MS: AtomicU64 = AtomicU64::new(0);
+/// Текущая стартовая попытка - на нашего брокера (для отката при таймауте).
+static MQTT_CHOSEN_OWN: AtomicBool = AtomicBool::new(false);
+const MQTT_OWN_RETRY_AFTER_MS: u64 = 60 * 60 * 1000;
+const MQTT_START_CONNACK_TIMEOUT: Duration = Duration::from_secs(20);
 const MQTT_FAILOVER_TCP_ERRORS: u64 = 4;
 const MQTT_FAILOVER_WSS_ERRORS: u64 = 6;
 const MQTT_WSS_REVIEW_AFTER_MS: u64 = 5 * 60 * 1000;
@@ -515,10 +523,14 @@ impl MqttTransport {
             .ok_or_else(|| "No MQTT brokers configured".to_string())?;
         let mut chosen: Option<(String, u16)> = None;
         let forced_wss = MQTT_PREFER_WSS.load(Ordering::Relaxed);
+        let failed_at = MQTT_OWN_FAILED_AT_MS.load(Ordering::Relaxed);
+        let own_allowed = failed_at == 0
+            || unix_ms().saturating_sub(failed_at) >= MQTT_OWN_RETRY_AFTER_MS;
         let own_is_first = brokers.own().is_some();
-        // Пропускаем пробы, если раньше сеть уже порезала прямой TCP:
-        // сразу WSS-мост (перезапуск сессии вернётся сюда же).
-        if !forced_wss {
+        // Наш брокер (тот же relay-домен, единый рой) - первый выбор без
+        // TCP-проб; публичные перебираем, только если он в часе отказа.
+        let skip_probes = forced_wss || own_allowed;
+        if !skip_probes {
         for (index, (host, port)) in brokers.candidates().into_iter().enumerate() {
             // Пробуем своего брокера и не больше двух публичных: каждый
             // молчащий адрес - это ещё BROKER_PROBE_TIMEOUT ожидания на старте.
@@ -566,11 +578,15 @@ impl MqttTransport {
         MQTT_POLL_ERROR_STREAK.store(0, Ordering::Relaxed);
         MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
         MQTT_WSS_ACTIVE.store(wss_bridge, Ordering::Relaxed);
+        let using_own = wss_bridge && own_allowed && !forced_wss;
+        MQTT_CHOSEN_OWN.store(using_own, Ordering::Relaxed);
         mqtt_link_set_mode(if wss_bridge {
-            if forced_wss {
-                "wss-мост relay-домена (сеть режет прямой TCP - проверено)".to_string()
+            if using_own {
+                "наш брокер на relay-домене (единый рой)".to_string()
+            } else if forced_wss {
+                "наш брокер (сеть режет прямой TCP - переход)".to_string()
             } else {
-                "wss-мост relay-домена (прямые брокеры не ответили)".to_string()
+                "наш брокер (прямые брокеры не ответили)".to_string()
             }
         } else if host == "127.0.0.1" {
             format!("tcp {}:{} через SOCKS5-мост", broker_host, broker_port)
@@ -1379,9 +1395,30 @@ impl MqttTransport {
         }));
 
         tracing::info!("MQTT: event loop started; awaiting initial broker ConnAck");
-        initial_connack_rx
-            .await
-            .map_err(|_| "MQTT event loop stopped before initial ConnAck".to_string())?;
+        match tokio::time::timeout(MQTT_START_CONNACK_TIMEOUT, initial_connack_rx).await {
+            Ok(Ok(())) => {
+                if MQTT_CHOSEN_OWN.swap(false, Ordering::Relaxed) {
+                    MQTT_OWN_FAILED_AT_MS.store(0, Ordering::Relaxed);
+                }
+            }
+            Ok(Err(_)) => {
+                MQTT_CHOSEN_OWN.store(false, Ordering::Relaxed);
+                return Err("MQTT event loop stopped before initial ConnAck".to_string());
+            }
+            Err(_) => {
+                // Висящий старт лечится перезапуском сессии (движок сам);
+                // если это был наш брокер - помечаем отказ, следующая
+                // попытка идёт на публичных.
+                if MQTT_CHOSEN_OWN.swap(false, Ordering::Relaxed) {
+                    MQTT_OWN_FAILED_AT_MS.store(unix_ms(), Ordering::Relaxed);
+                    return Err(
+                        "наш брокер не ответил ConnAck за 20 с - пробуем публичных"
+                            .to_string(),
+                    );
+                }
+                return Err("MQTT initial ConnAck timed out".to_string());
+            }
+        }
 
         // Queue the wildcard subscription only after the broker has acknowledged
         // the connection. The EventLoop task continues polling and sends it.
