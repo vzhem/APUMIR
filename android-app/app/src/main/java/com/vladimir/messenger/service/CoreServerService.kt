@@ -58,6 +58,7 @@ class CoreServerService : Service() {
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
     @Inject lateinit var addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup
+    @Inject lateinit var addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
@@ -326,6 +327,8 @@ class CoreServerService : Service() {
                     while (true) {
                         runCatching { addressBookBackup.backupIfDue() }
                             .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
+                        runCatching { addressBookBackup.swarmHourlyTick() }
+                            .onFailure { Log.w(TAG, "AddressBook swarm tick: ${it.message}") }
                         kotlinx.coroutines.delay(60 * 60 * 1000L)
                     }
                 }
@@ -772,6 +775,18 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Heart packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Рой-копии азбуки: store/ack/ask/give. Конверт может нести
+                    // до 120 КБ шифрованных байтов — в чат и автоконтакты ему
+                    // дороги нет.
+                    if (addressBookSwarm.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Swarm backup ACK failed: " + e.message)
                         }
                         return
                     }

@@ -49,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     private val apkSeeder: com.vladimir.messenger.data.update.ApkSeeder,
     private val updateChecker: com.vladimir.messenger.service.UpdateChecker,
     private val addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup,
+    private val addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup,
     private val botApi: com.vladimir.messenger.service.BotApi,
 ) : ViewModel() {
 
@@ -352,7 +353,9 @@ class SettingsViewModel @Inject constructor(
                     "Копии на сервере ещё нет."
                 }
             )
-            append(" Копия делается сама раз в 6 часов.")
+            append(" Копия делается сама.")
+            val fresh = addressBookSwarm.freshAckCount()
+            append(" На телефонах роя: $fresh из ${com.vladimir.messenger.data.backup.AddressBookSwarmBackup.HOLDER_COUNT}.")
         }
         _uiState.update { it.copy(addrBookLine = line) }
     }

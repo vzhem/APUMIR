@@ -34,12 +34,13 @@ import org.json.JSONObject
 class AddressBookBackup @Inject constructor(
     @ApplicationContext private val context: Context,
     private val botApi: BotApi,
+    private val swarm: AddressBookSwarmBackup,
 ) {
     companion object {
         private const val TAG = "AddressBookBackup"
         private const val PREFS = "p2p_prefs"
         private const val FILE_NAME = "apu_peer_addresses.json"
-        private const val MAGIC = "APUADDBK1"
+        const val MAGIC = "APUADDBK1"
         private const val KEY_LAST_BACKUP_AT = "addrbook_backup_at"
         private const val KEY_LAST_BACKUP_SHA = "addrbook_backup_sha"
         private const val KEY_LAST_RESTORE_AT = "addrbook_restore_at"
@@ -121,9 +122,18 @@ class AddressBookBackup @Inject constructor(
                 .putLong(KEY_LAST_BACKUP_AT, System.currentTimeMillis())
                 .putString(KEY_LAST_BACKUP_SHA, fileSha(file))
                 .apply()
-            "Копия сохранена на сервере (${localEntryCount()} адресов)"
+            val extra = runCatching { swarm.distribute(sealed, force = true) }.getOrNull().orEmpty()
+            buildString {
+                append("Копия сохранена на сервере (${localEntryCount()} адресов)")
+                if (extra.isNotBlank()) append(", ").append(extra)
+            }
         } else {
-            "Сервер недоступен — попробую снова позже"
+            // Сервер не отвечает — раздаём копию по рою хотя бы так.
+            val extra = runCatching { swarm.distribute(sealed, force = true) }.getOrNull().orEmpty()
+            buildString {
+                append("Сервер недоступен — попробую снова позже")
+                if (extra.startsWith("роздана")) append("; копия ").append(extra)
+            }
         }
     }
 
@@ -166,21 +176,59 @@ class AddressBookBackup @Inject constructor(
             ?: return@withContext "Личность ещё не создана"
         val privateKey = privateKey() ?: return@withContext "Личность ещё не создана"
         val sealed = botApi.fetchAddressBook(shelfFor(nodeId))
-            ?: return@withContext "На сервере копии нет (или сервер недоступен)"
-        val plainBytes = decrypt(sealed, privateKey)
+        if (sealed == null) {
+            // Сервер молчит или копии нет — спрашиваем рой.
+            val fromSwarm = askSwarm(privateKey)
+            if (fromSwarm != null) return@withContext fromSwarm
+            return@withContext "На сервере копии нет, рой тоже не отдал — попробуйте позже"
+        }
+        val parsed = parseEnvelope(sealed, privateKey)
             ?: return@withContext "Копия не открылась вашим ключом"
-        val plainText = String(plainBytes, Charsets.UTF_8)
-        val parsed = runCatching { JSONObject(plainText) }.getOrNull()
-        if (parsed == null || !parsed.has("entries")) return@withContext "Копия повреждена"
+        writeBook(parsed)
+        "Восстановлено ${parsed.optJSONArray("entries")?.length() ?: 0} адресов — вступит в силу после перезапуска приложения"
+    }
+
+    /** Открыть конверт и проверить структуру. null — не наш/битый. */
+    private fun parseEnvelope(envelope: String, privateKey: String): JSONObject? {
+        val plainBytes = decrypt(envelope, privateKey) ?: return null
+        val parsed = runCatching { JSONObject(String(plainBytes, Charsets.UTF_8)) }.getOrNull()
+        if (parsed == null || !parsed.has("entries")) return null
+        return parsed
+    }
+
+    /** Записать азбуку на диск (tmp+rename, как пишет ядро). */
+    private fun writeBook(parsed: JSONObject) {
         val file = bookFile(context)
         val tmp = File(file.parentFile, "$FILE_NAME.tmp")
-        tmp.writeText(plainText)
+        tmp.writeText(parsed.toString())
         if (!tmp.renameTo(file)) {
-            file.writeText(plainText)
+            file.writeText(parsed.toString())
             tmp.delete()
         }
         prefs().edit().putLong(KEY_LAST_RESTORE_AT, System.currentTimeMillis()).apply()
-        "Восстановлено ${parsed.optJSONArray("entries")?.length() ?: 0} адресов — вступит в силу после перезапуска приложения"
+    }
+
+    /** Спросить телефоны роя и, если дали, применить копию. */
+    private suspend fun askSwarm(privateKey: String): String? {
+        val envelope = swarm.askAndRestore { e -> parseEnvelope(e, privateKey) != null }
+            ?: return null
+        val parsed = parseEnvelope(envelope, privateKey) ?: return null
+        writeBook(parsed)
+        return "Восстановлено с телефона роя: ${parsed.optJSONArray("entries")?.length() ?: 0} адресов — вступит в силу после перезапуска приложения"
+    }
+
+    /** Свежий конверт для раздачи по рою (шифруем на месте). */
+    suspend fun currentEnvelope(): String? = withContext(Dispatchers.IO) {
+        val privateKey = privateKey() ?: return@withContext null
+        val file = bookFile(context)
+        if (!file.isFile || file.length() < 4) return@withContext null
+        val plain = runCatching { file.readText() }.getOrNull() ?: return@withContext null
+        encrypt(plain.toByteArray(Charsets.UTF_8), privateKey)
+    }
+
+    /** Ежечасный тик: обновить копии на телефонах роя. */
+    suspend fun swarmHourlyTick() {
+        swarm.hourlyTick(currentEnvelope())
     }
 
     /**
