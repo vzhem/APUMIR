@@ -4,6 +4,12 @@
 // Что делает:
 //   /register, /lookup   — реестр узлов (как было);
 //   /version             — сведения об обновлении (как было);
+//   /update/latest       — сведения о последнем релизе (worker сам ходит на GitHub);
+//   /update/apk          — поток APK последнего релиза (белый список мобильных сетей);
+//   /mqtt                — WebSocket-мост к MQTT-брокерам (телефоны в «жёсткой»
+//                          мобильной сети: TLS-443 к нашему домену сеть пускает,
+//                          а TCP-1883 иностранных брокеров — нет). Мост держит
+//                          Durable Object MQTT_BRIDGE (привязка в дашборде);
 //   /health              — проверка живости;
 //   /vault/put, /vault/get — хранилище личности;
 //   /i?slug=...          — страница пересланной ссылки старого (длинного) вида:
@@ -53,6 +59,81 @@
 // Существующая привязка REGISTRY используется как раньше.
 // =============================================================================
 
+// Мост для MQTT: WebSocket телефона <-> TLS-сокет к настоящему брокеру.
+// Durable Object нужен, чтобы соединение жило, пока открыты обе стороны.
+// В дашборде Cloudflare (Deploy -> Settings -> Bindings) добавить привязку:
+//   Durable Object Namespace: имя MQTT_BRIDGE, класс MqttBridge
+// (при первом деплое Cloudflare сам предложит миграцию «new class»).
+import { connect } from "cloudflare:sockets";
+
+const MQTT_UPSTREAMS = [
+  { hostname: "broker.emqx.io", port: 8883 },
+  { hostname: "broker.hivemq.com", port: 8883 },
+  { hostname: "test.mosquitto.org", port: 8883 },
+];
+
+/** Первое живое TLS-соединение с брокером из списка; иначе — ошибка. */
+async function connectToBroker() {
+  let lastError = null;
+  for (const address of MQTT_UPSTREAMS) {
+    try {
+      const socket = connect(address, { secureTransport: "on", allowHalfOpen: false });
+      await socket.opened;
+      return socket;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error("no upstream configured");
+}
+
+/** Перекачка байтов в обе стороны: WebSocket телефона <-> TLS-сокет брокера. */
+function pump(socket, ws) {
+  const writer = socket.writable.getWriter();
+  ws.addEventListener("message", (event) => {
+    const data = event.data;
+    const bytes = typeof data === "string"
+      ? new TextEncoder().encode(data)
+      : new Uint8Array(data);
+    writer.write(bytes).catch(() => {
+      try { ws.close(1011, "upstream write failed"); } catch (_) {}
+    });
+  });
+  ws.addEventListener("close", () => { try { socket.close(); } catch (_) {} });
+  ws.addEventListener("error", () => { try { socket.close(); } catch (_) {} });
+  socket.readable
+    .pipeTo(new WritableStream({
+      write(chunk) { try { ws.send(chunk); } catch (_) {} },
+      abort() { try { ws.close(1011, "upstream closed"); } catch (_) {} },
+    }))
+    .catch(() => { try { ws.close(1011, "bridge closed"); } catch (_) {} });
+}
+
+export class MqttBridge {
+  async fetch(request) {
+    try {
+      // Соединение с брокером ставим ДО ответа 101: если ни один брокер
+      // не доступен, телефон сразу получит ошибку апгрейда и повторит.
+      const socket = await connectToBroker();
+      const pair = new WebSocketPair();
+      const client = pair[0];
+      const server = pair[1];
+      server.accept();
+      server.binaryType = "arraybuffer";
+      pump(socket, server);
+      // rumqttc (validate_response_headers) требует эхо субпротокола mqtt -
+      // без этого заголовка клиент рвёт соединение сразу после рукопожатия.
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+        headers: { "Sec-WebSocket-Protocol": "mqtt" },
+      });
+    } catch (e) {
+      return json({ error: "mqtt bridge: " + (e && e.message ? e.message : String(e)) }, 502);
+    }
+  }
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -88,6 +169,16 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // MQTT-мост: важен только заголовок Upgrade (rumqttc сам выбирает путь).
+    // Обычные запросы (приглашения, ссылки, обновление) не задеваем.
+    if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
+      if (!env.MQTT_BRIDGE) {
+        return json({ error: "MQTT_BRIDGE binding is not configured" }, 501);
+      }
+      const stub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
+      return env.MQTT_BRIDGE.get(stub).fetch(request);
+    }
+
     try {
       if (path === "/i" && request.method === "GET") {
         return handleInviteLanding(url);
@@ -109,6 +200,10 @@ export default {
         return await handleLookup(url, env);
       } else if (path === "/version" && request.method === "GET") {
         return await handleVersion(env);
+      } else if (path === "/update/latest" && request.method === "GET") {
+        return await handleUpdateLatest(request);
+      } else if (path === "/update/apk" && request.method === "GET") {
+        return await handleUpdateApk();
       } else if (path === "/health") {
         return json({ status: "ok" });
       } else {
@@ -469,6 +564,67 @@ async function handleVersion(env) {
     update_url:
       "https://github.com/vzhem/APUMIR/releases/download/" + version + "/app-release.apk",
   });
+}
+
+// ---- обновление приложения (белый список мобильных сетей) -------------------
+//
+// На «жёстком» мобильном интернете сеть пускает только хосты из белого
+// списка: наш домен там есть (приглашения и короткие ссылки живут здесь),
+// а GitHub - нет. Телефон спрашивает обновление здесь, а worker сам ходит
+// на GitHub (у Cloudflare своих ограничений нет) и отдаёт сведения и APK
+// потоком СО СВОЕГО домена. Открытого прокси нет: репозиторий и имя файла
+// зашиты намертво, через worker нельзя скачать ничего постороннего.
+
+const RELEASE_REPO = "vzhem/APUMIR";
+const RELEASE_ASSET = "app-release.apk";
+
+async function handleUpdateLatest(request) {
+  let upstream;
+  try {
+    upstream = await fetch("https://api.github.com/repos/" + RELEASE_REPO + "/releases/latest", {
+      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "APU-Relay-Worker" },
+    });
+  } catch (e) {
+    return json({ error: "github unreachable: " + e.message }, 502);
+  }
+  if (!upstream.ok) {
+    return json({ error: "github " + upstream.status }, 502);
+  }
+  const data = await upstream.json();
+  const payload = {
+    tag_name: typeof data.tag_name === "string" ? data.tag_name : "",
+    notes: typeof data.body === "string" ? data.body.slice(0, 4096) : "",
+    published_at: typeof data.published_at === "string" ? data.published_at : "",
+    // APK телефон тоже берёт здесь же: /update/apk отдаёт файл последнего
+    // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
+    apk_url: new URL("/update/apk", request.url).toString(),
+  };
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=300" },
+  });
+}
+
+async function handleUpdateApk() {
+  let upstream;
+  try {
+    upstream = await fetch(
+      "https://github.com/" + RELEASE_REPO + "/releases/latest/download/" + RELEASE_ASSET,
+      { redirect: "follow", headers: { "User-Agent": "APU-Relay-Worker" } }
+    );
+  } catch (e) {
+    return json({ error: "github unreachable: " + e.message }, 502);
+  }
+  if (!upstream.ok || !upstream.body) {
+    return json({ error: "github " + upstream.status }, 502);
+  }
+  const headers = new Headers();
+  headers.set("Content-Type", "application/vnd.android.package-archive");
+  headers.set("Content-Disposition", 'attachment; filename="' + RELEASE_ASSET + '"');
+  const length = upstream.headers.get("content-length");
+  if (length) headers.set("Content-Length", length);
+  headers.set("Cache-Control", "no-store");
+  return new Response(upstream.body, { status: 200, headers: headers });
 }
 
 // ---- общее ------------------------------------------------------------------

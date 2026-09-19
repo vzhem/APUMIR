@@ -56,25 +56,49 @@ pub fn parse_broker_endpoint(text: &str) -> Option<(String, u16)> {
     Some((host.to_string(), port))
 }
 
-/// Отвечает ли порт брокера в пределах [`BROKER_PROBE_TIMEOUT`].
+/// Отвечает ли брокер на порт в пределах [`BROKER_PROBE_TIMEOUT`].
 ///
-/// Проверяем именно соединение (MQTT-hello не шлём): задача - быстро
-/// отличить «там что-то есть» от «там никого нет», не поднимая сессию.
-/// Ошибка разбора адреса - тоже `false`: значит, идём на публичный брокер.
+/// Проба - НАСТОЯЩЕЕ MQTT-рукопожатие: шлём минимальный CONNECT (MQTT 3.1.1,
+/// чистая сессия, клиент "probe1") и ждём CONNACK с кодом успеха. Раньше
+/// проверяли только установку TCP-соединения - и в сетях, где порт «приоткрыт»,
+/// а полезный трафик режется (белые списки оператора, DPI), проба говорила
+/// «жив», движок садился на мёртвого адреса и никогда не добирался до
+/// WSS-моста. Настоящий брокер всегда отвечает CONNACK сразу; заглушки,
+/// чёрные дыры и перехватчики - нет. Сессию не закрываем вежливо (без
+/// DISCONNECT): чистая сессия и так сгорит по keep-alive, а соединение
+/// рвём сразу. Ошибка разбора адреса - тоже `false`.
 pub async fn probe_broker(host: &str, port: u16) -> bool {
-    match tokio::time::timeout(
-        BROKER_PROBE_TIMEOUT,
-        tokio::net::TcpStream::connect((host, port)),
-    )
-    .await
-    {
-        Ok(Ok(stream)) => {
-            drop(stream);
-            true
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // CONNECT: 10 12 | 00 04 "MQTT" | 04 (уровень 3.1.1) | 02 (clean session)
+    // | 00 3C (keep-alive 60 c) | 00 06 "probe1".
+    const CONNECT: &[u8] = &[
+        0x10, 0x12, 0x00, 0x04, b'M', b'Q', b'T', b'T', 0x04, 0x02, 0x00, 0x3C, 0x00, 0x06, b'p',
+        b'r', b'o', b'b', b'e', b'1',
+    ];
+    let handshake = async {
+        let io_err = |error| error.to_string();
+        let mut stream =
+            tokio::net::TcpStream::connect((host, port)).await.map_err(io_err)?;
+        stream.write_all(CONNECT).await.map_err(io_err)?;
+        let mut header = [0u8; 2];
+        stream.read_exact(&mut header).await.map_err(io_err)?;
+        // CONNACK: 0x20, remaining length 2. Всё остальное - не MQTT-брокер.
+        if header[0] != 0x20 || header[1] != 0x02 {
+            return Err("в ответ на CONNECT не CONNACK".to_string());
         }
+        let mut body = [0u8; 2];
+        stream.read_exact(&mut body).await.map_err(io_err)?;
+        if body[1] != 0x00 {
+            return Err("CONNACK с кодом отказа".to_string());
+        }
+        Ok::<(), String>(())
+    };
+    match tokio::time::timeout(BROKER_PROBE_TIMEOUT, handshake).await {
+        Ok(Ok(())) => true,
         Ok(Err(error)) => {
             tracing::info!(
-                "MQTT OWN BROKER: {}:{} не ответил ({}), идём на публичный",
+                "MQTT OWN BROKER: {}:{} не брокер ({}) - дальше по списку",
                 host,
                 port,
                 error
@@ -83,7 +107,7 @@ pub async fn probe_broker(host: &str, port: u16) -> bool {
         }
         Err(_) => {
             tracing::info!(
-                "MQTT OWN BROKER: {}:{} молчит дольше {} с, идём на публичный",
+                "MQTT OWN BROKER: {}:{} молчит дольше {} с (нет TCP или нет CONNACK) - дальше по списку",
                 host,
                 port,
                 BROKER_PROBE_TIMEOUT.as_secs()

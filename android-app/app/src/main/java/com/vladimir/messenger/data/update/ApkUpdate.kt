@@ -132,4 +132,12 @@ object ApkUpdate {
             String.format(java.util.Locale.ROOT, "%.1f КБ", totalBytes / 1024.0)
         else -> "$totalBytes Б"
     }
+
+    /**
+     * Угадать версию из имени файла: первое числовое `11.70.29` в строке
+     * (APU-v11.70.29.apk, «APU 11.70.29 beta.apk»). null — не найдено,
+     * попросим у человека или прочитаем из самого APK.
+     */
+    fun versionFromName(fileName: String): String? =
+        Regex("""(\d{1,4}(?:\.\d{1,4}){1,3})""").find(fileName)?.value
 }

@@ -53,6 +53,19 @@ class ApkUpdateStore(private val root: File) {
         val seeds: List<String>,
     )
 
+    /**
+     * Скачанный файл обновления, уже взятый в раздел «Обновления»
+     * (автоматически после DownloadManager). Помним путь и размер, чтобы
+     * при следующем старте не пересчитывать sha256 большого файла зря.
+     */
+    data class Adopted(
+        val path: String,
+        val name: String,
+        val sha256: String,
+        val sizeBytes: Long,
+        val atMs: Long,
+    )
+
     // ── Раздача ─────────────────────────────────────────────────────────────
 
     @Synchronized
@@ -126,7 +139,50 @@ class ApkUpdateStore(private val root: File) {
         writeAll(file, formatPending(pending))
     }
 
+    // ── Уже взятые в раздел скачанные файлы ─────────────────────────────────
+
+    @Synchronized
+    fun loadAdopted(): List<Adopted> {
+        val file = File(root, ADOPTED_FILE)
+        if (!file.isFile) return emptyList()
+        val lines = runCatching { file.readLines(StandardCharsets.UTF_8) }.getOrElse { return emptyList() }
+        if (lines.firstOrNull()?.trim() != ADOPTED_HEADER) return emptyList()
+        return lines.asSequence().drop(1).mapNotNull { parseAdopted(it) }.take(MAX_ADOPTED).toList()
+    }
+
+    /** Запомнить взятый файл; новые записи в конце, старые вытесняются. */
+    @Synchronized
+    fun addAdopted(entry: Adopted) {
+        val next = (loadAdopted().filterNot { it.path == entry.path } + entry).takeLast(MAX_ADOPTED)
+        val body = buildString {
+            append(ADOPTED_HEADER).append('\n')
+            for (adopted in next) append(formatAdopted(adopted)).append('\n')
+        }
+        writeAll(File(root, ADOPTED_FILE), body)
+    }
+
     // ── Формат ──────────────────────────────────────────────────────────────
+
+    // ── Флаг «автораздачу выключил человек» ──────────────────────────────────
+
+    /**
+     * «Остановить раздачу» запоминается навсегда: самосев (ensureSelfSeeding)
+     * не воскресит раздачу, пока человек сам её не включит (пометив файл).
+     */
+    @Synchronized
+    fun loadAutoSeedOptOut(): Boolean {
+        val file = File(root, AUTOSEED_FILE)
+        if (!file.isFile) return false
+        val line = runCatching { file.readLines(StandardCharsets.UTF_8).firstOrNull() }.getOrNull()
+            ?: return false
+        return line.trimStart().startsWith("$AUTOSEED_HEADER|")
+    }
+
+    @Synchronized
+    fun saveAutoSeedOptOut(disabled: Boolean) {
+        val file = File(root, AUTOSEED_FILE)
+        if (disabled) writeAll(file, "$AUTOSEED_HEADER|off") else file.delete()
+    }
 
     private fun writeAll(file: File, body: String) {
         val parent = file.absoluteFile.parentFile
@@ -208,6 +264,26 @@ class ApkUpdateStore(private val root: File) {
         return Pending(version, sha, started, attempts, parts[5], askedAt, seeds)
     }
 
+    private fun formatAdopted(adopted: Adopted): String =
+        adopted.path.replace('\n', ' ') + "|" + encode(adopted.name) + "|" +
+            adopted.sha256 + "|" + adopted.sizeBytes + "|" + adopted.atMs
+
+    private fun parseAdopted(line: String): Adopted? {
+        val parts = line.split('|')
+        if (parts.size != 5) return null
+        val path = parts[0]
+        val name = decode(parts[1]) ?: return null
+        val sha = parts[2]
+        val size = parts[3].toLongOrNull() ?: return null
+        val at = parts[4].toLongOrNull() ?: return null
+        if (path.isBlank() || path.length > 1024 || name.isBlank() ||
+            !GroupWireSha.isSha256(sha) || size < 0L || at < 0L
+        ) {
+            return null
+        }
+        return Adopted(path, name, sha, size, at)
+    }
+
     private fun encode(value: String): String =
         Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(StandardCharsets.UTF_8))
 
@@ -221,7 +297,12 @@ class ApkUpdateStore(private val root: File) {
         const val SEED_HEADER = "APUSEED1"
         const val OFFERS_HEADER = "APUOFFER1"
         const val REQUEST_HEADER = "APUREQ1"
+        const val ADOPTED_FILE = "adopted.v1"
+        const val ADOPTED_HEADER = "APUADOPT1"
+        const val AUTOSEED_FILE = "autoseed.v1"
+        const val AUTOSEED_HEADER = "APUAUTOSEED1"
         const val MAX_OFFERS = 64
+        const val MAX_ADOPTED = 32
     }
 }
 
