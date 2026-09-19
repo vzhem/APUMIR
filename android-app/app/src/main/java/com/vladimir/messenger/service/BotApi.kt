@@ -128,6 +128,58 @@ class BotApi @Inject constructor(
         }
 
     /**
+     * Проверка живости сервера: время ответа /health в миллисекундах,
+     * null - сервер не ответил.
+     */
+    suspend fun pingHealth(): Int? = withContext(Dispatchers.IO) {
+        val started = System.currentTimeMillis()
+        val response = getJson("$REGISTRY_URL/health") ?: return@withContext null
+        (System.currentTimeMillis() - started).toInt().coerceAtLeast(1)
+    }
+
+    /**
+     * Положить резервную копию азбуки адресов на полку.
+     *
+     * Как и сундук личности: наружу уходят только зашифрованные байты,
+     * ключ выведен из приватного ключа узла и на сервер не уходит.
+     */
+    suspend fun storeAddressBook(shelf: String, book: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = JSONObject().apply {
+                    put("shelf", shelf)
+                    put("book", book)
+                }
+                val response = postJson("$REGISTRY_URL/addrbook/put", body.toString())
+                    ?: return@withContext false
+                JSONObject(response).optBoolean("success", false)
+            } catch (e: Exception) {
+                Log.e(TAG, "AddressBook store failed", e)
+                false
+            }
+        }
+
+    /**
+     * Забрать резервную копию азбуки адресов. null - полка пуста или
+     * сервер недоступен.
+     */
+    suspend fun fetchAddressBook(shelf: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val response = getJson("$REGISTRY_URL/addrbook/get?shelf=$shelf")
+                ?: return@withContext null
+            val json = JSONObject(response)
+            if (json.has("error")) {
+                Log.i(TAG, "AddressBook fetch: ${json.optString("error")}")
+                return@withContext null
+            }
+            json.optString("book", "").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "AddressBook fetch failed", e)
+            null
+        }
+    }
+
+    /**
      * Забрать сундук с полки. Открыть его сможет только тот, кто знает пароль.
      *
      * @return содержимое сундука в base64 или null, если полка пуста либо

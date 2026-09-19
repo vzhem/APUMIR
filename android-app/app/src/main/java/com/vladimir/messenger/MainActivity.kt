@@ -78,12 +78,38 @@ class MainActivity : ComponentActivity() {
     private var pendingGroupInviteLink by mutableStateOf<String?>(null)
     private var pendingGroupInvite by mutableStateOf<String?>(null)
     private var updateRelease by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
+
+    /** Версия, закрытая «Позже»: в этой сессии не показываем, более новую — покажем. */
+    private var dismissedUpdateVersion: String? = null
+
+    /** Момент последней проверки обновления (повтор при возврате — не чаще 5 минут). */
+    private var lastUpdateCheckAtMs = 0L
+
+    /** Интервал повторных проверок обновления при возврате в приложение. */
+    private val resumeUpdateCheckIntervalMs = 5L * 60 * 1000
+
     private var lastHandledInviteUri: String? = null
     private val viewModel: MainViewModel by viewModels()
 
     override fun onResume() {
         super.onResume()
         handleDeepLinkIntent(intent)
+        maybeCheckForUpdates()
+    }
+
+    /**
+     * Повторная проверка обновления при возврате в приложение. Стартовая
+     * проверка (onCreate) одна и молчаливая: если в тот момент сеть ещё не
+     * поднялась или GitHub ответил ошибкой (лимит запросов, таймаут),
+     * объявление пропадало до перезапуска — телефоны «не видели обновление».
+     * Теперь догоняем здесь: не чаще раза в 5 минут (лимит GitHub API —
+     * 60 запросов/час), закрытая «Позже» версия в этой сессии не надоедает.
+     */
+    private fun maybeCheckForUpdates() {
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateCheckAtMs < resumeUpdateCheckIntervalMs) return
+        lastUpdateCheckAtMs = now
+        checkForUpdates()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -367,14 +393,19 @@ class MainActivity : ComponentActivity() {
                             checker.downloadApk(currentUpdate)
                             updateRelease = null
                             
-                            // Показать подсказку "откройте Downloads"
+                            // Показать подсказку: файл сам встанет в настройки
                             android.widget.Toast.makeText(
                                 applicationContext,
-                                "Скачивание началось. После завершения откройте Downloads для установки.",
+                                "Скачивание началось. Когда файл скачается, он сам появится в «Настройки → Обновления».",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         },
-                        onDismissClick = { updateRelease = null }
+                        onDismissClick = {
+                            // Отложили «Позже»: эту версию в этой сессии
+                            // больше не показываем (более новую — покажем).
+                            dismissedUpdateVersion = currentUpdate.version
+                            updateRelease = null
+                        }
                     )
                 }
 
@@ -433,6 +464,7 @@ class MainActivity : ComponentActivity() {
 
 
     private fun checkForUpdates() {
+        lastUpdateCheckAtMs = System.currentTimeMillis()
         lifecycleScope.launch {
             try {
                 val entryPoint = EntryPointAccessors.fromApplication(
@@ -445,10 +477,16 @@ class MainActivity : ComponentActivity() {
                     } catch (_: Exception) { "v0.0.0" }
                     val release = updateChecker.checkForUpdate(appVersion)
                 if (release != null) {
+                    if (release.version == dismissedUpdateVersion) {
+                        // Эту версию уже отложили «Позже» в этой сессии —
+                        // не показываем окно снова; более новую покажем.
+                        Log.d("MainActivity", "Update ${release.version} dismissed earlier this session")
+                        return@launch
+                    }
                     Log.i("MainActivity", "New version available: ${release.version}")
                     updateRelease = release
                 } else {
-                    Log.d("MainActivity", "App is up to date")
+                    Log.d("MainActivity", "App is up to date (or check skipped: no network/limit)")
                 }
             } catch (e: Exception) {
                 Log.w("MainActivity", "Update check failed: ${e.message}")
