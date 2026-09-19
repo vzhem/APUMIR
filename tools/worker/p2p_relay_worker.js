@@ -4,6 +4,12 @@
 // Что делает:
 //   /register, /lookup   — реестр узлов (как было);
 //   /version             — сведения об обновлении (как было);
+//   /update/latest       — сведения о последнем релизе (worker сам ходит на GitHub);
+//   /update/apk          — поток APK последнего релиза (белый список мобильных сетей);
+//   /mqtt                — WebSocket-мост к MQTT-брокерам (телефоны в «жёсткой»
+//                          мобильной сети: TLS-443 к нашему домену сеть пускает,
+//                          а TCP-1883 иностранных брокеров — нет). Мост держит
+//                          Durable Object MQTT_BRIDGE (привязка в дашборде);
 //   /health              — проверка живости;
 //   /vault/put, /vault/get — хранилище личности;
 //   /i?slug=...          — страница пересланной ссылки старого (длинного) вида:
@@ -53,6 +59,75 @@
 // Существующая привязка REGISTRY используется как раньше.
 // =============================================================================
 
+// Мост для MQTT: WebSocket телефона <-> TLS-сокет к настоящему брокеру.
+// Durable Object нужен, чтобы соединение жило, пока открыты обе стороны.
+// В дашборде Cloudflare (Deploy -> Settings -> Bindings) добавить привязку:
+//   Durable Object Namespace: имя MQTT_BRIDGE, класс MqttBridge
+// (при первом деплое Cloudflare сам предложит миграцию «new class»).
+import { connect } from "cloudflare:sockets";
+
+const MQTT_UPSTREAMS = [
+  { hostname: "broker.emqx.io", port: 8883 },
+  { hostname: "broker.hivemq.com", port: 8883 },
+  { hostname: "test.mosquitto.org", port: 8883 },
+];
+
+/** Первое живое TLS-соединение с брокером из списка; иначе — ошибка. */
+async function connectToBroker() {
+  let lastError = null;
+  for (const address of MQTT_UPSTREAMS) {
+    try {
+      const socket = connect(address, { secureTransport: "on", allowHalfOpen: false });
+      await socket.opened;
+      return socket;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error("no upstream configured");
+}
+
+/** Перекачка байтов в обе стороны: WebSocket телефона <-> TLS-сокет брокера. */
+function pump(socket, ws) {
+  const writer = socket.writable.getWriter();
+  ws.addEventListener("message", (event) => {
+    const data = event.data;
+    const bytes = typeof data === "string"
+      ? new TextEncoder().encode(data)
+      : new Uint8Array(data);
+    writer.write(bytes).catch(() => {
+      try { ws.close(1011, "upstream write failed"); } catch (_) {}
+    });
+  });
+  ws.addEventListener("close", () => { try { socket.close(); } catch (_) {} });
+  ws.addEventListener("error", () => { try { socket.close(); } catch (_) {} });
+  socket.readable
+    .pipeTo(new WritableStream({
+      write(chunk) { try { ws.send(chunk); } catch (_) {} },
+      abort() { try { ws.close(1011, "upstream closed"); } catch (_) {} },
+    }))
+    .catch(() => { try { ws.close(1011, "bridge closed"); } catch (_) {} });
+}
+
+export class MqttBridge {
+  async fetch(request) {
+    try {
+      // Соединение с брокером ставим ДО ответа 101: если ни один брокер
+      // не доступен, телефон сразу получит ошибку апгрейда и повторит.
+      const socket = await connectToBroker();
+      const pair = new WebSocketPair();
+      const client = pair[0];
+      const server = pair[1];
+      server.accept();
+      server.binaryType = "arraybuffer";
+      pump(socket, server);
+      return new Response(null, { status: 101, webSocket: client });
+    } catch (e) {
+      return json({ error: "mqtt bridge: " + (e && e.message ? e.message : String(e)) }, 502);
+    }
+  }
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -87,6 +162,16 @@ export default {
 
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // MQTT-мост: важен только заголовок Upgrade (rumqttc сам выбирает путь).
+    // Обычные запросы (приглашения, ссылки, обновление) не задеваем.
+    if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
+      if (!env.MQTT_BRIDGE) {
+        return json({ error: "MQTT_BRIDGE binding is not configured" }, 501);
+      }
+      const stub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
+      return env.MQTT_BRIDGE.get(stub).fetch(request);
+    }
 
     try {
       if (path === "/i" && request.method === "GET") {

@@ -42,6 +42,16 @@ const MQTT_RECONNECT_BACKOFF_MAX_SECS: u64 = 30;
 const SECONDARY_BROKER_HOST: &str = "broker.emqx.io";
 #[cfg(feature = "mqtt-dual-broker")]
 const SECONDARY_BROKER_PORT: u16 = 1883;
+
+/// WSS-мост через наш relay-домен (белый список мобильных сетей, задача
+/// владельца 2026-09-18). «Жёсткая» сеть пускает только HTTPS-443 на
+/// разрешённые хосты: наш workers.dev там есть, TCP-1883 иностранных
+/// брокеров — нет. Когда НИ ОДИН TCP-кандидат не ответил на пробу,
+/// подключаемся сюда по WebSocket+TLS: Cloudflare-мост (/mqtt в
+/// tools/worker/p2p_relay_worker.js) доводит поток до настоящих брокеров.
+/// На обычной сети ветка не выполняется: кто-то из TCP отвечает раньше.
+const WSS_BRIDGE_HOST: &str = "p2p-relay.1985vzhem.workers.dev";
+const WSS_BRIDGE_PORT: u16 = 443;
 const MQTT_REQUEST_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(5);
 const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
 const MQTT_LIVENESS_STALL_AFTER: Duration = Duration::from_secs(90);
@@ -296,6 +306,28 @@ async fn forward_incoming_publish(
 /// (кастомного коннектора в 0.25.1 нет), MQTT-протокол не меняется. При сбое туннеля
 /// конкретное подключение падает и rumqttc переподключается заново — автопилот на
 /// Kotlin за это время успевает сменить прокси.
+/// TLS-конфигурация для WSS-моста: публичные корневые сертификаты Mozilla
+/// (webpki-roots), провайдер aws-lc-rs — тот же, что у остального стека.
+/// `None` — конфиг не собрался (страховка: остаётся прежний прямой TCP).
+fn wss_bridge_transport() -> Option<rumqttc::Transport> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(
+        webpki_roots::TLS_SERVER_ROOTS
+            .iter()
+            .map(|anchor| anchor.to_trust_anchor()),
+    );
+    let config = rustls::ClientConfig::builder_with_provider(
+        std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider()),
+    )
+    .with_safe_default_protocol_versions()
+    .ok()?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    Some(rumqttc::Transport::Wss(rumqttc::TlsConfiguration::Rustls(
+        std::sync::Arc::new(config),
+    )))
+}
+
 async fn socks5_bridge_endpoint(target_host: &str, target_port: u16) -> Option<(String, u16)> {
     let proxy = crate::network::socks5::mqtt_socks5_proxy_config()?;
     let listener = match tokio::net::TcpListener::bind(("127.0.0.1", 0)).await {
@@ -378,7 +410,9 @@ impl MqttTransport {
         // кто отвечает в пределах строгого таймаута. Если не ответил никто,
         // оставляем публичного по умолчанию: переподключение - дело rumqttc,
         // и повторять перебор на каждом круге не нужно.
-        let (default_host, default_port) = MQTT_BROKERS
+        // Проверяем, что список брокеров не пуст (сами значения больше не
+        // нужны: дефолтной TCP-целью при полном молчании стал WSS-мост).
+        MQTT_BROKERS
             .first()
             .copied()
             .ok_or_else(|| "No MQTT brokers configured".to_string())?;
@@ -402,14 +436,31 @@ impl MqttTransport {
                 brokers.mark_own_failed();
             }
         }
-        // Никто не ответил: остаётся публичный по умолчанию - rumqttc будет
-        // переподключаться к нему сам, как и до K4-3.
-        let (chosen_host, chosen_port) = chosen
-            .unwrap_or_else(|| (default_host.to_string(), default_port));
+        // Никто не ответил: если это обычная сеть с временно молчащими
+        // брокерами, остаёмся на публичном по умолчанию; но чаще это
+        // «жёсткая» мобильная сеть с белым списком - TCP-1883 туда не
+        // проходит вовсе. Тогда идём через WSS-мост нашего relay-домена:
+        // TLS-443 к workers.dev белый список пускает, а мост на Cloudflare
+        // доводит поток до настоящих брокеров; rumqttc переподключается
+        // сам, так что возвращение прямых брокеров видно только в логах.
+        let mut wss_bridge = false;
+        let (chosen_host, chosen_port) = match chosen {
+            Some(pair) => pair,
+            None => {
+                wss_bridge = true;
+                (WSS_BRIDGE_HOST.to_string(), WSS_BRIDGE_PORT)
+            }
+        };
         let (broker_host, broker_port) = (chosen_host.as_str(), chosen_port);
-        let (host, port) = socks5_bridge_endpoint(broker_host, broker_port)
-            .await
-            .unwrap_or((broker_host.to_string(), broker_port));
+        let (host, port) = if wss_bridge {
+            // SOCKS5-туннель и WSS-мост - два разных обхода; в WSS-ветке
+            // локальный мост не нужен.
+            (broker_host.to_string(), broker_port)
+        } else {
+            socks5_bridge_endpoint(broker_host, broker_port)
+                .await
+                .unwrap_or((broker_host.to_string(), broker_port))
+        };
 
         // Creating AsyncClient only creates a bounded local request channel; real readiness still
         // requires ConnAck followed by a queued wildcard subscription request.
@@ -420,6 +471,15 @@ impl MqttTransport {
             if host == "127.0.0.1" { " (via SOCKS5 bridge)" } else { "" }
         );
         let mut opts = MqttOptions::new(&client_id, &host, port);
+        if wss_bridge {
+            match wss_bridge_transport() {
+                Some(transport) => {
+                    opts.set_transport(transport);
+                    tracing::info!("MQTT: restricted network, primary via WSS bridge {}:{}", host, port);
+                }
+                None => tracing::warn!("MQTT: WSS bridge chosen but TLS setup failed; plain TCP as before"),
+            }
+        }
         opts.set_keep_alive(Duration::from_secs(60));
         opts.set_clean_session(true);
         // Last Will: брокер сам сотрёт retained presence, когда телефон пропадёт
@@ -442,17 +502,27 @@ impl MqttTransport {
         let (secondary_client, secondary_eventloop, secondary_liveness, secondary_ready) = {
             let suffix = &node_id[..16.min(node_id.len())];
             let secondary_client_id = format!("p2pm_emqx_{suffix}");
-            let (secondary_host, secondary_port) = socks5_bridge_endpoint(
-                SECONDARY_BROKER_HOST,
-                SECONDARY_BROKER_PORT,
-            )
-            .await
-            .unwrap_or((
-                SECONDARY_BROKER_HOST.to_string(),
-                SECONDARY_BROKER_PORT,
-            ));
+            let (secondary_host, secondary_port) = if wss_bridge {
+                (WSS_BRIDGE_HOST.to_string(), WSS_BRIDGE_PORT)
+            } else {
+                socks5_bridge_endpoint(SECONDARY_BROKER_HOST, SECONDARY_BROKER_PORT)
+                    .await
+                    .unwrap_or((
+                        SECONDARY_BROKER_HOST.to_string(),
+                        SECONDARY_BROKER_PORT,
+                    ))
+            };
             let mut secondary_options =
                 MqttOptions::new(secondary_client_id, &secondary_host, secondary_port);
+            if wss_bridge {
+                match wss_bridge_transport() {
+                    Some(transport) => {
+                        secondary_options.set_transport(transport);
+                        tracing::info!("MQTT: restricted network, secondary via WSS bridge {}:{}", secondary_host, secondary_port);
+                    }
+                    None => tracing::warn!("MQTT: secondary WSS bridge chosen but TLS setup failed; plain TCP as before"),
+                }
+            }
             secondary_options.set_keep_alive(Duration::from_secs(60));
             secondary_options.set_clean_session(true);
             secondary_options.set_last_will(LastWill::new(
