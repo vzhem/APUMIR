@@ -1,24 +1,5 @@
 package com.vladimir.messenger.ui.screens.channels
 
-/** Кружок непрочитанных комментариев поста: тёмная цифра на золоте (как в списках). */
-@Composable
-private fun UnreadBadge(count: Int) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            if (count > 99) "99+" else count.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF1E2430),
-            fontWeight = FontWeight.Bold,
-        )
-    }
-}
-
 // =============================================================================
 // CHANNELSCREEN.KT - лента канала
 // =============================================================================
@@ -865,4 +846,23 @@ private fun PostEditorDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
+}
+
+/** Кружок непрочитанных комментариев поста: тёмная цифра на золоте (как в списках). */
+@Composable
+private fun UnreadBadge(count: Int) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (count > 99) "99+" else count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFF1E2430),
+            fontWeight = FontWeight.Bold,
+        )
+    }
 }
