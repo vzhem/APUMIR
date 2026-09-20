@@ -1018,7 +1018,9 @@ private fun SettingsTabContent(
                     // (замер отклика /health).
                     SettingsItem(
                         icon     = Icons.Default.Dns,
-                        title    = "p2p-relay.1985vzhem.workers.dev",
+                        // Адрес сервера не показываем (просьба владельца,
+                        // 2026-09-19): в интерфейсе только нейтральное имя.
+                        title    = "Наш сервер",
                         subtitle = uiState.serverStatus,
                     )
                     // Диагностика брокерной линии: режим (наш сервер или
