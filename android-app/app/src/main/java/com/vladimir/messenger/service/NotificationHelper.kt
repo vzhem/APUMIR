@@ -49,7 +49,7 @@ class NotificationHelper @Inject constructor(
         senderId: String,
         messageText: String,
         isIncoming: Boolean,
-        topicId: String? = null,
+        topicId: String?,
     ) {
         android.util.Log.d("NotificationHelper", "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
         if (!isIncoming) {

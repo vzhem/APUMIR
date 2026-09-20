@@ -560,15 +560,15 @@ class CoreServerService : Service() {
                     }
                     for (msg in recentIncoming) {
                         try {
+                            // Тема/пост, где написано сообщение: тап открывает
+                            // именно его. Вызов позиционный: именованные
+                            // аргументы + значение по умолчанию ловили
+                            // фантомную «Argument type mismatch» в K2.
+                            val topicId = msg.topicId?.takeIf { it.isNotBlank() }
+                            val text = com.vladimir.messenger.util.InlineImage
+                                .stripImage(msg.content).ifBlank { "Фото" }.take(200)
                             notificationHelper.showMessageNotification(
-                                chatId = msg.chatId,
-                                senderId = msg.senderId,
-                                messageText = com.vladimir.messenger.util.InlineImage
-                                    .stripImage(msg.content).ifBlank { "Фото" }.take(200),
-                                isIncoming = true,
-                                // Тема/пост, где написано сообщение:
-                                // тап открывает именно его.
-                                topicId = msg.topicId?.takeIf { it.isNotBlank() }
+                                msg.chatId, msg.senderId, text, true, topicId
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")
