@@ -76,6 +76,13 @@ class MainActivity : ComponentActivity() {
 
     /** Ссылка-приглашение в группу: сначала спрашиваем разрешение, потом ведём в «Группы». */
     private var pendingGroupInviteLink by mutableStateOf<String?>(null)
+
+    /**
+     * Тап по уведомлению: (chatId, topicId) - куда вести. topicId null -
+     * личный чат. Разбирается в NavGraph (там доступ к базам), здесь только
+     * читаем extras и забываем их - повторный onCreate не ведёт снова.
+     */
+    private var pendingChatLink by mutableStateOf<Pair<String, String?>?>(null)
     private var pendingGroupInvite by mutableStateOf<String?>(null)
     private var updateRelease by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
 
@@ -115,7 +122,28 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleNotificationTap(intent)
         handleDeepLinkIntent(intent)
+    }
+
+    /**
+     * Тап по уведомлению о сообщении: запоминаем, куда вести. Экран разберёт
+     * (личный чат / тема группы / пост канала) и сбросит [pendingChatLink].
+     */
+    private fun handleNotificationTap(intent: Intent?) {
+        val chatId = intent?.getStringExtra(
+            com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID
+        ) ?: return
+        if (chatId.isBlank()) return
+        val topicId = intent.getStringExtra(
+            com.vladimir.messenger.service.NotificationHelper.EXTRA_TOPIC_ID
+        )?.takeIf { it.isNotBlank() }
+        pendingChatLink = chatId to topicId
+        // Extras забираем себе: иначе поворот экрана снова вёл бы по старому тапу.
+        runCatching {
+            intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID)
+            intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_TOPIC_ID)
+        }
     }
 
     private fun handleDeepLinkIntent(intent: Intent?) {
@@ -285,6 +313,7 @@ class MainActivity : ComponentActivity() {
         requestIgnoreBatteryOptimizations()
         startCoreService()
         checkForUpdates()
+        handleNotificationTap(intent)
 
         ThemeModeHolder.init(this)
         WallpaperHolder.init(this)
@@ -424,6 +453,8 @@ class MainActivity : ComponentActivity() {
                         else
                             Screen.Onboarding.route,
                         initialGroupInvite = pendingGroupInvite,
+                        pendingChatLink = pendingChatLink,
+                        onChatLinkConsumed = { pendingChatLink = null },
                     )
                 }
                 }

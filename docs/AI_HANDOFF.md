@@ -638,6 +638,16 @@
    «Наш сервер»; сам адрес в коде не менялся (REGISTRY_URL и ссылка
    приглашений прежние). ПРЯВИЛО НА БУДУЩЕЕ: домен владельца в UI не
    показывать.
+   v11.74.13: тап по уведомлению ведёт В МЕСТО сообщения (просьба
+   владельца). Раньше EXTRA_CHAT_ID писался в интент, но НИКЕМ не
+   читался. Теперь: NotificationHelper кладёт EXTRA_CHAT_ID+EXTRA_TOPIC_ID
+   (msg.topicId; у личных чатов null); MainActivity.handleNotificationTap
+   (onCreate + onNewIntent, extras удаляет - поворот экрана не ведёт
+   повторно) -> pendingChatLink; NavGraph.LaunchedEffect решает по базам
+   (ChatLinkEntryPoint: groupDao/chatDao/notificationHelper): группа/канал
+   -> GroupChat.createTopicRoute (или createRoute без темы), личный ->
+   ChatDetail по ChatEntity (contactName из чата), навигация
+   launchSingleTop, уведомление снимается cancelChatNotifications.
    Идеи-резервы следующие релизов (владелец «давай доделаем это все»):
    очередь офлайн-сообщений на нашем брокере; дублирование при раздаче
    копий; ACK с версией протокола APUBK1 (служебные конверты нового

@@ -565,7 +565,10 @@ class CoreServerService : Service() {
                                 senderId = msg.senderId,
                                 messageText = com.vladimir.messenger.util.InlineImage
                                     .stripImage(msg.content).ifBlank { "Фото" }.take(200),
-                                isIncoming = true
+                                isIncoming = true,
+                                // Тема/пост, где написано сообщение:
+                                // тап открывает именно его.
+                                topicId = msg.topicId?.takeIf { it.isNotBlank() }
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")

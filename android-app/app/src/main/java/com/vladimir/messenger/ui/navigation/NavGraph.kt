@@ -207,6 +207,15 @@ interface NavCallEntryPoint {
     fun callManager(): CallManager
 }
 
+/** Базы и уведомления для тапа по уведомлению о сообщении. */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface ChatLinkEntryPoint {
+    fun groupDao(): com.vladimir.messenger.data.local.dao.GroupDao
+    fun chatDao(): com.vladimir.messenger.data.local.dao.ChatDao
+    fun notificationHelper(): com.vladimir.messenger.service.NotificationHelper
+}
+
 // =============================================================================
 // Р“Р›РђР’РќР«Р™ NAV HOST
 // =============================================================================
@@ -221,6 +230,12 @@ fun MessengerNavGraph(
      * QR, Telegram). Не null — сразу ведём в раздел «Группы» и пробуем войти.
      */
     initialGroupInvite: String? = null,
+    /**
+     * Тап по уведомлению о сообщении: (chatId, topicId) - ведём ТОЧНО туда,
+     * где написано сообщение: личный чат, тема группы или пост канала.
+     */
+    pendingChatLink: Pair<String, String?>? = null,
+    onChatLinkConsumed: () -> Unit = {},
 ) {
     // Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ Р°РЅРёРјР°С†РёРё РїРµСЂРµС…РѕРґРѕРІ (РјСЃ)
     val transitionDuration = 300
@@ -231,6 +246,38 @@ fun MessengerNavGraph(
         if (!link.isNullOrBlank()) {
             navController.navigate(Screen.Groups.createJoinRoute(link))
         }
+    }
+
+    // Тап по уведомлению: по базам решаем, что это (личный чат или группа/
+    // канал), ведём в место сообщения и снимаем уведомление.
+    val navLinkContext = LocalContext.current.applicationContext
+    LaunchedEffect(pendingChatLink) {
+        val link = pendingChatLink ?: return@LaunchedEffect
+        val (chatId, topicId) = link
+        onChatLinkConsumed()
+        if (chatId.isBlank()) return@LaunchedEffect
+        val entry = EntryPointAccessors.fromApplication(
+            navLinkContext, ChatLinkEntryPoint::class.java
+        )
+        val group = runCatching { entry.groupDao().getGroupById(chatId) }.getOrNull()
+        val route = if (group != null) {
+            // Группа или канал: открываем тему/пост, где написано сообщение.
+            if (!topicId.isNullOrBlank()) {
+                Screen.GroupChat.createTopicRoute(chatId, topicId)
+            } else {
+                Screen.GroupChat.createRoute(chatId)
+            }
+        } else {
+            val chat = runCatching { entry.chatDao().getChatById(chatId) }.getOrNull()
+                ?: return@LaunchedEffect
+            Screen.ChatDetail.createRoute(
+                chatId = chat.id,
+                contactName = chat.contactName.ifBlank { chat.contactId.take(8) },
+                contactId = chat.contactId,
+            )
+        }
+        navController.navigate(route) { launchSingleTop = true }
+        runCatching { entry.notificationHelper().cancelChatNotifications(chatId) }
     }
 
     // Входящий звонок: экран звонка показывается сам, где бы ни был пользователь.
