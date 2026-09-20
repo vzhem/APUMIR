@@ -38,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -60,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import com.vladimir.messenger.ui.components.ApuBubble
@@ -332,17 +334,22 @@ private fun OverviewTab(
         // обоев, и голый текст на тёмной подложке не читался.
         ApuBubble {
         if (canChangeInfo) {
+            // Поля внутри светлого пузыря: цвета ФИКСИРОВАННЫЕ, из темы брать
+            // нельзя - в тёмной теме поле красилось в белый и на светлой
+            // подложке «Название» и «Описание» пропадали (жалоба владельца).
             OutlinedTextField(
                 value = titleDraft,
                 onValueChange = { titleDraft = it },
                 label = { Text("Название") },
                 modifier = Modifier.fillMaxWidth(),
+                colors = bubbleFieldColors(),
             )
             OutlinedTextField(
                 value = aboutDraft,
                 onValueChange = { aboutDraft = it },
                 label = { Text("Описание") },
                 modifier = Modifier.fillMaxWidth(),
+                colors = bubbleFieldColors(),
             )
             TextButton(onClick = { onSave(titleDraft, aboutDraft) }) { Text("Сохранить") }
         } else {
@@ -1097,3 +1104,16 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
         }
     }
 }
+
+/** Цвета поля ввода внутри светлого пузыря: тёмный текст/подпись на светлой
+ *  подложке при ЛЮБОЙ теме (в тёмной теме стандартное поле белело). */
+@Composable
+private fun bubbleFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color(0xFF1E2430),
+    unfocusedTextColor = Color(0xFF1E2430),
+    cursorColor = MaterialTheme.colorScheme.primary,
+    focusedLabelColor = Color(0xFF5A6472),
+    unfocusedLabelColor = Color(0xFF5A6472),
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = Color(0xFFB9C2CC),
+)
