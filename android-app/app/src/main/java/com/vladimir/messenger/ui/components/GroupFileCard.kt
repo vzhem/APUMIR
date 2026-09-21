@@ -10,6 +10,7 @@ package com.vladimir.messenger.ui.components
 // (FileCardState.of), здесь только рисование.
 // =============================================================================
 
+import coil.compose.AsyncImage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -116,7 +117,9 @@ data class FileCardState(
                 pending = GroupFileMarker.key(chatId, info.sha256) in pendingKeys,
                 stalled = stalled,
                 seeded = if (isFromMe) mine.count { it.direction == "OUTGOING" && it.state == "COMPLETE" } + servedCount else 0,
-                previewFile = localFile?.takeIf { info.mediaType.startsWith("image/") },
+                previewFile = localFile?.takeIf {
+                    info.mediaType.startsWith("image/") || GroupFileMarker.isGif(info)
+                },
                 onDownload = onDownload,
                 onSave = if (complete) {
                     { onSave(transfer!!) }
@@ -165,7 +168,21 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
             .padding(8.dp),
     ) {
         val bitmap = previewBitmap
-        if (bitmap != null) {
+        if (GroupFileMarker.isGif(info) && previewPath != null) {
+            // GIF: Coil с GIF-декодером (MessengerApplication.newImageLoader)
+            // крутит анимацию сам; статический кадр не годится.
+            AsyncImage(
+                model = java.io.File(previewPath),
+                contentDescription = info.displayName,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showFull = true },
+            )
+            Spacer(Modifier.height(6.dp))
+        } else if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = info.displayName,

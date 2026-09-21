@@ -448,6 +448,8 @@ class ChatRepository @Inject constructor(
         timestamp = timestamp,
         isFromMe = isFromMe,
         status = try { MessageStatus.valueOf(status) } catch (_: Exception) { MessageStatus.PENDING },
+        // Тема нужна уведомлениям: тап ведёт в место сообщения.
+        topicId = topicId,
     )
 
     suspend fun getMessageById(messageId: String): Message? {

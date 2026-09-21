@@ -57,6 +57,8 @@ class CoreServerService : Service() {
     @Inject lateinit var botApi: BotApi
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
+    @Inject lateinit var addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup
+    @Inject lateinit var addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
@@ -280,6 +282,12 @@ class CoreServerService : Service() {
             val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
 
+            // Азбука адресов: на свежей установке файла ещё нет — тянем
+            // облачную копию ДО создания движка (ядро читает файл один раз
+            // при старте). На обычном запуске это мгновенный no-op.
+            runCatching { addressBookBackup.restoreBeforeStart() }
+                .onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
+
             // Собственный SQLite-файл relay custody (app-private, WAL).
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
             val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath)
@@ -308,6 +316,20 @@ class CoreServerService : Service() {
                         proxyAutopilot.cycle()
                     } catch (e: Exception) {
                         Log.w(TAG, "Proxy autopilot startup cycle: ${e.message}")
+                    }
+                }
+
+                // Облачная копия азбуки: первая через 3 минуты (адреса уже
+                // насобирались), дальше каждый час; шлём только если файл
+                // менялся (см. AddressBookBackup.backupIfDue).
+                serviceScope.launch {
+                    kotlinx.coroutines.delay(3 * 60 * 1000L)
+                    while (true) {
+                        runCatching { addressBookBackup.backupIfDue() }
+                            .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
+                        runCatching { addressBookBackup.swarmHourlyTick() }
+                            .onFailure { Log.w(TAG, "AddressBook swarm tick: ${it.message}") }
+                        kotlinx.coroutines.delay(60 * 60 * 1000L)
                     }
                 }
 
@@ -538,12 +560,15 @@ class CoreServerService : Service() {
                     }
                     for (msg in recentIncoming) {
                         try {
+                            // Тема/пост, где написано сообщение: тап открывает
+                            // именно его. Вызов позиционный: именованные
+                            // аргументы + значение по умолчанию ловили
+                            // фантомную «Argument type mismatch» в K2.
+                            val topicId = msg.topicId?.takeIf { it.isNotBlank() }
+                            val text = com.vladimir.messenger.util.InlineImage
+                                .stripImage(msg.content).ifBlank { "Фото" }.take(200)
                             notificationHelper.showMessageNotification(
-                                chatId = msg.chatId,
-                                senderId = msg.senderId,
-                                messageText = com.vladimir.messenger.util.InlineImage
-                                    .stripImage(msg.content).ifBlank { "Фото" }.take(200),
-                                isIncoming = true
+                                msg.chatId, msg.senderId, text, true, topicId
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")
@@ -753,6 +778,18 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Heart packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Рой-копии азбуки: store/ack/ask/give. Конверт может нести
+                    // до 120 КБ шифрованных байтов — в чат и автоконтакты ему
+                    // дороги нет.
+                    if (addressBookSwarm.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Swarm backup ACK failed: " + e.message)
                         }
                         return
                     }

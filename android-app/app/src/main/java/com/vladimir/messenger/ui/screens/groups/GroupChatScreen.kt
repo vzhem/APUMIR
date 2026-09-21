@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Search
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -131,6 +134,8 @@ fun GroupChatScreen(
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
+    // Каталог GIF (кнопка «GIF» у скрепки).
+    var showGifCatalog by remember { mutableStateOf(false) }
     // В КАНАЛЕ список тем не показываем. Пост и комментарии к нему устроены
     // как тема внутри, но человеку это знать незачем: он открыл комментарии к
     // конкретному посту и должен видеть обычную переписку, а «Назад» обязано
@@ -541,6 +546,26 @@ fun GroupChatScreen(
                             tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
                         )
                     }
+                }
+                // Каталог GIF (v11.74.14): те же права, что у вложений.
+                TextButton(
+                    onClick = {
+                        if (uiState.canAttach) {
+                            showGifCatalog = true
+                            if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                                viewModel.searchGifs("")
+                            }
+                        } else {
+                            viewModel.onAttachLocked()
+                        }
+                    },
+                    enabled = !uiState.isPreparingFile && !uiState.sending,
+                ) {
+                    Text(
+                        "GIF",
+                        fontWeight = FontWeight.Bold,
+                        color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                    )
                 }
                 OutlinedTextField(
                     value = draft,
@@ -1024,6 +1049,22 @@ private fun MessageBubble(
             }
         }
     }
+
+    if (showGifCatalog) {
+        GifCatalogDialog(
+            uiState = uiState,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.attachGif(item) { }
+            },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
 }
 
 @Composable
@@ -1102,5 +1143,86 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
             ) { Text("Создать") }
         },
         dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
+    )
+}
+
+/**
+ * Каталог GIF (v11.74.14): поиск через НАШ сервер (ключ Tenor спрятан там),
+ * выбор - скачиваем гифку и прикладываем как файл (едет через рой, зашифрованная).
+ */
+@Composable
+private fun GifCatalogDialog(
+    uiState: GroupChatUiState,
+    onSearch: (String) -> Unit,
+    onMore: () -> Unit,
+    onAttach: (com.vladimir.messenger.data.gif.GifItem) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Каталог GIF") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Поиск: котики, привет…") },
+                    singleLine = true,
+                    trailingIcon = {
+                        IconButton(onClick = { onSearch(query) }) {
+                            Icon(Icons.Filled.Search, contentDescription = "Найти")
+                        }
+                    },
+                )
+                Spacer(Modifier.height(8.dp))
+                val error = uiState.gifError
+                if (error != null) {
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(320.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        gridItems(uiState.gifItems, key = { it.id }) { item ->
+                            AsyncImage(
+                                model = item.preview,
+                                contentDescription = "GIF",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onAttach(item) },
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        if (uiState.gifLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else if (uiState.gifNext.isNotBlank()) {
+                            TextButton(onClick = onMore) { Text("Ещё") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        },
     )
 }

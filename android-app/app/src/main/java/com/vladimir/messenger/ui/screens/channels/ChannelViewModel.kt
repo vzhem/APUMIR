@@ -46,6 +46,8 @@ data class ChannelPost(
     val authorName: String,
     val timeMs: Long,
     val comments: Int,
+    /** Сколько комментариев поста ещё не прочитано (значок у «Комментарии»). */
+    val unreadComments: Int = 0,
     /** Сколько разных людей открыли пост. */
     val views: Int = 0,
     /** Файл, приложенный к посту (визитка `APUFILE1:`, рой этап 9-10); null - файла нет. */
@@ -318,6 +320,10 @@ class ChannelViewModel @Inject constructor(
                             ?: "Участник " + first.senderId.takeLast(4),
                         timeMs = first.timestamp,
                         comments = (texts.size - 1).coerceAtLeast(0),
+                        // Непрочитанные комментарии: счётчик темы ведёт
+                        // GroupRepository (прибавляет на каждом чужом сообщении),
+                        // сбрасывает GroupChatViewModel.markRead при чтении.
+                        unreadComments = topic.unreadCount,
                         views = viewCounts[topic.id] ?: 0,
                         // Файл поста (этап 10): визитка в тексте, сам файл
                         // тянется у автора или у соседей по нажатию.

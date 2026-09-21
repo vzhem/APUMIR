@@ -128,6 +128,135 @@ class BotApi @Inject constructor(
         }
 
     /**
+     * Каталог GIF: поиск через НАШ сервер (ключ Tenor спрятан там).
+     * query пустой/blank - популярные. Вернёт (гифки, курсор «ещё») или
+     * null - сервер недоступен/не настроен (в json будет error).
+     */
+    suspend fun gifSearch(
+        query: String,
+        pos: String,
+    ): Pair<List<com.vladimir.messenger.data.gif.GifItem>, String>? =
+        withContext(Dispatchers.IO) {
+            try {
+                val sb = StringBuilder("$REGISTRY_URL/gif/search")
+                val params = ArrayList<String>()
+                if (query.isNotBlank()) {
+                    params.add("q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8"))
+                }
+                if (pos.isNotBlank()) params.add("pos=" + java.net.URLEncoder.encode(pos, "UTF-8"))
+                if (params.isNotEmpty()) sb.append('?').append(params.joinToString("&"))
+                val response = getJson(sb.toString()) ?: return@withContext null
+                val json = JSONObject(response)
+                if (json.has("error")) {
+                    Log.i(TAG, "gif search: ${json.optString("error")}")
+                    return@withContext null
+                }
+                val array = json.optJSONArray("results") ?: return@withContext null
+                val items = ArrayList<com.vladimir.messenger.data.gif.GifItem>()
+                for (i in 0 until array.length()) {
+                    val o = array.optJSONObject(i) ?: continue
+                    val id = o.optString("id", "")
+                    val preview = o.optString("preview", "")
+                    val gif = o.optString("gif", "")
+                    if (id.isNotBlank() && preview.isNotBlank() && gif.isNotBlank()) {
+                        items.add(com.vladimir.messenger.data.gif.GifItem(id, preview, gif))
+                    }
+                }
+                items to json.optString("next", "")
+            } catch (e: Exception) {
+                Log.e(TAG, "gif search failed", e)
+                null
+            }
+        }
+
+    /**
+     * Скачать выбранную гифку (байты с CDN каталога). null - не вышло.
+     */
+    suspend fun downloadGif(url: String): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            require(url.startsWith("https://")) { "Only https" }
+            val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 20_000
+            connection.instanceFollowRedirects = true
+            try {
+                if (connection.responseCode !in 200..299) return@withContext null
+                val stream = connection.inputStream ?: return@withContext null
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                var total = 0
+                stream.use { input ->
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > 25 * 1024 * 1024) return@withContext null
+                        out.write(buffer, 0, read)
+                    }
+                }
+                out.toByteArray()
+            } finally {
+                connection.disconnect()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "gif download failed", e)
+            null
+        }
+    }
+
+    /**
+     * Проверка живости сервера: время ответа /health в миллисекундах,
+     * null - сервер не ответил.
+     */
+    suspend fun pingHealth(): Int? = withContext(Dispatchers.IO) {
+        val started = System.currentTimeMillis()
+        val response = getJson("$REGISTRY_URL/health") ?: return@withContext null
+        (System.currentTimeMillis() - started).toInt().coerceAtLeast(1)
+    }
+
+    /**
+     * Положить резервную копию азбуки адресов на полку.
+     *
+     * Как и сундук личности: наружу уходят только зашифрованные байты,
+     * ключ выведен из приватного ключа узла и на сервер не уходит.
+     */
+    suspend fun storeAddressBook(shelf: String, book: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val body = JSONObject().apply {
+                    put("shelf", shelf)
+                    put("book", book)
+                }
+                val response = postJson("$REGISTRY_URL/addrbook/put", body.toString())
+                    ?: return@withContext false
+                JSONObject(response).optBoolean("success", false)
+            } catch (e: Exception) {
+                Log.e(TAG, "AddressBook store failed", e)
+                false
+            }
+        }
+
+    /**
+     * Забрать резервную копию азбуки адресов. null - полка пуста или
+     * сервер недоступен.
+     */
+    suspend fun fetchAddressBook(shelf: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val response = getJson("$REGISTRY_URL/addrbook/get?shelf=$shelf")
+                ?: return@withContext null
+            val json = JSONObject(response)
+            if (json.has("error")) {
+                Log.i(TAG, "AddressBook fetch: ${json.optString("error")}")
+                return@withContext null
+            }
+            json.optString("book", "").takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "AddressBook fetch failed", e)
+            null
+        }
+    }
+
+    /**
      * Забрать сундук с полки. Открыть его сможет только тот, кто знает пароль.
      *
      * @return содержимое сундука в base64 или null, если полка пуста либо

@@ -27,6 +27,13 @@ class NotificationHelper @Inject constructor(
     companion object {
         private const val MESSAGE_NOTIFICATION_BASE_ID = 2000
         const val EXTRA_CHAT_ID = "extra_chat_id"
+
+        /**
+         * Тема (пост канала / тема группы), где написано сообщение. null -
+         * личный чат. По нему тап открывает ТО МЕСТО, где сообщение, а не
+         * только список чатов.
+         */
+        const val EXTRA_TOPIC_ID = "extra_topic_id"
     }
 
     /**
@@ -42,6 +49,7 @@ class NotificationHelper @Inject constructor(
         senderId: String,
         messageText: String,
         isIncoming: Boolean,
+        topicId: String?,
     ) {
         android.util.Log.d("NotificationHelper", "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
         if (!isIncoming) {
@@ -68,6 +76,7 @@ class NotificationHelper @Inject constructor(
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_CHAT_ID, chatId)
+            if (!topicId.isNullOrBlank()) putExtra(EXTRA_TOPIC_ID, topicId)
         }
         
         val pendingIntent = PendingIntent.getActivity(

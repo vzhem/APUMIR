@@ -4,8 +4,17 @@
 // Что делает:
 //   /register, /lookup   — реестр узлов (как было);
 //   /version             — сведения об обновлении (как было);
+//   /update/latest       — сведения о последнем релизе (worker сам ходит на GitHub);
+//   /update/apk          — поток APK последнего релиза (белый список мобильных сетей);
+//   /mqtt                — НАШ MQTT-брокер (Durable Object MQTT_BRIDGE, привязка
+//                          в дашборде): единый рой для всех телефонов, без
+//                          сторонних брокеров (v11.74.7);
 //   /health              — проверка живости;
 //   /vault/put, /vault/get — хранилище личности;
+//   /addrbook/put, /addrbook/get — резервные копии азбуки адресов (зашифрованы
+//                          на телефоне; v11.74.8);
+//   /gif/search            — каталог GIF через Tenor, ключ в TENOR_KEY
+//                          (v11.74.14); выбранная гифка едет через файловый рой;
 //   /i?slug=...          — страница пересланной ссылки старого (длинного) вида:
 //                          открыть в APU или установить его;
 //   /s/<код>             — КОРОТКАЯ ссылка: та же страница, но адрес не выдаёт
@@ -53,6 +62,196 @@
 // Существующая привязка REGISTRY используется как раньше.
 // =============================================================================
 
+// НАШ MQTT-БРОКЕР (задача владельца 2026-09-19, "полноценный
+// маленький сервер"): все телефоны WebSocket'ом сходятся в один
+// Durable Object (idFromName константа), поэтому он сам может
+// раздавать публикации подписчикам - это и есть брокер.
+// Реализован минимальный MQTT 3.1.1 для сигнального трафика
+// роя: CONNECT/CONNACK, SUBSCRIBE/SUBACK, PUBLISH (QoS0 вер; QoS1
+// входящие подтверждаем PUBACK), retain (нужен presence),
+// LastWill, PINGREQ/PINGRESP, дискретные вайлдкарды + #.
+// Старые сборки (v11.74.4/5) попадают сюда же - рой единый.
+
+const MQTT_MAX_CLIENTS = 400;
+const MQTT_MAX_PUBLISH_BYTES = 256 * 1024;
+
+function encLen(n) {
+  const out = [];
+  do { let b = n % 128; n = Math.floor(n / 128); if (n > 0) b += 128; out.push(b); } while (n > 0);
+  return out;
+}
+
+function buildPublish(topic, payload, retain) {
+  const t = new TextEncoder().encode(topic);
+  const body = new Uint8Array(2 + t.length + payload.length);
+  body[0] = t.length >> 8; body[1] = t.length & 255;
+  body.set(t, 2); body.set(payload, 2 + t.length);
+  const head = [0x30 | (retain ? 1 : 0), ...encLen(body.length)];
+  return new Uint8Array([...head, ...body]);
+}
+
+function topicMatch(filter, topic) {
+  if (filter === topic) return true;
+  if (filter === "#") return true;
+  if (filter.endsWith("/#")) {
+    const prefix = filter.slice(0, -2);
+    return topic === prefix || topic.startsWith(prefix + "/");
+  }
+  const f = filter.split("/"); const t = topic.split("/");
+  if (f.length !== t.length) return false;
+  for (let i = 0; i < f.length; i++) {
+    if (f[i] !== "+" && f[i] !== t[i]) return false;
+  }
+  return true;
+}
+
+class MqttClient {
+  constructor(ws) {
+    this.ws = ws;
+    this.subs = [];       // фильтры подписок
+    this.will = null;     // {topic, payload, retain}
+    this.buf = new Uint8Array(0);
+  }
+  send(bytes) { try { this.ws.send(bytes); } catch (_) {} }
+}
+
+export class MqttBridge {
+  constructor() {
+    this.clients = new Set();
+    this.retained = new Map(); // topic -> {topic, payload}
+  }
+
+  async fetch(request) {
+    if (this.clients.size >= MQTT_MAX_CLIENTS) {
+      return json({ error: "broker busy" }, 503);
+    }
+    const pair = new WebSocketPair();
+    const server = pair[1];
+    server.accept();
+    server.binaryType = "arraybuffer";
+    const client = new MqttClient(server);
+    this.clients.add(client);
+    server.addEventListener("message", (event) => {
+      try {
+        const data = event.data;
+        const chunk = typeof data === "string"
+          ? new TextEncoder().encode(data)
+          : new Uint8Array(data);
+        this.feed(client, chunk);
+      } catch (_) { this.drop(client); }
+    });
+    server.addEventListener("close", () => this.drop(client));
+    server.addEventListener("error", () => this.drop(client));
+    // rumqttc требует эхо субпротокола mqtt.
+    return new Response(null, {
+      status: 101,
+      webSocket: pair[0],
+      headers: { "Sec-WebSocket-Protocol": "mqtt" },
+    });
+  }
+
+  drop(client) {
+    if (!this.clients.has(client)) return;
+    this.clients.delete(client);
+    if (client.will) {
+      this.publish(null, client.will.topic, client.will.payload, client.will.retain);
+      client.will = null;
+    }
+  }
+
+  feed(client, chunk) {
+    const buf = new Uint8Array(client.buf.length + chunk.length);
+    buf.set(client.buf); buf.set(chunk, client.buf.length);
+    let pos = 0;
+    while (pos + 2 <= buf.length) {
+      let len = 0, mult = 1, i = pos + 1, byte = 0;
+      do {
+        if (i >= buf.length) { client.buf = buf.slice(pos); return; }
+        byte = buf[i++]; len += (byte & 127) * mult; mult *= 128;
+        if (mult > 128 * 128 * 128 * 2) { this.drop(client); return; }
+      } while (byte & 128);
+      if (pos + 1 + len > buf.length) { client.buf = buf.slice(pos); return; }
+      this.handle(client, buf[pos], buf.slice(i, pos + 1 + len));
+      pos += 1 + len;
+    }
+    client.buf = buf.slice(pos);
+  }
+
+  handle(client, first, body) {
+    const type = first >> 4;
+    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    if (type === 1) { // CONNECT
+      let p = 0;
+      const pnamelen = view.getUint16(p); p += 2 + pnamelen; // "MQTT"
+      p += 1; // level
+      const flags = body[p]; p += 1;
+      p += 2; // keepalive
+      const idlen = view.getUint16(p); p += 2 + idlen; // clientId
+      if (flags & 4) { // will
+        const wtopicLen = view.getUint16(p); const wtopic = new TextDecoder().decode(body.slice(p + 2, p + 2 + wtopicLen)); p += 2 + wtopicLen;
+        const wpayLen = view.getUint16(p); const wpay = body.slice(p + 2, p + 2 + wpayLen); p += 2 + wpayLen;
+        client.will = { topic: wtopic, payload: wpay, retain: (flags & 32) !== 0 };
+      }
+      client.send(new Uint8Array([0x20, 0x02, 0x00, 0x00])); // CONNACK ok
+    } else if (type === 3) { // PUBLISH
+      const qos = (first >> 1) & 3;
+      const retain = (first & 1) !== 0;
+      const tlen = view.getUint16(0);
+      const topic = new TextDecoder().decode(body.slice(2, 2 + tlen));
+      let p = 2 + tlen;
+      if (qos > 0) {
+        const pid = [body[p], body[p + 1]];
+        p += 2;
+        if (qos === 1) client.send(new Uint8Array([0x40, 0x02, pid[0], pid[1]]));
+      }
+      const payload = body.slice(p);
+      if (payload.length > MQTT_MAX_PUBLISH_BYTES) return;
+      this.publish(client, topic, payload, retain);
+    } else if (type === 8) { // SUBSCRIBE
+      const pid = [body[0], body[1]];
+      let p = 2;
+      const granted = [];
+      while (p < body.length) {
+        const flen = view.getUint16(p); p += 2;
+        const filter = new TextDecoder().decode(body.slice(p, p + flen)); p += flen;
+        p += 1; // requested qos
+        client.subs.push(filter);
+        granted.push(0);
+        // Retained: всё совпавшее - сразу (retain бит стоит).
+        for (const entry of this.retained.values()) {
+          if (topicMatch(filter, entry.topic)) {
+            client.send(buildPublish(entry.topic, entry.payload, true));
+          }
+        }
+      }
+      const out = [0x90, ...encLen(2 + granted.length), pid[0], pid[1], ...granted];
+      client.send(new Uint8Array(out));
+    } else if (type === 12) { // PINGREQ
+      client.send(new Uint8Array([0xd0, 0x00]));
+    } else if (type === 14) { // DISCONNECT
+      client.will = null;
+      try { client.ws.close(1000, "bye"); } catch (_) {}
+      this.clients.delete(client);
+    }
+  }
+
+  publish(from, topic, payload, retain) {
+    if (retain) {
+      if (payload.length === 0) this.retained.delete(topic);
+      else this.retained.set(topic, { topic, payload });
+    }
+    if (this.retained.size > 512) {
+      this.retained.delete(this.retained.keys().next().value);
+    }
+    for (const c of this.clients) {
+      if (c === from) continue; // себе эхо не шлем
+      for (const filter of c.subs) {
+        if (topicMatch(filter, topic)) { c.send(buildPublish(topic, payload, false)); break; }
+      }
+    }
+  }
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -88,6 +287,16 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // MQTT-мост: важен только заголовок Upgrade (rumqttc сам выбирает путь).
+    // Обычные запросы (приглашения, ссылки, обновление) не задеваем.
+    if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
+      if (!env.MQTT_BRIDGE) {
+        return json({ error: "MQTT_BRIDGE binding is not configured" }, 501);
+      }
+      const stub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
+      return env.MQTT_BRIDGE.get(stub).fetch(request);
+    }
+
     try {
       if (path === "/i" && request.method === "GET") {
         return handleInviteLanding(url);
@@ -101,6 +310,12 @@ export default {
         return handleAssetLinks();
       } else if (path === "/vault/put" && request.method === "POST") {
         return await handleVaultPut(request, env);
+      } else if (path === "/gif/search" && request.method === "GET") {
+        return await handleGifSearch(url, env);
+      } else if (path === "/addrbook/put" && request.method === "POST") {
+        return await handleAddrBookPut(request, env);
+      } else if (path === "/addrbook/get" && request.method === "GET") {
+        return await handleAddrBookGet(url, env);
       } else if (path === "/vault/get" && request.method === "GET") {
         return await handleVaultGet(url, env);
       } else if (path === "/register" && request.method === "POST") {
@@ -109,6 +324,10 @@ export default {
         return await handleLookup(url, env);
       } else if (path === "/version" && request.method === "GET") {
         return await handleVersion(env);
+      } else if (path === "/update/latest" && request.method === "GET") {
+        return await handleUpdateLatest(request);
+      } else if (path === "/update/apk" && request.method === "GET") {
+        return await handleUpdateApk();
       } else if (path === "/health") {
         return json({ status: "ok" });
       } else {
@@ -121,6 +340,96 @@ export default {
 };
 
 // ---- хранилище личности -----------------------------------------------------
+
+// ── Каталог GIF (v11.74.14): поиск через Tenor, ключ СПРЯТАН на сервере ──
+// Телефон спрашивает наш /gif/search, сервер ходит к Tenor со своим ключом
+// (binding TENOR_KEY; не задан - честно отвечаем «не настроен»). Выбранная
+// гифка скачивается телефоном с CDN Tenor и дальше едёт через НАШ файловый
+// рой, зашифрованная: каталог - единственная внешняя точка.
+async function handleGifSearch(url, env) {
+  try {
+    const key = (env && env.TENOR_KEY) || "";
+    if (!key) {
+      return json({ error: "Каталог GIF не настроен на сервере (нет ключа Tenor)" }, 503);
+    }
+    const q = (url.searchParams.get("q") || "").trim().slice(0, 64);
+    const pos = (url.searchParams.get("pos") || "").slice(0, 64);
+    const params = new URLSearchParams({
+      key: key,
+      limit: "24",
+      client_key: "apu_app",
+      media_filter: "tinygif,gif",
+    });
+    let endpoint = "featured";
+    if (q) {
+      endpoint = "search";
+      params.set("q", q);
+    } else {
+      params.set("random", "false");
+    }
+    if (pos) params.set("pos", pos);
+    const resp = await fetch(
+      "https://tenor.googleapis.com/v2/" + endpoint + "?" + params.toString()
+    );
+    if (!resp.ok) {
+      return json({ error: "Каталог GIF ответил ошибкой (" + resp.status + ")" }, 502);
+    }
+    const data = await resp.json();
+    const results = (data.results || [])
+      .map((r) => {
+        const f = r.media_formats || {};
+        return {
+          id: String(r.id || ""),
+          preview: String(f.tinygif && f.tinygif.url ? f.tinygif.url : ""),
+          gif: String(
+            f.gif && f.gif.url ? f.gif.url : (f.tinygif && f.tinygif.url) || ""
+          ),
+        };
+      })
+      .filter((x) => x.id && x.preview && x.gif);
+    return json({ results: results, next: String(data.next || "") }, 200);
+  } catch (e) {
+    return json({ error: "gif: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+// ── Резервные копии азбуки адресов (v11.74.8) ────────────────────────────
+// Телефон сам (раз в сутки и по кнопке) кладёт ЗАШИФРОВАННУЮ азбуку:
+// ключ шифрования выведен из приватного ключа узла, сервер видит только
+// непрозрачные байты. Полка = "addrbook|<node_id>".
+const MAX_ADDRBOOK_CHARS = 200000;
+
+async function handleAddrBookPut(request, env) {
+  try {
+    const body = await request.json();
+    const shelf = String(body.shelf || "");
+    const book = String(body.book || "");
+    if (!shelf.startsWith("addrbook|") || shelf.length > 160) {
+      return json({ error: "bad shelf" }, 400);
+    }
+    if (!book || book.length > MAX_ADDRBOOK_CHARS) {
+      return json({ error: "bad book" }, 400);
+    }
+    await env.APU_VAULT.put(shelf, book);
+    return json({ success: true }, 200);
+  } catch (e) {
+    return json({ error: "addrbook put: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+async function handleAddrBookGet(url, env) {
+  try {
+    const shelf = url.searchParams.get("shelf") || "";
+    if (!shelf.startsWith("addrbook|") || shelf.length > 160) {
+      return json({ error: "bad shelf" }, 400);
+    }
+    const book = await env.APU_VAULT.get(shelf);
+    if (!book) return json({ error: "not found" }, 404);
+    return json({ book }, 200);
+  } catch (e) {
+    return json({ error: "addrbook get: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
 
 async function handleVaultPut(request, env) {
   let body;
@@ -469,6 +778,67 @@ async function handleVersion(env) {
     update_url:
       "https://github.com/vzhem/APUMIR/releases/download/" + version + "/app-release.apk",
   });
+}
+
+// ---- обновление приложения (белый список мобильных сетей) -------------------
+//
+// На «жёстком» мобильном интернете сеть пускает только хосты из белого
+// списка: наш домен там есть (приглашения и короткие ссылки живут здесь),
+// а GitHub - нет. Телефон спрашивает обновление здесь, а worker сам ходит
+// на GitHub (у Cloudflare своих ограничений нет) и отдаёт сведения и APK
+// потоком СО СВОЕГО домена. Открытого прокси нет: репозиторий и имя файла
+// зашиты намертво, через worker нельзя скачать ничего постороннего.
+
+const RELEASE_REPO = "vzhem/APUMIR";
+const RELEASE_ASSET = "app-release.apk";
+
+async function handleUpdateLatest(request) {
+  let upstream;
+  try {
+    upstream = await fetch("https://api.github.com/repos/" + RELEASE_REPO + "/releases/latest", {
+      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "APU-Relay-Worker" },
+    });
+  } catch (e) {
+    return json({ error: "github unreachable: " + e.message }, 502);
+  }
+  if (!upstream.ok) {
+    return json({ error: "github " + upstream.status }, 502);
+  }
+  const data = await upstream.json();
+  const payload = {
+    tag_name: typeof data.tag_name === "string" ? data.tag_name : "",
+    notes: typeof data.body === "string" ? data.body.slice(0, 4096) : "",
+    published_at: typeof data.published_at === "string" ? data.published_at : "",
+    // APK телефон тоже берёт здесь же: /update/apk отдаёт файл последнего
+    // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
+    apk_url: new URL("/update/apk", request.url).toString(),
+  };
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=300" },
+  });
+}
+
+async function handleUpdateApk() {
+  let upstream;
+  try {
+    upstream = await fetch(
+      "https://github.com/" + RELEASE_REPO + "/releases/latest/download/" + RELEASE_ASSET,
+      { redirect: "follow", headers: { "User-Agent": "APU-Relay-Worker" } }
+    );
+  } catch (e) {
+    return json({ error: "github unreachable: " + e.message }, 502);
+  }
+  if (!upstream.ok || !upstream.body) {
+    return json({ error: "github " + upstream.status }, 502);
+  }
+  const headers = new Headers();
+  headers.set("Content-Type", "application/vnd.android.package-archive");
+  headers.set("Content-Disposition", 'attachment; filename="' + RELEASE_ASSET + '"');
+  const length = upstream.headers.get("content-length");
+  if (length) headers.set("Content-Length", length);
+  headers.set("Cache-Control", "no-store");
+  return new Response(upstream.body, { status: 200, headers: headers });
 }
 
 // ---- общее ------------------------------------------------------------------

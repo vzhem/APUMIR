@@ -59,6 +59,12 @@ data class GroupChatUiState(
     /** Можно ли прикреплять файлы: ранг «Круг друзей» и право «Отправка медиа». */
     val canAttach: Boolean = false,
     val attachLockedHint: String = "",
+    /** Каталог GIF (наш сервер): гифки, курсор «ещё», состояние. */
+    val gifItems: List<com.vladimir.messenger.data.gif.GifItem> = emptyList(),
+    val gifNext: String = "",
+    val gifLoading: Boolean = false,
+    /** Почему каталог недоступен (текст для диалога); null - доступен. */
+    val gifError: String? = null,
     /** Принятый файл, который человек просит сохранить в папку (системное окно). */
     val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
 )
@@ -72,6 +78,7 @@ class GroupChatViewModel @Inject constructor(
     private val groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm,
     private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
+    private val botApi: com.vladimir.messenger.service.BotApi,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -172,6 +179,73 @@ class GroupChatViewModel @Inject constructor(
             } catch (e: Exception) {
                 android.util.Log.w("GroupChatVM", "group file stage failed", e)
                 _uiState.update { it.copy(error = "Файл не приложен: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    // ── Каталог GIF (наш сервер -> Tenor; отправка через файловый рой) ──
+
+    /** Открыть/обновить каталог: популярные или по запросу. */
+    fun searchGifs(query: String, more: Boolean = false) {
+        if (_uiState.value.gifLoading) return
+        val pos = if (more) _uiState.value.gifNext else ""
+        _uiState.update {
+            it.copy(
+                gifLoading = true,
+                gifError = null,
+                gifItems = if (more) it.gifItems else emptyList(),
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { botApi.gifSearch(query, pos) }.getOrNull()
+            _uiState.update { state ->
+                if (result == null) {
+                    state.copy(
+                        gifLoading = false,
+                        gifError = "Каталог недоступен: сервер не отвечает или ключ GIF ещё не настроен",
+                    )
+                } else {
+                    val (items, next) = result
+                    if (items.isEmpty() && state.gifItems.isEmpty()) {
+                        state.copy(gifLoading = false, gifError = "Ничего не нашлось")
+                    } else {
+                        state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifItems = (state.gifItems + items).distinctBy { it.id },
+                            gifNext = next,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** Закрыли каталог -.state гифок можно отпустить. */
+    fun closeGifCatalog() {
+        _uiState.update { it.copy(gifItems = emptyList(), gifNext = "", gifError = null) }
+    }
+
+    /** Выбрал гифку: скачать байты и приложить как файл (нажатие кнопки — как файл). */
+    fun attachGif(item: com.vladimir.messenger.data.gif.GifItem, onDone: () -> Unit) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                val bytes = botApi.downloadGif(item.gif)
+                    ?: throw IllegalStateException("Гифка не скачалась")
+                val previous = _uiState.value.stagedFile
+                val info = groupFiles.stageGifBytes(groupId, bytes)
+                if (previous != null && previous.sha256 != info.sha256) {
+                    groupFiles.unstage(groupId, previous.sha256)
+                }
+                _uiState.update { it.copy(stagedFile = info) }
+                onDone()
+            } catch (e: Exception) {
+                android.util.Log.w("GroupChatVM", "gif attach failed", e)
+                _uiState.update { it.copy(error = "Гифка не приложена: ${e.message}") }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }

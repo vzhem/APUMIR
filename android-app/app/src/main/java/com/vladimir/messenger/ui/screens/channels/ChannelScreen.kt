@@ -13,6 +13,7 @@ import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -513,6 +514,12 @@ private fun PostCard(
                             "Оставить комментарий"
                         },
                     )
+                    // Непрочитанные комментарии поста: тот же золотой кружок,
+                    // что на канале и на темах группы.
+                    if (post.unreadComments > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        UnreadBadge(post.unreadComments)
+                    }
                 }
                 // Переслать пост: и внутрь APU, и в любой другой мессенджер.
                 IconButton(onClick = onSharePost) {
@@ -839,4 +846,23 @@ private fun PostEditorDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
+}
+
+/** Кружок непрочитанных комментариев поста: тёмная цифра на золоте (как в списках). */
+@Composable
+private fun UnreadBadge(count: Int) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (count > 99) "99+" else count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFF1E2430),
+            fontWeight = FontWeight.Bold,
+        )
+    }
 }

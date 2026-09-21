@@ -19,7 +19,23 @@ import android.os.Build
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
-class MessengerApplication : Application() {
+class MessengerApplication : Application(), coil.ImageLoaderFactory {
+    /**
+     * Общий ImageLoader Coil С декодером GIF: без него AsyncImage рисует
+     * только первый кадр. Гифки в темах групп (v11.74.14) оживают сами.
+     */
+    override fun newImageLoader(): coil.ImageLoader =
+        coil.ImageLoader.Builder(this)
+            .components {
+                // API 28+: системный декодер (GIF и анимированный WebP);
+                // младше: встроенный декодер GIF (minSdk 26-27).
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                }
+                add(coil.decode.GifDecoder.Factory())
+            }
+            .build()
+
 
     override fun onCreate() {
         super.onCreate()

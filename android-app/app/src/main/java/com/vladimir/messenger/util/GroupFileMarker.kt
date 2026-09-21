@@ -58,6 +58,11 @@ object GroupFileMarker {
     /** Есть ли в тексте визитка файла. */
     fun has(text: String): Boolean = parse(text) != null
 
+    /** GIF (анимация): по MIME или по имени - не все проводники ставят image/gif. */
+    fun isGif(info: Info): Boolean =
+        info.mediaType.equals("image/gif", ignoreCase = true) ||
+            info.displayName.trimEnd().endsWith(".gif", ignoreCase = true)
+
     /** Сама строка визитки из текста (как есть) или null, если её нет или она испорчена. */
     fun line(text: String): String? =
         text.lineSequence().firstOrNull { it.startsWith(PREFIX) }?.takeIf { parse(it) != null }

@@ -180,6 +180,33 @@ class GroupFileSwarm @Inject constructor(
         )
     }
 
+    /**
+     * Приложить гифку из каталога: байты уже скачаны телефоном. Тот же путь,
+     * что у [stage] (рейтинг, ша-256, хранилище, визитка), только источник -
+     * память, а не проводник.
+     */
+    suspend fun stageGifBytes(
+        groupId: String,
+        bytes: ByteArray,
+    ): GroupFileMarker.Info = withContext(Dispatchers.IO) {
+        check(bytes.isNotEmpty()) { "Пустая гифка" }
+        FileTransferRankPolicy.requireCanSend(
+            qualifiedDirectReferrals = ReferralRankStore.qualifiedDirectCount(appContext),
+            mediaType = "image/gif",
+            sizeBytes = bytes.size.toLong(),
+        )
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val sha256 = digest.digest(bytes).joinToString("") { "%02x".format(it) }
+        val name = "gif_" + sha256.take(10) + ".gif"
+        store.put(groupId, sha256, name, bytes.inputStream())
+        GroupFileMarker.Info(
+            sha256 = sha256,
+            sizeBytes = bytes.size.toLong(),
+            mediaType = "image/gif",
+            displayName = name,
+        )
+    }
+
     /** Сообщение с визиткой не ушло - копия не нужна. */
     suspend fun unstage(groupId: String, sha256: String) = withContext(Dispatchers.IO) {
         runCatching { store.delete(groupId, sha256) }

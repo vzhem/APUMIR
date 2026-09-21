@@ -413,6 +413,10 @@ class FileTransferRouter @Inject constructor(
                 onOfferAccepted = { chatId, seedId, fileSha256, seedCount ->
                     runCatching { groupFiles.get().onSeedJoined(chatId, seedId, fileSha256, seedCount) }
                         .onFailure { Log.w(TAG, "group seed hook failed: ${it.message}") }
+                    // Рой APK (docs/UPDATE_SEEDING.md): куски обновления тоже
+                    // со всех сидов — просим следующего, пока их меньше трёх.
+                    runCatching { apkSeeder.get().onSeedJoined(chatId, seedId, fileSha256, seedCount) }
+                        .onFailure { Log.w(TAG, "apk seed stripe hook failed: ${it.message}") }
                 },
             ),
             // K3: собеседник подтвердил, что принимает APUF-кадры — передатчик
