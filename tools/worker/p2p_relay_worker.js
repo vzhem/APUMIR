@@ -348,10 +348,64 @@ export default {
 // рой, зашифрованная: каталог - единственная внешняя точка.
 async function handleGifSearch(url, env) {
   try {
-    const key = (env && env.TENOR_KEY) || "";
-    if (!key) {
-      return json({ error: "Каталог GIF не настроен на сервере (нет ключа Tenor)" }, 503);
+    // Каталог умеет двух поставщиков: GIPHY_KEY (проще получить) и
+    // TENOR_KEY (если уж заведён). Нет ни одного - честно говорим.
+    const giphyKey = (env && env.GIPHY_KEY) || "";
+    const tenorKey = (env && env.TENOR_KEY) || "";
+    if (!giphyKey && !tenorKey) {
+      return json({ error: "Каталог GIF не настроен на сервере (нет ключа Giphy/Tenor)" }, 503);
     }
+    if (giphyKey) return await gifSearchGiphy(url, giphyKey);
+    return await gifSearchTenor(url, tenorKey);
+  } catch (e) {
+    return json({ error: "gif: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+// Giphy v1: search?api_key&q&limit&offset; «ещё» = offset (число).
+async function gifSearchGiphy(url, key) {
+  try {
+    const q = (url.searchParams.get("q") || "").trim().slice(0, 64);
+    const pos = parseInt((url.searchParams.get("pos") || "0"), 10) || 0;
+    const params = new URLSearchParams({
+      api_key: key,
+      limit: "24",
+      offset: String(pos),
+      rating: "pg-13",
+    });
+    let endpoint = "trending";
+    if (q) {
+      endpoint = "search";
+      params.set("q", q);
+    }
+    const resp = await fetch(
+      "https://api.giphy.com/v1/gifs/" + endpoint + "?" + params.toString()
+    );
+    if (!resp.ok) {
+      return json({ error: "Каталог GIF ответил ошибкой (" + resp.status + ")" }, 502);
+    }
+    const data = await resp.json();
+    const results = (data.data || [])
+      .map((r) => {
+        const im = r.images || {};
+        const preview = (im.preview_gif && im.preview_gif.url) ||
+          (im.fixed_width_small && im.fixed_width_small.url) || "";
+        const gif = (im.downsized_medium && im.downsized_medium.url) ||
+          (im.downsized && im.downsized.url) ||
+          (im.original && im.original.url) || "";
+        return { id: String(r.id || ""), preview: preview, gif: gif };
+      })
+      .filter((x) => x.id && x.preview && x.gif);
+    const next = ((data.pagination && data.pagination.offset) || 0) + results.length;
+    return json({ results: results, next: String(next) }, 200);
+  } catch (e) {
+    return json({ error: "gif: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+// Tenor v2: featured/search + pos-курсор.
+async function gifSearchTenor(url, key) {
+  try {
     const q = (url.searchParams.get("q") || "").trim().slice(0, 64);
     const pos = (url.searchParams.get("pos") || "").slice(0, 64);
     const params = new URLSearchParams({

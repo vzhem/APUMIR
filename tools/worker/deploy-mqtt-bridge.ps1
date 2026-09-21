@@ -69,7 +69,7 @@ if (-not $VaultId -or -not $RegistryId -or -not $RelayId) {
 Write-Host "=== 4/5 Downloading worker.js ===" -ForegroundColor Cyan
 Invoke-WebRequest -Uri $WorkerUrl -OutFile "worker.js"
 $lines = (Get-Content "worker.js").Count
-Write-Host ("  worker.js: $lines lines (expected about 848)")
+Write-Host ("  worker.js: $lines lines (expected about 902)")
 if (Select-String -Path "worker.js" -Pattern "addrbook/put" -Quiet) {
   Write-Host "  OK: /addrbook endpoints present (backup of the address book)"
 } else {
@@ -97,6 +97,14 @@ if (Test-Path "tenor-key.txt") {
     Write-Host "  GIF catalog: TENOR_KEY loaded from tenor-key.txt" -ForegroundColor Green
   }
 }
+$giphyBindings = @()
+if (Test-Path "giphy-key.txt") {
+  $giphyKey = (Get-Content "giphy-key.txt" -Raw).Trim()
+  if ($giphyKey) {
+    $giphyBindings = @(@{ type = "plain_text"; name = "GIPHY_KEY"; text = $giphyKey })
+    Write-Host "  GIF catalog: GIPHY_KEY loaded from giphy-key.txt" -ForegroundColor Green
+  }
+}
 if ($lines -lt 700) {
     Write-Host "ERROR: file looks truncated, download failed." -ForegroundColor Red
     exit 1
@@ -107,7 +115,7 @@ $bindings = @(
     @{ type = "kv_namespace"; name = "REGISTRY";  namespace_id = $RegistryId },
     @{ type = "kv_namespace"; name = "RELAY";     namespace_id = $RelayId },
     @{ type = "durable_object_namespace"; name = "MQTT_BRIDGE"; class_name = "MqttBridge" }
-) + $tenorBindings
+) + $tenorBindings + $giphyBindings
 $metadata = @{
     main_module        = "worker.js"
     compatibility_date = "2025-09-15"
