@@ -283,6 +283,12 @@ fun ChatDetailScreen(
                 isPreparingFile = uiState.isPreparingFile,
                 onPastedMedia = viewModel::onFileSelected,
                 onPasteLocked = viewModel::onAttachmentsLocked,
+                onGifClick = {
+                    showGifCatalog = true
+                    if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                        viewModel.searchGifs("")
+                    }
+                },
             )
         },
     ) { paddingValues ->
@@ -540,6 +546,7 @@ private fun MessageInputBar(
     canAttach: Boolean = true,
     onPastedMedia: (android.net.Uri) -> Unit = {},
     onPasteLocked: () -> Unit = {},
+    onGifClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Раунд 42: новый BasicTextField(state) - только он проводит картинки со
@@ -605,20 +612,13 @@ private fun MessageInputBar(
                     )
                 }
                 TextButton(
-                    onClick = {
-                        if (uiState.canSendAttachments) {
-                            showGifCatalog = true
-                            if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
-                                viewModel.searchGifs("")
-                            }
-                        }
-                    },
-                    enabled = !uiState.isPreparingFile && !uiState.isSending,
+                    onClick = onGifClick,
+                    enabled = !isPreparingFile && !isSending && canAttach,
                 ) {
                     Text(
                         "GIF",
                         fontWeight = FontWeight.Bold,
-                        color = if (uiState.canSendAttachments) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                        color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
                     )
                 }
             }

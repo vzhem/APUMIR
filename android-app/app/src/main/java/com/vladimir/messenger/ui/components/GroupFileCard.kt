@@ -140,6 +140,7 @@ data class FileCardState(
  * участников уже получили файл.
  */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun GroupFileCard(
     state: FileCardState,
     isFromMe: Boolean,
