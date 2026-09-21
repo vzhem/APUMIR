@@ -3010,61 +3010,59 @@ impl P2PCore {
                                         }
                                         None => match String::from_utf8(e2e_payload) {
                                             Ok(text) => {
-                                                // M8-D: после restart RAM-мапа доставок пуста;
-                                                // durable tombstone защищает от повторной UI-доставки.
-                                                // Receipt при этом всё равно шлём (идемпотентный
-                                                // cleanup чужих custody-копий).
-                                                let durable_tombstoned = relay_custody
-                                                    .as_ref()
-                                                    .map(|custody| {
-                                                        custody.store.has_tombstone(&msg_id).unwrap_or(false)
-                                                    })
-                                                    .unwrap_or(false);
-                                                if durable_tombstoned {
-                                                    tracing::info!(
-                                                        "MESH relay: {} already delivered before restart, UI suppressed",
-                                                        msg_id
-                                                    );
-                                                    true
-                                                } else {
-                                                    let now = std::time::SystemTime::now()
-                                                        .duration_since(std::time::UNIX_EPOCH)
-                                                        .unwrap_or_default();
-                                                    events.emit(CoreEvent::MessageReceived {
-                                                        message_id: msg_id.clone(),
-                                                        chat_id: chat_scope,
-                                                        sender_id: origin.clone(),
-                                                        text,
-                                                        timestamp: now.as_millis() as i64,
-                                                    });
-                                                    remember_bounded_delivery(
-                                                        &mut delivered_mesh_relay_origins,
-                                                        &mut delivered_mesh_relay_order,
-                                                        &msg_id,
-                                                        &origin,
-                                                        MAX_DELIVERED_MESH_RELAY_IDS,
-                                                    );
-                                                    // M8-B/D: durable tombstone — после restart поздний/
-                                                    // повторный relay с этим ID не даст вторую UI-доставку.
-                                                    if let Some(ref custody) = relay_custody {
-                                                        let now_durable =
-                                                            crate::network::relay_queue::utc_now_ms();
-                                                        if let Err(e) =
-                                                            custody.store.record_tombstone(&msg_id, now_durable)
-                                                        {
-                                                            tracing::warn!(
-                                                                "MESH relay: durable tombstone failed for {}: {}",
-                                                                msg_id,
-                                                                e
-                                                            );
-                                                        }
+                                                // Раунд 119: durable tombstone БОЛЬШЕ НЕ
+                                                // подавляет UI-доставку. Раньше: доставка ->
+                                                // tombstone -> процесс убит (например,
+                                                // ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ) до того, как Kotlin
+                                                // сохранил сообщение -> повторная доставка
+                                                // подавлялась tombstone-ом, receipt уходил,
+                                                // отправитель ставил «доставлено» ->
+                                                // сообщение пропадало навсегда. Теперь
+                                                // UI-событие шлём ВСЕГДА: дубль уже
+                                                // сохранённого отфильтрует Room по msg_id
+                                                // (messageExists + повторный ACK), а
+                                                // незасохранённое сообщение наконец дойдёт.
+                                                // Tombstone остаётся книгой учёта для
+                                                // cleanup чужих custody-копий.
+                                                let now = std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .unwrap_or_default();
+                                                events.emit(CoreEvent::MessageReceived {
+                                                    message_id: msg_id.clone(),
+                                                    chat_id: chat_scope,
+                                                    sender_id: origin.clone(),
+                                                    text,
+                                                    timestamp: now.as_millis() as i64,
+                                                });
+                                                remember_bounded_delivery(
+                                                    &mut delivered_mesh_relay_origins,
+                                                    &mut delivered_mesh_relay_order,
+                                                    &msg_id,
+                                                    &origin,
+                                                    MAX_DELIVERED_MESH_RELAY_IDS,
+                                                );
+                                                // M8-B/D: tombstone остаётся книгой учёта
+                                                // доставки (cleanup чужих custody-копий и
+                                                // запрет повторного хранения), но UI-доставку
+                                                // он больше не блокирует.
+                                                if let Some(ref custody) = relay_custody {
+                                                    let now_durable =
+                                                        crate::network::relay_queue::utc_now_ms();
+                                                    if let Err(e) =
+                                                        custody.store.record_tombstone(&msg_id, now_durable)
+                                                    {
+                                                        tracing::warn!(
+                                                            "MESH relay: durable tombstone failed for {}: {}",
+                                                            msg_id,
+                                                            e
+                                                        );
                                                     }
-                                                    tracing::info!(
-                                                        "MESH relay: {} delivered to local recipient",
-                                                        msg_id
-                                                    );
-                                                    true
                                                 }
+                                                tracing::info!(
+                                                    "MESH relay: {} delivered to local recipient",
+                                                    msg_id
+                                                );
+                                                true
                                             }
                                             Err(_) => {
                                                 tracing::warn!(

@@ -611,17 +611,21 @@ private fun MessageInputBar(
                         },
                     )
                 }
-                TextButton(
-                    onClick = onGifClick,
-                    enabled = !isPreparingFile && !isSending && canAttach,
-                ) {
-                    Text(
-                        "GIF",
-                        fontWeight = FontWeight.Bold,
-                        color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
-                    )
-                }
             }
+            }
+
+            // Каталог GIF (v11.74.15): ОТДЕЛЬНАЯ кнопка рядом со скрепкой,
+            // те же права, что у вложений. Раньше кнопка была вложена внутрь
+            // IconButton скрепки и накладывалась на неё.
+            TextButton(
+                onClick = onGifClick,
+                enabled = !isPreparingFile && !isSending && canAttach,
+            ) {
+                Text(
+                    "GIF",
+                    fontWeight = FontWeight.Bold,
+                    color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                )
             }
 
             BasicTextField(
