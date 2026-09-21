@@ -9084,3 +9084,21 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   /gif/search прежний. Деплой-скрипт: giphy-key.txt, WorkerUrl
   закреплён за SHA (иммунитет к «поднять тег»). Приложение не
   менялось - перевыпуск не нужен.
+
+- **2026-09-21 (раунд 118-тер) — v11.74.15 выпущен: GIF доводка по
+  замечаниям владельца.** (1) GIF-кнопка и в личных чатах: каталог тот
+  же (GifCatalogDialog вынесен в ui/components, параметры вместо
+  GroupChatUiState), attachGif в ChatDetailViewModel качает гифку в
+  cacheDir/gif_out и отправляет через prepareFromFile (тот же защищённый
+  файловый путь, ранг проверяем сами; binding-is-not-pinned обработан).
+  (2) GroupFileCard: имя/размер только пока нет превью; статус при
+  превью - только «в пути»/ошибки. (3) Долгое нажатие на картинке
+  карточки = меню пузыря (реакция на гифке). (4) FileTransferBubble в
+  личке: GIF через AsyncImage (анимация вместо первого кадра).
+  Отладка по аннотациям: MessageInputBar - отдельный composable (кнопка
+  не видела uiState -> параметр onGifClick; вставка вызова порезала
+  arrayOf("*/*") - починено точным якорем), OptIn ExperimentalFoundationApi,
+  пакет ReferralRankStore = data.referral. check30-32, зелёный 32.
+  Latest = v11.74.15 (8a67c69), apk 40 257 190 Б, sha256 df7705db…d92a.
+  Владелец разрешил. GIPHY_KEY задеплоен владельцем через дашборд
+  (переменная), /gif/search отдаёт каталог (проверено владельцем).
