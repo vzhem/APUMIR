@@ -414,7 +414,7 @@ class ChatDetailViewModel @Inject constructor(
                 check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
                 com.vladimir.messenger.data.file.FileTransferRankPolicy.requireCanSend(
                     qualifiedDirectReferrals =
-                        com.vladimir.messenger.data.peer.ReferralRankStore.qualifiedDirectCount(appContext),
+                        com.vladimir.messenger.data.referral.ReferralRankStore.qualifiedDirectCount(appContext),
                     mediaType = "image/gif",
                     sizeBytes = 0L,
                 )

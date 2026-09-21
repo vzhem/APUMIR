@@ -95,6 +95,7 @@ import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
+import com.vladimir.messenger.ui.components.GifCatalogDialog
 import com.vladimir.messenger.ui.components.GroupFileCard
 import com.vladimir.messenger.ui.components.fileIconFor
 import com.vladimir.messenger.ui.components.ImagePreview
