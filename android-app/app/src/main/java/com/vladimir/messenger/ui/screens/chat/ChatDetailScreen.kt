@@ -84,6 +84,27 @@ fun ChatDetailScreen(
     val context = LocalContext.current
 
     // F3: системный выбор файла (SAF) → зашифрованная подготовка → durable отправка
+    // Каталог GIF (кнопка «GIF» у скрепки).
+    var showGifCatalog by remember { mutableStateOf(false) }
+
+    if (showGifCatalog) {
+        com.vladimir.messenger.ui.components.GifCatalogDialog(
+            items = uiState.gifItems,
+            next = uiState.gifNext,
+            loading = uiState.gifLoading,
+            error = uiState.gifError,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.attachGif(item)
+            },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -581,6 +602,23 @@ private fun MessageInputBar(
                         } else {
                             Color(0xFF9AA3AF)
                         },
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        if (uiState.canSendAttachments) {
+                            showGifCatalog = true
+                            if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                                viewModel.searchGifs("")
+                            }
+                        }
+                    },
+                    enabled = !uiState.isPreparingFile && !uiState.isSending,
+                ) {
+                    Text(
+                        "GIF",
+                        fontWeight = FontWeight.Bold,
+                        color = if (uiState.canSendAttachments) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
                     )
                 }
             }

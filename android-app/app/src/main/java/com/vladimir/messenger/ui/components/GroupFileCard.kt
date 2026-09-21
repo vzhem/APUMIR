@@ -14,6 +14,7 @@ import coil.compose.AsyncImage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -139,7 +140,13 @@ data class FileCardState(
  * участников уже получили файл.
  */
 @Composable
-fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = Modifier) {
+fun GroupFileCard(
+    state: FileCardState,
+    isFromMe: Boolean,
+    modifier: Modifier = Modifier,
+    /** Долгое нажатие на картинку: реакции/меню пузыря (групповой чат). */
+    onLongPress: (() -> Unit)? = null,
+) {
     val info = state.info
     val transfer = state.transfer
     val complete = transfer != null && transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
@@ -179,7 +186,10 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
                     .fillMaxWidth()
                     .heightIn(max = 240.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { showFull = true },
+                    .combinedClickable(
+                        onClick = { showFull = true },
+                        onLongClick = onLongPress,
+                    ),
             )
             Spacer(Modifier.height(6.dp))
         } else if (bitmap != null) {
@@ -191,11 +201,17 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
                     .fillMaxWidth()
                     .heightIn(max = 240.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { showFull = true },
+                    .combinedClickable(
+                        onClick = { showFull = true },
+                        onLongClick = onLongPress,
+                    ),
             )
             Spacer(Modifier.height(6.dp))
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Имя и размер нужны, только пока картинки ещё нет (идёт приём).
+        // Картинка на месте - она и есть сообщение (решение владельца).
+        val hasPreview = bitmap != null || (GroupFileMarker.isGif(info) && previewPath != null)
+        if (!hasPreview) Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -228,7 +244,14 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
             state.pending -> "Запрошено, ждём раздающего…"
             else -> ""
         }
-        if (status.isNotEmpty()) {
+        // С картинкой на месте служебные строки не нужны: «Получено ✓»
+        // очевидно, остальное покажем, только пока что-то идёт не так.
+        val statusVisible = when {
+            !hasPreview -> status.isNotEmpty()
+            isFromMe -> status.startsWith("Получили") || status.startsWith("Раздающ")
+            else -> status.contains("…") || status.startsWith("Ошибка") || status.startsWith("Раздающ")
+        }
+        if (statusVisible) {
             Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
         }
         if (transfer != null && !complete && transfer.chunkCount > 0 && transfer.state != "FAILED") {

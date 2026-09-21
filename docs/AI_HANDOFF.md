@@ -682,6 +682,17 @@
    acfe133dde234114b4df0 (неизменяемый, теги больше не поднимаем).
    Владельцу: ключ Giphy на developers.giphy.com (без Google, с
    телефона), файл giphy-key.txt, деплой командой со скриптом этого SHA.
+   v11.74.15 (замечания владельца после проверки v11.74.14): (1) GIF в
+   ЛИЧНЫХ чатах: ChatDetailScreen кнопка GIF -> GifCatalogDialog (вынесен
+   в ui/components, параметры вместо UiState группы) -> attachGif в
+   ChatDetailViewModel: rank-проверка, downloadGif, байты в cacheDir/
+   gif_out, prepareFromFile (не Content - ранг проверяем сами), тот же
+   insertLocalFileMessage+pumpOutgoing, обработка binding-is-not-pinned;
+   (2) GroupFileCard: имя/размер ТОЛЬКО пока нет превью (hasPreview),
+   статус при превью - только «в пути»/ошибки, «Получено» скрыт;
+   (3) GroupFileCard.onLongPress -> combinedClickable на картинках ->
+   showMenu пузыря (реакция на гифке). FileTransferBubble (личка):
+   isGif -> AsyncImage анимацией вместо статичного кадра.
    Идеи-резервы следующие релизов (владелец «давай доделаем это все»):
    очередь офлайн-сообщений на нашем брокере; дублирование при раздаче
    копий; ACK с версией протокола APUBK1 (служебные конверты нового

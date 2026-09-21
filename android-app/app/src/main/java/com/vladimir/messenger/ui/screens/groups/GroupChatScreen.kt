@@ -139,7 +139,10 @@ fun GroupChatScreen(
 
     if (showGifCatalog) {
         GifCatalogDialog(
-            uiState = uiState,
+            items = uiState.gifItems,
+            next = uiState.gifNext,
+            loading = uiState.gifLoading,
+            error = uiState.gifError,
             onSearch = { viewModel.searchGifs(it) },
             onMore = { viewModel.searchGifs("", more = true) },
             onAttach = { item ->
@@ -997,7 +1000,14 @@ private fun MessageBubble(
                     else -> Text(bodyText)
                 }
                 if (fileCard != null) {
-                    GroupFileCard(state = fileCard, isFromMe = message.isFromMe)
+                    // Долгое нажатие на самой картинке = меню пузыря
+                    // (реакции/закрепить): раньше область карточки
+                    // «проглатывала» жест, и реакцию поставить не выходило.
+                    GroupFileCard(
+                        state = fileCard,
+                        isFromMe = message.isFromMe,
+                        onLongPress = { showMenu = true },
+                    )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(time, style = MaterialTheme.typography.labelSmall)
@@ -1146,83 +1156,3 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
     )
 }
 
-/**
- * Каталог GIF (v11.74.14): поиск через НАШ сервер (ключ Tenor спрятан там),
- * выбор - скачиваем гифку и прикладываем как файл (едет через рой, зашифрованная).
- */
-@Composable
-private fun GifCatalogDialog(
-    uiState: GroupChatUiState,
-    onSearch: (String) -> Unit,
-    onMore: () -> Unit,
-    onAttach: (com.vladimir.messenger.data.gif.GifItem) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var query by remember { mutableStateOf("") }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Каталог GIF") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Поиск: котики, привет…") },
-                    singleLine = true,
-                    trailingIcon = {
-                        IconButton(onClick = { onSearch(query) }) {
-                            Icon(Icons.Filled.Search, contentDescription = "Найти")
-                        }
-                    },
-                )
-                Spacer(Modifier.height(8.dp))
-                val error = uiState.gifError
-                if (error != null) {
-                    Text(
-                        error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        gridItems(uiState.gifItems, key = { it.id }) { item ->
-                            AsyncImage(
-                                model = item.preview,
-                                contentDescription = "GIF",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onAttach(item) },
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        if (uiState.gifLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else if (uiState.gifNext.isNotBlank()) {
-                            TextButton(onClick = onMore) { Text("Ещё") }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть") }
-        },
-    )
-}

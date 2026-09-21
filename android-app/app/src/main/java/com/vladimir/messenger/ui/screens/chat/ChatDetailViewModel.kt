@@ -45,6 +45,11 @@ data class ChatDetailUiState(
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
     val canSendAttachments: Boolean = true,
     val attachmentsLockedHint: String = "",
+    /** Каталог GIF (наш сервер): гифки, курсор «ещё», состояние. */
+    val gifItems: List<com.vladimir.messenger.data.gif.GifItem> = emptyList(),
+    val gifNext: String = "",
+    val gifLoading: Boolean = false,
+    val gifError: String? = null,
     /** Реакции по сообщениям: ключ - id сообщения. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
 )
@@ -59,6 +64,7 @@ class ChatDetailViewModel @Inject constructor(
     private val filePreparation: OutgoingFilePreparationService,
     private val fileTransferDao: FileTransferDao,
     private val fileTransferRouter: FileTransferRouter,
+    private val botApi: com.vladimir.messenger.service.BotApi,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
@@ -343,6 +349,113 @@ class ChatDetailViewModel @Inject constructor(
                     }
                 } else {
                     _uiState.update { it.copy(error = "Файл не отправлен: ${e.message}") }
+                }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    // ── Каталог GIF (наш сервер -> Tenor/Giphy; отправка как файл) ──
+
+    fun searchGifs(query: String, more: Boolean = false) {
+        if (_uiState.value.gifLoading) return
+        val pos = if (more) _uiState.value.gifNext else ""
+        _uiState.update {
+            it.copy(
+                gifLoading = true,
+                gifError = null,
+                gifItems = if (more) it.gifItems else emptyList(),
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { botApi.gifSearch(query, pos) }.getOrNull()
+            _uiState.update { state ->
+                if (result == null) {
+                    state.copy(
+                        gifLoading = false,
+                        gifError = "Каталог недоступен: сервер не отвечает или ключ GIF ещё не настроен",
+                    )
+                } else {
+                    val (items, next) = result
+                    if (items.isEmpty() && state.gifItems.isEmpty()) {
+                        state.copy(gifLoading = false, gifError = "Ничего не нашлось")
+                    } else {
+                        state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifItems = (state.gifItems + items).distinctBy { it.id },
+                            gifNext = next,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun closeGifCatalog() {
+        _uiState.update { it.copy(gifItems = emptyList(), gifNext = "", gifError = null) }
+    }
+
+    /** Выбрал гифку: скачать и отправить как файл (тот же путь, что скрепка). */
+    fun attachGif(item: com.vladimir.messenger.data.gif.GifItem) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            var targetRecipientId: String? = null
+            try {
+                val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+                val recipientId = chat.contactId
+                targetRecipientId = recipientId
+                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                com.vladimir.messenger.data.file.FileTransferRankPolicy.requireCanSend(
+                    qualifiedDirectReferrals =
+                        com.vladimir.messenger.data.peer.ReferralRankStore.qualifiedDirectCount(appContext),
+                    mediaType = "image/gif",
+                    sizeBytes = 0L,
+                )
+                val bytes = botApi.downloadGif(item.gif)
+                    ?: error("Гифка не скачалась")
+                val dir = java.io.File(appContext.cacheDir, "gif_out").apply { mkdirs() }
+                val tmp = java.io.File.createTempFile("gif_", ".gif", dir)
+                java.io.FileOutputStream(tmp).use { it.write(bytes) }
+                val name = "gif_" + item.id + ".gif"
+                val messageId = UUID.randomUUID().toString()
+                val prepared = filePreparation.prepareFromFile(
+                    source = tmp,
+                    displayName = name,
+                    mediaType = "image/gif",
+                    messageId = messageId,
+                    chatId = chatId,
+                    recipientNodeId = recipientId,
+                )
+                chatRepository.insertLocalFileMessage(
+                    chatId = chatId,
+                    recipientId = recipientId,
+                    messageId = messageId,
+                    content = FileTransferRouter.formatPlaceholder(
+                        prepared.displayName,
+                        prepared.mediaType,
+                        prepared.totalBytes,
+                    ),
+                    timestamp = System.currentTimeMillis(),
+                )
+                _uiState.update { it.copy(scrollToBottom = true) }
+                fileTransferRouter.pumpOutgoing()
+            } catch (e: Exception) {
+                android.util.Log.w("ChatDetailVM", "gif attach failed", e)
+                val message = e.message.orEmpty()
+                if (message.contains("binding is not pinned")) {
+                    targetRecipientId?.let { fileTransferRouter.requestExchangeBinding(it) }
+                    _uiState.update {
+                        it.copy(error = "Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.")
+                    }
+                } else {
+                    _uiState.update { it.copy(error = "Гифка не отправлена: $message") }
                 }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
