@@ -69,7 +69,7 @@ if (-not $VaultId -or -not $RegistryId -or -not $RelayId) {
 Write-Host "=== 4/5 Downloading worker.js ===" -ForegroundColor Cyan
 Invoke-WebRequest -Uri $WorkerUrl -OutFile "worker.js"
 $lines = (Get-Content "worker.js").Count
-Write-Host ("  worker.js: $lines lines (expected about 792)")
+Write-Host ("  worker.js: $lines lines (expected about 848)")
 if (Select-String -Path "worker.js" -Pattern "addrbook/put" -Quiet) {
   Write-Host "  OK: /addrbook endpoints present (backup of the address book)"
 } else {

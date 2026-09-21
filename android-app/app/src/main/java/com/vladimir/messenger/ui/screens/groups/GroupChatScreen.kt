@@ -136,6 +136,22 @@ fun GroupChatScreen(
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
+
+    if (showGifCatalog) {
+        GifCatalogDialog(
+            uiState = uiState,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.attachGif(item) { }
+            },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
     // В КАНАЛЕ список тем не показываем. Пост и комментарии к нему устроены
     // как тема внутри, но человеку это знать незачем: он открыл комментарии к
     // конкретному посту и должен видеть обычную переписку, а «Назад» обязано
@@ -1048,22 +1064,6 @@ private fun MessageBubble(
                 )
             }
         }
-    }
-
-    if (showGifCatalog) {
-        GifCatalogDialog(
-            uiState = uiState,
-            onSearch = { viewModel.searchGifs(it) },
-            onMore = { viewModel.searchGifs("", more = true) },
-            onAttach = { item ->
-                showGifCatalog = false
-                viewModel.attachGif(item) { }
-            },
-            onDismiss = {
-                showGifCatalog = false
-                viewModel.closeGifCatalog()
-            },
-        )
     }
 }
 
