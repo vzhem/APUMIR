@@ -311,7 +311,7 @@ object GifLibrary {
             root.put(peerId, peerCatalogToJson(merged, System.currentTimeMillis()))
             // Держим каталог компактным: свежие 50 собеседников.
             while (root.length() > MAX_PEERS) {
-                val oldest = root.keySet().asSequence()
+                val oldest = peerIds(root)
                     .minByOrNull { root.optJSONObject(it)?.optLong("at") ?: 0L } ?: break
                 root.remove(oldest)
             }
@@ -328,7 +328,7 @@ object GifLibrary {
         val mine = mutex.withLock { loadIndex(context) }.map { it.sha256 }.toSet()
         val root = mutex.withLock { loadPeerRoot(context) }
         val bySha = LinkedHashMap<String, MutableList<Pair<String, GifLibEntry>>>()
-        for (peer in root.keySet()) {
+        for (peer in peerIds(root)) {
             val obj = root.optJSONObject(peer) ?: continue
             val items = jsonToPeerItems(obj)
             for (entry in items) {
@@ -348,9 +348,17 @@ object GifLibrary {
 
     suspend fun peerCatalogCounts(context: Context): Map<String, Int> = withContext(Dispatchers.IO) {
         val root = mutex.withLock { loadPeerRoot(context) }
-        root.keySet().asSequence().associateWith {
+        peerIds(root).associateWith {
             root.optJSONObject(it)?.optJSONArray("items")?.length() ?: 0
         }
+    }
+
+    /** Список ключей каталога: keys() доступен везде, keySet() - нет. */
+    private fun peerIds(root: JSONObject): List<String> {
+        val out = ArrayList<String>()
+        val it = root.keys()
+        while (it.hasNext()) out.add(it.next())
+        return out
     }
 
     private fun loadPeerRoot(context: Context): JSONObject = try {
