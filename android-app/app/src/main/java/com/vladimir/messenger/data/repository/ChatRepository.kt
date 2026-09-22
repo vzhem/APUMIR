@@ -311,6 +311,65 @@ class ChatRepository @Inject constructor(
         return inserted != -1L
     }
 
+    /**
+     * Раунд 128: моя ССЫЛКА на гифку в чате (от моего лица). В чате карточка
+     * одна; байты каждый телефон тихо подтягивает с хранителей. Превью в
+     * списке чатов - аккуратное, без служебной строки.
+     */
+    suspend fun insertGifRefMessage(
+        chatId: String,
+        recipientId: String,
+        messageId: String,
+        sha256: String,
+        timestamp: Long,
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = "self",
+            content = content,
+            timestamp = timestamp,
+            isFromMe = true,
+            status = "LOCAL_FILE",
+            channel = MessageChannel.STORE_FORWARD.name,
+            recipientId = recipientId,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, "\ud83d\uddbc Гифка", timestamp)
+        }
+        return inserted != -1L
+    }
+
+    /** Раунд 128: пришла ссылка на гифку от собеседника - карточка в чате. */
+    suspend fun insertReceivedGifRefMessage(
+        chatId: String,
+        senderId: String,
+        messageId: String,
+        sha256: String,
+        timestamp: Long,
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            timestamp = timestamp,
+            isFromMe = false,
+            status = "RECEIVED",
+            channel = MessageChannel.STORE_FORWARD.name,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, "\ud83d\uddbc Гифка", timestamp)
+        }
+        return inserted != -1L
+    }
+
     suspend fun getChatByContactId(contactId: String): Chat? {
         return chatDao.getChatByContactId(contactId)?.toDomain()
     }

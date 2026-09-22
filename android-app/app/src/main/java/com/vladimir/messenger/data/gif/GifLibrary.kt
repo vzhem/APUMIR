@@ -63,6 +63,9 @@ object GifLibrary {
     private const val TAG = "GifLibrary"
     const val WIRE_PREFIX = "APUGIF1"
 
+    /** Раунд 128: служебная ссылка «передай байты этой гифки». */
+    const val REF_WIRE = "${WIRE_PREFIX}|ref|"
+
     // Раунд 123: лимита на число гифок в библиотеке БОЛЬШЕ НЕТ - сколько
     // человек использует, столько и хранится (решение владельца).
 
@@ -413,6 +416,19 @@ object GifLibrary {
         val sha256: String,
     )
 
+    /** Раунд 128: ССЫЛКА на гифку в чате - «APUGIFREF1|<sha256>». */
+    const val REF_PREFIX = "APUGIFREF1"
+
+    fun refContent(sha256: String): String = "$REF_PREFIX|$sha256"
+
+    fun isGifRef(text: String?): Boolean =
+        text != null && text.startsWith("$REF_PREFIX|")
+
+    fun gifRefSha(text: String?): String? =
+        text?.takeIf { isGifRef(it) }
+            ?.removePrefix("$REF_PREFIX|")
+            ?.takeIf { isSafeSha(it) }
+
     fun isGifPacket(text: String?): Boolean =
         text != null && text.length <= 8000 && text.startsWith("$WIRE_PREFIX|")
 
@@ -423,6 +439,11 @@ object GifLibrary {
         // Разбор с limit: тег/имя внутри JSON могут нести "|", хвост цельный.
         return when {
             t == "$WIRE_PREFIX|ask" -> GifPacket("ask", 0, 1, emptyList(), "")
+            t.startsWith("$WIRE_PREFIX|ref|") -> {
+                // Раунд 128: ссылка на гифку (байты тянутся тихо с хранителей).
+                val sha = t.removePrefix("$WIRE_PREFIX|ref|")
+                if (isSafeSha(sha)) GifPacket("ref", 0, 1, emptyList(), sha) else null
+            }
             t.startsWith("$WIRE_PREFIX|want|") -> {
                 val sha = t.removePrefix("$WIRE_PREFIX|want|")
                 if (isSafeSha(sha)) GifPacket("want", 0, 1, emptyList(), sha) else null

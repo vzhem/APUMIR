@@ -374,7 +374,10 @@ fun ChatDetailScreen(
                                 it.direction == "INCOMING" &&
                                     it.state != "COMPLETE" &&
                                     it.messageId !in knownMessageIds &&
-                                    it.transferId !in shadowed
+                                    it.transferId !in shadowed &&
+                                    // Раунд 128: гифки ходят ТИХО (по ссылкам) -
+                                    // служебную передачу байтов в ленте не показываем.
+                                    !it.mediaType.equals("image/gif", ignoreCase = true)
                             }
                             .map { transfer ->
                                 ChatRow(
@@ -446,7 +449,17 @@ fun ChatDetailScreen(
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                MessageBubble(
+                                // Раунд 128: ССЫЛКА на гифку - карточка с
+                                // анимацией (байты подтягиваются тихо с сети).
+                                if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content)) {
+                                    com.vladimir.messenger.ui.components.GifRefCard(
+                                        content = message.content,
+                                        modifier = Modifier.align(
+                                            if (message.isFromMe) Alignment.End else Alignment.Start
+                                        ),
+                                        onEnsure = { sha -> viewModel.ensureGifRef(sha) },
+                                    )
+                                } else MessageBubble(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
                                     linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),

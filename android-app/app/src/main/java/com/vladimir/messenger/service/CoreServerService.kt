@@ -110,7 +110,7 @@ class CoreServerService : Service() {
      * сохранения в чат (как реакции), поэтому «мусорных» строк в переписке
      * не появляется.
      */
-    private fun handleGifEnvelope(senderId: String, chatId: String, text: String) {
+    private fun handleGifEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
         val packet = com.vladimir.messenger.data.gif.GifLibrary.parseGifPacket(text) ?: return
         val now = System.currentTimeMillis()
         when (packet.kind) {
@@ -140,6 +140,23 @@ class CoreServerService : Service() {
                         .onFailure { Log.w(TAG, "gif serve failed: ${it.message}") }
                 }
             }
+            "ref" -> {
+                // Раунд 128: собеседник прислал ССЫЛКУ на гифку. В чат ложится
+                // карточка от его лица; байты он и я каждый тихо подтянем
+                // с хранителей - в переписке с хранителем ничего не появляется.
+                val sha = packet.sha256
+                serviceScope.launch {
+                    runCatching {
+                        chatRepository.insertReceivedGifRefMessage(
+                            chatId = chatId,
+                            senderId = senderId,
+                            messageId = messageId,
+                            sha256 = sha,
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    }.onFailure { Log.w(TAG, "gif ref insert failed: ${it.message}") }
+                }
+            }
         }
     }
 
@@ -156,9 +173,9 @@ class CoreServerService : Service() {
     }
 
     /**
-     * Собеседник попросил гифку из моего каталога: отправляю её обычной
-     * защищённой передачей файлов в наш чат - механика та же, что у кнопки
-     * «GIF» и скрепки.
+     * Собеседник попросил гифку из моего каталога (раунд 128): передаю БАЙТЫ
+     * защищённой передачей файлов ТИХО - без сообщения в наш чат. Телефон
+     * просителя сам положит гифку в тот чат, откуда пришла ссылка.
      */
     private suspend fun serveGifFromLibrary(peerId: String, chatId: String, sha256: String) {
         val app = applicationContext
@@ -166,7 +183,7 @@ class CoreServerService : Service() {
         val file = com.vladimir.messenger.data.gif.GifLibrary.gifFile(app, sha256) ?: return
         val messageId = UUID.randomUUID().toString()
         try {
-            val prepared = gifPreparation.prepareFromFile(
+            gifPreparation.prepareFromFile(
                 source = file,
                 displayName = entry.displayName.ifBlank { "gif_${sha256.take(8)}.gif" },
                 mediaType = "image/gif",
@@ -174,19 +191,8 @@ class CoreServerService : Service() {
                 chatId = chatId,
                 recipientNodeId = peerId,
             )
-            chatRepository.insertLocalFileMessage(
-                chatId = chatId,
-                recipientId = peerId,
-                messageId = messageId,
-                content = com.vladimir.messenger.data.file.FileTransferRouter.formatPlaceholder(
-                    prepared.displayName,
-                    prepared.mediaType,
-                    prepared.totalBytes,
-                ),
-                timestamp = System.currentTimeMillis(),
-            )
             fileTransferRouter.pumpOutgoing()
-            Log.i(TAG, "GIF ${sha256.take(12)} sent to ${peerId.takeLast(8)} from library")
+            Log.i(TAG, "GIF ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
         } catch (e: Exception) {
             if (e.message.orEmpty().contains("binding is not pinned")) {
                 fileTransferRouter.requestExchangeBinding(peerId)
@@ -851,7 +857,7 @@ class CoreServerService : Service() {
                     // контакта. Иначе каждое групповое событие превратилось бы в личный
                     // чат с отправителем.
                     if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
-                        handleGifEnvelope(senderId, chatId, text)
+                        handleGifEnvelope(senderId, chatId, messageId, text)
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {

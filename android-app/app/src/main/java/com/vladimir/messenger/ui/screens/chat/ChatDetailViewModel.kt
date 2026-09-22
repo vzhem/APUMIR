@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileTransferRouter
 import com.vladimir.messenger.data.file.OutgoingFilePreparationService
@@ -97,12 +98,11 @@ class ChatDetailViewModel @Inject constructor(
     /** Раунд 121: гифка, которую ждали из роя, пришла - сразу отправить. */
     private fun observeGifArrivals() {
         viewModelScope.launch {
-            com.vladimir.messenger.data.gif.GifLibrary.arrivalsFlow().collect { sha ->
-                if (pendingSwarmSha == sha) {
-                    pendingSwarmSha = null
-                    _uiState.update { it.copy(swarmStatus = null) }
-                    attachLocalGifInternal(sha)
-                }
+            // Раунд 128: гифка приезжает ТИХО (с хранителей) - карточки-ссылки
+            // в чате оживают сами (GifRefCard слушает arrivals). Здесь только
+            // гасим статус в окне каталога.
+            com.vladimir.messenger.data.gif.GifLibrary.arrivalsFlow().collect { _ ->
+                _uiState.update { it.copy(swarmStatus = null) }
             }
         }
     }
@@ -420,7 +420,6 @@ class ChatDetailViewModel @Inject constructor(
     // ── Свой каталог роя (раунд 121) ────────────────────────────────────
 
     private var lastGifQuery: String = ""
-    private var pendingSwarmSha: String? = null
 
     /** Открыли окно гифок: подтянуть мою библиотеку и каталог роя. */
     fun onGifCatalogOpened() {
@@ -497,88 +496,270 @@ class ChatDetailViewModel @Inject constructor(
     }
 
 
-    /** Гифка из моей библиотеки - наружный ресурс не нужен вовсе. */
+    /**
+     * Раунд 128: гифка из моей библиотеки уходит ССЫЛКОЙ. В чате появляется
+     * ОДНА карточка от моего лица; байты собеседник тихо подтянет с
+     * хранителей (у меня они уже есть - я и хранитель).
+     */
     fun attachLocalGif(sha256: String) {
         if (_uiState.value.isPreparingFile) return
-        viewModelScope.launch { attachLocalGifInternal(sha256) }
-    }
-
-    private suspend fun attachLocalGifInternal(sha256: String) {
-        if (_uiState.value.isPreparingFile) return
-        if (!_uiState.value.canSendAttachments) {
-            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
-            return
-        }
-        _uiState.update { it.copy(isPreparingFile = true, error = null) }
-        try {
-            val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
-            val recipientId = chat.contactId
-            check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
-            val file = com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha256)
-                ?: error("Гифки нет в библиотеке")
-            val entry = com.vladimir.messenger.data.gif.GifLibrary.bySha(appContext, sha256)
-            com.vladimir.messenger.data.file.FileTransferRankPolicy.requireCanSend(
-                qualifiedDirectReferrals =
-                    com.vladimir.messenger.data.referral.ReferralRankStore.qualifiedDirectCount(appContext),
-                mediaType = "image/gif",
-                sizeBytes = file.length(),
-            )
-            val messageId = java.util.UUID.randomUUID().toString()
-            val prepared = filePreparation.prepareFromFile(
-                source = file,
-                displayName = entry?.displayName?.takeIf { it.isNotBlank() }
-                    ?: ("gif_" + sha256.take(8) + ".gif"),
-                mediaType = "image/gif",
-                messageId = messageId,
-                chatId = chatId,
-                recipientNodeId = recipientId,
-            )
-            chatRepository.insertLocalFileMessage(
-                chatId = chatId,
-                recipientId = recipientId,
-                messageId = messageId,
-                content = com.vladimir.messenger.data.file.FileTransferRouter.formatPlaceholder(
-                    prepared.displayName,
-                    prepared.mediaType,
-                    prepared.totalBytes,
-                ),
-                timestamp = System.currentTimeMillis(),
-            )
-            _uiState.update { it.copy(scrollToBottom = true) }
-            fileTransferRouter.pumpOutgoing()
-        } catch (e: Exception) {
-            val message = e.message.orEmpty()
-            if (message.contains("binding is not pinned")) {
-                _uiState.update {
-                    it.copy(error = "Ключ получателя ещё не закреплён. Попробуйте через пару минут.")
-                }
-            } else {
-                _uiState.update { it.copy(error = "Гифка не отправлена: $message") }
-            }
-        } finally {
-            _uiState.update { it.copy(isPreparingFile = false) }
-        }
-    }
-
-    /** Гифки нет ни у меня, ни запрос ещё в пути - попросить у роя. */
-    fun requestSwarmGif(swarm: com.vladimir.messenger.data.gif.SwarmGif) {
-        if (pendingSwarmSha == swarm.entry.sha256) return
         viewModelScope.launch {
-            val holder = runCatching {
-                com.vladimir.messenger.data.gif.GifLibrary.requestGif(
-                    appContext, chatRepository, swarm.entry.sha256, swarm.holders,
-                )
-            }.getOrNull()
-            if (holder == null) {
-                _uiState.update { it.copy(swarmStatus = "Держателей сейчас нет на связи") }
-            } else if (holder.isEmpty()) {
-                _uiState.update { it.copy(swarmStatus = "Уже попросили - гифка в пути") }
-            } else {
-                pendingSwarmSha = swarm.entry.sha256
-                com.vladimir.messenger.data.gif.GifLibrary.rememberWant(swarm.entry.sha256)
+            try {
+                sendGifRefInternal(sha256)
+            } catch (e: Exception) {
+                val message = e.message.orEmpty()
                 _uiState.update {
-                    it.copy(swarmStatus = "Попросил у $holder - принесёт самый быстрый")
+                    it.copy(error = if (message.contains("недоступен")) "Собеседник недоступен - попробуйте позже" else "Гифка не отправлена: $message")
                 }
+            }
+        }
+    }
+
+    /**
+     * Раунд 128: отправить ССЫЛКУ на гифку (от моего лица). Никаких файлов
+     * по переписке: карточка одна, байты каждый телефон подтягивает тихо с
+     * хранителей из каталога сети.
+     */
+    private suspend fun sendGifRefInternal(sha256: String) {
+        val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+        val recipientId = chat.contactId
+        val messageId = UUID.randomUUID().toString()
+        val sent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                RustBridge.sendMessage(
+                    messageId, chatId, recipientId,
+                    com.vladimir.messenger.data.gif.GifLibrary.REF_WIRE + sha256,
+                )
+            }.getOrDefault(false)
+        }
+        check(sent) { "телефон собеседника недоступен" }
+        chatRepository.insertGifRefMessage(
+            chatId = chatId,
+            recipientId = recipientId,
+            messageId = messageId,
+            sha256 = sha256,
+            timestamp = System.currentTimeMillis(),
+        )
+        _uiState.update { it.copy(scrollToBottom = true) }
+        // Своя карточка тоже должна ожить: если гифки у меня нет - тихо
+        // попросим у сети (тротлимб внутри GifLibrary).
+        ensureGifRefInternal(sha256)
+    }
+
+    /**
+     * Раунд 128: убедиться, что гифка есть в моей библиотеке (для карточки-
+     * ссылки). Нет - тихо попросить у хранителей сети.
+     */
+    fun ensureGifRef(sha256: String) {
+        viewModelScope.launch { ensureGifRefInternal(sha256) }
+    }
+
+    private suspend fun ensureGifRefInternal(sha256: String) {
+        val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha256)?.isFile == true
+        }
+        if (have) return
+        val holders = runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
+        }.getOrDefault(emptyList())
+            .firstOrNull { it.entry.sha256 == sha256 }?.holders.orEmpty()
+        if (holders.isEmpty()) return
+        com.vladimir.messenger.data.gif.GifLibrary.rememberWant(sha256)
+        runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.requestGif(
+                appContext, chatRepository, sha256, holders,
+            )
+        }
+    }
+
+    /**
+     * Раунд 128: выбрал гифку из сети (синяя точка) - в чат уходит моя
+     * ССЫЛКА. У меня гифка подтянется тихо, у собеседника - тоже.
+     */
+    fun requestSwarmGif(swarm: com.vladimir.messenger.data.gif.SwarmGif) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            try {
+                sendGifRefInternal(swarm.entry.sha256)
+                _uiState.update { it.copy(swarmStatus = "Ссылка отправлена - гифка подтянется из сети") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(swarmStatus = "Собеседник недоступен - попробуйте позже") }
+            }
+        }
+    }
+
+    /** Выбрал гифку: скачать и отправить как файл (тот же путь, что скрепка). */
+    /**
+     * Раунд 128: выбрал гифку во внешнем каталоге - скачиваем ОДИН раз,
+     * селим в библиотеку (телефон становится хранителем) и отправляем в чат
+     * ССЫЛКОЙ. Байты собеседник подтянет тихо - с меня как с хранителя.
+     */
+    fun attachGif(item: com.vladimir.messenger.data.gif.GifItem) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                // Раунд 121: если гифка уже живёт в моей библиотеке (качали
+                // раньше или получили из сети) - наружный ресурс не трогаем.
+                var sha = com.vladimir.messenger.data.gif.GifLibrary
+                    .shaForGiphyId(appContext, item.id)
+                if (sha == null) {
+                    val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        botApi.downloadGif(item.gif)
+                    } ?: error("Гифка не скачалась")
+                    val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.vladimir.messenger.data.gif.GifLibrary.add(
+                            appContext, bytes, item.id, lastGifQuery, "gif_" + item.id + ".gif",
+                        )
+                    } ?: error("Гифка не сохранилась")
+                    sha = added.sha256
+                }
+                sendGifRefInternal(sha)
+            } catch (e: Exception) {
+                android.util.Log.w("ChatDetailVM", "gif attach failed", e)
+                _uiState.update { it.copy(error = "Гифка не отправлена: " + e.message.orEmpty()) }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /**
+     * Раунд 124: СВОЯ гифка из хранилища телефона. Ложится в библиотеку
+     * (превью + индекс), объявляется в каталоге нашей сети - теперь она
+     * есть у всех телефонов, без внешнего ресурса.
+     */
+    fun addOwnGif(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val bytes = appContext.contentResolver.openInputStream(uri)
+                        ?.use { input -> input.readBytes() }
+                        ?: return@withContext null
+                    if (bytes.isEmpty() || bytes.size > 30 * 1024 * 1024) return@withContext null
+                    val name = runCatching {
+                        appContext.contentResolver.query(
+                            uri, null, null, null, null,
+                        )?.use { cursor ->
+                            val idx = cursor.getColumnIndex(
+                                android.provider.OpenableColumns.DISPLAY_NAME,
+                            )
+                            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+                        }
+                    }.getOrNull()
+                    com.vladimir.messenger.data.gif.GifLibrary.add(
+                        appContext,
+                        bytes,
+                        null,
+                        "своя",
+                        name?.takeIf { it.isNotBlank() }
+                            ?: "своя_${System.currentTimeMillis() / 1000}.gif",
+                    )
+                }.getOrNull()
+            }
+            if (added == null) {
+                _uiState.update { it.copy(swarmStatus = "Не вышло: нужен файл GIF до 30 МБ") }
+            } else {
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                        appContext, chatRepository, force = false,
+                    )
+                }
+                onGifCatalogOpened()
+                _uiState.update { it.copy(swarmStatus = "Своя гифка добавлена - уже в нашей сети") }
+            }
+        }
+    }
+
+
+    /**
+     * Раунд 128: гифка из моей библиотеки уходит ССЫЛКОЙ. В чате появляется
+     * ОДНА карточка от моего лица; байты собеседник тихо подтянет с
+     * хранителей (у меня они уже есть - я и хранитель).
+     */
+    fun attachLocalGif(sha256: String) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            try {
+                sendGifRefInternal(sha256)
+            } catch (e: Exception) {
+                val message = e.message.orEmpty()
+                _uiState.update {
+                    it.copy(error = if (message.contains("недоступен")) "Собеседник недоступен - попробуйте позже" else "Гифка не отправлена: $message")
+                }
+            }
+        }
+    }
+
+    /**
+     * Раунд 128: отправить ССЫЛКУ на гифку (от моего лица). Никаких файлов
+     * по переписке: карточка одна, байты каждый телефон подтягивает тихо с
+     * хранителей из каталога сети.
+     */
+    private suspend fun sendGifRefInternal(sha256: String) {
+        val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+        val recipientId = chat.contactId
+        val messageId = UUID.randomUUID().toString()
+        val sent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                RustBridge.sendMessage(
+                    messageId, chatId, recipientId,
+                    com.vladimir.messenger.data.gif.GifLibrary.REF_WIRE + sha256,
+                )
+            }.getOrDefault(false)
+        }
+        check(sent) { "телефон собеседника недоступен" }
+        chatRepository.insertGifRefMessage(
+            chatId = chatId,
+            recipientId = recipientId,
+            messageId = messageId,
+            sha256 = sha256,
+            timestamp = System.currentTimeMillis(),
+        )
+        _uiState.update { it.copy(scrollToBottom = true) }
+        // Своя карточка тоже должна ожить: если гифки у меня нет - тихо
+        // попросим у сети (тротлимб внутри GifLibrary).
+        ensureGifRefInternal(sha256)
+    }
+
+    /**
+     * Раунд 128: убедиться, что гифка есть в моей библиотеке (для карточки-
+     * ссылки). Нет - тихо попросить у хранителей сети.
+     */
+    fun ensureGifRef(sha256: String) {
+        viewModelScope.launch { ensureGifRefInternal(sha256) }
+    }
+
+    private suspend fun ensureGifRefInternal(sha256: String) {
+        val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha256)?.isFile == true
+        }
+        if (have) return
+        val holders = runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
+        }.getOrDefault(emptyList())
+            .firstOrNull { it.entry.sha256 == sha256 }?.holders.orEmpty()
+        if (holders.isEmpty()) return
+        com.vladimir.messenger.data.gif.GifLibrary.rememberWant(sha256)
+        runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.requestGif(
+                appContext, chatRepository, sha256, holders,
+            )
+        }
+    }
+
+    /**
+     * Раунд 128: выбрал гифку из сети (синяя точка) - в чат уходит моя
+     * ССЫЛКА. У меня гифка подтянется тихо, у собеседника - тоже.
+     */
+    fun requestSwarmGif(swarm: com.vladimir.messenger.data.gif.SwarmGif) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            try {
+                sendGifRefInternal(swarm.entry.sha256)
+                _uiState.update { it.copy(swarmStatus = "Ссылка отправлена - гифка подтянется из сети") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(swarmStatus = "Собеседник недоступен - попробуйте позже") }
             }
         }
     }
