@@ -9213,3 +9213,23 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   одну (shadowed-набор в ChatDetailScreen). check39/40 упали (suspend
   в лямбде, Int/Long), check41 зелёный. v11.74.20 = 16006d0, APK
   40 320 198 Б, sha256 3d132aa2…d716.
+
+- **2026-09-22 (раунд 124) - v11.74.21: избранное для файлов/гифок;
+  свои гифки; «Рой» -> «В нашей сети».** (1) Избранное УЖЕ БЫЛО
+  (SavedItemsRepository, Room SavedItemDao - БЕЗ миграций; KIND_TEXT /
+  KIND_FILE; просмотр SavedScreen из списка чатов): в личке текст
+  клался, файлы - кнопкой в пузыре; ДОБАВЛЕНО: личка - в меню сообщения
+  пункт «Файл в избранное» (transfer INCOMING COMPLETE по
+  message.id=chatPlaceholderMessageId), текстовый пункт скрыт у пустых;
+  группы/каналы/комментарии - FileCardState.onFavorite (nullable,
+  кнопка «В избранное» на карточке когда complete; ChannelScreen +
+  ChannelViewModel.saveFileToFavorites, GroupChatViewModel.
+  saveFileToFavorites - savedItems.saveFile(transfer, title)).
+  (2) Свои гифки: GifCatalogDialog «+ Своя» (GetContent image/gif в
+  диалоге) -> VM.addOwnGif(uri): bytes<=30МБ, имя из OpenableColumns,
+  GifLibrary.add(bytes,null,"своя",name) + syncWithSwarm +
+  onGifCatalogOpened; статус в диалоге. (3) Вкладка «Рой» -> «В нашей
+  сети» (+тексты «частью роя»->«частью нашей сети», «Гифка из роя
+  получена»->«нашей сети»). ГРАБЛИ: у гифок долгое нажатие вело в
+  меню сообщения, где «В избранное» клало ПУСТОЙ текст - теперь файл.
+  v11.74.21 = f1aaf39, APK 40 336 586 Б, sha256 ef4cec56…1a10.
