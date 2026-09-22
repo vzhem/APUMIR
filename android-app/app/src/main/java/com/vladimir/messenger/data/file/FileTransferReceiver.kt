@@ -1144,8 +1144,10 @@ class FileTransferReceiver(
                         row,
                         newState = row.state,
                         completedChunks = counted,
-                        transferredBytes =
-                            Math.addExact(row.transferredBytes, reEncrypted.size - FileTransferChunkStore.AEAD_TAG_BYTES),
+                        transferredBytes = Math.addExact(
+                            row.transferredBytes,
+                            (reEncrypted.size - FileTransferChunkStore.AEAD_TAG_BYTES).toLong(),
+                        ),
                     )
                     sendFileAck(primary.transferId, contiguous)
                 }
