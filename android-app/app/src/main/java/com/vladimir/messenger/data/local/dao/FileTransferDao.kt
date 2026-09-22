@@ -198,6 +198,25 @@ interface FileTransferDao {
     suspend fun getForFile(chatId: String, fileSha256: String): List<FileTransferEntity>
 
     /**
+     * Раунд 120: уже принятый (COMPLETE) тот же файл от того же собеседника
+     * в том же чате, с неистёкшим сроком. По нему повторное предложение
+     * того же файла завершается локальной копией - без качания байтов.
+     */
+    @Query(
+        "SELECT * FROM file_transfers " +
+            "WHERE direction = 'INCOMING' AND state = 'COMPLETE' " +
+            "AND chatId = :chatId AND peerNodeId = :peerNodeId " +
+            "AND fileSha256 = :fileSha256 AND expiresAtMs > :nowMs " +
+            "ORDER BY createdAtMs DESC LIMIT 1"
+    )
+    suspend fun getCompletedIncomingSameFile(
+        chatId: String,
+        peerNodeId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): FileTransferEntity?
+
+    /**
      * Мои групповые копии (K2, v11.70.25): строка `OUTGOING`/`SEEDING` -
      * файл группы, зашифрованный один раз общим ключом; куски из неё уходят
      * любому участнику по его просьбе (GroupFileSeeder). Обычный передатчик

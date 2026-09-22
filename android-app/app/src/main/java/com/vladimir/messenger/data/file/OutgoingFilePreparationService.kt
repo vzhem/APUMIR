@@ -345,7 +345,23 @@ class OutgoingFilePreparationService private constructor(
             // картинка целиком (уменьшенная, с теми же пропорциями), а не
             // квадрат из середины: отправитель, открыв своё фото на весь экран,
             // должен видеть то же, что и получатель.
-            if (inspected.mediaType.startsWith("image/")) {
+            // Раунд 120: у гифки «превью» - копия самой гифки, иначе пузырь
+            // отправителя показывает статичный первый кадр (jpg), а не анимацию.
+            if (inspected.mediaType.equals("image/gif", ignoreCase = true) &&
+                source is Source.Local
+            ) {
+                runCatching {
+                    val dir = java.io.File(context.noBackupFilesDir, "file_preview/v1")
+                    val dst = java.io.File(dir, manifest.transferIdHex + ".gif")
+                    val tmp = java.io.File(dir, "." + manifest.transferIdHex + ".gif.tmp")
+                    source.file.inputStream().use { input ->
+                        tmp.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (!tmp.renameTo(dst)) {
+                        tmp.delete()
+                    }
+                }
+            } else if (inspected.mediaType.startsWith("image/")) {
                 runCatching {
                     val dir = java.io.File(context.noBackupFilesDir, "file_preview/v1")
                     val previewUri = when (source) {

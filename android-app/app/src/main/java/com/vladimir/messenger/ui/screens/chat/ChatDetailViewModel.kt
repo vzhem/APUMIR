@@ -420,9 +420,13 @@ class ChatDetailViewModel @Inject constructor(
                 )
                 val bytes = botApi.downloadGif(item.gif)
                     ?: error("Гифка не скачалась")
-                val dir = java.io.File(appContext.cacheDir, "gif_out").apply { mkdirs() }
-                val tmp = java.io.File.createTempFile("gif_", ".gif", dir)
-                java.io.FileOutputStream(tmp).use { it.write(bytes) }
+                // Раунд 120: запись 10-25 МБ - только в фоновом потоке.
+                val tmp = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val dir = java.io.File(appContext.cacheDir, "gif_out").apply { mkdirs() }
+                    val t = java.io.File.createTempFile("gif_", ".gif", dir)
+                    java.io.FileOutputStream(t).use { it.write(bytes) }
+                    t
+                }
                 val name = "gif_" + item.id + ".gif"
                 val messageId = UUID.randomUUID().toString()
                 val prepared = filePreparation.prepareFromFile(

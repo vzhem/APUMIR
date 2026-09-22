@@ -56,6 +56,13 @@ fun FileTransferBubble(
     onShareClick: (() -> Unit)? = null,
     /** Переслать файл себе в «Избранное». Доступно для принятых файлов. */
     onSaveToFavorites: (() -> Unit)? = null,
+    /**
+     * Раунд 120: долгое нажатие на картинке/гифке открывает меню СООБЩЕНИЯ
+     * (реакции, «В избранное»), как у текстовых пузырей. Раньше жест
+     * открывал только меню файла (сохранить/поделиться) и только у принятых
+     * картинок, поэтому реакцию на гифке поставить не мог никто.
+     */
+    onLongPress: (() -> Unit)? = null,
 ) {
     val background = if (isFromMe) {
         MaterialTheme.colorScheme.primary
@@ -139,7 +146,9 @@ fun FileTransferBubble(
                                 .combinedClickable(
                                     onClick = { showFullImage = true },
                                     onLongClick = {
-                                        if (canActOnImage) imageMenuOpen.value = true
+                                        val messageMenu = onLongPress
+                                        if (messageMenu != null) messageMenu()
+                                        else if (canActOnImage) imageMenuOpen.value = true
                                     },
                                 ),
                         )
@@ -155,7 +164,9 @@ fun FileTransferBubble(
                             .combinedClickable(
                                 onClick = { showFullImage = true },
                                 onLongClick = {
-                                    if (canActOnImage) imageMenuOpen.value = true
+                                    val messageMenu = onLongPress
+                                    if (messageMenu != null) messageMenu()
+                                    else if (canActOnImage) imageMenuOpen.value = true
                                 },
                             ),
                     )

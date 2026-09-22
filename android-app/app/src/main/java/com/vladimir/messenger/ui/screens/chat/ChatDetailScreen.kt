@@ -393,7 +393,26 @@ fun ChatDetailScreen(
                                     } else {
                                         null
                                     },
+                                    // Раунд 120: долгое нажатие на картинке/гифке -
+                                    // то же меню действий, что у текстового пузыря:
+                                    // оттуда и «Поставить реакцию». Раньше реакцию
+                                    // на гифке поставить было нельзя никому.
+                                    onLongPress = row.message?.let { message ->
+                                        {
+                                            activeMessage = message
+                                            showCopyDialog = message
+                                        }
+                                    },
                                 )
+                                // Реакции файла/гифки - той же строкой под пузырём,
+                                // что и у текстовых сообщений.
+                                row.message?.let { message ->
+                                    com.vladimir.messenger.ui.components.ReactionRow(
+                                        reactions = uiState.reactions[message.id].orEmpty(),
+                                        onToggle = { reactionFor = message.id },
+                                        modifier = Modifier.padding(horizontal = 14.dp),
+                                    )
+                                }
                             } else {
                                 val message = row.message!!
                                 Column(

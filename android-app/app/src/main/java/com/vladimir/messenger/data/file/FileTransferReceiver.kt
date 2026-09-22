@@ -581,6 +581,32 @@ class FileTransferReceiver(
                 return
             }
         }
+        // Раунд 120: тот же файл от того же собеседника в тот же чат уже
+        // приходил и проверен (COMPLETE) - повторную передачу не качаем.
+        // Новый transferId получает копию проверенного plaintext и сразу
+        // COMPLETE; отправителю уходит полный ACK, его насос останавливается
+        // на первом же подтверждении. Так повторная отправка той же гифки
+        // не тащит мегабайты по медленному пути второй раз.
+        if (!groupOffer && existing == null) {
+            val twin = transferDao.getCompletedIncomingSameFile(
+                targetChatId, senderId, manifest.fileSha256Hex, now,
+            )
+            if (twin != null) {
+                val twinPlaintext = runCatching {
+                    receivedStore.receivedFile(twin.transferId, twin.displayName)
+                }.getOrNull()
+                if (twinPlaintext != null &&
+                    completeFromLocalCopy(manifest, offer, senderId, targetChatId, twinPlaintext, now)
+                ) {
+                    Log.i(
+                        TAG,
+                        "File offer $transferIdHex: identical file already received " +
+                            "(${manifest.fileSha256Hex.take(12)}); completed locally, no transfer",
+                    )
+                    return
+                }
+            }
+        }
         val transfer = existing ?: insertIncomingTransfer(manifest, senderId, targetChatId, now) ?: return
         if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
         // Раньше отказывались, теперь берём (первый сид пропал): куски снова нужны.
@@ -938,6 +964,83 @@ class FileTransferReceiver(
         sendFileAck(transferIdHex, contiguous)
         if (completedChunks == chunkCount) {
             finalizeTransfer(transfer, manifest)
+        }
+    }
+
+    /**
+     * Раунд 120: завершить входящую передачу КОПИЕЙ уже проверенного файла
+     * (тот же sha256, тот же отправитель, тот же чат). Куски не скачиваем:
+     * повтор того же файла не должен второй раз тащить весь объём по сети.
+     * Возвращает false - обычный путь (куски приедут как всегда); строка
+     * передачи при этом уже заведена, обычный путь её подхватит.
+     */
+    private suspend fun completeFromLocalCopy(
+        manifest: FileTransferManifestFfi,
+        offer: FileOfferPdu.Offer,
+        senderId: String,
+        chatId: String,
+        twinPlaintext: java.io.File,
+        now: Long,
+    ): Boolean {
+        val transferIdHex = manifest.transferIdHex
+        if (insertIncomingTransfer(manifest, senderId, chatId, now) == null) return false
+        try {
+            chunkStore.storeManifest(transferIdHex, offer.manifest)
+            chunkStore.storeKeyEnvelope(transferIdHex, offer.keyEnvelope)
+            if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) {
+                openAndImportKey(transferIdHex, offer)
+            }
+            val expectedBytes = manifest.fileSize.toLong()
+            val digest = MessageDigest.getInstance("SHA-256")
+            val writer = receivedStore.openWriter(transferIdHex, manifest.displayName, expectedBytes)
+            try {
+                twinPlaintext.inputStream().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        if (read > 0) {
+                            digest.update(buffer, 0, read)
+                            writer.write(buffer, read)
+                        }
+                    }
+                }
+                check(digest.digest().toHex() == manifest.fileSha256Hex) {
+                    "Local copy hash mismatch"
+                }
+                writer.commit()
+            } catch (error: Exception) {
+                writer.abort()
+                throw error
+            }
+            val entity = transferDao.getTransfer(transferIdHex) ?: return false
+            check(
+                advance(
+                    entity,
+                    newState = "COMPLETE",
+                    completedChunks = entity.chunkCount,
+                    transferredBytes = expectedBytes,
+                ) == 1
+            ) { "Cannot persist dedup completion" }
+            mutex.withLock {
+                contiguousPrefixes[transferIdHex] = entity.chunkCount
+                bufferedChunks.remove(transferIdHex)?.values?.forEach { it.fill(0) }
+            }
+            notifier.onFileReceived(
+                chatId = chatId,
+                senderId = senderId,
+                messageId = FileTransferWire.chatPlaceholderMessageId(transferIdHex),
+                displayName = manifest.displayName,
+                mediaType = manifest.mediaType,
+                totalBytes = expectedBytes,
+                fileSha256 = manifest.fileSha256Hex,
+            )
+            sendFileAck(transferIdHex, manifest.chunkCount.toLong())
+            return true
+        } catch (error: Exception) {
+            Log.w(TAG, "Local-copy completion failed for $transferIdHex: ${error.message}")
+            runCatching { receivedStore.deleteTransfer(transferIdHex) }
+            return false
         }
     }
 

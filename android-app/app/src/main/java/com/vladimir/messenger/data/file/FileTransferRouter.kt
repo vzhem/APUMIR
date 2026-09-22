@@ -593,17 +593,23 @@ class FileTransferRouter @Inject constructor(
 
     /** Drives all resumable outgoing transfers plus contact key handshakes; safe to call periodically. */
     suspend fun pumpOutgoing(): FileTransferSender.PumpSummary? {
-        if (!RustBridge.isRunning()) {
-            Log.d(TAG, "File pump skipped: engine not running")
-            return null
+        // Раунд 120: насос всегда уходит в фоновый поток. Внутри - блокирующие
+        // прямые отправки (QUIC до секунд на кадр) и чтение кусков из базы;
+        // вызов с главного потока (ViewModel при отправке) давал
+        // «Приложение не отвечает» вплоть до убийства системы.
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (!RustBridge.isRunning()) {
+                Log.d(TAG, "File pump skipped: engine not running")
+                return@withContext null
+            }
+            runCatching { sendHelloHandshakes() }
+                .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
+            val summary = sender.pumpOnce()
+            pumpCustody()
+            runCatching { groupSeeder.pump() }
+                .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
+            summary
         }
-        runCatching { sendHelloHandshakes() }
-            .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
-        val summary = sender.pumpOnce()
-        pumpCustody()
-        runCatching { groupSeeder.pump() }
-            .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
-        return summary
     }
 
     /** Ключ передачи на месте (для проверки, годится ли строка как источник общей копии, K2). */
@@ -779,15 +785,19 @@ class FileTransferRouter @Inject constructor(
     /**
      * Раунд 43: файл превью для пузыря в чате. Входящая картинка - принятый
      * plaintext после COMPLETE; исходящая - маленькое превью, записанное при
-     * подготовке передачи.
+     * подготовке передачи. Раунд 120: у исходящей гифки превью - сама гифка
+     * (.gif), чтобы пузырь отправителя анимировался; старые передачи остаются
+     * на .jpg.
      */
     fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
         if (!transfer.mediaType.startsWith("image/")) return null
         if (transfer.direction == "INCOMING") return receivedFileFor(transfer)
-        val f = java.io.File(
-            appContext.noBackupFilesDir,
-            "file_preview/v1/" + transfer.transferId + ".jpg",
-        )
+        val base = "file_preview/v1/" + transfer.transferId
+        if (transfer.mediaType.equals("image/gif", ignoreCase = true)) {
+            val gif = java.io.File(appContext.noBackupFilesDir, base + ".gif")
+            if (gif.isFile) return gif
+        }
+        val f = java.io.File(appContext.noBackupFilesDir, base + ".jpg")
         return if (f.isFile) f else null
     }
 
