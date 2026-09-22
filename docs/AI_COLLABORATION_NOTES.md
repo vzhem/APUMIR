@@ -9147,3 +9147,29 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   состояние ef51b1b лежало в дереве; лечение: fetch -> reset --soft
   <tip> -> reset (mixed) -> коммит только своих файлов.
   v11.74.17 = 813a8cd, APK 40 287 430 Б, sha256 557d946d…1750.
+
+- **2026-09-22 (раунд 121) — v11.74.18: СВОЙ каталог гифок роя
+  (APUGIF1).** Идея владельца: лимит внешнего каталога 100/час -
+  внутренний безграничен. Реализация: GifLibrary (data/gif/GifLibrary.kt,
+  object) - байты+превью jpg+JSON-индекс в noBackupFilesDir/giflib
+  (LRU 400), каталоги собеседников (gif_peer_catalog.json, 50 шт),
+  pendingBatches (сборка have-порций), arrivals SharedFlow (VM
+  досылает awaited гифку), prefs-тротлимб (ann_/ask_/fp). Провод:
+  APUGIF1|ask / have|i|n|json (порции по 2200 симв., потолок конверта
+  4096) / want|sha. CoreServerService: handleGifEnvelope ДО groupRouter
+  (ask->announce, have->receivePeerBatch, want->serveGifFromLibrary
+  через gifPreparation.prepareFromFile+insertLocalFileMessage+pump,
+  тротлимб 10 мин); bootstrap при старте движка -
+  GifLibrary.syncWithSwarm (все контакты: своё объявить, чужое
+  попросить; сила=изменение fp). FileTransferRouter notifier: входящая
+  gif -> addFromFile. VM (личка+группа): вкладка «swarm» -
+  моя библиотека с превью + swarmCatalog («у N»), attachLocalGif,
+  requestSwarmGif (держатель по PeerRatingStore lastSeen/sightings;
+  лично к хранителю - в группе гифка приходит в ЛИЧНЫЙ чат с ним и
+  сразу ставится в сцену). attachGif: сначала shaForGiphyId (своё -
+  без сети), скачанное - GifLibrary.add(giphyId, query-тег). ГРАБЛИ:
+  (а) org.json сборки НЕ ЗНАЕТ keySet - только keys(); (б) smart-cast
+  через функцию-предикат не работает - локальная non-null копия;
+  check35/36 упали на этом, check37 зелёный. Песочница пересобирается
+  МЕЖДУ вызовами - git tag после reset --hard FETCH_HEAD.
+  v11.74.18 = c9b4eba, APK 40 320 198 Б, sha256 6ce478c6…cc0d.
