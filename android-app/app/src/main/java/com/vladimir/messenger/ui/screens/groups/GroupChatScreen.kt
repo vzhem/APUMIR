@@ -140,6 +140,11 @@ fun GroupChatScreen(
 
     if (showGifCatalog) {
         GifCatalogDialog(
+            tab = uiState.gifTab,
+            onTab = { viewModel.setGifTab(it) },
+            myGifs = uiState.myGifs,
+            swarmGifs = uiState.swarmGifs,
+            swarmStatus = uiState.swarmStatus,
             items = uiState.gifItems,
             next = uiState.gifNext,
             loading = uiState.gifLoading,
@@ -149,6 +154,13 @@ fun GroupChatScreen(
             onAttach = { item ->
                 showGifCatalog = false
                 viewModel.attachGif(item) { }
+            },
+            onAttachLocal = { entry ->
+                showGifCatalog = false
+                viewModel.attachLocalGif(entry.sha256)
+            },
+            onRequestSwarm = { swarm ->
+                viewModel.requestSwarmGif(swarm) { showGifCatalog = false }
             },
             onDismiss = {
                 showGifCatalog = false
@@ -572,6 +584,7 @@ fun GroupChatScreen(
                     onClick = {
                         if (uiState.canAttach) {
                             showGifCatalog = true
+                            viewModel.onGifCatalogOpened()
                             if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
                                 viewModel.searchGifs("")
                             }

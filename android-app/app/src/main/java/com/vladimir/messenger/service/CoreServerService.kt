@@ -32,6 +32,7 @@ import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.util.NodeIds
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,6 +71,7 @@ class CoreServerService : Service() {
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    @Inject lateinit var gifPreparation: com.vladimir.messenger.data.file.OutgoingFilePreparationService
     private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
@@ -97,6 +99,108 @@ class CoreServerService : Service() {
     private val PRESENCE_SWEEP_MS = 60_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
+
+    // Раунд 121: свой каталог гифок роя (APUGIF1).
+    private val gifCatalogSentAt = mutableMapOf<String, Long>()
+    private val gifAskHandledAt = mutableMapOf<String, Long>()
+    private val gifWantServedAt = mutableMapOf<String, Long>()
+
+    /**
+     * Служебные конверты каталога гифок: ask/have/want. Разбираются до
+     * сохранения в чат (как реакции), поэтому «мусорных» строк в переписке
+     * не появляется.
+     */
+    private fun handleGifEnvelope(senderId: String, chatId: String, text: String) {
+        val packet = com.vladimir.messenger.data.gif.GifLibrary.parseGifPacket(text) ?: return
+        val now = System.currentTimeMillis()
+        when (packet.kind) {
+            "ask" -> {
+                if (now - (gifAskHandledAt[senderId] ?: 0L) < 10 * 60_000L) return
+                gifAskHandledAt[senderId] = now
+                serviceScope.launch {
+                    runCatching { announceMyGifCatalogTo(senderId) }
+                        .onFailure { Log.w(TAG, "gif catalog announce failed: ${it.message}") }
+                }
+            }
+            "have" -> {
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.gif.GifLibrary.receivePeerBatch(
+                            applicationContext, senderId, packet.index, packet.total, packet.items,
+                        )
+                    }.onFailure { Log.w(TAG, "gif catalog batch failed: ${it.message}") }
+                }
+            }
+            "want" -> {
+                val key = "$senderId|${packet.sha256}"
+                if (now - (gifWantServedAt[key] ?: 0L) < 10 * 60_000L) return
+                gifWantServedAt[key] = now
+                serviceScope.launch {
+                    runCatching { serveGifFromLibrary(senderId, chatId, packet.sha256) }
+                        .onFailure { Log.w(TAG, "gif serve failed: ${it.message}") }
+                }
+            }
+        }
+    }
+
+    private suspend fun announceMyGifCatalogTo(peerId: String) {
+        val now = System.currentTimeMillis()
+        if (now - (gifCatalogSentAt[peerId] ?: 0L) < 10 * 60_000L) return
+        gifCatalogSentAt[peerId] = now
+        val chat = chatRepository.getChatByContactId(peerId) ?: return
+        val batches = com.vladimir.messenger.data.gif.GifLibrary.buildHaveBatches(applicationContext)
+        for (batch in batches) {
+            RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, peerId, batch)
+        }
+        Log.i(TAG, "GIF catalog sent to ${peerId.takeLast(8)}: ${batches.size} batch(es)")
+    }
+
+    /**
+     * Собеседник попросил гифку из моего каталога: отправляю её обычной
+     * защищённой передачей файлов в наш чат - механика та же, что у кнопки
+     * «GIF» и скрепки.
+     */
+    private suspend fun serveGifFromLibrary(peerId: String, chatId: String, sha256: String) {
+        val app = applicationContext
+        val entry = com.vladimir.messenger.data.gif.GifLibrary.bySha(app, sha256) ?: return
+        val file = com.vladimir.messenger.data.gif.GifLibrary.gifFile(app, sha256) ?: return
+        val messageId = UUID.randomUUID().toString()
+        try {
+            val prepared = gifPreparation.prepareFromFile(
+                source = file,
+                displayName = entry.displayName.ifBlank { "gif_${sha256.take(8)}.gif" },
+                mediaType = "image/gif",
+                messageId = messageId,
+                chatId = chatId,
+                recipientNodeId = peerId,
+            )
+            chatRepository.insertLocalFileMessage(
+                chatId = chatId,
+                recipientId = peerId,
+                messageId = messageId,
+                content = com.vladimir.messenger.data.file.FileTransferRouter.formatPlaceholder(
+                    prepared.displayName,
+                    prepared.mediaType,
+                    prepared.totalBytes,
+                ),
+                timestamp = System.currentTimeMillis(),
+            )
+            fileTransferRouter.pumpOutgoing()
+            Log.i(TAG, "GIF ${sha256.take(12)} sent to ${peerId.takeLast(8)} from library")
+        } catch (e: Exception) {
+            if (e.message.orEmpty().contains("binding is not pinned")) {
+                fileTransferRouter.requestExchangeBinding(peerId)
+            }
+            throw e
+        }
+    }
+
+    private suspend fun gifLibraryBootstrap() {
+        // Рассказать свой каталог и попросить чужие (тротлимб в GifLibrary).
+        com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+            applicationContext, chatRepository, force = false,
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -307,6 +411,13 @@ class CoreServerService : Service() {
                     }.onFailure {
                         Log.w(TAG, "Presence audience seed failed: ${it.message}")
                     }
+                }
+
+                // Раунд 121: свой каталог гифок - разослать и спросить чужие
+                // (тротлимб внутри; при старте уходит после подключения).
+                serviceScope.launch {
+                    runCatching { gifLibraryBootstrap() }
+                        .onFailure { Log.w(TAG, "gif catalog bootstrap failed: ${it.message}") }
                 }
 
                 // Прокси-автопилот: первичный цикл при старте — проверить пул, убрать мёртвых,
@@ -739,6 +850,16 @@ class CoreServerService : Service() {
                     // Группы: APUGRP1-конверт разбирается здесь же, ДО авто-создания
                     // контакта. Иначе каждое групповое событие превратилось бы в личный
                     // чат с отправителем.
+                    if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
+                        handleGifEnvelope(senderId, chatId, text)
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "GIF packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
                     if (groupRouter.routeIncoming(senderId, chatId, messageId, text)) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)

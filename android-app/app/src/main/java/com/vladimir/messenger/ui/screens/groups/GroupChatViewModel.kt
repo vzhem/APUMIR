@@ -65,6 +65,11 @@ data class GroupChatUiState(
     val gifLoading: Boolean = false,
     /** Почему каталог недоступен (текст для диалога); null - доступен. */
     val gifError: String? = null,
+    /** Раунд 121: свой каталог роя. tab: "swarm" | "external". */
+    val gifTab: String = "swarm",
+    val myGifs: List<com.vladimir.messenger.data.gif.GifLibEntry> = emptyList(),
+    val swarmGifs: List<com.vladimir.messenger.data.gif.SwarmGif> = emptyList(),
+    val swarmStatus: String? = null,
     /** Принятый файл, который человек просит сохранить в папку (системное окно). */
     val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
 )
@@ -79,6 +84,7 @@ class GroupChatViewModel @Inject constructor(
     private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     private val botApi: com.vladimir.messenger.service.BotApi,
+    private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -112,6 +118,20 @@ class GroupChatViewModel @Inject constructor(
         observeTransfers()
         // Закрепы подписываем на выбранную тему, а не на всю группу:
         // observePinned(topicId) стартует вместе с лентой сообщений.
+        observeGifArrivals()
+    }
+
+    /** Раунд 121: гифка из роя пришла файлом - сразу приложить к сообщению. */
+    private fun observeGifArrivals() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.gif.GifLibrary.arrivalsFlow().collect { sha ->
+                if (pendingSwarmSha == sha) {
+                    pendingSwarmSha = null
+                    _uiState.update { it.copy(swarmStatus = "Гифка из роя получена - нажмите «Отправить»") }
+                    attachLocalGif(sha)
+                }
+            }
+        }
     }
 
     // ── Файлы группы (рой, этап 9) ────────────────────────────────────────────
@@ -190,6 +210,7 @@ class GroupChatViewModel @Inject constructor(
     /** Открыть/обновить каталог: популярные или по запросу. */
     fun searchGifs(query: String, more: Boolean = false) {
         if (_uiState.value.gifLoading) return
+        if (!more) lastGifQuery = query
         val pos = if (more) _uiState.value.gifNext else ""
         _uiState.update {
             it.copy(
@@ -228,13 +249,107 @@ class GroupChatViewModel @Inject constructor(
         _uiState.update { it.copy(gifItems = emptyList(), gifNext = "", gifError = null) }
     }
 
+    // ── Свой каталог роя (раунд 121) ────────────────────────────────────
+
+    private var lastGifQuery: String = ""
+    private var pendingSwarmSha: String? = null
+
+    /** Открыли окно гифок: подтянуть мою библиотеку и каталог роя. */
+    fun onGifCatalogOpened() {
+        viewModelScope.launch {
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = false,
+                )
+            }
+            val my = runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.entries(appContext)
+            }.getOrDefault(emptyList())
+            val swarm = runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
+            }.getOrDefault(emptyList())
+            _uiState.update {
+                it.copy(
+                    gifTab = if (my.isNotEmpty() || swarm.isNotEmpty()) "swarm" else "external",
+                    myGifs = my,
+                    swarmGifs = swarm,
+                )
+            }
+        }
+    }
+
+    fun setGifTab(tab: String) {
+        _uiState.update { it.copy(gifTab = tab) }
+    }
+
+    /** Своя гифка: в сцену - наружный ресурс не нужен. */
+    fun attachLocalGif(sha256: String) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                val file = com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha256)
+                    ?: error("Гифки нет в библиотеке")
+                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    file.readBytes()
+                }
+                val previous = _uiState.value.stagedFile
+                val info = groupFiles.stageGifBytes(groupId, bytes)
+                if (previous != null && previous.sha256 != info.sha256) {
+                    groupFiles.unstage(groupId, previous.sha256)
+                }
+                _uiState.update { it.copy(stagedFile = info) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = "Гифка не приложена: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /** Гифки нет нигде - попросить у хранителя роя. */
+    fun requestSwarmGif(swarm: com.vladimir.messenger.data.gif.SwarmGif, onDone: () -> Unit) {
+        if (pendingSwarmSha == swarm.entry.sha256) return
+        viewModelScope.launch {
+            val holder = runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.requestGif(
+                    appContext, chatRepository, swarm.entry.sha256, swarm.holders,
+                )
+            }.getOrNull()
+            if (holder == null) {
+                _uiState.update { it.copy(swarmStatus = "Держателей сейчас нет на связи") }
+            } else {
+                pendingSwarmSha = swarm.entry.sha256
+                com.vladimir.messenger.data.gif.GifLibrary.rememberWant(swarm.entry.sha256)
+                _uiState.update {
+                    it.copy(swarmStatus = "Попросил у $holder - придёт в личный чат с ним")
+                }
+                onDone()
+            }
+        }
+    }
+
     /** Выбрал гифку: скачать байты и приложить как файл (нажатие кнопки — как файл). */
     fun attachGif(item: com.vladimir.messenger.data.gif.GifItem, onDone: () -> Unit) {
         if (_uiState.value.isPreparingFile) return
         viewModelScope.launch {
             _uiState.update { it.copy(isPreparingFile = true, error = null) }
             try {
-                val bytes = botApi.downloadGif(item.gif)
+                // Раунд 121: своя библиотека прежде внешнего каталога.
+                val localSha = com.vladimir.messenger.data.gif.GifLibrary
+                    .shaForGiphyId(appContext, item.id)
+                val bytes = localSha?.let { sha ->
+                    com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha)
+                        ?.takeIf { it.isFile }
+                        ?.let { f -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { f.readBytes() } }
+                } ?: botApi.downloadGif(item.gif)
+                    ?.also { downloaded ->
+                        runCatching {
+                            com.vladimir.messenger.data.gif.GifLibrary.add(
+                                appContext, downloaded, item.id, lastGifQuery, "gif_" + item.id + ".gif",
+                            )
+                        }
+                    }
                     ?: throw IllegalStateException("Гифка не скачалась")
                 val previous = _uiState.value.stagedFile
                 val info = groupFiles.stageGifBytes(groupId, bytes)

@@ -89,6 +89,11 @@ fun ChatDetailScreen(
 
     if (showGifCatalog) {
         com.vladimir.messenger.ui.components.GifCatalogDialog(
+            tab = uiState.gifTab,
+            onTab = { viewModel.setGifTab(it) },
+            myGifs = uiState.myGifs,
+            swarmGifs = uiState.swarmGifs,
+            swarmStatus = uiState.swarmStatus,
             items = uiState.gifItems,
             next = uiState.gifNext,
             loading = uiState.gifLoading,
@@ -99,6 +104,11 @@ fun ChatDetailScreen(
                 showGifCatalog = false
                 viewModel.attachGif(item)
             },
+            onAttachLocal = { entry ->
+                showGifCatalog = false
+                viewModel.attachLocalGif(entry.sha256)
+            },
+            onRequestSwarm = { swarm -> viewModel.requestSwarmGif(swarm) },
             onDismiss = {
                 showGifCatalog = false
                 viewModel.closeGifCatalog()
@@ -285,6 +295,7 @@ fun ChatDetailScreen(
                 onPasteLocked = viewModel::onAttachmentsLocked,
                 onGifClick = {
                     showGifCatalog = true
+                    viewModel.onGifCatalogOpened()
                     if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
                         viewModel.searchGifs("")
                     }

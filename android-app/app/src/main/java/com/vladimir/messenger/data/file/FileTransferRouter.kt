@@ -190,6 +190,21 @@ class FileTransferRouter @Inject constructor(
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                 }
+                    // Раунд 121: принятая гифка оседает в библиотеке телефона -
+                    // она становится частью СВОЕГО каталога роя (без внешнего
+                    // ресурса): announces/выдача - через APUGIF1.
+                    if (mediaType.equals("image/gif", ignoreCase = true)) {
+                        runCatching {
+                            val row = transferDao.getForFile(chatId, fileSha256)
+                                .firstOrNull { it.direction == "INCOMING" && it.state == "COMPLETE" }
+                            val plain = row?.let { receivedFileFor(it) }
+                            if (plain != null) {
+                                com.vladimir.messenger.data.gif.GifLibrary.addFromFile(
+                                    appContext, plain, null, null,
+                                )
+                            }
+                        }.onFailure { Log.w(TAG, "gif library hook failed: ${it.message}") }
+                    }
             },
         )
         val directSend: (String, String) -> Boolean = { recipientId, payload ->
