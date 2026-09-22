@@ -1028,7 +1028,7 @@ private fun SettingsTabContent(
                     if (uiState.mqttLink.isNotBlank()) {
                         SettingsItem(
                             icon     = Icons.Default.NetworkCheck,
-                            title    = "Сообщения (рой)",
+                            title    = "Сообщения сети",
                             subtitle = uiState.mqttLink,
                             onClick  = { showMqttDialog = true },
                         )
