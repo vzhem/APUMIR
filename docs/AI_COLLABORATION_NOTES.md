@@ -9317,3 +9317,29 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   ambiguity» на check47) - вылечено удалением второго блока (626-853).
   check48 зелёный. v11.74.25 = 4f991b5, APK 40 352 966 Б, sha256
   5685497b…1095.
+
+- **2026-09-22 (раунд 129) - v11.74.26: миниатюры каталога; живой поиск;
+  надёжные ссылки.** Полевые замечания владельца (скрин каталога:
+  у чужих гифок заглушки; бейджи «мой»/«у N» лишние; поиск только по
+  лупе; окно не закрывается при выборе из сети; ссылка-гифка доходит
+  только у отправителя - у получателя «непонятная ссылка в уведомлении»).
+  (1) МИНИАТЮРЫ: кадры APUGIF1|thumb|<sha> (просьба) / |thmb|<sha>|<b64>
+  (ответ, jpeg <=96px <=2100 b64, GifPacket.payload). GifLibrary:
+  tinyThumbFile (t<sha>.jpg в giflib), receiveThumb (валидация+кэш+
+  thumbArrivals SharedFlow), tinyThumbPayload (кэш или encodeTinyThumb:
+  96/80/64px x q55/45/35 до <=2100), requestThumb (лучший хранитель,
+  тротлимб thumbAskedAt 5мин/sha, cap 256). Service: thumb-раздача
+  (тротлимб gifWantServedAt["T"+peer] 5мин), thmb-приём. VM
+  requestPeerThumbs (личка+группа); диалог: produceState по ячейке +
+  thumbArrivalsFlow, LaunchedEffect(peerCells) -> onRequestThumbs.
+  (2) Бейджи убраны (Badge-функция удалена). (3) Живой поиск:
+  LaunchedEffect(query) delay 450 -> onSearch; при открытии
+  LaunchedEffect(Unit) -> onSearch("") (тренды). (4) ChatDetailScreen
+  onRequestSwarm закрывает окно. (5) ССЫЛКА = сам контент сообщения
+  «APUGIFREF1|<sha>» (REF_WIRE удалён, ref-кейс парсера удалён);
+  CoreServerService перехватывает isGifRef ДО isGifPacket: карточка
+  insertReceivedGifRefMessage + ACK + return (без уведомления); если
+  конверт утечёт запасным путём и сохранится сырым - ChatDetailScreen
+  всё равно рисует GifRefCard по контенту (isGifRef), байты тянут
+  ensureGifRef-ом у обоих. v11.74.26 = cbaf1b0, APK 40 352 966 Б,
+  sha256 19c32d81…297f.
