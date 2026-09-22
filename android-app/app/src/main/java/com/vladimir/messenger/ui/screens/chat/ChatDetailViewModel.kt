@@ -449,6 +449,53 @@ class ChatDetailViewModel @Inject constructor(
     fun setGifTab(tab: String) {
         _uiState.update { it.copy(gifTab = tab) }
     }
+    /**
+     * Раунд 124: СВОЯ гифка из хранилища телефона. Ложится в библиотеку
+     * (превью + индекс), объявляется в каталоге нашей сети - теперь она
+     * есть у всех телефонов, без внешнего ресурса.
+     */
+    fun addOwnGif(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val bytes = appContext.contentResolver.openInputStream(uri)
+                        ?.use { input -> input.readBytes() }
+                        ?: return@withContext null
+                    if (bytes.isEmpty() || bytes.size > 30 * 1024 * 1024) return@withContext null
+                    val name = runCatching {
+                        appContext.contentResolver.query(
+                            uri, null, null, null, null,
+                        )?.use { cursor ->
+                            val idx = cursor.getColumnIndex(
+                                android.provider.OpenableColumns.DISPLAY_NAME,
+                            )
+                            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+                        }
+                    }.getOrNull()
+                    com.vladimir.messenger.data.gif.GifLibrary.add(
+                        appContext,
+                        bytes,
+                        null,
+                        "своя",
+                        name?.takeIf { it.isNotBlank() }
+                            ?: "своя_${System.currentTimeMillis() / 1000}.gif",
+                    )
+                }.getOrNull()
+            }
+            if (added == null) {
+                _uiState.update { it.copy(swarmStatus = "Не вышло: нужен файл GIF до 30 МБ") }
+            } else {
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                        appContext, chatRepository, force = false,
+                    )
+                }
+                onGifCatalogOpened()
+                _uiState.update { it.copy(swarmStatus = "Своя гифка добавлена - уже в нашей сети") }
+            }
+        }
+    }
+
 
     /** Гифка из моей библиотеки - наружный ресурс не нужен вовсе. */
     fun attachLocalGif(sha256: String) {

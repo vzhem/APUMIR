@@ -162,6 +162,7 @@ fun GroupChatScreen(
             onRequestSwarm = { swarm ->
                 viewModel.requestSwarmGif(swarm) { showGifCatalog = false }
             },
+            onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
             onDismiss = {
                 showGifCatalog = false
                 viewModel.closeGifCatalog()
@@ -500,6 +501,7 @@ fun GroupChatScreen(
                             onDownload = { viewModel.requestFile(message, card) },
                             onSave = { viewModel.requestSaveReceivedFile(it) },
                             onShare = { f -> viewModel.shareFile(f, card.displayName, card.mediaType) },
+                            onFavorite = { viewModel.saveFileToFavorites(it) },
                             servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.groupId, card.sha256)] ?: 0,
                         )
                     }

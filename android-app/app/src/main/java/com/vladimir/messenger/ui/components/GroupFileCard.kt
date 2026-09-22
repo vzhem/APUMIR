@@ -74,6 +74,8 @@ data class FileCardState(
     val onDownload: () -> Unit,
     val onSave: (() -> Unit)?,
     val onShare: (() -> Unit)?,
+    /** Раунд 124: файл (гифка) уже принят - можно в избранное. */
+    val onFavorite: (() -> Unit)? = null,
     /** Файл мой (я автор): карточка без «Скачать», со счётчиком получивших. */
     val isFromMe: Boolean = false,
 ) {
@@ -95,6 +97,8 @@ data class FileCardState(
             onDownload: () -> Unit,
             onSave: (FileTransferEntity) -> Unit,
             onShare: (file: java.io.File) -> Unit,
+            /** Раунд 124: добавить файл в избранное (когда он принят). */
+            onFavorite: ((FileTransferEntity) -> Unit)? = null,
             nowMs: Long = System.currentTimeMillis(),
             /** Скольким участникам отдана общая копия (K2): у автора строки COMPLETE на каждого больше нет. */
             servedCount: Int = 0,
@@ -128,6 +132,11 @@ data class FileCardState(
                     null
                 },
                 onShare = localFile?.let { f -> { onShare(f) } },
+                onFavorite = if (complete && onFavorite != null) {
+                    { onFavorite(transfer!!) }
+                } else {
+                    null
+                },
                 isFromMe = isFromMe,
             )
         }
@@ -276,6 +285,11 @@ fun GroupFileCard(
                 if (state.onShare != null) {
                     TextButton(onClick = state.onShare, contentPadding = PaddingValues(horizontal = 4.dp)) {
                         Text("Поделиться", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                if (state.onFavorite != null) {
+                    TextButton(onClick = state.onFavorite, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                        Text("В избранное", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }

@@ -109,6 +109,7 @@ fun ChatDetailScreen(
                 viewModel.attachLocalGif(entry.sha256)
             },
             onRequestSwarm = { swarm -> viewModel.requestSwarmGif(swarm) },
+            onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
             onDismiss = {
                 showGifCatalog = false
                 viewModel.closeGifCatalog()
@@ -517,15 +518,36 @@ fun ChatDetailScreen(
                     ) {
                         Text("Выделить часть текста", modifier = Modifier.fillMaxWidth())
                     }
-                    TextButton(
-                        onClick = {
-                            viewModel.saveTextToFavorites(message.content, contactName)
-                            showCopyDialog = null
-                            resetSelection()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("В избранное", modifier = Modifier.fillMaxWidth())
+                    // Раунд 124: у файла/гифки в избранное кладётся САМ ФАЙЛ
+                    // (ссылка на принятую передачу), а не пустой текст.
+                    val savedMessageFile = uiState.transfers.firstOrNull {
+                        it.messageId == message.id &&
+                            it.direction == "INCOMING" &&
+                            it.state == "COMPLETE"
+                    }
+                    if (savedMessageFile != null) {
+                        TextButton(
+                            onClick = {
+                                viewModel.saveToFavorites(savedMessageFile, contactName)
+                                showCopyDialog = null
+                                resetSelection()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Файл в избранное", modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    if (message.content.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                viewModel.saveTextToFavorites(message.content, contactName)
+                                showCopyDialog = null
+                                resetSelection()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("В избранное", modifier = Modifier.fillMaxWidth())
+                        }
                     }
                     TextButton(
                         onClick = {

@@ -47,7 +47,7 @@ import com.vladimir.messenger.data.gif.SwarmGif
 
 /**
  * Каталог GIF (v11.74.14), раунд 121 - два источника:
- * - «Рой»: СВОЙ каталог на телефонах роя (без внешнего ресурса, без лимитов).
+ * - «В нашей сети»: СВОЙ каталог на телефонах (без внешнего ресурса, без лимитов).
  *   Гифки, скачанные кем-то из своих, лежат на его телефоне; выбор шлёт
  *   хранителю просьбу, и он отправляет её защищённой передачей файлов.
  * - «Каталог»: внешний (Giphy через наш сервер) - только если гифки ещё
@@ -69,6 +69,8 @@ fun GifCatalogDialog(
     onAttach: (GifItem) -> Unit,
     onAttachLocal: (GifLibEntry) -> Unit,
     onRequestSwarm: (SwarmGif) -> Unit,
+    /** Раунд 124: добавить СВОЮ гифку из хранилища телефона. */
+    onAddOwnGif: (android.net.Uri) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -83,7 +85,7 @@ fun GifCatalogDialog(
                 ) {
                     TextButton(onClick = { onTab("swarm") }) {
                         Text(
-                            "Рой",
+                            "В нашей сети",
                             fontWeight = if (tab == "swarm") FontWeight.Bold else FontWeight.Normal,
                             color = if (tab == "swarm") {
                                 MaterialTheme.colorScheme.primary
@@ -101,6 +103,16 @@ fun GifCatalogDialog(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    val pickOwnGif = androidx.activity.compose.rememberLauncherForActivityResult(
+                        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+                    ) { uri -> if (uri != null) onAddOwnGif(uri) }
+                    TextButton(onClick = { pickOwnGif.launch("image/gif") }) {
+                        Text(
+                            "+ Своя",
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
@@ -215,8 +227,9 @@ private fun SwarmGifSection(
     if (my.isEmpty() && swarm.isEmpty()) {
         Text(
             if (q.isBlank()) {
-                "Пока пусто. Откройте вкладку «Каталог», скачайте гифку - она " +
-                    "поселится на телефоне и станет частью роя. Каталоги телефонов " +
+                "Пока пусто. Скачайте гифку во вкладке «Каталог» или добавьте " +
+                    "свою кнопкой «+ Своя» - она поселится на телефоне и станет " +
+                    "частью нашей сети. Каталоги телефонов " +
                     "обмениваются автоматически: чем дольше пользуетесь, тем больше " +
                     "набор без внешнего ресурса."
             } else {

@@ -461,6 +461,23 @@ class ChannelViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 124: файл из карточки канала/комментариев - в избранное. */
+    fun saveFileToFavorites(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        viewModelScope.launch {
+            val source = _uiState.value.channel?.title.orEmpty()
+            val result = savedItems.saveFile(transfer, if (source.isBlank()) "Канал" else "Канал " + source)
+            _uiState.update {
+                it.copy(
+                    error = when (result) {
+                        com.vladimir.messenger.data.repository.SaveResult.Saved -> "Добавлено в избранное"
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> "Уже в избранном"
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> "Файл ещё не получен полностью"
+                    },
+                )
+            }
+        }
+    }
+
     /**
      * Репост поста в другое приложение одним нажатием: одно меню «Поделиться»,
      * одно сообщение у получателя - картинка (одно фото или сетка из всех
