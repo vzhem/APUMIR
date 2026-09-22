@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,11 +83,24 @@ fun GifCatalogDialog(
     onAttach: (GifItem) -> Unit,
     onAttachLocal: (GifLibEntry) -> Unit,
     onRequestSwarm: (SwarmGif) -> Unit,
+    /** Раунд 129: подтянуть миниатюры чужих гифок для сетки. */
+    onRequestThumbs: (List<SwarmGif>) -> Unit = {},
     /** Раунд 124: добавить СВОЮ гифку из хранилища телефона. */
     onAddOwnGif: (android.net.Uri) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    // Раунд 129: живой поиск - начинается с первой буквы (пауза 450 мс).
+    LaunchedEffect(query) {
+        if (query.isNotBlank()) {
+            kotlinx.coroutines.delay(450)
+            onSearch(query)
+        }
+    }
+    // Открыли каталог - он сразу не пустой: тренды внешнего каталога.
+    LaunchedEffect(Unit) {
+        if (items.isEmpty() && error == null && !loading) onSearch("")
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Гифки") },
@@ -137,6 +151,11 @@ fun GifCatalogDialog(
                         return@filter false
                     }
                     q.isBlank() || sg.entry.tag.lowercase().contains(q) || sg.entry.displayName.lowercase().contains(q)
+                }
+
+                // Раунд 129: чужие гифки - качаем миниатюры (кэш на диске).
+                LaunchedEffect(peerCells.size, peerCells.firstOrNull()?.entry?.sha256) {
+                    if (peerCells.isNotEmpty()) onRequestThumbs(peerCells)
                 }
 
                 val nothingAtAll = myCells.isEmpty() && peerCells.isEmpty() && items.isEmpty() && error == null
@@ -191,22 +210,44 @@ fun GifCatalogDialog(
                                 } else {
                                     PlaceholderCell(label = entry.displayName)
                                 }
-                                Badge("мой", Modifier.align(Alignment.TopStart))
                                 NetDot(Modifier.align(Alignment.TopEnd))
                             }
                         }
                         // ── Гифки сети (у других телефонов): просьба хранителю ──
                         gridItems(peerCells, key = { "s-${it.entry.sha256}" }) { swarmGif ->
+                            val context = androidx.compose.ui.platform.LocalContext.current
+                            // Раунд 129: миниатюра приезжает с хранителя и
+                            // оживает прямо в сетке (кэш на диске).
+                            val thumb by androidx.compose.runtime.produceState<java.io.File?>(
+                                initialValue = com.vladimir.messenger.data.gif.GifLibrary
+                                    .tinyThumbFile(context, swarmGif.entry.sha256),
+                                key1 = swarmGif.entry.sha256,
+                            ) {
+                                com.vladimir.messenger.data.gif.GifLibrary
+                                    .thumbArrivalsFlow().collect { arrived ->
+                                        if (arrived == swarmGif.entry.sha256) {
+                                            value = com.vladimir.messenger.data.gif.GifLibrary
+                                                .tinyThumbFile(context, swarmGif.entry.sha256)
+                                        }
+                                    }
+                            }
                             Box(
                                 modifier = Modifier
                                     .aspectRatio(1f)
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable { onRequestSwarm(swarmGif) },
                             ) {
-                                PlaceholderCell(
-                                    label = swarmGif.entry.tag.ifBlank { "гифка" },
-                                )
-                                Badge("у ${swarmGif.holders.size}", Modifier.align(Alignment.TopStart))
+                                val shown = thumb
+                                if (shown != null) {
+                                    AsyncImage(
+                                        model = shown,
+                                        contentDescription = "гифка сети",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                    )
+                                } else {
+                                    PlaceholderCell(label = "гифка")
+                                }
                                 NetDot(Modifier.align(Alignment.TopEnd))
                             }
                         }
@@ -234,9 +275,6 @@ fun GifCatalogDialog(
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                                 )
-                                if (peer != null && myEntry == null) {
-                                    Badge("у ${peer.holders.size}", Modifier.align(Alignment.TopStart))
-                                }
                                 if (inNet) NetDot(Modifier.align(Alignment.TopEnd))
                             }
                         }
@@ -319,21 +357,6 @@ private fun NetDot(modifier: Modifier = Modifier) {
             .graphicsLayer { alpha = glow }
             .background(tint, CircleShape)
             .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape),
-    )
-}
-
-@Composable
-private fun Badge(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        color = Color.White,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier
-            .padding(3.dp)
-            .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 4.dp, vertical = 1.dp),
     )
 }
 

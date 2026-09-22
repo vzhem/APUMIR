@@ -63,8 +63,6 @@ object GifLibrary {
     private const val TAG = "GifLibrary"
     const val WIRE_PREFIX = "APUGIF1"
 
-    /** Раунд 128: служебная ссылка «передай байты этой гифки». */
-    const val REF_WIRE = "${WIRE_PREFIX}|ref|"
 
     // Раунд 123: лимита на число гифок в библиотеке БОЛЬШЕ НЕТ - сколько
     // человек использует, столько и хранится (решение владельца).
@@ -89,6 +87,108 @@ object GifLibrary {
     private val arrivals = MutableSharedFlow<String>(extraBufferCapacity = 16)
 
     fun arrivalsFlow(): SharedFlow<String> = arrivals.asSharedFlow()
+
+    // ── Миниатюры чужих гифок (раунд 129: быстрый каталог) ──────────────
+
+    private val thumbArrivals = MutableSharedFlow<String>(extraBufferCapacity = 32)
+
+    /** sha гифки, чья миниатюра только что приехала (для сетки каталога). */
+    fun thumbArrivalsFlow(): SharedFlow<String> = thumbArrivals.asSharedFlow()
+
+    /** Крошечная миниатюра (<=96px), если уже скачана с хранителя. */
+    fun tinyThumbFile(context: Context, sha256: String): File? {
+        if (!isSafeSha(sha256)) return null
+        return File(dir(context), "t$sha256.jpg").takeIf { it.isFile }
+    }
+
+    /** Сохранить приехавшую миниатюру (base64 jpeg, маленькая). */
+    suspend fun receiveThumb(context: Context, sha256: String, b64: String): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!isSafeSha(sha256)) return@withContext false
+            if (b64.length !in 16..2600) return@withContext false
+            val bytes = runCatching {
+                android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
+            }.getOrNull() ?: return@withContext false
+            if (bytes.isEmpty() || bytes.size > 2000) return@withContext false
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            if (opts.outWidth <= 0) return@withContext false
+            val f = File(dir(context), "t$sha256.jpg")
+            runCatching { f.writeBytes(bytes) }.getOrElse { return@withContext false }
+            thumbArrivals.emit(sha256)
+            true
+        }
+
+    /** Миниатюра для отдачи: из кэша или сжать из своего превью/гифки. */
+    suspend fun tinyThumbPayload(context: Context, sha256: String): String? =
+        withContext(Dispatchers.IO) {
+            if (!isSafeSha(sha256)) return@withContext null
+            val cached = File(dir(context), "t$sha256.jpg")
+            if (cached.isFile && cached.length() in 1..2000) {
+                return@withContext android.util.Base64.encodeToString(
+                    cached.readBytes(), android.util.Base64.NO_WRAP,
+                )
+            }
+            val src = previewFile(context, sha256) ?: gifFile(context, sha256)
+                ?: return@withContext null
+            val b64 = encodeTinyThumb(src) ?: return@withContext null
+            runCatching {
+                File(dir(context), "t$sha256.jpg").writeBytes(
+                    android.util.Base64.decode(b64, android.util.Base64.NO_WRAP),
+                )
+            }
+            b64
+        }
+
+    /** Сжать до крошечного jpeg, влезающего в служебный кадр (~2 КБ). */
+    private fun encodeTinyThumb(src: File): String? {
+        val bmp = android.graphics.BitmapFactory.decodeFile(src.absolutePath)
+            ?: return null
+        for (size in intArrayOf(96, 80, 64)) {
+            for (quality in intArrayOf(55, 45, 35)) {
+                val scaled = android.graphics.Bitmap.createScaledBitmap(bmp, size, size, true)
+                val out = java.io.ByteArrayOutputStream()
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out)
+                val b64 = android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+                if (b64.length <= 2100) return b64
+            }
+        }
+        return null
+    }
+
+    /** Попросить миниатюру у лучшего доступного хранителя. */
+    suspend fun requestThumb(
+        context: Context,
+        chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+        sha256: String,
+        holders: List<String>,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val app = context.applicationContext
+        val now = System.currentTimeMillis()
+        // Повтор по той же гифке чаще 5 минут - без новой просьбы.
+        val last = thumbAskedAt[sha256]
+        if (last != null && now - last < 5 * 60_000L) return@withContext false
+        thumbAskedAt[sha256] = now
+        while (thumbAskedAt.size > 256) {
+            val oldest = thumbAskedAt.entries.minByOrNull { it.value } ?: break
+            thumbAskedAt.remove(oldest.key)
+        }
+        val ranked = holders.sortedByDescending { holder ->
+            val stats = PeerRatingStore.statsFor(app, holder)
+            val fresh = stats?.lastSeenMs?.takeIf { now - it < 600_000L } ?: 0L
+            (fresh / 1000L) + (stats?.sightings ?: 0L).coerceAtMost(1000L)
+        }
+        for (holder in ranked) {
+            val chat = chatRepository.getChatByContactId(holder) ?: continue
+            val sent = RustBridge.sendMessage(
+                UUID.randomUUID().toString(), chat.id, holder, "$WIRE_PREFIX|thumb|$sha256",
+            )
+            if (sent) return@withContext true
+        }
+        false
+    }
+
+    private val thumbAskedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /** Незавершённые сборки каталогов собеседников: peer -> (всего, порции). */
     private val pendingBatches = ConcurrentHashMap<String, MutableMap<Int, List<GifLibEntry>>>()
@@ -409,11 +509,13 @@ object GifLibrary {
     // ── Провод: APUGIF1 ─────────────────────────────────────────────────
 
     data class GifPacket(
-        val kind: String, // "ask" | "have" | "want"
+        val kind: String, // "ask" | "have" | "want" | "thumb" | "thmb"
         val index: Int,
         val total: Int,
         val items: List<GifLibEntry>,
         val sha256: String,
+        /** Раунд 129: хвост кадра (например, base64 миниатюры). */
+        val payload: String = "",
     )
 
     /** Раунд 128: ССЫЛКА на гифку в чате - «APUGIFREF1|<sha256>». */
@@ -439,10 +541,18 @@ object GifLibrary {
         // Разбор с limit: тег/имя внутри JSON могут нести "|", хвост цельный.
         return when {
             t == "$WIRE_PREFIX|ask" -> GifPacket("ask", 0, 1, emptyList(), "")
-            t.startsWith("$WIRE_PREFIX|ref|") -> {
-                // Раунд 128: ссылка на гифку (байты тянутся тихо с хранителей).
-                val sha = t.removePrefix("$WIRE_PREFIX|ref|")
-                if (isSafeSha(sha)) GifPacket("ref", 0, 1, emptyList(), sha) else null
+            t.startsWith("$WIRE_PREFIX|thumb|") -> {
+                // Раунд 129: просьба о миниатюре чужой гифки (каталог).
+                val sha = t.removePrefix("$WIRE_PREFIX|thumb|")
+                if (isSafeSha(sha)) GifPacket("thumb", 0, 1, emptyList(), sha) else null
+            }
+            t.startsWith("$WIRE_PREFIX|thmb|") -> {
+                // Раунд 129: миниатюра в ответ (base64 jpeg, <= ~2100 символов).
+                val parts = t.split("|", limit = 4)
+                if (parts.size != 4) return null
+                val sha = parts[2]
+                if (!isSafeSha(sha) || parts[3].length !in 16..2600) return null
+                GifPacket("thmb", 0, 1, emptyList(), sha, parts[3])
             }
             t.startsWith("$WIRE_PREFIX|want|") -> {
                 val sha = t.removePrefix("$WIRE_PREFIX|want|")

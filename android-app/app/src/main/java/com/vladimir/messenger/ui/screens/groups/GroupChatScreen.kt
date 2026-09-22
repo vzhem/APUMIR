@@ -162,6 +162,7 @@ fun GroupChatScreen(
             onRequestSwarm = { swarm ->
                 viewModel.requestSwarmGif(swarm) { showGifCatalog = false }
             },
+            onRequestThumbs = { viewModel.requestPeerThumbs(it) },
             onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
             onDismiss = {
                 showGifCatalog = false

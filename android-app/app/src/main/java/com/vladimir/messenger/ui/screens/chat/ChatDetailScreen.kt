@@ -108,7 +108,12 @@ fun ChatDetailScreen(
                 showGifCatalog = false
                 viewModel.attachLocalGif(entry.sha256)
             },
-            onRequestSwarm = { swarm -> viewModel.requestSwarmGif(swarm) },
+            onRequestSwarm = { swarm ->
+                // Раунд 129: выбрал - окно закрылось, показан чат с карточкой.
+                showGifCatalog = false
+                viewModel.requestSwarmGif(swarm)
+            },
+            onRequestThumbs = { viewModel.requestPeerThumbs(it) },
             onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
             onDismiss = {
                 showGifCatalog = false

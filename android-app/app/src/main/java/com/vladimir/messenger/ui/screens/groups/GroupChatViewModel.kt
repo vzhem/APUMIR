@@ -281,6 +281,26 @@ class GroupChatViewModel @Inject constructor(
     fun setGifTab(tab: String) {
         _uiState.update { it.copy(gifTab = tab) }
     }
+    private val thumbRequestedAt = HashMap<String, Long>()
+
+    /** Раунд 129: миниатюры чужих гифок для сетки каталога. */
+    fun requestPeerThumbs(entries: List<com.vladimir.messenger.data.gif.SwarmGif>) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch {
+            for (sg in entries) {
+                val sha = sg.entry.sha256
+                if (com.vladimir.messenger.data.gif.GifLibrary.tinyThumbFile(appContext, sha) != null) continue
+                val now = System.currentTimeMillis()
+                if (now - (thumbRequestedAt[sha] ?: 0L) < 5 * 60_000L) continue
+                thumbRequestedAt[sha] = now
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.requestThumb(
+                        appContext, chatRepository, sha, sg.holders,
+                    )
+                }
+            }
+        }
+    }
     /**
      * Раунд 124: СВОЯ гифка из хранилища телефона. Ложится в библиотеку
      * (превью + индекс), объявляется в каталоге нашей сети - теперь она

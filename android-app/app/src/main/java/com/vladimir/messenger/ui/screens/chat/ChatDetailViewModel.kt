@@ -528,7 +528,7 @@ class ChatDetailViewModel @Inject constructor(
             runCatching {
                 RustBridge.sendMessage(
                     messageId, chatId, recipientId,
-                    com.vladimir.messenger.data.gif.GifLibrary.REF_WIRE + sha256,
+                    com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256),
                 )
             }.getOrDefault(false)
         }
@@ -544,6 +544,30 @@ class ChatDetailViewModel @Inject constructor(
         // Своя карточка тоже должна ожить: если гифки у меня нет - тихо
         // попросим у сети (тротлимб внутри GifLibrary).
         ensureGifRefInternal(sha256)
+    }
+
+    private val thumbRequestedAt = HashMap<String, Long>()
+
+    /**
+     * Раунд 129: подтянуть миниатюры чужих гифок для сетки каталога
+     * (по одной просьбе - лучшему хранителю; тротлимб 5 минут/sha).
+     */
+    fun requestPeerThumbs(entries: List<com.vladimir.messenger.data.gif.SwarmGif>) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch {
+            for (sg in entries) {
+                val sha = sg.entry.sha256
+                if (com.vladimir.messenger.data.gif.GifLibrary.tinyThumbFile(appContext, sha) != null) continue
+                val now = System.currentTimeMillis()
+                if (now - (thumbRequestedAt[sha] ?: 0L) < 5 * 60_000L) continue
+                thumbRequestedAt[sha] = now
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.requestThumb(
+                        appContext, chatRepository, sha, sg.holders,
+                    )
+                }
+            }
+        }
     }
 
     /**

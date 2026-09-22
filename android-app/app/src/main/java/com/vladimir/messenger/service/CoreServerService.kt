@@ -140,21 +140,34 @@ class CoreServerService : Service() {
                         .onFailure { Log.w(TAG, "gif serve failed: ${it.message}") }
                 }
             }
-            "ref" -> {
-                // Раунд 128: собеседник прислал ССЫЛКУ на гифку. В чат ложится
-                // карточка от его лица; байты он и я каждый тихо подтянем
-                // с хранителей - в переписке с хранителем ничего не появляется.
-                val sha = packet.sha256
+            "thumb" -> {
+                // Раунд 129: просят миниатюру - отдаём крошечный jpeg (тихо).
+                val key = "T$senderId|${packet.sha256}"
+                if (now - (gifWantServedAt[key] ?: 0L) < 5 * 60_000L) return
+                gifWantServedAt[key] = now
                 serviceScope.launch {
                     runCatching {
-                        chatRepository.insertReceivedGifRefMessage(
-                            chatId = chatId,
-                            senderId = senderId,
-                            messageId = messageId,
-                            sha256 = sha,
-                            timestamp = System.currentTimeMillis(),
+                        val b64 = com.vladimir.messenger.data.gif.GifLibrary
+                            .tinyThumbPayload(applicationContext, packet.sha256)
+                            ?: return@runCatching
+                        val chat = chatRepository.getChatByContactId(senderId)
+                            ?: return@runCatching
+                        RustBridge.sendMessage(
+                            UUID.randomUUID().toString(), chat.id, senderId,
+                            com.vladimir.messenger.data.gif.GifLibrary.WIRE_PREFIX +
+                                "|thmb|" + packet.sha256 + "|" + b64,
                         )
-                    }.onFailure { Log.w(TAG, "gif ref insert failed: ${it.message}") }
+                    }.onFailure { Log.w(TAG, "gif thumb serve failed: ${it.message}") }
+                }
+            }
+            "thmb" -> {
+                // Раунд 129: приехала миниатюра - в кэш, сетка обновится сама.
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.gif.GifLibrary.receiveThumb(
+                            applicationContext, packet.sha256, packet.payload,
+                        )
+                    }.onFailure { Log.w(TAG, "gif thumb receive failed: ${it.message}") }
                 }
             }
         }
@@ -856,6 +869,35 @@ class CoreServerService : Service() {
                     // Группы: APUGRP1-конверт разбирается здесь же, ДО авто-создания
                     // контакта. Иначе каждое групповое событие превратилось бы в личный
                     // чат с отправителем.
+                    // Раунд 129: ССЫЛКА на гифку - сам контент сообщения
+                    // («APUGIFREF1|<sha>»). Перехватывается здесь: в чат
+                    // ложится карточка от лица отправителя, байты каждый
+                    // телефон тихо тянет с хранителей. Даже если конверт
+                    // утечёт через запасной путь доставки и сохранится как
+                    // обычное сообщение - экран чата рисует по нему карточку.
+                    if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
+                        val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
+                        if (refSha != null) {
+                            serviceScope.launch {
+                                runCatching {
+                                    chatRepository.insertReceivedGifRefMessage(
+                                        chatId = chatId,
+                                        senderId = senderId,
+                                        messageId = messageId,
+                                        sha256 = refSha,
+                                        timestamp = System.currentTimeMillis(),
+                                    )
+                                }.onFailure { Log.w(TAG, "gif ref insert failed: " + it.message) }
+                            }
+                        }
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "GIF ref ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
                     if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
                         handleGifEnvelope(senderId, chatId, messageId, text)
                         try {
