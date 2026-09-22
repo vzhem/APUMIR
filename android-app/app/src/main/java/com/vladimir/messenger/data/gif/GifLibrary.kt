@@ -423,16 +423,18 @@ object GifLibrary {
         text != null && text.length <= 8000 && text.startsWith("$WIRE_PREFIX|")
 
     fun parseGifPacket(text: String?): GifPacket? {
-        if (!isGifPacket(text)) return null
+        // Локальная non-null копия: smart-cast через вызов isGifPacket не работает.
+        val t = text ?: return null
+        if (!isGifPacket(t)) return null
         // Разбор с limit: тег/имя внутри JSON могут нести "|", хвост цельный.
         return when {
-            text == "$WIRE_PREFIX|ask" -> GifPacket("ask", 0, 1, emptyList(), "")
-            text.startsWith("$WIRE_PREFIX|want|") -> {
-                val sha = text.removePrefix("$WIRE_PREFIX|want|")
+            t == "$WIRE_PREFIX|ask" -> GifPacket("ask", 0, 1, emptyList(), "")
+            t.startsWith("$WIRE_PREFIX|want|") -> {
+                val sha = t.removePrefix("$WIRE_PREFIX|want|")
                 if (isSafeSha(sha)) GifPacket("want", 0, 1, emptyList(), sha) else null
             }
-            text.startsWith("$WIRE_PREFIX|have|") -> {
-                val parts = text.split("|", limit = 5)
+            t.startsWith("$WIRE_PREFIX|have|") -> {
+                val parts = t.split("|", limit = 5)
                 if (parts.size != 5) return null
                 val index = parts[2].toIntOrNull() ?: return null
                 val total = parts[3].toIntOrNull() ?: return null
