@@ -952,9 +952,8 @@ class FileTransferReceiver(
         // Раунд 123: кусок от НЕпервичного источника немедленно перекладывается
         // в первичную передачу (расшифровал своим ключом - зашифровал её ключом):
         // первичная собирается из частей от ВСЕХ источников параллельно.
-        if (!groupManifest) {
-            mirrorChunkIntoPrimary(transferIdHex, chunkIndex, ciphertext)
-        }
+        // (Групповые манифесты зеркало отсекает само.)
+        mirrorChunkIntoPrimary(transferIdHex, chunkIndex, ciphertext)
 
         // Раунд 123: зеркало могло уже завершить ЭТУ передачу (кусок доехал
         // до первичного раньше, победил он) - тогда здесь делать нечего.
@@ -1091,62 +1090,64 @@ class FileTransferReceiver(
         runCatching {
             if (chunkStore.hasEncryptedChunk(primary.transferId, chunkIndex)) return
             val selfManifestBytes = chunkStore.readManifest(transferIdHex) ?: return
+            // Групповые общие копии (K2) живут одной передачей - зеркалу не нужны.
+            if (GroupFileSeeder.isGroupManifest(selfManifestBytes)) return
             val primaryManifestBytes = chunkStore.readManifest(primary.transferId) ?: return
             if (keyVault.mode(primary.transferId) != FileTransferKeyVault.Mode.READY) return
-            keyVault.withExistingKey(transferIdHex) { selfKey ->
+            // Фаза 1 (без suspend внутри лямбды ключа): расшифровать своим
+            // ключом и зашифровать ключом первичной.
+            val reEncrypted = keyVault.withExistingKey(transferIdHex) { selfKey ->
                 val plaintext = crypto.decryptChunk(selfManifestBytes, selfKey, chunkIndex, ciphertext)
                 try {
                     keyVault.withExistingKey(primary.transferId) { primaryKey ->
-                        val reEncrypted = encryptFileTransferChunk(
+                        encryptFileTransferChunk(
                             primaryManifestBytes,
                             primaryKey,
                             chunkIndex.toULong(),
                             plaintext,
                         )
-                        val stored = chunkStore.storeEncryptedChunk(
-                            primary.transferId, chunkIndex, reEncrypted,
-                        )
-                        val inserted = transferDao.insertChunkIgnore(
-                            FileTransferChunkEntity(
-                                transferId = primary.transferId,
-                                chunkIndex = chunkIndex,
-                                state = "RECEIVED",
-                                ciphertextBytes = stored.ciphertextBytes,
-                                chunkSha256 = stored.sha256,
-                                updatedAtMs = nowMs(),
-                            ),
-                        ) != -1L
-                        if (inserted) {
-                            val contiguous = advanceContiguousPrefix(primary.transferId)
-                            val row = transferDao.getTransfer(primary.transferId)
-                            if (row != null && row.state != "COMPLETE") {
-                                val counted = transferDao.countChunks(primary.transferId)
-                                if (contiguous >= row.chunkCount) {
-                                    advance(
-                                        row,
-                                        newState = "VERIFYING",
-                                        completedChunks = counted,
-                                        transferredBytes = row.totalBytes,
-                                    )
-                                    finalizeTransfer(
-                                        transferDao.getTransfer(primary.transferId) ?: return@withExistingKey,
-                                        crypto.parseManifest(primaryManifestBytes),
-                                    )
-                                } else {
-                                    advance(
-                                        row,
-                                        newState = row.state,
-                                        completedChunks = counted,
-                                        transferredBytes =
-                                            Math.addExact(row.transferredBytes, plaintext.size.toLong()),
-                                    )
-                                    sendFileAck(primary.transferId, contiguous)
-                                }
-                            }
-                        }
                     }
                 } finally {
                     plaintext.fill(0)
+                }
+            }
+            // Фаза 2: сохранить и подвинуть первичную (suspend-вызовы снаружи).
+            val stored = chunkStore.storeEncryptedChunk(primary.transferId, chunkIndex, reEncrypted)
+            val inserted = transferDao.insertChunkIgnore(
+                FileTransferChunkEntity(
+                    transferId = primary.transferId,
+                    chunkIndex = chunkIndex,
+                    state = "RECEIVED",
+                    ciphertextBytes = stored.ciphertextBytes,
+                    chunkSha256 = stored.sha256,
+                    updatedAtMs = nowMs(),
+                ),
+            ) != -1L
+            if (!inserted) return
+            val contiguous = advanceContiguousPrefix(primary.transferId)
+            val row = transferDao.getTransfer(primary.transferId) ?: return
+            if (row.state != "COMPLETE") {
+                val counted = transferDao.countChunks(primary.transferId)
+                if (contiguous >= row.chunkCount) {
+                    advance(
+                        row,
+                        newState = "VERIFYING",
+                        completedChunks = counted,
+                        transferredBytes = row.totalBytes,
+                    )
+                    finalizeTransfer(
+                        transferDao.getTransfer(primary.transferId) ?: return,
+                        crypto.parseManifest(primaryManifestBytes),
+                    )
+                } else {
+                    advance(
+                        row,
+                        newState = row.state,
+                        completedChunks = counted,
+                        transferredBytes =
+                            Math.addExact(row.transferredBytes, reEncrypted.size - FileTransferChunkStore.AEAD_TAG_BYTES),
+                    )
+                    sendFileAck(primary.transferId, contiguous)
                 }
             }
         }.onFailure { Log.w(TAG, "mirror chunk $chunkIndex failed: ${it.message}") }
