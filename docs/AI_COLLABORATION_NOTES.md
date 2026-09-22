@@ -9187,3 +9187,29 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   !groupOffer && existing==null (групповые сиды не трогать! блок уходил
   наружу - перенёс). v11.74.19 = 508b592, APK 40 320 198 Б, sha256
   09f5357b…87e5.
+
+- **2026-09-22 (раунд 123) - v11.74.20: лимит 400 снят + сборка гифки
+  кусками от трёх телефонов.** Владелец: «кто сколько пользуется - столько
+  и хранится» и «5 кусочков от одного, 3 от другого, 20 от третьего».
+  Реализация: (а) MAX_ENTRIES LRU в GifLibrary УДАЛЁН, каталоги:
+  MAX_PEER_ITEMS 2000, MAX_PEERS 100, batch total 1..300. (б) Приёмник:
+  параллельные источники НЕ отклоняются (раунд-122 отказ снят); в
+  ingestChunkCiphertext хук mirrorChunkIntoPrimary - кусок не-первичного
+  источника расшифровывается его ключом, зашифровывается ключом
+  ПЕРВИЧНОЙ (самая ранняя активная INCOMING того же чат+sha, геометрия
+  chunkSize/chunkCount должна совпадать) и кладётся ей; первичная
+  собирается из частей всех полос. ФИНАЛ: resolveParallelTransfers -
+  победитель уведомляет чат ОДИН РАЗ; победил не-первичный ->
+  completeRowFromCopy (писатель+sha-проверка) достраивает первичного,
+  остальные stopParallelSource (полный ACK + CANCELLED SUPERSEDED +
+  удаление кусков). ГРАБЛИ: (1) groupManifest не виден в ingest -
+  отсечение групповых ВНУТРИ зеркала по isGroupManifest; (2) suspend
+  вызовы внутри не-inline лямбды withExistingKey запрещены - фаза
+  крипто без suspend, учёт после; (3) advanceProgress получил guard
+  state NOT IN (COMPLETE,CANCELLED) от воскрешения; (4) addExact(Long,
+  Int) не существует - toLong(); (5) isGroupScope(chatId) НЕ РАБОТАЕТ
+  (групповые строки хранят голый groupId) - только по
+  manifest.recipientNodeId; (6) UI: параллельные полосы свёрнуты в
+  одну (shadowed-набор в ChatDetailScreen). check39/40 упали (suspend
+  в лямбде, Int/Long), check41 зелёный. v11.74.20 = 16006d0, APK
+  40 320 198 Б, sha256 3d132aa2…d716.
