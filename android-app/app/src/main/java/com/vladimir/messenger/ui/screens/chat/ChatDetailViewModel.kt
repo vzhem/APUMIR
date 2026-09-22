@@ -524,11 +524,13 @@ class ChatDetailViewModel @Inject constructor(
             }.getOrNull()
             if (holder == null) {
                 _uiState.update { it.copy(swarmStatus = "Держателей сейчас нет на связи") }
+            } else if (holder.isEmpty()) {
+                _uiState.update { it.copy(swarmStatus = "Уже попросили - гифка в пути") }
             } else {
                 pendingSwarmSha = swarm.entry.sha256
                 com.vladimir.messenger.data.gif.GifLibrary.rememberWant(swarm.entry.sha256)
                 _uiState.update {
-                    it.copy(swarmStatus = "Попросил у $holder - гифка придёт в чат")
+                    it.copy(swarmStatus = "Попросил у $holder - принесёт самый быстрый")
                 }
             }
         }

@@ -541,6 +541,13 @@ object GifLibrary {
      * Попросить гифку у роя: хранитель выбирается по свежести онлайна
      * (рейтинг узлов). Возвращает имя телефона-хранителя или null.
      */
+    /**
+     * Раунд 122: попросить гифку у роя. Просьба уходит ТРЁМ лучшим
+     * хранителям (свежий онлайн выше в рейтинге) - гифку принесёт самый
+     * быстрый/доступный, остальных получатель вежливо остановит
+     * (FileTransferReceiver отклоняет дубль, который уже едет).
+     * Возвращает имя первого хранителя для статуса или null.
+     */
     suspend fun requestGif(
         context: Context,
         chatRepository: ChatRepository,
@@ -549,24 +556,45 @@ object GifLibrary {
     ): String? = withContext(Dispatchers.IO) {
         val app = context.applicationContext
         val now = System.currentTimeMillis()
+        // Повторное нажатие на ту же гифку чаще 2 минут - без новой просьбы.
+        val last = wantSentAt[sha256]
+        if (last != null && now - last < 2 * 60_000L) return@withContext ""
+        wantSentAt[sha256] = now
+        while (wantSentAt.size > 64) {
+            val oldest = wantSentAt.entries.minByOrNull { it.value } ?: break
+            wantSentAt.remove(oldest.key)
+        }
         val ranked = holders.sortedByDescending { holder ->
             val stats = PeerRatingStore.statsFor(app, holder)
             val fresh = stats?.lastSeenMs?.takeIf { now - it < 600_000L } ?: 0L
             (fresh / 1000L) + (stats?.sightings ?: 0L).coerceAtMost(1000L)
         }
+        var sentTo = 0
+        val firstName = StringBuilder()
         for (holder in ranked) {
+            if (sentTo >= 3) break
             val chat = chatRepository.getChatByContactId(holder) ?: continue
             val sent = RustBridge.sendMessage(
                 UUID.randomUUID().toString(), chat.id, holder, "$WIRE_PREFIX|want|$sha256",
             )
-            if (sent) return@withContext chat.contactName.ifBlank { "роем" }
+            if (sent) {
+                if (sentTo == 0) firstName.append(chat.contactName.ifBlank { "телефоном" })
+                sentTo++
+            }
         }
-        null
+        when (sentTo) {
+            0 -> null
+            1 -> firstName.toString()
+            else -> "$firstName (и ещё ${sentTo - 1})"
+        }
     }
 
     // ── Ожидаемые гифки (нажали в каталоге - ждём файл от роя) ──────────
 
     private val pendingWants = ConcurrentHashMap<String, Long>()
+
+    /** Раунд 122: когда по этой гифке последний раз уходила просьба. */
+    private val wantSentAt = ConcurrentHashMap<String, Long>()
 
     fun rememberWant(sha256: String) {
         pendingWants[sha256] = System.currentTimeMillis()

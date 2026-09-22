@@ -217,6 +217,23 @@ interface FileTransferDao {
     ): FileTransferEntity?
 
     /**
+     * Раунд 122: тот же файл УЖЕ ЕДЕТ от любого отправителя (просили у
+     * нескольких хранителей роя). Новое предложение того же файла
+     * отклоняется, пока первый источник активен (живость - по updatedAtMs).
+     */
+    @Query(
+        "SELECT * FROM file_transfers " +
+            "WHERE direction = 'INCOMING' AND state NOT IN ('COMPLETE', 'FAILED', 'CANCELLED') " +
+            "AND chatId = :chatId AND fileSha256 = :fileSha256 AND expiresAtMs > :nowMs " +
+            "ORDER BY createdAtMs DESC LIMIT 1"
+    )
+    suspend fun getActiveIncomingSameFile(
+        chatId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): FileTransferEntity?
+
+    /**
      * Мои групповые копии (K2, v11.70.25): строка `OUTGOING`/`SEEDING` -
      * файл группы, зашифрованный один раз общим ключом; куски из неё уходят
      * любому участнику по его просьбе (GroupFileSeeder). Обычный передатчик

@@ -606,6 +606,24 @@ class FileTransferReceiver(
                     return
                 }
             }
+            // Раунд 122: тот же файл уже едет от другого хранителя (просили у
+            // троих - принесёт самый быстрый). Остальных останавливаем сразу,
+            // чтобы один и тот же файл не качался дважды параллельно. Если
+            // первый источник замолчал дольше 10 минут - новому даём дорогу.
+            val inFlight = transferDao.getActiveIncomingSameFile(
+                targetChatId, manifest.fileSha256Hex, now,
+            )
+            if (inFlight != null && inFlight.updatedAtMs > now - 10 * 60_000L) {
+                Log.i(
+                    TAG,
+                    "File offer $transferIdHex: same file already in flight from " +
+                        "${inFlight.peerNodeId.takeLast(8)}; declined",
+                )
+                declined[transferIdHex] = true
+                bufferedChunks.remove(transferIdHex)?.values?.forEach { it.fill(0) }
+                sendCancel(transferIdHex, targetChatId, senderId)
+                return
+            }
         }
         val transfer = existing ?: insertIncomingTransfer(manifest, senderId, targetChatId, now) ?: return
         if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
