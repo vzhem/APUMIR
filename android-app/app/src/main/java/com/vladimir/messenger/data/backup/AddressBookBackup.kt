@@ -184,8 +184,58 @@ class AddressBookBackup @Inject constructor(
         }
         val parsed = parseEnvelope(sealed, privateKey)
             ?: return@withContext "Копия не открылась вашим ключом"
-        writeBook(parsed)
-        "Восстановлено ${parsed.optJSONArray("entries")?.length() ?: 0} адресов — вступит в силу после перезапуска приложения"
+        // Раунд 125 (владелец): азбука на телефоне ОДНА - копия в неё
+        // вливается (добавляются только те адреса, которых не было).
+        val added = mergeIntoLocalBook(parsed)
+        if (added == 0) {
+            return@withContext "Нового ничего: все ${localEntryCount()} адресов уже в азбуке"
+        }
+        "В азбуку добавлено $added адресов (стало ${localEntryCount()}) — вступит в силу после перезапуска приложения"
+    }
+
+    /**
+     * Раунд 125 (владелец): телефон хранит ОДНУ азбуку. Присланные копии
+     * (с сервера и от хранителей роя) в неё ВЛИВАЮТСЯ: добавляются только
+     * те адреса, которых локально ещё нет; существующие не трогаются.
+     *
+     * @return сколько адресов добавлено.
+     */
+    private suspend fun mergeIntoLocalBook(parsed: JSONObject): Int = withContext(Dispatchers.IO) {
+        val file = bookFile(context)
+        val local = if (file.isFile && file.length() >= 4) {
+            runCatching { JSONObject(file.readText()) }.getOrNull()
+        } else {
+            null
+        }
+        val incoming = parsed.optJSONArray("entries")
+        if (incoming == null || incoming.length() == 0) return@withContext 0
+        if (local == null) {
+            // Своей азбуки ещё нет - копия и становится той самой единственной.
+            writeBook(parsed)
+            return@withContext incoming.length()
+        }
+        val localEntries = local.optJSONArray("entries")
+        if (localEntries == null) {
+            // Битая локальная азбука - заменяем целиком присланной.
+            writeBook(parsed)
+            return@withContext incoming.length()
+        }
+        val known = HashSet<String>()
+        for (i in 0 until localEntries.length()) {
+            val id = localEntries.optJSONObject(i)?.optString("id").orEmpty()
+            if (id.isNotBlank()) known.add(id)
+        }
+        var added = 0
+        for (i in 0 until incoming.length()) {
+            val entry = incoming.optJSONObject(i) ?: continue
+            val id = entry.optString("id").orEmpty()
+            if (id.isBlank() || known.contains(id)) continue
+            known.add(id)
+            localEntries.put(entry)
+            added++
+        }
+        if (added > 0) writeBook(local)
+        added
     }
 
     /** Открыть конверт и проверить структуру. null — не наш/битый. */
@@ -208,13 +258,23 @@ class AddressBookBackup @Inject constructor(
         prefs().edit().putLong(KEY_LAST_RESTORE_AT, System.currentTimeMillis()).apply()
     }
 
-    /** Спросить телефоны роя и, если дали, применить копию. */
+    /**
+     * Спросить телефоны роя и слить их копии (сколько дали) в одну азбуку:
+     * добавляются только адреса, которых локально нет (решение владельца
+     * 2026-09-22).
+     */
     private suspend fun askSwarm(privateKey: String): String? {
-        val envelope = swarm.askAndRestore { e -> parseEnvelope(e, privateKey) != null }
-            ?: return null
-        val parsed = parseEnvelope(envelope, privateKey) ?: return null
-        writeBook(parsed)
-        return "Восстановлено с телефона роя: ${parsed.optJSONArray("entries")?.length() ?: 0} адресов — вступит в силу после перезапуска приложения"
+        val envelopes = swarm.askAndRestoreAll { e -> parseEnvelope(e, privateKey) != null }
+        if (envelopes.isEmpty()) return null
+        var added = 0
+        for (envelope in envelopes) {
+            val parsed = parseEnvelope(envelope, privateKey) ?: continue
+            added += mergeIntoLocalBook(parsed)
+        }
+        if (added == 0) {
+            return "Рой отдал ${envelopes.size} копий, но нового ничего: все адреса уже в азбуке"
+        }
+        return "Из ${envelopes.size} копий роя в азбуку добавлено $added адресов (стало ${localEntryCount()}) — вступит в силу после перезапуска приложения"
     }
 
     /** Свежий конверт для раздачи по рою (шифруем на месте). */

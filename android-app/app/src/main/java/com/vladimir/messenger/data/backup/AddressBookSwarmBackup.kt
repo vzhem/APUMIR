@@ -38,9 +38,10 @@ import org.json.JSONObject
  *   `APUBK1|ask|<проситель>`             — «дай мою копию» (сервер недоступен);
  *   `APUBK1|give|<хранитель>|<владелец>|<конверт>` — «вот твоя копия».
  *
- * У хранителя: один файл на владельца (filesDir/apu_swarm_backups/), не более
- * [MAX_OWNERS] владельцев и не дольше [OWNER_TTL_MS] — чтобы хранение было
- * посильным. Просроченное стирается само.
+ * У хранителя: один файл на владельца (filesDir/apu_swarm_backups/), самая
+ * свежая копия каждого владельца. Решение владельца 2026-09-22: копий может
+ * быть СКОЛЬ УГОДНО, от сколь угодно владельцев и без срока хранения —
+ * ничего не вытесняется и не протухает.
  */
 @Singleton
 class AddressBookSwarmBackup @Inject constructor(
@@ -58,8 +59,6 @@ class AddressBookSwarmBackup @Inject constructor(
          *  упираться в потолок брокера (256 КБ) после запечатывания. */
         const val MAX_ENVELOPE_CHARS = 120_000
 
-        private const val MAX_OWNERS = 20
-        private const val OWNER_TTL_MS = 60L * 24 * 60 * 60 * 1000
         private const val RESEND_AFTER_MS = 12L * 60 * 60 * 1000
         private const val ACK_FRESH_MS = 48L * 60 * 60 * 1000
         private const val DIR_NAME = "apu_swarm_backups"
@@ -68,6 +67,9 @@ class AddressBookSwarmBackup @Inject constructor(
         private const val KEY_SENDS = "swarm_bk_sends"
         private const val ASK_TIMEOUT_MS = 20_000L
         private const val MAX_ASK_PEERS = 40
+
+        /** Сколько версий копии собрать для слияния - дальше ждать незачем. */
+        private const val ENOUGH_GIVES = 4
 
         fun isSwarmEnvelope(text: String?): Boolean =
             text != null && text.startsWith("$PREFIX|")
@@ -196,39 +198,51 @@ class AddressBookSwarmBackup @Inject constructor(
 
     @Volatile private var asking: Boolean = false
 
-    @Volatile private var pendingGive: String? = null
+    private val pendingGives = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
     /**
      * Спросить рой: «дай мою копию азбуки». Посылает [MAX_ASK_PEERS] знакомым
-     * узлам запрос и ждёт первый конверт, который откроется ключом владельца
-     * ([validator] — это расшифровка+проверка структуры у AddressBookBackup).
+     * узлам запрос и собирает конверты, которые открылись ключом владельца
+     * ([validator] — это расшифровка+проверка структуры у AddressBookBackup),
+     * пока не наберётся [ENOUGH_GIVES] или не выйдет время.
      *
-     * @return конверт, или null — рой молчал/копий нет.
+     * Раунд 125 (владелец): копий у разных хранителей может быть много —
+     * собираем НЕСКОЛЬКО, чтобы наверху слить их в одну азбуку
+     * (добавив то, чего локально нет).
+     *
+     * @return список открывшихся конвертов; пустой — рой молчал/копий нет.
      */
-    suspend fun askAndRestore(validator: (String) -> Boolean): String? = withContext(Dispatchers.IO) {
-        val me = me() ?: return@withContext null
-        val peers = candidates(me).take(MAX_ASK_PEERS)
-        if (peers.isEmpty()) return@withContext null
-        pendingGive = null
-        asking = true
-        try {
-            for (peer in peers) send(peer, "$PREFIX|ask|$me")
-            Log.i(TAG, "ask sent to ${peers.size} peers")
-            val deadline = System.currentTimeMillis() + ASK_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
-                val give = pendingGive
-                if (give != null) {
-                    if (validator(give)) return@withContext give
-                    pendingGive = null
+    suspend fun askAndRestoreAll(validator: (String) -> Boolean): List<String> =
+        withContext(Dispatchers.IO) {
+            val me = me() ?: return@withContext emptyList()
+            val peers = candidates(me).take(MAX_ASK_PEERS)
+            if (peers.isEmpty()) return@withContext emptyList()
+            pendingGives.clear()
+            asking = true
+            try {
+                for (peer in peers) send(peer, "$PREFIX|ask|$me")
+                Log.i(TAG, "ask sent to ${peers.size} peers")
+                val deadline = System.currentTimeMillis() + ASK_TIMEOUT_MS
+                val valid = LinkedHashSet<String>()
+                while (System.currentTimeMillis() < deadline && valid.size < ENOUGH_GIVES) {
+                    while (true) {
+                        val give = pendingGives.poll() ?: break
+                        if (validator(give)) valid.add(give)
+                    }
+                    if (valid.size >= ENOUGH_GIVES) break
+                    delay(1000)
                 }
-                delay(1000)
+                // Дочистить то, что пришло в последний момент.
+                while (true) {
+                    val give = pendingGives.poll() ?: break
+                    if (validator(give)) valid.add(give)
+                }
+                valid.toList()
+            } finally {
+                asking = false
+                pendingGives.clear()
             }
-        } finally {
-            asking = false
-            pendingGive = null
         }
-        null
-    }
 
     // ── роль хранителя: приём, хранение, отдача ─────────────────────────────
 
@@ -246,18 +260,11 @@ class AddressBookSwarmBackup @Inject constructor(
                 file.writeText(envelope)
                 tmp.delete()
             }
+            // Раунд 125 (владелец): копий столько, сколько прислали, - без
+            // потолка и без срока. У каждого владельца файл один: новая
+            // копия заменяет его же старую.
             val index = jsonMap(KEY_INDEX)
             index[owner] = System.currentTimeMillis()
-            // Просроченных стираем, лишних (сверх MAX_OWNERS) — самых старых.
-            val now = System.currentTimeMillis()
-            val alive = index.filterValues { now - it <= OWNER_TTL_MS }.toMutableMap()
-            while (alive.size > MAX_OWNERS) {
-                val oldest = alive.minByOrNull { it.value }?.key ?: break
-                if (oldest == owner) break
-                alive.remove(oldest)
-                runCatching { blobFile(oldest).delete() }
-            }
-            index.clear(); index.putAll(alive)
             saveJsonMap(KEY_INDEX, index)
         }.onFailure { Log.w(TAG, "store blob: ${it.message}") }
     }
@@ -315,7 +322,7 @@ class AddressBookSwarmBackup @Inject constructor(
                 // APUBK1|give|<хранитель>|<владелец>|<конверт>
                 val owner = parts.getOrNull(3).orEmpty()
                 val envelope = parts.drop(4).joinToString("|")
-                if (owner == me && asking) pendingGive = envelope
+                if (owner == me && asking) pendingGives.add(envelope)
                 return true
             }
             else -> return true
