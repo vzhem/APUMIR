@@ -9289,3 +9289,31 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   androidx.compose.animation.animateColor (НЕ .core - check45 упал).
   Диалог в Избранном теперь тоже единый (те же параметры). v11.74.24
   = a7b305b, APK 40 352 966 Б, sha256 0f8b0f92…c7ec.
+
+- **2026-09-22 (раунд 128) - v11.74.25: гифки ходят ССЫЛКАМИ.**
+  Владелец: «запрошенную из сети гифку не отправлять в личный чат
+  (хранителя); она сразу высвечивается у собеседника ОТ МОЕГО ЛИЦА;
+  в моём чате грузится одна как обычное сообщение; чужой телефон
+  только подгружает байты - два абонента обмениваются ссылками».
+  Реализация: (1) ССЫЛКА = «APUGIF1|ref|<sha>» (служебный, в чат
+  сырым текстом НЕ попадает) -> CoreServerService вставляет
+  ВХОДЯЩУЮ карточку ChatRepository.insertReceivedGifRefMessage
+  (content="APUGIFREF1|<sha>", status RECEIVED, isFromMe=false,
+  lastMessage="🖼 Гифка"); отправитель - insertGifRefMessage
+  (LOCAL_FILE, isFromMe=true). (2) Тихая выдача: serveGifFromLibrary
+  БЕЗ insertLocalFileMessage (байты - prepareFromFile+pump). (3)
+  GifRefCard (ui/components): produceState(gifFile)+arrivalsFlow,
+  «гифка из нашей сети - загружается…» -> AsyncImage анимация,
+  click=PhotoViewer; ensureGifRef (VM) - если нет, тихий requestGif
+  по хранителям из swarmCatalog (тротлимб wantSentAt 2 мин).
+  (4) attachLocalGif/attachGif/requestSwarmGif -> sendGifRefInternal
+  (sendMessage ref + вставка карточки + ensureGifRef); attachGif:
+  скачал ОДИН раз в библиотеку -> ссылка (собеседник берёт с меня).
+  (5) ChatDetailScreen: messageless gif-передачи спрятаны из ленты;
+  isGifRef(message) -> GifRefCard вместо MessageBubble (реакции
+  работают - ReactionRow по message.id). ГРУППЫ НЕ ТРОНУТЫ.
+  ГРАБЛИ: пересборка песочницы посреди правок ЗАДВОИЛА блок функций
+  в ChatDetailViewModel (attachGif и др. x2 -> «Overload resolution
+  ambiguity» на check47) - вылечено удалением второго блока (626-853).
+  check48 зелёный. v11.74.25 = 4f991b5, APK 40 352 966 Б, sha256
+  5685497b…1095.
