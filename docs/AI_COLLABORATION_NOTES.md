@@ -9343,3 +9343,23 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   всё равно рисует GifRefCard по контенту (isGifRef), байты тянут
   ensureGifRef-ом у обоих. v11.74.26 = cbaf1b0, APK 40 352 966 Б,
   sha256 19c32d81…297f.
+
+- **2026-09-22 (раунд 130) - v11.74.27: «Сообщения сети»; ссылки в
+  группах/комментариях; совместимость ссылок.** (1) SettingsScreen:
+  «Сообщения (рой)» -> «Сообщения сети» (последний видимый «рой»).
+  (2) Группа (она же комментарии каналов - темы групп): attachLocalGif/
+  attachGif/requestSwarmGif -> sendGifRefToGroup(sha) =
+  groupRepository.sendMessage(groupId, topicId, refContent) + 
+  ensureGifRefInternal (тихо себе); attachGif: качает ОДИН раз в
+  библиотеку -> ссылка. MessageBubble: ветка isGifRef в when ->
+  GifRefCard + параметр onEnsureGif. observeGifArrivals: только гасит
+  статус (pendingSwarmSha удалён, сцену для гифок не используем;
+  файлы-скрепка - как было). (3) Обратная совместимость: parseGifPacket
+  снова знает «APUGIF1|ref|» (ссылки от v11.74.25-телефонов) ->
+  handleGifEnvelope «ref» вставляет карточку. ГРАБЛИ: мой регэксп-дек
+  скобок врёт на GroupChatScreen (стринг-шаблоны) - «depth 6» и у
+  собранного HEAD; доверять struct_check + сборке CI. Отчёт владельца
+  «у получателя сырая ссылка» = смешанные версии (.25/.26); лечится
+  обновлением всех + совместимость в .27. check51/52 зелёные
+  (watch51 упал по таймауту почти в конце - ретрай).
+  v11.74.27 = 7f41bdb, APK 40 369 350 Б, sha256 579f0de1…f1ca2.
