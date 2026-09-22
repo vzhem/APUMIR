@@ -517,6 +517,7 @@ fun GroupChatScreen(
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
                         fileCard = cardState,
+                        onEnsureGif = { sha -> viewModel.ensureGifRef(sha) },
                     )
                 }
             }
@@ -930,6 +931,8 @@ private fun MessageBubble(
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к сообщению (этап 9), и ход его приёма/раздачи. */
     fileCard: FileCardState? = null,
+    /** Раунд 130: карточка-ссылка просит VM тихо подтянуть байты гифки. */
+    onEnsureGif: (String) -> Unit = {},
 ) {
     // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
@@ -986,6 +989,14 @@ private fun MessageBubble(
                     )
                 }
                 when {
+                    // Раунд 130: ССЫЛКА на гифку - карточка с анимацией;
+                    // байты каждый телефон тихо тянет с хранителей сети.
+                    com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content) -> {
+                        com.vladimir.messenger.ui.components.GifRefCard(
+                            content = message.content,
+                            onEnsure = onEnsureGif,
+                        )
+                    }
                     attachedBitmap != null -> {
                         androidx.compose.foundation.Image(
                             bitmap = attachedBitmap.asImageBitmap(),
