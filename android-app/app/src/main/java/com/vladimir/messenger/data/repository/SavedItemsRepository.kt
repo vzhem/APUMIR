@@ -117,6 +117,40 @@ class SavedItemsRepository @Inject constructor(
 
     suspend fun delete(id: String) = dao.delete(id)
 
+    /** Запись по id (чтобы при удалении подчистить свой локальный файл). */
+    suspend fun get(id: String): SavedItemEntity? = dao.get(id)
+
+    /**
+     * Раунд 126: добавить в избранное ЛОКАЛЬНЫЙ файл (с телефона, из
+     * каталога гифок, из моих гифок). Копия байтов лежит в хранилище
+     * приложения, в записи - ссылка [storageRef] («local:…») вместо
+     * transferId: у записи нет принятой передачи.
+     */
+    suspend fun saveLocalFile(
+        fileName: String,
+        mediaType: String,
+        sizeBytes: Long,
+        storageRef: String,
+        sourceTitle: String,
+    ): SaveResult {
+        if (fileName.isBlank() || storageRef.isBlank()) return SaveResult.FileNotReady
+        if (dao.byTransfer(storageRef) != null) return SaveResult.AlreadySaved
+        dao.upsert(
+            SavedItemEntity(
+                id = UUID.randomUUID().toString(),
+                kind = KIND_FILE,
+                text = fileName,
+                transferId = storageRef,
+                fileName = fileName,
+                mediaType = mediaType,
+                sizeBytes = sizeBytes,
+                sourceTitle = sourceTitle,
+                savedAtMs = System.currentTimeMillis(),
+            )
+        )
+        return SaveResult.Saved
+    }
+
     companion object {
         const val KIND_TEXT = "TEXT"
         const val KIND_FILE = "FILE"

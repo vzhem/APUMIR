@@ -102,7 +102,18 @@ fun SavedScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showNoteDialog by remember { mutableStateOf(false) }
+    var showAddMenu by remember { mutableStateOf(false) }
+    var showGifCatalog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<SavedItemEntity?>(null) }
+
+    // Раунд 126: «+» добавляет не только заметку - файл и гифку с телефона,
+    // гифку из внешнего каталога, любую свою гифку из библиотеки.
+    val docPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) viewModel.addLocalFile(uri) }
+    val gifPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> if (uri != null) viewModel.addOwnGif(uri) }
 
     LaunchedEffect(uiState.message) {
         uiState.message?.let {
@@ -117,6 +128,9 @@ fun SavedScreen(
     ) { uri -> viewModel.onExportTargetPicked(uri) }
     LaunchedEffect(uiState.pendingExport) {
         uiState.pendingExport?.let { exportPicker.launch(it.displayName) }
+    }
+    LaunchedEffect(uiState.pendingLocalExport) {
+        uiState.pendingLocalExport?.let { exportPicker.launch(it.fileName.ifBlank { "файл" }) }
     }
 
     Box(
@@ -146,8 +160,8 @@ fun SavedScreen(
                 )
             },
             floatingActionButton = {
-                FloatingActionButton(onClick = { showNoteDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Своя заметка")
+                FloatingActionButton(onClick = { showAddMenu = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "Добавить")
                 }
             },
         ) { padding ->
@@ -235,6 +249,88 @@ fun SavedScreen(
         )
     }
 
+    if (showAddMenu) {
+        AlertDialog(
+            onDismissRequest = { showAddMenu = false },
+            title = { Text("Добавить в избранное") },
+            text = {
+                Column {
+                    TextButton(
+                        onClick = {
+                            showAddMenu = false
+                            docPicker.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Файл с телефона", modifier = Modifier.fillMaxWidth()) }
+                    TextButton(
+                        onClick = {
+                            showAddMenu = false
+                            gifPicker.launch("image/gif")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Гифка с телефона", modifier = Modifier.fillMaxWidth()) }
+                    TextButton(
+                        onClick = {
+                            showAddMenu = false
+                            viewModel.onGifCatalogOpened()
+                            showGifCatalog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Из каталога гифок", modifier = Modifier.fillMaxWidth()) }
+                    TextButton(
+                        onClick = {
+                            showAddMenu = false
+                            viewModel.onGifCatalogOpened()
+                            viewModel.setGifTab("swarm")
+                            showGifCatalog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Свои гифки", modifier = Modifier.fillMaxWidth()) }
+                    TextButton(
+                        onClick = {
+                            showAddMenu = false
+                            showNoteDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Заметка", modifier = Modifier.fillMaxWidth()) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAddMenu = false }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    if (showGifCatalog) {
+        com.vladimir.messenger.ui.components.GifCatalogDialog(
+            tab = uiState.gifTab,
+            onTab = { viewModel.setGifTab(it) },
+            myGifs = uiState.myGifs,
+            swarmGifs = emptyList(),
+            swarmStatus = null,
+            items = uiState.gifItems,
+            next = uiState.gifNext,
+            loading = uiState.gifLoading,
+            error = uiState.gifError,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.addCatalogGif(item)
+            },
+            onAttachLocal = { entry ->
+                showGifCatalog = false
+                viewModel.addLibraryGif(entry)
+            },
+            onRequestSwarm = { },
+            onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
+
     confirmDelete?.let { item ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
@@ -316,7 +412,22 @@ private fun SavedItemBubble(
                     onDismiss = { showFull = false },
                 )
             }
-            if (shownBitmap != null) {
+            // Раунд 126: гифка в избранном ЖИВЁТ - крутится анимацией
+            // (Coil с GIF-декодером), а не стоит первым кадром.
+            val isGifItem = item.mediaType.equals("image/gif", ignoreCase = true) ||
+                item.fileName.lowercase().endsWith(".gif")
+            if (isGifItem && previewPath != null) {
+                coil.compose.AsyncImage(
+                    model = java.io.File(previewPath),
+                    contentDescription = item.fileName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { showFull = true },
+                )
+            } else if (shownBitmap != null) {
                 Image(
                     bitmap = shownBitmap.asImageBitmap(),
                     contentDescription = item.fileName,

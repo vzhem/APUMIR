@@ -354,8 +354,9 @@ class SettingsViewModel @Inject constructor(
                 }
             )
             append(" Копия делается сама.")
+            // Раунд 126 (владелец): без лимита - просто число сохранивших.
             val fresh = addressBookSwarm.freshAckCount()
-            append(" На телефонах роя: $fresh из ${com.vladimir.messenger.data.backup.AddressBookSwarmBackup.HOLDER_COUNT}.")
+            append(" Копий на других телефонах: $fresh.")
         }
         _uiState.update { it.copy(addrBookLine = line) }
     }
