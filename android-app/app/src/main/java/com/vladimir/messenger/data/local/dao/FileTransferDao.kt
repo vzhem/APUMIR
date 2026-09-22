@@ -62,6 +62,7 @@ interface FileTransferDao {
           AND :completedChunks <= chunkCount
           AND :transferredBytes >= transferredBytes
           AND :transferredBytes <= totalBytes
+          AND state NOT IN ('COMPLETE', 'CANCELLED')
         """
     )
     suspend fun advanceProgress(
@@ -232,6 +233,24 @@ interface FileTransferDao {
         fileSha256: String,
         nowMs: Long,
     ): FileTransferEntity?
+
+    /**
+     * Раунд 123: другие АКТИВНЫЕ источники того же файла (кроме указанной
+     * передачи). Зеркалирование кусков и уборка после победителя.
+     */
+    @Query(
+        "SELECT * FROM file_transfers " +
+            "WHERE direction = 'INCOMING' AND state NOT IN ('COMPLETE', 'FAILED', 'CANCELLED') " +
+            "AND chatId = :chatId AND fileSha256 = :fileSha256 AND transferId != :transferId " +
+            "AND expiresAtMs > :nowMs " +
+            "ORDER BY createdAtMs ASC"
+    )
+    suspend fun getActiveIncomingSameFileExcept(
+        chatId: String,
+        transferId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): List<FileTransferEntity>
 
     /**
      * Мои групповые копии (K2, v11.70.25): строка `OUTGOING`/`SEEDING` -

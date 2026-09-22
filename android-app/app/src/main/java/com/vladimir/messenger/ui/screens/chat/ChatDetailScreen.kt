@@ -351,6 +351,16 @@ fun ChatDetailScreen(
                     }
                     val chatRows = remember(uiState.messages, uiState.transfers) {
                         val knownMessageIds = uiState.messages.map { it.id }.toSet()
+                        // Раунд 123: одну гифку может везти несколько телефонов
+                        // (просьба уходит троим). Показываем только первичную
+                        // (самую раннюю) полосу - без трёх одинаковых пузырей.
+                        val shadowed = uiState.transfers
+                            .filter { it.direction == "INCOMING" && it.state != "COMPLETE" }
+                            .groupBy { it.fileSha256 }
+                            .flatMap { (_, group) ->
+                                group.sortedBy { it.createdAtMs }.drop(1).map { it.transferId }
+                            }
+                            .toSet()
                         val rows = uiState.messages.map { message ->
                             ChatRow(
                                 key = message.id,
@@ -362,7 +372,8 @@ fun ChatDetailScreen(
                             .filter {
                                 it.direction == "INCOMING" &&
                                     it.state != "COMPLETE" &&
-                                    it.messageId !in knownMessageIds
+                                    it.messageId !in knownMessageIds &&
+                                    it.transferId !in shadowed
                             }
                             .map { transfer ->
                                 ChatRow(

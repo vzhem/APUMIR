@@ -5,6 +5,7 @@ import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import java.security.MessageDigest
+import uniffi.p2p_core.encryptFileTransferChunk
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import uniffi.p2p_core.FileTransferManifestFfi
@@ -606,24 +607,11 @@ class FileTransferReceiver(
                     return
                 }
             }
-            // Раунд 122: тот же файл уже едет от другого хранителя (просили у
-            // троих - принесёт самый быстрый). Остальных останавливаем сразу,
-            // чтобы один и тот же файл не качался дважды параллельно. Если
-            // первый источник замолчал дольше 10 минут - новому даём дорогу.
-            val inFlight = transferDao.getActiveIncomingSameFile(
-                targetChatId, manifest.fileSha256Hex, now,
-            )
-            if (inFlight != null && inFlight.updatedAtMs > now - 10 * 60_000L) {
-                Log.i(
-                    TAG,
-                    "File offer $transferIdHex: same file already in flight from " +
-                        "${inFlight.peerNodeId.takeLast(8)}; declined",
-                )
-                declined[transferIdHex] = true
-                bufferedChunks.remove(transferIdHex)?.values?.forEach { it.fill(0) }
-                sendCancel(transferIdHex, targetChatId, senderId)
-                return
-            }
+            // Раунд 123: параллельные источники того же файла НЕ отклоняем -
+            // они и есть ускорение. Просьба уходит трём хранителям, каждый
+            // шлёт свою передачу (свой ключ), а приёмник зеркалит куски всех
+            // в первичную (самую раннюю) - гифка собирается из частей от
+            // нескольких телефонов. Победителя и уборку см. resolveParallel.
         }
         val transfer = existing ?: insertIncomingTransfer(manifest, senderId, targetChatId, now) ?: return
         if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
@@ -957,12 +945,27 @@ class FileTransferReceiver(
         if (!inserted) {
             // Duplicate: repeat current ACK. No per-chunk in-memory set is retained.
             sendFileAck(transferIdHex, contiguous)
+            mirrorChunkIntoPrimary(transferIdHex, chunkIndex, ciphertext)
             return
         }
 
-        val completedChunks = Math.addExact(transfer.completedChunks, 1L)
+        // Раунд 123: кусок от НЕпервичного источника немедленно перекладывается
+        // в первичную передачу (расшифровал своим ключом - зашифровал её ключом):
+        // первичная собирается из частей от ВСЕХ источников параллельно.
+        if (!groupManifest) {
+            mirrorChunkIntoPrimary(transferIdHex, chunkIndex, ciphertext)
+        }
+
+        // Раунд 123: зеркало могло уже завершить ЭТУ передачу (кусок доехал
+        // до первичного раньше, победил он) - тогда здесь делать нечего.
+        val freshSelf = transferDao.getTransfer(transferIdHex) ?: return
+        if (freshSelf.state == "COMPLETE" || freshSelf.state == "CANCELLED" || freshSelf.state == "FAILED") {
+            sendFileAck(transferIdHex, freshSelf.chunkCount)
+            return
+        }
+        val completedChunks = Math.addExact(freshSelf.completedChunks, 1L)
         val transferredBytes = Math.addExact(
-            transfer.transferredBytes,
+            freshSelf.transferredBytes,
             plaintextLengthOf(manifest, chunkIndex).toLong(),
         )
         Log.i(
@@ -972,7 +975,7 @@ class FileTransferReceiver(
         )
 
         val updated = advance(
-            transfer,
+            freshSelf,
             newState = if (completedChunks == chunkCount) "VERIFYING" else "TRANSFERRING",
             completedChunks = completedChunks,
             transferredBytes = transferredBytes,
@@ -1062,6 +1065,210 @@ class FileTransferReceiver(
         }
     }
 
+    /**
+     * Раунд 123: докачка кусками от нескольких телефонов. Кусок, приехавший
+     * от не-первичного источника, немедленно перекладывается в первичную
+     * передачу (расшифровали его ключом - зашифровали ключом первичной).
+     * Первичная = самая ранняя активная передача того же файла в чате.
+     * Геометрию сверяем: разные chunkSize/chunkCount не смешиваем (такой
+     * источник просто работает сам по себе).
+     */
+    private suspend fun mirrorChunkIntoPrimary(
+        transferIdHex: String,
+        chunkIndex: Long,
+        ciphertext: ByteArray,
+    ) {
+        val self = transferDao.getTransfer(transferIdHex) ?: return
+        if (self.direction != "INCOMING" || self.state == "COMPLETE") return
+        val twins = transferDao.getActiveIncomingSameFileExcept(
+            self.chatId, transferIdHex, self.fileSha256, nowMs(),
+        )
+        val primary = twins.minByOrNull { it.createdAtMs }
+            ?.takeIf { it.createdAtMs < self.createdAtMs } ?: return
+        if (primary.state == "COMPLETE") return
+        if (primary.chunkSize != self.chunkSize || primary.chunkCount != self.chunkCount) return
+        if (chunkIndex >= primary.chunkCount) return
+        runCatching {
+            if (chunkStore.hasEncryptedChunk(primary.transferId, chunkIndex)) return
+            val selfManifestBytes = chunkStore.readManifest(transferIdHex) ?: return
+            val primaryManifestBytes = chunkStore.readManifest(primary.transferId) ?: return
+            if (keyVault.mode(primary.transferId) != FileTransferKeyVault.Mode.READY) return
+            keyVault.withExistingKey(transferIdHex) { selfKey ->
+                val plaintext = crypto.decryptChunk(selfManifestBytes, selfKey, chunkIndex, ciphertext)
+                try {
+                    keyVault.withExistingKey(primary.transferId) { primaryKey ->
+                        val reEncrypted = encryptFileTransferChunk(
+                            primaryManifestBytes,
+                            primaryKey,
+                            chunkIndex.toULong(),
+                            plaintext,
+                        )
+                        val stored = chunkStore.storeEncryptedChunk(
+                            primary.transferId, chunkIndex, reEncrypted,
+                        )
+                        val inserted = transferDao.insertChunkIgnore(
+                            FileTransferChunkEntity(
+                                transferId = primary.transferId,
+                                chunkIndex = chunkIndex,
+                                state = "RECEIVED",
+                                ciphertextBytes = stored.ciphertextBytes,
+                                chunkSha256 = stored.sha256,
+                                updatedAtMs = nowMs(),
+                            ),
+                        ) != -1L
+                        if (inserted) {
+                            val contiguous = advanceContiguousPrefix(primary.transferId)
+                            val row = transferDao.getTransfer(primary.transferId)
+                            if (row != null && row.state != "COMPLETE") {
+                                val counted = transferDao.countChunks(primary.transferId)
+                                if (contiguous >= row.chunkCount) {
+                                    advance(
+                                        row,
+                                        newState = "VERIFYING",
+                                        completedChunks = counted,
+                                        transferredBytes = row.totalBytes,
+                                    )
+                                    finalizeTransfer(
+                                        transferDao.getTransfer(primary.transferId) ?: return@withExistingKey,
+                                        crypto.parseManifest(primaryManifestBytes),
+                                    )
+                                } else {
+                                    advance(
+                                        row,
+                                        newState = row.state,
+                                        completedChunks = counted,
+                                        transferredBytes =
+                                            Math.addExact(row.transferredBytes, plaintext.size.toLong()),
+                                    )
+                                    sendFileAck(primary.transferId, contiguous)
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    plaintext.fill(0)
+                }
+            }
+        }.onFailure { Log.w(TAG, "mirror chunk $chunkIndex failed: ${it.message}") }
+    }
+
+    /**
+     * Раунд 123: сборка из частей завершена одной из передач семейства
+     * (тот же чат + sha256). Победитель уведомляет чат РОВНО ОДИН РАЗ:
+     * - победил первичный (самая ранняя) - остальные источники глушим;
+     * - победил не-первичный - первичный достраивается готовым файлом
+     *   (уведомляет он), остальные глушим.
+     * Возвращает true, если уведомление чата уже отправлено отсюда.
+     */
+    private suspend fun resolveParallelTransfers(
+        done: FileTransferEntity,
+        manifest: FileTransferManifestFfi,
+    ): Boolean {
+        val twins = transferDao.getActiveIncomingSameFileExcept(
+            done.chatId, done.transferId, done.fileSha256, nowMs(),
+        )
+        if (twins.isEmpty()) return false
+        val primary = twins.minByOrNull { it.createdAtMs }
+            ?.takeIf { it.createdAtMs < done.createdAtMs }
+        if (primary == null) {
+            // Победил первичный - глушим остальные источники.
+            for (twin in twins) stopParallelSource(twin)
+            return false
+        }
+        val donePlaintext = runCatching {
+            receivedStore.receivedFile(done.transferId, manifest.displayName)
+        }.getOrNull()
+        var notified = false
+        if (donePlaintext != null) {
+            notified = completeRowFromCopy(primary, donePlaintext)
+        }
+        for (twin in twins) {
+            if (twin.transferId != primary.transferId) stopParallelSource(twin)
+        }
+        if (!notified) {
+            // Первичного не достроили - уведим тем, что есть: гифка не должна
+            // потеряться из-за нашей внутренней уборки.
+            notifier.onFileReceived(
+                chatId = done.chatId,
+                senderId = done.peerNodeId,
+                messageId = FileTransferWire.chatPlaceholderMessageId(done.transferId),
+                displayName = manifest.displayName,
+                mediaType = manifest.mediaType,
+                totalBytes = manifest.fileSize.toLong(),
+                fileSha256 = manifest.fileSha256Hex,
+            )
+        }
+        return true
+    }
+
+    /** Остановить параллельный источник: ACK глушит его отправителя, место освобождаем. */
+    private suspend fun stopParallelSource(twin: FileTransferEntity) {
+        sendFileAck(twin.transferId, twin.chunkCount)
+        mutex.withLock {
+            contiguousPrefixes.remove(twin.transferId)
+            bufferedChunks.remove(twin.transferId)?.values?.forEach { it.fill(0) }
+        }
+        runCatching { chunkStore.deleteTransfer(twin.transferId) }
+        runCatching { advance(twin, newState = "CANCELLED", errorCode = "SUPERSEDED") }
+        Log.i(TAG, "Parallel source ${twin.transferId.takeLast(6)} stopped (superseded)")
+    }
+
+    /** Достроить передачу готовым проверенным файлом другой передачи семейства. */
+    private suspend fun completeRowFromCopy(target: FileTransferEntity, sourcePlaintext: java.io.File): Boolean {
+        val transferIdHex = target.transferId
+        return try {
+            val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return false
+            val manifest = crypto.parseManifest(manifestBytes)
+            val expectedBytes = manifest.fileSize.toLong()
+            val digest = MessageDigest.getInstance("SHA-256")
+            val writer = receivedStore.openWriter(transferIdHex, manifest.displayName, expectedBytes)
+            try {
+                sourcePlaintext.inputStream().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        if (read > 0) {
+                            digest.update(buffer, 0, read)
+                            writer.write(buffer, read)
+                        }
+                    }
+                }
+                check(digest.digest().toHex() == manifest.fileSha256Hex) { "Copy hash mismatch" }
+                writer.commit()
+            } catch (error: Exception) {
+                writer.abort()
+                throw error
+            }
+            val row = transferDao.getTransfer(transferIdHex) ?: return false
+            check(
+                advance(
+                    row,
+                    newState = "COMPLETE",
+                    completedChunks = row.chunkCount,
+                    transferredBytes = expectedBytes,
+                ) == 1
+            ) { "Cannot persist parallel completion" }
+            directFromOrigin.remove(transferIdHex)
+            notifier.onFileReceived(
+                chatId = row.chatId,
+                senderId = row.peerNodeId,
+                messageId = FileTransferWire.chatPlaceholderMessageId(transferIdHex),
+                displayName = manifest.displayName,
+                mediaType = manifest.mediaType,
+                totalBytes = expectedBytes,
+                fileSha256 = manifest.fileSha256Hex,
+            )
+            sendFileAck(transferIdHex, manifest.chunkCount.toLong())
+            Log.i(TAG, "Primary ${transferIdHex.takeLast(6)} completed from winner copy")
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "copy-complete failed for $transferIdHex: ${error.message}")
+            runCatching { receivedStore.deleteTransfer(transferIdHex) }
+            false
+        }
+    }
+
     private suspend fun finalizeTransfer(
         transfer: FileTransferEntity,
         manifest: FileTransferManifestFfi,
@@ -1111,6 +1318,19 @@ class FileTransferReceiver(
             holderAskedAt.remove(transferIdHex)
             lastHolderHeard.remove(transferIdHex)
             val finalSeeds = groupSeeds.remove(transferIdHex)
+            if (finalSeeds.isNullOrEmpty()) {
+                sendFileAck(transferIdHex, manifest.chunkCount.toLong())
+            } else {
+                // Итоговое подтверждение - каждому сиду общей копии: по нему
+                // сидер закрывает полосу просителю (K2).
+                for (seed in finalSeeds) sendGroupAck(transferIdHex, seed, manifest.chunkCount.toLong())
+            }
+            if (!FileTransferChatRouting.isGroupScope(manifest.recipientNodeId)) {
+                // Раунд 123: в личном чате файл мог собираться из частей от
+                // нескольких источников - победитель уведомляет чат, остальные
+                // источники останавливаются. Уведомление из resolve.
+                if (resolveParallelTransfers(fresh, manifest)) return
+            }
             notifier.onFileReceived(
                 chatId = fresh.chatId,
                 senderId = fresh.peerNodeId,
@@ -1120,13 +1340,6 @@ class FileTransferReceiver(
                 totalBytes = manifest.fileSize.toLong(),
                 fileSha256 = manifest.fileSha256Hex,
             )
-            if (finalSeeds.isNullOrEmpty()) {
-                sendFileAck(transferIdHex, manifest.chunkCount.toLong())
-            } else {
-                // Итоговое подтверждение - каждому сиду общей копии: по нему
-                // сидер закрывает полосу просителю (K2).
-                for (seed in finalSeeds) sendGroupAck(transferIdHex, seed, manifest.chunkCount.toLong())
-            }
         } catch (error: Exception) {
             // abort() is a no-op after a successful commit (Writer guards its finished state).
             writer.abort()

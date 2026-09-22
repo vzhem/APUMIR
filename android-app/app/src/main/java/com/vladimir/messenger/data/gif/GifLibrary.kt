@@ -63,14 +63,14 @@ object GifLibrary {
     private const val TAG = "GifLibrary"
     const val WIRE_PREFIX = "APUGIF1"
 
-    /** Максимум гифок в библиотеке одного телефона (LRU по добавлению). */
-    private const val MAX_ENTRIES = 400
+    // Раунд 123: лимита на число гифок в библиотеке БОЛЬШЕ НЕТ - сколько
+    // человек использует, столько и хранится (решение владельца).
 
     /** Максимум записей в каталоге одного собеседника. */
-    private const val MAX_PEER_ITEMS = 400
+    private const val MAX_PEER_ITEMS = 2000
 
     /** Максимум собеседников в общем каталоге «что у кого». */
-    private const val MAX_PEERS = 50
+    private const val MAX_PEERS = 100
 
     /** Гифка больше этого не попадает в библиотеку (насос и так режет 25 МБ). */
     private const val MAX_GIF_BYTES = 30 * 1024 * 1024
@@ -173,12 +173,6 @@ object GifLibrary {
                     )
                 }
                 items.add(0, entry)
-                // LRU: самые старые сверх лимита - вон (вместе с файлами).
-                while (items.size > MAX_ENTRIES) {
-                    val gone = items.removeAt(items.size - 1)
-                    runCatching { File(dir(app), "${gone.sha256}.gif").delete() }
-                    runCatching { File(dir(app), "${gone.sha256}.jpg").delete() }
-                }
                 saveIndex(app, items)
                 entry
             }
@@ -297,7 +291,7 @@ object GifLibrary {
         total: Int,
         items: List<GifLibEntry>,
     ): Boolean = withContext(Dispatchers.IO) {
-        if (peerId.isBlank() || total !in 1..50 || index !in 0 until total) return@withContext false
+        if (peerId.isBlank() || total !in 1..300 || index !in 0 until total) return@withContext false
         val slots = pendingBatches.getOrPut(peerId) { ConcurrentHashMap() }
         slots[index] = items
         if (slots.size < total) return@withContext false
