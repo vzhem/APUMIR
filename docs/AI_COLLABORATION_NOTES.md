@@ -9248,3 +9248,26 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   N (стало M)». Формат азбуки: {"v":1,"entries":[{id,addr,seen}]} -
   ядро само держит потолок 1000/TTL 30д. v11.74.22 = e172399, APK
   40 336 586 Б, sha256 9f35c7c5…7d0.
+
+- **2026-09-22 (раунд 126) - v11.74.23: азбука без «5 хранителей»;
+  Избранное - добавить самому.** Владелец: «создать копию работает,
+  ограничение не нужно - просто пишите количество копий» + «избранное:
+  гифка анимированная, плюсик добавляет файлы/гифки, из внешнего
+  каталога и свои». (1) AddressBookSwarmBackup: HOLDER_COUNT=5 УДАЛЁН,
+  elect() без take() - копия ВСЕМ знакомым; SettingsViewModel: «Копий
+  на других телефонах: N» (свежие ack за 48ч). (2) Избранное:
+  SavedScreen FAB -> меню (Файл с телефона OpenDocument / Гифка с
+  телефона GetContent image/gif / Из каталога гифок -> GifCatalogDialog
+  / Свои гифки -> тот же диалог вкладка swarm / Заметка). Схема
+  локальных записей: SavedItemEntity.transferId = "local:gif:<sha>"
+  (файл библиотеки giflib/<sha>.gif, БЕЗ копии) или "local:doc:<имя>"
+  (копия в filesDir/saved_files/<uuid8>_<name>, удаляется вместе с
+  записью); repository.saveLocalFile (dao.byTransfer ловит дубли),
+  dao.get(id). SavedViewModel: botApi.gifSearch/downloadGif,
+  GifLibrary.add + syncWithSwarm (гифка также расходится по сети),
+  shareLocalFile (FileProvider), экспорт локальных через
+  pendingLocalExport -> CreateDocument; delete подчищает doc-копию.
+  Гифка в списке - coil AsyncImage (анимация). ГРАБЛИ: tableName
+  saved_items (в существующем @Query); SavedItemEntity.fileName
+  non-null (elvis лишний). v11.74.23 = 5c2a11a, APK 40 352 966 Б,
+  sha256 df525d1d…a69c.
