@@ -541,6 +541,11 @@ object GifLibrary {
         // Разбор с limit: тег/имя внутри JSON могут нести "|", хвост цельный.
         return when {
             t == "$WIRE_PREFIX|ask" -> GifPacket("ask", 0, 1, emptyList(), "")
+            t.startsWith("$WIRE_PREFIX|ref|") -> {
+                // Раунд 130: ссылки от телефонов v11.74.25 (служебный конверт).
+                val sha = t.removePrefix("$WIRE_PREFIX|ref|")
+                if (isSafeSha(sha)) GifPacket("ref", 0, 1, emptyList(), sha) else null
+            }
             t.startsWith("$WIRE_PREFIX|thumb|") -> {
                 // Раунд 129: просьба о миниатюре чужой гифки (каталог).
                 val sha = t.removePrefix("$WIRE_PREFIX|thumb|")

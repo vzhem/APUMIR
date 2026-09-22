@@ -140,6 +140,20 @@ class CoreServerService : Service() {
                         .onFailure { Log.w(TAG, "gif serve failed: ${it.message}") }
                 }
             }
+            "ref" -> {
+                // Раунд 130: ссылка от телефона v11.74.25 - та же карточка.
+                serviceScope.launch {
+                    runCatching {
+                        chatRepository.insertReceivedGifRefMessage(
+                            chatId = chatId,
+                            senderId = senderId,
+                            messageId = messageId,
+                            sha256 = packet.sha256,
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    }.onFailure { Log.w(TAG, "gif ref (legacy) insert failed: ${it.message}") }
+                }
+            }
             "thumb" -> {
                 // Раунд 129: просят миниатюру - отдаём крошечный jpeg (тихо).
                 val key = "T$senderId|${packet.sha256}"
