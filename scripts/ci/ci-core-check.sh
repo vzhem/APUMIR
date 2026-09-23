@@ -240,7 +240,77 @@ if [ "$TESTS_OK" = 0 ]; then
     fi
 fi
 
-# ── 5. итог ────────────────────────────────────────────────────────────────
+# ── 5. формат дифф-патча обновлений: кросс-проверка python <-> pwsh ────────
+# Патч APUBSP1 (раунд 132) генерируется на машине владельца
+# (tools/ci/make_update_patch.ps1 - в песочницы нет доступа к релизным
+# APK), телефон применяет его (ApkDiffPatch.kt). Держим формат под
+# контролем: python-пара (make_apk_patch.py + apply_apk_patch.py) - эталон,
+# PS-версия обязана и генерировать совместимый патч, и применять эталонный.
+# Проверка блокирующая: молча разъехавшийся формат ломает компактные
+# обновления (телефон тогда просто качает полный APK, но мы хотим знать).
+PATCH_OK=0
+if command -v pwsh >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+    begin "patch format: python <-> pwsh"
+    TMPD="$(mktemp -d)"
+    # Синтетика: дубликат блока (карта дайджестов берёт ПЕРВОЕ вхождение),
+    # изменённые блоки, нетронутые блоки, частичный последний блок.
+    python3 - "$TMPD" <<'PYEOF' >>"$LOG" 2>&1
+import hashlib, sys
+d = sys.argv[1]
+def blk(i, salt):
+    return hashlib.sha256((salt + ":" + str(i)).encode()).digest() * 128  # 4096 B
+old = bytearray()
+for i in range(20):
+    old += blk(i, "a")
+old += blk(3, "a")          # duplicate of block 3
+old += b"tail-old"          # partial last block
+new = bytearray(old[:10 * 4096])
+for i in range(10, 16):
+    new += blk(i, "b")      # 6 changed blocks
+new += old[16 * 4096:]      # unchanged tail (incl. duplicate + partial)
+open(d + "/old.bin", "wb").write(bytes(old))
+open(d + "/new.bin", "wb").write(bytes(new))
+PYEOF
+    GOOD=1
+    python3 tools/ci/make_apk_patch.py "$TMPD/old.bin" "$TMPD/new.bin" "$TMPD/py.bspatch" >>"$LOG" 2>&1 || GOOD=0
+    if [ "$GOOD" = 1 ]; then
+        pwsh -NoProfile -NonInteractive -File tools/ci/make_update_patch.ps1 \
+            -OldPath "$TMPD/old.bin" -NewPath "$TMPD/new.bin" -OutFile "$TMPD/ps.bspatch" >>"$LOG" 2>&1 || GOOD=0
+    fi
+    # Эталонный патч обязан применяться PS-версией (проверка старого файла и
+    # сборка), PS-патч - эталонным применителем; оба результата байт-в-байт.
+    if [ "$GOOD" = 1 ]; then
+        pwsh -NoProfile -NonInteractive -File tools/ci/make_update_patch.ps1 \
+            -Apply -PatchFile "$TMPD/py.bspatch" -OldPath "$TMPD/old.bin" \
+            -OutFile "$TMPD/out-ps-apply.bin" >>"$LOG" 2>&1 || GOOD=0
+    fi
+    if [ "$GOOD" = 1 ]; then
+        python3 tools/ci/apply_apk_patch.py "$TMPD/ps.bspatch" "$TMPD/old.bin" \
+            "$TMPD/out-py-apply.bin" >>"$LOG" 2>&1 || GOOD=0
+    fi
+    if [ "$GOOD" = 1 ]; then
+        cmp -s "$TMPD/out-ps-apply.bin" "$TMPD/new.bin" || GOOD=0
+        cmp -s "$TMPD/out-py-apply.bin" "$TMPD/new.bin" || GOOD=0
+    fi
+    strip_ansi
+    if [ "$GOOD" = 1 ]; then
+        PATCH_OK=1
+        say "patch format: OK"
+        say "$(grep 'APUBSP1:' "$LOG" | tail -1)"
+    else
+        say "patch format: FAILED (хвост лога ниже)"
+        say "$(grep -aE 'FATAL|bad magic|error|Error|Exception' "$LOG" | tail -10)"
+    fi
+    rm -rf "$TMPD"
+    if [ "$PATCH_OK" = 0 ] && [ "$FAILED" = 0 ]; then
+        FAILED=1
+        FAILED_STEP="patch format: python <-> pwsh"
+    fi
+else
+    say "patch format: пропущено (нет pwsh или python3 в окружении)"
+fi
+
+# ── 6. итог ────────────────────────────────────────────────────────────────
 say ""
 if [ "$FAILED" = 0 ]; then
     say "RESULT: OK (check=pass, bindings=$([ "$BINDING_OK" = 1 ] && echo pass || echo fail), tests=$([ "$TESTS_OK" = 1 ] && echo pass || echo fail))"
