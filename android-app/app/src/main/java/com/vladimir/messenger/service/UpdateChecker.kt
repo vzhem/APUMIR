@@ -194,7 +194,7 @@ class UpdateChecker @Inject constructor(
                 ReleaseInfo(
                     version = latestVersion,
                     downloadUrl = downloadUrl,
-                    releaseNotes = json.optString("body", ""),
+                    releaseNotes = humanNotes(json.optString("body", "")),
                     publishedAt = json.optString("published_at", ""),
                     patchUrl = patchUrl,
                     patchFrom = patchFrom,
@@ -230,7 +230,7 @@ class UpdateChecker @Inject constructor(
             ReleaseInfo(
                 version = latestVersion,
                 downloadUrl = apkUrl,
-                releaseNotes = json.optString("notes", ""),
+                releaseNotes = humanNotes(json.optString("notes", "")),
                 publishedAt = json.optString("published_at", "")
             )
         } catch (e: Exception) {
@@ -327,6 +327,47 @@ class UpdateChecker @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "installApk failed", e)
         }
+    }
+
+    /**
+     * Раунд 136: заметки релиза пишутся для страницы GitHub - с разметкой,
+     * а в окне обновления markdown выглядел «каким-то кодом» (скрин
+     * владельца 2026-09-23: решётки, звёздочки и блок команды). Для окна
+     * берём ТОЛЬКО вступление: заголовок и абзац до первого «## » - и
+     * снимаем разметку. Детали, команды и патчи остаются на странице
+     * релиза, куда окно человека не тащит.
+     */
+    private fun humanNotes(raw: String): String {
+        if (raw.isBlank()) return ""
+        // Заголовок и ПЕРВАЯ секция (до второго «## »): у части релизов
+        // сразу под заголовком секция - выбрасывать её жаль, а хвост с
+        // командами и патчами в окно всё равно не тащим.
+        val first = raw.indexOf("\n## ")
+        val intro = when {
+            first < 0 -> raw
+            else -> {
+                val second = raw.indexOf("\n## ", first + 1)
+                if (second < 0) raw else raw.substring(0, second)
+            }
+        }
+        val plain = intro.lines()
+            .mapNotNull { line ->
+                val t = line.trim()
+                when {
+                    t.isEmpty() -> null
+                    t.startsWith("```") -> null
+                    t == "---" -> null
+                    else -> t.trimStart('#').trim()
+                }
+            }
+            .joinToString("\n")
+            .replace("**", "")
+            .replace("`", "")
+        if (plain.isBlank()) return ""
+        if (plain.length <= 420) return plain
+        // Обрезка по границе слова, не посреди слова.
+        val cut = plain.lastIndexOf(' ', 419).coerceAtLeast(400)
+        return plain.take(cut).trimEnd() + "\u2026"
     }
 
     /** Установленная версия («11.74.27») для проверки применимости патча. */
