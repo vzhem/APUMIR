@@ -364,10 +364,15 @@ object GroupWire {
             val text: String,
         ) : Packet()
 
-        /** Автор (или владелец) стёр сообщение [messageId] у всех (раунд 135). */
+        /**
+         * Автор (или владелец) стёр сообщение [messageId] у всех. [deleterId] -
+         * кто удалял; пусто в пакете старого образца (раунд 135), там
+         * удалявший - отправитель пакета.
+         */
         data class MessageDelete(
             val groupId: String,
             val messageId: String,
+            val deleterId: String = "",
         ) : Packet()
 
         /**
@@ -775,11 +780,18 @@ object GroupWire {
     fun buildEdit(groupId: String, topicId: String, messageId: String, text: String): String =
         "$PREFIX|$KIND_EDIT|$groupId|$topicId|${encode(messageId)}|${encode(text)}"
 
-    /** «Удалить сообщение у всех» (раунд 135): группа и идентификатор. */
-    fun buildMessageDelete(groupId: String, messageId: String): String {
+    /**
+     * «Удалить сообщение у всех»: группа, идентификатор и КТО удалял
+     * (раунд 137). Удалял нужен для проверки прав у получателей ретрансляции:
+     * пакет может привезти любой участник, а стереть вправе автор или
+     * владелец. Четырёхпольная форма (раунд 135) по-прежнему принимается -
+     * там удалявший считается по отправителю пакета.
+     */
+    fun buildMessageDelete(groupId: String, messageId: String, deleterId: String): String {
         require(groupId.isNotBlank()) { "bad group id" }
         require(messageId.isNotBlank()) { "bad message id" }
-        return "$PREFIX|$KIND_MESSAGE_DELETE|$groupId|${encode(messageId)}"
+        require(deleterId.isNotBlank()) { "bad deleter id" }
+        return "$PREFIX|$KIND_MESSAGE_DELETE|$groupId|${encode(messageId)}|${encode(deleterId)}"
     }
 
     /** «Пришлите последние limit постов, кроме этих» - владельцу канала. */
@@ -1203,12 +1215,13 @@ object GroupWire {
                 null
             }
 
-            KIND_MESSAGE_DELETE -> if (parts.size == 4) {
+            KIND_MESSAGE_DELETE -> if (parts.size == 4 || parts.size == 5) {
                 val deletedId = decode(parts[3]) ?: return null
+                val deleter = if (parts.size == 5) decode(parts[4]).orEmpty() else ""
                 if (deletedId.isBlank() || parts[2].isBlank()) {
                     null
                 } else {
-                    Packet.MessageDelete(parts[2], deletedId)
+                    Packet.MessageDelete(parts[2], deletedId, deleter)
                 }
             } else {
                 null

@@ -801,6 +801,18 @@ class CoreServerService : Service() {
                 } catch (ex: Exception) {
                     Log.w(TAG, "Apk seeder pump error: ${ex.message}")
                 }
+                // Раунд 137: недоставленные «удалить у всех» - личные (до ack)
+                // и групповые (эпидемией через помпу репозитория).
+                try {
+                    messageDeletion.pump()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Deletion pump error: ${ex.message}")
+                }
+                try {
+                    groupRepository.pumpDeletions()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Group deletion pump error: ${ex.message}")
+                }
                 delay(FILE_PUMP_INTERVAL_MS)
             }
         }

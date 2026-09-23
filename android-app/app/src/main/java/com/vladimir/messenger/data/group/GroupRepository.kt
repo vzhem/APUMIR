@@ -165,7 +165,16 @@ class GroupRepository(
      * так живут JVM-тесты, и захват прав в них недоступен.
      */
     private val peerLastSeenMs: suspend (nodeId: String) -> Long? = { null },
+    /**
+     * Раунд 137: очередь «удалить у всех» - команда хранится на телефоне и
+     * досылается через помпу, пока не дойдёт до всех (эпидемией - через тех,
+     * кто в сети).
+     */
+    private val deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox? = null,
 ) {
+
+    /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
+    private val deletionRelayedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
      * Мой идентификатор, спрошенный у ядра ОДИН раз.
@@ -1463,8 +1472,107 @@ class GroupRepository(
             .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
         for (row in stale) messageDao.deleteById(row.id)
         messageDao.deleteById(messageId)
-        broadcast(groupId, GroupWire.buildMessageDelete(groupId, messageId), excludeSelf = true)
+        // Раунд 137: конверт несёт «кто удалял» - получатели ретрансляции
+        // проверяют права по нему, а не по отправителю пакета. Команда
+        // остаётся в очереди: помпа будет досылать её тем, до кого веер
+        // пока не добрался (никого нет в сети - команда просто ждёт).
+        val envelope = GroupWire.buildMessageDelete(groupId, messageId, me)
+        broadcast(groupId, envelope, excludeSelf = true)
+        deletionOutbox?.add(
+            com.vladimir.messenger.data.repository.DeletionOutbox.Entry(
+                targetId = messageId,
+                kind = com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP,
+                chatId = groupId,
+                peerId = "",
+                deleterId = me,
+                atMs = clock(),
+                lastTryMs = clock(),
+                attempts = 1,
+                tried = emptyList(),
+            ),
+        )
         return Result.success(Unit)
+    }
+
+    /**
+     * Раунд 137: досылка сохранённых «удалить у всех» из помпы сервиса.
+     * Каждый круг - не больше двух адресатам, которых ещё не пробовали;
+     * получатель, применив удаление, тоже ретранслирует, так что команда
+     * добирается до всех через тех, кто в сети, а при полном офлайне -
+     * просто ждёт в очереди (неделю, потом сгорает).
+     */
+    suspend fun pumpDeletions() {
+        val outbox = deletionOutbox ?: return
+        val now = clock()
+        val due = outbox.due(now, DELETION_RETRY_MS, DELETION_TTL_MS)
+            .filter { it.kind == com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP }
+        for (entry in due) {
+            val group = groupDao.getGroupById(entry.chatId)
+            if (group == null) {
+                outbox.remove(entry.kind, entry.chatId, entry.targetId)
+                continue
+            }
+            if (groupDao.getMember(entry.chatId, myId().orEmpty()) == null) {
+                // Нас выгнали/вышли - дальше эту команду везём не мы.
+                outbox.remove(entry.kind, entry.chatId, entry.targetId)
+                continue
+            }
+            val me = myId().orEmpty()
+            val candidates = groupDao.getMembers(entry.chatId)
+                .filter { !it.isBanned && it.nodeId != me && it.nodeId !in entry.tried }
+                .map { it.nodeId }
+            if (candidates.isEmpty()) {
+                outbox.remove(entry.kind, entry.chatId, entry.targetId)
+                continue
+            }
+            val targets = runCatching { orderPeers(candidates) }.getOrDefault(candidates).take(2)
+            val envelope = GroupWire.buildMessageDelete(entry.chatId, entry.targetId, entry.deleterId)
+            runCatching { delivery.deliver(entry.chatId, envelope, targets) }
+            for (target in targets) outbox.markTried(entry, now, target)
+        }
+    }
+
+    /**
+     * Ретрансляция «удалить у всех» (раунд 137): применить - мало, надо ещё
+     * ПОНЕСТИ дальше, через тех, кто в сети. Каждый телефон ретранслирует
+     * одно удаление один раз за час (память [deletionRelayedAt]) и только
+     * трём соседям - эпидемия без шторма. Команда одновременно кладётся в
+     * свою очередь: если соседи сейчас офлайн, помпа донесёт позже.
+     */
+    private suspend fun relayMessageDelete(groupId: String, messageId: String, deleterId: String, fromId: String) {
+        val outbox = deletionOutbox ?: return
+        val now = clock()
+        val key = "$groupId|$messageId"
+        val last = deletionRelayedAt[key] ?: 0L
+        if (now - last < DELETION_RELAY_INTERVAL_MS) return
+        deletionRelayedAt[key] = now
+        if (deletionRelayedAt.size > 256) {
+            val oldest = deletionRelayedAt.entries.minByOrNull { it.value } ?: return
+            deletionRelayedAt.remove(oldest.key)
+        }
+        val me = myId().orEmpty()
+        val candidates = groupDao.getMembers(groupId)
+            .filter { !it.isBanned && it.nodeId != me && it.nodeId != fromId }
+            .map { it.nodeId }
+        val targets = runCatching { orderPeers(candidates) }.getOrDefault(candidates)
+            .shuffled().take(DELETION_RELAY_FANOUT)
+        if (targets.isEmpty()) return
+        val envelope = GroupWire.buildMessageDelete(groupId, messageId, deleterId)
+        runCatching { delivery.deliver(groupId, envelope, targets) }
+        outbox.add(
+            com.vladimir.messenger.data.repository.DeletionOutbox.Entry(
+                targetId = messageId,
+                kind = com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP,
+                chatId = groupId,
+                peerId = "",
+                deleterId = deleterId,
+                atMs = now,
+                lastTryMs = now,
+                attempts = 1,
+                tried = targets,
+            ),
+        )
+        Log.i(TAG, "message delete relayed id=$messageId group=$groupId to ${targets.size} node(s)")
     }
 
     // ── Правка сообщения ──────────────────────────────────────────────────────
@@ -2731,10 +2839,14 @@ class GroupRepository(
                 if (groupDao.getMember(packet.groupId, me) == null) return
                 val message = messageDao.getMessageById(packet.messageId) ?: return
                 if (message.chatId != packet.groupId) return
-                // Удалять вправе автор и владелец группы - остальное отбрасываем.
-                if (senderId != message.senderId && senderId != group.ownerId) return
+                // Права проверяются по ТОМУ, КТО удалял (раунд 137): пакет
+                // мог привезти любой участник - ретрансляция через тех, кто
+                // в сети. В пакете старого образца удалявший - отправитель.
+                val deleter = packet.deleterId.ifBlank { senderId }
+                if (deleter != message.senderId && deleter != group.ownerId) return
                 deleteMessageForMe(packet.groupId, packet.messageId)
-                Log.i(TAG, "message delete applied id=${packet.messageId} group=${group.id} from=$senderId")
+                relayMessageDelete(group.id, packet.messageId, deleter, senderId)
+                Log.i(TAG, "message delete applied id=${packet.messageId} group=${group.id} via=$senderId deleter=$deleter")
             }
 
             is GroupWire.Packet.PostsRequest -> {
@@ -4432,6 +4544,18 @@ class GroupRepository(
         Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
     companion object {
+        /** Раунд 137: как часто очередь пытается донести «удалить у всех». */
+        const val DELETION_RETRY_MS = 10L * 60 * 1000
+
+        /** Раунд 137: сколько хранить недоставленную команду (потом сгорает). */
+        const val DELETION_TTL_MS = 7L * 24 * 60 * 60 * 1000
+
+        /** Раунд 137: один телефон ретранслирует удаление не чаще раза в час. */
+        const val DELETION_RELAY_INTERVAL_MS = 60L * 60 * 1000
+
+        /** Раунд 137: скольким соседям ретранслируем (эпидемия без шторма). */
+        const val DELETION_RELAY_FANOUT = 3
+
         /** Ключ группового аватара в роевом реестре avatars. */
         const val GROUP_AVATAR_PREFIX = "g:"
         const val GENERAL_TOPIC_NAME = "General"

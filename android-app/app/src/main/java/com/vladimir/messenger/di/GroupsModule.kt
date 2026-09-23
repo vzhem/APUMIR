@@ -99,6 +99,9 @@ object GroupsModule {
         // Рой APK (обновление роем, docs/UPDATE_SEEDING.md): те же кольца,
         // что у файлов группы, — через Provider.
         apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
+        // Раунд 137: очередь «удалить у всех» - команда хранится и досылается,
+        // пока не дойдёт до всех (через тех, кто в сети).
+        deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -138,6 +141,8 @@ object GroupsModule {
             com.vladimir.messenger.data.peer.PeerRatingStore
                 .statsFor(context.applicationContext, nodeId)?.lastSeenMs?.takeIf { it > 0L }
         },
+        // Раунд 137: очередь «удалить у всех» - команда хранится и досылается.
+        deletionOutbox = deletionOutbox,
         // Файлы группы роем (этап 9). Через Provider: рой сам шлёт пакеты
         // через GroupDelivery и качает через FileTransferRouter, а репозиторий
         // лишь передаёт ему просьбы - кольца зависимостей так нет.
