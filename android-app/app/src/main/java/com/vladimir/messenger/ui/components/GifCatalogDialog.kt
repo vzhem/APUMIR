@@ -65,6 +65,10 @@ import com.vladimir.messenger.data.gif.SwarmGif
  *   и отправка идёт с телефонов сети (внешний ресурс не тратится);
  * - если нет - гифка скачивается из внешнего каталога и оседает в сети.
  * Под сеткой - пометка, что означает точка.
+ *
+ * Раунд 138: содержимое вынесено в [GifCatalogBody] - единая панель ввода
+ * (эмодзи/гиф/стикеры) встраивает его разделом «Гиф», а этот диалог остаётся
+ * тонкой обёрткой для совместимости.
  */
 @Composable
 fun GifCatalogDialog(
@@ -89,6 +93,55 @@ fun GifCatalogDialog(
     onAddOwnGif: (android.net.Uri) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Гифки") },
+        text = {
+            GifCatalogBody(
+                myGifs = myGifs,
+                swarmGifs = swarmGifs,
+                swarmStatus = swarmStatus,
+                items = items,
+                next = next,
+                loading = loading,
+                error = error,
+                onSearch = onSearch,
+                onMore = onMore,
+                onAttach = onAttach,
+                onAttachLocal = onAttachLocal,
+                onRequestSwarm = onRequestSwarm,
+                onRequestThumbs = onRequestThumbs,
+                onAddOwnGif = onAddOwnGif,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Закрыть") }
+        },
+    )
+}
+
+/**
+ * Содержимое каталога гифок без оболочки (раунд 138): строка поиска, сетка
+ * (мои + сеть + внешний), «Ещё» и легенда синей точки. Вызывается из старого
+ * диалога и из единой панели ввода.
+ */
+@Composable
+fun GifCatalogBody(
+    myGifs: List<GifLibEntry>,
+    swarmGifs: List<SwarmGif>,
+    swarmStatus: String?,
+    items: List<GifItem>,
+    next: String,
+    loading: Boolean,
+    error: String?,
+    onSearch: (String) -> Unit,
+    onMore: () -> Unit,
+    onAttach: (GifItem) -> Unit,
+    onAttachLocal: (GifLibEntry) -> Unit,
+    onRequestSwarm: (SwarmGif) -> Unit,
+    onRequestThumbs: (List<SwarmGif>) -> Unit = {},
+    onAddOwnGif: (android.net.Uri) -> Unit = {},
+) {
     var query by remember { mutableStateOf("") }
     // Раунд 129: живой поиск - начинается с первой буквы (пауза 450 мс).
     LaunchedEffect(query) {
@@ -101,231 +154,222 @@ fun GifCatalogDialog(
     LaunchedEffect(Unit) {
         if (items.isEmpty() && error == null && !loading) onSearch("")
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Гифки") },
-        text = {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Поиск: котики, привет…") },
-                        singleLine = true,
-                        trailingIcon = {
-                            IconButton(onClick = { onSearch(query) }) {
-                                Icon(Icons.Filled.Search, contentDescription = "Найти")
-                            }
-                        },
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    val pickOwnGif = androidx.activity.compose.rememberLauncherForActivityResult(
-                        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
-                    ) { uri -> if (uri != null) onAddOwnGif(uri) }
-                    TextButton(onClick = { pickOwnGif.launch("image/gif") }) {
-                        Text("+ Своя", color = MaterialTheme.colorScheme.primary)
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Поиск: котики, привет…") },
+                singleLine = true,
+                trailingIcon = {
+                    IconButton(onClick = { onSearch(query) }) {
+                        Icon(Icons.Filled.Search, contentDescription = "Найти")
                     }
-                }
-                Spacer(Modifier.height(8.dp))
+                },
+            )
+            Spacer(Modifier.width(6.dp))
+            val pickOwnGif = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+            ) { uri -> if (uri != null) onAddOwnGif(uri) }
+            TextButton(onClick = { pickOwnGif.launch("image/gif") }) {
+                Text("+ Своя", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
 
-                val q = query.trim().lowercase()
-                // Сеть уже покрывает эти внешние гифки (по метке внешнего каталога).
-                val netGiphyIds = HashSet<String>()
-                for (entry in myGifs) if (entry.giphyId.isNotBlank()) netGiphyIds.add(entry.giphyId)
-                for (sg in swarmGifs) if (sg.entry.giphyId.isNotBlank()) netGiphyIds.add(sg.entry.giphyId)
-                val externalIds = items.mapTo(HashSet()) { it.id }
-                val myCells = if (q.isBlank()) {
-                    myGifs
-                } else {
-                    myGifs.filter { it.tag.lowercase().contains(q) || it.displayName.lowercase().contains(q) }
-                }
-                val peerCells = swarmGifs.filter { sg ->
-                    val gid = sg.entry.giphyId
-                    // Без дублей: тот же giphyId уже показан моими ячейками или
-                    // внешними результатами - там и будет синяя точка.
-                    if (gid.isNotBlank() && (gid in externalIds || myGifs.any { it.giphyId == gid })) {
-                        return@filter false
+        val q = query.trim().lowercase()
+        // Сеть уже покрывает эти внешние гифки (по метке внешнего каталога).
+        val netGiphyIds = HashSet<String>()
+        for (entry in myGifs) if (entry.giphyId.isNotBlank()) netGiphyIds.add(entry.giphyId)
+        for (sg in swarmGifs) if (sg.entry.giphyId.isNotBlank()) netGiphyIds.add(sg.entry.giphyId)
+        val externalIds = items.mapTo(HashSet()) { it.id }
+        val myCells = if (q.isBlank()) {
+            myGifs
+        } else {
+            myGifs.filter { it.tag.lowercase().contains(q) || it.displayName.lowercase().contains(q) }
+        }
+        val peerCells = swarmGifs.filter { sg ->
+            val gid = sg.entry.giphyId
+            // Без дублей: тот же giphyId уже показан моими ячейками или
+            // внешними результатами - там и будет синяя точка.
+            if (gid.isNotBlank() && (gid in externalIds || myGifs.any { it.giphyId == gid })) {
+                return@filter false
+            }
+            q.isBlank() || sg.entry.tag.lowercase().contains(q) || sg.entry.displayName.lowercase().contains(q)
+        }
+
+        // Раунд 129: чужие гифки - качаем миниатюры (кэш на диске).
+        LaunchedEffect(peerCells.size, peerCells.firstOrNull()?.entry?.sha256) {
+            if (peerCells.isNotEmpty()) onRequestThumbs(peerCells)
+        }
+
+        val nothingAtAll = myCells.isEmpty() && peerCells.isEmpty() && items.isEmpty() && error == null
+        if (nothingAtAll) {
+            Text(
+                "Пока пусто. Нажмите поиск - гифки из внешнего каталога; " +
+                    "скачанные оседают в нашей сети. Свою гифку добавьте кнопкой «+ Своя». " +
+                    "Каталоги телефонов обмениваются автоматически: чем дольше пользуетесь, " +
+                    "тем больше набор без внешнего ресурса.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp, horizontal = 8.dp),
+            )
+        } else if (error != null) {
+            Text(
+                error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                // ── Мои гифки: превью с телефона, уходят мгновенно ──
+                gridItems(myCells, key = { "m-${it.sha256}" }) { entry ->
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val preview = remember(entry.sha256) {
+                        com.vladimir.messenger.data.gif.GifLibrary
+                            .previewFile(context, entry.sha256)?.absolutePath
                     }
-                    q.isBlank() || sg.entry.tag.lowercase().contains(q) || sg.entry.displayName.lowercase().contains(q)
-                }
-
-                // Раунд 129: чужие гифки - качаем миниатюры (кэш на диске).
-                LaunchedEffect(peerCells.size, peerCells.firstOrNull()?.entry?.sha256) {
-                    if (peerCells.isNotEmpty()) onRequestThumbs(peerCells)
-                }
-
-                val nothingAtAll = myCells.isEmpty() && peerCells.isEmpty() && items.isEmpty() && error == null
-                if (nothingAtAll) {
-                    Text(
-                        "Пока пусто. Нажмите поиск - гифки из внешнего каталога; " +
-                            "скачанные оседают в нашей сети. Свою гифку добавьте кнопкой «+ Своя». " +
-                            "Каталоги телефонов обмениваются автоматически: чем дольше пользуетесь, " +
-                            "тем больше набор без внешнего ресурса.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp, horizontal = 8.dp),
-                    )
-                } else if (error != null) {
-                    Text(
-                        error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(300.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        // ── Мои гифки: превью с телефона, уходят мгновенно ──
-                        gridItems(myCells, key = { "m-${it.sha256}" }) { entry ->
-                            val context = androidx.compose.ui.platform.LocalContext.current
-                            val preview = remember(entry.sha256) {
-                                com.vladimir.messenger.data.gif.GifLibrary
-                                    .previewFile(context, entry.sha256)?.absolutePath
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onAttachLocal(entry) },
-                            ) {
-                                if (preview != null) {
-                                    AsyncImage(
-                                        model = java.io.File(preview),
-                                        contentDescription = entry.displayName,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                    )
-                                } else {
-                                    PlaceholderCell(label = entry.displayName)
-                                }
-                                NetDot(Modifier.align(Alignment.TopEnd))
-                            }
-                        }
-                        // ── Гифки сети (у других телефонов): просьба хранителю ──
-                        gridItems(peerCells, key = { "s-${it.entry.sha256}" }) { swarmGif ->
-                            val context = androidx.compose.ui.platform.LocalContext.current
-                            // Раунд 129: миниатюра приезжает с хранителя и
-                            // оживает прямо в сетке (кэш на диске).
-                            val thumb by androidx.compose.runtime.produceState<java.io.File?>(
-                                initialValue = com.vladimir.messenger.data.gif.GifLibrary
-                                    .tinyThumbFile(context, swarmGif.entry.sha256),
-                                key1 = swarmGif.entry.sha256,
-                            ) {
-                                com.vladimir.messenger.data.gif.GifLibrary
-                                    .thumbArrivalsFlow().collect { arrived ->
-                                        if (arrived == swarmGif.entry.sha256) {
-                                            value = com.vladimir.messenger.data.gif.GifLibrary
-                                                .tinyThumbFile(context, swarmGif.entry.sha256)
-                                        }
-                                    }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onRequestSwarm(swarmGif) },
-                            ) {
-                                val shown = thumb
-                                if (shown != null) {
-                                    AsyncImage(
-                                        model = shown,
-                                        contentDescription = "гифка сети",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                    )
-                                } else {
-                                    PlaceholderCell(label = "гифка")
-                                }
-                                NetDot(Modifier.align(Alignment.TopEnd))
-                            }
-                        }
-                        // ── Внешний каталог: точка = уже в нашей сети ──
-                        gridItems(items, key = { "e-${it.id}" }) { item ->
-                            val myEntry = myGifs.firstOrNull { it.giphyId == item.id }
-                            val peer = swarmGifs.firstOrNull { it.entry.giphyId == item.id }
-                            val inNet = myEntry != null || peer != null
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        when {
-                                            // В нашей сети - наружный ресурс не тратим.
-                                            myEntry != null -> onAttachLocal(myEntry)
-                                            peer != null -> onRequestSwarm(peer)
-                                            else -> onAttach(item)
-                                        }
-                                    },
-                            ) {
-                                AsyncImage(
-                                    model = item.preview,
-                                    contentDescription = item.id,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                )
-                                if (inNet) NetDot(Modifier.align(Alignment.TopEnd))
-                            }
-                        }
-                    }
-                    if (loading) {
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                        }
-                    } else if (next.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        TextButton(
-                            onClick = onMore,
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                        ) { Text("Ещё") }
-                    }
-                }
-
-                // ── Пометка: что означает синяя точка (решение владельца) ──
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(10.dp)
-                            .background(Color(0xFF2F80ED), CircleShape),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "синяя точка - гифка уже в нашей сети: придёт с телефонов " +
-                            "своих, внешний каталог не тратится",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onAttachLocal(entry) },
+                    ) {
+                        if (preview != null) {
+                            AsyncImage(
+                                model = java.io.File(preview),
+                                contentDescription = entry.displayName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                            )
+                        } else {
+                            PlaceholderCell(label = entry.displayName)
+                        }
+                        NetDot(Modifier.align(Alignment.TopEnd))
+                    }
                 }
-                if (swarmStatus != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        swarmStatus,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                // ── Гифки сети (у других телефонов): просьба хранителю ──
+                gridItems(peerCells, key = { "s-${it.entry.sha256}" }) { swarmGif ->
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    // Раунд 129: миниатюра приезжает с хранителя и
+                    // оживает прямо в сетке (кэш на диске).
+                    val thumb by androidx.compose.runtime.produceState<java.io.File?>(
+                        initialValue = com.vladimir.messenger.data.gif.GifLibrary
+                            .tinyThumbFile(context, swarmGif.entry.sha256),
+                        key1 = swarmGif.entry.sha256,
+                    ) {
+                        com.vladimir.messenger.data.gif.GifLibrary
+                            .thumbArrivalsFlow().collect { arrived ->
+                                if (arrived == swarmGif.entry.sha256) {
+                                    value = com.vladimir.messenger.data.gif.GifLibrary
+                                        .tinyThumbFile(context, swarmGif.entry.sha256)
+                                }
+                            }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onRequestSwarm(swarmGif) },
+                    ) {
+                        val shown = thumb
+                        if (shown != null) {
+                            AsyncImage(
+                                model = shown,
+                                contentDescription = "гифка сети",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                            )
+                        } else {
+                            PlaceholderCell(label = "гифка")
+                        }
+                        NetDot(Modifier.align(Alignment.TopEnd))
+                    }
+                }
+                // ── Внешний каталог: точка = уже в нашей сети ──
+                gridItems(items, key = { "e-${it.id}" }) { item ->
+                    val myEntry = myGifs.firstOrNull { it.giphyId == item.id }
+                    val peer = swarmGifs.firstOrNull { it.entry.giphyId == item.id }
+                    val inNet = myEntry != null || peer != null
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                when {
+                                    // В нашей сети - наружный ресурс не тратим.
+                                    myEntry != null -> onAttachLocal(myEntry)
+                                    peer != null -> onRequestSwarm(peer)
+                                    else -> onAttach(item)
+                                }
+                            },
+                    ) {
+                        AsyncImage(
+                            model = item.preview,
+                            contentDescription = item.id,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                        )
+                        if (inNet) NetDot(Modifier.align(Alignment.TopEnd))
+                    }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть") }
-        },
-    )
+            if (loading) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                }
+            } else if (next.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = onMore,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) { Text("Ещё") }
+            }
+        }
+
+        // ── Пометка: что означает синяя точка (решение владельца) ──
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(Color(0xFF2F80ED), CircleShape),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "синяя точка - гифка уже в нашей сети: придёт с телефонов " +
+                    "своих, внешний каталог не тратится",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (swarmStatus != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                swarmStatus,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
 }
 
 /** Переливающаяся синяя точка «уже в нашей сети» (правый верхний угол). */

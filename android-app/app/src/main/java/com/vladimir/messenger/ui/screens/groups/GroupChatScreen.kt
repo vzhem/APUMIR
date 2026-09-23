@@ -96,6 +96,7 @@ import com.vladimir.messenger.ui.components.AnimatedTopicIcon
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
 import com.vladimir.messenger.ui.components.GifCatalogDialog
+import com.vladimir.messenger.ui.components.InputPanelDialog
 import com.vladimir.messenger.ui.components.GroupFileCard
 import com.vladimir.messenger.ui.components.fileIconFor
 import com.vladimir.messenger.ui.components.ImagePreview
@@ -157,9 +158,11 @@ fun GroupChatScreen(
     }
 
     if (showGifCatalog) {
-        GifCatalogDialog(
-            tab = uiState.gifTab,
-            onTab = { viewModel.setGifTab(it) },
+        // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
+        // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
+        val stickerEntries by viewModel.stickerEntries.collectAsStateWithLifecycle()
+        val stickerRecents by viewModel.stickerRecents.collectAsStateWithLifecycle()
+        InputPanelDialog(
             myGifs = uiState.myGifs,
             swarmGifs = uiState.swarmGifs,
             swarmStatus = uiState.swarmStatus,
@@ -182,6 +185,12 @@ fun GroupChatScreen(
             },
             onRequestThumbs = { viewModel.requestPeerThumbs(it) },
             onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
+            stickers = stickerEntries,
+            stickerRecents = stickerRecents,
+            onSticker = { viewModel.sendSticker(it) },
+            onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onEmoji = { emoji -> draft += emoji },
+            onOpened = { viewModel.refreshStickers() },
             onDismiss = {
                 showGifCatalog = false
                 viewModel.closeGifCatalog()

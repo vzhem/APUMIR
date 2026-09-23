@@ -77,6 +77,7 @@ class ChatDetailViewModel @Inject constructor(
     private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     private val messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository,
+    private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -423,6 +424,88 @@ class ChatDetailViewModel @Inject constructor(
     private var lastGifQuery: String = ""
 
     /** Открыли окно гифок: подтянуть мою библиотеку и каталог роя. */
+    // ── Стикеры (раунд 138): единая панель ввода ────────────────────────────
+
+    /** Мои стикеры для панели. */
+    private val _stickerEntries = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerEntries: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerEntries.asStateFlow()
+
+    /** Недавние стикеры для панели. */
+    private val _stickerRecents = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerRecents: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerRecents.asStateFlow()
+
+    /** Перечитать библиотеку стикеров (панель открылась / добавили). */
+    fun refreshStickers() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _stickerEntries.value = stickerLibrary.all()
+            _stickerRecents.value = stickerLibrary.recents()
+        }
+    }
+
+    /** Добавить свой стикер из хранилища телефона. */
+    fun addSticker(uri: Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { stickerLibrary.add(uri) }
+            refreshStickers()
+        }
+    }
+
+    /**
+     * Отправить стикер в личный чат: картинкой (та же файловая машина, что у
+     * скрепки), но сразу - без диалога выбора. Стикер встаёт в «Недавние».
+     */
+    fun sendSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            var targetRecipientId: String? = null
+            try {
+                val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+                val recipientId = chat.contactId
+                targetRecipientId = recipientId
+                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                val messageId = UUID.randomUUID().toString()
+                val prepared = filePreparation.prepareFromFile(
+                    source = entry.file,
+                    displayName = entry.name,
+                    mediaType = "image/png",
+                    messageId = messageId,
+                    chatId = chatId,
+                    recipientNodeId = recipientId,
+                )
+                chatRepository.insertLocalFileMessage(
+                    chatId = chatId,
+                    recipientId = recipientId,
+                    messageId = messageId,
+                    content = FileTransferRouter.formatPlaceholder(
+                        prepared.displayName,
+                        prepared.mediaType,
+                        prepared.totalBytes,
+                    ),
+                    timestamp = System.currentTimeMillis(),
+                )
+                _uiState.update { it.copy(scrollToBottom = true) }
+                fileTransferRouter.pumpOutgoing()
+                stickerLibrary.touch(entry.sha256)
+                refreshStickers()
+            } catch (e: Exception) {
+                android.util.Log.w("ChatDetailVM", "sticker send failed", e)
+                targetRecipientId?.takeIf { _uiState.value.error == null }?.let {
+                    fileTransferRouter.requestExchangeBinding(it)
+                }
+                _uiState.update {
+                    it.copy(error = "Стикер не отправлен: ${e.message.orEmpty()}")
+                }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
     fun onGifCatalogOpened() {
         viewModelScope.launch {
             runCatching {

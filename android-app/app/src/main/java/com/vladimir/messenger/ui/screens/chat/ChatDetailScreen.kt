@@ -90,9 +90,11 @@ fun ChatDetailScreen(
     var showGifCatalog by remember { mutableStateOf(false) }
 
     if (showGifCatalog) {
-        com.vladimir.messenger.ui.components.GifCatalogDialog(
-            tab = uiState.gifTab,
-            onTab = { viewModel.setGifTab(it) },
+        // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
+        // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
+        val stickerEntries by viewModel.stickerEntries.collectAsStateWithLifecycle()
+        val stickerRecents by viewModel.stickerRecents.collectAsStateWithLifecycle()
+        com.vladimir.messenger.ui.components.InputPanelDialog(
             myGifs = uiState.myGifs,
             swarmGifs = uiState.swarmGifs,
             swarmStatus = uiState.swarmStatus,
@@ -117,6 +119,12 @@ fun ChatDetailScreen(
             },
             onRequestThumbs = { viewModel.requestPeerThumbs(it) },
             onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
+            stickers = stickerEntries,
+            stickerRecents = stickerRecents,
+            onSticker = { viewModel.sendSticker(it) },
+            onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onEmoji = { emoji -> viewModel.onInputTextChanged(uiState.inputText + emoji) },
+            onOpened = { viewModel.refreshStickers() },
             onDismiss = {
                 showGifCatalog = false
                 viewModel.closeGifCatalog()

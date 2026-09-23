@@ -85,6 +85,7 @@ class GroupChatViewModel @Inject constructor(
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -252,6 +253,68 @@ class GroupChatViewModel @Inject constructor(
     private var lastGifQuery: String = ""
 
     /** Открыли окно гифок: подтянуть мою библиотеку и каталог роя. */
+    // ── Стикеры (раунд 138): единая панель ввода ────────────────────────────
+
+    /** Мои стикеры для панели. */
+    private val _stickerEntries = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerEntries: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerEntries.asStateFlow()
+
+    /** Недавние стикеры для панели. */
+    private val _stickerRecents = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerRecents: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerRecents.asStateFlow()
+
+    /** Перечитать библиотеку стикеров. */
+    fun refreshStickers() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _stickerEntries.value = stickerLibrary.all()
+            _stickerRecents.value = stickerLibrary.recents()
+        }
+    }
+
+    /** Добавить свой стикер из хранилища телефона. */
+    fun addSticker(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { stickerLibrary.add(uri) }
+            refreshStickers()
+        }
+    }
+
+    /**
+     * Отправить стикер в тему/комментарии: прикладываем его файл и сразу
+     * отправляем (как обычный приложенный файл - карточка с картинкой).
+     * Стикер встаёт в «Недавние».
+     */
+    fun sendSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                val topicId = _uiState.value.selectedTopicId ?: error("Выберите тему")
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    appContext,
+                    appContext.packageName + ".fileprovider",
+                    entry.file,
+                )
+                val previous = _uiState.value.stagedFile
+                val info = groupFiles.stage(groupId, uri)
+                if (previous != null && previous.sha256 != info.sha256) {
+                    groupFiles.unstage(groupId, previous.sha256)
+                }
+                val body = com.vladimir.messenger.util.GroupFileMarker.compose("", info)
+                groupRepository.sendMessage(groupId, topicId, body)
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                    .onSuccess { _uiState.update { it.copy(stagedFile = null) } }
+                stickerLibrary.touch(entry.sha256)
+                refreshStickers()
+            } catch (e: Exception) {
+                android.util.Log.w("GroupChatVM", "sticker send failed", e)
+                _uiState.update { it.copy(error = "Стикер не отправлен: ${e.message.orEmpty()}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
     fun onGifCatalogOpened() {
         viewModelScope.launch {
             runCatching {
