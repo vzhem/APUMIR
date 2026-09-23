@@ -340,6 +340,7 @@ private fun StickerSection(
 ) {
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
+    val panelContext = androidx.compose.ui.platform.LocalContext.current
     // Миниатюры приезжают тихо - тик заставляет сетку перечитать кэш.
     val thumbTick by remember {
         StickerLibrary.thumbArrivalsFlow()
@@ -444,7 +445,7 @@ private fun StickerSection(
                     swarmStatus,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 4.dp, bottom = 4.dp),
+                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
                 )
             }
         }
@@ -460,7 +461,6 @@ private fun StickerSection(
         }
         // Стикеры из роя: миниатюра с хранителя или заглушка; нажатие -
         // тихо скачать у трёх хранителей и отправить в чат.
-        val panelContext = androidx.compose.ui.platform.LocalContext.current
         gridEntries(
             swarm,
             key = { "sw-$thumbTick-${it.sha256}" },
