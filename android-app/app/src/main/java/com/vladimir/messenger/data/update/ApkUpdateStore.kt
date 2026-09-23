@@ -391,7 +391,6 @@ class ApkUpdateStore(private val root: File) {
         return Adopted(path, name, sha, size, at)
     }
 
-    private fun encode(value: String): String =
     private fun formatPatchSeed(seed: PatchSeed): String =
         PATCH_SEED_HEADER + "|" + seed.fromVersion + "|" + seed.toVersion + "|" + seed.patchSha256 + "|" +
             seed.apkSha256 + "|" + seed.sizeBytes + "|" + encode(seed.name) + "|" + seed.atMs + "|" +
@@ -467,6 +466,7 @@ class ApkUpdateStore(private val root: File) {
         return PatchPending(from, to, patchSha, apkSha, started, attempts, parts[7], askedAt, seeds)
     }
 
+    private fun encode(value: String): String =
         Base64.getUrlEncoder().withoutPadding().encodeToString(value.toByteArray(StandardCharsets.UTF_8))
 
     private fun decode(value: String): String? = try {
