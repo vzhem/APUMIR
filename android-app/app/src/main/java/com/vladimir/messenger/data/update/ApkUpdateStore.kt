@@ -483,8 +483,6 @@ class ApkUpdateStore(private val root: File) {
         const val ADOPTED_HEADER = "APUADOPT1"
         const val AUTOSEED_FILE = "autoseed.v1"
         const val AUTOSEED_HEADER = "APUAUTOSEED1"
-        const val AUTOSEED_FILE = "autoseed.v1"
-        const val AUTOSEED_HEADER = "APUAUTOSEED1"
         // Раунд 133: дифф-патч обновления.
         const val PATCH_SEED_HEADER = "APUPSEED1"
         const val PATCH_OFFERS_HEADER = "APUPOFFER1"
