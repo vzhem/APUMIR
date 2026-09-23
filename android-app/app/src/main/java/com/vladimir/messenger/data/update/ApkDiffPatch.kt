@@ -93,7 +93,7 @@ object ApkDiffPatch {
                         if (expected <= 0) return false
                         when (desc.kind) {
                             1 -> {
-                                val srcOffset = (oldDigestToIndex[hexOf(patch, 24 + 16L * desc.value)]
+                                val srcOffset = (oldDigestToIndex[hexOf(patch, 24 + 16 * desc.value)]
                                     ?: return false) * blockSize
                                 oldRandom.seek(srcOffset)
                                 var done = 0
