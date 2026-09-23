@@ -112,6 +112,11 @@ class CoreServerService : Service() {
     private val stickerAskHandledAt = mutableMapOf<String, Long>()
     private val stickerWantServedAt = mutableMapOf<String, Long>()
 
+    // Раунд 141: уведомления без хрупкого окна «2 секунды» - базой служит
+    // момент старта сервиса, повторы гасятся множеством оглашённых id.
+    private val serviceStartedAtMs = System.currentTimeMillis()
+    private val notifiedMessageIds = java.util.Collections.synchronizedSet(HashSet<String>())
+
     /**
      * Служебные конверты каталога гифок: ask/have/want. Разбираются до
      * сохранения в чат (как реакции), поэтому «мусорных» строк в переписке
@@ -269,7 +274,14 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
-        if (fileTransferRouter.routeIncoming(senderId, chatId, messageId, text)) return true
+        // Раунд 141: каждый страж в защитной обёртке - если какой-то
+        // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
+        // и уведомления, а не исчезнуть молча.
+        if (runCatching { fileTransferRouter.routeIncoming(senderId, chatId, messageId, text) }
+            .getOrDefault(false)
+        ) {
+            return true
+        }
         if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
             val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
             if (refSha != null && chatId.isNotBlank()) {
@@ -288,22 +300,30 @@ class CoreServerService : Service() {
             return true
         }
         if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
-            handleGifEnvelope(senderId, chatId, messageId, text)
+            runCatching { handleGifEnvelope(senderId, chatId, messageId, text) }
             return true
         }
         if (com.vladimir.messenger.data.sticker.StickerLibrary.isStickerPacket(text)) {
-            handleStickerEnvelope(senderId, chatId, messageId, text)
+            runCatching { handleStickerEnvelope(senderId, chatId, messageId, text) }
             return true
         }
-        if (groupRouter.routeIncoming(senderId, chatId, messageId, text)) return true
-        if (reactionRepository.routeIncoming(senderId, text)) return true
-        if (messageDeletion.routeIncoming(senderId, text)) return true
-        if (postViews.routeIncoming(senderId, text)) return true
-        if (hearts.routeIncoming(senderId, text)) return true
-        if (addressBookSwarm.routeIncoming(senderId, text)) return true
-        if (readReceipts.routeIncoming(senderId, text)) return true
-        if (referralAttributionRouter.routeIncoming(senderId, text)) return true
-        if (callManager.routeIncoming(senderId, chatId, messageId, text)) return true
+        if (runCatching { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
+            .getOrDefault(false)
+        ) {
+            return true
+        }
+        if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
+            .getOrDefault(false)
+        ) {
+            return true
+        }
         return false
     }
 
@@ -504,8 +524,13 @@ class CoreServerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.i(TAG, "CoreServerService started")
+        Log.i(TAG, "CoreServerService started (action=" + (intent?.action ?: "null") + ")")
         startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
+
+        // Раунд 141: аварийный каркас - каждый старт перевзводит системный
+        // будильник «+5 минут». Если процесс убьют или усыпят, будильник
+        // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
+        EmergencyKeepAliveReceiver.scheduleNext(applicationContext)
 
         // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
         if (!gossipStarted) {
@@ -908,14 +933,21 @@ class CoreServerService : Service() {
             chatRepository.observeAllMessages()
                 .collect { messages ->
                     Log.d(TAG, "Message observer received ${messages.size} messages")
-                    // Фильтруем только новые входящие (lastSeen = 0 или не прочитаны)
-                    // Простая логика: если сообщение появилось в последние 2 секунды и входящее
-                    val now = System.currentTimeMillis()
-                    val recentIncoming = messages.filter { 
-                        !it.isFromMe && (now - it.timestamp) < 2000 &&
-                            // Куски фотографий поста - служебные строки, а не
-                            // сообщения: без этого фильтра один пост с шестью
-                            // фото давал полтора десятка уведомлений с «буквами».
+                    // Раунд 141: прежнее окно «письмо младше 2 секунд от
+                    // отметки времени» молчало, когда часы телефонов
+                    // расходились или письмо ехало через запасной канал
+                    // дольше двух секунд - уведомления «переставали
+                    // приходить» (владелец, 2026-09-23). Теперь: оглашаем
+                    // всё, что появилось с момента старта сервиса (минус
+                    // две минуты - доложить написанное, пока процесс был
+                    // мёртв), и ещё не оглашённое: дубль core+CF гасится
+                    // по id, старые записи при восстановлении бэкапа -
+                    // базой старта.
+                    if (notifiedMessageIds.size > 4096) notifiedMessageIds.clear()
+                    val recentIncoming = messages.filter {
+                        !it.isFromMe &&
+                            it.timestamp >= serviceStartedAtMs - 120_000L &&
+                            notifiedMessageIds.add(it.id) &&
                             !com.vladimir.messenger.util.InlineImage.isPart(it.content)
                     }
                     for (msg in recentIncoming) {

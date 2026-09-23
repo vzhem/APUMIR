@@ -27,6 +27,15 @@
     <!-- Батарея -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Раунд 141: аварийный каркас уведомлений - будить сервис каждые
+         5 минут даже после убийства процесса и перезагрузки телефона.
+         USE_EXACT_ALARM - точный будильник на Android 13+; точный на 12
+         (SCHEDULE_EXACT_ALARM) и неточный запасной - в коде приёмника. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
     <!-- Уведомления (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -179,7 +188,20 @@
                 <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
             </intent-filter>
         </receiver>
-    
+
+        <!-- Раунд 141: аварийный каркас уведомлений - системный будильник
+             раз в 5 минут поднимает сервис, если его убили; после
+             перезагрузки телефона стартует по BOOT_COMPLETED. Действие
+             BOOT_COMPLETED - защищённое, слать его может только система. -->
+        <receiver
+            android:name=".service.EmergencyKeepAliveReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <!-- FileProvider для установки APK -->
         <provider
             android:name="androidx.core.content.FileProvider"
