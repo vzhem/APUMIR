@@ -9498,6 +9498,32 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-23 (раунд 141) - v11.74.38: уведомления всегда +
+  аварийный каркас.** Владелец: «всплывающие уведомления перестали
+  приходить... нужно чтобы пробивались в любом случае; если убили и
+  спит - запуститься через 5 минут в аварийном режиме на минималках,
+  ждать письмо и сразу сообщить; по тапу - полностью». Причина пропаж:
+  триггер-наблюдатель показывал пуш только при (now - ts) < 2000 мс по
+  ОТПРАВИТЕЛЬСКОЙ метке - расход часов или задержка CF гасили пуш.
+  Фикс: база = старт сервиса минус 2 мин (доложить написанное при
+  мёртвом процессе) + notifiedMessageIds (синхронизированный HashSet,
+  add() = dedup core+CF, cap 4096 clear). Аварийный каркас:
+  EmergencyKeepAlive.kt - receiver, alarm setExactAndAllowWhileIdle
+  каждые 5 мин (без права - setAndAllowWhileIdle; canScheduleExactAlarms),
+  wake lock 20 с, startForegroundService; сервис в onStartCommand
+  перевзводит (цепочка самоподдерживается, переживает kill и reboot -
+  BOOT_COMPLETED); manifest: RECEIVE_BOOT_COMPLETED, SCHEDULE_EXACT_ALARM
+  maxSdk=32, USE_EXACT_ALARM; receiver exported=true (защищённое
+  действие). «Минималки» = сам CoreServerService (MQTT+poll+пуш), тап -
+  полный запуск (уже было). Стражи routeIncomingEnvelope - каждый в
+  runCatching (падение разбора не ест письмо). ГРАБЛЯ (3-й раз!):
+  пересборка песочницы в паузе снова откатила HEAD (застал 860b47b
+  перед тегом) - if-guard на rev-parse в КОМАНДЕ тегирования спас,
+  recovery: fetch refspec -> reset --hard origin/ветка -> тег. ПРАВИЛО:
+  любая git-операция после паузы - только с guard-ом. check69 зелёный
+  с первого раза. v11.74.38 = a7ffe85, run 35903143350 SUCCESS, latest,
+  APK 40 484 174 Б, sha256 a05e581a…522.
+
 - **2026-09-23 (раунд 140) - v11.74.37: конверты в запасном пути и
   тап по уведомлению.** Оба бага с ОБНОВЛЁННЫХ телефонов. (1) «APUSTK1
   ask» в личке: CF-relay путь (cloudflareRelay.onMessageReceived,
