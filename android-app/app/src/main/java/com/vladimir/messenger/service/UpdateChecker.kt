@@ -51,6 +51,12 @@ class UpdateChecker @Inject constructor(
         val downloadUrl: String,
         val releaseNotes: String,
         val publishedAt: String,
+        /** Раунд 132: дифф-патч «APUBSP1» - качаем разницу, а не весь APK. */
+        val patchUrl: String? = null,
+        /** С какой версии применим патч (нормализованная, «11.74.27»). */
+        val patchFrom: String? = null,
+        /** SHA-256 релизного APK (из GitHub digest) - сверка собранного. */
+        val apkSha256: String? = null,
     )
 
     /** Завершённая загрузка APK: наш файл обновления из DownloadManager. */
@@ -132,6 +138,9 @@ class UpdateChecker @Inject constructor(
                 val oldCanonicalName = "P2P-Messenger-$latestVersion.apk"
                 var canonicalUrl: String? = null
                 var legacyUrl: String? = null
+                var apkSha256: String? = null
+                var patchUrl: String? = null
+                var patchFrom: String? = null
                 for (i in 0 until assets.length()) {
                     val asset = assets.getJSONObject(i)
                     val name = asset.getString("name")
@@ -139,9 +148,29 @@ class UpdateChecker @Inject constructor(
                         name.equals(canonicalName, ignoreCase = true) ||
                             name.equals(oldCanonicalName, ignoreCase = true) -> {
                             canonicalUrl = asset.getString("browser_download_url")
+                            // GitHub отдаёт «sha256:<hex>» - пригодится патчу.
+                            apkSha256 = asset.optString("digest", "")
+                                .removePrefix("sha256:").takeIf { it.length == 64 }
                         }
                         name.equals("app-release.apk", ignoreCase = true) -> {
                             legacyUrl = asset.getString("browser_download_url")
+                            if (apkSha256 == null) {
+                                apkSha256 = asset.optString("digest", "")
+                                    .removePrefix("sha256:").takeIf { it.length == 64 }
+                            }
+                        }
+                        name.startsWith("patch-") && name.endsWith(".bspatch") -> {
+                            // patch-11.74.27-to-11.74.28.bspatch
+                            val body = name.removePrefix("patch-")
+                                .removeSuffix(".bspatch")
+                            val from = body.substringBefore("-to-")
+                            val to = body.substringAfter("-to-", "")
+                            if (to == com.vladimir.messenger.data.update.ApkUpdate
+                                .normalize(latestVersion)
+                            ) {
+                                patchUrl = asset.getString("browser_download_url")
+                                patchFrom = from
+                            }
                         }
                     }
                 }
@@ -158,7 +187,10 @@ class UpdateChecker @Inject constructor(
                     version = latestVersion,
                     downloadUrl = downloadUrl,
                     releaseNotes = json.optString("body", ""),
-                    publishedAt = json.optString("published_at", "")
+                    publishedAt = json.optString("published_at", ""),
+                    patchUrl = patchUrl,
+                    patchFrom = patchFrom,
+                    apkSha256 = apkSha256,
                 )
             } else {
                 Log.i(TAG, "Current version is up to date")
@@ -204,6 +236,24 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     fun downloadApk(releaseInfo: ReleaseInfo): Long {
+        // Раунд 132: если мой телефон ровно той версии, от которой сделан
+        // дифф-патч, - качаем РАЗНИЦУ (в разы меньше APK), собираем полный
+        // файл у себя, сверяем sha256 релиза и сразу запускаем установку.
+        // Не вышло (патча нет, база не та, сборка не сошлась) - обычное
+        // скачивание целого APK.
+        val currentNormalized = com.vladimir.messenger.data.update.ApkUpdate
+            .normalize(currentAppVersion())
+        if (releaseInfo.patchUrl != null &&
+            releaseInfo.patchFrom == currentNormalized &&
+            releaseInfo.apkSha256 != null
+        ) {
+            val patched = runCatching { downloadViaPatch(releaseInfo) }.getOrDefault(false)
+            if (patched) {
+                Log.i(TAG, "Delta update applied: v${releaseInfo.version.removePrefix("v")}")
+                return -1L
+            }
+            Log.w(TAG, "Delta update failed - falling back to full APK")
+        }
         // Имя файла и заголовок уведомления - "APU v11.33.0", а не техническое
         // "P2P-Messenger-...": владелец видит в шторке именно эту строку.
         val version = releaseInfo.version.removePrefix("v")
@@ -268,6 +318,76 @@ class UpdateChecker @Inject constructor(
             Log.i(TAG, "Install intent started successfully")
         } catch (e: Exception) {
             Log.e(TAG, "installApk failed", e)
+        }
+    }
+
+    /** Установленная версия («11.74.27») для проверки применимости патча. */
+    private fun currentAppVersion(): String = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
+    }.getOrDefault("")
+
+    /**
+     * Раунд 132: скачать дифф-патч, собрать полный APK из установленного,
+     * сверить sha256 релиза и запустить установщик. false - не вышло
+     * (позовём обычное скачивание).
+     */
+    private fun downloadViaPatch(releaseInfo: ReleaseInfo): Boolean {
+        val patchUrl = releaseInfo.patchUrl ?: return false
+        val expectedSha = releaseInfo.apkSha256 ?: return false
+        val base = File(context.applicationInfo.sourceDir ?: return false)
+        if (!base.isFile) return false
+        val dir = File(context.cacheDir, "updates").apply { mkdirs() }
+        val patchFile = File(dir, "update.bspatch")
+        val out = File(dir, "APU-v" + releaseInfo.version.removePrefix("v") + ".apk")
+
+        // Скачать патч (в разы меньше APK).
+        val conn = (URL(patchUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = HTTP_TIMEOUT
+            readTimeout = 60000
+        }
+        try {
+            conn.connect()
+            if (conn.responseCode !in 200..299) {
+                Log.w(TAG, "patch download: HTTP ${conn.responseCode}")
+                return false
+            }
+            conn.inputStream.use { input ->
+                patchFile.outputStream().use { output ->
+                    input.copyTo(output, 64 * 1024)
+                }
+            }
+        } finally {
+            conn.disconnect()
+        }
+        Log.i(TAG, "Patch downloaded: ${patchFile.length() / 1024} KB (base ${base.length() / 1024 / 1024} MB)")
+
+        // Собрать новый APK и сверить с релизом.
+        if (!com.vladimir.messenger.data.update.ApkDiffPatch.apply(base, patchFile, out)) {
+            Log.w(TAG, "patch apply failed")
+            runCatching { out.delete() }
+            return false
+        }
+        val actualSha = com.vladimir.messenger.data.update.ApkDiffPatch.sha256OfFile(out)
+        if (!actualSha.equals(expectedSha, ignoreCase = true)) {
+            Log.w(TAG, "patched apk sha mismatch")
+            runCatching { out.delete() }
+            return false
+        }
+        runCatching { patchFile.delete() }
+
+        // Запустить установку того же пути, что и рой-обновления.
+        return runCatching {
+            val authority = "${context.packageName}.fileprovider"
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, out)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(intent)
+            true
+        }.getOrElse { error ->
+            Log.e(TAG, "patch install intent failed: ${error.message}")
+            false
         }
     }
 

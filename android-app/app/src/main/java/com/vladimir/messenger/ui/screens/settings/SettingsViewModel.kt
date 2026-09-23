@@ -272,13 +272,22 @@ class SettingsViewModel @Inject constructor(
     fun onDownloadOfficialRelease() {
         val release = _officialRelease.value ?: return
         runCatching { updateChecker.downloadApk(release) }
-            .onSuccess {
-                android.widget.Toast.makeText(
-                    context,
-                    "Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — " +
-                        "установка и раздача соседям начнутся сами",
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
+            .onSuccess { id ->
+                if (id == -1L) {
+                    // Раунд 132: дифф-патч - скачали разницу, установщик уже открыт.
+                    android.widget.Toast.makeText(
+                        context,
+                        "Обновление скачано компактно (только разница версий) - установщик открыт",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — " +
+                            "установка и раздача соседям начнутся сами",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
             .onFailure {
                 android.widget.Toast.makeText(context, "Не удалось начать скачивание: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
