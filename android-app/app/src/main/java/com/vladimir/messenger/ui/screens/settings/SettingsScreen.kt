@@ -1216,6 +1216,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     val download by viewModel.apkDownload.collectAsStateWithLifecycle()
     val ready by viewModel.apkReady.collectAsStateWithLifecycle()
     val receivedApks by viewModel.apkReceivedApks.collectAsStateWithLifecycle()
+    val patchOffers by viewModel.apkPatchOffers.collectAsStateWithLifecycle()
+    val patchDownload by viewModel.apkPatchDownload.collectAsStateWithLifecycle()
     val checking by viewModel.updatesChecking.collectAsStateWithLifecycle()
     val official by viewModel.officialRelease.collectAsStateWithLifecycle()
     val apkPick by viewModel.apkPick.collectAsStateWithLifecycle()
@@ -1276,13 +1278,40 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 onClick = viewModel::onCancelUpdateDownload,
             )
         }
+        // Раунд 133: приём ДИФФ-ПАТЧА (только разница версий) от соседа.
+        patchDownload?.let { pd ->
+            SettingsItem(
+                icon    = Icons.Default.Download,
+                title   = "Принимаю v${pd.version} (компактно)",
+                subtitle = StoragePolicy.format(pd.receivedBytes) + " из " + StoragePolicy.format(pd.totalBytes) +
+                    " — качаем только разницу версий",
+            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsItem(
+                icon    = Icons.Default.Close,
+                title   = "Остановить приём",
+                onClick = viewModel::onCancelPatchDownload,
+            )
+        }
+        // Раунд 133: сосед раздаёт ПАТЧ для ровно нашей версии — качаем
+        // разницу, а не весь APK. Соберём файл на месте и сверим sha256.
+        val patchBest = patchOffers.firstOrNull()
+        if (patchBest != null && download == null && patchDownload == null && ready == null) {
+            SettingsItem(
+                icon    = Icons.Default.Download,
+                title   = "Скачать компактно v" + patchBest.toVersion,
+                subtitle = "Патч " + StoragePolicy.format(patchBest.sizeBytes) +
+                    " от " + patchOffers.size.coerceAtLeast(1).toString() + " сосед(ей) — только разница версий",
+                onClick = { viewModel.onDownloadPatchFrom(patchBest.nodeId) },
+            )
+        }
         // Выбор, откуда качать. Проверка нашла обновление И на официальном
         // сайте, И у соседей в сети — показываем обе кнопки рядом.
         // Локальные копии: делегированные свойства не умнее cast'ов, а
         // условие в переменной не даёт smart cast для best.
         val officialNow = official
         val best = offers.firstOrNull()
-        if (officialNow != null && best != null && download == null && ready == null) {
+        if (officialNow != null && best != null && download == null && patchDownload == null && ready == null) {
             Text(
                 "Обновление найдено в двух местах — выберите, откуда скачать:",
                 style = MaterialTheme.typography.bodyMedium,
@@ -1303,7 +1332,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         } else {
             // Предложение соседа: лучший (самый новый) первый. Версия — на
             // самой кнопке: «Скачать v…».
-            if (best != null && download == null && ready == null) {
+            if (best != null && download == null && patchDownload == null && ready == null) {
                 SettingsItem(
                     icon    = Icons.Default.Download,
                     title   = "Скачать v" + best.version,

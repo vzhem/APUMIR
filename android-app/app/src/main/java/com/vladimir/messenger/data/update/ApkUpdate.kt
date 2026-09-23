@@ -33,6 +33,15 @@ object ApkUpdate {
     const val OFFERS_FILE = "offers.v1"
     const val REQUEST_FILE = "request.v1"
 
+    // Раунд 133: дифф-патч обновления — раздача, объявления, просьба.
+    const val PATCH_SEED_FILE = "patchseed.v1"
+    const val PATCH_OFFERS_FILE = "patchoffers.v1"
+    const val PATCH_REQUEST_FILE = "patchrequest.v1"
+
+    /** Имя патч-файла релиза: как ассет на GitHub (patch-11.74.28-to-11.74.29.bspatch). */
+    fun patchName(fromVersion: String, toVersion: String): String =
+        "patch-$fromVersion-to-$toVersion.bspatch"
+
     // ── Версии ──────────────────────────────────────────────────────────────
 
     /**

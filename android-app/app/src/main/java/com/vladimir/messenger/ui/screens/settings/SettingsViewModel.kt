@@ -89,6 +89,14 @@ class SettingsViewModel @Inject constructor(
     val apkReceivedApks: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.ReceivedApk>>
         get() = apkSeeder.receivedApks
 
+    /** Раунд 133: предложения соседей — дифф-патчи для ровно моей версии. */
+    val apkPatchOffers: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.PatchOfferUi>>
+        get() = apkSeeder.patchOffers
+
+    /** Раунд 133: ход приёма дифф-патча. */
+    val apkPatchDownload: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.PatchDownload?>
+        get() = apkSeeder.patchDownload
+
     /**
      * Выбранный в проводнике APK (SAF): имя берётся из самого файла, версия
      * читается из его AndroidManifest (пока читается — поле версии ждёт).
@@ -216,6 +224,16 @@ class SettingsViewModel @Inject constructor(
     /** Остановить приём обновления. */
     fun onCancelUpdateDownload() {
         viewModelScope.launch { runCatching { apkSeeder.cancelDownload() } }
+    }
+
+    /** Раунд 133: качать у узла [nodeId] дифф-патч — только разницу версий. */
+    fun onDownloadPatchFrom(nodeId: String) {
+        viewModelScope.launch { runCatching { apkSeeder.requestPatchUpdate(nodeId) } }
+    }
+
+    /** Остановить приём дифф-патча. */
+    fun onCancelPatchDownload() {
+        viewModelScope.launch { runCatching { apkSeeder.cancelPatchDownload() } }
     }
 
     /** Установить скачанное обновление (системный диалог). Ошибка — тостом. */

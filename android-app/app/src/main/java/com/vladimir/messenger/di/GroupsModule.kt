@@ -153,6 +153,9 @@ object GroupsModule {
         onUpdateWant = { senderId, packet -> apkSeeder.get().onUpdateWant(senderId, packet) },
         onUpdateNone = { senderId, packet -> apkSeeder.get().onUpdateNone(senderId, packet) },
         onUpdateAsk = { senderId, packet -> apkSeeder.get().onUpdateAsk(senderId, packet) },
+        // Раунд 133: дифф-патч обновления — тот же сидер.
+        onUpdatePatchPack = { senderId, packet -> apkSeeder.get().onUpdatePatchPack(senderId, packet) },
+        onUpdatePatchWant = { senderId, packet -> apkSeeder.get().onUpdatePatchWant(senderId, packet) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

@@ -46,6 +46,14 @@ class UpdateChecker @Inject constructor(
         private const val RELAY_BASE = "https://p2p-relay.1985vzhem.workers.dev"
     }
 
+    /**
+     * Раунд 133: патч успешно применён и проверен — НЕ удаляем его, а
+     * отдаём рой-слою (ApkSeeder вешает хук при старте), чтобы телефон
+     * раздавал разницу соседям. Вызов синхронный и быстрый: сохранить
+     * файл и запомнить метаданные; вся раздача — в фоне у сида.
+     */
+    var onPatchKept: ((patchFile: File, fromVersion: String, toVersion: String, apkSha256: String) -> Unit)? = null
+
     data class ReleaseInfo(
         val version: String,
         val downloadUrl: String,
@@ -373,7 +381,16 @@ class UpdateChecker @Inject constructor(
             runCatching { out.delete() }
             return false
         }
-        runCatching { patchFile.delete() }
+        // Раунд 133: патч больше не удаляем — он становится раздачей
+        // для соседей с той же исходной версией (только разница по рою).
+        runCatching {
+            onPatchKept?.invoke(
+                patchFile,
+                releaseInfo.patchFrom ?: "",
+                com.vladimir.messenger.data.update.ApkUpdate.normalize(releaseInfo.version),
+                expectedSha,
+            )
+        }
 
         // Запустить установку того же пути, что и рой-обновления.
         return runCatching {

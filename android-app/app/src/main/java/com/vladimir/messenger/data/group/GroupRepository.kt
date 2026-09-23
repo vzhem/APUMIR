@@ -151,6 +151,13 @@ class GroupRepository(
     private val onUpdateNone: suspend (senderId: String, packet: GroupWire.Packet.UpdateNone) -> Unit = { _, _ -> },
     private val onUpdateAsk: suspend (senderId: String, packet: GroupWire.Packet.UpdateAsk) -> Unit = { _, _ -> },
     /**
+     * Раунд 133: дифф-патч обновления в рое — объявление «я раздаю патч»
+     * `uppk` и просьба «пришли патч» `uppwant`. По умолчанию ничего не
+     * делают — так живут JVM-тесты.
+     */
+    private val onUpdatePatchPack: suspend (senderId: String, packet: GroupWire.Packet.UpdatePatchPack) -> Unit = { _, _ -> },
+    private val onUpdatePatchWant: suspend (senderId: String, packet: GroupWire.Packet.UpdatePatchWant) -> Unit = { _, _ -> },
+    /**
      * Когда узел последний раз выходил на связь по наблюдениям ЭТОГО телефона
      * (`PeerRatingStore`), миллисекунды эпохи; null - этот телефон его ни
      * разу не видел. Нужно наследованию владения: «владелец удалился» здесь
@@ -2741,6 +2748,18 @@ class GroupRepository(
             is GroupWire.Packet.UpdateAsk -> backgroundScope.launch {
                 runCatching { onUpdateAsk(senderId, packet) }
                     .onFailure { Log.w(TAG, "update ask failed: ${it.message}") }
+            }
+
+            // Раунд 133: дифф-патч обновления — объявление и просьба, в фоне;
+            // сам патч идёт файловой машиной (кусочки в `apkseed`), не здесь.
+            is GroupWire.Packet.UpdatePatchPack -> backgroundScope.launch {
+                runCatching { onUpdatePatchPack(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update patch pack failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.UpdatePatchWant -> backgroundScope.launch {
+                runCatching { onUpdatePatchWant(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update patch want failed: ${it.message}") }
             }
 
             // Счётчики через владельца (этап 3): сводку считает и применяет
