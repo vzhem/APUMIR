@@ -182,26 +182,31 @@ class FileTransferRouter @Inject constructor(
                 } else {
                     false
                 }
-                if (!apkUpdate && !groupFile) {
-                    // Раунд 134: байты гифки приезжают ТИХО (раунд 128 - обмен
-                    // только ссылками). Карточка-ссылка уже стоит в чате и
-                    // оживёт сама, когда байты лягут в библиотеку (хук ниже);
-                    // плейсхолдер «Сохранено» рядом с ней и есть задвоение,
-                    // что на скрине владельца 2026-09-23. Тихо - только ту
-                    // гифку, которую этот телефон сам просил у хранителя
-                    // (isWanted): присланный скрепкой .gif по-прежнему
-                    // показывает пузырь, его никто не просил из каталога.
-                    // Раунд 139: то же - для стикера, которого телефон сам
-                    // попросил в панели «Из сети».
+                    // Раунд 139: стикер, которого телефон сам просил в панели
+                    // «Из сети» (isWanted), приезжает тихо и без пузыря.
+                    // Вычисляется до «если не апдейт/не файл группы»: ниже,
+                    // в хуке оседания, та же отметка нужна вне этого блока.
                     val stickerWanted = runCatching {
-                        stickerLibrary.isWanted(fileSha256)
+                        com.vladimir.messenger.data.sticker.StickerLibrary
+                            .isWanted(fileSha256)
                     }.getOrDefault(false)
-                    val gifSilent = stickerWanted ||
-                        (mediaType.equals("image/gif", ignoreCase = true) &&
-                            runCatching {
-                                com.vladimir.messenger.data.gif.GifLibrary.isWanted(fileSha256)
-                            }.getOrDefault(false))
-                    if (!gifSilent) {
+                    if (!apkUpdate && !groupFile) {
+                        // Раунд 134: байты гифки приезжают ТИХО (раунд 128 - обмен
+                        // только ссылками). Карточка-ссылка уже стоит в чате и
+                        // оживёт сама, когда байты лягут в библиотеку (хук ниже);
+                        // плейсхолдер «Сохранено» рядом с ней и есть задвоение,
+                        // что на скрине владельца 2026-09-23. Тихо - только ту
+                        // гифку, которую этот телефон сам просил у хранителя
+                        // (isWanted): присланный скрепкой .gif по-прежнему
+                        // показывает пузырь, его никто не просил из каталога.
+                        // Раунд 139: то же - для стикера, которого телефон сам
+                        // попросил в панели «Из сети».
+                        val gifSilent = stickerWanted ||
+                            (mediaType.equals("image/gif", ignoreCase = true) &&
+                                runCatching {
+                                    com.vladimir.messenger.data.gif.GifLibrary.isWanted(fileSha256)
+                                }.getOrDefault(false))
+                        if (!gifSilent) {
                         chatRepository.saveIncomingMessage(
                             chatId = chatId,
                             senderId = senderId,
