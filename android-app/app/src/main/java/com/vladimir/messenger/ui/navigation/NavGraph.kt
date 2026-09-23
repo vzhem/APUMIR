@@ -254,8 +254,10 @@ fun MessengerNavGraph(
     LaunchedEffect(pendingChatLink) {
         val link = pendingChatLink ?: return@LaunchedEffect
         val (chatId, topicId) = link
-        onChatLinkConsumed()
-        if (chatId.isBlank()) return@LaunchedEffect
+        if (chatId.isBlank()) {
+            onChatLinkConsumed()
+            return@LaunchedEffect
+        }
         val entry = EntryPointAccessors.fromApplication(
             navLinkContext, ChatLinkEntryPoint::class.java
         )
@@ -269,15 +271,25 @@ fun MessengerNavGraph(
             }
         } else {
             val chat = runCatching { entry.chatDao().getChatById(chatId) }.getOrNull()
-                ?: return@LaunchedEffect
+            if (chat == null) {
+                onChatLinkConsumed()
+                return@LaunchedEffect
+            }
             Screen.ChatDetail.createRoute(
                 chatId = chat.id,
                 contactName = chat.contactName.ifBlank { chat.contactId.take(8) },
                 contactId = chat.contactId,
             )
         }
-        navController.navigate(route) { launchSingleTop = true }
+        // Снять уведомление ДО consume: после него эффект отменяется.
         runCatching { entry.notificationHelper().cancelChatNotifications(chatId) }
+        navController.navigate(route) { launchSingleTop = true }
+        // Раунд 140: сброс был ПЕРВОЙ строкой - он обнулял ключ этого
+        // LaunchedEffect, корутина отменялась на первом же запросе к базе,
+        // и навигация не успевала случиться: тап по уведомлению вёл на
+        // главный экран (владелец, 2026-09-23). Теперь сброс - последним:
+        // после него в эффекте нет suspend-вызовов, отменять нечего.
+        onChatLinkConsumed()
     }
 
     // Входящий звонок: экран звонка показывается сам, где бы ни был пользователь.

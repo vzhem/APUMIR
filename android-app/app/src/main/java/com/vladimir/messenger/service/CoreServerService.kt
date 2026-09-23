@@ -254,6 +254,60 @@ class CoreServerService : Service() {
     }
 
     /**
+     * Раунд 140: служебные конверты ЗАПАСНОГО пути (Cloudflare relay).
+     * Цепочка - та же фильтрация, что в handleEvent / «message_received»:
+     * стикеры, гифки, группы, реакции, удаления и прочее разбираются ДО
+     * сохранения. Раньше запасной путь сохранял всё как есть, и конверт
+     * «APUSTK1|ask» падал в переписку мусорным текстом (владелец, скрин
+     * 2026-09-23, оба телефона на последней версии). Если добавляете новый
+     * конверт - добавьте его и здесь, и в основной цепочке.
+     * Возвращает true, если текст служебный и в чат ему дороги нет.
+     */
+    private suspend fun routeIncomingEnvelope(
+        senderId: String,
+        chatId: String,
+        messageId: String,
+        text: String,
+    ): Boolean {
+        if (fileTransferRouter.routeIncoming(senderId, chatId, messageId, text)) return true
+        if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
+            val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
+            if (refSha != null && chatId.isNotBlank()) {
+                runCatching {
+                    chatRepository.insertReceivedGifRefMessage(
+                        chatId = chatId,
+                        senderId = senderId,
+                        messageId = messageId,
+                        sha256 = refSha,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                }.onFailure { Log.w(TAG, "CF gif ref insert failed: " + it.message) }
+                runCatching { ensureGifBytesForRef(refSha) }
+                    .onFailure { Log.w(TAG, "CF gif ref fetch failed: " + it.message) }
+            }
+            return true
+        }
+        if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
+            handleGifEnvelope(senderId, chatId, messageId, text)
+            return true
+        }
+        if (com.vladimir.messenger.data.sticker.StickerLibrary.isStickerPacket(text)) {
+            handleStickerEnvelope(senderId, chatId, messageId, text)
+            return true
+        }
+        if (groupRouter.routeIncoming(senderId, chatId, messageId, text)) return true
+        if (reactionRepository.routeIncoming(senderId, text)) return true
+        if (messageDeletion.routeIncoming(senderId, text)) return true
+        if (postViews.routeIncoming(senderId, text)) return true
+        if (hearts.routeIncoming(senderId, text)) return true
+        if (addressBookSwarm.routeIncoming(senderId, text)) return true
+        if (readReceipts.routeIncoming(senderId, text)) return true
+        if (referralAttributionRouter.routeIncoming(senderId, text)) return true
+        if (callManager.routeIncoming(senderId, chatId, messageId, text)) return true
+        return false
+    }
+
+    /**
      * Раунд 139: служебные конверты каталога СТИКЕРОВ (APUSTK1). Разбираются
      * до сохранения в чат (как гифковые), поэтому в переписке мусора нет.
      */
@@ -681,9 +735,6 @@ class CoreServerService : Service() {
                                 if (existingMsg != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
                                 } else {
-                                    val contact = contactRepository.getContactById(senderId)
-                                    val contactName = contact?.displayName ?: senderId.take(16)
-                                    val chat = chatRepository.getOrCreateChat(senderId, contactName)
                                     // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
                                     // расшифровки здесь в чат попал бы конверт как текст.
                                     val cfContent = if (SealedWire.isSealed(parsed.content)) {
@@ -694,16 +745,33 @@ class CoreServerService : Service() {
                                     if (cfContent == null) {
                                         Log.w(TAG, "CF sealed envelope not opened msgId=$messageId; skipped")
                                     } else {
-                                        chatRepository.saveIncomingMessage(
-                                            chatId = chat.id,
-                                            senderId = senderId,
-                                            messageId = messageId,
-                                            content = cfContent,
-                                            timestamp = parsed.timestamp,
-                                            channel = MessageChannel.CF,
-                                        )
+                                        // Раунд 140: служебные конверты разбираются ДО
+                                        // сохранения - тем же стражем, что и основной
+                                        // путь. У неизвестного отправителя чат ради
+                                        // конверта не создаётся.
+                                        val knownChat = chatRepository.getChatByContactId(senderId)
+                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent)) {
+                                            Log.i(TAG, "CF service envelope handled msgId=$messageId")
+                                            try {
+                                                RustBridge.sendDeliveryAck(messageId, senderId)
+                                            } catch (e: Exception) {
+                                                Log.w(TAG, "CF envelope ACK failed: " + e.message)
+                                            }
+                                        } else {
+                                            val contact = contactRepository.getContactById(senderId)
+                                            val contactName = contact?.displayName ?: senderId.take(16)
+                                            val chat = chatRepository.getOrCreateChat(senderId, contactName)
+                                            chatRepository.saveIncomingMessage(
+                                                chatId = chat.id,
+                                                senderId = senderId,
+                                                messageId = messageId,
+                                                content = cfContent,
+                                                timestamp = parsed.timestamp,
+                                                channel = MessageChannel.CF,
+                                            )
+                                            Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
+                                        }
                                     }
-                                    Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
                                 }
                                 // G1 fix: отправить ACK обратно отправителю через relay
                                 // (отправитель узнаёт о доставке, даже если был офлайн в момент приёма).
@@ -718,19 +786,26 @@ class CoreServerService : Service() {
 
                             is RelayEnvelope.Parsed.Other -> {
                                 // Legacy plain-text payload (не envelope) — сохраняем как раньше.
-                                val messageId = java.util.UUID.randomUUID().toString()
-                                val contact = contactRepository.getContactById(senderId)
-                                val contactName = contact?.displayName ?: senderId.take(16)
-                                val chat = chatRepository.getOrCreateChat(senderId, contactName)
-                                chatRepository.saveIncomingMessage(
-                                    chatId = chat.id,
-                                    senderId = senderId,
-                                    messageId = messageId,
-                                    content = parsed.raw,
-                                    timestamp = System.currentTimeMillis(),
-                                    channel = MessageChannel.CF,
-                                )
-                                Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                // Раунд 140: но только не служебный конверт - он
+                                // разбирается стражем, в чат ему дороги нет.
+                                val legacyMessageId = java.util.UUID.randomUUID().toString()
+                                val knownChat = chatRepository.getChatByContactId(senderId)
+                                if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", legacyMessageId, parsed.raw)) {
+                                    Log.i(TAG, "CF legacy service envelope handled")
+                                } else {
+                                    val contact = contactRepository.getContactById(senderId)
+                                    val contactName = contact?.displayName ?: senderId.take(16)
+                                    val chat = chatRepository.getOrCreateChat(senderId, contactName)
+                                    chatRepository.saveIncomingMessage(
+                                        chatId = chat.id,
+                                        senderId = senderId,
+                                        messageId = legacyMessageId,
+                                        content = parsed.raw,
+                                        timestamp = System.currentTimeMillis(),
+                                        channel = MessageChannel.CF,
+                                    )
+                                    Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                }
                             }
                         }
                     } catch (e: Exception) {
