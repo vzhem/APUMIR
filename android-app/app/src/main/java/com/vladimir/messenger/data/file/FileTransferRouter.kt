@@ -181,14 +181,28 @@ class FileTransferRouter @Inject constructor(
                     false
                 }
                 if (!apkUpdate && !groupFile) {
-                    chatRepository.saveIncomingMessage(
-                        chatId = chatId,
-                        senderId = senderId,
-                        messageId = messageId,
-                        content = formatPlaceholder(displayName, mediaType, totalBytes),
-                        timestamp = System.currentTimeMillis(),
-                        recipientId = RustBridge.nodeId() ?: "",
-                    )
+                    // Раунд 134: байты гифки приезжают ТИХО (раунд 128 - обмен
+                    // только ссылками). Карточка-ссылка уже стоит в чате и
+                    // оживёт сама, когда байты лягут в библиотеку (хук ниже);
+                    // плейсхолдер «Сохранено» рядом с ней и есть задвоение,
+                    // что на скрине владельца 2026-09-23. Тихо - только ту
+                    // гифку, которую этот телефон сам просил у хранителя
+                    // (isWanted): присланный скрепкой .gif по-прежнему
+                    // показывает пузырь, его никто не просил из каталога.
+                    val gifSilent = mediaType.equals("image/gif", ignoreCase = true) &&
+                        runCatching {
+                            com.vladimir.messenger.data.gif.GifLibrary.isWanted(fileSha256)
+                        }.getOrDefault(false)
+                    if (!gifSilent) {
+                        chatRepository.saveIncomingMessage(
+                            chatId = chatId,
+                            senderId = senderId,
+                            messageId = messageId,
+                            content = formatPlaceholder(displayName, mediaType, totalBytes),
+                            timestamp = System.currentTimeMillis(),
+                            recipientId = RustBridge.nodeId() ?: "",
+                        )
+                    }
                 }
                     // Раунд 121: принятая гифка оседает в библиотеке телефона -
                     // она становится частью СВОЕГО каталога роя (без внешнего
