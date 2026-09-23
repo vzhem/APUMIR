@@ -681,6 +681,15 @@ class GroupChatViewModel @Inject constructor(
                 .onSuccess {
                     _uiState.update { it.copy(sending = false) }
                     ensureGifRefInternal(sha256)
+                    // Раунд 131: объявить каталог - участники должны узнать
+                    // во мне хранителя новой гифки.
+                    runCatching {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                                appContext, chatRepository, force = false,
+                            )
+                        }
+                    }
                 }
         }
     }

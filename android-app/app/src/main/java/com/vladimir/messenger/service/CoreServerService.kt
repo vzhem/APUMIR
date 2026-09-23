@@ -187,6 +187,24 @@ class CoreServerService : Service() {
         }
     }
 
+    /**
+     * Раунд 131: убедиться, что гифка из ссылки есть в моей библиотеке.
+     * Нет - тихо попросить у хранителей из каталога сети.
+     */
+    private suspend fun ensureGifBytesForRef(sha256: String) {
+        val have = com.vladimir.messenger.data.gif.GifLibrary
+            .gifFile(applicationContext, sha256)?.isFile == true
+        if (have) return
+        val holders = com.vladimir.messenger.data.gif.GifLibrary
+            .swarmCatalog(applicationContext)
+            .firstOrNull { it.entry.sha256 == sha256 }?.holders.orEmpty()
+        if (holders.isEmpty()) return
+        com.vladimir.messenger.data.gif.GifLibrary.rememberWant(sha256)
+        com.vladimir.messenger.data.gif.GifLibrary.requestGif(
+            applicationContext, chatRepository, sha256, holders,
+        )
+    }
+
     private suspend fun announceMyGifCatalogTo(peerId: String) {
         val now = System.currentTimeMillis()
         if (now - (gifCatalogSentAt[peerId] ?: 0L) < 10 * 60_000L) return
@@ -709,8 +727,16 @@ class CoreServerService : Service() {
                             // аргументы + значение по умолчанию ловили
                             // фантомную «Argument type mismatch» в K2.
                             val topicId = msg.topicId?.takeIf { it.isNotBlank() }
-                            val text = com.vladimir.messenger.util.InlineImage
-                                .stripImage(msg.content).ifBlank { "Фото" }.take(200)
+                            // Раунд 131: ссылка на гифку - в уведомлении
+                            // аккуратное «🖼 Гифка», а не служебная строка.
+                            val text = if (
+                                com.vladimir.messenger.data.gif.GifLibrary.isGifRef(msg.content)
+                            ) {
+                                "🖼 Гифка"
+                            } else {
+                                com.vladimir.messenger.util.InlineImage
+                                    .stripImage(msg.content).ifBlank { "Фото" }.take(200)
+                            }
                             notificationHelper.showMessageNotification(
                                 msg.chatId, msg.senderId, text, true, topicId
                             )
@@ -902,6 +928,10 @@ class CoreServerService : Service() {
                                         timestamp = System.currentTimeMillis(),
                                     )
                                 }.onFailure { Log.w(TAG, "gif ref insert failed: " + it.message) }
+                                // Раунд 131: байты тянем СРАЗУ, не дожидаясь,
+                                // пока человек откроет чат - карточка оживает сама.
+                                runCatching { ensureGifBytesForRef(refSha) }
+                                    .onFailure { Log.w(TAG, "gif ref fetch failed: " + it.message) }
                             }
                         }
                         try {

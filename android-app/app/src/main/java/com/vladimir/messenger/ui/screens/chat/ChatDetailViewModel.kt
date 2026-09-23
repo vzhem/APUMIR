@@ -541,6 +541,15 @@ class ChatDetailViewModel @Inject constructor(
             timestamp = System.currentTimeMillis(),
         )
         _uiState.update { it.copy(scrollToBottom = true) }
+        // Раунд 131: я мог только что скачать эту гифку - объявить каталог,
+        // чтобы все узнали хранителя и смогли тихо забрать байты.
+        runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = false,
+                )
+            }
+        }
         // Своя карточка тоже должна ожить: если гифки у меня нет - тихо
         // попросим у сети (тротлимб внутри GifLibrary).
         ensureGifRefInternal(sha256)
