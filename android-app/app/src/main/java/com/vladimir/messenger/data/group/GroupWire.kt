@@ -77,6 +77,12 @@ object GroupWire {
      */
     const val KIND_EDIT = "edit"
     /**
+     * «Удалить сообщение у всех» (раунд 135): `msdel|groupId|msgId`. Права
+     * те же, что у правки: автор или владелец. Телефоны прошлых версий вид
+     * не знают и молча отбрасывают - у них сообщение останется.
+     */
+    const val KIND_MESSAGE_DELETE = "msdel"
+    /**
      * «Пришлите последние посты»: вступивший позже просит владельца канала
      * прислать тексты и фотографии последних постов, а не только список тем.
      */
@@ -356,6 +362,12 @@ object GroupWire {
             val topicId: String,
             val messageId: String,
             val text: String,
+        ) : Packet()
+
+        /** Автор (или владелец) стёр сообщение [messageId] у всех (раунд 135). */
+        data class MessageDelete(
+            val groupId: String,
+            val messageId: String,
         ) : Packet()
 
         /**
@@ -762,6 +774,13 @@ object GroupWire {
     /** Правка сообщения: тот же id, новый текст. */
     fun buildEdit(groupId: String, topicId: String, messageId: String, text: String): String =
         "$PREFIX|$KIND_EDIT|$groupId|$topicId|${encode(messageId)}|${encode(text)}"
+
+    /** «Удалить сообщение у всех» (раунд 135): группа и идентификатор. */
+    fun buildMessageDelete(groupId: String, messageId: String): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        require(messageId.isNotBlank()) { "bad message id" }
+        return "$PREFIX|$KIND_MESSAGE_DELETE|$groupId|${encode(messageId)}"
+    }
 
     /** «Пришлите последние limit постов, кроме этих» - владельцу канала. */
     fun buildPostsRequest(groupId: String, limit: Int, have: List<String> = emptyList()): String {
@@ -1180,6 +1199,17 @@ object GroupWire {
                 val authorId = if (parts.size >= 8) decode(parts[7]).orEmpty() else ""
                 val sentAtMs = if (parts.size >= 9) parts[8].toLongOrNull() ?: 0L else 0L
                 Packet.Message(groupId, parts[3], body, senderMessageId, senderName, authorId, sentAtMs)
+            } else {
+                null
+            }
+
+            KIND_MESSAGE_DELETE -> if (parts.size == 4) {
+                val deletedId = decode(parts[3]) ?: return null
+                if (deletedId.isBlank() || parts[2].isBlank()) {
+                    null
+                } else {
+                    Packet.MessageDelete(parts[2], deletedId)
+                }
             } else {
                 null
             }

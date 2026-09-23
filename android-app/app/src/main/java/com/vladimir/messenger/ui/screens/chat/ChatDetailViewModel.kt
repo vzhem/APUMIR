@@ -76,6 +76,7 @@ class ChatDetailViewModel @Inject constructor(
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
+    private val messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -654,6 +655,28 @@ class ChatDetailViewModel @Inject constructor(
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }
+        }
+    }
+
+    /**
+     * Раунд 135: удалить своё сообщение только у себя.
+     */
+    fun deleteMessageForMe(messageId: String) {
+        viewModelScope.launch {
+            messageDeletion.deleteForMe(chatId, messageId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
+        }
+    }
+
+    /**
+     * Раунд 135: удалить своё сообщение у всех: конверт собеседнику и
+     * стирание у себя. Ошибка (собеседник недоступен) - тостом, ничего
+     * не стираем: половинное удаление хуже честного отказа.
+     */
+    fun deleteMessageForAll(messageId: String) {
+        viewModelScope.launch {
+            messageDeletion.deleteForAllDirect(chatId, messageId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
         }
     }
 

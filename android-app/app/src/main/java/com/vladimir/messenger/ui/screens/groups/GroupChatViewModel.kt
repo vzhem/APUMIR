@@ -724,6 +724,22 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 135: удалить сообщение только у себя. */
+    fun deleteMessageForMe(messageId: String) {
+        viewModelScope.launch {
+            runCatching { groupRepository.deleteMessageForMe(groupId, messageId) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Раунд 135: удалить своё сообщение у всех (автор или владелец). */
+    fun deleteMessageForAll(messageId: String) {
+        viewModelScope.launch {
+            groupRepository.deleteMessageForAll(groupId, messageId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
     /** Переслать сообщение темы себе в «Избранное». */
     fun saveToFavorites(text: String) {
         val source = _uiState.value.group?.title.orEmpty()

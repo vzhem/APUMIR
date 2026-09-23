@@ -26,6 +26,10 @@ interface MessageReactionDao {
     @Query("SELECT * FROM message_reactions WHERE messageId = :messageId AND nodeId = :nodeId")
     suspend fun get(messageId: String, nodeId: String): MessageReactionEntity?
 
+    /** Раунд 135: реакции удаляемого сообщения - за призраком их не оставляем. */
+    @Query("DELETE FROM message_reactions WHERE messageId = :messageId")
+    suspend fun deleteForMessage(messageId: String)
+
     @Query("DELETE FROM message_reactions WHERE chatId = :chatId")
     suspend fun clearChat(chatId: String)
 }

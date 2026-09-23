@@ -1422,6 +1422,51 @@ class GroupRepository(
         return SwarmWave(full = legacy + wave, wave = wave, rest = swarmers.size - wave.size)
     }
 
+    // ── Удаление сообщения (раунд 135) ────────────────────────────────────────
+
+    /**
+     * Удалить сообщение ТОЛЬКО У СЕБЯ: у остальных остаётся. Куски длинного
+     * текста (InlineImage-хвосты) стираются вместе с головой.
+     */
+    suspend fun deleteMessageForMe(groupId: String, messageId: String) {
+        val message = messageDao.getMessageById(messageId) ?: return
+        if (message.chatId != groupId) return
+        val stale = messageDao.getByContentPattern(groupId, InlineImage.textPartPattern(messageId))
+            .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
+        for (row in stale) messageDao.deleteById(row.id)
+        messageDao.deleteById(messageId)
+    }
+
+    /**
+     * Удалить своё сообщение У ВСЕХ. Права как у правки: автор или владелец
+     * группы. У себя стираем сразу; остальным уходит короткий пакет `msdel` -
+     * каждый получатель стирает то же самое у себя (автора проверяет по
+     * отправителю пакета, подделать чужое удаление нельзя). Телефоны прошлых
+     * версий пакет не знают: у них сообщение останется - лечится обновлением.
+     */
+    suspend fun deleteMessageForAll(groupId: String, messageId: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        val message = messageDao.getMessageById(messageId)
+            ?: return Result.failure(IllegalStateException("Сообщение не найдено"))
+        if (message.chatId != groupId) {
+            return Result.failure(IllegalArgumentException("Сообщение из другой группы"))
+        }
+        if (message.senderId != me && group.ownerId != me) {
+            return Result.failure(SecurityException("Удалять у всех может автор или владелец"))
+        }
+        val stale = messageDao.getByContentPattern(groupId, InlineImage.textPartPattern(messageId))
+            .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
+        for (row in stale) messageDao.deleteById(row.id)
+        messageDao.deleteById(messageId)
+        broadcast(groupId, GroupWire.buildMessageDelete(groupId, messageId), excludeSelf = true)
+        return Result.success(Unit)
+    }
+
     // ── Правка сообщения ──────────────────────────────────────────────────────
 
     /**
@@ -2678,6 +2723,18 @@ class GroupRepository(
                     if (part.headId == packet.messageId && part.rev != keepRev) messageDao.deleteById(row.id)
                 }
                 Log.i(TAG, "message edit applied id=${packet.messageId} group=${group.id} from=$senderId")
+            }
+
+            // Раунд 135: автор (или владелец) стёр сообщение у всех.
+            is GroupWire.Packet.MessageDelete -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val message = messageDao.getMessageById(packet.messageId) ?: return
+                if (message.chatId != packet.groupId) return
+                // Удалять вправе автор и владелец группы - остальное отбрасываем.
+                if (senderId != message.senderId && senderId != group.ownerId) return
+                deleteMessageForMe(packet.groupId, packet.messageId)
+                Log.i(TAG, "message delete applied id=${packet.messageId} group=${group.id} from=$senderId")
             }
 
             is GroupWire.Packet.PostsRequest -> {

@@ -164,6 +164,23 @@ interface MessageDao {
     suspend fun deleteById(messageId: String)
 
     /**
+     * Раунд 135: последнее сообщение чата - пересчёт превью после удаления.
+     */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatest(chatId: String): MessageEntity?
+
+    /**
+     * Раунд 135: чужая просьба «удали у всех». Стирает ТОЛЬКО сообщение
+     * этого отправителя в этом чате: подделать чужое удаление нельзя,
+     * свои сообщения чужой конверт не трогает. Возвращает сколько стёрто.
+     */
+    @Query(
+        "DELETE FROM messages WHERE id = :messageId AND chatId = :chatId " +
+            "AND senderId = :senderId"
+    )
+    suspend fun deleteByIdChatAndSender(messageId: String, chatId: String, senderId: String): Int
+
+    /**
      * Стереть все сообщения группы. У messages нет внешнего ключа на groups,
      * поэтому каскад их не убирает — чистим явно при удалении группы.
      */

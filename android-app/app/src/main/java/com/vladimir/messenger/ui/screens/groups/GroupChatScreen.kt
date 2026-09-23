@@ -137,6 +137,24 @@ fun GroupChatScreen(
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
+    // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
+    var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
+    deleteForAllTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteForAllTarget = null },
+            title = { Text("Удалить у всех?") },
+            text = { Text("Сообщение исчезнет у всех участников группы. У кого старая версия приложения - там останется: обновите телефоны.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteForAllTarget = null
+                    viewModel.deleteMessageForAll(target.id)
+                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
+            },
+        )
+    }
 
     if (showGifCatalog) {
         GifCatalogDialog(
@@ -518,6 +536,8 @@ fun GroupChatScreen(
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
                         fileCard = cardState,
                         onEnsureGif = { sha -> viewModel.ensureGifRef(sha) },
+                        onDeleteForMe = { viewModel.deleteMessageForMe(message.id) },
+                        onDeleteForAll = { deleteForAllTarget = message },
                     )
                 }
             }
@@ -933,6 +953,9 @@ private fun MessageBubble(
     fileCard: FileCardState? = null,
     /** Раунд 130: карточка-ссылка просит VM тихо подтянуть байты гифки. */
     onEnsureGif: (String) -> Unit = {},
+    /** Раунд 135: удалить сообщение - у себя или у всех. */
+    onDeleteForMe: () -> Unit = {},
+    onDeleteForAll: () -> Unit = {},
 ) {
     // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
@@ -1073,6 +1096,23 @@ private fun MessageBubble(
                     onClick = {
                         showMenu = false
                         onTogglePin()
+                    },
+                )
+            }
+            // Раунд 135: удаление своего сообщения - у себя и у всех.
+            if (message.isFromMe) {
+                DropdownMenuItem(
+                    text = { Text("Удалить у себя", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        showMenu = false
+                        onDeleteForMe()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Удалить у всех", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        showMenu = false
+                        onDeleteForAll()
                     },
                 )
             }

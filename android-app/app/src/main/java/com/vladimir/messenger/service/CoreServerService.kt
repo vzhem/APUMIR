@@ -61,6 +61,7 @@ class CoreServerService : Service() {
     @Inject lateinit var addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup
     @Inject lateinit var addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
+    @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
@@ -970,6 +971,18 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Reaction packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Раунд 135: «удали у всех» в личном чате - конверт
+                    // APUDEL1 разбирается до сохранения, в переписку ему
+                    // дороги нет (как у реакций).
+                    if (messageDeletion.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Delete packet ACK failed: " + e.message)
                         }
                         return
                     }

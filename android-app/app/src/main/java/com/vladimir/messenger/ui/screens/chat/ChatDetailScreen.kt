@@ -70,6 +70,8 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
     var activeMessage by remember { mutableStateOf<Message?>(null) }
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
+    // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
+    var deleteForAllTarget by remember { mutableStateOf<Message?>(null) }
     // Сообщение, для которого открыт выбор реакции.
     var reactionFor by remember { mutableStateOf<String?>(null) }
     // Текст, открытый в окне выделения части.
@@ -576,10 +578,58 @@ fun ChatDetailScreen(
                     ) {
                         Text("Поставить реакцию", modifier = Modifier.fillMaxWidth())
                     }
+                    // Раунд 135: удаление своего сообщения - у себя и у всех.
+                    if (message.isFromMe) {
+                        TextButton(
+                            onClick = {
+                                showCopyDialog = null
+                                viewModel.deleteMessageForMe(message.id)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                "Удалить у себя",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                showCopyDialog = null
+                                deleteForAllTarget = message
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                "Удалить у всех",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showCopyDialog = null }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    // Раунд 135: подтверждение удаления у всех - сообщение пропадёт и у
+    // собеседника (он должен быть на связи; иначе - честный отказ).
+    deleteForAllTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteForAllTarget = null },
+            title = { Text("Удалить у всех?") },
+            text = { Text("Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteForAllTarget = null
+                    viewModel.deleteMessageForAll(target.id)
+                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
             },
         )
     }
