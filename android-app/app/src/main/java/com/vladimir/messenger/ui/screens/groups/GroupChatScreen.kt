@@ -162,6 +162,7 @@ fun GroupChatScreen(
         // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
         val stickerEntries by viewModel.stickerEntries.collectAsStateWithLifecycle()
         val stickerRecents by viewModel.stickerRecents.collectAsStateWithLifecycle()
+        val swarmStickers by viewModel.swarmStickers.collectAsStateWithLifecycle()
         InputPanelDialog(
             myGifs = uiState.myGifs,
             swarmGifs = uiState.swarmGifs,
@@ -187,8 +188,10 @@ fun GroupChatScreen(
             onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
             stickers = stickerEntries,
             stickerRecents = stickerRecents,
+            swarmStickers = swarmStickers,
             onSticker = { viewModel.sendSticker(it) },
             onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onRequestSwarmSticker = { swarm -> viewModel.requestSwarmSticker(swarm) },
             onEmoji = { emoji -> draft += emoji },
             onOpened = { viewModel.refreshStickers() },
             onDismiss = {

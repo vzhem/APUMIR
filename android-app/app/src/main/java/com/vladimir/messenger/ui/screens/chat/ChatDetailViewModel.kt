@@ -95,6 +95,7 @@ class ChatDetailViewModel @Inject constructor(
         observeReactions()
         markAsRead()
         observeGifArrivals()
+        observeStickerArrivals()
     }
 
     /** Раунд 121: гифка, которую ждали из роя, пришла - сразу отправить. */
@@ -434,11 +435,39 @@ class ChatDetailViewModel @Inject constructor(
     private val _stickerRecents = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
     val stickerRecents: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerRecents.asStateFlow()
 
+    /** Стикеры других телефонов роя для панели («Из сети»). */
+    private val _swarmStickers = MutableStateFlow<List<com.vladimir.messenger.data.sticker.SwarmSticker>>(emptyList())
+    val swarmStickers: StateFlow<List<com.vladimir.messenger.data.sticker.SwarmSticker>> = _swarmStickers.asStateFlow()
+
+    /** sha стикера из сети, который ждём, чтобы сразу отправить (раунд 139). */
+    private var pendingSwarmStickerSha: String? = null
+
     /** Перечитать библиотеку стикеров (панель открылась / добавили). */
     fun refreshStickers() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _stickerEntries.value = stickerLibrary.all()
             _stickerRecents.value = stickerLibrary.recents()
+            // Раунд 139: каталог роя - рассказать о себе и спросить чужие,
+            // слить каталоги хранителей, подтянуть миниатюры для сетки.
+            runCatching {
+                stickerLibrary.syncWithSwarm(chatRepository, force = false)
+            }
+            val mine = _stickerEntries.value.map { it.sha256 }.toSet()
+            val swarm = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.swarmCatalog(appContext, mine)
+            }.getOrDefault(emptyList())
+            _swarmStickers.value = swarm
+            for (s in swarm.take(40)) {
+                if (com.vladimir.messenger.data.sticker.StickerLibrary
+                    .tinyThumbFile(appContext, s.sha256) == null
+                ) {
+                    runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary.requestThumb(
+                            appContext, chatRepository, s.sha256, s.holders,
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -502,6 +531,60 @@ class ChatDetailViewModel @Inject constructor(
                 }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /**
+     * Раунд 139: выбрал стикер в «Из сети». Есть локально - сразу в чат;
+     * нет - тихая просьба трём хранителям, байты приедут - отправим сами.
+     */
+    fun requestSwarmSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
+        viewModelScope.launch {
+            val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                stickerLibrary.entryOf(swarm.sha256)
+            }
+            if (local != null) {
+                sendSticker(local)
+                return@launch
+            }
+            com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
+            pendingSwarmStickerSha = swarm.sha256
+            val holder = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
+                    appContext, chatRepository, swarm.sha256, swarm.holders,
+                )
+            }.getOrNull()
+            _uiState.update {
+                it.copy(
+                    swarmStatus = when (holder) {
+                        null -> "Сеть пока не отвечает - попробуйте позже"
+                        "" -> "Уже качаем этот стикер"
+                        else -> "Качается с $holder - сейчас отправим"
+                    },
+                )
+            }
+        }
+    }
+
+    /** Раунд 139: стикер, которого ждали из роя, приехал - сразу отправить. */
+    private fun observeStickerArrivals() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.sticker.StickerLibrary.arrivalsFlow().collect { sha ->
+                _uiState.update { it.copy(swarmStatus = null) }
+                refreshStickers()
+                val wanted = pendingSwarmStickerSha
+                if (wanted != null && wanted == sha) {
+                    pendingSwarmStickerSha = null
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        stickerLibrary.entryOf(sha)
+                    }?.let { sendSticker(it) }
+                }
             }
         }
     }

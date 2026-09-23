@@ -45,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -101,8 +102,11 @@ fun InputPanelDialog(
     // ── Стикеры ──
     stickers: List<StickerLibrary.StickerEntry>,
     stickerRecents: List<StickerLibrary.StickerEntry>,
+    swarmStickers: List<com.vladimir.messenger.data.sticker.SwarmSticker> = emptyList(),
     onSticker: (StickerLibrary.StickerEntry) -> Unit,
     onAddSticker: (android.net.Uri) -> Unit,
+    /** Выбрали стикер из сети - скачать тихо у хранителей и отправить. */
+    onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
     // ── Эмодзи ──
     onEmoji: (String) -> Unit,
     onOpened: () -> Unit = {},
@@ -189,8 +193,11 @@ fun InputPanelDialog(
                     StickerSection(
                         stickers = stickers,
                         recents = stickerRecents,
+                        swarm = swarmStickers,
+                        swarmStatus = swarmStatus,
                         onSticker = onSticker,
                         onAddSticker = onAddSticker,
+                        onRequestSwarmSticker = onRequestSwarmSticker,
                     )
                 }
             }
@@ -325,21 +332,34 @@ private fun EmojiSection(onEmoji: (String) -> Unit) {
 private fun StickerSection(
     stickers: List<StickerLibrary.StickerEntry>,
     recents: List<StickerLibrary.StickerEntry>,
+    swarm: List<com.vladimir.messenger.data.sticker.SwarmSticker>,
+    swarmStatus: String?,
     onSticker: (StickerLibrary.StickerEntry) -> Unit,
     onAddSticker: (android.net.Uri) -> Unit,
+    onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
-    // Два пака: Недавние и Мои. Индексы первых ячеек - по числу стикеров.
+    // Миниатюры приезжают тихо - тик заставляет сетку перечитать кэш.
+    val thumbTick by remember {
+        StickerLibrary.thumbArrivalsFlow()
+    }.collectAsState("")
+    // Три пака: Недавние, Мои, Из сети. Индексы первых ячеек - по числу.
     val recentsStart = 0
     val myStart = 1 + recents.size + 1 // заголовок + стикеры + заголовок «Мои»
+    val swarmStart = myStart + stickers.size + 1 + 1 // «+» строка + заголовок «Из сети»
     val groups = listOf(
         Triple("🕘", "Недавние", recentsStart),
         Triple("📦", "Мои", myStart),
+        Triple("🕸", "Из сети", swarmStart),
     )
     val current by remember {
         derivedStateOf {
-            if (gridState.firstVisibleItemIndex >= myStart) 1 else 0
+            when {
+                gridState.firstVisibleItemIndex >= swarmStart -> 2
+                gridState.firstVisibleItemIndex >= myStart -> 1
+                else -> 0
+            }
         }
     }
     SubPillRow(
@@ -407,6 +427,72 @@ private fun StickerSection(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
+            }
+        }
+        item(key = "hs", span = { GridItemSpan(maxLineSpan) }) {
+            Text(
+                "Из сети",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp),
+            )
+        }
+        if (!swarmStatus.isNullOrEmpty()) {
+            item(key = "hs-status", span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    swarmStatus,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 4.dp, bottom = 4.dp),
+                )
+            }
+        }
+        if (swarm.isEmpty()) {
+            item(key = "hs-empty", span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    "Пока пусто. Добавьте стикер на любом телефоне - он появится здесь на всех и будет храниться в сети.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+        }
+        // Стикеры из роя: миниатюра с хранителя или заглушка; нажатие -
+        // тихо скачать у трёх хранителей и отправить в чат.
+        val panelContext = androidx.compose.ui.platform.LocalContext.current
+        gridEntries(
+            swarm,
+            key = { "sw-$thumbTick-${it.sha256}" },
+        ) { item ->
+            val thumb = remember(item.sha256, thumbTick) {
+                StickerLibrary.tinyThumbFile(panelContext, item.sha256)
+            }
+            Box(
+                modifier = Modifier
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                    .clickable { onRequestSwarmSticker(item) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (thumb != null) {
+                    AsyncImage(
+                        model = thumb,
+                        contentDescription = item.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .padding(4.dp),
+                    )
+                } else {
+                    Text(
+                        "🧩",
+                        fontSize = 22.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

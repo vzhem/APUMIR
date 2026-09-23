@@ -94,6 +94,7 @@ fun ChatDetailScreen(
         // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
         val stickerEntries by viewModel.stickerEntries.collectAsStateWithLifecycle()
         val stickerRecents by viewModel.stickerRecents.collectAsStateWithLifecycle()
+        val swarmStickers by viewModel.swarmStickers.collectAsStateWithLifecycle()
         com.vladimir.messenger.ui.components.InputPanelDialog(
             myGifs = uiState.myGifs,
             swarmGifs = uiState.swarmGifs,
@@ -121,8 +122,13 @@ fun ChatDetailScreen(
             onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
             stickers = stickerEntries,
             stickerRecents = stickerRecents,
+            swarmStickers = swarmStickers,
             onSticker = { viewModel.sendSticker(it) },
             onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onRequestSwarmSticker = { swarm ->
+                showGifCatalog = false
+                viewModel.requestSwarmSticker(swarm)
+            },
             onEmoji = { emoji -> viewModel.onInputTextChanged(uiState.inputText + emoji) },
             onOpened = { viewModel.refreshStickers() },
             onDismiss = {

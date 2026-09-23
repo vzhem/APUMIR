@@ -73,6 +73,7 @@ class CoreServerService : Service() {
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
     @Inject lateinit var gifPreparation: com.vladimir.messenger.data.file.OutgoingFilePreparationService
+    @Inject lateinit var stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary
     private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
@@ -105,6 +106,11 @@ class CoreServerService : Service() {
     private val gifCatalogSentAt = mutableMapOf<String, Long>()
     private val gifAskHandledAt = mutableMapOf<String, Long>()
     private val gifWantServedAt = mutableMapOf<String, Long>()
+
+    // Раунд 139: свой каталог стикеров роя (APUSTK1) - как у гифок.
+    private val stickerCatalogSentAt = mutableMapOf<String, Long>()
+    private val stickerAskHandledAt = mutableMapOf<String, Long>()
+    private val stickerWantServedAt = mutableMapOf<String, Long>()
 
     /**
      * Служебные конверты каталога гифок: ask/have/want. Разбираются до
@@ -239,6 +245,115 @@ class CoreServerService : Service() {
             )
             fileTransferRouter.pumpOutgoing()
             Log.i(TAG, "GIF ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
+        } catch (e: Exception) {
+            if (e.message.orEmpty().contains("binding is not pinned")) {
+                fileTransferRouter.requestExchangeBinding(peerId)
+            }
+            throw e
+        }
+    }
+
+    /**
+     * Раунд 139: служебные конверты каталога СТИКЕРОВ (APUSTK1). Разбираются
+     * до сохранения в чат (как гифковые), поэтому в переписке мусора нет.
+     */
+    private fun handleStickerEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
+        val packet = com.vladimir.messenger.data.sticker.StickerLibrary.parseStickerPacket(text) ?: return
+        val now = System.currentTimeMillis()
+        when (packet.kind) {
+            "ask" -> {
+                if (now - (stickerAskHandledAt[senderId] ?: 0L) < 10 * 60_000L) return
+                stickerAskHandledAt[senderId] = now
+                serviceScope.launch {
+                    runCatching { announceMyStickerCatalogTo(senderId) }
+                        .onFailure { Log.w(TAG, "sticker catalog announce failed: ${it.message}") }
+                }
+            }
+            "have" -> {
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary.receivePeerBatch(
+                            applicationContext, senderId, packet.index, packet.total, packet.items,
+                        )
+                    }.onFailure { Log.w(TAG, "sticker catalog batch failed: ${it.message}") }
+                }
+            }
+            "want" -> {
+                val key = "$senderId|${packet.sha256}"
+                if (now - (stickerWantServedAt[key] ?: 0L) < 10 * 60_000L) return
+                stickerWantServedAt[key] = now
+                serviceScope.launch {
+                    runCatching { serveStickerFromLibrary(senderId, chatId, packet.sha256) }
+                        .onFailure { Log.w(TAG, "sticker serve failed: ${it.message}") }
+                }
+            }
+            "thumb" -> {
+                // Просят миниатюру - отдаём крошечный jpeg (тихо).
+                val key = "T$senderId|${packet.sha256}"
+                if (now - (stickerWantServedAt[key] ?: 0L) < 5 * 60_000L) return
+                stickerWantServedAt[key] = now
+                serviceScope.launch {
+                    runCatching {
+                        val b64 = com.vladimir.messenger.data.sticker.StickerLibrary
+                            .tinyThumbPayload(applicationContext, packet.sha256)
+                            ?: return@runCatching
+                        val chat = chatRepository.getChatByContactId(senderId)
+                            ?: return@runCatching
+                        RustBridge.sendMessage(
+                            UUID.randomUUID().toString(), chat.id, senderId,
+                            com.vladimir.messenger.data.sticker.StickerLibrary.WIRE_PREFIX +
+                                "|thmb|" + packet.sha256 + "|" + b64,
+                        )
+                    }.onFailure { Log.w(TAG, "sticker thumb serve failed: ${it.message}") }
+                }
+            }
+            "thmb" -> {
+                // Приехала миниатюра - в кэш, сетка панели обновится сама.
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary.receiveThumb(
+                            applicationContext, packet.sha256, packet.payload,
+                        )
+                    }.onFailure { Log.w(TAG, "sticker thumb receive failed: ${it.message}") }
+                }
+            }
+        }
+    }
+
+    /** Рассказать свой каталог стикеров одному собеседнику (раунд 139). */
+    private suspend fun announceMyStickerCatalogTo(peerId: String) {
+        val now = System.currentTimeMillis()
+        if (now - (stickerCatalogSentAt[peerId] ?: 0L) < 10 * 60_000L) return
+        stickerCatalogSentAt[peerId] = now
+        val chat = chatRepository.getChatByContactId(peerId) ?: return
+        val batches = stickerLibrary.buildHaveBatches()
+        for (batch in batches) {
+            RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, peerId, batch)
+        }
+        Log.i(TAG, "Sticker catalog sent to ${peerId.takeLast(8)}: ${batches.size} batch(es)")
+    }
+
+    /**
+     * Собеседник попросил стикер из моего каталога: передаю БАЙТЫ защищённой
+     * передачей файлов ТИХО - без сообщения в наш чат. Телефон просителя сам
+     * положит стикер в библиотеку и отправит его в тот чат, откуда просьба.
+     */
+    private suspend fun serveStickerFromLibrary(peerId: String, chatId: String, sha256: String) {
+        val app = applicationContext
+        val entry = stickerLibrary.entryOf(sha256) ?: return
+        val file = entry.file.takeIf { it.isFile } ?: return
+        val messageId = UUID.randomUUID().toString()
+        try {
+            gifPreparation.prepareFromFile(
+                source = file,
+                displayName = entry.name.ifBlank { "sticker_${sha256.take(8)}.png" },
+                mediaType = com.vladimir.messenger.data.sticker.StickerLibrary.mimeFor(file),
+                messageId = messageId,
+                chatId = chatId,
+                recipientNodeId = peerId,
+            )
+            fileTransferRouter.pumpOutgoing()
+            Log.i(TAG, "Sticker ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
         } catch (e: Exception) {
             if (e.message.orEmpty().contains("binding is not pinned")) {
                 fileTransferRouter.requestExchangeBinding(peerId)
@@ -470,6 +585,13 @@ class CoreServerService : Service() {
                 serviceScope.launch {
                     runCatching { gifLibraryBootstrap() }
                         .onFailure { Log.w(TAG, "gif catalog bootstrap failed: ${it.message}") }
+                }
+
+                // Раунд 139: свой каталог стикеров - так же разослать и спросить.
+                serviceScope.launch {
+                    runCatching {
+                        stickerLibrary.syncWithSwarm(chatRepository, force = false)
+                    }.onFailure { Log.w(TAG, "sticker catalog bootstrap failed: ${it.message}") }
                 }
 
                 // Прокси-автопилот: первичный цикл при старте — проверить пул, убрать мёртвых,
@@ -961,6 +1083,16 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "GIF packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    if (com.vladimir.messenger.data.sticker.StickerLibrary.isStickerPacket(text)) {
+                        handleStickerEnvelope(senderId, chatId, messageId, text)
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Sticker packet ACK failed: " + e.message)
                         }
                         return
                     }

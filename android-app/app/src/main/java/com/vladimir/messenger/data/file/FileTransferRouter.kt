@@ -50,6 +50,8 @@ class FileTransferRouter @Inject constructor(
      * Берётся только при обработке предложений и завершении передачи.
      */
     private val apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
+    /** Раунд 139: библиотека стикеров - тихое оседание стикеров из роя. */
+    private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
 ) {
     private val appContext: Context
     private val sender: FileTransferSender
@@ -189,10 +191,16 @@ class FileTransferRouter @Inject constructor(
                     // гифку, которую этот телефон сам просил у хранителя
                     // (isWanted): присланный скрепкой .gif по-прежнему
                     // показывает пузырь, его никто не просил из каталога.
-                    val gifSilent = mediaType.equals("image/gif", ignoreCase = true) &&
-                        runCatching {
-                            com.vladimir.messenger.data.gif.GifLibrary.isWanted(fileSha256)
-                        }.getOrDefault(false)
+                    // Раунд 139: то же - для стикера, которого телефон сам
+                    // попросил в панели «Из сети».
+                    val stickerWanted = runCatching {
+                        stickerLibrary.isWanted(fileSha256)
+                    }.getOrDefault(false)
+                    val gifSilent = stickerWanted ||
+                        (mediaType.equals("image/gif", ignoreCase = true) &&
+                            runCatching {
+                                com.vladimir.messenger.data.gif.GifLibrary.isWanted(fileSha256)
+                            }.getOrDefault(false))
                     if (!gifSilent) {
                         chatRepository.saveIncomingMessage(
                             chatId = chatId,
@@ -218,6 +226,19 @@ class FileTransferRouter @Inject constructor(
                                 )
                             }
                         }.onFailure { Log.w(TAG, "gif library hook failed: ${it.message}") }
+                    }
+                    // Раунд 139: стикер, которого телефон сам просил в панели
+                    // «Из сети», тихо ложится в библиотеку стикеров - дальше
+                    // VM сам отправит его в чат и поднимет «Мои».
+                    if (stickerWanted) {
+                        runCatching {
+                            val row = transferDao.getForFile(chatId, fileSha256)
+                                .firstOrNull { it.direction == "INCOMING" && it.state == "COMPLETE" }
+                            val plain = row?.let { receivedFileFor(it) }
+                            if (plain != null) {
+                                stickerLibrary.addBytes(plain.readBytes(), displayName)
+                            }
+                        }.onFailure { Log.w(TAG, "sticker library hook failed: ${it.message}") }
                     }
             },
         )
