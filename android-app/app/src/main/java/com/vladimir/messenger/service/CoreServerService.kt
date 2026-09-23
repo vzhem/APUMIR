@@ -1559,13 +1559,15 @@ class CoreServerService : Service() {
             this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(this, MessengerApplication.CHANNEL_ID)
+        return NotificationCompat.Builder(this, MessengerApplication.CHANNEL_SERVICE_ID)
             .setContentTitle("APU")
             .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setShowWhen(false)
             .build()
     }
 
