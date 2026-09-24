@@ -78,10 +78,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -517,7 +520,30 @@ fun GroupChatScreen(
             }
 
             // ── Лента темы
+            // Раунд 144: при входе в тема открывается на первом непрочитанном
+            // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
+            val feedListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val feedScope = rememberCoroutineScope()
+            LaunchedEffect(uiState.selectedTopicId, uiState.messages.size) {
+                val jump = viewModel.feedJump.value ?: return@LaunchedEffect
+                if (jump.topicId != uiState.selectedTopicId || uiState.messages.isEmpty()) {
+                    return@LaunchedEffect
+                }
+                val offset = if (uiState.moreComments > 0) 1 else 0
+                feedListState.scrollToItem(
+                    (offset + jump.index).coerceIn(0, offset + uiState.messages.size - 1),
+                )
+                viewModel.consumeFeedJump()
+            }
+            val feedRemaining by remember(uiState.messages.size, uiState.moreComments) {
+                derivedStateOf {
+                    val last = feedListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    (uiState.messages.size + (if (uiState.moreComments > 0) 1 else 0) - 1 - last)
+                        .coerceAtLeast(0)
+                }
+            }
             LazyColumn(
+                state = feedListState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -595,6 +621,31 @@ fun GroupChatScreen(
                         Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp))
                     }
                 }
+            }
+
+            // Раунд 144: сколько сообщений осталось ниже - тап прокручивает вниз.
+            if (feedRemaining > 0) {
+                val lastIndex = (if (uiState.moreComments > 0) 1 else 0) + uiState.messages.size - 1
+                Text(
+                    "↓  Ещё " + messagesLabel(feedRemaining),
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFFF5F7FA).copy(alpha = 0.96f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                            RoundedCornerShape(16.dp),
+                        )
+                        .clickable {
+                            feedScope.launch {
+                                feedListState.animateScrollToItem(lastIndex.coerceAtLeast(0))
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                )
             }
 
             // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).

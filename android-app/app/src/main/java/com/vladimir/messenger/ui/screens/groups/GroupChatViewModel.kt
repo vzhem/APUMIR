@@ -745,9 +745,28 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    // ── Раунд 144: вход в тему - сразу на первом непрочитанном ──────────────
+
+    /** Куда прыгнуть ленте: тема, индекс сообщения, сколько непрочитанных. */
+    data class FeedJump(val topicId: String, val index: Int, val unread: Int)
+
+    private val _feedJump = MutableStateFlow<FeedJump?>(null)
+    val feedJump: StateFlow<FeedJump?> = _feedJump.asStateFlow()
+
+    private var jumpTopicId: String? = null
+
+    /** Однократный захват на входе в тему (счётчик - до markRead). */
+    private var jumpCaptured = false
+
+    fun consumeFeedJump() {
+        _feedJump.value = null
+    }
+
     private fun observeMessages(topicId: String) {
         messagesJob?.cancel()
         followComments(topicId)
+        jumpTopicId = topicId
+        jumpCaptured = false
         messagesJob = viewModelScope.launch {
             groupRepository.observeTopicMessages(groupId, topicId).collect { all ->
                 // Куски фотографий и длинного текста - служебные строки, а не
@@ -765,6 +784,14 @@ class GroupChatViewModel @Inject constructor(
                     }
                 }
                 _uiState.update { it.copy(messages = list, moreComments = moreComments(topicId, list.size)) }
+                // Раунд 144: первый выпуск ленты - захватить непрочитанные
+                // ДО их сброса и указать ленте первое непрочитанное.
+                if (jumpTopicId == topicId && !jumpCaptured) {
+                    jumpCaptured = true
+                    val unread = runCatching { groupRepository.peekTopicUnread(topicId) }.getOrDefault(0)
+                    val index = if (unread in 1..list.size) list.size - unread else list.size - 1
+                    _feedJump.value = FeedJump(topicId, index, unread)
+                }
                 // Экран открыт - значит тема прочитана. Вызываем на каждом
                 // обновлении, чтобы счётчик гас и на новых сообщениях.
                 groupRepository.markRead(groupId, topicId)

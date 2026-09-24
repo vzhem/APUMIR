@@ -3303,6 +3303,13 @@ class GroupRepository(
     }
 
     /**
+     * Раунд 144: непрочитанные темы ДО сброса - лента прыгает на первое
+     * непрочитанное сообщение при входе (вызывается из VM до markRead).
+     */
+    suspend fun peekTopicUnread(topicId: String): Int =
+        groupDao.getTopicById(topicId)?.unreadCount ?: 0
+
+    /**
      * Тема прочитана.
      *
      * Счётчик непрочитанных только рос: markTopicRead и markGroupRead в DAO
