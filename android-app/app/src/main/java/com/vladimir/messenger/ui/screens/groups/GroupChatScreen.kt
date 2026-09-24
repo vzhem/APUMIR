@@ -68,6 +68,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -649,7 +650,10 @@ fun GroupChatScreen(
             }
 
             // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
-            Row(
+            // Раунд 145: во время набора скрепка и GIF уходят НАД полем, а
+            // текст занимает всю ширину и до шести строк (просьба владельца).
+            var inputFocused by remember { mutableStateOf(false) }
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(8.dp)
@@ -663,71 +667,76 @@ fun GroupChatScreen(
                         RoundedCornerShape(18.dp),
                     )
                     .padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Скрепка (этап 9): файл к сообщению. Закрытые вложения
-                // объясняются, а не молчат.
-                IconButton(
-                    onClick = {
-                        if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
-                    },
-                    enabled = !uiState.isPreparingFile && !uiState.sending,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    if (uiState.isPreparingFile) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            Icons.Filled.AttachFile,
-                            contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
-                            tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                if (inputFocused) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
+                            },
+                            enabled = !uiState.isPreparingFile && !uiState.sending,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            if (uiState.isPreparingFile) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(
+                                    Icons.Filled.AttachFile,
+                                    contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
+                                    tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                                )
+                            }
+                        }
+                    TextButton(
+                        onClick = {
+                            if (uiState.canAttach) {
+                                showGifCatalog = true
+                                viewModel.onGifCatalogOpened()
+                                if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                                    viewModel.searchGifs("")
+                                }
+                            } else {
+                                viewModel.onAttachLocked()
+                            }
+                        },
+                        enabled = !uiState.isPreparingFile && !uiState.sending,
+                    ) {
+                        Text(
+                            "GIF",
+                            fontWeight = FontWeight.Bold,
+                            color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
                         )
                     }
+                    }
                 }
-                // Каталог GIF (v11.74.14): те же права, что у вложений.
-                TextButton(
-                    onClick = {
-                        if (uiState.canAttach) {
-                            showGifCatalog = true
-                            viewModel.onGifCatalogOpened()
-                            if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
-                                viewModel.searchGifs("")
-                            }
-                        } else {
-                            viewModel.onAttachLocked()
-                        }
-                    },
-                    enabled = !uiState.isPreparingFile && !uiState.sending,
-                ) {
-                    Text(
-                        "GIF",
-                        fontWeight = FontWeight.Bold,
-                        color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                Row(verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { inputFocused = it.isFocused },
+                        placeholder = { Text("Сообщение") },
+                        minLines = 1,
+                        maxLines = 6,
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFF1E2430),
+                            unfocusedTextColor = Color(0xFF1E2430),
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedPlaceholderColor = Color(0xFF5A6472),
+                            unfocusedPlaceholderColor = Color(0xFF5A6472),
+                        ),
                     )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
+                        onClick = {
+                            viewModel.send(draft)
+                            draft = ""
+                        },
+                    ) { Text("Отправить") }
                 }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Сообщение") },
-                    maxLines = 4,
-                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFF1E2430),
-                        unfocusedTextColor = Color(0xFF1E2430),
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedPlaceholderColor = Color(0xFF5A6472),
-                        unfocusedPlaceholderColor = Color(0xFF5A6472),
-                    ),
-                )
-                Spacer(Modifier.width(8.dp))
-                TextButton(
-                    enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
-                    onClick = {
-                        viewModel.send(draft)
-                        draft = ""
-                    },
-                ) { Text("Отправить") }
             }
 
             } // else: лента темы
