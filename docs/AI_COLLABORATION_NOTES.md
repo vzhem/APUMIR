@@ -9498,6 +9498,22 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-24 (раунд 155) - v11.74.52: служебные строки вне списков.**
+  Владелец (скрин «Проводника»): «гифка прописана буквами и цифрами;
+  служебные строки видны на главной». Светились: APUGIFREF1|sha
+  (предпросмотр группы - preview() не знал про ссылки), APUSTK1|ask
+  (личка - saveIncoming пишет content как есть), 🖼 uuid (визитка
+  LOCAL_FILE). Фикс: NEW util/ChatPreviews.human() (nullable in/out)
+  на отображении (ContactCard, ChatListScreen группы, список тем -
+  чинит существующие строки!) и записи (GroupRepository.preview(),
+  3 вызова ChatRepository.updateLastMessage). ГРАБЛИ: check86 failure -
+  Text в темах: isNullOrBlank()-контракт давал smart-cast, обёртка в
+  nullable-хелпер его сломала (None of the following candidates
+  is applicable); fix `?: ""`, check87 success. УРОК: nullable-хелперы
+  + contract-based smart casts - сразу elvis в месте вызова.
+  v11.74.52 = 2983350, run 36008923856 SUCCESS, latest, APK
+  40 500 694 Б, sha256 9a537473…7d8.
+
 - **2026-09-24 (раунд 154) - v11.74.51: закрытые группы вне поиска.**
   Владелец (фото: закрытая «тест группа без тем - Вход по заявке» в
   «Открытых группах сети» у участника): «создал закрытую группу, но она
