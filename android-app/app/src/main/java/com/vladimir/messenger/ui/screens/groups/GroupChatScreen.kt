@@ -242,6 +242,27 @@ fun GroupChatScreen(
     }
 
     // Подложка на весь экран, в том числе под верхней панелью.
+            val feedListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val feedScope = rememberCoroutineScope()
+            LaunchedEffect(uiState.selectedTopicId, uiState.messages.size) {
+                val jump = viewModel.feedJump.value ?: return@LaunchedEffect
+                if (jump.topicId != uiState.selectedTopicId || uiState.messages.isEmpty()) {
+                    return@LaunchedEffect
+                }
+                val offset = if (uiState.moreComments > 0) 1 else 0
+                feedListState.scrollToItem(
+                    (offset + jump.index).coerceIn(0, offset + uiState.messages.size - 1),
+                )
+                viewModel.consumeFeedJump()
+            }
+            val feedRemaining by remember(uiState.messages.size, uiState.moreComments) {
+                derivedStateOf {
+                    val last = feedListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    (uiState.messages.size + (if (uiState.moreComments > 0) 1 else 0) - 1 - last)
+                        .coerceAtLeast(0)
+                }
+            }
+
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
         Scaffold(
@@ -524,26 +545,6 @@ fun GroupChatScreen(
             // ── Лента темы
             // Раунд 144: при входе в тема открывается на первом непрочитанном
             // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
-            val feedListState = androidx.compose.foundation.lazy.rememberLazyListState()
-            val feedScope = rememberCoroutineScope()
-            LaunchedEffect(uiState.selectedTopicId, uiState.messages.size) {
-                val jump = viewModel.feedJump.value ?: return@LaunchedEffect
-                if (jump.topicId != uiState.selectedTopicId || uiState.messages.isEmpty()) {
-                    return@LaunchedEffect
-                }
-                val offset = if (uiState.moreComments > 0) 1 else 0
-                feedListState.scrollToItem(
-                    (offset + jump.index).coerceIn(0, offset + uiState.messages.size - 1),
-                )
-                viewModel.consumeFeedJump()
-            }
-            val feedRemaining by remember(uiState.messages.size, uiState.moreComments) {
-                derivedStateOf {
-                    val last = feedListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                    (uiState.messages.size + (if (uiState.moreComments > 0) 1 else 0) - 1 - last)
-                        .coerceAtLeast(0)
-                }
-            }
             LazyColumn(
                 state = feedListState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -631,8 +632,6 @@ fun GroupChatScreen(
             } // Row: левая колонка + правая
         }
     }
-    }
-
     // Раунд 147: поле ввода - оверлей НА ВЕСЬ экран, включая область
     // пузырей тем слева (просьба владельца); imePadding поднимает всё
     // над клавиатурой, «Отправить» всегда видна.
@@ -783,6 +782,9 @@ fun GroupChatScreen(
             }
 
     }
+
+    }
+
 
     // Раунд 143: список заявок поверх экрана (как в привычном мессенджере):
     // поиск-пузырь, прокрутка, «Принять в группу» / «Отклонить».
