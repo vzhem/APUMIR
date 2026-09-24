@@ -888,7 +888,6 @@ private fun UnreadBadge(count: Int) {
 // Тема в своём пузыре: иконка, название, превью, время и непрочитанные
 // =============================================================================
 
-@Composable
 /**
  * Раунд 143: пузырь «N заявок на вступление» - виден только владельцу и
  * админам, живёт над содержимым (не перекрывает его) на главной
@@ -1058,6 +1057,7 @@ private fun messagesLabel(count: Int): String = when {
     else -> "$count сообщений"
 }
 
+@Composable
 private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
     Card(
         modifier = Modifier
