@@ -255,6 +255,15 @@ fun GroupChatScreen(
                 )
                 viewModel.consumeFeedJump()
             }
+            // Раунд 150: отправил сообщение - лента доехала до него
+            // (раньше оно оставалось за полем ввода, владелец, скрин).
+            LaunchedEffect(uiState.messages.size, uiState.messages.lastOrNull()?.id) {
+                val last = uiState.messages.lastOrNull() ?: return@LaunchedEffect
+                if (last.isFromMe) {
+                    val offset = if (uiState.moreComments > 0) 1 else 0
+                    feedListState.animateScrollToItem(offset + uiState.messages.size - 1)
+                }
+            }
             val feedRemaining by remember(uiState.messages.size, uiState.moreComments) {
                 derivedStateOf {
                     val last = feedListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0

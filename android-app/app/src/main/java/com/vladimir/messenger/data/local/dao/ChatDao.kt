@@ -58,6 +58,11 @@ interface ChatDao {
     @Query("UPDATE chats SET unreadCount = 0 WHERE id = :chatId")
     suspend fun markAsRead(chatId: String)
 
+    // Раунд 150: счётчик непрочитанных личных чатов (на списке чатов бейджа
+    // не было - saveIncomingMessage только обновлял lastMessage).
+    @Query("UPDATE chats SET unreadCount = unreadCount + 1 WHERE id = :chatId")
+    suspend fun incrementUnread(chatId: String)
+
     @Query("UPDATE chats SET lastMessage = :message, lastMessageTime = :time WHERE id = :chatId")
     suspend fun updateLastMessage(chatId: String, message: String, time: Long)
 

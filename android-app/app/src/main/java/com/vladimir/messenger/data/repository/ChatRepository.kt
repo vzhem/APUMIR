@@ -273,6 +273,8 @@ class ChatRepository @Inject constructor(
         )
         messageDao.insertMessageIgnore(entity)
         chatDao.updateLastMessage(chatId, content, timestamp)
+        // Раунд 150: бейдж непрочитанных на пузыре личного чата.
+        runCatching { chatDao.incrementUnread(chatId) }
     }
 
     suspend fun getChatById(chatId: String): Chat? {
@@ -366,6 +368,7 @@ class ChatRepository @Inject constructor(
         val inserted = messageDao.insertMessageIgnore(entity)
         if (inserted != -1L) {
             chatDao.updateLastMessage(chatId, "\ud83d\uddbc Гифка", timestamp)
+            runCatching { chatDao.incrementUnread(chatId) }
         }
         return inserted != -1L
     }
