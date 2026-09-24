@@ -711,7 +711,10 @@ private fun MessageInputBar(
     // обои (фирменные или свои) проходят сквозь неё. Белые пузыри скрепки,
     // поля и стрелки читаются на любом фоне.
     Surface(
-        modifier  = modifier.fillMaxWidth(),
+        // Раунд 149: imePadding - панель поднимается над клавиатурой
+        // (edge-to-edge: adjustResize сам не работает, владелец прислал
+        // скрин с закрытой клавиатурой поля и «Отправить»).
+        modifier  = modifier.fillMaxWidth().imePadding(),
         shadowElevation = 8.dp,
         color     = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
     ) {
