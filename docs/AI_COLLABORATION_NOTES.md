@@ -9498,6 +9498,28 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-24 (раунд 143) - v11.74.40: пузырь заявок + счётчик тем.**
+  Владелец (скрины Telegram): пузырь «28 заявок на вступление» на
+  главной канала/группы, висит в темах и комментариях, не перекрывает;
+  нажатие - прокручиваемый список с одобрением/отклонением и поиском-
+  пузырём; счётчик сообщений под названием темы. Инфраструктура УЖЕ
+  была (group_join_requests, observeJoinRequests, decideJoinRequest,
+  messageCount в TopicSummary) - добавлен только UI: GroupChatViewModel
+  (+joinRequests StateFlow, observeJoinRequests, decideJoinRequest),
+  GroupChatScreen (баннер в правой колонке перед контентом во ВСЕХ
+  состояниях; шторка Box(затемнение+Column снизу, поиск OutlinedTextField,
+  LazyColumn 460dp, карточки с «Принять в группу»/«Отклонить»);
+  requestsLabel/messagesLabel со склонениями. ГРАБЛИ: align() вне
+  BoxScope (обёртка Box); вставка перед «private fun TopicBubble»
+  оторвала @Composable (annotation not repeatable + Card из
+  не-комозабла) - КАЙТ: при вставке «перед fun X» учитывать строку
+  аннотации НАД X. Пятый откат базы: коммит на 860b47b с +472 чужих
+  строк - /tmp-копии, reset --hard 8fdcab8, перекоммит. check71
+  красный (аннотации), check72 зелёный. v11.74.40 = aec8392,
+  run 35950552045 SUCCESS, latest, APK 40 483 662 Б,
+  sha256 ece77cac…88c. ОПЕЧАТКА в заметках релиза («accompanied»)
+  замечена и исправлена сразу после публикации.
+
 - **2026-09-24 (раунд 142) - v11.74.39: служебная плашка спрятана.**
   Владелец (скрин): «это уведомление нужно спрятать... нужны только
   уведомления о сообщениях». Причина заметности: buildNotification
