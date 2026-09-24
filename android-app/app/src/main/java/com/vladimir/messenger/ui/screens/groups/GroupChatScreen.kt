@@ -55,6 +55,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -136,6 +137,13 @@ fun GroupChatScreen(
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
+    // Раунд 143: заявки на вступление - пузырь над содержимым для админов.
+    val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
+    var showRequestsSheet by remember { mutableStateOf(false) }
+    var requestQuery by remember { mutableStateOf("") }
+    val canDecideRequests = uiState.me?.let {
+        com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(it.role)
+    } == true
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
@@ -375,6 +383,16 @@ fun GroupChatScreen(
 
             // ── Правая часть: список тем пузырями либо лента выбранной темы.
             Column(modifier = Modifier.weight(1f).fillMaxSize()) {
+
+            // Раунд 143: пузырь заявок - на главной группы/канала, в темах
+            // и в комментариях; содержимое НЕ перекрывает (оно уезжает вниз).
+            if (canDecideRequests && joinRequests.isNotEmpty()) {
+                JoinRequestsBanner(
+                    count = joinRequests.size,
+                    expanded = showRequestsSheet,
+                    onClick = { showRequestsSheet = !showRequestsSheet },
+                )
+            }
 
             if (uiState.error != null) {
                 Text(
@@ -668,6 +686,21 @@ fun GroupChatScreen(
     }
     }
 
+    // Раунд 143: список заявок поверх экрана (как в привычном мессенджере):
+    // поиск-пузырь, прокрутка, «Принять в группу» / «Отклонить».
+    if (showRequestsSheet && joinRequests.isNotEmpty()) {
+        JoinRequestsSheet(
+            requests = joinRequests,
+            query = requestQuery,
+            onQuery = { requestQuery = it },
+            onDecide = { nodeId, approve ->
+                viewModel.decideJoinRequest(nodeId, approve)
+                if (joinRequests.size <= 1) showRequestsSheet = false
+            },
+            onDismiss = { showRequestsSheet = false },
+        )
+    }
+
     if (showNewTopic) {
         NewTopicDialog(
             onDismiss = { showNewTopic = false },
@@ -856,6 +889,175 @@ private fun UnreadBadge(count: Int) {
 // =============================================================================
 
 @Composable
+/**
+ * Раунд 143: пузырь «N заявок на вступление» - виден только владельцу и
+ * админам, живёт над содержимым (не перекрывает его) на главной
+ * группы/канала, в темах и в комментариях. Нажатие раскрывает список.
+ */
+@Composable
+private fun JoinRequestsBanner(count: Int, expanded: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.94f))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                RoundedCornerShape(18.dp),
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text("👥", fontSize = 18.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            requestsLabel(count) + " на вступление",
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            if (expanded) "▲" else "▼",
+            fontSize = 14.sp,
+            color = Color(0xFF5A6472),
+        )
+    }
+}
+
+/**
+ * Раунд 143: список заявок снизу поверх экрана: поиск-пузырь и
+ * прокручиваемые карточки с решениями.
+ */
+@Composable
+private fun JoinRequestsSheet(
+    requests: List<com.vladimir.messenger.data.group.JoinRequestSummary>,
+    query: String,
+    onQuery: (String) -> Unit,
+    onDecide: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Затемнение: нажатие вне списка закрывает его.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable { onDismiss() },
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(Color(0xFFF7F9FC))
+                .padding(12.dp),
+        ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQuery,
+            placeholder = { Text("Поиск заявок") },
+            singleLine = true,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        val clean = query.trim()
+        val filtered = if (clean.isEmpty()) requests else requests.filter {
+            it.displayName.contains(clean, ignoreCase = true) ||
+                it.note.contains(clean, ignoreCase = true)
+        }
+        if (filtered.isEmpty()) {
+            Text(
+                if (requests.isEmpty()) "Заявок пока нет" else "Никого не нашли по «" + clean + "»",
+                color = Color(0xFF5A6472),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 460.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                items(filtered, key = { it.nodeId }) { request ->
+                    JoinRequestRow(request = request, onDecide = onDecide)
+                }
+            }
+        }
+        }
+    }
+}
+
+/** Карточка одной заявки: кто, когда и кнопки решения. */
+@Composable
+private fun JoinRequestRow(
+    request: com.vladimir.messenger.data.group.JoinRequestSummary,
+    onDecide: (String, Boolean) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE8EEF5)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    request.displayName.trim().take(1).uppercase().ifBlank { "?" },
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF5A6472),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    request.displayName.ifBlank { request.nodeId.take(8) },
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1E2430),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "подал(а) заявку " + topicTimeLabel(request.requestedAtMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF5A6472),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { onDecide(request.nodeId, true) }) {
+                Text("Принять в группу")
+            }
+            TextButton(onClick = { onDecide(request.nodeId, false) }) {
+                Text("Отклонить", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+/** «1 заявка / 2 заявки / 28 заявок». */
+private fun requestsLabel(count: Int): String = when {
+    count % 10 == 1 && count % 100 != 11 -> "$count заявка"
+    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count заявки"
+    else -> "$count заявок"
+}
+
+/** Раунд 143: «1 сообщение / 3 сообщения / 653 сообщения / 5 сообщений». */
+private fun messagesLabel(count: Int): String = when {
+    count <= 0 -> "Нет сообщений"
+    count % 10 == 1 && count % 100 != 11 -> "$count сообщение"
+    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count сообщения"
+    else -> "$count сообщений"
+}
+
 private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
     Card(
         modifier = Modifier
@@ -902,18 +1104,24 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                         )
                     }
                 }
+                // Раунд 143: счётчик сообщений под названием темы (как в
+                // привычном мессенджере: «653 сообщения»).
                 Text(
-                    topic.lastMessagePreview
-                        ?: if (topic.messageCount > 0) {
-                            topic.messageCount.toString() + " сообщ."
-                        } else {
-                            "Нет сообщений"
-                        },
+                    messagesLabel(topic.messageCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF5A6472),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!topic.lastMessagePreview.isNullOrBlank()) {
+                    Text(
+                        topic.lastMessagePreview,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF8A93A2),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {

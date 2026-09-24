@@ -121,6 +121,7 @@ class GroupChatViewModel @Inject constructor(
         // observePinned(topicId) стартует вместе с лентой сообщений.
         observeGifArrivals()
         observeStickerArrivals()
+        observeJoinRequests()
     }
 
     /** Раунд 121: гифка из роя пришла файлом - сразу приложить к сообщению. */
@@ -394,6 +395,28 @@ class GroupChatViewModel @Inject constructor(
                     }
                 }
             }
+        }
+    }
+
+    // ── Заявки на вступление (раунд 143): пузырь владельца/админа ───────────
+
+    /** Заявки на вступление, ждущие решения (поток из базы). */
+    private val _joinRequests = MutableStateFlow<List<com.vladimir.messenger.data.group.JoinRequestSummary>>(emptyList())
+    val joinRequests: StateFlow<List<com.vladimir.messenger.data.group.JoinRequestSummary>> = _joinRequests.asStateFlow()
+
+    private fun observeJoinRequests() {
+        viewModelScope.launch {
+            groupRepository.observeJoinRequests(groupId).collect { list ->
+                _joinRequests.value = list
+            }
+        }
+    }
+
+    /** Одобрить или отклонить заявку (решение уходит просителю). */
+    fun decideJoinRequest(nodeId: String, approve: Boolean) {
+        viewModelScope.launch {
+            groupRepository.decideJoinRequest(groupId, nodeId, approve)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
