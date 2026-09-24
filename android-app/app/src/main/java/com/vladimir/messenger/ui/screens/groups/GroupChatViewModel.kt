@@ -108,6 +108,25 @@ class GroupChatViewModel @Inject constructor(
         observeAllGroups()
         observeMembers()
         observeTopics()
+        // Раунд 153: в группе «без тем» строк тем в базе нет - отправка
+        // молча выходила (selectedTopicId == null), лента не запускалась,
+        // владелец видел «Выберите тему» при пустом списке. Материализуем
+        // General (детерминированный id, одинаковый у всех) и открываем
+        // его как обычную тему: пишуться и лента, и «Отправить».
+        viewModelScope.launch {
+            repeat(10) {
+                val g = _uiState.value.group
+                if (g != null) {
+                    if (!g.topicsEnabled) {
+                        runCatching { groupRepository.ensureFlatTopic(groupId) }.getOrNull()?.let { id ->
+                            if (_uiState.value.selectedTopicId == null) selectTopic(id)
+                        }
+                    }
+                    return@launch
+                }
+                kotlinx.coroutines.delay(300)
+            }
+        }
         // Вступивший позже не застал создание тем - просим список у владельца.
         viewModelScope.launch { groupRepository.requestTopics(groupId) }
         // В канале ещё и сами посты: по ссылке на пост человек попадает сюда,

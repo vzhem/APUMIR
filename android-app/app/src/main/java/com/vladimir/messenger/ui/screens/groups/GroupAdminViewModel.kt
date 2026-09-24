@@ -225,6 +225,15 @@ class GroupAdminViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 153: перевести группу «без тем» в группу с темами. */
+    fun enableTopics() {
+        viewModelScope.launch {
+            groupRepository.enableTopics(groupId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess { _uiState.update { it.copy(notice = "Темы включены") } }
+        }
+    }
+
     fun updateProfile(title: String, about: String) {
         viewModelScope.launch {
             groupRepository.updateProfile(groupId, title, about)

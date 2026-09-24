@@ -116,6 +116,10 @@ interface GroupDao {
     @Query("UPDATE groups SET isPublic = :isPublic WHERE id = :groupId")
     suspend fun updateGroupVisibility(groupId: String, isPublic: Boolean)
 
+    // Раунд 153: перевод группы «без тем» в обычную группу с темами.
+    @Query("UPDATE groups SET topicsEnabled = 1 WHERE id = :groupId")
+    suspend fun setTopicsEnabled(groupId: String)
+
     @Query("UPDATE groups SET topicsEnabled = :enabled WHERE id = :groupId")
     suspend fun updateTopicsEnabled(groupId: String, enabled: Boolean)
 

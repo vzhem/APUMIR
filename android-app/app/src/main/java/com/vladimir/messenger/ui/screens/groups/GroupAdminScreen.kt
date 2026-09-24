@@ -208,9 +208,11 @@ fun GroupAdminScreen(
                     isOwner = uiState.isOwner,
                     canChangeInfo = uiState.canChangeInfo,
                     canChangeVisibility = uiState.isAdmin,
+                    topicsEnabled = uiState.group?.topicsEnabled == true,
                     onSetAvatar = viewModel::setGroupAvatar,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
+                    onEnableTopics = viewModel::enableTopics,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
                     onDeleteGroup = { viewModel.deleteGroup(onLeftGroup) },
                 )
@@ -272,9 +274,12 @@ private fun OverviewTab(
     isOwner: Boolean,
     canChangeInfo: Boolean,
     canChangeVisibility: Boolean,
+    /** Раунд 153: у группы темы выключены - предлагаем включить. */
+    topicsEnabled: Boolean,
     onSetAvatar: (android.net.Uri) -> Unit,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
+    onEnableTopics: () -> Unit,
     onLeave: () -> Unit,
     onDeleteGroup: () -> Unit,
 ) {
@@ -419,6 +424,25 @@ private fun OverviewTab(
                 }
                 if (canChangeVisibility) {
                     Switch(checked = isPublic, onCheckedChange = onTogglePublic)
+                }
+            }
+        }
+
+        // Раунд 153: перевод «без тем» -> «с темами» (владелец: «нужно
+        // в настройках переводить»). Односторонний: после включения
+        // переключатель исчезает - темы уже есть.
+        if (!isChannel && !topicsEnabled) {
+            ApuBubble {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Темы в группе", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Сейчас один общий чат без тем. Нажмите, чтобы включить темы",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                    Switch(checked = false, onCheckedChange = { onEnableTopics() })
                 }
             }
         }

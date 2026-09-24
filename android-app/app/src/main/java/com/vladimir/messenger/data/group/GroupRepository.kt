@@ -3984,6 +3984,49 @@ class GroupRepository(
         return Result.success(Unit)
     }
 
+    /**
+     * Раунд 153: перевести группу «без тем» в группу с темами (владелец:
+     * «нужно в настройках переводить»). Включаем флаг; если тем ещё нет -
+     * создаём General и объявляем участникам, как обычное создание темы.
+     * Если General уже материализован (плоский режим, см. ensureFlatTopic) -
+     * он и становится общей темой, старые сообщения остаются на месте.
+     */
+    suspend fun enableTopics(groupId: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Нет права менять настройки группы"))
+        }
+        if (group.topicsEnabled) return Result.success(Unit)
+        groupDao.setTopicsEnabled(groupId)
+        val existing = groupDao.getGeneralTopic(groupId) ?: groupDao.getTopics(groupId).firstOrNull()
+        if (existing == null) {
+            val topicId = idFactory()
+            groupDao.insertTopic(
+                GroupTopicEntity(
+                    id = topicId,
+                    groupId = groupId,
+                    name = GENERAL_TOPIC_NAME,
+                    ownerId = me,
+                    ownerName = member.displayName,
+                    createdAtMs = clock(),
+                    isGeneral = true,
+                )
+            )
+            broadcast(
+                groupId,
+                GroupWire.buildTopicCreated(groupId, topicId, GENERAL_TOPIC_NAME, ""),
+                excludeSelf = true,
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    
+
     suspend fun updateProfile(groupId: String, title: String, about: String): Result<Unit> {
         val clean = title.trim()
         if (clean.isEmpty()) return Result.failure(IllegalArgumentException("Пустое название"))
@@ -4550,7 +4593,38 @@ class GroupRepository(
     private fun dayKey(epochMs: Long): String =
         Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
-    companion object {
+        /**
+     * Раунд 153: у группы «без тем» строк тем в базе нет - писать некуда
+     * (resolveTopic возвращал null -> «Тема не найдена»), и лента не
+     * запускалась. Материализуем General с ДЕТЕРМИНИРОВАННЫМ id: каждый
+     * участник одинаково создаёт строку у себя, рассылка не нужна и
+     * расхождений между телефонами не бывает.
+     */
+    fun flatGeneralTopicId(groupId: String): String = groupId + ":general"
+
+    /** Id общей темы группы без тем, создав её при необходимости. */
+    suspend fun ensureFlatTopic(groupId: String): String? {
+        val group = groupDao.getGroupById(groupId) ?: return null
+        if (group.topicsEnabled) return null
+        groupDao.getGeneralTopic(groupId)?.let { return it.id }
+        groupDao.getTopics(groupId).firstOrNull()?.let { return it.id }
+        val me = myId() ?: return null
+        val member = groupDao.getMember(groupId, me)
+        groupDao.insertTopic(
+            GroupTopicEntity(
+                id = flatGeneralTopicId(groupId),
+                groupId = groupId,
+                name = GENERAL_TOPIC_NAME,
+                ownerId = me,
+                ownerName = member?.displayName.orEmpty(),
+                createdAtMs = clock(),
+                isGeneral = true,
+            )
+        )
+        return flatGeneralTopicId(groupId)
+    }
+
+companion object {
         /** Раунд 137: как часто очередь пытается донести «удалить у всех». */
         const val DELETION_RETRY_MS = 10L * 60 * 1000
 
