@@ -1234,7 +1234,8 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                 )
                 if (!topic.lastMessagePreview.isNullOrBlank()) {
                     Text(
-                        topic.lastMessagePreview,
+                        // Раунд 155: без служебных строк (гифки/стикеры).
+                        com.vladimir.messenger.util.ChatPreviews.human(topic.lastMessagePreview),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF8A93A2),
                         maxLines = 1,

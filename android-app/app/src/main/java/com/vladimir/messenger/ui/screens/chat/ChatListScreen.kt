@@ -989,7 +989,9 @@ private fun GroupCard(
                 maxLines = 1,
             )
             Text(
-                text = group.preview ?: if (group.isPublic) {
+                // Раунд 155: без служебных строк (гифки/стикеры).
+                text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
+                    ?: if (group.isPublic) {
                     "Публичная группа - ${group.memberCount} уч."
                 } else {
                     "Частная группа - ${group.memberCount} уч."

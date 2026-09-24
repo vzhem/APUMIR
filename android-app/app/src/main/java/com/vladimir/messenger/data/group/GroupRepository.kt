@@ -27,6 +27,7 @@ import com.vladimir.messenger.data.swarm.PostManifest
 import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.link.ShortLinks
+import com.vladimir.messenger.util.ChatPreviews
 import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -4581,6 +4582,8 @@ class GroupRepository(
 
     /** Превью для списков: без служебных строк фотографий и визитки файла. */
     private fun preview(text: String): String {
+        // Раунд 155: служебные строки - человеческими подписями ещё на записи.
+        val text = ChatPreviews.human(text) ?: return ""
         val clean = InlineImage.stripImage(text)
         val shown = if (clean.isBlank() && (InlineImage.hasImage(text) || InlineImage.photoCount(text) > 0)) {
             "Фото"

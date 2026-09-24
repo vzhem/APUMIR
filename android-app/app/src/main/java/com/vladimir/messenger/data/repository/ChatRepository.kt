@@ -101,7 +101,7 @@ class ChatRepository @Inject constructor(
                 recipientId = actualRecipientId,
             )
             messageDao.insertMessage(entity)
-            chatDao.updateLastMessage(chatId, content, timestamp)
+            chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
 
             // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
             val sentDirectly = if (actualRecipientId.isNotBlank()) {
@@ -272,7 +272,7 @@ class ChatRepository @Inject constructor(
             recipientId = recipientId,
         )
         messageDao.insertMessageIgnore(entity)
-        chatDao.updateLastMessage(chatId, content, timestamp)
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
         runCatching { chatDao.incrementUnread(chatId) }
     }
@@ -308,7 +308,7 @@ class ChatRepository @Inject constructor(
         )
         val inserted = messageDao.insertMessageIgnore(entity)
         if (inserted != -1L) {
-            chatDao.updateLastMessage(chatId, content, timestamp)
+            chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         }
         return inserted != -1L
     }
