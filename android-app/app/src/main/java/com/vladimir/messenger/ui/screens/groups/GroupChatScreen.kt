@@ -765,8 +765,13 @@ fun GroupChatScreen(
                     )
                 }
                 Spacer(Modifier.height(6.dp))
+                // Раунд 152: активная «Отправить» - золотая заливка и белый
+                // текст: сразу видно, что сообщение можно отправить (раньше
+                // менялся только оттенок текста - владелец не замечал).
+                val canSend = (draft.isNotBlank() || uiState.stagedFile != null) &&
+                    !uiState.sending && !uiState.isPreparingFile
                 TextButton(
-                    enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
+                    enabled = canSend,
                     onClick = {
                         viewModel.send(draft)
                         draft = ""
@@ -775,23 +780,21 @@ fun GroupChatScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
                         .background(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+                            if (canSend) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
                         )
                         .border(
                             1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            if (canSend) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                             RoundedCornerShape(18.dp),
                         )
                         .padding(vertical = 8.dp),
                 ) {
                     Text(
                         "Отправить",
-                        fontWeight = FontWeight.SemiBold,
-                        color = if ((draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color(0xFF9AA3AF)
-                        },
+                        fontWeight = FontWeight.Bold,
+                        color = if (canSend) Color.White else Color(0xFF9AA3AF),
                     )
                 }
             }

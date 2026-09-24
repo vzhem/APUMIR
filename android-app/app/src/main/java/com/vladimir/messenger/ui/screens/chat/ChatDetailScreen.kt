@@ -841,28 +841,33 @@ private fun MessageInputBar(
 
             Spacer(modifier = Modifier.height(6.dp))
 
+            // Раунд 152: активность читаем НАПРЯМУЮ из inputState - раньше
+            // она шла через родителя (snapshotFlow -> onTextChange ->
+            // recomposition), и кнопка активировалась с задержкой; плюс
+            // золотая заливка и белый текст (как в темах) - видно сразу.
+            val canSend = inputState.text.isNotBlank() && !isSending
             TextButton(
                 onClick = onSend,
-                enabled = text.isNotBlank() && !isSending,
+                enabled = canSend,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
-                    .background(Color.White.copy(alpha = 0.85f))
+                    .background(
+                        if (canSend) MaterialTheme.colorScheme.primary
+                        else Color.White.copy(alpha = 0.85f)
+                    )
                     .border(
                         1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                        if (canSend) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                         RoundedCornerShape(18.dp),
                     )
                     .padding(vertical = 8.dp),
             ) {
                 Text(
                     "Отправить",
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (text.isNotBlank() && !isSending) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        Color(0xFF9AA3AF)
-                    },
+                    fontWeight = FontWeight.Bold,
+                    color = if (canSend) Color.White else Color(0xFF9AA3AF),
                 )
             }
         }
