@@ -948,7 +948,10 @@ class CoreServerService : Service() {
                         !it.isFromMe &&
                             it.timestamp >= serviceStartedAtMs - 120_000L &&
                             notifiedMessageIds.add(it.id) &&
-                            !com.vladimir.messenger.util.InlineImage.isPart(it.content)
+                            !com.vladimir.messenger.util.InlineImage.isPart(it.content) &&
+                            // Раунд 156: конверты роя (стикеры/миниатюры) -
+                            // служебные, не звоним (владелец).
+                            !com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(it.content)
                     }
                     for (msg in recentIncoming) {
                         try {

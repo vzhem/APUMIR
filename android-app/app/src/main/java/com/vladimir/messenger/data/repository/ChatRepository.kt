@@ -274,7 +274,11 @@ class ChatRepository @Inject constructor(
         messageDao.insertMessageIgnore(entity)
         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
-        runCatching { chatDao.incrementUnread(chatId) }
+        // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
+        // сообщения, непрочитанные не считают (владелец).
+        if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
+            runCatching { chatDao.incrementUnread(chatId) }
+        }
     }
 
     suspend fun getChatById(chatId: String): Chat? {
