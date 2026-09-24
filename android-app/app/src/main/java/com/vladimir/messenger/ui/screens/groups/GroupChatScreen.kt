@@ -556,7 +556,10 @@ fun GroupChatScreen(
             // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
             LazyColumn(
                 state = feedListState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                // Раунд 151: лента сжимается над клавиатурой (edge-to-edge:
+                // окно само не сжимается - переписка пряталась за пузырями
+                // ввода; запас 200dp снизу отводит место под пузыри).
+                modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
                 // Раунд 147: снизу запас под оверлей поля ввода.
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
