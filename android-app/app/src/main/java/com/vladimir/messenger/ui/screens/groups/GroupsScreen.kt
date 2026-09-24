@@ -617,7 +617,12 @@ private fun GroupRow(
                         append(group.memberCount)
                         append(" участн.")
                         if (group.topicsEnabled) append(" • темы")
-                        group.lastMessagePreview?.let { append(" • ").append(it) }
+                        // Раунд 156: без служебных строк (гифки/стикеры).
+                        group.lastMessagePreview?.let {
+                            append(" • ").append(
+                                com.vladimir.messenger.util.ChatPreviews.human(it).orEmpty()
+                            )
+                        }
                     },
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,

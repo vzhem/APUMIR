@@ -964,8 +964,14 @@ class CoreServerService : Service() {
                             ) {
                                 "🖼 Гифка"
                             } else {
-                                com.vladimir.messenger.util.InlineImage
-                                    .stripImage(msg.content).ifBlank { "Фото" }.take(200)
+                                // Раунд 156: стикер-конверты и прочие служебные
+                                // строки - человеческими подписями.
+                                com.vladimir.messenger.util.ChatPreviews
+                                    .human(
+                                        com.vladimir.messenger.util.InlineImage
+                                            .stripImage(msg.content).ifBlank { "Фото" }
+                                    )
+                                    ?.take(200) ?: "Фото"
                             }
                             notificationHelper.showMessageNotification(
                                 msg.chatId, msg.senderId, text, true, topicId

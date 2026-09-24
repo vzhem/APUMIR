@@ -525,9 +525,12 @@ fun GroupChatScreen(
                                         Spacer(Modifier.width(4.dp))
                                     }
                                     Text(
-                                        // Без служебных строк фото и длинного текста.
-                                        com.vladimir.messenger.util.InlineImage.stripImage(m.content)
-                                            .ifBlank { pinnedFile?.let { GroupFileMarker.caption(it) }.orEmpty() },
+                                        // Без служебных строк фото и длинного текста;
+                                        // р156: и без гифка-ссылок/стикер-конвертов.
+                                        com.vladimir.messenger.util.ChatPreviews.human(
+                                            com.vladimir.messenger.util.InlineImage.stripImage(m.content)
+                                                .ifBlank { pinnedFile?.let { GroupFileMarker.caption(it) }.orEmpty() }
+                                        ) ?: "",
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
