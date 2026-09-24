@@ -23,6 +23,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.content.MediaType
 import androidx.compose.foundation.content.TransferableContent
 import androidx.compose.foundation.content.consume
@@ -714,12 +715,16 @@ private fun MessageInputBar(
         shadowElevation = 8.dp,
         color     = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
     ) {
-        Row(
+        // Раунд 148: как в темах - при наборе скрепка и GIF уходят НАД
+        // полем, «Отправить» - своим пузырём во всю ширину ПОД полем.
+        var inputFocused by remember { mutableStateOf(false) }
+        Column(
             modifier = Modifier
                 .navigationBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.Bottom,
         ) {
+            if (inputFocused) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -762,15 +767,17 @@ private fun MessageInputBar(
             // Каталог GIF (v11.74.15): ОТДЕЛЬНАЯ кнопка рядом со скрепкой,
             // те же права, что у вложений. Раньше кнопка была вложена внутрь
             // IconButton скрепки и накладывалась на неё.
-            TextButton(
-                onClick = onGifClick,
-                enabled = !isPreparingFile && !isSending && canAttach,
-            ) {
-                Text(
-                    "GIF",
-                    fontWeight = FontWeight.Bold,
-                    color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
-                )
+                TextButton(
+                    onClick = onGifClick,
+                    enabled = !isPreparingFile && !isSending && canAttach,
+                ) {
+                    Text(
+                        "GIF",
+                        fontWeight = FontWeight.Bold,
+                        color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                    )
+                }
+                }
             }
 
             BasicTextField(
@@ -802,7 +809,8 @@ private fun MessageInputBar(
                     }
                 },
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
+                    .onFocusChanged { inputFocused = it.isFocused }
                     // Раунд 41: стикеры/картинки/гифки с клавиатуры (Gboard и
                     // др.) вставляются прямо в поле. Раньше система писала
                     // «приложение не поддерживает вставку изображений».
@@ -828,42 +836,31 @@ private fun MessageInputBar(
                     },
             )
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            Box(
+            TextButton(
+                onClick = onSend,
+                enabled = text.isNotBlank() && !isSending,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.White.copy(alpha = 0.85f))
                     .border(
                         1.dp,
                         MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(14.dp),
-                    ),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .padding(vertical = 8.dp),
             ) {
-                IconButton(
-                    onClick  = onSend,
-                    enabled  = text.isNotBlank() && !isSending,
-                    modifier = Modifier.size(48.dp),
-                ) {
-                    if (isSending) {
-                        CircularProgressIndicator(
-                            modifier  = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color     = MaterialTheme.colorScheme.primary,
-                        )
+                Text(
+                    "Отправить",
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (text.isNotBlank() && !isSending) {
+                        MaterialTheme.colorScheme.primary
                     } else {
-                        Icon(
-                            Icons.Default.Send,
-                            contentDescription = "Отправить",
-                            tint = if (text.isNotBlank()) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                Color(0xFF9AA3AF)
-                            },
-                        )
-                    }
-                }
+                        Color(0xFF9AA3AF)
+                    },
+                )
             }
         }
     }
