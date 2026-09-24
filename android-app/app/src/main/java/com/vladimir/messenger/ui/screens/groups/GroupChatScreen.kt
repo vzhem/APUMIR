@@ -650,71 +650,74 @@ fun GroupChatScreen(
             }
 
             // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
-            // Раунд 145: во время набора скрепка и GIF уходят НАД полем, а
-            // текст занимает всю ширину и до шести строк (просьба владельца).
+            // Раунд 146: пузырь поля - от края до края экрана; «Отправить» -
+            // своим пузырём той же ширины под полем (просьба владельца).
             var inputFocused by remember { mutableStateOf(false) }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                    )
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(18.dp),
-                    )
-                    .padding(6.dp),
+                    .padding(vertical = 6.dp),
             ) {
-                if (inputFocused) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = {
-                                if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
-                            },
-                            enabled = !uiState.isPreparingFile && !uiState.sending,
-                            modifier = Modifier.size(40.dp),
-                        ) {
-                            if (uiState.isPreparingFile) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(
-                                    Icons.Filled.AttachFile,
-                                    contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
-                                    tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+                        )
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(6.dp),
+                ) {
+                    if (inputFocused) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = {
+                                    if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                if (uiState.isPreparingFile) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        Icons.Filled.AttachFile,
+                                        contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
+                                        tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                                    )
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    if (uiState.canAttach) {
+                                        showGifCatalog = true
+                                        viewModel.onGifCatalogOpened()
+                                        if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                                            viewModel.searchGifs("")
+                                        }
+                                    } else {
+                                        viewModel.onAttachLocked()
+                                    }
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                            ) {
+                                Text(
+                                    "GIF",
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
                                 )
                             }
                         }
-                    TextButton(
-                        onClick = {
-                            if (uiState.canAttach) {
-                                showGifCatalog = true
-                                viewModel.onGifCatalogOpened()
-                                if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
-                                    viewModel.searchGifs("")
-                                }
-                            } else {
-                                viewModel.onAttachLocked()
-                            }
-                        },
-                        enabled = !uiState.isPreparingFile && !uiState.sending,
-                    ) {
-                        Text(
-                            "GIF",
-                            fontWeight = FontWeight.Bold,
-                            color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
-                        )
                     }
-                    }
-                }
-                Row(verticalAlignment = Alignment.Bottom) {
                     OutlinedTextField(
                         value = draft,
                         onValueChange = { draft = it },
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth()
                             .onFocusChanged { inputFocused = it.isFocused },
                         placeholder = { Text("Сообщение") },
                         minLines = 1,
@@ -728,14 +731,36 @@ fun GroupChatScreen(
                             unfocusedPlaceholderColor = Color(0xFF5A6472),
                         ),
                     )
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(
-                        enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
-                        onClick = {
-                            viewModel.send(draft)
-                            draft = ""
+                }
+                Spacer(Modifier.height(6.dp))
+                TextButton(
+                    enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
+                    onClick = {
+                        viewModel.send(draft)
+                        draft = ""
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+                        )
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(vertical = 8.dp),
+                ) {
+                    Text(
+                        "Отправить",
+                        fontWeight = FontWeight.SemiBold,
+                        color = if ((draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color(0xFF9AA3AF)
                         },
-                    ) { Text("Отправить") }
+                    )
                 }
             }
 
