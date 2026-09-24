@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -546,7 +547,8 @@ fun GroupChatScreen(
             LazyColumn(
                 state = feedListState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(8.dp),
+                // Раунд 147: снизу запас под оверлей поля ввода.
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Большой канал: комментарии приходят от владельца по запросу,
@@ -624,6 +626,22 @@ fun GroupChatScreen(
                 }
             }
 
+            } // else: лента темы
+            } // правая колонка
+            } // Row: левая колонка + правая
+        }
+    }
+    }
+
+    // Раунд 147: поле ввода - оверлей НА ВЕСЬ экран, включая область
+    // пузырей тем слева (просьба владельца); imePadding поднимает всё
+    // над клавиатурой, «Отправить» всегда видна.
+    Column(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .imePadding(),
+    ) {
             // Раунд 144: сколько сообщений осталось ниже - тап прокручивает вниз.
             if (feedRemaining > 0) {
                 val lastIndex = (if (uiState.moreComments > 0) 1 else 0) + uiState.messages.size - 1
@@ -764,11 +782,6 @@ fun GroupChatScreen(
                 }
             }
 
-            } // else: лента темы
-            } // правая колонка
-            } // Row: левая колонка + правая
-        }
-    }
     }
 
     // Раунд 143: список заявок поверх экрана (как в привычном мессенджере):
