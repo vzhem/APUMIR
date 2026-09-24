@@ -46,8 +46,12 @@ object ShortLinks {
 
     fun isValidCode(code: String?): Boolean = code != null && CODE.matches(code)
 
-    /** Короткая ссылка на нашем хосте по коду. */
-    fun build(code: String): String = "https://" + GroupInviteLinks.WEB_HOST + PATH + code
+    /** Короткая ссылка по коду.
+     *  Раунд 157: показываем ТОЛЬКО нейтральный apumir.app (владелец:
+     *  «спрятать vzhem и 1985») - это тот же воркер (App Links верифицированы),
+     *  workers.dev тоже работает (PATTERN принимает оба хоста, старые
+     *  ссылки в переписке открываются). */
+    fun build(code: String): String = "https://" + GroupInviteLinks.OFFICIAL_HOST + PATH + code
 
     /**
      * Код из короткой ссылки либо null, если в тексте её нет. Понимает и

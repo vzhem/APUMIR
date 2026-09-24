@@ -26,7 +26,10 @@ data class ShareProfileUiState(
     val shareLink: String = "",
     val legacyLink: String = "",
     val alternativeLink: String = "",
-    val installLink: String = "https://github.com/vzhem/APUMIR/releases/latest",
+    // Раунд 157: APK отдаёт наш воркер (/update/apk - поток последнего
+    // релиза); ссылка на GitHub (vzhem) больше не показывается.
+    val installLink: String =
+        "https://" + com.vladimir.messenger.data.group.GroupInviteLinks.OFFICIAL_HOST + "/update/apk",
     val isSignedReferral: Boolean = false,
     val isLoading: Boolean = true,
 )
