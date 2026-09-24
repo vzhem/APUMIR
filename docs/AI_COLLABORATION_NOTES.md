@@ -9498,6 +9498,25 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-24 (раунд 150) - v11.74.47: автопрокрут при отправке;
+  бейдж непрочитанных личных чатов.** Владелец (2 скрина): «отправленное
+  скрывается за полем ввода (группа и канал); счётчик непрочитанных
+  не показывает на пузыре личного чата». Причины: в ленте тем вообще
+  не было автопрокрутки (scrollToBottom есть только в личке); в
+  saveIncomingMessage не инкрементировался unreadCount (у групп/каналов
+  - другой путь). Фиксы: GroupChatScreen LaunchedEffect(size, last.id)
+  - last.isFromMe -> animateScrollToItem(offset + size-1); ChatDao
+  .incrementUnread + вызовы в saveIncomingMessage и
+  insertReceivedGifRefMessage (runCatching). ГРАБЛИ (9-й откат):
+  упавший python-шаг НЕ остановил цепочку (между heredoc-ами не было
+  &&) - коммит +579 на устаревшей базе, push отклонён; УРОК: после
+  heredoc-питона проверять exit-код перед git-шагами. Гиф-якорь:
+  в файле литеральные Kotlin-эскейпы \ud83d\uddbc - искать через
+  find+repr, не переписывать строку руками. Recovery: /tmp/CD.kt,
+  CR.kt, GCS4.kt; перекоммит 447d625 (+17). check81 зелёный.
+  v11.74.47 = 447d625, run 35978017655 SUCCESS, latest, APK
+  40 500 694 Б, sha256 fadfd7a1…c73.
+
 - **2026-09-24 (раунд 149) - v11.74.46: клавиатура не прячет ввод
   в личке.** Владелец (скрин: поле и «Отправить» за клавиатурой).
   Причина: enableEdgeToEdge() в MainActivity - при edge-to-edge
