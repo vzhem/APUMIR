@@ -289,6 +289,13 @@ class SavedViewModel @Inject constructor(
             val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { stickerLibrary.add(uri) }.getOrNull()
             }
+            // Раунд 167: добавленный стикер сразу объявляется рою - у
+            // абонентов он появится в «Из сети» без ожидания.
+            if (ok != null) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { stickerLibrary.syncWithSwarm(chatRepository, force = true) }
+                }
+            }
             _uiState.update {
                 it.copy(
                     message = if (ok != null) "Стикер добавлен в библиотеку"
@@ -308,6 +315,12 @@ class SavedViewModel @Inject constructor(
             val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 // Раунд 165: общая логика импорта в библиотеке стикеров.
                 runCatching { stickerLibrary.addZip(uri) }.getOrNull()
+            }
+            // Раунд 167: альбом добавлен - сразу объявить каталог рою.
+            if ((summary?.first ?: 0) > 0) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { stickerLibrary.syncWithSwarm(chatRepository, force = true) }
+                }
             }
             _uiState.update {
                 val text = if (summary == null) {

@@ -285,7 +285,11 @@ class StickerLibrary @Inject constructor(
             val chat = chatRepository.getChatByContactId(peer) ?: continue
             val announceDue = force || changed ||
                 now - prefs.getLong("ann_$peer", 0L) > 6 * 3600_000L
-            if (announceDue && now - prefs.getLong("ann_$peer", 0L) > 10 * 60_000L) {
+            // Раунд 167: force - объявить СРАЗУ (только что добавили стикеры
+            // - рой узнаёт немедленно), без 10-минутной вежливости.
+            if (announceDue &&
+                (force || now - prefs.getLong("ann_$peer", 0L) > 10 * 60_000L)
+            ) {
                 val batches = buildHaveBatches()
                 var sent = true
                 for (b in batches) {

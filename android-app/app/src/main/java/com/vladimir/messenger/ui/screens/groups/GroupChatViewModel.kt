@@ -324,6 +324,7 @@ class GroupChatViewModel @Inject constructor(
     fun addSticker(uri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { stickerLibrary.add(uri) }
+            announceAdded()
             refreshStickers()
         }
     }
@@ -332,8 +333,17 @@ class GroupChatViewModel @Inject constructor(
     fun addStickerZip(uri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { stickerLibrary.addZip(uri) }
+            announceAdded()
             refreshStickers()
         }
+    }
+
+    /**
+     * Раунд 167: добавили стикеры (.zip или по одному) - объявить свой
+     * каталог рою СРАЗУ: абоненты увидят их в «Из сети» без ожидания.
+     */
+    private fun announceAdded() {
+        runCatching { stickerLibrary.syncWithSwarm(chatRepository, force = true) }
     }
 
     /**
