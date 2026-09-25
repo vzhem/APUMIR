@@ -9498,6 +9498,16 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-25 (раунд 162) - v11.74.59: «канал», а не «группа».**
+  Владелец: приглашение в канал пишет «группу». AppShare.groupInviteText/
+  shareGroupInvite + параметр isChannel (текст «Присоединяйся к каналу
+  «X»», шапка шера «Пригласить в канал»); isChannel прокинут из
+  ChatListScreen, GroupsScreen, GroupAdminScreen (InvitesTab ->
+  InviteCard - НОВЫЙ параметр на каждом уровне, check99 failure
+  Unresolved isChannel в InviteCard -> fix). 15-й откат. check100
+  success. v11.74.59 = cdad91a, run 36118920608 SUCCESS, latest,
+  APK 40 517 078 Б, sha256 6522bca2…a10.
+
 - **2026-09-25 (раунд 161) - v11.74.58: золото повсюду в приглашении.**
   Владелец (2 скрина): три пузыря - ВСЕ золотые; абоненты - пузыри с
   круглыми чеками, выбор золотит пузырь. InviteActionBubble filled=true
