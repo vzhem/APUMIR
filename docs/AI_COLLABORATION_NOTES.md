@@ -9498,6 +9498,17 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-25 (раунд 166) - v11.74.63: стикер - анимированной картинкой.**
+  Владелец (скрин группы): «Стикер не показывается в чате… нужно чтобы
+  показывался анимированной картинкой». GroupFileSwarm.stageStickerBytes
+  (image/webp, «Стикер.webp», store.put - байты уже local); ChatDetail
+  sendSticker - те же тип/имя; FileTransferBubble isAnimated (gif|webp)
+  -> AsyncImage; GroupFileCard -> GroupFileMarker.isAnimatedImage;
+  GroupChatScreen: получатель тихо сам зовёт файл (LaunchedEffect,
+  transfer==null && !pending); лента рисует стикер картинкой без
+  карточки при локальной копии. check109 success; тег v11.74.63,
+  run 36149188344 SUCCESS, latest, APK 40 533 462 Б.
+
 - **2026-09-25 (раунд 165) - v11.74.62: стикеры в панели всех чатов.**
   Владелец (2 скрина): .zip и свои стикеры - в личке/группах/каналах
   через Гиф-панель; стикеры в группе/каналах показываются ссылками,
