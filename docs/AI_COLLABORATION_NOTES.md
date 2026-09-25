@@ -9498,6 +9498,18 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-25 (раунд 164) - v11.74.61: свои стикеры + .zip-альбом.**
+  Владелец (скрины): добавлять свои стикеры - альбом одной темы .zip
+  (с vibesticker-подобных генераторов) и по одному .webp и другие
+  форматы. SavedScreen: диалог «Выберите стикер» + 2 золотые кнопки
+  (GetContent image/* и */*), stickerTick-перезагрузка; SavedViewModel:
+  addStickerFromUri (StickerLibrary.add - дедуп внутри), addStickersFromZip
+  (ZipInputStream, webp/png/jpg/jpeg/gif/bmp -> addBytes, webm скип,
+  итог N из M). ГРАБЛИ: check103 - stickerTick объявлен после пикеров
+  (Kotlin объявление до использования); скобки Column ловит
+  struct_check до коммита. v11.74.61 = 54c66b9, run 36129575508
+  SUCCESS, latest, APK 40 517 206 Б, sha256 7946d209…ace.
+
 - **2026-09-25 (раунд 163) - v11.74.60: «уже в канале» + стикеры
   в Избранном.** Владелец (2 скрина): метку «уже в группе» для каналов
   поправить; «Добавить в избранное» - пузыри в нашем стиле + стикеры.
