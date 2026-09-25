@@ -80,10 +80,20 @@ fun FileTransferBubble(
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = if (isFromMe) Arrangement.End else Arrangement.Start,
     ) {
+        // Раунд 169: стикер парит в чате - без подложки пузыря; остаётся
+        // только анимированная картинка с «тремя точками». (Условие
+        // самодостаточное: isImage/isSticker объявлены ниже, внутри Column.)
+        val stickerFloat = previewFile != null && (
+            transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".webp")
+            ) && transfer.mediaType.startsWith("image/", ignoreCase = true)
         Column(
             modifier = Modifier
-                .background(background, RoundedCornerShape(16.dp))
-                .padding(12.dp),
+                .then(
+                    if (stickerFloat) Modifier
+                    else Modifier.background(background, RoundedCornerShape(16.dp))
+                )
+                .padding(if (stickerFloat) 0.dp else 12.dp),
         ) {
             // Превью картинки: исходящее доступно сразу, входящее - после
             // приёма (COMPLETE).
@@ -103,6 +113,9 @@ fun FileTransferBubble(
             val isImage = transfer.mediaType.startsWith("image/")
             val isGif = transfer.mediaType.equals("image/gif", ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".gif")
+            // Раунд 169: стикер («Стикер.webp» или webp-картинка).
+            val isSticker = transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".webp")
             // Раунд 166: анимированный webp-стикер крутится так же, как гифка.
             val isAnimated = isGif ||
                 transfer.mediaType.equals("image/webp", ignoreCase = true) ||
@@ -257,11 +270,15 @@ fun FileTransferBubble(
             }
             }
             Spacer(modifier = Modifier.padding(2.dp))
-            Text(
-                stateLabel(transfer),
-                style = MaterialTheme.typography.bodySmall,
-                color = contentColor.copy(alpha = 0.9f),
-            )
+            // У парящего стикера служебной строки нет: «Получено ✓» -
+            // лишний текст под картинкой (раунд 169).
+            if (!(stickerFloat && transfer.state == "COMPLETE")) {
+                Text(
+                    stateLabel(transfer),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.9f),
+                )
+            }
             if (transfer.state == "TRANSFERRING" && transfer.transferredBytes > 0) {
                 val elapsedMs = System.currentTimeMillis() - transfer.createdAtMs
                 if (elapsedMs > 1000) {

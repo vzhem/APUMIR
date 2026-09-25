@@ -462,8 +462,18 @@ private fun SavedItemBubble(
         SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.savedAtMs))
     }
     val isFile = item.kind == SavedItemsRepository.KIND_FILE
+    // Раунд 169: сохранённый стикер - парит без пузыря, анимированной
+    // картинкой (как в чатах).
+    val isStickerItem = isFile && (
+        item.mediaType.equals("image/webp", ignoreCase = true) ||
+            item.fileName.lowercase().endsWith(".webp") ||
+            item.fileName.startsWith("Стикер")
+        )
 
-    ApuBubble(modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
+    ApuBubble(
+        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+        transparent = isStickerItem,
+    ) {
         if (item.sourceTitle.isNotBlank()) {
             Text(
                 item.sourceTitle,
@@ -505,7 +515,9 @@ private fun SavedItemBubble(
             // (Coil с GIF-декодером), а не стоит первым кадром.
             val isGifItem = item.mediaType.equals("image/gif", ignoreCase = true) ||
                 item.fileName.lowercase().endsWith(".gif")
-            if (isGifItem && previewPath != null) {
+            // Раунд 169: стикеры (.webp) тоже живут анимацией.
+            val isLiveItem = isGifItem || isStickerItem
+            if (isLiveItem && previewPath != null) {
                 coil.compose.AsyncImage(
                     model = java.io.File(previewPath),
                     contentDescription = item.fileName,

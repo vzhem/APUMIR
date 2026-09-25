@@ -1331,6 +1331,10 @@ private fun MessageBubble(
         // с колонкой тем) кнопка выдавливалась за край - файл нельзя было
         // закрепить. Вес без заполнения: пузырь занимает не больше остатка.
         Box(modifier = if (canPin) Modifier.weight(1f, fill = false) else Modifier) {
+        // Раунд 169: стикер с копией на телефоне парит в чате - пузырь
+        // без фона и тени, только картинка, время и реакции.
+        val stickerFloat = fileCard != null && fileCard.previewFile != null &&
+            GroupFileMarker.isSticker(fileCard.info)
         Card(
             modifier = Modifier
                 .widthIn(max = 300.dp)
@@ -1339,6 +1343,16 @@ private fun MessageBubble(
                     onClick = { showReactions = true },
                     onLongClick = { showMenu = true },
                 ),
+            colors = if (stickerFloat) {
+                CardDefaults.cardColors(containerColor = Color.Transparent)
+            } else {
+                CardDefaults.cardColors()
+            },
+            elevation = if (stickerFloat) {
+                CardDefaults.cardElevation(defaultElevation = 0.dp)
+            } else {
+                CardDefaults.cardElevation()
+            },
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {

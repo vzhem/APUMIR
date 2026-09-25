@@ -69,6 +69,14 @@ object GroupFileMarker {
             info.mediaType.equals("image/webp", ignoreCase = true) ||
             info.displayName.trimEnd().endsWith(".webp", ignoreCase = true)
 
+    /**
+     * Раунд 169: это стикер («Стикер.webp» от наших отправителей или любая
+     * webp-картинка) - рисуется без пузыря и рамок, анимированной картинкой.
+     */
+    fun isSticker(info: Info): Boolean =
+        info.displayName.trimStart().startsWith("Стикер", ignoreCase = true) ||
+            info.displayName.trimEnd().lowercase().endsWith(".webp")
+
     /** Сама строка визитки из текста (как есть) или null, если её нет или она испорчена. */
     fun line(text: String): String? =
         text.lineSequence().firstOrNull { it.startsWith(PREFIX) }?.takeIf { parse(it) != null }

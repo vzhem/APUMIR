@@ -193,11 +193,18 @@ fun GroupFileCard(
             .padding(top = 6.dp)
             .fillMaxWidth(),
     ) {
+    // Раунд 169: стикер парит в чате - без подложки, скруглений и полей
+    // карточки (владелец: «без лишних рамок и фонов»).
+    val stickerFloating = GroupFileMarker.isSticker(info) &&
+        GroupFileMarker.isAnimatedImage(info) && previewPath != null
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-            .padding(8.dp),
+            .then(if (stickerFloating) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+            .then(
+                if (stickerFloating) Modifier
+                else Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+            )
+            .padding(if (stickerFloating) 0.dp else 8.dp),
     ) {
         val bitmap = previewBitmap
         if (GroupFileMarker.isAnimatedImage(info) && previewPath != null) {

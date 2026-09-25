@@ -19,6 +19,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,19 +48,33 @@ val ApuBubbleMutedColor: Color = HintBubbleMutedColor
 fun ApuBubble(
     modifier: Modifier = Modifier,
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(6.dp),
+    /** Раунд 169: стикеры в «Избранном» - без рамки и подложки. */
+    transparent: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
+            .then(if (transparent) Modifier else Modifier.clip(RoundedCornerShape(18.dp)))
+            .then(
+                if (transparent) Modifier
+                else Modifier.background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
             )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .then(
+                if (transparent) Modifier
+                else Modifier.border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(18.dp),
+                )
+            )
+            .padding(
+                if (transparent) {
+                    PaddingValues(0.dp)
+                } else {
+                    PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+                }
+            ),
         verticalArrangement = verticalArrangement,
     ) {
         CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) {
