@@ -845,7 +845,12 @@ class FileTransferRouter @Inject constructor(
      * на .jpg.
      */
     fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
-        if (!transfer.mediaType.startsWith("image/")) return null
+        // Раунд 170: стикеры (webp/webm) тоже с картинкой в пузыре.
+        if (!transfer.mediaType.startsWith("image/") &&
+            !transfer.displayName.startsWith("Стикер")
+        ) {
+            return null
+        }
         if (transfer.direction == "INCOMING") return receivedFileFor(transfer)
         val base = "file_preview/v1/" + transfer.transferId
         if (transfer.mediaType.equals("image/gif", ignoreCase = true)) {

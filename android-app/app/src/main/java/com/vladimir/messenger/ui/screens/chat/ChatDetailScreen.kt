@@ -124,7 +124,11 @@ fun ChatDetailScreen(
             stickers = stickerEntries,
             stickerRecents = stickerRecents,
             swarmStickers = swarmStickers,
-            onSticker = { viewModel.sendSticker(it) },
+            onSticker = {
+                // Раунд 170: выбрал стикер - окно закрывается, видно чат.
+                showGifCatalog = false
+                viewModel.sendSticker(it)
+            },
             onAddSticker = { uri -> viewModel.addSticker(uri) },
             onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
             onRequestSwarmSticker = { swarm ->
@@ -398,9 +402,10 @@ fun ChatDetailScreen(
                                     it.state != "COMPLETE" &&
                                     it.messageId !in knownMessageIds &&
                                     it.transferId !in shadowed &&
-                                    // Раунд 128: гифки ходят ТИХО (по ссылкам) -
+                                    // Раунд 128/170: гифки и стикеры ходят ТИХО -
                                     // служебную передачу байтов в ленте не показываем.
-                                    !it.mediaType.equals("image/gif", ignoreCase = true)
+                                    !it.mediaType.equals("image/gif", ignoreCase = true) &&
+                                    !it.displayName.startsWith("Стикер")
                             }
                             .map { transfer ->
                                 ChatRow(

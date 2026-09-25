@@ -349,10 +349,12 @@ private fun StickerSection(
     val thumbTick by remember {
         StickerLibrary.thumbArrivalsFlow()
     }.collectAsState("")
-    // Три пака: Недавние, Мои, Из сети. Индексы первых ячеек - по числу.
-    val recentsStart = 0
-    val myStart = 1 + recents.size + 1 // заголовок + стикеры + заголовок «Мои»
-    val swarmStart = myStart + stickers.size + 1 + 1 // «+» строка + заголовок «Из сети»
+    // Три пака: Недавние, Мои, Из сети. Сверху сетки - две кнопки «+»,
+    // поэтому «Недавние» начинаются с индекса 2 (раунд 170: кнопки вверху,
+    // чтобы их не искали под сотней стикеров).
+    val recentsStart = 2
+    val myStart = 3 + maxOf(recents.size, 1)
+    val swarmStart = myStart + 1 + stickers.size
     val groups = listOf(
         Triple("🕘", "Недавние", recentsStart),
         Triple("📦", "Мои", myStart),
@@ -389,36 +391,6 @@ private fun StickerSection(
         verticalArrangement = Arrangement.spacedBy(4.dp),
         contentPadding = PaddingValues(vertical = 4.dp),
     ) {
-        item(key = "hr", span = { GridItemSpan(maxLineSpan) }) {
-            Text(
-                "Недавние",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
-            )
-        }
-        if (recents.isEmpty()) {
-            item(key = "hr-empty", span = { GridItemSpan(maxLineSpan) }) {
-                Text(
-                    "Пока пусто - отправленные стикеры появятся здесь.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-            }
-        }
-        rowStickers(recents, "r", onSticker)
-        item(key = "hm", span = { GridItemSpan(maxLineSpan) }) {
-            Text(
-                "Мои стикеры",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp),
-            )
-        }
-        rowStickers(stickers, "m", onSticker)
         item(key = "add", span = { GridItemSpan(maxLineSpan) }) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -457,6 +429,36 @@ private fun StickerSection(
                 )
             }
         }
+        item(key = "hr", span = { GridItemSpan(maxLineSpan) }) {
+            Text(
+                "Недавние",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+            )
+        }
+        if (recents.isEmpty()) {
+            item(key = "hr-empty", span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    "Пока пусто - отправленные стикеры появятся здесь.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+        }
+        rowStickers(recents, "r", onSticker)
+        item(key = "hm", span = { GridItemSpan(maxLineSpan) }) {
+            Text(
+                "Мои стикеры",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp),
+            )
+        }
+        rowStickers(stickers, "m", onSticker)
         item(key = "hs", span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 "Из сети",
@@ -542,8 +544,9 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.rowStickers(
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                 .clickable { onSticker(entry) },
         ) {
-            AsyncImage(
-                model = entry.file,
+            // Раунд 170: анимированные стикеры (gif/webp/webm) живут в сетке.
+            StickerAnimated(
+                file = entry.file,
                 contentDescription = entry.name,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier

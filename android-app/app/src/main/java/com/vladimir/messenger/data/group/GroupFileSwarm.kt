@@ -6,6 +6,7 @@ import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.AndroidFileSelection
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
+import com.vladimir.messenger.data.sticker.StickerLibrary
 import com.vladimir.messenger.data.file.FileExchangePeerStore
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileTransferReceiver
@@ -224,12 +225,15 @@ class GroupFileSwarm @Inject constructor(
         )
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val sha256 = digest.digest(bytes).joinToString("") { "%02x".format(it) }
-        store.put(groupId, sha256, "Стикер.webp", bytes.inputStream())
+        // Раунд 170: видео-стикер webm едет со своим типом - принимающая
+        // сторона рисует его покадрово (StickerAnimated).
+        val webm = StickerLibrary.isWebmBytes(bytes)
+        store.put(groupId, sha256, if (webm) "Стикер.webm" else "Стикер.webp", bytes.inputStream())
         GroupFileMarker.Info(
             sha256 = sha256,
             sizeBytes = bytes.size.toLong(),
-            mediaType = "image/webp",
-            displayName = "Стикер.webp",
+            mediaType = if (webm) "video/webm" else "image/webp",
+            displayName = if (webm) "Стикер.webm" else "Стикер.webp",
         )
     }
 

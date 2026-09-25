@@ -80,13 +80,12 @@ fun FileTransferBubble(
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = if (isFromMe) Arrangement.End else Arrangement.Start,
     ) {
-        // Раунд 169: стикер парит в чате - без подложки пузыря; остаётся
-        // только анимированная картинка с «тремя точками». (Условие
-        // самодостаточное: isImage/isSticker объявлены ниже, внутри Column.)
+        // Раунд 169/170: стикер (webp и видео-webm) парит в чате - без
+        // подложки пузыря; остаётся только анимированная картинка.
         val stickerFloat = previewFile != null && (
             transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp")
-            ) && transfer.mediaType.startsWith("image/", ignoreCase = true)
+            )
         Column(
             modifier = Modifier
                 .then(
@@ -110,16 +109,19 @@ fun FileTransferBubble(
                     previewBitmap = AvatarBitmaps.loadFile(previewPath, sampleSize = 2)
                 }
             }
-            val isImage = transfer.mediaType.startsWith("image/")
+            // Раунд 170: стикер - и webp, и видео-webm (генераторы стикеров).
+            val isSticker = transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".webp") ||
+                transfer.displayName.lowercase().endsWith(".webm")
+            val isImage = transfer.mediaType.startsWith("image/") || isSticker
             val isGif = transfer.mediaType.equals("image/gif", ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".gif")
-            // Раунд 169: стикер («Стикер.webp» или webp-картинка).
-            val isSticker = transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
-                transfer.displayName.lowercase().endsWith(".webp")
-            // Раунд 166: анимированный webp-стикер крутится так же, как гифка.
+            // Раунд 166: анимированный webp крутится как гифка; webm -
+            // покадрово. Всю анимацию рисует StickerAnimated.
             val isAnimated = isGif ||
                 transfer.mediaType.equals("image/webp", ignoreCase = true) ||
-                transfer.displayName.lowercase().endsWith(".webp")
+                transfer.displayName.lowercase().endsWith(".webp") ||
+                isSticker
             val canActOnImage = isImage && previewBitmap != null &&
                 transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
             var imageMenuOpen = androidx.compose.runtime.remember {
@@ -132,7 +134,10 @@ fun FileTransferBubble(
             var showFullImage by androidx.compose.runtime.remember(previewPath) {
                 androidx.compose.runtime.mutableStateOf(false)
             }
-            if (showFullImage && previewPath != null) {
+            // Раунд 170: видео-стикер webm в полноэкранный просмотр не зовём.
+            if (showFullImage && previewPath != null &&
+                !com.vladimir.messenger.data.sticker.StickerLibrary.isWebmFile(java.io.File(previewPath))
+            ) {
                 PhotoViewer(
                     photos = listOf(PhotoSource.File(previewPath)),
                     onDismiss = { showFullImage = false },
@@ -150,10 +155,10 @@ fun FileTransferBubble(
                 val ratio = shownPreview.width.toFloat() / shownPreview.height.coerceAtLeast(1).toFloat()
                 Box {
                     if (isAnimated) {
-                        // GIF: Coil с GIF-декодером крутит анимацию; статичный
-                        // первый кадр не годится. Рамку берём у того же файла.
-                        coil.compose.AsyncImage(
-                            model = java.io.File(previewPath),
+                        // Раунд 170: гифки/webp крутит Coil, webm-стикеры -
+                        // покадрово (StickerAnimated). Рамку берём у файла.
+                        com.vladimir.messenger.ui.components.StickerAnimated(
+                            file = java.io.File(previewPath),
                             contentDescription = transfer.displayName,
                             contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                             modifier = Modifier

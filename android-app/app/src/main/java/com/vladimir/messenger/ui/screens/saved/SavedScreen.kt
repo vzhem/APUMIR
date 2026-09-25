@@ -466,7 +466,9 @@ private fun SavedItemBubble(
     // картинкой (как в чатах).
     val isStickerItem = isFile && (
         item.mediaType.equals("image/webp", ignoreCase = true) ||
+            item.mediaType.equals("video/webm", ignoreCase = true) ||
             item.fileName.lowercase().endsWith(".webp") ||
+            item.fileName.lowercase().endsWith(".webm") ||
             item.fileName.startsWith("Стикер")
         )
 
@@ -518,8 +520,9 @@ private fun SavedItemBubble(
             // Раунд 169: стикеры (.webp) тоже живут анимацией.
             val isLiveItem = isGifItem || isStickerItem
             if (isLiveItem && previewPath != null) {
-                coil.compose.AsyncImage(
-                    model = java.io.File(previewPath),
+                // Раунд 170: гифки/webp крутит Coil, webm-стикеры покадрово.
+                com.vladimir.messenger.ui.components.StickerAnimated(
+                    file = java.io.File(previewPath),
                     contentDescription = item.fileName,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier

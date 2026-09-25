@@ -202,7 +202,11 @@ fun GroupChatScreen(
             stickers = stickerEntries,
             stickerRecents = stickerRecents,
             swarmStickers = swarmStickers,
-            onSticker = { viewModel.sendSticker(it) },
+            onSticker = {
+                // Раунд 170: выбрал стикер - окно закрывается, видно чат.
+                showGifCatalog = false
+                viewModel.sendSticker(it)
+            },
             onAddSticker = { uri -> viewModel.addSticker(uri) },
             onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
             onRequestSwarmSticker = { swarm -> viewModel.requestSwarmSticker(swarm) },

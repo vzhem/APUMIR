@@ -292,8 +292,16 @@ class ChatDetailViewModel @Inject constructor(
      * durable transport, not by this UI path.
      */
     /** Раунд 43: превью картинки для пузыря передачи файла. */
-    fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? =
-        fileTransferRouter.previewFileFor(transfer)
+    fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
+        val routerFile = fileTransferRouter.previewFileFor(transfer)
+        if (routerFile != null) return routerFile
+        // Раунд 170: свой стикер в исходящей передаче рисуем из библиотеки -
+        // jpg-снимка для webp/webm машина файлов не делает.
+        if (transfer.direction == "OUTGOING" && transfer.displayName.startsWith("Стикер")) {
+            return stickerLibrary.fileOf(transfer.fileSha256)
+        }
+        return null
+    }
 
     /**
      * Раунд 44: «Поделиться» картинкой из пузыря: копирую файл в cache и
@@ -516,12 +524,13 @@ class ChatDetailViewModel @Inject constructor(
                 targetRecipientId = recipientId
                 check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
                 val messageId = UUID.randomUUID().toString()
-                // Раунд 166: честный тип (анимированный webp) и имя - на
-                // карточке и в уведомлениях «Стикер.webp», не sha-строка.
+                // Раунд 166/170: честный тип и имя - на карточке и в
+                // уведомлениях «Стикер.webp»/«Стикер.webm», не sha-строка.
+                val webm = com.vladimir.messenger.data.sticker.StickerLibrary.isWebmFile(entry.file)
                 val prepared = filePreparation.prepareFromFile(
                     source = entry.file,
-                    displayName = "Стикер.webp",
-                    mediaType = "image/webp",
+                    displayName = if (webm) "Стикер.webm" else "Стикер.webp",
+                    mediaType = if (webm) "video/webm" else "image/webp",
                     messageId = messageId,
                     chatId = chatId,
                     recipientNodeId = recipientId,

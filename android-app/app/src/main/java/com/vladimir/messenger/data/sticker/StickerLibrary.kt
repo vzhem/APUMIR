@@ -105,7 +105,9 @@ class StickerLibrary @Inject constructor(
                 if (!entry.isDirectory) {
                     val name = entry.name.substringAfterLast('/')
                     val ext = name.substringAfterLast('.', "").lowercase()
-                    if (ext in imageExts) {
+                    // Раунд 170: webm - анимированные стикеры генераторов,
+                    // храним как есть (рисует StickerAnimated покадрово).
+                    if (ext in imageExts || ext == "webm") {
                         total++
                         if (addBytes(zip.readBytes(), name.substringBeforeLast('.')) != null) added++
                     }
@@ -772,9 +774,27 @@ class StickerLibrary @Inject constructor(
                     head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte() -> return "image/jpeg"
                     String(head, 0, 4, Charsets.US_ASCII) == "RIFF" &&
                         String(head, 8, 4, Charsets.US_ASCII) == "WEBP" -> return "image/webp"
+                    head[0] == 0x1A.toByte() && head[1] == 0x45.toByte() &&
+                        head[2] == 0xDF.toByte() && head[3] == 0xA3.toByte() -> return "video/webm"
                 }
             }
             return "image/png"
+        }
+
+        /** Раунд 170: это видео-стикер webm (EBML-подпись)? */
+        fun isWebmBytes(bytes: ByteArray): Boolean =
+            bytes.size >= 4 && bytes[0] == 0x1A.toByte() && bytes[1] == 0x45.toByte() &&
+                bytes[2] == 0xDF.toByte() && bytes[3] == 0xA3.toByte()
+
+        /** Видео-стикер webm по файлу библиотеки (файлы без расширения). */
+        fun isWebmFile(file: java.io.File): Boolean = try {
+            val head = ByteArray(4)
+            java.io.FileInputStream(file).use { input ->
+                val read = input.read(head)
+                read == 4 && isWebmBytes(head)
+            }
+        } catch (error: Exception) {
+            false
         }
     }
 }

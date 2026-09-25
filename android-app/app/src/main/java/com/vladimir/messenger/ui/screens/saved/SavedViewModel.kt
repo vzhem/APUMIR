@@ -339,9 +339,16 @@ class SavedViewModel @Inject constructor(
         viewModelScope.launch {
             val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching {
+                    // Раунд 170: видео-стикер webm сохраняется со своим типом.
+                    val webm = com.vladimir.messenger.data.sticker.StickerLibrary
+                        .isWebmFile(entry.file)
                     val result = repository.saveLocalFile(
-                        fileName = "стикер_${entry.sha256.take(8)}.webp",
-                        mediaType = "image/webp",
+                        fileName = if (webm) {
+                            "стикер_${entry.sha256.take(8)}.webm"
+                        } else {
+                            "стикер_${entry.sha256.take(8)}.webp"
+                        },
+                        mediaType = if (webm) "video/webm" else "image/webp",
                         sizeBytes = entry.file.length(),
                         storageRef = "local:stk:" + entry.sha256,
                         sourceTitle = "Стикеры",

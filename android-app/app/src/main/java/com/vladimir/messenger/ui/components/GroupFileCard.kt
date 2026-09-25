@@ -130,8 +130,11 @@ data class FileCardState(
                 pending = GroupFileMarker.key(chatId, info.sha256) in pendingKeys,
                 stalled = stalled,
                 seeded = if (isFromMe) mine.count { it.direction == "OUTGOING" && it.state == "COMPLETE" } + servedCount else 0,
+                // Раунд 170: у стикеров (в т.ч. webm) картинка есть всегда.
                 previewFile = localFile?.takeIf {
-                    info.mediaType.startsWith("image/") || GroupFileMarker.isGif(info)
+                    info.mediaType.startsWith("image/") ||
+                        GroupFileMarker.isGif(info) ||
+                        GroupFileMarker.isSticker(info)
                 },
                 onDownload = onDownload,
                 onSave = if (complete) {
@@ -178,7 +181,10 @@ fun GroupFileCard(
         }
     }
     var showFull by remember(previewPath) { mutableStateOf(false) }
-    if (showFull && previewPath != null) {
+    // Раунд 170: видео-стикер webm в полноэкранный просмотр не зовём.
+    if (showFull && previewPath != null &&
+        !com.vladimir.messenger.data.sticker.StickerLibrary.isWebmFile(java.io.File(previewPath))
+    ) {
         PhotoViewer(
             photos = listOf(PhotoSource.File(previewPath)),
             onDismiss = { showFull = false },
@@ -195,8 +201,8 @@ fun GroupFileCard(
     ) {
     // Раунд 169: стикер парит в чате - без подложки, скруглений и полей
     // карточки (владелец: «без лишних рамок и фонов»).
-    val stickerFloating = GroupFileMarker.isSticker(info) &&
-        GroupFileMarker.isAnimatedImage(info) && previewPath != null
+    // Раунд 170: webm-стикеры тоже парят (StickerAnimated рисует покадрово).
+    val stickerFloating = GroupFileMarker.isSticker(info) && previewPath != null
     Column(
         modifier = Modifier
             .then(if (stickerFloating) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
@@ -207,11 +213,12 @@ fun GroupFileCard(
             .padding(if (stickerFloating) 0.dp else 8.dp),
     ) {
         val bitmap = previewBitmap
-        if (GroupFileMarker.isAnimatedImage(info) && previewPath != null) {
-            // Гифка и анимированный webp-стикер: Coil с декодерами
-            // (MessengerApplication.newImageLoader) крутит анимацию сам.
-            AsyncImage(
-                model = java.io.File(previewPath),
+        if ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
+            previewPath != null
+        ) {
+            // Раунд 170: гифки/webp крутит Coil, webm-стикеры - покадрово.
+            StickerAnimated(
+                file = java.io.File(previewPath),
                 contentDescription = info.displayName,
                 contentScale = ContentScale.FillWidth,
                 modifier = Modifier
@@ -243,7 +250,8 @@ fun GroupFileCard(
         // Имя и размер нужны, только пока картинки ещё нет (идёт приём).
         // Картинка на месте - она и есть сообщение (решение владельца).
         val hasPreview = bitmap != null ||
-            (GroupFileMarker.isAnimatedImage(info) && previewPath != null)
+            ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
+                previewPath != null)
         if (!hasPreview) Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(8.dp))
@@ -302,7 +310,8 @@ fun GroupFileCard(
         // Раунд 168: «три точки» в правом верхнем углу карточки; тап -
         // три горизонтальных пузыря в гамме APU (как в «Избранном»).
         val cardHasPreview = previewBitmap != null ||
-            (GroupFileMarker.isAnimatedImage(info) && previewPath != null)
+            ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
+                previewPath != null)
         val hasActions = state.onSave != null || state.onShare != null ||
             state.onFavorite != null
         if (cardHasPreview && hasActions) {
