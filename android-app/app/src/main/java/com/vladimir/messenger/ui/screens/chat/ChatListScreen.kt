@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -402,33 +403,42 @@ fun ChatListScreen(
                         "Ссылку можно отправить кому угодно - по ней вход как обычно."
                 )
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    val chosen = group
-                    inviteChoice = null
-                    viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
-                        qrInvite = title to link
+            text = {
+                // Раунд 160: действия - тремя пузырями друг под другом
+                // (владелец: «три горизонтальных пузыря ... с нашей
+                // цветовой гаммой») вместо сжатых текстовых кнопок.
+                Column {
+                    Text(
+                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
+                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    InviteActionBubble("Показать QR-код", filled = true) {
+                        val chosen = group
+                        inviteChoice = null
+                        viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
+                            qrInvite = title to link
+                        }
                     }
-                }) { Text("Показать QR-код") }
-            },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = {
+                    Spacer(Modifier.height(8.dp))
+                    InviteActionBubble("Отправить ссылку") {
                         val chosen = group
                         inviteChoice = null
                         viewModel.shareGroupInvite(chosen.id) { title, link ->
                             com.vladimir.messenger.util.AppShare
                                 .shareGroupInvite(context, title, link)
                         }
-                    }) { Text("Отправить ссылку") }
-                    // Раунд 158: разослать приглашение контактам APU в личку.
-                    TextButton(onClick = {
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    InviteActionBubble("Отправить в APU") {
                         val chosen = group
                         inviteChoice = null
                         inviteApu = chosen
-                    }) { Text("Отправить в APU") }
+                    }
                 }
             },
+            confirmButton = {},
+            dismissButton = {},
         )
     }
 
@@ -693,6 +703,41 @@ fun ChatListScreen(
  * две страницы, и каждая рисует свой раздел независимо от выбранного.
  */
 @Composable
+/**
+ * Раунд 160: пузырь-кнопка диалога приглашения в гамме APU: золотая
+ * заливка (главное действие) либо светлый пузырь с золотой рамкой.
+ */
+@Composable
+private fun InviteActionBubble(
+    label: String,
+    filled: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                if (filled) MaterialTheme.colorScheme.primary
+                else Color.White.copy(alpha = 0.85f)
+            )
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.primary.copy(alpha = if (filled) 1f else 0.4f),
+                RoundedCornerShape(18.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontWeight = FontWeight.Bold,
+            color = if (filled) Color.White else MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
 private fun SectionPage(
     section: InboxSection,
     items: List<InboxItem>,
