@@ -9498,6 +9498,19 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-25 (раунд 165) - v11.74.62: стикеры в панели всех чатов.**
+  Владелец (2 скрина): .zip и свои стикеры - в личке/группах/каналах
+  через Гиф-панель; стикеры в группе/каналах показываются ссылками,
+  в уведомлениях тоже. InputPanelDialog: onAddStickerZip + строка
+  «Добавить альбом (.zip)» (StickerSection, GridItemSpan-строка);
+  ChatDetail/Group VM addStickerZip -> StickerLibrary.addZip (логика
+  перенесена из SavedViewModel - делегирует); sendSticker: визитка
+  displayName «Стикер.webp» (info.copy - store.put остаётся с sha,
+  маркер/карточка/уведомление - дружелюбные); ChatPreviews.human:
+  визитка «Стикер…» -> «🖼 Стикер». check105 success сразу.
+  v11.74.62 = a4fc3de, run 36135176330 SUCCESS, latest, APK
+  40 533 590 Б, sha256 8ed9a0aa…31a.
+
 - **2026-09-25 (раунд 164) - v11.74.61: свои стикеры + .zip-альбом.**
   Владелец (скрины): добавлять свои стикеры - альбом одной темы .zip
   (с vibesticker-подобных генераторов) и по одному .webp и другие
