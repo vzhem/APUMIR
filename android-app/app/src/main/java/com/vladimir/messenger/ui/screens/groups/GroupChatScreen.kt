@@ -604,12 +604,13 @@ fun GroupChatScreen(
                     // файл сам, и анимированная картинка появляется без
                     // кнопки «Скачать».
                     val st = cardState
-                    if (st != null && !message.isFromMe &&
-                        card.displayName.startsWith("Стикер") &&
+                    val stickerCard = card
+                    if (st != null && stickerCard != null && !message.isFromMe &&
+                        stickerCard.displayName.startsWith("Стикер") &&
                         st.transfer == null && !st.pending
                     ) {
-                        LaunchedEffect(card.sha256) {
-                            viewModel.requestFile(message, card)
+                        LaunchedEffect(stickerCard.sha256) {
+                            viewModel.requestFile(message, stickerCard)
                         }
                     }
                     MessageBubble(
