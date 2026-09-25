@@ -493,7 +493,7 @@ class ChatDetailViewModel @Inject constructor(
      * Раунд 167: добавили стикеры (.zip или по одному) - объявить свой
      * каталог рою СРАЗУ: абоненты увидят их в «Из сети» без ожидания.
      */
-    private fun announceAdded() {
+    private suspend fun announceAdded() {
         runCatching { stickerLibrary.syncWithSwarm(chatRepository, force = true) }
     }
 
