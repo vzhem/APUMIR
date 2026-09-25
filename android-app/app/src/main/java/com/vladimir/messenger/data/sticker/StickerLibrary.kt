@@ -86,6 +86,11 @@ class StickerLibrary @Inject constructor(
 
     // ── Мои стикеры ─────────────────────────────────────────────────────────
 
+    /** Раунд 163: файл стикера по sha - «Избранное» рисует и делится им. */
+    @Synchronized
+    fun fileOf(sha256: String): java.io.File? =
+        File(root, "$sha256.img").takeIf { it.isFile }
+
     @Synchronized
     fun all(): List<StickerEntry> {
         val file = File(root, INDEX_FILE)

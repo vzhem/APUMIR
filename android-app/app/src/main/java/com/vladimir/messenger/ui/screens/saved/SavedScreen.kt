@@ -17,6 +17,8 @@ import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -103,6 +105,8 @@ fun SavedScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showNoteDialog by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
+    // Раунд 163: выбор стикера для избранного.
+    var showStickerPicker by remember { mutableStateOf(false) }
     var showGifCatalog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<SavedItemEntity?>(null) }
 
@@ -250,53 +254,112 @@ fun SavedScreen(
     }
 
     if (showAddMenu) {
+        // Раунд 163: действия - золотыми пузырями друг под другом
+        // (владелец: «красивые пузыри горизонтальные в нашем стиле»).
         AlertDialog(
             onDismissRequest = { showAddMenu = false },
             title = { Text("Добавить в избранное") },
             text = {
                 Column {
-                    TextButton(
-                        onClick = {
-                            showAddMenu = false
-                            docPicker.launch(arrayOf("*/*"))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Файл с телефона", modifier = Modifier.fillMaxWidth()) }
-                    TextButton(
-                        onClick = {
-                            showAddMenu = false
-                            gifPicker.launch("image/gif")
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Гифка с телефона", modifier = Modifier.fillMaxWidth()) }
-                    TextButton(
-                        onClick = {
-                            showAddMenu = false
-                            viewModel.onGifCatalogOpened()
-                            showGifCatalog = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Из каталога гифок", modifier = Modifier.fillMaxWidth()) }
-                    TextButton(
-                        onClick = {
-                            showAddMenu = false
-                            viewModel.onGifCatalogOpened()
-                            viewModel.setGifTab("swarm")
-                            showGifCatalog = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Свои гифки", modifier = Modifier.fillMaxWidth()) }
-                    TextButton(
-                        onClick = {
-                            showAddMenu = false
-                            showNoteDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Заметка", modifier = Modifier.fillMaxWidth()) }
+                    SavedAddBubble("Файл с телефона") {
+                        showAddMenu = false
+                        docPicker.launch(arrayOf("*/*"))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Гифка с телефона") {
+                        showAddMenu = false
+                        gifPicker.launch("image/gif")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Из каталога гифок") {
+                        showAddMenu = false
+                        viewModel.onGifCatalogOpened()
+                        showGifCatalog = true
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Свои гифки") {
+                        showAddMenu = false
+                        viewModel.onGifCatalogOpened()
+                        viewModel.setGifTab("swarm")
+                        showGifCatalog = true
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // Раунд 163: стикеры из библиотеки - в избранное.
+                    SavedAddBubble("Стикеры") {
+                        showAddMenu = false
+                        showStickerPicker = true
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Заметка") {
+                        showAddMenu = false
+                        showNoteDialog = true
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showAddMenu = false }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    // Раунд 163: выбор стикера из библиотеки - добавить в избранное.
+    if (showStickerPicker) {
+        var stickers by remember { mutableStateOf<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>?>(null) }
+        LaunchedEffect(Unit) {
+            viewModel.stickersOnce { stickers = it }
+        }
+        AlertDialog(
+            onDismissRequest = { showStickerPicker = false },
+            title = { Text("Выберите стикер") },
+            text = {
+                val list = stickers
+                when {
+                    list == null -> Text("Загрузка…")
+                    list.isEmpty() -> Text("Библиотека стикеров пуста - добавьте стикеры в чате.")
+                    else -> {
+                        androidx.compose.foundation.lazy.LazyVerticalGrid(
+                            columns = androidx.compose.foundation.lazy.GridCells.Fixed(3),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(list.size) { i ->
+                                val entry = list[i]
+                                androidx.compose.foundation.layout.Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Color.White.copy(alpha = 0.85f))
+                                        .border(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                            RoundedCornerShape(14.dp),
+                                        )
+                                        .clickable {
+                                            showStickerPicker = false
+                                            viewModel.addSticker(entry)
+                                        }
+                                        .height(86.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    coil.compose.AsyncImage(
+                                        model = entry.file,
+                                        contentDescription = entry.name,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(6.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showStickerPicker = false }) { Text("Закрыть") }
             },
         )
     }
@@ -575,4 +638,28 @@ private fun formatSize(bytes: Long): String = when {
     bytes >= 1024L * 1024 -> String.format(Locale.getDefault(), "%.1f МБ", bytes / 1024.0 / 1024)
     bytes >= 1024L -> String.format(Locale.getDefault(), "%.0f КБ", bytes / 1024.0)
     else -> "$bytes Б"
+}
+
+
+/**
+ * Раунд 163: пузырь-кнопка меню «Добавить в избранное» в гамме APU -
+ * золотая заливка, белая жирная надпись (как пузыри приглашения).
+ */
+@Composable
+private fun SavedAddBubble(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.primary)
+            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontWeight = FontWeight.Bold, color = Color.White)
+    }
 }

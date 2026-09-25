@@ -556,7 +556,8 @@ fun ChatListScreen(
                                         )
                                         if (inGroup) {
                                             Text(
-                                                "уже в группе",
+                                                // Раунд 163: каналу - честное «уже в канале».
+                                                if (grp.isChannel) "уже в канале" else "уже в группе",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = Color(0xFF9AA3AF),
                                                 maxLines = 1,

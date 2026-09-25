@@ -41,6 +41,7 @@ class SavedViewModel @Inject constructor(
     private val fileTransferRouter: FileTransferRouter,
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -264,7 +265,43 @@ class SavedViewModel @Inject constructor(
             ref.startsWith("local:doc:") ->
                 java.io.File(java.io.File(appContext.filesDir, "saved_files"), ref.removePrefix("local:doc:"))
                     .takeIf { it.isFile }
+            ref.startsWith("local:stk:") ->
+                stickerLibrary.fileOf(ref.removePrefix("local:stk:"))
             else -> null
+        }
+    }
+
+    /** Раунд 163: мои стикеры - для выбора в «Добавить в избранное». */
+    fun stickersOnce(onLoaded: (List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>) -> Unit) {
+        viewModelScope.launch {
+            val list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    stickerLibrary.all().sortedByDescending { it.atMs }
+                }.getOrDefault(emptyList())
+            }
+            onLoaded(list)
+        }
+    }
+
+    /** Раунд 163: стикер из библиотеки - в избранное (файл остаётся в ней). */
+    fun addSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        viewModelScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val result = repository.saveLocalFile(
+                        fileName = "стикер_${entry.sha256.take(8)}.webp",
+                        mediaType = "image/webp",
+                        sizeBytes = entry.file.length(),
+                        storageRef = "local:stk:" + entry.sha256,
+                        sourceTitle = "Стикеры",
+                    )
+                    result == com.vladimir.messenger.data.repository.SaveResult.Saved ||
+                        result == com.vladimir.messenger.data.repository.SaveResult.AlreadySaved
+                }.getOrDefault(false)
+            }
+            _uiState.update {
+                it.copy(message = if (ok) "Стикер добавлен в избранное" else "Не удалось добавить стикер")
+            }
         }
     }
 
