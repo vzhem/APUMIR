@@ -15,7 +15,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,14 +27,20 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -176,10 +184,17 @@ fun GroupFileCard(
             onDismiss = { showFull = false },
         )
     }
-    Column(
-        modifier = modifier
+    // Раунд 168: Box-обёртка - в правом верхнем углу карточки живут
+    // «три точки» действий (владелец: прежние кнопки под стикером
+    // не помещались и рвались посреди слова).
+    var showActions by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
             .padding(top = 6.dp)
-            .fillMaxWidth()
+            .fillMaxWidth(),
+    ) {
+    Column(
+        modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
             .padding(8.dp),
@@ -276,26 +291,94 @@ fun GroupFileCard(
                 Text(if (state.stalled) "Спросить у другого" else "Скачать снова", style = MaterialTheme.typography.labelMedium)
             }
         }
-        if (complete || (isFromMe && state.onShare != null)) {
-            Row {
-                if (state.onSave != null) {
-                    TextButton(onClick = state.onSave, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                        Text("Сохранить в папку", style = MaterialTheme.typography.labelMedium)
+    }
+        // Раунд 168: «три точки» в правом верхнем углу карточки; тап -
+        // три горизонтальных пузыря в гамме APU (как в «Избранном»).
+        val cardHasPreview = previewBitmap != null ||
+            (GroupFileMarker.isAnimatedImage(info) && previewPath != null)
+        val hasActions = state.onSave != null || state.onShare != null ||
+            state.onFavorite != null
+        if (cardHasPreview && hasActions) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                    .clickable { showActions = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.MoreVert,
+                    contentDescription = "Действия",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            DropdownMenu(
+                expanded = showActions,
+                onDismissRequest = { showActions = false },
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .widthIn(min = 210.dp),
+                ) {
+                    val save = state.onSave
+                    if (save != null) {
+                        CardActionBubble("Сохранить в папку", Icons.Filled.Save) {
+                            showActions = false
+                            save()
+                        }
                     }
-                }
-                if (state.onShare != null) {
-                    TextButton(onClick = state.onShare, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                        Text("Поделиться", style = MaterialTheme.typography.labelMedium)
+                    val share = state.onShare
+                    if (share != null) {
+                        CardActionBubble("Поделиться", Icons.Filled.Share) {
+                            showActions = false
+                            share()
+                        }
                     }
-                }
-                if (state.onFavorite != null) {
-                    TextButton(onClick = state.onFavorite, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                        Text("В избранное", style = MaterialTheme.typography.labelMedium)
+                    val favorite = state.onFavorite
+                    if (favorite != null) {
+                        CardActionBubble("В избранное", Icons.Filled.Star) {
+                            showActions = false
+                            favorite()
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/** Пузырь действия карточки (раунд 168): золотой ряд, иконка + подпись. */
+@Composable
+private fun CardActionBubble(label: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.primary)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            color = MaterialTheme.colorScheme.onPrimary,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+    Spacer(Modifier.height(6.dp))
 }
 
 /** Значок по типу файла: картинка, видео, звук, PDF, прочее. */
