@@ -116,6 +116,7 @@ fun SavedScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> if (uri != null) viewModel.addLocalFile(uri) }
     // Раунд 164: свой стикер (картинка) и альбом .zip - в библиотеку.
+    var stickerTick by remember { mutableStateOf(0) }
     val stickerPicker = rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent(),
     ) { uri ->
@@ -126,8 +127,6 @@ fun SavedScreen(
     ) { uri ->
         if (uri != null) viewModel.addStickersFromZip(uri) { stickerTick += 1 }
     }
-    var stickerTick by remember { mutableStateOf(0) }
-
     val gifPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
     ) { uri -> if (uri != null) viewModel.addOwnGif(uri) }
