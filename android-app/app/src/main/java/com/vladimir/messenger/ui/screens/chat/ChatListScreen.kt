@@ -419,8 +419,9 @@ fun ChatListScreen(
                         val chosen = group
                         inviteChoice = null
                         viewModel.shareGroupInvite(chosen.id) { title, link ->
+                            // Раунд 162: каналу - «канал», группе - «группа».
                             com.vladimir.messenger.util.AppShare
-                                .shareGroupInvite(context, title, link)
+                                .shareGroupInvite(context, title, link, chosen.isChannel)
                         }
                     }
                     Spacer(Modifier.height(8.dp))

@@ -243,6 +243,7 @@ fun GroupAdminScreen(
                 AdminTab.Invites -> InvitesTab(
                     invites = uiState.invites,
                     groupTitle = uiState.group?.title.orEmpty(),
+                    isChannel = uiState.group?.isChannel == true,
                     isPublic = uiState.group?.isPublic == true,
                     canManage = uiState.canManageInvites,
                     onCreate = viewModel::createInvite,
@@ -895,6 +896,8 @@ private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, B
 private fun InvitesTab(
     invites: List<InviteSummary>,
     groupTitle: String,
+    /** Раунд 162: тексту «Поделиться» - честное «канал»/«группа». */
+    isChannel: Boolean,
     isPublic: Boolean,
     canManage: Boolean,
     onCreate: (Boolean) -> Unit,
@@ -1017,7 +1020,7 @@ private fun InviteCard(
                 TextButton(onClick = { clipboard.setText(AnnotatedString(invite.shareLink)) }) {
                     Text("Копировать")
                 }
-                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink) }) {
+                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink, isChannel) }) {
                     Text("Поделиться")
                 }
                 // Отозвать и удалить ссылку может только администратор:

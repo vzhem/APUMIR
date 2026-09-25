@@ -42,13 +42,16 @@ object AppShare {
             INSTALL_LINK
     }
 
-    /** Текст приглашения в группу: коротко и сразу со ссылкой отдельной строкой. */
-    fun groupInviteText(groupTitle: String, link: String): String {
+    /** Текст приглашения в группу/канал: коротко и сразу со ссылкой
+     *  отдельной строкой. Раунд 162: для канала пишем «канал» (владелец:
+     *  «приглашение в канал пишет что в группу»). */
+    fun groupInviteText(groupTitle: String, link: String, isChannel: Boolean = false): String {
         val title = groupTitle.trim()
-        val head = if (title.isBlank()) {
-            "Присоединяйся к моей группе в APU."
-        } else {
-            "Присоединяйся к группе «$title» в APU."
+        val head = when {
+            title.isBlank() && isChannel -> "Присоединяйся к моему каналу в APU."
+            title.isBlank() -> "Присоединяйся к моей группе в APU."
+            isChannel -> "Присоединяйся к каналу «$title» в APU."
+            else -> "Присоединяйся к группе «$title» в APU."
         }
         return head + "\n\n" +
             "Открой ссылку или вставь её в APU (можно вставить всё сообщение целиком):\n" +
@@ -81,9 +84,18 @@ object AppShare {
         shareText(context, groupsInviteText(invites), "Пригласить в группу")
     }
 
-    /** Поделиться приглашением в группу. */
-    fun shareGroupInvite(context: Context, groupTitle: String, link: String) {
-        shareText(context, groupInviteText(groupTitle, link), "Пригласить в группу")
+    /** Поделиться приглашением в группу/канал (раунд 162: честное слово). */
+    fun shareGroupInvite(
+        context: Context,
+        groupTitle: String,
+        link: String,
+        isChannel: Boolean = false,
+    ) {
+        shareText(
+            context,
+            groupInviteText(groupTitle, link, isChannel),
+            if (isChannel) "Пригласить в канал" else "Пригласить в группу",
+        )
     }
 
     /** Поделиться приглашением в APUMIR. */

@@ -486,7 +486,8 @@ fun GroupsScreen(
                     val chosen = group
                     inviteChoice = null
                     viewModel.shareInvite(chosen.id) { title, link ->
-                        AppShare.shareGroupInvite(context, title, link)
+                        // Раунд 162: каналу - «канал».
+                        AppShare.shareGroupInvite(context, title, link, chosen.isChannel)
                     }
                 }) { Text("Отправить ссылку") }
             },
