@@ -952,6 +952,7 @@ private fun InvitesTab(
             InviteCard(
                 invite = invite,
                 groupTitle = groupTitle,
+                isChannel = isChannel,
                 canManage = canManage,
                 onRevoke = { onRevoke(invite.slug) },
                 onDelete = { onDelete(invite.slug) },
@@ -969,6 +970,8 @@ private fun InvitesTab(
 private fun InviteCard(
     invite: InviteSummary,
     groupTitle: String,
+    /** Раунд 162: «Поделиться» пишет честное «канал»/«группа». */
+    isChannel: Boolean,
     canManage: Boolean,
     onRevoke: () -> Unit,
     onDelete: () -> Unit,
