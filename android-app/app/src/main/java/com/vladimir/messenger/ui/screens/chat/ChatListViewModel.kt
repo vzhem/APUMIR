@@ -568,8 +568,7 @@ class ChatListViewModel @Inject constructor(
                     failed++
                     continue
                 }
-                val body = "Приглашение в $what «$title»:
-$link"
+                val body = "Приглашение в $what «$title»:\n$link"
                 val result = chatRepository.sendMessage(chatId, chat.contactId, body)
                 if (result.isSuccess) sent++ else failed++
             }
