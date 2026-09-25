@@ -415,7 +415,7 @@ fun ChatListScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    InviteActionBubble("Отправить ссылку") {
+                    InviteActionBubble("Отправить ссылку", filled = true) {
                         val chosen = group
                         inviteChoice = null
                         viewModel.shareGroupInvite(chosen.id) { title, link ->
@@ -424,7 +424,7 @@ fun ChatListScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    InviteActionBubble("Отправить в APU") {
+                    InviteActionBubble("Отправить в APU", filled = true) {
                         val chosen = group
                         inviteChoice = null
                         inviteApu = chosen
@@ -470,40 +470,88 @@ fun ChatListScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(max = 360.dp),
+                                // Раунд 161: пузыри-абоненты с зазором.
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 items(list, key = { it.id }) { c ->
                                     val inGroup = c.contactId.isNotBlank() && c.contactId in memberIds
+                                    val isSelected = c.id in selected
+                                    // Раунд 161: каждый абонент - свой пузырь;
+                                    // выбрали - пузырь золотой (наш стиль).
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else Color.White.copy(alpha = 0.85f)
+                                            )
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                                RoundedCornerShape(18.dp),
+                                            )
                                             .clickable(enabled = !inGroup) {
-                                                selected = if (c.id in selected) {
+                                                selected = if (isSelected) {
                                                     selected - c.id
                                                 } else if (selected.size < maxPick) {
                                                     selected + c.id
                                                 } else {
                                                     selected
                                                 }
-                                            },
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        androidx.compose.material3.Checkbox(
-                                            checked = inGroup || c.id in selected,
-                                            enabled = !inGroup,
-                                            onCheckedChange = {
-                                                selected = if (it) {
-                                                    if (selected.size < maxPick) selected + c.id else selected
-                                                } else {
-                                                    selected - c.id
-                                                }
-                                            },
-                                        )
+                                        // Круглый чек: рамка -> золотая заливка с галочкой.
+                                        val checkTint = when {
+                                            inGroup -> Color(0xFFE7EAF0)
+                                            isSelected -> Color.White
+                                            else -> Color.Transparent
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    when {
+                                                        inGroup -> Color(0xFF9AA3AF)
+                                                        isSelected -> MaterialTheme.colorScheme.primary
+                                                        else -> Color.Transparent
+                                                    }
+                                                )
+                                                .border(
+                                                    1.5.dp,
+                                                    when {
+                                                        inGroup -> Color(0xFF9AA3AF)
+                                                        else -> MaterialTheme.colorScheme.primary
+                                                    },
+                                                    CircleShape,
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (isSelected || inGroup) {
+                                                Icon(
+                                                    Icons.Filled.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = checkTint,
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(10.dp))
                                         Text(
                                             c.contactName.ifBlank { "Без имени" },
                                             modifier = Modifier.weight(1f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
-                                            color = if (inGroup) Color(0xFF9AA3AF) else Color.Unspecified,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = when {
+                                                isSelected -> Color.White
+                                                inGroup -> Color(0xFF9AA3AF)
+                                                else -> Color.Unspecified
+                                            },
                                         )
                                         if (inGroup) {
                                             Text(
