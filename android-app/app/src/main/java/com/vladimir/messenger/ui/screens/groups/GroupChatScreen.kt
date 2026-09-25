@@ -599,6 +599,7 @@ fun GroupChatScreen(
                             onFavorite = { viewModel.saveFileToFavorites(it) },
                             servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.groupId, card.sha256)] ?: 0,
                         )
+                    }
                     // Раунд 166: стикер маленький - получатель ТИХО просит
                     // файл сам, и анимированная картинка появляется без
                     // кнопки «Скачать».
@@ -610,7 +611,6 @@ fun GroupChatScreen(
                         LaunchedEffect(card.sha256) {
                             viewModel.requestFile(message, card)
                         }
-                    }
                     }
                     MessageBubble(
                         message = message,
