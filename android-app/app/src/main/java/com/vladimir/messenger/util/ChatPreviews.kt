@@ -51,6 +51,11 @@ object ChatPreviews {
         // Визитка файла с uuid-именем (гифки-блобы) - имя в предпросмотре
         // не нужно: внутри и так карточка.
         if (UUID_FILE.matches(t)) return GIF_LABEL
+        // Раунд 166: подпись визитки стикера («📎 Стикер.webp (76.6 КБ)»)
+        // - именно её получают уведомления.
+        if (t.startsWith("\ud83d\udcce Стикер") || t.startsWith("\uD83D\uDCC8 Стикер")) {
+            return "\uD83D\uDDBC Стикер"
+        }
         return raw
     }
 }

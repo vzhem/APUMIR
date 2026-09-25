@@ -506,10 +506,12 @@ class ChatDetailViewModel @Inject constructor(
                 targetRecipientId = recipientId
                 check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
                 val messageId = UUID.randomUUID().toString()
+                // Раунд 166: честный тип (анимированный webp) и имя - на
+                // карточке и в уведомлениях «Стикер.webp», не sha-строка.
                 val prepared = filePreparation.prepareFromFile(
                     source = entry.file,
-                    displayName = entry.name,
-                    mediaType = "image/png",
+                    displayName = "Стикер.webp",
+                    mediaType = "image/webp",
                     messageId = messageId,
                     chatId = chatId,
                     recipientNodeId = recipientId,

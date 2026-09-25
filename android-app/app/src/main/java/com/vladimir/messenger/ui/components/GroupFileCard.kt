@@ -185,9 +185,9 @@ fun GroupFileCard(
             .padding(8.dp),
     ) {
         val bitmap = previewBitmap
-        if (GroupFileMarker.isGif(info) && previewPath != null) {
-            // GIF: Coil с GIF-декодером (MessengerApplication.newImageLoader)
-            // крутит анимацию сам; статический кадр не годится.
+        if (GroupFileMarker.isAnimatedImage(info) && previewPath != null) {
+            // Гифка и анимированный webp-стикер: Coil с декодерами
+            // (MessengerApplication.newImageLoader) крутит анимацию сам.
             AsyncImage(
                 model = java.io.File(previewPath),
                 contentDescription = info.displayName,
@@ -220,7 +220,8 @@ fun GroupFileCard(
         }
         // Имя и размер нужны, только пока картинки ещё нет (идёт приём).
         // Картинка на месте - она и есть сообщение (решение владельца).
-        val hasPreview = bitmap != null || (GroupFileMarker.isGif(info) && previewPath != null)
+        val hasPreview = bitmap != null ||
+            (GroupFileMarker.isAnimatedImage(info) && previewPath != null)
         if (!hasPreview) Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(8.dp))

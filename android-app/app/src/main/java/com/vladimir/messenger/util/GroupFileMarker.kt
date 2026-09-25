@@ -63,6 +63,12 @@ object GroupFileMarker {
         info.mediaType.equals("image/gif", ignoreCase = true) ||
             info.displayName.trimEnd().endsWith(".gif", ignoreCase = true)
 
+    /** Раунд 166: анимированная картинка (гифка или анимированный webp). */
+    fun isAnimatedImage(info: Info): Boolean =
+        isGif(info) ||
+            info.mediaType.equals("image/webp", ignoreCase = true) ||
+            info.displayName.trimEnd().endsWith(".webp", ignoreCase = true)
+
     /** Сама строка визитки из текста (как есть) или null, если её нет или она испорчена. */
     fun line(text: String): String? =
         text.lineSequence().firstOrNull { it.startsWith(PREFIX) }?.takeIf { parse(it) != null }

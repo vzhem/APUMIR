@@ -207,6 +207,32 @@ class GroupFileSwarm @Inject constructor(
         )
     }
 
+    /**
+     * Раунд 166: приложить стикер из библиотеки. Байты уже на телефоне,
+     * тип - image/webp (анимированный), имя - человеческое «Стикер.webp»:
+     * карточка в ленте и уведомления без sha-строк.
+     */
+    suspend fun stageStickerBytes(
+        groupId: String,
+        bytes: ByteArray,
+    ): GroupFileMarker.Info = withContext(Dispatchers.IO) {
+        check(bytes.isNotEmpty()) { "Пустой стикер" }
+        FileTransferRankPolicy.requireCanSend(
+            qualifiedDirectReferrals = ReferralRankStore.qualifiedDirectCount(appContext),
+            mediaType = "image/webp",
+            sizeBytes = bytes.size.toLong(),
+        )
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val sha256 = digest.digest(bytes).joinToString("") { "%02x".format(it) }
+        store.put(groupId, sha256, "Стикер.webp", bytes.inputStream())
+        GroupFileMarker.Info(
+            sha256 = sha256,
+            sizeBytes = bytes.size.toLong(),
+            mediaType = "image/webp",
+            displayName = "Стикер.webp",
+        )
+    }
+
     /** Сообщение с визиткой не ушло - копия не нужна. */
     suspend fun unstage(groupId: String, sha256: String) = withContext(Dispatchers.IO) {
         runCatching { store.delete(groupId, sha256) }

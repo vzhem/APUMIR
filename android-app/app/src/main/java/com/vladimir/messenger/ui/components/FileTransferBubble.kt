@@ -103,6 +103,10 @@ fun FileTransferBubble(
             val isImage = transfer.mediaType.startsWith("image/")
             val isGif = transfer.mediaType.equals("image/gif", ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".gif")
+            // Раунд 166: анимированный webp-стикер крутится так же, как гифка.
+            val isAnimated = isGif ||
+                transfer.mediaType.equals("image/webp", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".webp")
             val canActOnImage = isImage && previewBitmap != null &&
                 transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
             var imageMenuOpen = androidx.compose.runtime.remember {
@@ -132,7 +136,7 @@ fun FileTransferBubble(
                 // и низ - как в квадратном превью у отправителя.
                 val ratio = shownPreview.width.toFloat() / shownPreview.height.coerceAtLeast(1).toFloat()
                 Box {
-                    if (isGif) {
+                    if (isAnimated) {
                         // GIF: Coil с GIF-декодером крутит анимацию; статичный
                         // первый кадр не годится. Рамку берём у того же файла.
                         coil.compose.AsyncImage(

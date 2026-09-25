@@ -347,20 +347,12 @@ class GroupChatViewModel @Inject constructor(
             _uiState.update { it.copy(isPreparingFile = true, error = null) }
             try {
                 val topicId = _uiState.value.selectedTopicId ?: error("Выберите тему")
-                val uri = androidx.core.content.FileProvider.getUriForFile(
-                    appContext,
-                    appContext.packageName + ".fileprovider",
-                    entry.file,
-                )
-                val previous = _uiState.value.stagedFile
-                val info = groupFiles.stage(groupId, uri)
-                if (previous != null && previous.sha256 != info.sha256) {
-                    groupFiles.unstage(groupId, previous.sha256)
-                }
-                // Раунд 165: визитка с ДРУЖЕЛЕПРИЯТНЫМ именем - на карточке
-                // и в уведомлениях «Стикер.webp», а не sha-строка.
-                val body = com.vladimir.messenger.util.GroupFileMarker
-                    .compose("", info.copy(displayName = "Стикер.webp"))
+                // Раунд 166: стикер - БАЙТАМИ (image/webp, имя «Стикер.webp»):
+                // раньше стейджился FileProvider-uri файла <sha>.img, MIME
+                // выходил не-картинка, и карточка в ленте была без картинки.
+                val bytes = entry.file.readBytes()
+                val info = groupFiles.stageStickerBytes(groupId, bytes)
+                val body = com.vladimir.messenger.util.GroupFileMarker.compose("", info)
                 groupRepository.sendMessage(groupId, topicId, body)
                     .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                     .onSuccess { _uiState.update { it.copy(stagedFile = null) } }
