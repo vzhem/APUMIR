@@ -387,6 +387,9 @@ fun ChatListScreen(
     }
     }
 
+    // Раунд 158: группа/канал для рассылки приглашения контактам APU.
+    var inviteApu by remember { mutableStateOf<InboxGroup?>(null) }
+
     // Как приглашать: QR при встрече или ссылка кому угодно.
     inviteChoice?.let { group ->
         val what = if (group.isChannel) "канал" else "группу"
@@ -409,14 +412,118 @@ fun ChatListScreen(
                 }) { Text("Показать QR-код") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    val chosen = group
-                    inviteChoice = null
-                    viewModel.shareGroupInvite(chosen.id) { title, link ->
-                        com.vladimir.messenger.util.AppShare
-                            .shareGroupInvite(context, title, link)
+                Row {
+                    TextButton(onClick = {
+                        val chosen = group
+                        inviteChoice = null
+                        viewModel.shareGroupInvite(chosen.id) { title, link ->
+                            com.vladimir.messenger.util.AppShare
+                                .shareGroupInvite(context, title, link)
+                        }
+                    }) { Text("Отправить ссылку") }
+                    // Раунд 158: разослать приглашение контактам APU в личку.
+                    TextButton(onClick = {
+                        val chosen = group
+                        inviteChoice = null
+                        inviteApu = chosen
+                    }) { Text("Отправить в APU") }
+                }
+            },
+        )
+    }
+
+    // Раунд 158: «Отправить в APU» - выбираем адресатов галочками (до
+    // ChatListViewModel.MAX_INVITE_RECIPIENTS), каждому приглашение
+    // уходит в личный чат.
+    inviteApu?.let { grp ->
+        val what = if (grp.isChannel) "канал" else "группу"
+        var contacts by remember { mutableStateOf<List<com.vladimir.messenger.domain.model.Chat>?>(null) }
+        var selected by remember { mutableStateOf(setOf<String>()) }
+        var sending by remember { mutableStateOf(false) }
+        val maxPick = ChatListViewModel.MAX_INVITE_RECIPIENTS
+        LaunchedEffect(grp.id) {
+            viewModel.personalChatsOnce { contacts = it }
+        }
+        AlertDialog(
+            onDismissRequest = { if (!sending) inviteApu = null },
+            title = { Text("Кому отправить") },
+            text = {
+                Column {
+                    val list = contacts
+                    when {
+                        list == null -> Text("Загрузка…")
+                        list.isEmpty() -> Text("Пока нет личных чатов - сначала добавьте контакты.")
+                        else -> {
+                            Text(
+                                "Выбрано: ${selected.size} из $maxPick",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF8A93A2),
+                            )
+                            androidx.compose.foundation.lazy.LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 360.dp),
+                            ) {
+                                items(list, key = { it.id }) { c ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                selected = if (c.id in selected) {
+                                                    selected - c.id
+                                                } else if (selected.size < maxPick) {
+                                                    selected + c.id
+                                                } else {
+                                                    selected
+                                                }
+                                            },
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        androidx.compose.material3.Checkbox(
+                                            checked = c.id in selected,
+                                            onCheckedChange = {
+                                                selected = if (it) {
+                                                    if (selected.size < maxPick) selected + c.id else selected
+                                                } else {
+                                                    selected - c.id
+                                                }
+                                            },
+                                        )
+                                        Text(
+                                            c.contactName.ifBlank { "Без имени" },
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
-                }) { Text("Отправить ссылку") }
+                }
+            },
+            confirmButton = {
+                if (selected.isNotEmpty()) {
+                    TextButton(
+                        enabled = !sending,
+                        onClick = {
+                            sending = true
+                            val ids = selected.toList()
+                            viewModel.sendGroupInviteToChats(grp.id, what, ids) { sent, failed ->
+                                sending = false
+                                inviteApu = null
+                                android.widget.Toast.makeText(
+                                    context,
+                                    if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
+                    ) { Text(if (sending) "Отправляем…" else "Отправить") }
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !sending, onClick = { inviteApu = null }) { Text("Отмена") }
             },
         )
     }

@@ -528,6 +528,55 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 158: личные чаты для выбора адресатов приглашения. */
+    fun personalChatsOnce(onLoaded: (List<com.vladimir.messenger.domain.model.Chat>) -> Unit) {
+        viewModelScope.launch {
+            val chats = withContext(Dispatchers.IO) {
+                runCatching { chatRepository.getAllChats() }.getOrDefault(emptyList())
+            }
+            onLoaded(chats.sortedBy { it.contactName.lowercase() })
+        }
+    }
+
+    /**
+     * Раунд 158: разослать приглашение выбранным адресатам в ЛИЧНЫЕ чаты
+     * (владелец: «отправить ссылку в APU»). Ограничение выбора - 100
+     * человек (владелец: «ограждение выбрать абонентов сделай 100»).
+     */
+    fun sendGroupInviteToChats(
+        groupId: String,
+        what: String,
+        chatIds: List<String>,
+        onDone: (sent: Int, failed: Int) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.inviteLinkFor(groupId) }.getOrNull()
+            }
+            if (prepared == null) {
+                onDone(0, chatIds.size)
+                return@launch
+            }
+            val (title, link) = prepared
+            var sent = 0
+            var failed = 0
+            for (chatId in chatIds.take(MAX_INVITE_RECIPIENTS)) {
+                val chat = withContext(Dispatchers.IO) {
+                    runCatching { chatRepository.getChatById(chatId) }.getOrNull()
+                }
+                if (chat == null) {
+                    failed++
+                    continue
+                }
+                val body = "Приглашение в $what «$title»:
+$link"
+                val result = chatRepository.sendMessage(chatId, chat.contactId, body)
+                if (result.isSuccess) sent++ else failed++
+            }
+            onDone(sent, failed)
+        }
+    }
+
     /** Удалить свою группу или канал у всех участников (только владельцу). */
     fun deleteGroup(groupId: String) {
         viewModelScope.launch(Dispatchers.IO) { groupRepository.deleteGroup(groupId) }
@@ -556,6 +605,9 @@ class ChatListViewModel @Inject constructor(
     }
 
     companion object {
+        /** Раунд 158: максимум адресатов за одну рассылку приглашения. */
+        const val MAX_INVITE_RECIPIENTS = 100
+
         /** Пауза в наборе, после которой пересчитывается поиск. */
         private const val SEARCH_DEBOUNCE_MS = 200L
 

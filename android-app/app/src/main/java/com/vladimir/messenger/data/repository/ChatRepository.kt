@@ -285,6 +285,10 @@ class ChatRepository @Inject constructor(
         return chatDao.getChatById(chatId)?.toDomain()
     }
 
+    /** Раунд 158: все личные чаты - выбор адресатов «Отправить в APU». */
+    suspend fun getAllChats(): List<com.vladimir.messenger.domain.model.Chat> =
+        chatDao.getAllChats().map { it.toDomain() }
+
     /**
      * Local-only outgoing file placeholder: it never rides the text transport (the file packets
      * are the transport); the row exists so the chat shows the transfer and its delivery state.
