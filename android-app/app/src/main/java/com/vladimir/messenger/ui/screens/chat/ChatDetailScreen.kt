@@ -126,6 +126,7 @@ fun ChatDetailScreen(
             swarmStickers = swarmStickers,
             onSticker = { viewModel.sendSticker(it) },
             onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
             onRequestSwarmSticker = { swarm ->
                 showGifCatalog = false
                 viewModel.requestSwarmSticker(swarm)

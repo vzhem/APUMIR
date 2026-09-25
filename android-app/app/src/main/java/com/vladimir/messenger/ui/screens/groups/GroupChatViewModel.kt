@@ -328,6 +328,14 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 165: альбом стикеров .zip - в библиотеку, сетка обновится. */
+    fun addStickerZip(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { stickerLibrary.addZip(uri) }
+            refreshStickers()
+        }
+    }
+
     /**
      * Отправить стикер в тему/комментарии: прикладываем его файл и сразу
      * отправляем (как обычный приложенный файл - карточка с картинкой).
@@ -349,7 +357,10 @@ class GroupChatViewModel @Inject constructor(
                 if (previous != null && previous.sha256 != info.sha256) {
                     groupFiles.unstage(groupId, previous.sha256)
                 }
-                val body = com.vladimir.messenger.util.GroupFileMarker.compose("", info)
+                // Раунд 165: визитка с ДРУЖЕЛЕПРИЯТНЫМ именем - на карточке
+                // и в уведомлениях «Стикер.webp», а не sha-строка.
+                val body = com.vladimir.messenger.util.GroupFileMarker
+                    .compose("", info.copy(displayName = "Стикер.webp"))
                 groupRepository.sendMessage(groupId, topicId, body)
                     .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                     .onSuccess { _uiState.update { it.copy(stagedFile = null) } }

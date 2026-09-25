@@ -86,6 +86,37 @@ class StickerLibrary @Inject constructor(
 
     // ── Мои стикеры ─────────────────────────────────────────────────────────
 
+    /**
+     * Раунд 165: альбом стикеров архивом .zip - в библиотеку все картинки
+     * (webp/png/jpg/gif/bmp; видео-webm пропускаем). Дубли по sha не пишутся.
+     * Возврат: «добавлено» к «всего картинок», null - архив не открылся.
+     */
+    fun addZip(uri: android.net.Uri): kotlin.Pair<Int, Int>? {
+        val bytes = runCatching {
+            appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }.getOrNull() ?: return null
+        var added = 0
+        var total = 0
+        runCatching {
+            val zip = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes))
+            val imageExts = setOf("webp", "png", "jpg", "jpeg", "gif", "bmp")
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (!entry.isDirectory) {
+                    val name = entry.name.substringAfterLast('/')
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    if (ext in imageExts) {
+                        total++
+                        if (addBytes(zip.readBytes(), name.substringBeforeLast('.')) != null) added++
+                    }
+                }
+                zip.closeEntry()
+            }
+            zip.close()
+        }
+        return added to total
+    }
+
     /** Раунд 163: файл стикера по sha - «Избранное» рисует и делится им. */
     @Synchronized
     fun fileOf(sha256: String): java.io.File? =

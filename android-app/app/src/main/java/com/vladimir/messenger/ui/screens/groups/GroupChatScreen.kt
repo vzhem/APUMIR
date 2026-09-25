@@ -204,6 +204,7 @@ fun GroupChatScreen(
             swarmStickers = swarmStickers,
             onSticker = { viewModel.sendSticker(it) },
             onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
             onRequestSwarmSticker = { swarm -> viewModel.requestSwarmSticker(swarm) },
             onEmoji = { emoji -> draft += emoji },
             onOpened = { viewModel.refreshStickers() },

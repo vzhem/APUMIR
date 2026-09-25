@@ -479,6 +479,14 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 165: альбом стикеров .zip - в библиотеку, сетка обновится. */
+    fun addStickerZip(uri: Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { stickerLibrary.addZip(uri) }
+            refreshStickers()
+        }
+    }
+
     /**
      * Отправить стикер в личный чат: картинкой (та же файловая машина, что у
      * скрепки), но сразу - без диалога выбора. Стикер встаёт в «Недавние».

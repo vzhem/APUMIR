@@ -43,6 +43,11 @@ object ChatPreviews {
         if (t.startsWith("APUGIFREF1|")) return GIF_LABEL
         // Конверт стикер-роя (раунд 139): «APUSTK1|ask|…».
         if (t.startsWith("APUSTK1|")) return "Стикеры"
+        // Раунд 165: визитка стикера в группе/канале (имя «Стикер…») -
+        // «🖼 Стикер» вместо sha/имени в уведомлениях и списках.
+        GroupFileMarker.parse(t)?.let { info ->
+            if (info.displayName.startsWith("Стикер")) return "\uD83D\uDDBC Стикер"
+        }
         // Визитка файла с uuid-именем (гифки-блобы) - имя в предпросмотре
         // не нужно: внутри и так карточка.
         if (UUID_FILE.matches(t)) return GIF_LABEL

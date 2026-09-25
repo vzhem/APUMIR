@@ -105,6 +105,8 @@ fun InputPanelDialog(
     swarmStickers: List<com.vladimir.messenger.data.sticker.SwarmSticker> = emptyList(),
     onSticker: (StickerLibrary.StickerEntry) -> Unit,
     onAddSticker: (android.net.Uri) -> Unit,
+    /** Раунд 165: альбом стикеров архивом .zip - в библиотеку. */
+    onAddStickerZip: (android.net.Uri) -> Unit = {},
     /** Выбрали стикер из сети - скачать тихо у хранителей и отправить. */
     onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
     // ── Эмодзи ──
@@ -197,6 +199,7 @@ fun InputPanelDialog(
                         swarmStatus = swarmStatus,
                         onSticker = onSticker,
                         onAddSticker = onAddSticker,
+                        onAddStickerZip = onAddStickerZip,
                         onRequestSwarmSticker = onRequestSwarmSticker,
                     )
                 }
@@ -336,6 +339,7 @@ private fun StickerSection(
     swarmStatus: String?,
     onSticker: (StickerLibrary.StickerEntry) -> Unit,
     onAddSticker: (android.net.Uri) -> Unit,
+    onAddStickerZip: (android.net.Uri) -> Unit = {},
     onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
@@ -371,6 +375,10 @@ private fun StickerSection(
     val pickSticker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent(),
     ) { uri -> if (uri != null) onAddSticker(uri) }
+    // Раунд 165: альбом .zip - в библиотеку все картинки архива.
+    val pickStickerZip = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri -> if (uri != null) onAddStickerZip(uri) }
     LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(5),
@@ -425,6 +433,25 @@ private fun StickerSection(
                 Spacer(Modifier.width(10.dp))
                 Text(
                     "Добавить стикер из телефона (картинка)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        item(key = "zip", span = { GridItemSpan(maxLineSpan) }) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .clickable { pickStickerZip.launch("*/*") }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            ) {
+                Text("+", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Добавить альбом стикеров (.zip)",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

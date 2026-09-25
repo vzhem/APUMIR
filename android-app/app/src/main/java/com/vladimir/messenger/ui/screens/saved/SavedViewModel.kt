@@ -306,31 +306,8 @@ class SavedViewModel @Inject constructor(
     fun addStickersFromZip(uri: android.net.Uri, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching {
-                    val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: return@runCatching null
-                    val zip = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes))
-                    val imageExts = setOf("webp", "png", "jpg", "jpeg", "gif", "bmp")
-                    var added = 0
-                    var total = 0
-                    while (true) {
-                        val entry = zip.nextEntry ?: break
-                        if (!entry.isDirectory) {
-                            val name = entry.name.substringAfterLast('/')
-                            val ext = name.substringAfterLast('.', "").lowercase()
-                            if (ext in imageExts) {
-                                total++
-                                val entry2 = runCatching {
-                                    stickerLibrary.addBytes(zip.readBytes(), name.substringBeforeLast('.'))
-                                }.getOrNull()
-                                if (entry2 != null) added++
-                            }
-                        }
-                        zip.closeEntry()
-                    }
-                    zip.close()
-                    added to total
-                }.getOrNull()
+                // Раунд 165: общая логика импорта в библиотеке стикеров.
+                runCatching { stickerLibrary.addZip(uri) }.getOrNull()
             }
             _uiState.update {
                 val text = if (summary == null) {
