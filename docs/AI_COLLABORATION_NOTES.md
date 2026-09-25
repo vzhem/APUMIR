@@ -9498,6 +9498,19 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-25 (раунд 163) - v11.74.60: «уже в канале» + стикеры
+  в Избранном.** Владелец (2 скрина): метку «уже в группе» для каналов
+  поправить; «Добавить в избранное» - пузыри в нашем стиле + стикеры.
+  ChatListScreen: метка isChannel-aware. SavedScreen: меню -> золотые
+  SavedAddBubble (копия InviteActionBubble) + пункт «Стикеры» -> сетка
+  LazyVerticalGrid(3) пузырьков 86dp (AsyncImage файла); SavedViewModel:
+  inject StickerLibrary, stickersOnce, addSticker (saveLocalFile,
+  storageRef «local:stk:<sha>»), localFileOf + ветка local:stk:,
+  StickerLibrary.fileOf (File(root, sha+".img")). ГРАБЛИ: check101 -
+  LazyVerticalGrid/GridCells живут в foundation.lazy.grid (не lazy).
+  check102 success. v11.74.60 = c7101bd, run 36124738791 SUCCESS,
+  latest, APK 40 517 206 Б, sha256 9cf79e80…3fe.
+
 - **2026-09-25 (раунд 162) - v11.74.59: «канал», а не «группа».**
   Владелец: приглашение в канал пишет «группу». AppShare.groupInviteText/
   shareGroupInvite + параметр isChannel (текст «Присоединяйся к каналу
