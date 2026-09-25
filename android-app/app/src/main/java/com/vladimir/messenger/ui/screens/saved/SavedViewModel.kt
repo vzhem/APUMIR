@@ -283,6 +283,67 @@ class SavedViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 164: свой стикер (.webp/.png/.jpg/.gif) - в библиотеку. */
+    fun addStickerFromUri(uri: android.net.Uri, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { stickerLibrary.add(uri) }.getOrNull()
+            }
+            _uiState.update {
+                it.copy(
+                    message = if (ok != null) "Стикер добавлен в библиотеку"
+                    else "Не удалось добавить стикер"
+                )
+            }
+            onDone()
+        }
+    }
+
+    /**
+     * Раунд 164: альбом стикеров архивом .zip - в библиотеку все картинки
+     * (webp/png/jpg/gif/bmp; видео-webm пропускаем). Дубли по sha не пишутся.
+     */
+    fun addStickersFromZip(uri: android.net.Uri, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val bytes = appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: return@runCatching null
+                    val zip = java.util.zip.ZipInputStream(java.io.ByteArrayInputStream(bytes))
+                    val imageExts = setOf("webp", "png", "jpg", "jpeg", "gif", "bmp")
+                    var added = 0
+                    var total = 0
+                    while (true) {
+                        val entry = zip.nextEntry ?: break
+                        if (!entry.isDirectory) {
+                            val name = entry.name.substringAfterLast('/')
+                            val ext = name.substringAfterLast('.', "").lowercase()
+                            if (ext in imageExts) {
+                                total++
+                                val entry2 = runCatching {
+                                    stickerLibrary.addBytes(zip.readBytes(), name.substringBeforeLast('.'))
+                                }.getOrNull()
+                                if (entry2 != null) added++
+                            }
+                        }
+                        zip.closeEntry()
+                    }
+                    zip.close()
+                    added to total
+                }.getOrNull()
+            }
+            _uiState.update {
+                val text = if (summary == null) {
+                    "Не удалось открыть архив"
+                } else {
+                    "Добавлено стикеров: " + summary.first + " из " + summary.second
+                }
+                it.copy(message = text)
+            }
+            onDone()
+        }
+    }
+
     /** Раунд 163: стикер из библиотеки - в избранное (файл остаётся в ней). */
     fun addSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
         viewModelScope.launch {

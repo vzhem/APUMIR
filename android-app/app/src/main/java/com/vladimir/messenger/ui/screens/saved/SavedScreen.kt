@@ -115,6 +115,19 @@ fun SavedScreen(
     val docPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> if (uri != null) viewModel.addLocalFile(uri) }
+    // Раунд 164: свой стикер (картинка) и альбом .zip - в библиотеку.
+    val stickerPicker = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) viewModel.addStickerFromUri(uri) { stickerTick += 1 }
+    }
+    val stickerZipPicker = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) viewModel.addStickersFromZip(uri) { stickerTick += 1 }
+    }
+    var stickerTick by remember { mutableStateOf(0) }
+
     val gifPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
     ) { uri -> if (uri != null) viewModel.addOwnGif(uri) }
@@ -305,17 +318,30 @@ fun SavedScreen(
     // Раунд 163: выбор стикера из библиотеки - добавить в избранное.
     if (showStickerPicker) {
         var stickers by remember { mutableStateOf<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>?>(null) }
-        LaunchedEffect(Unit) {
+        // Раунд 164: после добавления своих стикеров сетка обновляется.
+        LaunchedEffect(stickerTick) {
             viewModel.stickersOnce { stickers = it }
         }
         AlertDialog(
             onDismissRequest = { showStickerPicker = false },
             title = { Text("Выберите стикер") },
             text = {
-                val list = stickers
-                when {
-                    list == null -> Text("Загрузка…")
-                    list.isEmpty() -> Text("Библиотека стикеров пуста - добавьте стикеры в чате.")
+                Column {
+                    // Раунд 164: добавить свои - по одному или альбомом .zip.
+                    SavedAddBubble("Добавить стикер (.webp, .png…)") {
+                        stickerPicker.launch("image/*")
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    SavedAddBubble("Добавить альбом (.zip)") {
+                        stickerZipPicker.launch("*/*")
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    val list = stickers
+                    when {
+                        list == null -> Text("Загрузка…")
+                        list.isEmpty() -> Text(
+                            "Библиотека пуста - добавьте свои стикеры кнопками выше."
+                        )
                     else -> {
                         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                             columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
@@ -354,6 +380,7 @@ fun SavedScreen(
                                 }
                             }
                         }
+                    }
                     }
                 }
             },
