@@ -9498,6 +9498,18 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-25 (раунд 158) - v11.74.55: «Отправить в APU».** Владелец:
+  третий вариант в «Пригласить» - список контактов, галочки, кнопка
+  «Отправить» при выборе, рассылка в лички, лимит 100. Реализация:
+  ChatRepository.getAllChats(); ChatListViewModel.personalChatsOnce +
+  sendGroupInviteToChats (inviteLinkFor + sendMessage каждому,
+  MAX_INVITE_RECIPIENTS=100); ChatListScreen - кнопка в диалоге +
+  диалог «Кому отправить» (Checkbox, счётчик, Toast-итог). ГРАБЛИ:
+  python heredoc съел \n в Kotlin-литерале (check92 failure) - в
+  генерации писать \\n; 12-й откат (спасение CR/CLVM/CLS в /tmp).
+  check93 success. v11.74.55 = 03e462c, run 36092727698 SUCCESS,
+  latest, APK 40 517 078 Б, sha256 68a7f215…354.
+
 - **2026-09-24 (раунд 157) - v11.74.54: «Поделиться» без GitHub.**
   Владелец (скрин): «спрятать vzhem и 1985, чтобы ссылки работали».
   Сначала переключил ShortLinks.build + installLink на apumir.app
