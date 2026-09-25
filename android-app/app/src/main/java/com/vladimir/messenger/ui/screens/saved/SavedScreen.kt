@@ -317,8 +317,8 @@ fun SavedScreen(
                     list == null -> Text("Загрузка…")
                     list.isEmpty() -> Text("Библиотека стикеров пуста - добавьте стикеры в чате.")
                     else -> {
-                        androidx.compose.foundation.lazy.LazyVerticalGrid(
-                            columns = androidx.compose.foundation.lazy.GridCells.Fixed(3),
+                        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = 360.dp),
