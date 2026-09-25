@@ -440,9 +440,12 @@ fun ChatListScreen(
         var contacts by remember { mutableStateOf<List<com.vladimir.messenger.domain.model.Chat>?>(null) }
         var selected by remember { mutableStateOf(setOf<String>()) }
         var sending by remember { mutableStateOf(false) }
+        // Раунд 159: уже в группе - серым и не выбираются.
+        var memberIds by remember { mutableStateOf(setOf<String>()) }
         val maxPick = ChatListViewModel.MAX_INVITE_RECIPIENTS
         LaunchedEffect(grp.id) {
             viewModel.personalChatsOnce { contacts = it }
+            viewModel.groupMemberIdsOnce(grp.id) { memberIds = it }
         }
         AlertDialog(
             onDismissRequest = { if (!sending) inviteApu = null },
@@ -465,10 +468,11 @@ fun ChatListScreen(
                                     .heightIn(max = 360.dp),
                             ) {
                                 items(list, key = { it.id }) { c ->
+                                    val inGroup = c.contactId.isNotBlank() && c.contactId in memberIds
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable {
+                                            .clickable(enabled = !inGroup) {
                                                 selected = if (c.id in selected) {
                                                     selected - c.id
                                                 } else if (selected.size < maxPick) {
@@ -480,7 +484,8 @@ fun ChatListScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         androidx.compose.material3.Checkbox(
-                                            checked = c.id in selected,
+                                            checked = inGroup || c.id in selected,
+                                            enabled = !inGroup,
                                             onCheckedChange = {
                                                 selected = if (it) {
                                                     if (selected.size < maxPick) selected + c.id else selected
@@ -494,7 +499,16 @@ fun ChatListScreen(
                                             modifier = Modifier.weight(1f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                            color = if (inGroup) Color(0xFF9AA3AF) else Color.Unspecified,
                                         )
+                                        if (inGroup) {
+                                            Text(
+                                                "уже в группе",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF9AA3AF),
+                                                maxLines = 1,
+                                            )
+                                        }
                                     }
                                 }
                             }

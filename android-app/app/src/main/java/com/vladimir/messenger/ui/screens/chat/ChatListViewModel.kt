@@ -528,6 +528,20 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Раунд 159: nodeId участников группы - уже состоящие в «Кому
+     * отправить» показываются серыми с пометкой и не выбираются.
+     */
+    fun groupMemberIdsOnce(groupId: String, onLoaded: (Set<String>) -> Unit) {
+        viewModelScope.launch {
+            val ids = withContext(Dispatchers.IO) {
+                runCatching { groupDao.getMembers(groupId).map { it.nodeId } }
+                    .getOrDefault(emptyList())
+            }
+            onLoaded(ids.toSet())
+        }
+    }
+
     /** Раунд 158: личные чаты для выбора адресатов приглашения. */
     fun personalChatsOnce(onLoaded: (List<com.vladimir.messenger.domain.model.Chat>) -> Unit) {
         viewModelScope.launch {
