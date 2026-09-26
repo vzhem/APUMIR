@@ -1412,8 +1412,14 @@ class CoreServerService : Service() {
                 // файлов ведёт свой список «кто в сети» - по нему выбирается
                 // хранитель и отдаётся хранимое появившемуся получателю.
                 serviceScope.launch {
-                    runCatching { fileTransferRouter.markOnline(peerId) }
-                        .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
+                    // Раунд 180 (аудит-2): регистр «кто онлайн» для файлов -
+                    // только на «тяжёлом» пульсе (раз в 30 с), а не на каждый
+                    // пульс: при живой сети это были десятки лишних записей
+                    // в минуту без какой-нибудь пользы.
+                    if (!lightTouch) {
+                        runCatching { fileTransferRouter.markOnline(peerId) }
+                            .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
+                    }
                     // Файл группы, который я жду, а его сид только что появился:
                     // спросить сразу, не дожидаясь очередного круга (этап 9).
                     if (!lightTouch) {

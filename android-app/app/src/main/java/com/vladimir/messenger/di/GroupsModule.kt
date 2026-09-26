@@ -1,5 +1,11 @@
 package com.vladimir.messenger.di
 
+/** Раунд 180: последний сжатый аватар - чтобы не жечь ЦП на каждый whois. */
+private object MyAvatarMemo {
+    @Volatile var uri: String? = null
+    @Volatile var b64: String? = null
+}
+
 import android.content.Context
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
@@ -182,11 +188,28 @@ object GroupsModule {
         },
         avatarDao = avatarDao,
         myAvatarB64 = {
+            // Раунд 180 (аудит-2): сжатие аватара - только когда он сменился
+            // (uri другой). Раньше каждый ответ «представься» и каждая
+            // рассылка сжимали картинку заново.
             val uri = context.applicationContext
                 .getSharedPreferences(IDENTITY_PREFS, Context.MODE_PRIVATE)
                 .getString("my_avatar_uri", null)
-            uri?.takeIf { it.isNotBlank() }?.let {
-                com.vladimir.messenger.util.AvatarCompress.compressUri(context.applicationContext, it)
+                ?.takeIf { it.isNotBlank() }
+            if (uri == null) {
+                MyAvatarMemo.uri = null
+                MyAvatarMemo.b64 = null
+                null
+            } else if (uri == MyAvatarMemo.uri && MyAvatarMemo.b64 != null) {
+                MyAvatarMemo.b64
+            } else {
+                val b64 = com.vladimir.messenger.util.AvatarCompress.compressUri(
+                    context.applicationContext, uri,
+                )
+                if (b64 != null) {
+                    MyAvatarMemo.uri = uri
+                    MyAvatarMemo.b64 = b64
+                }
+                b64
             }
         },
         // Узнали настоящее @имя узла: подменяем им заглушку в контакте и
