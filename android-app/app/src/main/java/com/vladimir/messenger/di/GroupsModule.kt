@@ -1,11 +1,5 @@
 package com.vladimir.messenger.di
 
-/** Раунд 180: последний сжатый аватар - чтобы не жечь ЦП на каждый whois. */
-private object MyAvatarMemo {
-    @Volatile var uri: String? = null
-    @Volatile var b64: String? = null
-}
-
 import android.content.Context
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
@@ -240,4 +234,10 @@ object GroupsModule {
     @Provides
     @Singleton
     fun provideGroupRouter(repository: GroupRepository): GroupRouter = GroupRouter(repository)
+}
+
+/** Раунд 180: последний сжатый аватар - чтобы не жечь ЦП на каждый whois. */
+private object MyAvatarMemo {
+    @Volatile var uri: String? = null
+    @Volatile var b64: String? = null
 }
