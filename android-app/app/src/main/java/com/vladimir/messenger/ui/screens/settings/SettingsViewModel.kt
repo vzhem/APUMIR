@@ -343,6 +343,17 @@ class SettingsViewModel @Inject constructor(
     init {
         observeMyHearts()
         loadSettings()
+        // Раунд 177: имя в профиле должно стоять ПЕРВЫМ кадром. Владелец:
+        // «быстро переходишь на вкладку профиля - показывает анонимус,
+        // а потом подгружает». Одна строка из prefs читается мгновенно,
+        // тяжёлая часть (ключ, ссылка, пиры, версии) остаётся в фоне.
+        val instantName = runCatching {
+            context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                .getString("display_name", null)
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (instantName != null) {
+            _uiState.update { it.copy(displayName = instantName) }
+        }
         _uiState.update { it.copy(proxyTunnelEnabled = proxyTunnelEnabled()) }
         refreshServerSection()
     }
