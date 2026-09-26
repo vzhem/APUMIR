@@ -468,11 +468,18 @@ class GroupRepository(
         Log.i(TAG, "whois asked peer=$peerId")
     }
 
-    /** Адресный ответ на «представься»: моё @имя и мой аватар. */
+    /** Адресный ответ на «представься»: моё имя и мой аватар. */
     private suspend fun sendMyIdentityTo(peerId: String) {
         if (peerId.isBlank()) return
         val me = myId() ?: return
-        myUsername()?.let { name ->
+        // Раунд 175: узел без @никнейма раньше молчал на «представься» - ему
+        // нечего было ответить, и собеседник навсегда оставался с набором
+        // букв и цифр. Отвечаем видимым именем, если оно настоящее (заглушка
+        // «Contact a1b2c3d4» не едет). registeredAtMs = 0: такая заявка
+        // никогда не отберёт настоящий @ник у его владельца.
+        val fallbackName = myDisplayName().trim()
+            .takeIf { it.isNotEmpty() && !it.startsWith("Contact ") }
+        (myUsername() ?: fallbackName)?.let { name ->
             val envelope = GroupWire.buildNick(
                 ownerId = me,
                 name = name,

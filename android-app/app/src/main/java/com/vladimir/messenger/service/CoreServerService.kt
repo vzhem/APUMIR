@@ -795,6 +795,14 @@ class CoreServerService : Service() {
                                                 channel = MessageChannel.CF,
                                             )
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
+                                            // Раунд 175: как и в основном пути -
+                                            // техническое имя -> адресный whois.
+                                            runCatching {
+                                                val shown = contactRepository.getContactById(senderId)?.displayName
+                                                if (shown != null && contactRepository.isPlaceholderName(shown)) {
+                                                    groupRepository.requestIdentity(senderId)
+                                                }
+                                            }
                                         }
                                     }
                                 }

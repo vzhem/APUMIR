@@ -107,6 +107,7 @@ class ChatListViewModel @Inject constructor(
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
     private val groupDao: GroupDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
@@ -557,6 +558,34 @@ class ChatListViewModel @Inject constructor(
      * (владелец: «отправить ссылку в APU»). Ограничение выбора - 100
      * человек (владелец: «ограждение выбрать абонентов сделай 100»).
      */
+    /** Раунд 175: адресная книга для «Поделиться контактом» из списка чатов. */
+    val contacts: kotlinx.coroutines.flow.Flow<List<com.vladimir.messenger.domain.model.Contact>> =
+        contactRepository.observeContacts()
+
+    /**
+     * Раунд 175: отправить ссылку контакта выбранному абоненту APU -
+     * тот добавит человека одним тапом по apu://-ссылке.
+     */
+    fun sendContactCard(toId: String, toName: String, sharedNodeId: String, sharedName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                com.vladimir.messenger.util.ContactCardSender.send(
+                    chatRepository = chatRepository,
+                    toContactId = toId,
+                    toName = toName,
+                    sharedNodeId = sharedNodeId,
+                    sharedName = sharedName,
+                    sharedUsername = "",
+                )
+            }.getOrDefault(false)
+            android.widget.Toast.makeText(
+                appContext,
+                if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
     fun sendGroupInviteToChats(
         groupId: String,
         what: String,

@@ -258,7 +258,7 @@ fun ContactsScreen(
                                 BubbleMenuAction(
                                     title = "Поделиться контактом",
                                     icon = Icons.Default.Share,
-                                    onClick = { shareContact() },
+                                    onClick = { shareTarget = contact },
                                 ),
                                 BubbleMenuAction(
                                     title = "Удалить контакт",

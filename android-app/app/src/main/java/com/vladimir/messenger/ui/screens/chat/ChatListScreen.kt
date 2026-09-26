@@ -32,6 +32,7 @@ import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ApuMainTabBar
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import com.vladimir.messenger.ui.components.SearchOrb
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
