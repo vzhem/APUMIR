@@ -380,6 +380,7 @@ fun ChatListScreen(
                         onMarkChatRead = viewModel::markChatRead,
                         onMarkGroupRead = viewModel::markGroupRead,
                         onClearChat = { confirmClearChat = it },
+                        onShareCard = { shareCardFor = it },
                         onDeleteChat = { confirmDeleteChat = it },
                         onGroupLeaveOrDelete = { confirmGroup = it },
                         onInviteToGroup = { group -> inviteChoice = group },
@@ -814,6 +815,8 @@ private fun SectionPage(
     onMarkGroupRead: (String) -> Unit,
     onClearChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
     onDeleteChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
+    /** Раунд 175: «Поделиться контактом» - отдать чат наверх для выбора адресата. */
+    onShareCard: (com.vladimir.messenger.domain.model.Chat) -> Unit = {},
     onGroupLeaveOrDelete: (InboxGroup) -> Unit,
     /** Позвать людей в группу или канал. */
     onInviteToGroup: (InboxGroup) -> Unit = {},
@@ -956,7 +959,7 @@ private fun SectionPage(
                                     BubbleMenuAction(
                                         title = "Поделиться контактом",
                                         icon = Icons.Default.Share,
-                                        onClick = { shareCardFor = item.chat },
+                                        onClick = { onShareCard(item.chat) },
                                     ),
                                     BubbleMenuAction(
                                         title = "Отметить прочитанным",
