@@ -508,7 +508,7 @@ private fun StickerSection(
                 // Раунд 172: чей-то стикер, уже лежащий на телефоне,
                 // показывается живой анимацией; иначе - jpeg-миниатюра.
                 val localSticker = remember(item.sha256, thumbTick) {
-                    StickerLibrary.fileOf(item.sha256)
+                    StickerLibrary.libraryFile(panelContext, item.sha256)
                 }
                 if (localSticker != null) {
                     StickerAnimated(

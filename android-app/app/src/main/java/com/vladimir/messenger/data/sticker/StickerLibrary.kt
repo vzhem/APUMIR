@@ -788,6 +788,12 @@ class StickerLibrary @Inject constructor(
             return "image/png"
         }
 
+        /** Полный файл стикера библиотеки по sha (раунд 172, для панели). */
+        fun libraryFile(context: Context, sha256: String): File? {
+            if (!isSafeSha(sha256)) return null
+            return File(dir(context), "$sha256.img").takeIf { it.isFile }
+        }
+
         /** Раунд 170: это видео-стикер webm (EBML-подпись)? */
         fun isWebmBytes(bytes: ByteArray): Boolean =
             bytes.size >= 4 && bytes[0] == 0x1A.toByte() && bytes[1] == 0x45.toByte() &&
