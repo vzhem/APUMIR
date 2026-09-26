@@ -278,12 +278,19 @@ class StickerLibrary @Inject constructor(
         force: Boolean = false,
     ) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
+        // Раунд 171: сети нет вовсе - не жжём по 5-10 секунд на каждый
+        // send офлайн (ANR-шторм при пропавшей связи).
+        if (!RustBridge.isNetworkUp()) return@withContext
         val items = all()
         val fingerprint = "${items.size}:${items.firstOrNull()?.sha256.orEmpty()}"
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val changed = prefs.getString("fp", "") != fingerprint
         val contactIds = runCatching { chatRepository.getAllContactIds() }.getOrDefault(emptyList())
+        // Дедлайн цикла: даже при пропавшей связи посреди синка не копим
+        // многосекундные блокировки за движком.
+        val deadline = now + 8_000L
         for (peer in contactIds.filter { it.isNotBlank() }.distinct()) {
+            if (System.currentTimeMillis() > deadline) break
             val chat = chatRepository.getChatByContactId(peer) ?: continue
             val announceDue = force || changed ||
                 now - prefs.getLong("ann_$peer", 0L) > 6 * 3600_000L

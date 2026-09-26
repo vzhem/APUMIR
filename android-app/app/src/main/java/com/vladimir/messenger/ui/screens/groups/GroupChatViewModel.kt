@@ -360,7 +360,10 @@ class GroupChatViewModel @Inject constructor(
                 // Раунд 166: стикер - БАЙТАМИ (image/webp, имя «Стикер.webp»):
                 // раньше стейджился FileProvider-uri файла <sha>.img, MIME
                 // выходил не-картинка, и карточка в ленте была без картинки.
-                val bytes = entry.file.readBytes()
+                // Раунд 171: чтение файла - в IO (главному потоку не место).
+                val bytes = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    entry.file.readBytes()
+                }
                 val info = groupFiles.stageStickerBytes(groupId, bytes)
                 val body = com.vladimir.messenger.util.GroupFileMarker.compose("", info)
                 groupRepository.sendMessage(groupId, topicId, body)

@@ -548,7 +548,10 @@ class ChatDetailViewModel @Inject constructor(
                 )
                 _uiState.update { it.copy(scrollToBottom = true) }
                 fileTransferRouter.pumpOutgoing()
-                stickerLibrary.touch(entry.sha256)
+                // Раунд 171: запись recents - файловый ввод-вывод, в IO.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    stickerLibrary.touch(entry.sha256)
+                }
                 refreshStickers()
             } catch (e: Exception) {
                 android.util.Log.w("ChatDetailVM", "sticker send failed", e)

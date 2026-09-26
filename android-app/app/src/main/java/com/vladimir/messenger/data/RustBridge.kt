@@ -185,6 +185,21 @@ object RustBridge {
     fun isRunning(): Boolean = engine?.isRunning() == true
 
     /**
+     * Раунд 171: есть ли у телефона хоть какой-то сетевой интерфейс (LAN
+     * тоже считается). Сети нет вовсе - тяжелые синхронизации каталогов
+     * пропускаем: иначе каждый send офлайн жжёт до 5-10 секунд на
+     * QUIC-таймаутах и копит очередь за блокировкой движка.
+     */
+    fun isNetworkUp(): Boolean {
+        val context = appContext ?: return true
+        return runCatching {
+            val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                as? android.net.ConnectivityManager ?: return true
+            cm.activeNetwork != null
+        }.getOrDefault(true)
+    }
+
+    /**
      * Строка сборки ядра («p2p_core 0.1.0 · сборка v11.70.23 · 2 брокера»)
      * для экрана «О приложении». Первая функция моста, добавленная после
      * того, как CI начал перегенерировать `p2p_core.kt` из `lib.udl`: если
