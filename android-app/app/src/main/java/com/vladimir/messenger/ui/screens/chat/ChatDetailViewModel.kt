@@ -293,10 +293,14 @@ class ChatDetailViewModel @Inject constructor(
      */
     /** Раунд 43: превью картинки для пузыря передачи файла. */
     fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
+        // Раунд 172: стикеру нужен ПОЛНЫЙ файл (webm/webp анимация). Прежний
+        // порядок сначала отдавал jpg-снимок роутера - чёрный квадрат вместо
+        // анимации; теперь библиотечный стикер - первый источник.
+        if (transfer.displayName.startsWith("Стикер")) {
+            stickerLibrary.fileOf(transfer.fileSha256)?.let { return it }
+        }
         val routerFile = fileTransferRouter.previewFileFor(transfer)
         if (routerFile != null) return routerFile
-        // Раунд 170: свой стикер в исходящей передаче рисуем из библиотеки -
-        // jpg-снимка для webp/webm машина файлов не делает.
         if (transfer.direction == "OUTGOING" && transfer.displayName.startsWith("Стикер")) {
             return stickerLibrary.fileOf(transfer.fileSha256)
         }

@@ -515,7 +515,22 @@ fun GroupChatScreen(
                                 .verticalScroll(rememberScrollState()),
                         ) {
                             uiState.pinned.forEach { m ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Раунд 172: тап по закрепу - лента прыгает к
+                                // самому сообщению (просьба владельца).
+                                val pinnedIndex = uiState.messages.indexOfFirst { it.id == m.id }
+                                val rowModifier = if (pinnedIndex >= 0) {
+                                    Modifier.fillMaxWidth().clickable {
+                                        feedScope.launch {
+                                            feedListState.animateScrollToItem(pinnedIndex)
+                                        }
+                                    }
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = rowModifier,
+                                ) {
                                     // Закреплённый файл (этап 9-10): значок по
                                     // типу и подпись «📎 имя (размер)» - она и
                                     // так в тексте, служебная строка визитки

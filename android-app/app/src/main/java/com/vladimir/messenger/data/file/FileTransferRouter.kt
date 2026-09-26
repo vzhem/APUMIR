@@ -851,6 +851,11 @@ class FileTransferRouter @Inject constructor(
         ) {
             return null
         }
+        // Раунд 172: стикеру отдаём только ПОЛНЫЙ файл (анимация); статичный
+        // jpg-снимок - чёрный квадрат вместо живого стикера.
+        if (transfer.displayName.startsWith("Стикер") && transfer.direction == "OUTGOING") {
+            return null
+        }
         if (transfer.direction == "INCOMING") return receivedFileFor(transfer)
         val base = "file_preview/v1/" + transfer.transferId
         if (transfer.mediaType.equals("image/gif", ignoreCase = true)) {

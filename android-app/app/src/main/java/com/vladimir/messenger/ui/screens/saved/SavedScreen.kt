@@ -506,19 +506,26 @@ private fun SavedItemBubble(
             }
             // Локальная копия ради умного приведения к non-null.
             val shownBitmap = bitmap
-            var showFull by remember(previewPath) { mutableStateOf(false) }
-            if (showFull && previewPath != null) {
-                com.vladimir.messenger.ui.components.PhotoViewer(
-                    photos = listOf(com.vladimir.messenger.ui.components.PhotoSource.File(previewPath)),
-                    onDismiss = { showFull = false },
-                )
-            }
-            // Раунд 126: гифка в избранном ЖИВЁТ - крутится анимацией
-            // (Coil с GIF-декодером), а не стоит первым кадром.
+            // Раунд 126/169: гифка и стикер в избранном ЖИВУТ - крутятся
+            // анимацией (объявлено до блока просмотра - он на них ссылается).
             val isGifItem = item.mediaType.equals("image/gif", ignoreCase = true) ||
                 item.fileName.lowercase().endsWith(".gif")
-            // Раунд 169: стикеры (.webp) тоже живут анимацией.
             val isLiveItem = isGifItem || isStickerItem
+            var showFull by remember(previewPath) { mutableStateOf(false) }
+            if (showFull && previewPath != null) {
+                // Раунд 172: живые стикеры/гифки увеличиваются анимированными.
+                if (isLiveItem) {
+                    com.vladimir.messenger.ui.components.StickerViewer(
+                        file = java.io.File(previewPath),
+                        onDismiss = { showFull = false },
+                    )
+                } else {
+                    com.vladimir.messenger.ui.components.PhotoViewer(
+                        photos = listOf(com.vladimir.messenger.ui.components.PhotoSource.File(previewPath)),
+                        onDismiss = { showFull = false },
+                    )
+                }
+            }
             if (isLiveItem && previewPath != null) {
                 // Раунд 170: гифки/webp крутит Coil, webm-стикеры покадрово.
                 com.vladimir.messenger.ui.components.StickerAnimated(

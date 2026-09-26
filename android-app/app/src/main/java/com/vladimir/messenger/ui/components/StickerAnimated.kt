@@ -13,6 +13,8 @@ package com.vladimir.messenger.ui.components
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -182,4 +184,32 @@ private fun chromaKey(bmp: Bitmap): Bitmap {
     val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     out.setPixels(pixels, 0, width, 0, 0, width, height)
     return out
+}
+
+
+/** Полноэкранный просмотр стикера (раунд 172): анимация НЕ прерывается. */
+@Composable
+fun StickerViewer(file: File?, onDismiss: () -> Unit) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+        ),
+    ) {
+        androidx.compose.foundation.layout.Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.86f))
+                .clickable(onClick = onDismiss),
+            contentAlignment = androidx.compose.ui.Alignment.Center,
+        ) {
+            StickerAnimated(
+                file = file,
+                contentDescription = "Стикер",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp),
+            )
+        }
+    }
 }

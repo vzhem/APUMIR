@@ -122,8 +122,10 @@ fun FileTransferBubble(
                 transfer.mediaType.equals("image/webp", ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp") ||
                 isSticker
-            val canActOnImage = isImage && previewBitmap != null &&
-                transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
+            // Раунд 172: стикеру меню нужно и без битмапа (у webm его не
+            // бывает): удалить/поделиться/в избранное - по точкам и удержанию.
+            val canActOnImage = isImage && (previewBitmap != null || isSticker) &&
+                (transfer.direction == "OUTGOING" || transfer.state == "COMPLETE")
             var imageMenuOpen = androidx.compose.runtime.remember {
                 androidx.compose.runtime.mutableStateOf(false)
             }
@@ -134,16 +136,43 @@ fun FileTransferBubble(
             var showFullImage by androidx.compose.runtime.remember(previewPath) {
                 androidx.compose.runtime.mutableStateOf(false)
             }
-            // Раунд 170: видео-стикер webm в полноэкранный просмотр не зовём.
-            if (showFullImage && previewPath != null &&
-                !com.vladimir.messenger.data.sticker.StickerLibrary.isWebmFile(java.io.File(previewPath))
-            ) {
-                PhotoViewer(
-                    photos = listOf(PhotoSource.File(previewPath)),
-                    onDismiss = { showFullImage = false },
-                )
+            // Раунд 172: стикер увеличивается БЕЗ остановки анимации
+            // (StickerViewer), обычные фото - через PhotoViewer.
+            if (showFullImage && previewPath != null) {
+                if (isSticker) {
+                    com.vladimir.messenger.ui.components.StickerViewer(
+                        file = java.io.File(previewPath),
+                        onDismiss = { showFullImage = false },
+                    )
+                } else if (!com.vladimir.messenger.data.sticker.StickerLibrary
+                    .isWebmFile(java.io.File(previewPath))
+                ) {
+                    PhotoViewer(
+                        photos = listOf(PhotoSource.File(previewPath)),
+                        onDismiss = { showFullImage = false },
+                    )
+                }
             }
-            if (shownPreview != null && isImage) {
+            if (shownPreview == null && isSticker && previewPath != null) {
+                // Раунд 172: у webm-стикера статичного кадра нет (и не нужно) -
+                // рисуем анимацию сразу; раньше пузырь оставался без картинки.
+                com.vladimir.messenger.ui.components.StickerAnimated(
+                    file = java.io.File(previewPath),
+                    contentDescription = transfer.displayName,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier
+                        .sizeIn(maxWidth = 340.dp, maxHeight = 320.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .combinedClickable(
+                            onClick = { showFullImage = true },
+                            onLongClick = {
+                                val messageMenu = onLongPress
+                                if (messageMenu != null) messageMenu()
+                                else if (canActOnImage) imageMenuOpen.value = true
+                            },
+                        ),
+                )
+            } else if (shownPreview != null && isImage) {
                 // Раунд 44: картинка показывается полноценно, без имени файла и
                 // размера. Действия (сохранить/поделиться) - в меню: три точки в
                 // правом верхнем углу или удержание пальца.

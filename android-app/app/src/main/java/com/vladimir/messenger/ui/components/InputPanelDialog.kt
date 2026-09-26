@@ -398,7 +398,7 @@ private fun StickerSection(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    .clickable { pickSticker.launch("image/*") }
+                    .clickable { pickSticker.launch("*/*") }
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Text("+", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary)
@@ -505,7 +505,22 @@ private fun StickerSection(
                     .clickable { onRequestSwarmSticker(item) },
                 contentAlignment = Alignment.Center,
             ) {
-                if (thumb != null) {
+                // Раунд 172: чей-то стикер, уже лежащий на телефоне,
+                // показывается живой анимацией; иначе - jpeg-миниатюра.
+                val localSticker = remember(item.sha256, thumbTick) {
+                    StickerLibrary.fileOf(item.sha256)
+                }
+                if (localSticker != null) {
+                    StickerAnimated(
+                        file = localSticker,
+                        contentDescription = item.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .padding(4.dp),
+                    )
+                } else if (thumb != null) {
                     AsyncImage(
                         model = thumb,
                         contentDescription = item.name,

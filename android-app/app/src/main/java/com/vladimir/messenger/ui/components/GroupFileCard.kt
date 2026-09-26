@@ -181,14 +181,21 @@ fun GroupFileCard(
         }
     }
     var showFull by remember(previewPath) { mutableStateOf(false) }
-    // Раунд 170: видео-стикер webm в полноэкранный просмотр не зовём.
-    if (showFull && previewPath != null &&
-        !com.vladimir.messenger.data.sticker.StickerLibrary.isWebmFile(java.io.File(previewPath))
-    ) {
-        PhotoViewer(
-            photos = listOf(PhotoSource.File(previewPath)),
-            onDismiss = { showFull = false },
-        )
+    // Раунд 172: стикер увеличивается с продолжающейся анимацией.
+    if (showFull && previewPath != null) {
+        if (GroupFileMarker.isSticker(info)) {
+            StickerViewer(
+                file = java.io.File(previewPath),
+                onDismiss = { showFull = false },
+            )
+        } else if (!com.vladimir.messenger.data.sticker.StickerLibrary
+            .isWebmFile(java.io.File(previewPath))
+        ) {
+            PhotoViewer(
+                photos = listOf(PhotoSource.File(previewPath)),
+                onDismiss = { showFull = false },
+            )
+        }
     }
     // Раунд 168: Box-обёртка - в правом верхнем углу карточки живут
     // «три точки» действий (владелец: прежние кнопки под стикером
