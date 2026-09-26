@@ -18,6 +18,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.vladimir.messenger.ui.components.PeerProfileSheet
@@ -417,6 +421,62 @@ fun ChatDetailScreen(
                             }
                         rows.sortedBy { it.orderMs }
                     }
+                    // Раунд 173: закреплённые сообщения личного чата; тап -
+                    // лента прыгает к самому сообщению.
+                    if (uiState.pinned.isNotEmpty()) {
+                        val feedScope = androidx.compose.runtime.rememberCoroutineScope()
+                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Icon(
+                                        androidx.compose.material.icons.Icons.Filled.PushPin,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "Закреплённые" + if (uiState.pinned.size > 1) {
+                                            " (" + uiState.pinned.size + ")"
+                                        } else {
+                                            ""
+                                        },
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                                uiState.pinned.forEach { m ->
+                                    val pinnedIndex = chatRows.indexOfFirst { it.message?.id == m.id }
+                                    val rowModifier = if (pinnedIndex >= 0) {
+                                        Modifier.fillMaxWidth().clickable {
+                                            feedScope.launch { listState.animateScrollToItem(pinnedIndex) }
+                                        }
+                                    } else {
+                                        Modifier.fillMaxWidth()
+                                    }
+                                    Row(
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        modifier = rowModifier,
+                                    ) {
+                                        Text(
+                                            com.vladimir.messenger.util.ChatPreviews.human(
+                                                com.vladimir.messenger.util.InlineImage.stripImage(m.content)
+                                            ) ?: m.content.take(80),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 2,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IconButton(onClick = { viewModel.togglePin(m.id, false) }) {
+                                            Icon(
+                                                androidx.compose.material.icons.Icons.Filled.Close,
+                                                contentDescription = "Открепить",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     LazyColumn(
                         state          = listState,
                         modifier       = Modifier.fillMaxSize(),
@@ -549,6 +609,19 @@ fun ChatDetailScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Копировать всё", modifier = Modifier.fillMaxWidth())
+                    }
+                    // Раунд 173: закрепить/открепить сообщение личного чата.
+                    TextButton(
+                        onClick = {
+                            showCopyDialog = null
+                            viewModel.togglePin(message.id, !message.isPinned)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (message.isPinned) "Открепить" else "Закрепить",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
                     TextButton(
                         onClick = {

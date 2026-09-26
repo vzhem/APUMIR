@@ -29,6 +29,8 @@ import javax.inject.Inject
 
 data class ChatDetailUiState(
     val messages: List<Message> = emptyList(),
+    /** Раунд 173: закреплённые сообщения чата (свежие вверху). */
+    val pinned: List<Message> = emptyList(),
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
@@ -90,6 +92,7 @@ class ChatDetailViewModel @Inject constructor(
     init {
         refreshAttachmentRights()
         loadMessages()
+        observePinned()
         observeContactPresence()
         observeTransfers()
         observeReactions()
@@ -182,6 +185,22 @@ class ChatDetailViewModel @Inject constructor(
     /** Тап по скрепке при закрытых вложениях: объясняем, а не открываем выбор файла. */
     fun onAttachmentsLocked() {
         _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+    }
+
+    /** Раунд 173: закреплённые сообщения - живой поток в шапку чата. */
+    private fun observePinned() {
+        viewModelScope.launch {
+            chatRepository.observePinnedChatMessages(chatId).collect { pinned ->
+                _uiState.update { it.copy(pinned = pinned) }
+            }
+        }
+    }
+
+    /** Раунд 173: закрепить/открепить сообщение личного чата. */
+    fun togglePin(messageId: String, pinned: Boolean) {
+        viewModelScope.launch {
+            runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+        }
     }
 
     private fun loadMessages() {

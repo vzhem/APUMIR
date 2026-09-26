@@ -88,6 +88,22 @@ interface MessageDao {
     )
     suspend fun getPinnedMessages(chatId: String, topicId: String): List<MessageEntity>
 
+    // Раунд 173: закрепы БЕЗ темы - личные чаты и посты канала (у поста
+    // своя тема, поэтому фильтр по topicId здесь нельзя).
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId " +
+            "AND (topicId IS NULL OR topicId = '') AND isPinned = 1 " +
+            "ORDER BY pinnedAtMs DESC"
+    )
+    fun observePinnedChatMessages(chatId: String): Flow<List<MessageEntity>>
+
+    // Закрепы канала: посты живут в своих темах - берём все пиннутые чата.
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId AND isPinned = 1 " +
+            "ORDER BY pinnedAtMs DESC"
+    )
+    fun observePinnedChannelPosts(chatId: String): Flow<List<MessageEntity>>
+
     @Query("UPDATE messages SET isPinned = :pinned, pinnedAtMs = :atMs, pinnedBy = :by WHERE id = :messageId")
     suspend fun updatePinned(messageId: String, pinned: Boolean, atMs: Long?, by: String?)
 

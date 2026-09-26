@@ -36,6 +36,8 @@ data class ChannelPost(
     val topicId: String,
     /** id самого сообщения-поста: к нему привязываются реакции и правка. */
     val messageId: String,
+    /** Раунд 173: пост закреплён в канале. */
+    val isPinned: Boolean = false,
     val title: String,
     val text: String,
     /** Фотографии поста (jpeg в base64) по порядку; пусто, если фото нет. */
@@ -58,6 +60,8 @@ data class ChannelUiState(
     val channelId: String = "",
     val channel: GroupSummary? = null,
     val posts: List<ChannelPost> = emptyList(),
+    /** Раунд 173: закреплённые посты канала (messageId, свежие вверху). */
+    val pinnedPostIds: List<String> = emptyList(),
     /** Писать посты может владелец и администраторы; комментарии - все. */
     val canPost: Boolean = false,
     /** Мой идентификатор узла: по нему решается, можно ли править пост. */
@@ -108,6 +112,7 @@ class ChannelViewModel @Inject constructor(
         observe()
         observeReactions()
         observeTransfers()
+        observePinned()
         // Вступивший позже не застал посты - просим у владельца последние
         // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
         viewModelScope.launch {
@@ -117,6 +122,22 @@ class ChannelViewModel @Inject constructor(
         // администраторам (рой, этап 3): сводные числа спрашиваем у них.
         viewModelScope.launch {
             runCatching { postCounters.requestCounters(channelId) }
+        }
+    }
+
+    /** Раунд 173: закреплённые посты канала - живой поток в шапку. */
+    private fun observePinned() {
+        viewModelScope.launch {
+            messageDao.observePinnedChannelPosts(channelId).collect { list ->
+                _uiState.update { it.copy(pinnedPostIds = list.map { e -> e.id }) }
+            }
+        }
+    }
+
+    /** Раунд 173: закрепить/открепить пост канала. */
+    fun togglePostPin(post: ChannelPost) {
+        viewModelScope.launch {
+            runCatching { messageDao.updatePinned(post.messageId, !post.isPinned, if (!post.isPinned) System.currentTimeMillis() else null, null) }
         }
     }
 
@@ -309,6 +330,7 @@ class ChannelViewModel @Inject constructor(
                     ChannelPost(
                         topicId = topic.id,
                         messageId = first.id,
+                        isPinned = first.isPinned,
                         title = topic.name,
                         // Длинный текст едет кусками (рой, этап 3): склеиваем;
                         // пока куски в пути - текст с многоточием.

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -218,6 +219,61 @@ fun ChannelScreen(
                 LaunchedEffect(uiState.posts.size) {
                     if (uiState.posts.isNotEmpty()) {
                         listState.scrollToItem(uiState.posts.lastIndex)
+                    }
+                }
+                // Раунд 173: закреплённые посты канала; тап - лента прыгает
+                // к самому посту.
+                if (uiState.pinnedPostIds.isNotEmpty()) {
+                    val feedScope = androidx.compose.runtime.rememberCoroutineScope()
+                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Filled.PushPin,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "Закреплённые" + if (uiState.pinnedPostIds.size > 1) {
+                                        " (" + uiState.pinnedPostIds.size + ")"
+                                    } else {
+                                        ""
+                                    },
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                            uiState.posts.filter { it.messageId in uiState.pinnedPostIds }
+                                .sortedByDescending { it.timeMs }
+                                .forEach { pinnedPost ->
+                                    val pinnedIndex = uiState.posts.indexOfFirst { it.topicId == pinnedPost.topicId }
+                                    Row(
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        modifier = if (pinnedIndex >= 0) {
+                                            Modifier.fillMaxWidth().clickable {
+                                                feedScope.launch { listState.animateScrollToItem(pinnedIndex) }
+                                            }
+                                        } else {
+                                            Modifier.fillMaxWidth()
+                                        },
+                                    ) {
+                                        Text(
+                                            (pinnedPost.title.ifBlank { "Пост" }) + " - " + pinnedPost.text.take(60),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 2,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IconButton(onClick = { viewModel.togglePostPin(pinnedPost) }) {
+                                            Icon(
+                                                androidx.compose.material.icons.Icons.Filled.Close,
+                                                contentDescription = "Открепить",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                        }
                     }
                 }
                 // Бегунок справа: в длинном списке видно, где мы находимся.
@@ -415,6 +471,19 @@ private fun PostCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Раунд 173: закрепить/открепить пост канала.
+                    IconButton(onClick = { viewModel.togglePostPin(post) }, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.PushPin,
+                            contentDescription = if (post.isPinned) "Открепить" else "Закрепить",
+                            tint = if (post.isPinned) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
                 // Карандаш в углу поста: не теснит нижний ряд кнопок, который
                 // на узком экране и так заполнен.

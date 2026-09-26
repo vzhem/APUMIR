@@ -64,6 +64,20 @@ class ChatRepository @Inject constructor(
     fun observeMessages(chatId: String): Flow<List<Message>> =
         messageDao.observeMessages(chatId).map { it.map { e -> e.toDomain() } }
 
+    /** Раунд 173: закрепы личного чата (без тем). */
+    fun observePinnedChatMessages(chatId: String): Flow<List<Message>> =
+        messageDao.observePinnedChatMessages(chatId).map { list -> list.map { e -> e.toDomain() } }
+
+    /** Раунд 173: закрепить/открепить сообщение (личка и канальные посты). */
+    suspend fun setMessagePinned(messageId: String, pinned: Boolean) {
+        messageDao.updatePinned(
+            messageId,
+            pinned,
+            if (pinned) System.currentTimeMillis() else null,
+            null,
+        )
+    }
+
     suspend fun sendMessage(chatId: String, recipientId: String, content: String): Result<Message> {
         return try {
             val messageId = UUID.randomUUID().toString()
