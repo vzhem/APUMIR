@@ -242,9 +242,8 @@ Latest = **v11.74.70** (2026-09-26). Все релизы v11.74.30…70 выпу
   «параметр -File не существует» - ошибка 2026-09-26):
 
   ```powershell
-  cd C:\путь\к\папке\APUMIR
-  git fetch --tags --force
-  git pull
+  cd C:\APU-M8
+  git fetch origin --tags --force
   powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\make_update_patch.ps1 -FromTag v11.74.<старая> -ToTag v11.74.<новая> -Upload
   ```
 
