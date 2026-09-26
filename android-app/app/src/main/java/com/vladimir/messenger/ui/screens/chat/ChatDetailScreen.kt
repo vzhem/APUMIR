@@ -69,6 +69,8 @@ fun ChatDetailScreen(
     onBackClick: () -> Unit,
     onRenameClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
     onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
+    /** Раунд 176: открыть добавление контакта по ссылке из карточки в чате. */
+    onAddContactInvite: (String) -> Unit = {},
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -553,6 +555,7 @@ fun ChatDetailScreen(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
                                     linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                    onContactInvite = onAddContactInvite,
                                     // Одно нажатие - сразу пузырь с реакциями:
                                     // владелец просил ставить их в один тап.
                                     // Остальные действия - долгое нажатие.

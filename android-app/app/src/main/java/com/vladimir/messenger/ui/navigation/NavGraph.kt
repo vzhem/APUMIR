@@ -456,6 +456,9 @@ fun MessengerNavGraph(
                 },
                 onCallClick = { cId, cName ->
                     navController.navigate(Screen.Call.createOutgoing(cId, cName))
+                },
+                onAddContactInvite = { link ->
+                    navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(link)))
                 }
             )
         }

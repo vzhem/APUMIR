@@ -198,25 +198,6 @@ fun ContactsScreen(
                         key = { it.id }
                     ) { contact ->
                         // ContactCard expects Chat, create a minimal Chat from Contact
-                        val ctx = LocalContext.current
-                        val shareContact = {
-                            try {
-                                    val link = ContactShareLink.build(contact.id, contact.displayName, contact.username)
-                                    // Наружу - короткой https-ссылкой: apu:// в чужих
-                                    // мессенджерах не кликабельна. Сервис молчит -
-                                    // уйдёт прежняя ссылка.
-                                    ShortShare.shareText(ctx, link, "Поделиться контактом") { shared ->
-                                        // Доллар НЕ экранируем: с ${'$'} в
-                                        // сообщение уходил сам текст
-                                        // "${contact.displayName}" вместо имени,
-                                        // а вместо ссылки - "${link}".
-                                        "Мой контакт ${contact.displayName} в APU. " +
-                                            "Открой ссылку для добавления:\n$shared"
-                                    }
-                                } catch (_: Exception) {
-                                }
-                            Unit
-                        }
                         // Пузырь контакта — тот же ContactCard, что на главной:
                         // владелец просил, чтобы списки выглядели одинаково.
                         ContactCard(
@@ -232,7 +213,6 @@ fun ContactsScreen(
                             onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                             username = contact.username,
                             kind = BubbleKind.Personal,
-                            onShareClick = shareContact,
                             menuActions = listOf(
                                 BubbleMenuAction(
                                     title = "Написать",
