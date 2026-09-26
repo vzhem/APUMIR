@@ -56,6 +56,13 @@ fun FileTransferBubble(
     onShareClick: (() -> Unit)? = null,
     /** Переслать файл себе в «Избранное». Доступно для принятых файлов. */
     onSaveToFavorites: (() -> Unit)? = null,
+    /**
+     * Раунд 120: долгое нажатие на картинке/гифке открывает меню СООБЩЕНИЯ
+     * (реакции, «В избранное»), как у текстовых пузырей. Раньше жест
+     * открывал только меню файла (сохранить/поделиться) и только у принятых
+     * картинок, поэтому реакцию на гифке поставить не мог никто.
+     */
+    onLongPress: (() -> Unit)? = null,
 ) {
     val background = if (isFromMe) {
         MaterialTheme.colorScheme.primary
@@ -73,10 +80,19 @@ fun FileTransferBubble(
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = if (isFromMe) Arrangement.End else Arrangement.Start,
     ) {
+        // Раунд 169/170: стикер (webp и видео-webm) парит в чате - без
+        // подложки пузыря; остаётся только анимированная картинка.
+        val stickerFloat = previewFile != null && (
+            transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".webp")
+            )
         Column(
             modifier = Modifier
-                .background(background, RoundedCornerShape(16.dp))
-                .padding(12.dp),
+                .then(
+                    if (stickerFloat) Modifier
+                    else Modifier.background(background, RoundedCornerShape(16.dp))
+                )
+                .padding(if (stickerFloat) 0.dp else 12.dp),
         ) {
             // Превью картинки: исходящее доступно сразу, входящее - после
             // приёма (COMPLETE).
@@ -93,9 +109,23 @@ fun FileTransferBubble(
                     previewBitmap = AvatarBitmaps.loadFile(previewPath, sampleSize = 2)
                 }
             }
-            val isImage = transfer.mediaType.startsWith("image/")
-            val canActOnImage = isImage && previewBitmap != null &&
-                transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
+            // Раунд 170: стикер - и webp, и видео-webm (генераторы стикеров).
+            val isSticker = transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".webp") ||
+                transfer.displayName.lowercase().endsWith(".webm")
+            val isImage = transfer.mediaType.startsWith("image/") || isSticker
+            val isGif = transfer.mediaType.equals("image/gif", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".gif")
+            // Раунд 166: анимированный webp крутится как гифка; webm -
+            // покадрово. Всю анимацию рисует StickerAnimated.
+            val isAnimated = isGif ||
+                transfer.mediaType.equals("image/webp", ignoreCase = true) ||
+                transfer.displayName.lowercase().endsWith(".webp") ||
+                isSticker
+            // Раунд 172: стикеру меню нужно и без битмапа (у webm его не
+            // бывает): удалить/поделиться/в избранное - по точкам и удержанию.
+            val canActOnImage = isImage && (previewBitmap != null || isSticker) &&
+                (transfer.direction == "OUTGOING" || transfer.state == "COMPLETE")
             var imageMenuOpen = androidx.compose.runtime.remember {
                 androidx.compose.runtime.mutableStateOf(false)
             }
@@ -106,13 +136,43 @@ fun FileTransferBubble(
             var showFullImage by androidx.compose.runtime.remember(previewPath) {
                 androidx.compose.runtime.mutableStateOf(false)
             }
+            // Раунд 172: стикер увеличивается БЕЗ остановки анимации
+            // (StickerViewer), обычные фото - через PhotoViewer.
             if (showFullImage && previewPath != null) {
-                PhotoViewer(
-                    photos = listOf(PhotoSource.File(previewPath)),
-                    onDismiss = { showFullImage = false },
-                )
+                if (isSticker) {
+                    com.vladimir.messenger.ui.components.StickerViewer(
+                        file = java.io.File(previewPath),
+                        onDismiss = { showFullImage = false },
+                    )
+                } else if (!com.vladimir.messenger.data.sticker.StickerLibrary
+                    .isWebmFile(java.io.File(previewPath))
+                ) {
+                    PhotoViewer(
+                        photos = listOf(PhotoSource.File(previewPath)),
+                        onDismiss = { showFullImage = false },
+                    )
+                }
             }
-            if (shownPreview != null && isImage) {
+            if (shownPreview == null && isSticker && previewPath != null) {
+                // Раунд 172: у webm-стикера статичного кадра нет (и не нужно) -
+                // рисуем анимацию сразу; раньше пузырь оставался без картинки.
+                com.vladimir.messenger.ui.components.StickerAnimated(
+                    file = java.io.File(previewPath),
+                    contentDescription = transfer.displayName,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier
+                        .sizeIn(maxWidth = 340.dp, maxHeight = 320.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .combinedClickable(
+                            onClick = { showFullImage = true },
+                            onLongClick = {
+                                val messageMenu = onLongPress
+                                if (messageMenu != null) messageMenu()
+                                else if (canActOnImage) imageMenuOpen.value = true
+                            },
+                        ),
+                )
+            } else if (shownPreview != null && isImage) {
                 // Раунд 44: картинка показывается полноценно, без имени файла и
                 // размера. Действия (сохранить/поделиться) - в меню: три точки в
                 // правом верхнем углу или удержание пальца.
@@ -123,6 +183,27 @@ fun FileTransferBubble(
                 // и низ - как в квадратном превью у отправителя.
                 val ratio = shownPreview.width.toFloat() / shownPreview.height.coerceAtLeast(1).toFloat()
                 Box {
+                    if (isAnimated) {
+                        // Раунд 170: гифки/webp крутит Coil, webm-стикеры -
+                        // покадрово (StickerAnimated). Рамку берём у файла.
+                        com.vladimir.messenger.ui.components.StickerAnimated(
+                            file = java.io.File(previewPath),
+                            contentDescription = transfer.displayName,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            modifier = Modifier
+                                .sizeIn(maxWidth = 340.dp, maxHeight = 320.dp)
+                                .aspectRatio(ratio.coerceIn(0.4f, 3f))
+                                .clip(RoundedCornerShape(12.dp))
+                                .combinedClickable(
+                                    onClick = { showFullImage = true },
+                                    onLongClick = {
+                                        val messageMenu = onLongPress
+                                        if (messageMenu != null) messageMenu()
+                                        else if (canActOnImage) imageMenuOpen.value = true
+                                    },
+                                ),
+                        )
+                    } else {
                     androidx.compose.foundation.Image(
                         bitmap = shownPreview.asImageBitmap(),
                         contentDescription = transfer.displayName,
@@ -134,10 +215,13 @@ fun FileTransferBubble(
                             .combinedClickable(
                                 onClick = { showFullImage = true },
                                 onLongClick = {
-                                    if (canActOnImage) imageMenuOpen.value = true
+                                    val messageMenu = onLongPress
+                                    if (messageMenu != null) messageMenu()
+                                    else if (canActOnImage) imageMenuOpen.value = true
                                 },
                             ),
                     )
+                    }
                     if (canActOnImage) {
                         Box(
                             modifier = Modifier
@@ -220,11 +304,15 @@ fun FileTransferBubble(
             }
             }
             Spacer(modifier = Modifier.padding(2.dp))
-            Text(
-                stateLabel(transfer),
-                style = MaterialTheme.typography.bodySmall,
-                color = contentColor.copy(alpha = 0.9f),
-            )
+            // У парящего стикера служебной строки нет: «Получено ✓» -
+            // лишний текст под картинкой (раунд 169).
+            if (!(stickerFloat && transfer.state == "COMPLETE")) {
+                Text(
+                    stateLabel(transfer),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor.copy(alpha = 0.9f),
+                )
+            }
             if (transfer.state == "TRANSFERRING" && transfer.transferredBytes > 0) {
                 val elapsedMs = System.currentTimeMillis() - transfer.createdAtMs
                 if (elapsedMs > 1000) {

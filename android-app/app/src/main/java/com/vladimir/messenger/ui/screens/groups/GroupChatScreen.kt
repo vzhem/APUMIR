@@ -19,16 +19,19 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -37,6 +40,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Search
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,6 +56,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -64,6 +69,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -74,10 +80,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -92,6 +101,8 @@ import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
+import com.vladimir.messenger.ui.components.GifCatalogDialog
+import com.vladimir.messenger.ui.components.InputPanelDialog
 import com.vladimir.messenger.ui.components.GroupFileCard
 import com.vladimir.messenger.ui.components.fileIconFor
 import com.vladimir.messenger.ui.components.ImagePreview
@@ -131,6 +142,84 @@ fun GroupChatScreen(
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
+    // Раунд 143: заявки на вступление - пузырь над содержимым для админов.
+    val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
+    var showRequestsSheet by remember { mutableStateOf(false) }
+    var requestQuery by remember { mutableStateOf("") }
+    val canDecideRequests = uiState.me?.let {
+        com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(it.role)
+    } == true
+    // Каталог GIF (кнопка «GIF» у скрепки).
+    var showGifCatalog by remember { mutableStateOf(false) }
+    // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
+    var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
+    deleteForAllTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteForAllTarget = null },
+            title = { Text("Удалить у всех?") },
+            text = { Text("Сообщение исчезнет у всех участников группы. У кого старая версия приложения - там останется: обновите телефоны.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteForAllTarget = null
+                    viewModel.deleteMessageForAll(target.id)
+                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
+            },
+        )
+    }
+
+    if (showGifCatalog) {
+        // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
+        // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
+        val stickerEntries by viewModel.stickerEntries.collectAsStateWithLifecycle()
+        val stickerRecents by viewModel.stickerRecents.collectAsStateWithLifecycle()
+        val swarmStickers by viewModel.swarmStickers.collectAsStateWithLifecycle()
+        InputPanelDialog(
+            myGifs = uiState.myGifs,
+            swarmGifs = uiState.swarmGifs,
+            swarmStatus = uiState.swarmStatus,
+            items = uiState.gifItems,
+            next = uiState.gifNext,
+            loading = uiState.gifLoading,
+            error = uiState.gifError,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.attachGif(item) { }
+            },
+            onAttachLocal = { entry ->
+                showGifCatalog = false
+                viewModel.attachLocalGif(entry.sha256)
+            },
+            onRequestSwarm = { swarm ->
+                viewModel.requestSwarmGif(swarm) { showGifCatalog = false }
+            },
+            onRequestThumbs = { viewModel.requestPeerThumbs(it) },
+            onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
+            stickers = stickerEntries,
+            stickerRecents = stickerRecents,
+            swarmStickers = swarmStickers,
+            onSticker = {
+                // Раунд 170: выбрал стикер - окно закрывается, видно чат.
+                showGifCatalog = false
+                viewModel.sendSticker(it)
+            },
+            onRemoveSticker = { viewModel.removeSticker(it) },
+            onRemoveGif = { viewModel.removeOwnGif(it.sha256) },
+            onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
+            onRequestSwarmSticker = { swarm -> viewModel.requestSwarmSticker(swarm) },
+            onEmoji = { emoji -> draft += emoji },
+            onOpened = { viewModel.refreshStickers() },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
     // В КАНАЛЕ список тем не показываем. Пост и комментарии к нему устроены
     // как тема внутри, но человеку это знать незачем: он открыл комментарии к
     // конкретному посту и должен видеть обычную переписку, а «Назад» обязано
@@ -160,6 +249,36 @@ fun GroupChatScreen(
     }
 
     // Подложка на весь экран, в том числе под верхней панелью.
+            val feedListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val feedScope = rememberCoroutineScope()
+            LaunchedEffect(uiState.selectedTopicId, uiState.messages.size) {
+                val jump = viewModel.feedJump.value ?: return@LaunchedEffect
+                if (jump.topicId != uiState.selectedTopicId || uiState.messages.isEmpty()) {
+                    return@LaunchedEffect
+                }
+                val offset = if (uiState.moreComments > 0) 1 else 0
+                feedListState.scrollToItem(
+                    (offset + jump.index).coerceIn(0, offset + uiState.messages.size - 1),
+                )
+                viewModel.consumeFeedJump()
+            }
+            // Раунд 150: отправил сообщение - лента доехала до него
+            // (раньше оно оставалось за полем ввода, владелец, скрин).
+            LaunchedEffect(uiState.messages.size, uiState.messages.lastOrNull()?.id) {
+                val last = uiState.messages.lastOrNull() ?: return@LaunchedEffect
+                if (last.isFromMe) {
+                    val offset = if (uiState.moreComments > 0) 1 else 0
+                    feedListState.animateScrollToItem(offset + uiState.messages.size - 1)
+                }
+            }
+            val feedRemaining by remember(uiState.messages.size, uiState.moreComments) {
+                derivedStateOf {
+                    val last = feedListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    (uiState.messages.size + (if (uiState.moreComments > 0) 1 else 0) - 1 - last)
+                        .coerceAtLeast(0)
+                }
+            }
+
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
         Scaffold(
@@ -307,6 +426,16 @@ fun GroupChatScreen(
             // ── Правая часть: список тем пузырями либо лента выбранной темы.
             Column(modifier = Modifier.weight(1f).fillMaxSize()) {
 
+            // Раунд 143: пузырь заявок - на главной группы/канала, в темах
+            // и в комментариях; содержимое НЕ перекрывает (оно уезжает вниз).
+            if (canDecideRequests && joinRequests.isNotEmpty()) {
+                JoinRequestsBanner(
+                    count = joinRequests.size,
+                    expanded = showRequestsSheet,
+                    onClick = { showRequestsSheet = !showRequestsSheet },
+                )
+            }
+
             if (uiState.error != null) {
                 Text(
                     uiState.error ?: "",
@@ -388,7 +517,22 @@ fun GroupChatScreen(
                                 .verticalScroll(rememberScrollState()),
                         ) {
                             uiState.pinned.forEach { m ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Раунд 172: тап по закрепу - лента прыгает к
+                                // самому сообщению (просьба владельца).
+                                val pinnedIndex = uiState.messages.indexOfFirst { it.id == m.id }
+                                val rowModifier = if (pinnedIndex >= 0) {
+                                    Modifier.fillMaxWidth().clickable {
+                                        feedScope.launch {
+                                            feedListState.animateScrollToItem(pinnedIndex)
+                                        }
+                                    }
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = rowModifier,
+                                ) {
                                     // Закреплённый файл (этап 9-10): значок по
                                     // типу и подпись «📎 имя (размер)» - она и
                                     // так в тексте, служебная строка визитки
@@ -403,9 +547,12 @@ fun GroupChatScreen(
                                         Spacer(Modifier.width(4.dp))
                                     }
                                     Text(
-                                        // Без служебных строк фото и длинного текста.
-                                        com.vladimir.messenger.util.InlineImage.stripImage(m.content)
-                                            .ifBlank { pinnedFile?.let { GroupFileMarker.caption(it) }.orEmpty() },
+                                        // Без служебных строк фото и длинного текста;
+                                        // р156: и без гифка-ссылок/стикер-конвертов.
+                                        com.vladimir.messenger.util.ChatPreviews.human(
+                                            com.vladimir.messenger.util.InlineImage.stripImage(m.content)
+                                                .ifBlank { pinnedFile?.let { GroupFileMarker.caption(it) }.orEmpty() }
+                                        ) ?: "",
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
@@ -430,9 +577,16 @@ fun GroupChatScreen(
             }
 
             // ── Лента темы
+            // Раунд 144: при входе в тема открывается на первом непрочитанном
+            // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(8.dp),
+                state = feedListState,
+                // Раунд 151: лента сжимается над клавиатурой (edge-to-edge:
+                // окно само не сжимается - переписка пряталась за пузырями
+                // ввода; запас 200dp снизу отводит место под пузыри).
+                modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
+                // Раунд 147: снизу запас под оверлей поля ввода.
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Большой канал: комментарии приходят от владельца по запросу,
@@ -463,8 +617,22 @@ fun GroupChatScreen(
                             onDownload = { viewModel.requestFile(message, card) },
                             onSave = { viewModel.requestSaveReceivedFile(it) },
                             onShare = { f -> viewModel.shareFile(f, card.displayName, card.mediaType) },
+                            onFavorite = { viewModel.saveFileToFavorites(it) },
                             servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.groupId, card.sha256)] ?: 0,
                         )
+                    }
+                    // Раунд 166: стикер маленький - получатель ТИХО просит
+                    // файл сам, и анимированная картинка появляется без
+                    // кнопки «Скачать».
+                    val st = cardState
+                    val stickerCard = card
+                    if (st != null && stickerCard != null && !message.isFromMe &&
+                        stickerCard.displayName.startsWith("Стикер") &&
+                        st.transfer == null && !st.pending
+                    ) {
+                        LaunchedEffect(stickerCard.sha256) {
+                            viewModel.requestFile(message, stickerCard)
+                        }
                     }
                     MessageBubble(
                         message = message,
@@ -477,6 +645,9 @@ fun GroupChatScreen(
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
                         fileCard = cardState,
+                        onEnsureGif = { sha -> viewModel.ensureGifRef(sha) },
+                        onDeleteForMe = { viewModel.deleteMessageForMe(message.id) },
+                        onDeleteForAll = { deleteForAllTarget = message },
                     )
                 }
             }
@@ -506,72 +677,185 @@ fun GroupChatScreen(
                 }
             }
 
-            // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                    )
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(18.dp),
-                    )
-                    .padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Скрепка (этап 9): файл к сообщению. Закрытые вложения
-                // объясняются, а не молчат.
-                IconButton(
-                    onClick = {
-                        if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
-                    },
-                    enabled = !uiState.isPreparingFile && !uiState.sending,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    if (uiState.isPreparingFile) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            Icons.Filled.AttachFile,
-                            contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
-                            tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Сообщение") },
-                    maxLines = 4,
-                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFF1E2430),
-                        unfocusedTextColor = Color(0xFF1E2430),
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedPlaceholderColor = Color(0xFF5A6472),
-                        unfocusedPlaceholderColor = Color(0xFF5A6472),
-                    ),
-                )
-                Spacer(Modifier.width(8.dp))
-                TextButton(
-                    enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
-                    onClick = {
-                        viewModel.send(draft)
-                        draft = ""
-                    },
-                ) { Text("Отправить") }
-            }
-
             } // else: лента темы
             } // правая колонка
             } // Row: левая колонка + правая
         }
     }
+    // Показ - только ВНУТРИ темы (или в группе без тем): на списке
+    // тем поля ввода и «Отправить» нет (владелец, раунд 148).
+    if (!showTopicsList) {
+    // Раунд 147: поле ввода - оверлей НА ВЕСЬ экран, включая область
+    // пузырей тем слева (просьба владельца); imePadding поднимает всё
+    // над клавиатурой, «Отправить» всегда видна.
+    Column(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .imePadding(),
+    ) {
+            // Раунд 144: сколько сообщений осталось ниже - тап прокручивает вниз.
+            if (feedRemaining > 0) {
+                val lastIndex = (if (uiState.moreComments > 0) 1 else 0) + uiState.messages.size - 1
+                Text(
+                    "↓  Ещё " + messagesLabel(feedRemaining),
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFFF5F7FA).copy(alpha = 0.96f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                            RoundedCornerShape(16.dp),
+                        )
+                        .clickable {
+                            feedScope.launch {
+                                feedListState.animateScrollToItem(lastIndex.coerceAtLeast(0))
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                )
+            }
+
+            // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
+            // Раунд 146: пузырь поля - от края до края экрана; «Отправить» -
+            // своим пузырём той же ширины под полем (просьба владельца).
+            var inputFocused by remember { mutableStateOf(false) }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+                        )
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(6.dp),
+                ) {
+                    if (inputFocused) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = {
+                                    if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                if (uiState.isPreparingFile) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        Icons.Filled.AttachFile,
+                                        contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
+                                        tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                                    )
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    if (uiState.canAttach) {
+                                        showGifCatalog = true
+                                        viewModel.onGifCatalogOpened()
+                                        if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                                            viewModel.searchGifs("")
+                                        }
+                                    } else {
+                                        viewModel.onAttachLocked()
+                                    }
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                            ) {
+                                Text(
+                                    "GIF",
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { inputFocused = it.isFocused },
+                        placeholder = { Text("Сообщение") },
+                        minLines = 1,
+                        maxLines = 6,
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFF1E2430),
+                            unfocusedTextColor = Color(0xFF1E2430),
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedPlaceholderColor = Color(0xFF5A6472),
+                            unfocusedPlaceholderColor = Color(0xFF5A6472),
+                        ),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                // Раунд 152: активная «Отправить» - золотая заливка и белый
+                // текст: сразу видно, что сообщение можно отправить (раньше
+                // менялся только оттенок текста - владелец не замечал).
+                val canSend = (draft.isNotBlank() || uiState.stagedFile != null) &&
+                    !uiState.sending && !uiState.isPreparingFile
+                TextButton(
+                    enabled = canSend,
+                    onClick = {
+                        viewModel.send(draft)
+                        draft = ""
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (canSend) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+                        )
+                        .border(
+                            1.dp,
+                            if (canSend) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(vertical = 8.dp),
+                ) {
+                    Text(
+                        "Отправить",
+                        fontWeight = FontWeight.Bold,
+                        color = if (canSend) Color.White else Color(0xFF9AA3AF),
+                    )
+                }
+            }
+
+    }
+
+    }
+    }
+
+
+    // Раунд 143: список заявок поверх экрана (как в привычном мессенджере):
+    // поиск-пузырь, прокрутка, «Принять в группу» / «Отклонить».
+    if (showRequestsSheet && joinRequests.isNotEmpty()) {
+        JoinRequestsSheet(
+            requests = joinRequests,
+            query = requestQuery,
+            onQuery = { requestQuery = it },
+            onDecide = { nodeId, approve ->
+                viewModel.decideJoinRequest(nodeId, approve)
+                if (joinRequests.size <= 1) showRequestsSheet = false
+            },
+            onDismiss = { showRequestsSheet = false },
+        )
     }
 
     if (showNewTopic) {
@@ -761,6 +1045,175 @@ private fun UnreadBadge(count: Int) {
 // Тема в своём пузыре: иконка, название, превью, время и непрочитанные
 // =============================================================================
 
+/**
+ * Раунд 143: пузырь «N заявок на вступление» - виден только владельцу и
+ * админам, живёт над содержимым (не перекрывает его) на главной
+ * группы/канала, в темах и в комментариях. Нажатие раскрывает список.
+ */
+@Composable
+private fun JoinRequestsBanner(count: Int, expanded: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.94f))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                RoundedCornerShape(18.dp),
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text("👥", fontSize = 18.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            requestsLabel(count) + " на вступление",
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            if (expanded) "▲" else "▼",
+            fontSize = 14.sp,
+            color = Color(0xFF5A6472),
+        )
+    }
+}
+
+/**
+ * Раунд 143: список заявок снизу поверх экрана: поиск-пузырь и
+ * прокручиваемые карточки с решениями.
+ */
+@Composable
+private fun JoinRequestsSheet(
+    requests: List<com.vladimir.messenger.data.group.JoinRequestSummary>,
+    query: String,
+    onQuery: (String) -> Unit,
+    onDecide: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Затемнение: нажатие вне списка закрывает его.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable { onDismiss() },
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(Color(0xFFF7F9FC))
+                .padding(12.dp),
+        ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQuery,
+            placeholder = { Text("Поиск заявок") },
+            singleLine = true,
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        val clean = query.trim()
+        val filtered = if (clean.isEmpty()) requests else requests.filter {
+            it.displayName.contains(clean, ignoreCase = true) ||
+                it.note.contains(clean, ignoreCase = true)
+        }
+        if (filtered.isEmpty()) {
+            Text(
+                if (requests.isEmpty()) "Заявок пока нет" else "Никого не нашли по «" + clean + "»",
+                color = Color(0xFF5A6472),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 460.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                items(filtered, key = { it.nodeId }) { request ->
+                    JoinRequestRow(request = request, onDecide = onDecide)
+                }
+            }
+        }
+        }
+    }
+}
+
+/** Карточка одной заявки: кто, когда и кнопки решения. */
+@Composable
+private fun JoinRequestRow(
+    request: com.vladimir.messenger.data.group.JoinRequestSummary,
+    onDecide: (String, Boolean) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE8EEF5)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    request.displayName.trim().take(1).uppercase().ifBlank { "?" },
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF5A6472),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    request.displayName.ifBlank { request.nodeId.take(8) },
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1E2430),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "подал(а) заявку " + topicTimeLabel(request.requestedAtMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF5A6472),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { onDecide(request.nodeId, true) }) {
+                Text("Принять в группу")
+            }
+            TextButton(onClick = { onDecide(request.nodeId, false) }) {
+                Text("Отклонить", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+/** «1 заявка / 2 заявки / 28 заявок». */
+private fun requestsLabel(count: Int): String = when {
+    count % 10 == 1 && count % 100 != 11 -> "$count заявка"
+    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count заявки"
+    else -> "$count заявок"
+}
+
+/** Раунд 143: «1 сообщение / 3 сообщения / 653 сообщения / 5 сообщений». */
+private fun messagesLabel(count: Int): String = when {
+    count <= 0 -> "Нет сообщений"
+    count % 10 == 1 && count % 100 != 11 -> "$count сообщение"
+    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count сообщения"
+    else -> "$count сообщений"
+}
+
 @Composable
 private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
     Card(
@@ -808,18 +1261,26 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                         )
                     }
                 }
+                // Раунд 143: счётчик сообщений под названием темы (как в
+                // привычном мессенджере: «653 сообщения»).
                 Text(
-                    topic.lastMessagePreview
-                        ?: if (topic.messageCount > 0) {
-                            topic.messageCount.toString() + " сообщ."
-                        } else {
-                            "Нет сообщений"
-                        },
+                    messagesLabel(topic.messageCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF5A6472),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!topic.lastMessagePreview.isNullOrBlank()) {
+                    Text(
+                        // Раунд 155: без служебных строк (гифки/стикеры).
+                        com.vladimir.messenger.util.ChatPreviews.human(topic.lastMessagePreview)
+                            ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF8A93A2),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
@@ -869,6 +1330,11 @@ private fun MessageBubble(
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к сообщению (этап 9), и ход его приёма/раздачи. */
     fileCard: FileCardState? = null,
+    /** Раунд 130: карточка-ссылка просит VM тихо подтянуть байты гифки. */
+    onEnsureGif: (String) -> Unit = {},
+    /** Раунд 135: удалить сообщение - у себя или у всех. */
+    onDeleteForMe: () -> Unit = {},
+    onDeleteForAll: () -> Unit = {},
 ) {
     // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
@@ -886,6 +1352,10 @@ private fun MessageBubble(
         // с колонкой тем) кнопка выдавливалась за край - файл нельзя было
         // закрепить. Вес без заполнения: пузырь занимает не больше остатка.
         Box(modifier = if (canPin) Modifier.weight(1f, fill = false) else Modifier) {
+        // Раунд 169: стикер с копией на телефоне парит в чате - пузырь
+        // без фона и тени, только картинка, время и реакции.
+        val stickerFloat = fileCard != null && fileCard.previewFile != null &&
+            GroupFileMarker.isSticker(fileCard.info)
         Card(
             modifier = Modifier
                 .widthIn(max = 300.dp)
@@ -894,6 +1364,16 @@ private fun MessageBubble(
                     onClick = { showReactions = true },
                     onLongClick = { showMenu = true },
                 ),
+            colors = if (stickerFloat) {
+                CardDefaults.cardColors(containerColor = Color.Transparent)
+            } else {
+                CardDefaults.cardColors()
+            },
+            elevation = if (stickerFloat) {
+                CardDefaults.cardElevation(defaultElevation = 0.dp)
+            } else {
+                CardDefaults.cardElevation()
+            },
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {
@@ -925,6 +1405,14 @@ private fun MessageBubble(
                     )
                 }
                 when {
+                    // Раунд 130: ССЫЛКА на гифку - карточка с анимацией;
+                    // байты каждый телефон тихо тянет с хранителей сети.
+                    com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content) -> {
+                        com.vladimir.messenger.ui.components.GifRefCard(
+                            content = message.content,
+                            onEnsure = onEnsureGif,
+                        )
+                    }
                     attachedBitmap != null -> {
                         androidx.compose.foundation.Image(
                             bitmap = attachedBitmap.asImageBitmap(),
@@ -956,7 +1444,14 @@ private fun MessageBubble(
                     else -> Text(bodyText)
                 }
                 if (fileCard != null) {
-                    GroupFileCard(state = fileCard, isFromMe = message.isFromMe)
+                    // Долгое нажатие на самой картинке = меню пузыря
+                    // (реакции/закрепить): раньше область карточки
+                    // «проглатывала» жест, и реакцию поставить не выходило.
+                    GroupFileCard(
+                        state = fileCard,
+                        isFromMe = message.isFromMe,
+                        onLongPress = { showMenu = true },
+                    )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(time, style = MaterialTheme.typography.labelSmall)
@@ -994,6 +1489,23 @@ private fun MessageBubble(
                     onClick = {
                         showMenu = false
                         onTogglePin()
+                    },
+                )
+            }
+            // Раунд 135: удаление своего сообщения - у себя и у всех.
+            if (message.isFromMe) {
+                DropdownMenuItem(
+                    text = { Text("Удалить у себя", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        showMenu = false
+                        onDeleteForMe()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Удалить у всех", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        showMenu = false
+                        onDeleteForAll()
                     },
                 )
             }
@@ -1104,3 +1616,4 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
         dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
     )
 }
+

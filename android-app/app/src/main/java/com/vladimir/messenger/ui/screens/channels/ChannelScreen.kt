@@ -13,6 +13,7 @@ import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -219,6 +223,61 @@ fun ChannelScreen(
                         listState.scrollToItem(uiState.posts.lastIndex)
                     }
                 }
+                // Раунд 173: закреплённые посты канала; тап - лента прыгает
+                // к самому посту.
+                if (uiState.pinnedPostIds.isNotEmpty()) {
+                    val feedScope = androidx.compose.runtime.rememberCoroutineScope()
+                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Filled.PushPin,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "Закреплённые" + if (uiState.pinnedPostIds.size > 1) {
+                                        " (" + uiState.pinnedPostIds.size + ")"
+                                    } else {
+                                        ""
+                                    },
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                            uiState.posts.filter { it.messageId in uiState.pinnedPostIds }
+                                .sortedByDescending { it.timeMs }
+                                .forEach { pinnedPost ->
+                                    val pinnedIndex = uiState.posts.indexOfFirst { it.topicId == pinnedPost.topicId }
+                                    Row(
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        modifier = if (pinnedIndex >= 0) {
+                                            Modifier.fillMaxWidth().clickable {
+                                                feedScope.launch { listState.animateScrollToItem(pinnedIndex) }
+                                            }
+                                        } else {
+                                            Modifier.fillMaxWidth()
+                                        },
+                                    ) {
+                                        Text(
+                                            (pinnedPost.title.ifBlank { "Пост" }) + " - " + pinnedPost.text.take(60),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 2,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IconButton(onClick = { viewModel.togglePostPin(pinnedPost) }) {
+                                            Icon(
+                                                androidx.compose.material.icons.Icons.Filled.Close,
+                                                contentDescription = "Открепить",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                }
                 // Бегунок справа: в длинном списке видно, где мы находимся.
                 Box(modifier = Modifier.fillMaxSize()) {
                     LazyColumn(
@@ -251,6 +310,7 @@ fun ChannelScreen(
                                 post = post,
                                 canEdit = myId.isNotBlank() &&
                                     (post.authorId == myId || uiState.channel?.ownerId == myId),
+                                onTogglePin = { viewModel.togglePostPin(post) },
                                 onEdit = { editingPost = post },
                                 onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
                                 onSaveToFavorites = { viewModel.savePostToFavorites(post) },
@@ -276,6 +336,7 @@ fun ChannelScreen(
                                         onSave = { viewModel.requestSaveReceivedFile(it) },
                                         onShare = { f -> viewModel.shareFile(f, info.displayName, info.mediaType) },
                                         servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.channelId, info.sha256)] ?: 0,
+                                        onFavorite = { viewModel.saveFileToFavorites(it) },
                                     )
                                 },
                             )
@@ -364,6 +425,8 @@ private fun PostCard(
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к посту (рой, этап 10); null - файла нет. */
     fileCard: FileCardState? = null,
+    /** Раунд 173: закрепить/открепить пост. */
+    onTogglePin: () -> Unit = {},
 ) {
     var showReactions by remember { mutableStateOf(false) }
     // Подпись «📎 имя (размер)» - для старых версий; здесь её заменяет карточка.
@@ -413,6 +476,19 @@ private fun PostCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Раунд 173: закрепить/открепить пост канала.
+                    IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.PushPin,
+                            contentDescription = if (post.isPinned) "Открепить" else "Закрепить",
+                            tint = if (post.isPinned) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
                 // Карандаш в углу поста: не теснит нижний ряд кнопок, который
                 // на узком экране и так заполнен.
@@ -513,6 +589,12 @@ private fun PostCard(
                             "Оставить комментарий"
                         },
                     )
+                    // Непрочитанные комментарии поста: тот же золотой кружок,
+                    // что на канале и на темах группы.
+                    if (post.unreadComments > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        UnreadBadge(post.unreadComments)
+                    }
                 }
                 // Переслать пост: и внутрь APU, и в любой другой мессенджер.
                 IconButton(onClick = onSharePost) {
@@ -839,4 +921,23 @@ private fun PostEditorDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
+}
+
+/** Кружок непрочитанных комментариев поста: тёмная цифра на золоте (как в списках). */
+@Composable
+private fun UnreadBadge(count: Int) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (count > 99) "99+" else count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFF1E2430),
+            fontWeight = FontWeight.Bold,
+        )
+    }
 }

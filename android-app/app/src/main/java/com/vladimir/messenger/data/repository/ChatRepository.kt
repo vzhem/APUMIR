@@ -64,6 +64,20 @@ class ChatRepository @Inject constructor(
     fun observeMessages(chatId: String): Flow<List<Message>> =
         messageDao.observeMessages(chatId).map { it.map { e -> e.toDomain() } }
 
+    /** Раунд 173: закрепы личного чата (без тем). */
+    fun observePinnedChatMessages(chatId: String): Flow<List<Message>> =
+        messageDao.observePinnedChatMessages(chatId).map { list -> list.map { e -> e.toDomain() } }
+
+    /** Раунд 173: закрепить/открепить сообщение (личка и канальные посты). */
+    suspend fun setMessagePinned(messageId: String, pinned: Boolean) {
+        messageDao.updatePinned(
+            messageId,
+            pinned,
+            if (pinned) System.currentTimeMillis() else null,
+            null,
+        )
+    }
+
     suspend fun sendMessage(chatId: String, recipientId: String, content: String): Result<Message> {
         return try {
             val messageId = UUID.randomUUID().toString()
@@ -101,7 +115,7 @@ class ChatRepository @Inject constructor(
                 recipientId = actualRecipientId,
             )
             messageDao.insertMessage(entity)
-            chatDao.updateLastMessage(chatId, content, timestamp)
+            chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
 
             // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
             val sentDirectly = if (actualRecipientId.isNotBlank()) {
@@ -149,6 +163,41 @@ class ChatRepository @Inject constructor(
             Log.e(TAG, "sendMessage error", e)
             Result.failure(e)
         }
+    }
+
+    /**
+     * Раунд 179: мягкий слив офлайн-очереди БЕЗ привязки к presence.
+     * Раньше досыл запускался только «тяжёлым» пульсом обнаружения, а при
+     * живой связи пульсы чаще 30 с считались лёгкими и пропусками - очередь
+     * могла висеть, пока связь не мигнёт. Теперь служебный насос раз в
+     * минуту пробует отправить до [limit] хвостов; пустая очередь - один
+     * дешёвый индексный запрос, нагрузки почти нет. Дубли у получателя
+     * сняты дедупликацией по id сообщения.
+     */
+    suspend fun pumpQueuedOffline(limit: Int = 20): Int {
+        var sent = 0
+        try {
+            val queued = messageDao.getQueuedOfflineMessages(limit)
+            for (msg in queued) {
+                val chat = chatDao.getChatById(msg.chatId) ?: continue
+                val peer = chat.contactId
+                if (peer.isBlank()) continue
+                val ok = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        RustBridge.sendMessage(msg.id, msg.chatId, peer, msg.content)
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+                if (ok) {
+                    messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
+                    sent++
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "pumpQueuedOffline failed: " + e.message)
+        }
+        return sent
     }
 
     suspend fun retryPendingMessagesForPeer(peerId: String): Int {
@@ -272,12 +321,22 @@ class ChatRepository @Inject constructor(
             recipientId = recipientId,
         )
         messageDao.insertMessageIgnore(entity)
-        chatDao.updateLastMessage(chatId, content, timestamp)
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+        // Раунд 150: бейдж непрочитанных на пузыре личного чата.
+        // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
+        // сообщения, непрочитанные не считают (владелец).
+        if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
+            runCatching { chatDao.incrementUnread(chatId) }
+        }
     }
 
     suspend fun getChatById(chatId: String): Chat? {
         return chatDao.getChatById(chatId)?.toDomain()
     }
+
+    /** Раунд 158: все личные чаты - выбор адресатов «Отправить в APU». */
+    suspend fun getAllChats(): List<com.vladimir.messenger.domain.model.Chat> =
+        chatDao.getAllChats().map { it.toDomain() }
 
     /**
      * Local-only outgoing file placeholder: it never rides the text transport (the file packets
@@ -306,7 +365,69 @@ class ChatRepository @Inject constructor(
         )
         val inserted = messageDao.insertMessageIgnore(entity)
         if (inserted != -1L) {
-            chatDao.updateLastMessage(chatId, content, timestamp)
+            chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+        }
+        return inserted != -1L
+    }
+
+    /**
+     * Раунд 128: моя ССЫЛКА на гифку в чате (от моего лица). В чате карточка
+     * одна; байты каждый телефон тихо подтягивает с хранителей. Превью в
+     * списке чатов - аккуратное, без служебной строки.
+     */
+    suspend fun insertGifRefMessage(
+        chatId: String,
+        recipientId: String,
+        messageId: String,
+        sha256: String,
+        timestamp: Long,
+        /** Раунд 178: QUEUED_OFFLINE - собеседник офлайн, досылаем сами. */
+        status: String = "LOCAL_FILE",
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = "self",
+            content = content,
+            timestamp = timestamp,
+            isFromMe = true,
+            status = status,
+            channel = MessageChannel.STORE_FORWARD.name,
+            recipientId = recipientId,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, "\ud83d\uddbc Гифка", timestamp)
+        }
+        return inserted != -1L
+    }
+
+    /** Раунд 128: пришла ссылка на гифку от собеседника - карточка в чате. */
+    suspend fun insertReceivedGifRefMessage(
+        chatId: String,
+        senderId: String,
+        messageId: String,
+        sha256: String,
+        timestamp: Long,
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            timestamp = timestamp,
+            isFromMe = false,
+            status = "RECEIVED",
+            channel = MessageChannel.STORE_FORWARD.name,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, "\ud83d\uddbc Гифка", timestamp)
+            runCatching { chatDao.incrementUnread(chatId) }
         }
         return inserted != -1L
     }
@@ -448,6 +569,9 @@ class ChatRepository @Inject constructor(
         timestamp = timestamp,
         isFromMe = isFromMe,
         status = try { MessageStatus.valueOf(status) } catch (_: Exception) { MessageStatus.PENDING },
+        // Тема нужна уведомлениям: тап ведёт в место сообщения.
+        topicId = topicId,
+        isPinned = isPinned,
     )
 
     suspend fun getMessageById(messageId: String): Message? {

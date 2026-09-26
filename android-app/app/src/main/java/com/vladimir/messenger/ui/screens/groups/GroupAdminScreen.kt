@@ -38,6 +38,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -60,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import com.vladimir.messenger.ui.components.ApuBubble
@@ -206,9 +208,11 @@ fun GroupAdminScreen(
                     isOwner = uiState.isOwner,
                     canChangeInfo = uiState.canChangeInfo,
                     canChangeVisibility = uiState.isAdmin,
+                    topicsEnabled = uiState.group?.topicsEnabled == true,
                     onSetAvatar = viewModel::setGroupAvatar,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
+                    onEnableTopics = viewModel::enableTopics,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
                     onDeleteGroup = { viewModel.deleteGroup(onLeftGroup) },
                 )
@@ -239,6 +243,7 @@ fun GroupAdminScreen(
                 AdminTab.Invites -> InvitesTab(
                     invites = uiState.invites,
                     groupTitle = uiState.group?.title.orEmpty(),
+                    isChannel = uiState.group?.isChannel == true,
                     isPublic = uiState.group?.isPublic == true,
                     canManage = uiState.canManageInvites,
                     onCreate = viewModel::createInvite,
@@ -270,9 +275,12 @@ private fun OverviewTab(
     isOwner: Boolean,
     canChangeInfo: Boolean,
     canChangeVisibility: Boolean,
+    /** Раунд 153: у группы темы выключены - предлагаем включить. */
+    topicsEnabled: Boolean,
     onSetAvatar: (android.net.Uri) -> Unit,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
+    onEnableTopics: () -> Unit,
     onLeave: () -> Unit,
     onDeleteGroup: () -> Unit,
 ) {
@@ -332,17 +340,22 @@ private fun OverviewTab(
         // обоев, и голый текст на тёмной подложке не читался.
         ApuBubble {
         if (canChangeInfo) {
+            // Поля внутри светлого пузыря: цвета ФИКСИРОВАННЫЕ, из темы брать
+            // нельзя - в тёмной теме поле красилось в белый и на светлой
+            // подложке «Название» и «Описание» пропадали (жалоба владельца).
             OutlinedTextField(
                 value = titleDraft,
                 onValueChange = { titleDraft = it },
                 label = { Text("Название") },
                 modifier = Modifier.fillMaxWidth(),
+                colors = bubbleFieldColors(),
             )
             OutlinedTextField(
                 value = aboutDraft,
                 onValueChange = { aboutDraft = it },
                 label = { Text("Описание") },
                 modifier = Modifier.fillMaxWidth(),
+                colors = bubbleFieldColors(),
             )
             TextButton(onClick = { onSave(titleDraft, aboutDraft) }) { Text("Сохранить") }
         } else {
@@ -412,6 +425,25 @@ private fun OverviewTab(
                 }
                 if (canChangeVisibility) {
                     Switch(checked = isPublic, onCheckedChange = onTogglePublic)
+                }
+            }
+        }
+
+        // Раунд 153: перевод «без тем» -> «с темами» (владелец: «нужно
+        // в настройках переводить»). Односторонний: после включения
+        // переключатель исчезает - темы уже есть.
+        if (!isChannel && !topicsEnabled) {
+            ApuBubble {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Темы в группе", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Сейчас один общий чат без тем. Нажмите, чтобы включить темы",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                    Switch(checked = false, onCheckedChange = { onEnableTopics() })
                 }
             }
         }
@@ -864,6 +896,8 @@ private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, B
 private fun InvitesTab(
     invites: List<InviteSummary>,
     groupTitle: String,
+    /** Раунд 162: тексту «Поделиться» - честное «канал»/«группа». */
+    isChannel: Boolean,
     isPublic: Boolean,
     canManage: Boolean,
     onCreate: (Boolean) -> Unit,
@@ -918,6 +952,7 @@ private fun InvitesTab(
             InviteCard(
                 invite = invite,
                 groupTitle = groupTitle,
+                isChannel = isChannel,
                 canManage = canManage,
                 onRevoke = { onRevoke(invite.slug) },
                 onDelete = { onDelete(invite.slug) },
@@ -935,6 +970,8 @@ private fun InvitesTab(
 private fun InviteCard(
     invite: InviteSummary,
     groupTitle: String,
+    /** Раунд 162: «Поделиться» пишет честное «канал»/«группа». */
+    isChannel: Boolean,
     canManage: Boolean,
     onRevoke: () -> Unit,
     onDelete: () -> Unit,
@@ -986,7 +1023,7 @@ private fun InviteCard(
                 TextButton(onClick = { clipboard.setText(AnnotatedString(invite.shareLink)) }) {
                     Text("Копировать")
                 }
-                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink) }) {
+                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink, isChannel) }) {
                     Text("Поделиться")
                 }
                 // Отозвать и удалить ссылку может только администратор:
@@ -1097,3 +1134,16 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
         }
     }
 }
+
+/** Цвета поля ввода внутри светлого пузыря: тёмный текст/подпись на светлой
+ *  подложке при ЛЮБОЙ теме (в тёмной теме стандартное поле белело). */
+@Composable
+private fun bubbleFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color(0xFF1E2430),
+    unfocusedTextColor = Color(0xFF1E2430),
+    cursorColor = MaterialTheme.colorScheme.primary,
+    focusedLabelColor = Color(0xFF5A6472),
+    unfocusedLabelColor = Color(0xFF5A6472),
+    focusedBorderColor = MaterialTheme.colorScheme.primary,
+    unfocusedBorderColor = Color(0xFFB9C2CC),
+)

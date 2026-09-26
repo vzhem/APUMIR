@@ -36,6 +36,8 @@ data class ChannelPost(
     val topicId: String,
     /** id самого сообщения-поста: к нему привязываются реакции и правка. */
     val messageId: String,
+    /** Раунд 173: пост закреплён в канале. */
+    val isPinned: Boolean = false,
     val title: String,
     val text: String,
     /** Фотографии поста (jpeg в base64) по порядку; пусто, если фото нет. */
@@ -46,6 +48,8 @@ data class ChannelPost(
     val authorName: String,
     val timeMs: Long,
     val comments: Int,
+    /** Сколько комментариев поста ещё не прочитано (значок у «Комментарии»). */
+    val unreadComments: Int = 0,
     /** Сколько разных людей открыли пост. */
     val views: Int = 0,
     /** Файл, приложенный к посту (визитка `APUFILE1:`, рой этап 9-10); null - файла нет. */
@@ -56,6 +60,8 @@ data class ChannelUiState(
     val channelId: String = "",
     val channel: GroupSummary? = null,
     val posts: List<ChannelPost> = emptyList(),
+    /** Раунд 173: закреплённые посты канала (messageId, свежие вверху). */
+    val pinnedPostIds: List<String> = emptyList(),
     /** Писать посты может владелец и администраторы; комментарии - все. */
     val canPost: Boolean = false,
     /** Мой идентификатор узла: по нему решается, можно ли править пост. */
@@ -106,6 +112,7 @@ class ChannelViewModel @Inject constructor(
         observe()
         observeReactions()
         observeTransfers()
+        observePinned()
         // Вступивший позже не застал посты - просим у владельца последние
         // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
         viewModelScope.launch {
@@ -115,6 +122,22 @@ class ChannelViewModel @Inject constructor(
         // администраторам (рой, этап 3): сводные числа спрашиваем у них.
         viewModelScope.launch {
             runCatching { postCounters.requestCounters(channelId) }
+        }
+    }
+
+    /** Раунд 173: закреплённые посты канала - живой поток в шапку. */
+    private fun observePinned() {
+        viewModelScope.launch {
+            messageDao.observePinnedChannelPosts(channelId).collect { list ->
+                _uiState.update { it.copy(pinnedPostIds = list.map { e -> e.id }) }
+            }
+        }
+    }
+
+    /** Раунд 173: закрепить/открепить пост канала. */
+    fun togglePostPin(post: ChannelPost) {
+        viewModelScope.launch {
+            runCatching { messageDao.updatePinned(post.messageId, !post.isPinned, if (!post.isPinned) System.currentTimeMillis() else null, null) }
         }
     }
 
@@ -307,6 +330,7 @@ class ChannelViewModel @Inject constructor(
                     ChannelPost(
                         topicId = topic.id,
                         messageId = first.id,
+                        isPinned = first.isPinned,
                         title = topic.name,
                         // Длинный текст едет кусками (рой, этап 3): склеиваем;
                         // пока куски в пути - текст с многоточием.
@@ -318,6 +342,10 @@ class ChannelViewModel @Inject constructor(
                             ?: "Участник " + first.senderId.takeLast(4),
                         timeMs = first.timestamp,
                         comments = (texts.size - 1).coerceAtLeast(0),
+                        // Непрочитанные комментарии: счётчик темы ведёт
+                        // GroupRepository (прибавляет на каждом чужом сообщении),
+                        // сбрасывает GroupChatViewModel.markRead при чтении.
+                        unreadComments = topic.unreadCount,
                         views = viewCounts[topic.id] ?: 0,
                         // Файл поста (этап 10): визитка в тексте, сам файл
                         // тянется у автора или у соседей по нажатию.
@@ -452,6 +480,23 @@ class ChannelViewModel @Inject constructor(
                 photos = post.images,
             )
             _uiState.update { it.copy(error = "Добавлено в избранное") }
+        }
+    }
+
+    /** Раунд 124: файл из карточки канала/комментариев - в избранное. */
+    fun saveFileToFavorites(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        viewModelScope.launch {
+            val source = _uiState.value.channel?.title.orEmpty()
+            val result = savedItems.saveFile(transfer, if (source.isBlank()) "Канал" else "Канал " + source)
+            _uiState.update {
+                it.copy(
+                    error = when (result) {
+                        com.vladimir.messenger.data.repository.SaveResult.Saved -> "Добавлено в избранное"
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> "Уже в избранном"
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> "Файл ещё не получен полностью"
+                    },
+                )
+            }
         }
     }
 

@@ -117,6 +117,28 @@ impl CoreEvent {
                 | CoreEvent::MessageDelivered { .. }
         )
     }
+
+    /// Приоритет при переполнении шины (чем больше число - тем раньше
+    /// выкидываем). Раунд 119: входящее сообщение переписки терять НЕЛЬЗЯ
+    /// НИКОГДА. Раньше при переполнении молча выкидывалось самое старое
+    /// событие, и им мог оказаться MessageReceived: после обновления
+    /// приложения Kotlin начинает пить события с опозданием, ядро в это
+    /// время заливает шину retained-presence/gossip/кусками файлов -
+    /// входящее сообщение выбрасывалось, а повторная доставка подавлялась
+    /// durable tombstone-ом (см. ядро) - сообщение пропадало навсегда при
+    /// «доставленном» статусе у отправителя.
+    ///
+    /// 0 - не выбрасывать никогда (текст переписки, подтверждение доставки).
+    /// 1 - потеря чинится протоколом (галочки пересинхронизируются, куски
+    ///     файлов пере-запрашиваются приёмником).
+    /// 2 - служебная погода сети (presence, gossip) - дёшево потерять.
+    pub fn eviction_rank(&self) -> u8 {
+        match self {
+            CoreEvent::MessageReceived { .. } | CoreEvent::MessageDelivered { .. } => 0,
+            CoreEvent::MessageStatusChanged { .. } | CoreEvent::FileChunkReceived { .. } => 1,
+            _ => 2,
+        }
+    }
 }
 
 impl std::fmt::Display for CoreEvent {
@@ -148,11 +170,29 @@ impl EventBus {
     }
 
     /// Отправить событие в шину
+    ///
+    /// Раунд 119: при переполнении выкидываем сначала САМОЕ СВЕЖЕЕ
+    /// служебное событие (rank 2: presence/gossip), затем пере-запрашиваемые
+    /// (rank 1: куски файлов, статусы). События ранга 0 (входящее сообщение,
+    /// подтверждение доставки) не выбрасываются никогда; если очередь состоит
+    /// только из них - позволяем ей мягко вырасти: drain Kotlin'а мгновенно
+    /// разгрузит её, а потерять переписку хуже, чем ненадолго занять память.
     pub fn emit(&self, event: CoreEvent) {
         let mut queue = self.queue.lock().unwrap();
         if queue.len() >= self.max_size {
-            // Удаляем самое старое если очередь полна
-            queue.pop_front();
+            let victim = (1..=2).find_map(|rank| {
+                queue.iter().rposition(|e| e.eviction_rank() == rank)
+            });
+            match victim {
+                Some(i) => {
+                    queue.remove(i);
+                }
+                None => {
+                    tracing::warn!(
+                        "EventBus overflow: only critical message events queued, growing softly"
+                    );
+                }
+            }
         }
         queue.push_back(event);
     }
@@ -380,5 +420,108 @@ mod tests {
     fn test_bus_poll_empty_returns_none() {
         let bus = EventBus::with_defaults();
         assert!(bus.poll().is_none());
+    }
+
+    // --- Раунд 119: сообщения не выбрасываются при переполнении ---
+
+    fn message(id: &str) -> CoreEvent {
+        CoreEvent::MessageReceived {
+            message_id: id.into(),
+            chat_id: "chat".into(),
+            sender_id: "pk_aaaa".into(),
+            text: "привет".into(),
+            timestamp: 0,
+        }
+    }
+
+    fn presence(n: usize) -> CoreEvent {
+        CoreEvent::PeerDiscovered {
+            peer_id: format!("pk_peer{n:04}"),
+            display_name: format!("Peer {n}"),
+            is_local: false,
+        }
+    }
+
+    /// Сценарий владельца: после обновления приложения ядро заливает шину
+    /// presence/gossip-событиями, а входящее сообщение приходит посреди
+    /// лавины. Раньше переполнение выкидывало самое старое событие - им
+    /// бывало сообщение. Теперь сообщение обязано дожить до drain.
+    #[test]
+    fn message_survives_presence_flood_in_full_bus() {
+        let bus = EventBus::new(8);
+        for n in 0..8 {
+            bus.emit(presence(n));
+        }
+        assert_eq!(bus.len(), 8);
+        // Сообщение приходит посреди продолжающейся лавины.
+        bus.emit(message("m1"));
+        for n in 8..40 {
+            bus.emit(presence(n));
+        }
+        let drained = bus.drain();
+        assert!(
+            drained
+                .iter()
+                .any(|e| matches!(e, CoreEvent::MessageReceived { message_id, .. } if message_id == "m1")),
+            "MessageReceived выброшен лавой служебных событий - потеря сообщения"
+        );
+    }
+
+    /// Куски файлов (ранг 1) тоже переживут presence-лаву, но уступают
+    /// сообщениям: при переполнении выкидывается служебное (самое свежее).
+    #[test]
+    fn eviction_prefers_presence_over_chunks_and_messages() {
+        let bus = EventBus::new(4);
+        for n in 0..4 {
+            bus.emit(presence(n));
+        }
+        bus.emit(message("m1"));
+        // Очередь: [p0, p1, p2, p3] -> p3 (самое свежее служебное)
+        // вытеснено, m1 встал в хвост.
+        let drained = bus.drain();
+        assert!(matches!(drained.first(), Some(CoreEvent::PeerDiscovered { peer_id, .. }) if peer_id == "pk_peer0000"));
+        assert_eq!(drained.len(), 4);
+        assert!(drained
+            .iter()
+            .any(|e| matches!(e, CoreEvent::MessageReceived { message_id, .. } if message_id == "m1")));
+    }
+
+    /// Очередь из одних критичных событий переписки не роняет их:
+    /// мягкий рост вместо молчаливой потери.
+    #[test]
+    fn full_bus_of_messages_grows_instead_of_dropping() {
+        let bus = EventBus::new(4);
+        for n in 0..10 {
+            bus.emit(message(&format!("m{n}")));
+        }
+        let drained = bus.drain();
+        assert_eq!(drained.len(), 10, "критичные события потеряны");
+        for (n, e) in drained.iter().enumerate() {
+            match e {
+                CoreEvent::MessageReceived { message_id, .. } => {
+                    assert_eq!(message_id, &format!("m{n}"), "порядок нарушен");
+                }
+                other => panic!("лишнее событие в очереди: {other:?}"),
+            }
+        }
+    }
+
+    /// Подтверждение доставки (галочка отправителя) - тоже ранг 0.
+    #[test]
+    fn delivery_ack_survives_flood() {
+        let bus = EventBus::new(4);
+        for n in 0..10 {
+            bus.emit(presence(n));
+        }
+        bus.emit(CoreEvent::MessageDelivered {
+            message_id: "m1".into(),
+        });
+        for n in 10..30 {
+            bus.emit(presence(n));
+        }
+        assert!(bus
+            .drain()
+            .iter()
+            .any(|e| matches!(e, CoreEvent::MessageDelivered { message_id } if message_id == "m1")));
     }
 }

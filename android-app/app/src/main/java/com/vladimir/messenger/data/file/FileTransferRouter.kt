@@ -50,6 +50,8 @@ class FileTransferRouter @Inject constructor(
      * Берётся только при обработке предложений и завершении передачи.
      */
     private val apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
+    /** Раунд 139: библиотека стикеров - тихое оседание стикеров из роя. */
+    private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
 ) {
     private val appContext: Context
     private val sender: FileTransferSender
@@ -180,16 +182,69 @@ class FileTransferRouter @Inject constructor(
                 } else {
                     false
                 }
-                if (!apkUpdate && !groupFile) {
-                    chatRepository.saveIncomingMessage(
-                        chatId = chatId,
-                        senderId = senderId,
-                        messageId = messageId,
-                        content = formatPlaceholder(displayName, mediaType, totalBytes),
-                        timestamp = System.currentTimeMillis(),
-                        recipientId = RustBridge.nodeId() ?: "",
-                    )
+                    // Раунд 139: стикер, которого телефон сам просил в панели
+                    // «Из сети» (isWanted), приезжает тихо и без пузыря.
+                    // Вычисляется до «если не апдейт/не файл группы»: ниже,
+                    // в хуке оседания, та же отметка нужна вне этого блока.
+                    val stickerWanted = runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary
+                            .isWanted(fileSha256)
+                    }.getOrDefault(false)
+                    if (!apkUpdate && !groupFile) {
+                        // Раунд 134: байты гифки приезжают ТИХО (раунд 128 - обмен
+                        // только ссылками). Карточка-ссылка уже стоит в чате и
+                        // оживёт сама, когда байты лягут в библиотеку (хук ниже);
+                        // плейсхолдер «Сохранено» рядом с ней и есть задвоение,
+                        // что на скрине владельца 2026-09-23. Тихо - только ту
+                        // гифку, которую этот телефон сам просил у хранителя
+                        // (isWanted): присланный скрепкой .gif по-прежнему
+                        // показывает пузырь, его никто не просил из каталога.
+                        // Раунд 139: то же - для стикера, которого телефон сам
+                        // попросил в панели «Из сети».
+                        val gifSilent = stickerWanted ||
+                            (mediaType.equals("image/gif", ignoreCase = true) &&
+                                runCatching {
+                                    com.vladimir.messenger.data.gif.GifLibrary.isWanted(fileSha256)
+                                }.getOrDefault(false))
+                        if (!gifSilent) {
+                        chatRepository.saveIncomingMessage(
+                            chatId = chatId,
+                            senderId = senderId,
+                            messageId = messageId,
+                            content = formatPlaceholder(displayName, mediaType, totalBytes),
+                            timestamp = System.currentTimeMillis(),
+                            recipientId = RustBridge.nodeId() ?: "",
+                        )
+                    }
                 }
+                    // Раунд 121: принятая гифка оседает в библиотеке телефона -
+                    // она становится частью СВОЕГО каталога роя (без внешнего
+                    // ресурса): announces/выдача - через APUGIF1.
+                    if (mediaType.equals("image/gif", ignoreCase = true)) {
+                        runCatching {
+                            val row = transferDao.getForFile(chatId, fileSha256)
+                                .firstOrNull { it.direction == "INCOMING" && it.state == "COMPLETE" }
+                            val plain = row?.let { receivedFileFor(it) }
+                            if (plain != null) {
+                                com.vladimir.messenger.data.gif.GifLibrary.addFromFile(
+                                    appContext, plain, null, null,
+                                )
+                            }
+                        }.onFailure { Log.w(TAG, "gif library hook failed: ${it.message}") }
+                    }
+                    // Раунд 139: стикер, которого телефон сам просил в панели
+                    // «Из сети», тихо ложится в библиотеку стикеров - дальше
+                    // VM сам отправит его в чат и поднимет «Мои».
+                    if (stickerWanted) {
+                        runCatching {
+                            val row = transferDao.getForFile(chatId, fileSha256)
+                                .firstOrNull { it.direction == "INCOMING" && it.state == "COMPLETE" }
+                            val plain = row?.let { receivedFileFor(it) }
+                            if (plain != null) {
+                                stickerLibrary.addBytes(plain.readBytes(), displayName)
+                            }
+                        }.onFailure { Log.w(TAG, "sticker library hook failed: ${it.message}") }
+                    }
             },
         )
         val directSend: (String, String) -> Boolean = { recipientId, payload ->
@@ -413,6 +468,10 @@ class FileTransferRouter @Inject constructor(
                 onOfferAccepted = { chatId, seedId, fileSha256, seedCount ->
                     runCatching { groupFiles.get().onSeedJoined(chatId, seedId, fileSha256, seedCount) }
                         .onFailure { Log.w(TAG, "group seed hook failed: ${it.message}") }
+                    // Рой APK (docs/UPDATE_SEEDING.md): куски обновления тоже
+                    // со всех сидов — просим следующего, пока их меньше трёх.
+                    runCatching { apkSeeder.get().onSeedJoined(chatId, seedId, fileSha256, seedCount) }
+                        .onFailure { Log.w(TAG, "apk seed stripe hook failed: ${it.message}") }
                 },
             ),
             // K3: собеседник подтвердил, что принимает APUF-кадры — передатчик
@@ -589,17 +648,23 @@ class FileTransferRouter @Inject constructor(
 
     /** Drives all resumable outgoing transfers plus contact key handshakes; safe to call periodically. */
     suspend fun pumpOutgoing(): FileTransferSender.PumpSummary? {
-        if (!RustBridge.isRunning()) {
-            Log.d(TAG, "File pump skipped: engine not running")
-            return null
+        // Раунд 120: насос всегда уходит в фоновый поток. Внутри - блокирующие
+        // прямые отправки (QUIC до секунд на кадр) и чтение кусков из базы;
+        // вызов с главного потока (ViewModel при отправке) давал
+        // «Приложение не отвечает» вплоть до убийства системы.
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (!RustBridge.isRunning()) {
+                Log.d(TAG, "File pump skipped: engine not running")
+                return@withContext null
+            }
+            runCatching { sendHelloHandshakes() }
+                .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
+            val summary = sender.pumpOnce()
+            pumpCustody()
+            runCatching { groupSeeder.pump() }
+                .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
+            summary
         }
-        runCatching { sendHelloHandshakes() }
-            .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
-        val summary = sender.pumpOnce()
-        pumpCustody()
-        runCatching { groupSeeder.pump() }
-            .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
-        return summary
     }
 
     /** Ключ передачи на месте (для проверки, годится ли строка как источник общей копии, K2). */
@@ -775,15 +840,29 @@ class FileTransferRouter @Inject constructor(
     /**
      * Раунд 43: файл превью для пузыря в чате. Входящая картинка - принятый
      * plaintext после COMPLETE; исходящая - маленькое превью, записанное при
-     * подготовке передачи.
+     * подготовке передачи. Раунд 120: у исходящей гифки превью - сама гифка
+     * (.gif), чтобы пузырь отправителя анимировался; старые передачи остаются
+     * на .jpg.
      */
     fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
-        if (!transfer.mediaType.startsWith("image/")) return null
+        // Раунд 170: стикеры (webp/webm) тоже с картинкой в пузыре.
+        if (!transfer.mediaType.startsWith("image/") &&
+            !transfer.displayName.startsWith("Стикер")
+        ) {
+            return null
+        }
+        // Раунд 172: стикеру отдаём только ПОЛНЫЙ файл (анимация); статичный
+        // jpg-снимок - чёрный квадрат вместо живого стикера.
+        if (transfer.displayName.startsWith("Стикер") && transfer.direction == "OUTGOING") {
+            return null
+        }
         if (transfer.direction == "INCOMING") return receivedFileFor(transfer)
-        val f = java.io.File(
-            appContext.noBackupFilesDir,
-            "file_preview/v1/" + transfer.transferId + ".jpg",
-        )
+        val base = "file_preview/v1/" + transfer.transferId
+        if (transfer.mediaType.equals("image/gif", ignoreCase = true)) {
+            val gif = java.io.File(appContext.noBackupFilesDir, base + ".gif")
+            if (gif.isFile) return gif
+        }
+        val f = java.io.File(appContext.noBackupFilesDir, base + ".jpg")
         return if (f.isFile) f else null
     }
 

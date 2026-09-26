@@ -27,6 +27,14 @@ data class SettingsUiState(
     val connectionMode: String = "Unknown",
     val appVersion: String = "0.1.0",
     val rustCoreVersion: String = "Loading...",
+    /** Живая диагностика брокерной линии (пусто, пока движок не стартовал). */
+    val mqttLink: String = "",
+    /** Состояние нашего сервера: адрес, доступность и отклик. */
+    val serverStatus: String = "проверяю…",
+    /** Строка о резервной копии адресов (для карточки «Сервер»). */
+    val addrBookLine: String = "",
+    /** Последний итог ручных действий с копией (для диалога). */
+    val addrBookMessage: String = "",
     val proxyTunnelEnabled: Boolean = true,
     /** Сколько сердечек набрал мой профиль. */
     val heartCount: Int = 0,
@@ -40,6 +48,9 @@ class SettingsViewModel @Inject constructor(
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     private val apkSeeder: com.vladimir.messenger.data.update.ApkSeeder,
     private val updateChecker: com.vladimir.messenger.service.UpdateChecker,
+    private val addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup,
+    private val addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup,
+    private val botApi: com.vladimir.messenger.service.BotApi,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -78,29 +89,117 @@ class SettingsViewModel @Inject constructor(
     val apkReceivedApks: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.ReceivedApk>>
         get() = apkSeeder.receivedApks
 
-    /** Обозрел экран: перечитать список принятых APK (не чаще 5 минут в сидере). */
-    fun onUpdatesAppeared() = apkSeeder.refreshReceivedApks()
+    /** Раунд 133: предложения соседей — дифф-патчи для ровно моей версии. */
+    val apkPatchOffers: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.PatchOfferUi>>
+        get() = apkSeeder.patchOffers
+
+    /** Раунд 133: ход приёма дифф-патча. */
+    val apkPatchDownload: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.PatchDownload?>
+        get() = apkSeeder.patchDownload
 
     /**
-     * Пометить выбранный (SAF) APK как версию [version] и раздавать её.
-     * autoReseed=true: после установки и перезапуска раздача продолжается.
+     * Выбранный в проводнике APK (SAF): имя берётся из самого файла, версия
+     * читается из его AndroidManifest (пока читается — поле версии ждёт).
      */
-    fun onMarkApkFileAsUpdate(uri: android.net.Uri, version: String) {
+    data class ApkPickUi(
+        val displayName: String,
+        val sizeBytes: Long,
+        /** versionName из самого APK; null — ещё читаем или не разобрался. */
+        val version: String? = null,
+        /** Копия в кэше готова; null — ещё копируем. */
+        val tempPath: String? = null,
+        val error: String? = null,
+    )
+
+    private val _apkPick = MutableStateFlow<ApkPickUi?>(null)
+    val apkPick: kotlinx.coroutines.flow.StateFlow<ApkPickUi?>
+        get() = _apkPick.asStateFlow()
+
+    /** Обозрел экран: перечитать принятые APK и догнать загрузки (сканы не чаще 5 минут в сидере). */
+    fun onUpdatesAppeared() {
+        apkSeeder.refreshReceivedApks()
+        apkSeeder.pickupDownloadedApks()
+    }
+
+    /**
+     * Файл выбран в проводнике: сразу показываем настоящее имя и размер
+     * (ContentResolver), затем в фоне копируем во временный файл и читаем
+     * версию прямо из APK — поле версии заполнится само.
+     */
+    fun onApkPicked(uri: android.net.Uri) {
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
+            val quick = withContext(Dispatchers.IO) {
+                runCatching {
+                    var name = ""
+                    var size = -1L
+                    context.contentResolver.query(
+                        uri,
+                        arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE),
+                        null, null, null,
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                            if (nameIdx >= 0) name = cursor.getString(nameIdx).orEmpty()
+                            if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) size = cursor.getLong(sizeIdx)
+                        }
+                    }
+                    ApkPickUi(
+                        displayName = name.ifBlank { "обновление.apk" },
+                        sizeBytes = if (size >= 0L) size else 0L,
+                    )
+                }.getOrElse { ApkPickUi(displayName = "обновление.apk", sizeBytes = 0L) }
+            }
+            _apkPick.value = quick
+            val prepared = withContext(Dispatchers.IO) {
+                val temp = runCatching {
+                    java.io.File.createTempFile("apu_pick_", ".apk", context.cacheDir)
+                }.getOrNull() ?: return@withContext quick.copy(error = "Не удалось открыть файл")
                 try {
-                    val temp = java.io.File.createTempFile("apu_update_", ".apk", context.cacheDir)
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         temp.outputStream().use { output -> input.copyTo(output) }
-                    } ?: return@withContext "Не удалось открыть файл"
-                    apkSeeder.markAsSeed(temp, version, autoReseed = true)
-                        .also { temp.delete() }
+                    } ?: return@withContext quick.copy(error = "Не удалось открыть файл")
+                    // Версия — из самого APK; если архив не читается — из имени.
+                    val version = runCatching {
+                        context.packageManager.getPackageArchiveInfo(temp.absolutePath, 0)?.versionName
+                    }.getOrNull()?.takeIf { it.isNotBlank() }
+                        ?: com.vladimir.messenger.data.update.ApkUpdate.versionFromName(quick.displayName)
+                    quick.copy(version = version, tempPath = temp.absolutePath)
                 } catch (error: Exception) {
-                    "Ошибка: ${error.message}"
+                    temp.delete()
+                    quick.copy(error = "Ошибка чтения: ${error.message}")
                 }
             }
+            prepared.error?.let { message ->
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+            }
+            _apkPick.value = prepared
+        }
+    }
+
+    /** Подтверждено: раздавать выбранный файл как версию [version]. */
+    fun onApkPickConfirm(version: String) {
+        val pick = _apkPick.value ?: return
+        val tempPath = pick.tempPath ?: return // ещё копируется
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val temp = java.io.File(tempPath)
+                try {
+                    apkSeeder.markAsSeed(temp, version, autoReseed = true, displayName = pick.displayName)
+                } finally {
+                    temp.delete()
+                }
+            }
+            _apkPick.value = null
             toastIf(result)
         }
+    }
+
+    /** Отмена выбора файла: убрать временную копию. */
+    fun onApkPickCancel() {
+        val pick = _apkPick.value ?: return
+        pick.tempPath?.let { path -> java.io.File(path).delete() }
+        _apkPick.value = null
     }
 
     /** Раздавать уже принятый APK (из чата) как версию [version]. */
@@ -127,16 +226,31 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { runCatching { apkSeeder.cancelDownload() } }
     }
 
-    /** Установить скачанное обновление (системный диалог). */
+    /** Раунд 133: качать у узла [nodeId] дифф-патч — только разницу версий. */
+    fun onDownloadPatchFrom(nodeId: String) {
+        viewModelScope.launch { runCatching { apkSeeder.requestPatchUpdate(nodeId) } }
+    }
+
+    /** Остановить приём дифф-патча. */
+    fun onCancelPatchDownload() {
+        viewModelScope.launch { runCatching { apkSeeder.cancelPatchDownload() } }
+    }
+
+    /** Установить скачанное обновление (системный диалог). Ошибка — тостом. */
     fun onInstallUpdate() {
-        viewModelScope.launch { runCatching { apkSeeder.installReady() } }
+        viewModelScope.launch {
+            val result = runCatching { apkSeeder.installReady() }
+                .getOrElse { "Не удалось запустить установку: ${it.message}" }
+            toastIf(result)
+        }
     }
 
     /**
      * Кнопка «Проверить новую версию»: (1) спрашиваем соседей — `upask`
      * всем известным узлам, кто раздаёт новее, объявится `upk`; (2)
      * перечитываем принятые APK; (3) смотрим официальный релиз на GitHub.
-     * Итог — тостом; найденный релиз — строкой в карточке.
+     * Если нашлось и там, и там — в карточке появятся ДВЕ кнопки выбора,
+     * откуда качать.
      */
     fun onCheckForUpdates() {
         if (_updatesChecking.value) return
@@ -150,8 +264,17 @@ class SettingsViewModel @Inject constructor(
             val release = runCatching { updateChecker.checkForUpdate(currentVersion) }.getOrNull()
             _officialRelease.value = release
             _updatesChecking.value = false
+            // Соседи отвечают на `upask` не мгновенно: предложения доедут
+            // через пару секунд и карточка обновится сама (StateFlow).
+            val neighbors = apkOffers.value.size
             val message = when {
-                release != null -> "Есть новая версия v${release.version.removePrefix("v")} — скачайте или ждите соседей"
+                release != null && neighbors > 0 ->
+                    "Найдено в двух местах: официальный сайт v${release.version.removePrefix("v")} " +
+                        "и $neighbors сосед(ей) по сети — выберите в карточке, откуда скачать"
+                release != null ->
+                    "Есть новая версия v${release.version.removePrefix("v")} на официальном сайте — кнопка в карточке"
+                neighbors > 0 ->
+                    "Соседи раздают новую версию — кнопка «Скачать» в карточке"
                 asked > 0 -> "Спрошено у $asked соседей; новых объявлений пока нет"
                 else -> "Обновлений не найдено (соседей в сети нет или они на этой же версии)"
             }
@@ -159,17 +282,30 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** Скачать официальный релиз (DownloadManager; установка из «Загрузок»). */
+    /**
+     * Скачать официальный релиз (DownloadManager). Когда файл докачается,
+     * он САМ появится в этом разделе: версия прочитается из APK, карточка
+     * «Обновить до vX» и раздача соседям начнутся без человека.
+     */
     fun onDownloadOfficialRelease() {
         val release = _officialRelease.value ?: return
         runCatching { updateChecker.downloadApk(release) }
-            .onSuccess {
-                android.widget.Toast.makeText(
-                    context,
-                    "Скачивание началось. После завершения установите из «Загрузок» " +
-                        "и отметьте файл в «Обновлениях», чтобы раздать соседям",
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
+            .onSuccess { id ->
+                if (id == -1L) {
+                    // Раунд 132: дифф-патч - скачали разницу, установщик уже открыт.
+                    android.widget.Toast.makeText(
+                        context,
+                        "Обновление скачано компактно (только разница версий) - установщик открыт",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                } else {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — " +
+                            "установка и раздача соседям начнутся сами",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
             .onFailure {
                 android.widget.Toast.makeText(context, "Не удалось начать скачивание: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
@@ -204,10 +340,90 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 178: кэш публичного IP - сеть не дёргаем чаще раза в 10 минут. */
+    private var lastPublicIp: String? = null
+    private var lastPublicIpAt: Long = 0L
+    private val publicIpTtlMs: Long = 10L * 60 * 1000
+
     init {
         observeMyHearts()
         loadSettings()
+        // Раунд 177: имя в профиле должно стоять ПЕРВЫМ кадром. Владелец:
+        // «быстро переходишь на вкладку профиля - показывает анонимус,
+        // а потом подгружает». Одна строка из prefs читается мгновенно,
+        // тяжёлая часть (ключ, ссылка, пиры, версии) остаётся в фоне.
+        val instantName = runCatching {
+            context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                .getString("display_name", null)
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (instantName != null) {
+            _uiState.update { it.copy(displayName = instantName) }
+        }
         _uiState.update { it.copy(proxyTunnelEnabled = proxyTunnelEnabled()) }
+        refreshServerSection()
+    }
+
+    /** Раздел «Сервер»: доступность, отклик, состояние копии азбуки. */
+    fun refreshServerSection() {
+        viewModelScope.launch {
+            // Статус сервера: /health с замером отклика.
+            val health = runCatching { botApi.pingHealth() }.getOrNull()
+            _uiState.update {
+                it.copy(
+                    serverStatus = when {
+                        health == null -> "недоступен — рой на запасных брокерах"
+                        health < 400 -> "доступен, ответ за ${health} мс"
+                        else -> " отвечает с ошибкой ($health)"
+                    },
+                )
+            }
+            refreshAddrBookLine()
+        }
+    }
+
+    private fun refreshAddrBookLine() {
+        val at = addressBookBackup.lastBackupAtMs()
+        val count = addressBookBackup.localEntryCount()
+        val line = buildString {
+            append("В телефоне: ${count} адресов. ")
+            append(
+                if (at > 0) {
+                    "Копия на сервере от " + android.text.format.DateFormat.getTimeFormat(context)
+                        .format(java.util.Date(at)) + ", " +
+                        android.text.format.DateFormat.getDateFormat(context)
+                            .format(java.util.Date(at)) + "."
+                } else {
+                    "Копии на сервере ещё нет."
+                }
+            )
+            append(" Копия делается сама.")
+            // Раунд 126 (владелец): без лимита - просто число сохранивших.
+            val fresh = addressBookSwarm.freshAckCount()
+            append(" Копий на других телефонах: $fresh.")
+        }
+        _uiState.update { it.copy(addrBookLine = line) }
+    }
+
+    /** Кнопка «Создать копию» (диалог карточки «Сервер»). */
+    fun backupAddressBookNow() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(addrBookMessage = "Сохраняю…") }
+            val result = runCatching { addressBookBackup.backupNow() }
+                .getOrElse { "Не получилось: ${it.message}" }
+            _uiState.update { it.copy(addrBookMessage = result) }
+            refreshAddrBookLine()
+        }
+    }
+
+    /** Кнопка «Восстановить» (диалог карточки «Сервер»). */
+    fun restoreAddressBookNow() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(addrBookMessage = "Загружаю…") }
+            val result = runCatching { addressBookBackup.restoreNowForce() }
+                .getOrElse { "Не получилось: ${it.message}" }
+            _uiState.update { it.copy(addrBookMessage = result) }
+            refreshAddrBookLine()
+        }
     }
 
     /** «Любая сеть»: пользовательский выключатель прокси-туннеля (по умолчанию включён). */
@@ -282,17 +498,28 @@ class SettingsViewModel @Inject constructor(
                 "unknown"
             }
 
-            // Публичный IP: каким нас видит интернет. Определяем внешним
-            // сервисом; без сети честно пишем, что недоступен.
+            // Публичный IP: каким нас видит интернет. Раунд 178 (аудит
+            // нагрузки): сетевой запрос - не чаще раза в 10 минут, в
+            // остальное время показываем свежий кэш; слабые телефоны и
+            // мобильный трафик не дёргаем при каждом открытии профиля.
             val publicIp = withContext(Dispatchers.IO) {
-                runCatching {
-                    val conn = java.net.URL("https://api.ipify.org?text=true")
-                        .openConnection() as java.net.HttpURLConnection
-                    conn.connectTimeout = 5000
-                    conn.readTimeout = 5000
-                    conn.inputStream.bufferedReader().use { it.readText().trim() }
-                        .takeIf { it.isNotBlank() }
-                }.getOrNull()
+                val now = System.currentTimeMillis()
+                val cached = lastPublicIp
+                if (cached != null && now - lastPublicIpAt < publicIpTtlMs) {
+                    cached
+                } else {
+                    runCatching {
+                        val conn = java.net.URL("https://api.ipify.org?text=true")
+                            .openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 5000
+                        conn.readTimeout = 5000
+                        conn.inputStream.bufferedReader().use { it.readText().trim() }
+                            .takeIf { it.isNotBlank() }
+                    }.getOrNull()?.also {
+                        lastPublicIp = it
+                        lastPublicIpAt = now
+                    } ?: cached
+                }
             }
 
             // Чтение настроек и сборка ссылки трогают диск - тоже в фон.
@@ -306,6 +533,17 @@ class SettingsViewModel @Inject constructor(
             }
             val peers = withContext(Dispatchers.IO) { RustBridge.connectedPeers().toInt() }
             val coreInfo = withContext(Dispatchers.IO) { RustBridge.coreBuildInfo() }
+            // Ядро присылает одним куском «ядро · сборка · брокеры · MQTT: …».
+            // Диагностику MQTT показываем отдельной строкой «Сеть сообщений»,
+            // чтобы карточка «Ядро» не превращалась в простыню.
+            val mqttSeparator = " · MQTT: "
+            val mqttSeparatorAt = coreInfo.indexOf(mqttSeparator)
+            val coreLine = if (mqttSeparatorAt >= 0) coreInfo.take(mqttSeparatorAt) else coreInfo
+            val mqttLine = if (mqttSeparatorAt >= 0) {
+                "MQTT: " + coreInfo.substring(mqttSeparatorAt + mqttSeparator.length)
+            } else {
+                ""
+            }
 
             _uiState.update {
                 it.copy(
@@ -320,7 +558,8 @@ class SettingsViewModel @Inject constructor(
                     connectedPeers   = peers,
                     connectionMode   = "P2P / QUIC",
                     appVersion       = appVersion,
-                    rustCoreVersion  = coreInfo,
+                    rustCoreVersion  = coreLine,
+                    mqttLink         = mqttLine,
                     publicIp         = publicIp,
                 )
             }

@@ -3010,61 +3010,59 @@ impl P2PCore {
                                         }
                                         None => match String::from_utf8(e2e_payload) {
                                             Ok(text) => {
-                                                // M8-D: после restart RAM-мапа доставок пуста;
-                                                // durable tombstone защищает от повторной UI-доставки.
-                                                // Receipt при этом всё равно шлём (идемпотентный
-                                                // cleanup чужих custody-копий).
-                                                let durable_tombstoned = relay_custody
-                                                    .as_ref()
-                                                    .map(|custody| {
-                                                        custody.store.has_tombstone(&msg_id).unwrap_or(false)
-                                                    })
-                                                    .unwrap_or(false);
-                                                if durable_tombstoned {
-                                                    tracing::info!(
-                                                        "MESH relay: {} already delivered before restart, UI suppressed",
-                                                        msg_id
-                                                    );
-                                                    true
-                                                } else {
-                                                    let now = std::time::SystemTime::now()
-                                                        .duration_since(std::time::UNIX_EPOCH)
-                                                        .unwrap_or_default();
-                                                    events.emit(CoreEvent::MessageReceived {
-                                                        message_id: msg_id.clone(),
-                                                        chat_id: chat_scope,
-                                                        sender_id: origin.clone(),
-                                                        text,
-                                                        timestamp: now.as_millis() as i64,
-                                                    });
-                                                    remember_bounded_delivery(
-                                                        &mut delivered_mesh_relay_origins,
-                                                        &mut delivered_mesh_relay_order,
-                                                        &msg_id,
-                                                        &origin,
-                                                        MAX_DELIVERED_MESH_RELAY_IDS,
-                                                    );
-                                                    // M8-B/D: durable tombstone — после restart поздний/
-                                                    // повторный relay с этим ID не даст вторую UI-доставку.
-                                                    if let Some(ref custody) = relay_custody {
-                                                        let now_durable =
-                                                            crate::network::relay_queue::utc_now_ms();
-                                                        if let Err(e) =
-                                                            custody.store.record_tombstone(&msg_id, now_durable)
-                                                        {
-                                                            tracing::warn!(
-                                                                "MESH relay: durable tombstone failed for {}: {}",
-                                                                msg_id,
-                                                                e
-                                                            );
-                                                        }
+                                                // Раунд 119: durable tombstone БОЛЬШЕ НЕ
+                                                // подавляет UI-доставку. Раньше: доставка ->
+                                                // tombstone -> процесс убит (например,
+                                                // ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ) до того, как Kotlin
+                                                // сохранил сообщение -> повторная доставка
+                                                // подавлялась tombstone-ом, receipt уходил,
+                                                // отправитель ставил «доставлено» ->
+                                                // сообщение пропадало навсегда. Теперь
+                                                // UI-событие шлём ВСЕГДА: дубль уже
+                                                // сохранённого отфильтрует Room по msg_id
+                                                // (messageExists + повторный ACK), а
+                                                // незасохранённое сообщение наконец дойдёт.
+                                                // Tombstone остаётся книгой учёта для
+                                                // cleanup чужих custody-копий.
+                                                let now = std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .unwrap_or_default();
+                                                events.emit(CoreEvent::MessageReceived {
+                                                    message_id: msg_id.clone(),
+                                                    chat_id: chat_scope,
+                                                    sender_id: origin.clone(),
+                                                    text,
+                                                    timestamp: now.as_millis() as i64,
+                                                });
+                                                remember_bounded_delivery(
+                                                    &mut delivered_mesh_relay_origins,
+                                                    &mut delivered_mesh_relay_order,
+                                                    &msg_id,
+                                                    &origin,
+                                                    MAX_DELIVERED_MESH_RELAY_IDS,
+                                                );
+                                                // M8-B/D: tombstone остаётся книгой учёта
+                                                // доставки (cleanup чужих custody-копий и
+                                                // запрет повторного хранения), но UI-доставку
+                                                // он больше не блокирует.
+                                                if let Some(ref custody) = relay_custody {
+                                                    let now_durable =
+                                                        crate::network::relay_queue::utc_now_ms();
+                                                    if let Err(e) =
+                                                        custody.store.record_tombstone(&msg_id, now_durable)
+                                                    {
+                                                        tracing::warn!(
+                                                            "MESH relay: durable tombstone failed for {}: {}",
+                                                            msg_id,
+                                                            e
+                                                        );
                                                     }
-                                                    tracing::info!(
-                                                        "MESH relay: {} delivered to local recipient",
-                                                        msg_id
-                                                    );
-                                                    true
                                                 }
+                                                tracing::info!(
+                                                    "MESH relay: {} delivered to local recipient",
+                                                    msg_id
+                                                );
+                                                true
                                             }
                                             Err(_) => {
                                                 tracing::warn!(
@@ -3512,6 +3510,58 @@ impl P2PCore {
                                     _ => tracing::warn!(
                                         "MESH gossip: malformed summary dropped"
                                     ),
+                                }
+                            }
+                        }
+                    } else if evt.payload.starts_with(
+                        crate::network::presence_scope::DIRECT_PRESENCE_PREFIX,
+                    ) {
+                        // Адрес в конверте (владелец, 2026-09-19): отправитель,
+                        // у которого не вышел прямой путь, прикладывает к
+                        // сообщению личный presence со своим свежим адресом.
+                        // Записываем адрес сразу - ответ уходит без поиска.
+                        // Старые сборки такой кадр молча пропускают (не
+                        // четыре поля с pk_ первым), N-1 не страдает.
+                        if let Some(presence) =
+                            crate::network::presence_scope::parse_direct_presence(&evt.payload)
+                        {
+                            if presence.node_id != node_id
+                                && presence.version
+                                    + crate::config::defaults::PRESENCE_VERSION_TOLERANCE
+                                    > crate::config::defaults::PRESENCE_VERSION
+                            {
+                                let age_ms = crate::storage::models::now_ms()
+                                    .saturating_sub(presence.sent_at_ms);
+                                if age_ms <= crate::config::defaults::PRESENCE_MAX_AGE_MS {
+                                    tracing::info!(
+                                        "PRESENCE K4-MQTT: personal presence from {} addr={}",
+                                        presence.node_id,
+                                        presence
+                                            .addr
+                                            .map(|a| a.to_string())
+                                            .unwrap_or_else(|| "unknown".into())
+                                    );
+                                    network.add_peer(PeerInfo::new(
+                                        presence.node_id.clone(),
+                                        presence.display_name.clone(),
+                                    ));
+                                    network.touch_peer(&presence.node_id);
+                                    if let Some(addr) = presence.addr {
+                                        let public_key =
+                                            format!("{}_public", presence.node_id);
+                                        {
+                                            let mut addrs = peer_addrs.lock().unwrap();
+                                            addrs.insert(presence.node_id.clone(), addr);
+                                            addrs.insert(public_key.clone(), addr);
+                                        }
+                                        address_book.record(&presence.node_id, addr);
+                                        address_book.record(&public_key, addr);
+                                        tracing::info!(
+                                            "PRESENCE K4-MQTT: fresh addr from {} = {}",
+                                            presence.node_id,
+                                            addr
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -4371,6 +4421,32 @@ impl P2PCore {
                     message_id
                 ),
             }
+        }
+
+        // Адрес в конверте (владелец, 2026-09-19): прямой путь не вышел -
+        // расскажем получателю свой свежий адрес тем же брокерным путём,
+        // что и само сообщение. Получатель (новая сборка) запишет адрес
+        // сразу и ответит напрямую; старые сборки кадр молча пропустят.
+        let my_addr = *self.public_addr.lock().unwrap();
+        let ppres = crate::network::presence_scope::direct_presence_payload(
+            &sender_id,
+            &self.config.display_name,
+            my_addr.map(|a| a.to_string()).as_deref(),
+            my_addr.is_some(),
+            crate::storage::models::now_ms(),
+        );
+        if let Some(outbound) = self.mqtt_outbound_tx.as_ref() {
+            let queued = outbound.try_send(MqttOutboundCommand::MeshRelay {
+                recipient: recipient_id.clone(),
+                envelope: ppres,
+                message_id: format!("ppres-{}", message_id),
+            })
+            .is_ok();
+            tracing::info!(
+                "MESH origin: address-in-envelope ppres to {} queued={}",
+                recipient_id,
+                queued
+            );
         }
 
         let _ = self

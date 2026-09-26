@@ -486,7 +486,8 @@ fun GroupsScreen(
                     val chosen = group
                     inviteChoice = null
                     viewModel.shareInvite(chosen.id) { title, link ->
-                        AppShare.shareGroupInvite(context, title, link)
+                        // Раунд 162: каналу - «канал».
+                        AppShare.shareGroupInvite(context, title, link, chosen.isChannel)
                     }
                 }) { Text("Отправить ссылку") }
             },
@@ -617,7 +618,12 @@ private fun GroupRow(
                         append(group.memberCount)
                         append(" участн.")
                         if (group.topicsEnabled) append(" • темы")
-                        group.lastMessagePreview?.let { append(" • ").append(it) }
+                        // Раунд 156: без служебных строк (гифки/стикеры).
+                        group.lastMessagePreview?.let {
+                            append(" • ").append(
+                                com.vladimir.messenger.util.ChatPreviews.human(it).orEmpty()
+                            )
+                        }
                     },
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,

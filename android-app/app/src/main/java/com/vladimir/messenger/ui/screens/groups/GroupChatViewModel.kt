@@ -59,6 +59,17 @@ data class GroupChatUiState(
     /** Можно ли прикреплять файлы: ранг «Круг друзей» и право «Отправка медиа». */
     val canAttach: Boolean = false,
     val attachLockedHint: String = "",
+    /** Каталог GIF (наш сервер): гифки, курсор «ещё», состояние. */
+    val gifItems: List<com.vladimir.messenger.data.gif.GifItem> = emptyList(),
+    val gifNext: String = "",
+    val gifLoading: Boolean = false,
+    /** Почему каталог недоступен (текст для диалога); null - доступен. */
+    val gifError: String? = null,
+    /** Раунд 121: свой каталог роя. tab: "swarm" | "external". */
+    val gifTab: String = "swarm",
+    val myGifs: List<com.vladimir.messenger.data.gif.GifLibEntry> = emptyList(),
+    val swarmGifs: List<com.vladimir.messenger.data.gif.SwarmGif> = emptyList(),
+    val swarmStatus: String? = null,
     /** Принятый файл, который человек просит сохранить в папку (системное окно). */
     val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
 )
@@ -72,6 +83,9 @@ class GroupChatViewModel @Inject constructor(
     private val groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm,
     private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
+    private val botApi: com.vladimir.messenger.service.BotApi,
+    private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -94,6 +108,25 @@ class GroupChatViewModel @Inject constructor(
         observeAllGroups()
         observeMembers()
         observeTopics()
+        // Раунд 153: в группе «без тем» строк тем в базе нет - отправка
+        // молча выходила (selectedTopicId == null), лента не запускалась,
+        // владелец видел «Выберите тему» при пустом списке. Материализуем
+        // General (детерминированный id, одинаковый у всех) и открываем
+        // его как обычную тему: пишуться и лента, и «Отправить».
+        viewModelScope.launch {
+            repeat(10) {
+                val g = _uiState.value.group
+                if (g != null) {
+                    if (!g.topicsEnabled) {
+                        runCatching { groupRepository.ensureFlatTopic(groupId) }.getOrNull()?.let { id ->
+                            if (_uiState.value.selectedTopicId == null) selectTopic(id)
+                        }
+                    }
+                    return@launch
+                }
+                kotlinx.coroutines.delay(300)
+            }
+        }
         // Вступивший позже не застал создание тем - просим список у владельца.
         viewModelScope.launch { groupRepository.requestTopics(groupId) }
         // В канале ещё и сами посты: по ссылке на пост человек попадает сюда,
@@ -105,6 +138,20 @@ class GroupChatViewModel @Inject constructor(
         observeTransfers()
         // Закрепы подписываем на выбранную тему, а не на всю группу:
         // observePinned(topicId) стартует вместе с лентой сообщений.
+        observeGifArrivals()
+        observeStickerArrivals()
+        observeJoinRequests()
+    }
+
+    /** Раунд 121: гифка из роя пришла файлом - сразу приложить к сообщению. */
+    private fun observeGifArrivals() {
+        viewModelScope.launch {
+            // Раунд 130: гифка приезжает тихо - карточки-ссылки в ленте
+            // оживают сами (GifRefCard слушает arrivals).
+            com.vladimir.messenger.data.gif.GifLibrary.arrivalsFlow().collect { _ ->
+                _uiState.update { it.copy(swarmStatus = null) }
+            }
+        }
     }
 
     // ── Файлы группы (рой, этап 9) ────────────────────────────────────────────
@@ -174,6 +221,426 @@ class GroupChatViewModel @Inject constructor(
                 _uiState.update { it.copy(error = "Файл не приложен: ${e.message}") }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    // ── Каталог GIF (наш сервер -> Tenor; отправка через файловый рой) ──
+
+    /** Открыть/обновить каталог: популярные или по запросу. */
+    fun searchGifs(query: String, more: Boolean = false) {
+        if (_uiState.value.gifLoading) return
+        if (!more) lastGifQuery = query
+        val pos = if (more) _uiState.value.gifNext else ""
+        _uiState.update {
+            it.copy(
+                gifLoading = true,
+                gifError = null,
+                gifItems = if (more) it.gifItems else emptyList(),
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { botApi.gifSearch(query, pos) }.getOrNull()
+            _uiState.update { state ->
+                if (result == null) {
+                    state.copy(
+                        gifLoading = false,
+                        gifError = "Каталог недоступен: сервер не отвечает или ключ GIF ещё не настроен",
+                    )
+                } else {
+                    val (items, next) = result
+                    if (items.isEmpty() && state.gifItems.isEmpty()) {
+                        state.copy(gifLoading = false, gifError = "Ничего не нашлось")
+                    } else {
+                        state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifItems = (state.gifItems + items).distinctBy { it.id },
+                            gifNext = next,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** Закрыли каталог -.state гифок можно отпустить. */
+    fun closeGifCatalog() {
+        _uiState.update { it.copy(gifItems = emptyList(), gifNext = "", gifError = null) }
+    }
+
+    // ── Свой каталог роя (раунд 121) ────────────────────────────────────
+
+    private var lastGifQuery: String = ""
+
+    /** Открыли окно гифок: подтянуть мою библиотеку и каталог роя. */
+    // ── Стикеры (раунд 138): единая панель ввода ────────────────────────────
+
+    /** Мои стикеры для панели. */
+    private val _stickerEntries = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerEntries: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerEntries.asStateFlow()
+
+    /** Недавние стикеры для панели. */
+    private val _stickerRecents = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerRecents: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerRecents.asStateFlow()
+
+    /** Стикеры других телефонов роя для панели («Из сети»). */
+    private val _swarmStickers = MutableStateFlow<List<com.vladimir.messenger.data.sticker.SwarmSticker>>(emptyList())
+    val swarmStickers: StateFlow<List<com.vladimir.messenger.data.sticker.SwarmSticker>> = _swarmStickers.asStateFlow()
+
+    /** sha стикера из сети, который ждём, чтобы сразу отправить (раунд 139). */
+    private var pendingSwarmStickerSha: String? = null
+
+    /** Перечитать библиотеку стикеров. */
+    fun refreshStickers() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _stickerEntries.value = stickerLibrary.all()
+            _stickerRecents.value = stickerLibrary.recents()
+            // Раунд 139: каталог роя - рассказать о себе и спросить чужие,
+            // слить каталоги хранителей, подтянуть миниатюры для сетки.
+            runCatching {
+                stickerLibrary.syncWithSwarm(chatRepository, force = false)
+            }
+            val mine = _stickerEntries.value.map { it.sha256 }.toSet()
+            val swarm = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.swarmCatalog(appContext, mine)
+            }.getOrDefault(emptyList())
+            _swarmStickers.value = swarm
+            for (s in swarm.take(40)) {
+                if (com.vladimir.messenger.data.sticker.StickerLibrary
+                    .tinyThumbFile(appContext, s.sha256) == null
+                ) {
+                    runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary.requestThumb(
+                            appContext, chatRepository, s.sha256, s.holders,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** Добавить свой стикер из хранилища телефона. */
+    fun addSticker(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { stickerLibrary.add(uri) }
+            announceAdded()
+            refreshStickers()
+        }
+    }
+
+    /** Раунд 165: альбом стикеров .zip - в библиотеку, сетка обновится. */
+    fun addStickerZip(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { stickerLibrary.addZip(uri) }
+            announceAdded()
+            refreshStickers()
+        }
+    }
+
+    /**
+     * Раунд 167: добавили стикеры (.zip или по одному) - объявить свой
+     * каталог рою СРАЗУ: абоненты увидят их в «Из сети» без ожидания.
+     */
+    private suspend fun announceAdded() {
+        runCatching { stickerLibrary.syncWithSwarm(chatRepository, force = true) }
+    }
+
+    /**
+     * Раунд 174: удалить свой стикер случайно закинули). Из библиотеки,
+     * каталог роя переобъявляется сразу - у абонентов исчезнет из
+     * «Из сети». Кто уже скачал - у того остаётся (E2E).
+     */
+    fun removeSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { stickerLibrary.deleteBySha(entry.sha256) }
+            announceAdded()
+            refreshStickers()
+        }
+    }
+
+    /**
+     * Раунд 174: удалить свою гифку из библиотеки и роевого каталога.
+     */
+    fun removeOwnGif(sha256: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.deleteOwn(appContext, sha256)
+            }
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = true,
+                )
+            }
+            onGifCatalogOpened()
+        }
+    }
+
+    /**
+     * Отправить стикер в тему/комментарии: прикладываем его файл и сразу
+     * отправляем (как обычный приложенный файл - карточка с картинкой).
+     * Стикер встаёт в «Недавние».
+     */
+    fun sendSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                val topicId = _uiState.value.selectedTopicId ?: error("Выберите тему")
+                // Раунд 166: стикер - БАЙТАМИ (image/webp, имя «Стикер.webp»):
+                // раньше стейджился FileProvider-uri файла <sha>.img, MIME
+                // выходил не-картинка, и карточка в ленте была без картинки.
+                // Раунд 171: чтение файла - в IO (главному потоку не место).
+                val bytes = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    entry.file.readBytes()
+                }
+                val info = groupFiles.stageStickerBytes(groupId, bytes)
+                val body = com.vladimir.messenger.util.GroupFileMarker.compose("", info)
+                groupRepository.sendMessage(groupId, topicId, body)
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                    .onSuccess { _uiState.update { it.copy(stagedFile = null) } }
+                stickerLibrary.touch(entry.sha256)
+                refreshStickers()
+            } catch (e: Exception) {
+                android.util.Log.w("GroupChatVM", "sticker send failed", e)
+                _uiState.update { it.copy(error = "Стикер не отправлен: ${e.message.orEmpty()}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /**
+     * Раунд 139: выбрал стикер в «Из сети». Есть локально - сразу в чат;
+     * нет - тихая просьба трём хранителям, байты приедут - отправим сами.
+     */
+    fun requestSwarmSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            val local = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                stickerLibrary.entryOf(swarm.sha256)
+            }
+            if (local != null) {
+                sendSticker(local)
+                return@launch
+            }
+            com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
+            pendingSwarmStickerSha = swarm.sha256
+            val holder = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
+                    appContext, chatRepository, swarm.sha256, swarm.holders,
+                )
+            }.getOrNull()
+            _uiState.update {
+                it.copy(
+                    swarmStatus = when (holder) {
+                        null -> "Сеть пока не отвечает - попробуйте позже"
+                        "" -> "Уже качаем этот стикер"
+                        else -> "Качается с $holder - сейчас отправим"
+                    },
+                )
+            }
+        }
+    }
+
+    /** Раунд 139: стикер, которого ждали из роя, приехал - сразу отправить. */
+    private fun observeStickerArrivals() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.sticker.StickerLibrary.arrivalsFlow().collect { sha ->
+                _uiState.update { it.copy(swarmStatus = null) }
+                refreshStickers()
+                val wanted = pendingSwarmStickerSha
+                if (wanted != null && wanted == sha) {
+                    pendingSwarmStickerSha = null
+                    // В группу пошлём сами, как только выбрана тема.
+                    if (_uiState.value.selectedTopicId != null) {
+                        kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            stickerLibrary.entryOf(sha)
+                        }?.let { sendSticker(it) }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Заявки на вступление (раунд 143): пузырь владельца/админа ───────────
+
+    /** Заявки на вступление, ждущие решения (поток из базы). */
+    private val _joinRequests = MutableStateFlow<List<com.vladimir.messenger.data.group.JoinRequestSummary>>(emptyList())
+    val joinRequests: StateFlow<List<com.vladimir.messenger.data.group.JoinRequestSummary>> = _joinRequests.asStateFlow()
+
+    private fun observeJoinRequests() {
+        viewModelScope.launch {
+            groupRepository.observeJoinRequests(groupId).collect { list ->
+                _joinRequests.value = list
+            }
+        }
+    }
+
+    /** Одобрить или отклонить заявку (решение уходит просителю). */
+    fun decideJoinRequest(nodeId: String, approve: Boolean) {
+        viewModelScope.launch {
+            groupRepository.decideJoinRequest(groupId, nodeId, approve)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    fun onGifCatalogOpened() {
+        viewModelScope.launch {
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = false,
+                )
+            }
+            val my = runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.entries(appContext)
+            }.getOrDefault(emptyList())
+            val swarm = runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
+            }.getOrDefault(emptyList())
+            _uiState.update {
+                it.copy(
+                    gifTab = if (my.isNotEmpty() || swarm.isNotEmpty()) "swarm" else "external",
+                    myGifs = my,
+                    swarmGifs = swarm,
+                )
+            }
+        }
+    }
+
+    fun setGifTab(tab: String) {
+        _uiState.update { it.copy(gifTab = tab) }
+    }
+    private val thumbRequestedAt = HashMap<String, Long>()
+
+    /** Раунд 129: миниатюры чужих гифок для сетки каталога. */
+    fun requestPeerThumbs(entries: List<com.vladimir.messenger.data.gif.SwarmGif>) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch {
+            for (sg in entries) {
+                val sha = sg.entry.sha256
+                if (com.vladimir.messenger.data.gif.GifLibrary.tinyThumbFile(appContext, sha) != null) continue
+                val now = System.currentTimeMillis()
+                if (now - (thumbRequestedAt[sha] ?: 0L) < 5 * 60_000L) continue
+                thumbRequestedAt[sha] = now
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.requestThumb(
+                        appContext, chatRepository, sha, sg.holders,
+                    )
+                }
+            }
+        }
+    }
+    /**
+     * Раунд 124: СВОЯ гифка из хранилища телефона. Ложится в библиотеку
+     * (превью + индекс), объявляется в каталоге нашей сети - теперь она
+     * есть у всех телефонов, без внешнего ресурса.
+     */
+    fun addOwnGif(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val bytes = appContext.contentResolver.openInputStream(uri)
+                        ?.use { input -> input.readBytes() }
+                        ?: return@withContext null
+                    if (bytes.isEmpty() || bytes.size > 30 * 1024 * 1024) return@withContext null
+                    val name = runCatching {
+                        appContext.contentResolver.query(
+                            uri, null, null, null, null,
+                        )?.use { cursor ->
+                            val idx = cursor.getColumnIndex(
+                                android.provider.OpenableColumns.DISPLAY_NAME,
+                            )
+                            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+                        }
+                    }.getOrNull()
+                    com.vladimir.messenger.data.gif.GifLibrary.add(
+                        appContext,
+                        bytes,
+                        null,
+                        "своя",
+                        name?.takeIf { it.isNotBlank() }
+                            ?: "своя_${System.currentTimeMillis() / 1000}.gif",
+                    )
+                }.getOrNull()
+            }
+            if (added == null) {
+                _uiState.update { it.copy(swarmStatus = "Не вышло: нужен файл GIF до 30 МБ") }
+            } else {
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                        appContext, chatRepository, force = false,
+                    )
+                }
+                onGifCatalogOpened()
+                _uiState.update { it.copy(swarmStatus = "Своя гифка добавлена - уже в нашей сети") }
+            }
+        }
+    }
+
+    /**
+     * Раунд 124: файл (гифка) из групповой карточки - в избранное.
+     * Копия не делается: хранится ссылка на принятую передачу.
+     */
+    fun saveFileToFavorites(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        viewModelScope.launch {
+            val result = savedItems.saveFile(transfer, "Группа")
+            _uiState.update {
+                it.copy(
+                    swarmStatus = when (result) {
+                        com.vladimir.messenger.data.repository.SaveResult.Saved -> "Добавлено в избранное"
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> "Уже в избранном"
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> "Файл ещё не получен полностью"
+                    },
+                )
+            }
+        }
+    }
+
+
+    /**
+     * Раунд 130: гифка в группу/комментарии уходит ССЫЛКОЙ (как в личке):
+     * в ленту попадает карточка от лица отправителя, байты каждый участник
+     * тихо подтягивает с хранителей. Файлы (скрепка) едут по-прежнему
+     * через сцену и раздачу K2 - это их не касается.
+     */
+    fun attachLocalGif(sha256: String) {
+        sendGifRefToGroup(sha256)
+    }
+
+    /** Раунд 130: гифка из сети (синяя точка) - в группу уходит моя ссылка. */
+    fun requestSwarmGif(swarm: com.vladimir.messenger.data.gif.SwarmGif, onDone: () -> Unit) {
+        sendGifRefToGroup(swarm.entry.sha256)
+        onDone()
+    }
+
+    /**
+     * Раунд 130: выбрал во внешнем каталоге - скачиваю ОДИН раз, селю в
+     * библиотеку (становлюсь хранителем) и шлю в группу ССЫЛКУ. Байты
+     * участники подтянут с меня тихо.
+     */
+    fun attachGif(item: com.vladimir.messenger.data.gif.GifItem, onDone: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                // Раунд 121: своя библиотека прежде внешнего каталога.
+                var sha = com.vladimir.messenger.data.gif.GifLibrary
+                    .shaForGiphyId(appContext, item.id)
+                if (sha == null) {
+                    val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        botApi.downloadGif(item.gif)
+                    } ?: throw IllegalStateException("Гифка не скачалась")
+                    val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.vladimir.messenger.data.gif.GifLibrary.add(
+                            appContext, bytes, item.id, lastGifQuery, "gif_" + item.id + ".gif",
+                        )
+                    } ?: throw IllegalStateException("Гифка не сохранилась")
+                    sha = added.sha256
+                }
+                onDone()
+                sendGifRefToGroup(sha)
+            } catch (e: Exception) {
+                android.util.Log.w("GroupChatVM", "gif attach failed", e)
+                _uiState.update { it.copy(error = "Гифка не отправлена: ${e.message}") }
             }
         }
     }
@@ -343,9 +810,28 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    // ── Раунд 144: вход в тему - сразу на первом непрочитанном ──────────────
+
+    /** Куда прыгнуть ленте: тема, индекс сообщения, сколько непрочитанных. */
+    data class FeedJump(val topicId: String, val index: Int, val unread: Int)
+
+    private val _feedJump = MutableStateFlow<FeedJump?>(null)
+    val feedJump: StateFlow<FeedJump?> = _feedJump.asStateFlow()
+
+    private var jumpTopicId: String? = null
+
+    /** Однократный захват на входе в тему (счётчик - до markRead). */
+    private var jumpCaptured = false
+
+    fun consumeFeedJump() {
+        _feedJump.value = null
+    }
+
     private fun observeMessages(topicId: String) {
         messagesJob?.cancel()
         followComments(topicId)
+        jumpTopicId = topicId
+        jumpCaptured = false
         messagesJob = viewModelScope.launch {
             groupRepository.observeTopicMessages(groupId, topicId).collect { all ->
                 // Куски фотографий и длинного текста - служебные строки, а не
@@ -363,6 +849,14 @@ class GroupChatViewModel @Inject constructor(
                     }
                 }
                 _uiState.update { it.copy(messages = list, moreComments = moreComments(topicId, list.size)) }
+                // Раунд 144: первый выпуск ленты - захватить непрочитанные
+                // ДО их сброса и указать ленте первое непрочитанное.
+                if (jumpTopicId == topicId && !jumpCaptured) {
+                    jumpCaptured = true
+                    val unread = runCatching { groupRepository.peekTopicUnread(topicId) }.getOrDefault(0)
+                    val index = if (unread in 1..list.size) list.size - unread else list.size - 1
+                    _feedJump.value = FeedJump(topicId, index, unread)
+                }
                 // Экран открыт - значит тема прочитана. Вызываем на каждом
                 // обновлении, чтобы счётчик гас и на новых сообщениях.
                 groupRepository.markRead(groupId, topicId)
@@ -429,9 +923,79 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Раунд 130: отправить ССЫЛКУ на гифку в группу/тему комментариев.
+     * Карточка от лица отправителя; байты каждый участник тихо тянет
+     * с хранителей - в личные чаты ничего не приходит.
+     */
+    fun sendGifRefToGroup(sha256: String) {
+        val topicId = _uiState.value.selectedTopicId
+        if (topicId == null) {
+            _uiState.update { it.copy(error = "Выберите тему") }
+            return
+        }
+        _uiState.update { it.copy(sending = true, error = null) }
+        viewModelScope.launch {
+            groupRepository.sendMessage(groupId, topicId, com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256))
+                .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
+                .onSuccess {
+                    _uiState.update { it.copy(sending = false) }
+                    ensureGifRefInternal(sha256)
+                    // Раунд 131: объявить каталог - участники должны узнать
+                    // во мне хранителя новой гифки.
+                    runCatching {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                                appContext, chatRepository, force = false,
+                            )
+                        }
+                    }
+                }
+        }
+    }
+
+    /** Раунд 129: миниатюры уже подключены; карточка просит байты. */
+    fun ensureGifRef(sha256: String) {
+        viewModelScope.launch { ensureGifRefInternal(sha256) }
+    }
+
+    private suspend fun ensureGifRefInternal(sha256: String) {
+        val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha256)?.isFile == true
+        }
+        if (have) return
+        val holders = runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
+        }.getOrDefault(emptyList())
+            .firstOrNull { it.entry.sha256 == sha256 }?.holders.orEmpty()
+        if (holders.isEmpty()) return
+        com.vladimir.messenger.data.gif.GifLibrary.rememberWant(sha256)
+        runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.requestGif(
+                appContext, chatRepository, sha256, holders,
+            )
+        }
+    }
+
     fun togglePin(messageId: String, pinned: Boolean) {
         viewModelScope.launch {
             groupRepository.setPinned(groupId, messageId, pinned)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Раунд 135: удалить сообщение только у себя. */
+    fun deleteMessageForMe(messageId: String) {
+        viewModelScope.launch {
+            runCatching { groupRepository.deleteMessageForMe(groupId, messageId) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Раунд 135: удалить своё сообщение у всех (автор или владелец). */
+    fun deleteMessageForAll(messageId: String) {
+        viewModelScope.launch {
+            groupRepository.deleteMessageForAll(groupId, messageId)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }

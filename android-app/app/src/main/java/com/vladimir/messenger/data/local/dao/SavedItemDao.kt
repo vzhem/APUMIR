@@ -25,4 +25,7 @@ interface SavedItemDao {
     /** Уже сохранён этот файл? Чтобы не плодить дубли при повторной пересылке. */
     @Query("SELECT * FROM saved_items WHERE transferId = :transferId LIMIT 1")
     suspend fun byTransfer(transferId: String): SavedItemEntity?
+
+    @Query("SELECT * FROM saved_items WHERE id = :id LIMIT 1")
+    suspend fun get(id: String): SavedItemEntity?
 }

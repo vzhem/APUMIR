@@ -6,6 +6,7 @@ import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.AndroidFileSelection
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
+import com.vladimir.messenger.data.sticker.StickerLibrary
 import com.vladimir.messenger.data.file.FileExchangePeerStore
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileTransferReceiver
@@ -177,6 +178,62 @@ class GroupFileSwarm @Inject constructor(
             sizeBytes = inspected.sizeBytes,
             mediaType = inspected.mediaType,
             displayName = inspected.displayName,
+        )
+    }
+
+    /**
+     * Приложить гифку из каталога: байты уже скачаны телефоном. Тот же путь,
+     * что у [stage] (рейтинг, ша-256, хранилище, визитка), только источник -
+     * память, а не проводник.
+     */
+    suspend fun stageGifBytes(
+        groupId: String,
+        bytes: ByteArray,
+    ): GroupFileMarker.Info = withContext(Dispatchers.IO) {
+        check(bytes.isNotEmpty()) { "Пустая гифка" }
+        FileTransferRankPolicy.requireCanSend(
+            qualifiedDirectReferrals = ReferralRankStore.qualifiedDirectCount(appContext),
+            mediaType = "image/gif",
+            sizeBytes = bytes.size.toLong(),
+        )
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val sha256 = digest.digest(bytes).joinToString("") { "%02x".format(it) }
+        val name = "gif_" + sha256.take(10) + ".gif"
+        store.put(groupId, sha256, name, bytes.inputStream())
+        GroupFileMarker.Info(
+            sha256 = sha256,
+            sizeBytes = bytes.size.toLong(),
+            mediaType = "image/gif",
+            displayName = name,
+        )
+    }
+
+    /**
+     * Раунд 166: приложить стикер из библиотеки. Байты уже на телефоне,
+     * тип - image/webp (анимированный), имя - человеческое «Стикер.webp»:
+     * карточка в ленте и уведомления без sha-строк.
+     */
+    suspend fun stageStickerBytes(
+        groupId: String,
+        bytes: ByteArray,
+    ): GroupFileMarker.Info = withContext(Dispatchers.IO) {
+        check(bytes.isNotEmpty()) { "Пустой стикер" }
+        FileTransferRankPolicy.requireCanSend(
+            qualifiedDirectReferrals = ReferralRankStore.qualifiedDirectCount(appContext),
+            mediaType = "image/webp",
+            sizeBytes = bytes.size.toLong(),
+        )
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val sha256 = digest.digest(bytes).joinToString("") { "%02x".format(it) }
+        // Раунд 170: видео-стикер webm едет со своим типом - принимающая
+        // сторона рисует его покадрово (StickerAnimated).
+        val webm = StickerLibrary.isWebmBytes(bytes)
+        store.put(groupId, sha256, if (webm) "Стикер.webm" else "Стикер.webp", bytes.inputStream())
+        GroupFileMarker.Info(
+            sha256 = sha256,
+            sizeBytes = bytes.size.toLong(),
+            mediaType = if (webm) "video/webm" else "image/webp",
+            displayName = if (webm) "Стикер.webm" else "Стикер.webp",
         )
     }
 

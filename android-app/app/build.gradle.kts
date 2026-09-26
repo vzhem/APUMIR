@@ -206,6 +206,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.coil.compose)
+    // Анимированные GIF в сообщениях (декодер для Coil).
+    implementation(libs.coil.gif)
     implementation(libs.zxing.core)
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation(libs.eddsa)

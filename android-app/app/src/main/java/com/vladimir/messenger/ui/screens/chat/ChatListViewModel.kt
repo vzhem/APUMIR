@@ -107,6 +107,7 @@ class ChatListViewModel @Inject constructor(
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
     private val groupDao: GroupDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
@@ -528,6 +529,101 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Раунд 159: nodeId участников группы - уже состоящие в «Кому
+     * отправить» показываются серыми с пометкой и не выбираются.
+     */
+    fun groupMemberIdsOnce(groupId: String, onLoaded: (Set<String>) -> Unit) {
+        viewModelScope.launch {
+            val ids = withContext(Dispatchers.IO) {
+                runCatching { groupDao.getMembers(groupId).map { it.nodeId } }
+                    .getOrDefault(emptyList())
+            }
+            onLoaded(ids.toSet())
+        }
+    }
+
+    /** Раунд 158: личные чаты для выбора адресатов приглашения. */
+    fun personalChatsOnce(onLoaded: (List<com.vladimir.messenger.domain.model.Chat>) -> Unit) {
+        viewModelScope.launch {
+            val chats = withContext(Dispatchers.IO) {
+                runCatching { chatRepository.getAllChats() }.getOrDefault(emptyList())
+            }
+            onLoaded(chats.sortedBy { it.contactName.lowercase() })
+        }
+    }
+
+    /**
+     * Раунд 158: разослать приглашение выбранным адресатам в ЛИЧНЫЕ чаты
+     * (владелец: «отправить ссылку в APU»). Ограничение выбора - 100
+     * человек (владелец: «ограждение выбрать абонентов сделай 100»).
+     */
+    /** Раунд 175: адресная книга для «Поделиться контактом» из списка чатов. */
+    val contacts: kotlinx.coroutines.flow.Flow<List<com.vladimir.messenger.domain.model.Contact>> =
+        contactRepository.observeContacts()
+
+    /**
+     * Раунд 175: отправить ссылку контакта выбранному абоненту APU -
+     * тот добавит человека одним тапом по apu://-ссылке.
+     */
+    fun sendContactCard(toId: String, toName: String, sharedNodeId: String, sharedName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                com.vladimir.messenger.util.ContactCardSender.send(
+                    chatRepository = chatRepository,
+                    toContactId = toId,
+                    toName = toName,
+                    sharedNodeId = sharedNodeId,
+                    sharedName = sharedName,
+                    sharedUsername = "",
+                )
+            }.getOrDefault(false)
+            // Раунд 181: Toast только с главного потока - из фонового
+            // приложение падало сразу после отправки (в «Контактах»
+            // подтверждение идёт через StateFlow и потому не падало).
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    appContext,
+                    if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+
+    fun sendGroupInviteToChats(
+        groupId: String,
+        what: String,
+        chatIds: List<String>,
+        onDone: (sent: Int, failed: Int) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.inviteLinkFor(groupId) }.getOrNull()
+            }
+            if (prepared == null) {
+                onDone(0, chatIds.size)
+                return@launch
+            }
+            val (title, link) = prepared
+            var sent = 0
+            var failed = 0
+            for (chatId in chatIds.take(MAX_INVITE_RECIPIENTS)) {
+                val chat = withContext(Dispatchers.IO) {
+                    runCatching { chatRepository.getChatById(chatId) }.getOrNull()
+                }
+                if (chat == null) {
+                    failed++
+                    continue
+                }
+                val body = "Приглашение в $what «$title»:\n$link"
+                val result = chatRepository.sendMessage(chatId, chat.contactId, body)
+                if (result.isSuccess) sent++ else failed++
+            }
+            onDone(sent, failed)
+        }
+    }
+
     /** Удалить свою группу или канал у всех участников (только владельцу). */
     fun deleteGroup(groupId: String) {
         viewModelScope.launch(Dispatchers.IO) { groupRepository.deleteGroup(groupId) }
@@ -556,6 +652,9 @@ class ChatListViewModel @Inject constructor(
     }
 
     companion object {
+        /** Раунд 158: максимум адресатов за одну рассылку приглашения. */
+        const val MAX_INVITE_RECIPIENTS = 100
+
         /** Пауза в наборе, после которой пересчитывается поиск. */
         private const val SEARCH_DEBOUNCE_MS = 200L
 

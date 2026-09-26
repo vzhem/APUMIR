@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.data.group.GroupInviteLinks
@@ -57,6 +59,8 @@ fun MessageBubble(
     linkColor: Color = Color(0xFF4A90E2),
     onTap: () -> Unit = {},
     onLongClick: (() -> Unit)? = null,
+    /** Раунд 176: тап по «Добавить контакт» в карточке-приглашении. */
+    onContactInvite: ((inviteLink: String) -> Unit)? = null,
 ) {
     val isOwn = message.isFromMe
     val context = LocalContext.current
@@ -90,8 +94,20 @@ fun MessageBubble(
                 val imageUrl = remember(message.content) {
                     ImageLinkDetector.directImageUrl(message.content)
                 }
+                // Раунд 176: приглашение «поделиться контактом» рисуем карточкой:
+                // имя и ник человека, ниже золотой пузырь «Добавить контакт» -
+                // apu://-ссылка в тексте раньше была некликабельна.
+                val inviteCard = remember(message.content) {
+                    com.vladimir.messenger.util.ContactCardSender.parseCard(message.content)
+                }
 
-                if (imageUrl != null) {
+                if (inviteCard != null && onContactInvite != null) {
+                    ContactInviteCardView(
+                        card = inviteCard,
+                        textColor = textColor,
+                        onAdd = { onContactInvite(inviteCard.inviteLink) },
+                    )
+                } else if (imageUrl != null) {
                     ImagePreview(
                         model = imageUrl,
                         contentDescription = "Картинка из сообщения",
@@ -244,5 +260,46 @@ private fun formatMessageTime(timestamp: Long): String {
         timestamp > today.timeInMillis -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
         timestamp > yesterday.timeInMillis -> "Вчера"
         else -> SimpleDateFormat("d MMM", Locale("ru")).format(date)
+    }
+}
+
+
+/**
+ * Раунд 176: карточка контакта внутри сообщения-приглашения:
+ * имя, ник (если известен) и золотая кнопка «Добавить контакт».
+ */
+@Composable
+private fun ContactInviteCardView(
+    card: com.vladimir.messenger.util.ContactInviteCard,
+    textColor: Color,
+    onAdd: () -> Unit,
+) {
+    Column {
+        Text(
+            text = card.name,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+        )
+        if (!card.nickname.isNullOrBlank()) {
+            Text(
+                text = "@" + card.nickname,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor.copy(alpha = 0.7f),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onAdd,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Добавить контакт")
+        }
     }
 }

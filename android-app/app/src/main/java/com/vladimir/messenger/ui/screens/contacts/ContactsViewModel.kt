@@ -116,6 +116,26 @@ class ContactsViewModel @Inject constructor(
      * контактом. Системное меню «Поделиться» остаётся отдельной кнопкой -
      * оно нужно только тем, у кого APU ещё не стоит.
      */
+    /**
+     * Раунд 175: «Поделиться контактом» - отправить ссылку контакта
+     * выбранному абоненту APU (он добавит человека одним тапом).
+     */
+    fun sendContactCard(toId: String, toName: String, shared: Contact) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ok = runCatching {
+                com.vladimir.messenger.util.ContactCardSender.send(
+                    chatRepository = chatRepository,
+                    toContactId = toId,
+                    toName = toName,
+                    sharedNodeId = shared.id,
+                    sharedName = shared.displayName,
+                    sharedUsername = shared.username,
+                )
+            }.getOrDefault(false)
+            _toast.value = if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт"
+        }
+    }
+
     fun sendGroupInvites(contactId: String, contactName: String, groupIds: Collection<String>) {
         if (groupIds.isEmpty() || contactId.isBlank()) return
         viewModelScope.launch {

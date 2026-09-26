@@ -47,6 +47,10 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC")
     suspend fun getPendingOutgoingMessages(): List<MessageEntity>
 
+    /** Раунд 179: вся офлайн-очередь (любой чат) - для периодического слива. */
+    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE' ORDER BY timestamp ASC LIMIT :limit")
+    suspend fun getQueuedOfflineMessages(limit: Int): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentOutgoingMessagesForChat(chatId: String, limit: Int): List<MessageEntity>
 
@@ -87,6 +91,22 @@ interface MessageDao {
             "AND isPinned = 1 ORDER BY pinnedAtMs DESC"
     )
     suspend fun getPinnedMessages(chatId: String, topicId: String): List<MessageEntity>
+
+    // Раунд 173: закрепы БЕЗ темы - личные чаты и посты канала (у поста
+    // своя тема, поэтому фильтр по topicId здесь нельзя).
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId " +
+            "AND (topicId IS NULL OR topicId = '') AND isPinned = 1 " +
+            "ORDER BY pinnedAtMs DESC"
+    )
+    fun observePinnedChatMessages(chatId: String): Flow<List<MessageEntity>>
+
+    // Закрепы канала: посты живут в своих темах - берём все пиннутые чата.
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId AND isPinned = 1 " +
+            "ORDER BY pinnedAtMs DESC"
+    )
+    fun observePinnedChannelPosts(chatId: String): Flow<List<MessageEntity>>
 
     @Query("UPDATE messages SET isPinned = :pinned, pinnedAtMs = :atMs, pinnedBy = :by WHERE id = :messageId")
     suspend fun updatePinned(messageId: String, pinned: Boolean, atMs: Long?, by: String?)
@@ -162,6 +182,23 @@ interface MessageDao {
 
     @Query("DELETE FROM messages WHERE id = :messageId")
     suspend fun deleteById(messageId: String)
+
+    /**
+     * Раунд 135: последнее сообщение чата - пересчёт превью после удаления.
+     */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatest(chatId: String): MessageEntity?
+
+    /**
+     * Раунд 135: чужая просьба «удали у всех». Стирает ТОЛЬКО сообщение
+     * этого отправителя в этом чате: подделать чужое удаление нельзя,
+     * свои сообщения чужой конверт не трогает. Возвращает сколько стёрто.
+     */
+    @Query(
+        "DELETE FROM messages WHERE id = :messageId AND chatId = :chatId " +
+            "AND senderId = :senderId"
+    )
+    suspend fun deleteByIdChatAndSender(messageId: String, chatId: String, senderId: String): Int
 
     /**
      * Стереть все сообщения группы. У messages нет внешнего ключа на groups,

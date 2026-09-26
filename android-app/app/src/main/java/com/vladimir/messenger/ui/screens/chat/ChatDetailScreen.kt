@@ -18,11 +18,16 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.content.MediaType
 import androidx.compose.foundation.content.TransferableContent
 import androidx.compose.foundation.content.consume
@@ -64,12 +69,16 @@ fun ChatDetailScreen(
     onBackClick: () -> Unit,
     onRenameClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
     onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
+    /** Раунд 176: открыть добавление контакта по ссылке из карточки в чате. */
+    onAddContactInvite: (String) -> Unit = {},
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var activeMessage by remember { mutableStateOf<Message?>(null) }
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
+    // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
+    var deleteForAllTarget by remember { mutableStateOf<Message?>(null) }
     // Сообщение, для которого открыт выбор реакции.
     var reactionFor by remember { mutableStateOf<String?>(null) }
     // Текст, открытый в окне выделения части.
@@ -84,6 +93,64 @@ fun ChatDetailScreen(
     val context = LocalContext.current
 
     // F3: системный выбор файла (SAF) → зашифрованная подготовка → durable отправка
+    // Каталог GIF (кнопка «GIF» у скрепки).
+    var showGifCatalog by remember { mutableStateOf(false) }
+
+    if (showGifCatalog) {
+        // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
+        // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
+        val stickerEntries by viewModel.stickerEntries.collectAsStateWithLifecycle()
+        val stickerRecents by viewModel.stickerRecents.collectAsStateWithLifecycle()
+        val swarmStickers by viewModel.swarmStickers.collectAsStateWithLifecycle()
+        com.vladimir.messenger.ui.components.InputPanelDialog(
+            myGifs = uiState.myGifs,
+            swarmGifs = uiState.swarmGifs,
+            swarmStatus = uiState.swarmStatus,
+            items = uiState.gifItems,
+            next = uiState.gifNext,
+            loading = uiState.gifLoading,
+            error = uiState.gifError,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.attachGif(item)
+            },
+            onAttachLocal = { entry ->
+                showGifCatalog = false
+                viewModel.attachLocalGif(entry.sha256)
+            },
+            onRequestSwarm = { swarm ->
+                // Раунд 129: выбрал - окно закрылось, показан чат с карточкой.
+                showGifCatalog = false
+                viewModel.requestSwarmGif(swarm)
+            },
+            onRequestThumbs = { viewModel.requestPeerThumbs(it) },
+            onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
+            stickers = stickerEntries,
+            stickerRecents = stickerRecents,
+            swarmStickers = swarmStickers,
+            onSticker = {
+                // Раунд 170: выбрал стикер - окно закрывается, видно чат.
+                showGifCatalog = false
+                viewModel.sendSticker(it)
+            },
+            onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
+            onRemoveSticker = { viewModel.removeSticker(it) },
+            onRemoveGif = { viewModel.removeOwnGif(it.sha256) },
+            onRequestSwarmSticker = { swarm ->
+                showGifCatalog = false
+                viewModel.requestSwarmSticker(swarm)
+            },
+            onEmoji = { emoji -> viewModel.onInputTextChanged(uiState.inputText + emoji) },
+            onOpened = { viewModel.refreshStickers() },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -262,6 +329,13 @@ fun ChatDetailScreen(
                 isPreparingFile = uiState.isPreparingFile,
                 onPastedMedia = viewModel::onFileSelected,
                 onPasteLocked = viewModel::onAttachmentsLocked,
+                onGifClick = {
+                    showGifCatalog = true
+                    viewModel.onGifCatalogOpened()
+                    if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                        viewModel.searchGifs("")
+                    }
+                },
             )
         },
     ) { paddingValues ->
@@ -313,6 +387,16 @@ fun ChatDetailScreen(
                     }
                     val chatRows = remember(uiState.messages, uiState.transfers) {
                         val knownMessageIds = uiState.messages.map { it.id }.toSet()
+                        // Раунд 123: одну гифку может везти несколько телефонов
+                        // (просьба уходит троим). Показываем только первичную
+                        // (самую раннюю) полосу - без трёх одинаковых пузырей.
+                        val shadowed = uiState.transfers
+                            .filter { it.direction == "INCOMING" && it.state != "COMPLETE" }
+                            .groupBy { it.fileSha256 }
+                            .flatMap { (_, group) ->
+                                group.sortedBy { it.createdAtMs }.drop(1).map { it.transferId }
+                            }
+                            .toSet()
                         val rows = uiState.messages.map { message ->
                             ChatRow(
                                 key = message.id,
@@ -324,7 +408,12 @@ fun ChatDetailScreen(
                             .filter {
                                 it.direction == "INCOMING" &&
                                     it.state != "COMPLETE" &&
-                                    it.messageId !in knownMessageIds
+                                    it.messageId !in knownMessageIds &&
+                                    it.transferId !in shadowed &&
+                                    // Раунд 128/170: гифки и стикеры ходят ТИХО -
+                                    // служебную передачу байтов в ленте не показываем.
+                                    !it.mediaType.equals("image/gif", ignoreCase = true) &&
+                                    !it.displayName.startsWith("Стикер")
                             }
                             .map { transfer ->
                                 ChatRow(
@@ -335,6 +424,62 @@ fun ChatDetailScreen(
                                 )
                             }
                         rows.sortedBy { it.orderMs }
+                    }
+                    // Раунд 173: закреплённые сообщения личного чата; тап -
+                    // лента прыгает к самому сообщению.
+                    if (uiState.pinned.isNotEmpty()) {
+                        val feedScope = androidx.compose.runtime.rememberCoroutineScope()
+                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Icon(
+                                        androidx.compose.material.icons.Icons.Filled.PushPin,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "Закреплённые" + if (uiState.pinned.size > 1) {
+                                            " (" + uiState.pinned.size + ")"
+                                        } else {
+                                            ""
+                                        },
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                                uiState.pinned.forEach { m ->
+                                    val pinnedIndex = chatRows.indexOfFirst { it.message?.id == m.id }
+                                    val rowModifier = if (pinnedIndex >= 0) {
+                                        Modifier.fillMaxWidth().clickable {
+                                            feedScope.launch { listState.animateScrollToItem(pinnedIndex) }
+                                        }
+                                    } else {
+                                        Modifier.fillMaxWidth()
+                                    }
+                                    Row(
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        modifier = rowModifier,
+                                    ) {
+                                        Text(
+                                            com.vladimir.messenger.util.ChatPreviews.human(
+                                                com.vladimir.messenger.util.InlineImage.stripImage(m.content)
+                                            ) ?: m.content.take(80),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 2,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IconButton(onClick = { viewModel.togglePin(m.id, false) }) {
+                                            Icon(
+                                                androidx.compose.material.icons.Icons.Filled.Close,
+                                                contentDescription = "Открепить",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     LazyColumn(
                         state          = listState,
@@ -366,7 +511,26 @@ fun ChatDetailScreen(
                                     } else {
                                         null
                                     },
+                                    // Раунд 120: долгое нажатие на картинке/гифке -
+                                    // то же меню действий, что у текстового пузыря:
+                                    // оттуда и «Поставить реакцию». Раньше реакцию
+                                    // на гифке поставить было нельзя никому.
+                                    onLongPress = row.message?.let { message ->
+                                        {
+                                            activeMessage = message
+                                            showCopyDialog = message
+                                        }
+                                    },
                                 )
+                                // Реакции файла/гифки - той же строкой под пузырём,
+                                // что и у текстовых сообщений.
+                                row.message?.let { message ->
+                                    com.vladimir.messenger.ui.components.ReactionRow(
+                                        reactions = uiState.reactions[message.id].orEmpty(),
+                                        onToggle = { reactionFor = message.id },
+                                        modifier = Modifier.padding(horizontal = 14.dp),
+                                    )
+                                }
                             } else {
                                 val message = row.message!!
                                 Column(
@@ -377,10 +541,21 @@ fun ChatDetailScreen(
                                     },
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                MessageBubble(
+                                // Раунд 128: ССЫЛКА на гифку - карточка с
+                                // анимацией (байты подтягиваются тихо с сети).
+                                if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content)) {
+                                    com.vladimir.messenger.ui.components.GifRefCard(
+                                        content = message.content,
+                                        modifier = Modifier.align(
+                                            if (message.isFromMe) Alignment.End else Alignment.Start
+                                        ),
+                                        onEnsure = { sha -> viewModel.ensureGifRef(sha) },
+                                    )
+                                } else MessageBubble(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
                                     linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                    onContactInvite = onAddContactInvite,
                                     // Одно нажатие - сразу пузырь с реакциями:
                                     // владелец просил ставить их в один тап.
                                     // Остальные действия - долгое нажатие.
@@ -440,6 +615,19 @@ fun ChatDetailScreen(
                     ) {
                         Text("Копировать всё", modifier = Modifier.fillMaxWidth())
                     }
+                    // Раунд 173: закрепить/открепить сообщение личного чата.
+                    TextButton(
+                        onClick = {
+                            showCopyDialog = null
+                            viewModel.togglePin(message.id, !message.isPinned)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (message.isPinned) "Открепить" else "Закрепить",
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     TextButton(
                         onClick = {
                             showCopyDialog = null
@@ -449,15 +637,36 @@ fun ChatDetailScreen(
                     ) {
                         Text("Выделить часть текста", modifier = Modifier.fillMaxWidth())
                     }
-                    TextButton(
-                        onClick = {
-                            viewModel.saveTextToFavorites(message.content, contactName)
-                            showCopyDialog = null
-                            resetSelection()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("В избранное", modifier = Modifier.fillMaxWidth())
+                    // Раунд 124: у файла/гифки в избранное кладётся САМ ФАЙЛ
+                    // (ссылка на принятую передачу), а не пустой текст.
+                    val savedMessageFile = uiState.transfers.firstOrNull {
+                        it.messageId == message.id &&
+                            it.direction == "INCOMING" &&
+                            it.state == "COMPLETE"
+                    }
+                    if (savedMessageFile != null) {
+                        TextButton(
+                            onClick = {
+                                viewModel.saveToFavorites(savedMessageFile, contactName)
+                                showCopyDialog = null
+                                resetSelection()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Файл в избранное", modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    if (message.content.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                viewModel.saveTextToFavorites(message.content, contactName)
+                                showCopyDialog = null
+                                resetSelection()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("В избранное", modifier = Modifier.fillMaxWidth())
+                        }
                     }
                     TextButton(
                         onClick = {
@@ -468,10 +677,58 @@ fun ChatDetailScreen(
                     ) {
                         Text("Поставить реакцию", modifier = Modifier.fillMaxWidth())
                     }
+                    // Раунд 135: удаление своего сообщения - у себя и у всех.
+                    if (message.isFromMe) {
+                        TextButton(
+                            onClick = {
+                                showCopyDialog = null
+                                viewModel.deleteMessageForMe(message.id)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                "Удалить у себя",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                showCopyDialog = null
+                                deleteForAllTarget = message
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                "Удалить у всех",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showCopyDialog = null }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    // Раунд 135: подтверждение удаления у всех - сообщение пропадёт и у
+    // собеседника (он должен быть на связи; иначе - честный отказ).
+    deleteForAllTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteForAllTarget = null },
+            title = { Text("Удалить у всех?") },
+            text = { Text("Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteForAllTarget = null
+                    viewModel.deleteMessageForAll(target.id)
+                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
             },
         )
     }
@@ -519,6 +776,7 @@ private fun MessageInputBar(
     canAttach: Boolean = true,
     onPastedMedia: (android.net.Uri) -> Unit = {},
     onPasteLocked: () -> Unit = {},
+    onGifClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Раунд 42: новый BasicTextField(state) - только он проводит картинки со
@@ -537,16 +795,23 @@ private fun MessageInputBar(
     // обои (фирменные или свои) проходят сквозь неё. Белые пузыри скрепки,
     // поля и стрелки читаются на любом фоне.
     Surface(
-        modifier  = modifier.fillMaxWidth(),
+        // Раунд 149: imePadding - панель поднимается над клавиатурой
+        // (edge-to-edge: adjustResize сам не работает, владелец прислал
+        // скрин с закрытой клавиатурой поля и «Отправить»).
+        modifier  = modifier.fillMaxWidth().imePadding(),
         shadowElevation = 8.dp,
         color     = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
     ) {
-        Row(
+        // Раунд 148: как в темах - при наборе скрепка и GIF уходят НАД
+        // полем, «Отправить» - своим пузырём во всю ширину ПОД полем.
+        var inputFocused by remember { mutableStateOf(false) }
+        Column(
             modifier = Modifier
                 .navigationBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.Bottom,
         ) {
+            if (inputFocused) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -586,6 +851,22 @@ private fun MessageInputBar(
             }
             }
 
+            // Каталог GIF (v11.74.15): ОТДЕЛЬНАЯ кнопка рядом со скрепкой,
+            // те же права, что у вложений. Раньше кнопка была вложена внутрь
+            // IconButton скрепки и накладывалась на неё.
+                TextButton(
+                    onClick = onGifClick,
+                    enabled = !isPreparingFile && !isSending && canAttach,
+                ) {
+                    Text(
+                        "GIF",
+                        fontWeight = FontWeight.Bold,
+                        color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                    )
+                }
+                }
+            }
+
             BasicTextField(
                 state     = inputState,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -615,7 +896,8 @@ private fun MessageInputBar(
                     }
                 },
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
+                    .onFocusChanged { inputFocused = it.isFocused }
                     // Раунд 41: стикеры/картинки/гифки с клавиатуры (Gboard и
                     // др.) вставляются прямо в поле. Раньше система писала
                     // «приложение не поддерживает вставку изображений».
@@ -641,42 +923,36 @@ private fun MessageInputBar(
                     },
             )
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            Box(
+            // Раунд 152: активность читаем НАПРЯМУЮ из inputState - раньше
+            // она шла через родителя (snapshotFlow -> onTextChange ->
+            // recomposition), и кнопка активировалась с задержкой; плюс
+            // золотая заливка и белый текст (как в темах) - видно сразу.
+            val canSend = inputState.text.isNotBlank() && !isSending
+            TextButton(
+                onClick = onSend,
+                enabled = canSend,
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (canSend) MaterialTheme.colorScheme.primary
+                        else Color.White.copy(alpha = 0.85f)
+                    )
                     .border(
                         1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(14.dp),
-                    ),
+                        if (canSend) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .padding(vertical = 8.dp),
             ) {
-                IconButton(
-                    onClick  = onSend,
-                    enabled  = text.isNotBlank() && !isSending,
-                    modifier = Modifier.size(48.dp),
-                ) {
-                    if (isSending) {
-                        CircularProgressIndicator(
-                            modifier  = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color     = MaterialTheme.colorScheme.primary,
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Send,
-                            contentDescription = "Отправить",
-                            tint = if (text.isNotBlank()) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                Color(0xFF9AA3AF)
-                            },
-                        )
-                    }
-                }
+                Text(
+                    "Отправить",
+                    fontWeight = FontWeight.Bold,
+                    color = if (canSend) Color.White else Color(0xFF9AA3AF),
+                )
             }
         }
     }

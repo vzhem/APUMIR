@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Всё внутреннее хранилище приложения: принятые файлы лежат в
+         noBackupFilesDir/file_received (установка обновления из раздела
+         «Обновления»), а он НЕ под files/ и без root-path FileProvider
+         бросает "Failed to find configured root" — кнопка молчит. -->
+    <root-path name="root" path="." />
     <external-path name="external_files" path="." />
     <external-files-path name="external_app_files" path="." />
     <cache-path name="cache" path="." />

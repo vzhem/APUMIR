@@ -16,6 +16,7 @@ package com.vladimir.messenger.ui.components
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
+import coil.compose.AsyncImage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -164,6 +165,14 @@ private fun ZoomablePhoto(
         is PhotoSource.Encoded -> AvatarBitmaps.rememberAvatar(source.dataB64)
         is PhotoSource.File -> rememberFileBitmap(source.path)
     }
+    // GIF не декодируем в Bitmap (получился бы мёртвый первый кадр): крутим
+    // анимацию через Coil, а для рамки-ограничения хватает размеров файла.
+    val isAnimatedGif = source is PhotoSource.File && isGifPath(source.path)
+    val gifBounds = if (isAnimatedGif) {
+        remember(source) { decodeBounds(source.path) }
+    } else {
+        null
+    }
     var scale by remember(source) { mutableFloatStateOf(1f) }
     var offset by remember(source) { mutableStateOf(Offset.Zero) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
@@ -180,7 +189,20 @@ private fun ZoomablePhoto(
 
     /** Сдвиг не выпускает картинку за край экрана; при масштабе 1 он всегда ноль. */
     fun clampOffset(candidate: Offset, currentScale: Float, bmp: Bitmap?): Offset {
-        if (bmp == null || viewport == IntSize.Zero || currentScale <= 1f) return Offset.Zero
+        if (bmp == null && gifBounds == null) return Offset.Zero
+        if (viewport == IntSize.Zero || currentScale <= 1f) return Offset.Zero
+        if (bmp == null) {
+            val gb = gifBounds ?: return Offset.Zero
+            val fit = minOf(
+                viewport.width.toFloat() / gb.width,
+                viewport.height.toFloat() / gb.height,
+            )
+            val shownW = gb.width * fit * currentScale
+            val shownH = gb.height * fit * currentScale
+            val maxX = ((shownW - viewport.width) / 2f).coerceAtLeast(0f)
+            val maxY = ((shownH - viewport.height) / 2f).coerceAtLeast(0f)
+            return Offset(candidate.x.coerceIn(-maxX, maxX), candidate.y.coerceIn(-maxY, maxY))
+        }
         // Размер картинки на экране при масштабе 1 (ContentScale.Fit).
         val fit = minOf(
             viewport.width.toFloat() / bmp.width,
@@ -250,7 +272,21 @@ private fun ZoomablePhoto(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (bitmap != null) {
+        if (isAnimatedGif) {
+            AsyncImage(
+                model = (source as PhotoSource.File).path,
+                contentDescription = "GIF",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y,
+                    ),
+            )
+        } else if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = "Фото",
@@ -288,6 +324,17 @@ private fun rememberFileBitmap(path: String): Bitmap? {
         }
     }
     return bitmap
+}
+
+/** Анимированный GIF: по имени (MIME у скачанных файлов не всегда доезжает). */
+private fun isGifPath(path: String): Boolean = path.lowercase().endsWith(".gif")
+
+/** Только размеры файла (для рамки-ограничения GIF): пиксели не декодируем. */
+private fun decodeBounds(path: String): IntSize {
+    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    runCatching { BitmapFactory.decodeFile(path, options) }
+    if (options.outWidth <= 0 || options.outHeight <= 0) return IntSize(1024, 1024)
+    return IntSize(options.outWidth, options.outHeight)
 }
 
 /** Степень двойки, с которой длинная сторона файла укладывается в [MAX_DECODED_SIDE]. */

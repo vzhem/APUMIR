@@ -152,7 +152,10 @@ fun ContactCard(
 
             // Превью последнего сообщения
             Text(
-                text      = chat.lastMessage ?: "Нет сообщений",
+                // Раунд 155: служебные строки (гифки/стикеры) -
+                // человеческими подписями.
+                text      = com.vladimir.messenger.util.ChatPreviews.human(chat.lastMessage)
+                    ?: "Нет сообщений",
                 style     = MaterialTheme.typography.bodySmall,
                 color     = Color(0xFF5A6472),
                 maxLines  = 1,

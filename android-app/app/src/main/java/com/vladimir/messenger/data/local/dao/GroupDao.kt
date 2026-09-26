@@ -52,8 +52,10 @@ interface GroupDao {
     )
     fun searchGroups(query: String, limit: Int): Flow<List<GroupEntity>>
 
-    /** Мои группы и каналы со ссылкой - их каталог рассылает контактам. */
-    @Query("SELECT * FROM groups WHERE ownerId = :ownerId AND isLeft = 0 AND inviteSlug != ''")
+    /** Мои ПУБЛИЧНЫЕ группы и каналы со ссылкой - их каталог рассылает
+     *  контактам (раунд 154: закрытые в каталог не попадают - владелец
+     *  увидел закрытую группу в поиске у участников). */
+    @Query("SELECT * FROM groups WHERE ownerId = :ownerId AND isLeft = 0 AND inviteSlug != '' AND isPublic = 1")
     suspend fun getOwnPublishable(ownerId: String): List<GroupEntity>
 
     /**
@@ -115,6 +117,10 @@ interface GroupDao {
 
     @Query("UPDATE groups SET isPublic = :isPublic WHERE id = :groupId")
     suspend fun updateGroupVisibility(groupId: String, isPublic: Boolean)
+
+    // Раунд 153: перевод группы «без тем» в обычную группу с темами.
+    @Query("UPDATE groups SET topicsEnabled = 1 WHERE id = :groupId")
+    suspend fun setTopicsEnabled(groupId: String)
 
     @Query("UPDATE groups SET topicsEnabled = :enabled WHERE id = :groupId")
     suspend fun updateTopicsEnabled(groupId: String, enabled: Boolean)

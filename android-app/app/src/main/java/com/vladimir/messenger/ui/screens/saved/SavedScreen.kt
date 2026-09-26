@@ -17,6 +17,8 @@ import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -102,7 +104,32 @@ fun SavedScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showNoteDialog by remember { mutableStateOf(false) }
+    var showAddMenu by remember { mutableStateOf(false) }
+    // Раунд 163: выбор стикера для избранного.
+    var showStickerPicker by remember { mutableStateOf(false) }
+    var showGifCatalog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<SavedItemEntity?>(null) }
+
+    // Раунд 126: «+» добавляет не только заметку - файл и гифку с телефона,
+    // гифку из внешнего каталога, любую свою гифку из библиотеки.
+    val docPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) viewModel.addLocalFile(uri) }
+    // Раунд 164: свой стикер (картинка) и альбом .zip - в библиотеку.
+    var stickerTick by remember { mutableStateOf(0) }
+    val stickerPicker = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) viewModel.addStickerFromUri(uri) { stickerTick += 1 }
+    }
+    val stickerZipPicker = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { uri ->
+        if (uri != null) viewModel.addStickersFromZip(uri) { stickerTick += 1 }
+    }
+    val gifPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri -> if (uri != null) viewModel.addOwnGif(uri) }
 
     LaunchedEffect(uiState.message) {
         uiState.message?.let {
@@ -117,6 +144,9 @@ fun SavedScreen(
     ) { uri -> viewModel.onExportTargetPicked(uri) }
     LaunchedEffect(uiState.pendingExport) {
         uiState.pendingExport?.let { exportPicker.launch(it.displayName) }
+    }
+    LaunchedEffect(uiState.pendingLocalExport) {
+        uiState.pendingLocalExport?.let { exportPicker.launch(it.fileName.ifBlank { "файл" }) }
     }
 
     Box(
@@ -146,8 +176,8 @@ fun SavedScreen(
                 )
             },
             floatingActionButton = {
-                FloatingActionButton(onClick = { showNoteDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Своя заметка")
+                FloatingActionButton(onClick = { showAddMenu = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "Добавить")
                 }
             },
         ) { padding ->
@@ -235,6 +265,161 @@ fun SavedScreen(
         )
     }
 
+    if (showAddMenu) {
+        // Раунд 163: действия - золотыми пузырями друг под другом
+        // (владелец: «красивые пузыри горизонтальные в нашем стиле»).
+        AlertDialog(
+            onDismissRequest = { showAddMenu = false },
+            title = { Text("Добавить в избранное") },
+            text = {
+                Column {
+                    SavedAddBubble("Файл с телефона") {
+                        showAddMenu = false
+                        docPicker.launch(arrayOf("*/*"))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Гифка с телефона") {
+                        showAddMenu = false
+                        gifPicker.launch("image/gif")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Из каталога гифок") {
+                        showAddMenu = false
+                        viewModel.onGifCatalogOpened()
+                        showGifCatalog = true
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Свои гифки") {
+                        showAddMenu = false
+                        viewModel.onGifCatalogOpened()
+                        viewModel.setGifTab("swarm")
+                        showGifCatalog = true
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // Раунд 163: стикеры из библиотеки - в избранное.
+                    SavedAddBubble("Стикеры") {
+                        showAddMenu = false
+                        showStickerPicker = true
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SavedAddBubble("Заметка") {
+                        showAddMenu = false
+                        showNoteDialog = true
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAddMenu = false }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    // Раунд 163: выбор стикера из библиотеки - добавить в избранное.
+    if (showStickerPicker) {
+        var stickers by remember { mutableStateOf<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>?>(null) }
+        // Раунд 164: после добавления своих стикеров сетка обновляется.
+        LaunchedEffect(stickerTick) {
+            viewModel.stickersOnce { stickers = it }
+        }
+        AlertDialog(
+            onDismissRequest = { showStickerPicker = false },
+            title = { Text("Выберите стикер") },
+            text = {
+                Column {
+                    // Раунд 164: добавить свои - по одному или альбомом .zip.
+                    SavedAddBubble("Добавить стикер (.webp, .png…)") {
+                        stickerPicker.launch("image/*")
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    SavedAddBubble("Добавить альбом (.zip)") {
+                        stickerZipPicker.launch("*/*")
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    val list = stickers
+                    when {
+                        list == null -> Text("Загрузка…")
+                        list.isEmpty() -> Text(
+                            "Библиотека пуста - добавьте свои стикеры кнопками выше."
+                        )
+                    else -> {
+                        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            items(list.size) { i ->
+                                val entry = list[i]
+                                androidx.compose.foundation.layout.Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Color.White.copy(alpha = 0.85f))
+                                        .border(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                            RoundedCornerShape(14.dp),
+                                        )
+                                        .clickable {
+                                            showStickerPicker = false
+                                            viewModel.addSticker(entry)
+                                        }
+                                        .height(86.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    coil.compose.AsyncImage(
+                                        model = entry.file,
+                                        contentDescription = entry.name,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(6.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showStickerPicker = false }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    if (showGifCatalog) {
+        com.vladimir.messenger.ui.components.GifCatalogDialog(
+            tab = uiState.gifTab,
+            onTab = { viewModel.setGifTab(it) },
+            myGifs = uiState.myGifs,
+            swarmGifs = emptyList(),
+            swarmStatus = null,
+            items = uiState.gifItems,
+            next = uiState.gifNext,
+            loading = uiState.gifLoading,
+            error = uiState.gifError,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.addCatalogGif(item)
+            },
+            onAttachLocal = { entry ->
+                showGifCatalog = false
+                viewModel.addLibraryGif(entry)
+            },
+            onRequestSwarm = { },
+            onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
+
     confirmDelete?.let { item ->
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
@@ -277,8 +462,20 @@ private fun SavedItemBubble(
         SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.savedAtMs))
     }
     val isFile = item.kind == SavedItemsRepository.KIND_FILE
+    // Раунд 169: сохранённый стикер - парит без пузыря, анимированной
+    // картинкой (как в чатах).
+    val isStickerItem = isFile && (
+        item.mediaType.equals("image/webp", ignoreCase = true) ||
+            item.mediaType.equals("video/webm", ignoreCase = true) ||
+            item.fileName.lowercase().endsWith(".webp") ||
+            item.fileName.lowercase().endsWith(".webm") ||
+            item.fileName.startsWith("Стикер")
+        )
 
-    ApuBubble(modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
+    ApuBubble(
+        modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+        transparent = isStickerItem,
+    ) {
         if (item.sourceTitle.isNotBlank()) {
             Text(
                 item.sourceTitle,
@@ -309,14 +506,39 @@ private fun SavedItemBubble(
             }
             // Локальная копия ради умного приведения к non-null.
             val shownBitmap = bitmap
+            // Раунд 126/169: гифка и стикер в избранном ЖИВУТ - крутятся
+            // анимацией (объявлено до блока просмотра - он на них ссылается).
+            val isGifItem = item.mediaType.equals("image/gif", ignoreCase = true) ||
+                item.fileName.lowercase().endsWith(".gif")
+            val isLiveItem = isGifItem || isStickerItem
             var showFull by remember(previewPath) { mutableStateOf(false) }
             if (showFull && previewPath != null) {
-                com.vladimir.messenger.ui.components.PhotoViewer(
-                    photos = listOf(com.vladimir.messenger.ui.components.PhotoSource.File(previewPath)),
-                    onDismiss = { showFull = false },
-                )
+                // Раунд 172: живые стикеры/гифки увеличиваются анимированными.
+                if (isLiveItem) {
+                    com.vladimir.messenger.ui.components.StickerViewer(
+                        file = java.io.File(previewPath),
+                        onDismiss = { showFull = false },
+                    )
+                } else {
+                    com.vladimir.messenger.ui.components.PhotoViewer(
+                        photos = listOf(com.vladimir.messenger.ui.components.PhotoSource.File(previewPath)),
+                        onDismiss = { showFull = false },
+                    )
+                }
             }
-            if (shownBitmap != null) {
+            if (isLiveItem && previewPath != null) {
+                // Раунд 170: гифки/webp крутит Coil, webm-стикеры покадрово.
+                com.vladimir.messenger.ui.components.StickerAnimated(
+                    file = java.io.File(previewPath),
+                    contentDescription = item.fileName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { showFull = true },
+                )
+            } else if (shownBitmap != null) {
                 Image(
                     bitmap = shownBitmap.asImageBitmap(),
                     contentDescription = item.fileName,
@@ -464,4 +686,28 @@ private fun formatSize(bytes: Long): String = when {
     bytes >= 1024L * 1024 -> String.format(Locale.getDefault(), "%.1f МБ", bytes / 1024.0 / 1024)
     bytes >= 1024L -> String.format(Locale.getDefault(), "%.0f КБ", bytes / 1024.0)
     else -> "$bytes Б"
+}
+
+
+/**
+ * Раунд 163: пузырь-кнопка меню «Добавить в избранное» в гамме APU -
+ * золотая заливка, белая жирная надпись (как пузыри приглашения).
+ */
+@Composable
+private fun SavedAddBubble(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.primary)
+            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, fontWeight = FontWeight.Bold, color = Color.White)
+    }
 }

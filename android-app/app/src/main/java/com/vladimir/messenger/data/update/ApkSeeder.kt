@@ -2,6 +2,10 @@ package com.vladimir.messenger.data.update
 
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.os.Build
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.vladimir.messenger.data.RustBridge
@@ -18,6 +22,7 @@ import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.swarm.SwarmPeerDirectory
+import com.vladimir.messenger.service.UpdateChecker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.nio.file.Files
@@ -72,6 +77,7 @@ class ApkSeeder @Inject constructor(
     private val directory: SwarmPeerDirectory,
     private val router: FileTransferRouter,
     private val preparation: Provider<OutgoingFilePreparationService>,
+    private val updateChecker: UpdateChecker,
 ) {
     private val appContext: Context = context.applicationContext
     private val seedRoot: File = File(appContext.noBackupFilesDir, ApkUpdate.DIR_NAME)
@@ -114,6 +120,11 @@ class ApkSeeder @Inject constructor(
         val sizeBytes: Long,
         val sha256: String,
         val transferId: String,
+        /**
+         * Локальный файл, если он не из строки передачи (официальная загрузка,
+         * взятая в раздел автоматически): установка по нему, раздача — по копии.
+         */
+        val sourcePath: String? = null,
     )
 
     /** Принятый в чат APK-файл (кандидат на раздачу). */
@@ -124,7 +135,7 @@ class ApkSeeder @Inject constructor(
         val displayName: String,
         val sizeBytes: Long,
         val atMs: Long,
-        /** Версия, прочитанная из имени файла; null — попросить у человека. */
+        /** Версия из самого APK (или из имени файла); null — попросить у человека. */
         val versionGuess: String?,
     )
 
@@ -143,6 +154,51 @@ class ApkSeeder @Inject constructor(
     private val _receivedApks = MutableStateFlow<List<ReceivedApk>>(emptyList())
     val receivedApks: StateFlow<List<ReceivedApk>> = _receivedApks.asStateFlow()
 
+    // ── Дифф-патч обновления в рое (раунд 133) ──────────────────────────────
+
+    /** Предложение соседа: он раздаёт патч от [fromVersion] до [toVersion]. */
+    data class PatchOfferUi(
+        val nodeId: String,
+        val fromVersion: String,
+        val toVersion: String,
+        val patchSha256: String,
+        val apkSha256: String,
+        val sizeBytes: Long,
+        val atMs: Long,
+    )
+
+    /** Приём патча: ход по строке передачи. */
+    data class PatchDownload(
+        val version: String,
+        val receivedBytes: Long,
+        val totalBytes: Long,
+    )
+
+    private class PendingPatchAsk(
+        val fromVersion: String,
+        val toVersion: String,
+        val sha256: String,
+        val apkSha256: String,
+        val startedAtMs: Long,
+    ) {
+        var askedSeed: String? = null
+        var askedAtMs: Long = 0L
+        var attempts: Int = 0
+        /** Кого уже спрашивали в этом круге: следующий — другой сид. */
+        val tried = LinkedHashSet<String>()
+        /** Кто уже шлёт полосы (предложение принято приёмником, K2). */
+        val striping = LinkedHashSet<String>()
+    }
+
+    private val _patchOffers = MutableStateFlow<List<PatchOfferUi>>(emptyList())
+    val patchOffers: StateFlow<List<PatchOfferUi>> = _patchOffers.asStateFlow()
+
+    private val _patchDownload = MutableStateFlow<PatchDownload?>(null)
+    val patchDownload: StateFlow<PatchDownload?> = _patchDownload.asStateFlow()
+
+    @Volatile private var patchPending: PendingPatchAsk? = null
+    @Volatile private var lastPatchAnnounceAtMs = 0L
+
     // ── Моя просьба о новой версии ──────────────────────────────────────────
 
     private class PendingAsk(val version: String, val sha256: String, val startedAtMs: Long) {
@@ -151,6 +207,8 @@ class ApkSeeder @Inject constructor(
         var attempts: Int = 0
         /** Кого уже спрашивали в этом круге: следующий — другой сид. */
         val tried = LinkedHashSet<String>()
+        /** Кто уже шлёт полосы (предложение принято приёмником, K2). */
+        val striping = LinkedHashSet<String>()
     }
 
     @Volatile private var pending: PendingAsk? = null
@@ -158,9 +216,43 @@ class ApkSeeder @Inject constructor(
     @Volatile private var lastAnnounceAtMs = 0L
     @Volatile private var lastReceivedScanAtMs = 0L
 
+    /**
+     * Скачался наш файл обновления (DownloadManager шлёт ACTION_DOWNLOAD_COMPLETE):
+     * забираем его в раздел «Обновления» сами — версия читается из APK, карточка
+     * «Обновить до vX» появляется сама, раздача соседям начинается сама.
+     * Если процесс был мёртв в момент завершения — догоним сканом при старте
+     * ([adoptCompletedDownloads]) и при открытии настроек.
+     */
+    private val downloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(receiverContext: Context, intent: Intent) {
+            if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            scope.launch { runCatching { adoptCompletedDownloads() } }
+        }
+    }
+
     init {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Системная рассылка DownloadManager: NOT_EXPORTED её получает.
+                appContext.registerReceiver(
+                    downloadReceiver,
+                    IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                    Context.RECEIVER_NOT_EXPORTED,
+                )
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                appContext.registerReceiver(downloadReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+            }
+        }.onFailure { Log.w(TAG, "download receiver register failed: ${it.message}") }
         scope.launch {
             runCatching { ensureInit() }.onFailure { Log.w(TAG, "init failed: ${it.message}") }
+        }
+        // Раунд 133: компактная загрузка с сайта оставляет патч — берём его
+        // в раздачу (соседи с той же исходной версией скачают только разницу).
+        // Хук только запоминает файл и метаданные; копию и объявление достроит
+        // помпа (ensurePatchSeeding) — установщик мог перезапустить приложение.
+        updateChecker.onPatchKept = { patchFile, fromV, toV, apkSha ->
+            scope.launch { runCatching { adoptPatchFromSite(patchFile, fromV, toV, apkSha) } }
         }
     }
 
@@ -181,9 +273,16 @@ class ApkSeeder @Inject constructor(
      * APK; версия разбирается и НОВЕЕ текущей; sha256. Копирует файл в
      * [seedRoot], строит общую копию (`OUTGOING/SEEDING`) и объявляет
      * соседям `upk`. Более старая помеченная версия заменяется (стирается).
+     * [displayName] — настоящее имя файла (из SAF/проводника), чтобы в
+     * карточке и объявлении не оказалось служебного имени временной копии.
      * Возвращает текст для карточки: пусто — ок.
      */
-    suspend fun markAsSeed(source: File, rawVersion: String, autoReseed: Boolean): String {
+    suspend fun markAsSeed(
+        source: File,
+        rawVersion: String,
+        autoReseed: Boolean,
+        displayName: String? = null,
+    ): String {
         val version = ApkUpdate.normalize(rawVersion)
         if (ApkUpdate.parseVersion(version) == null) {
             return "Версия не распознана. Укажите числовую, например 11.70.29"
@@ -198,19 +297,41 @@ class ApkSeeder @Inject constructor(
         if (size > GroupWire.MAX_UPDATE_SIZE_BYTES) {
             return "Файл больше 4 ГБ — это не APK обновления"
         }
+        // Ручная пометка - человек снова хочет раздавать: снимаем запрет.
+        store.saveAutoSeedOptOut(false)
+        return startSeeding(source, version, size, displayName?.takeIf { it.isNotBlank() } ?: source.name, autoReseed)
+    }
+
+    /**
+     * Общий хвост пометки раздачи: sha256, копия в [seedRoot], общая копия
+     * кусков (`prepareGroupCopy`), запись о раздаче, объявление `upk`.
+     * Сюда приходят и ручная пометка ([markAsSeed]), и автоматический забор
+     * скачанного файла ([adoptDownloadedApk]).
+     */
+    private suspend fun startSeeding(
+        source: File,
+        version: String,
+        size: Long,
+        name: String,
+        autoReseed: Boolean,
+    ): String {
         val sha = ApkUpdate.sha256OfFile(source)
-        val name = source.name
         replaceSeedIfDifferent(sha)
         // Копия: исходный файл — чужой (из чата, из папок), раздаём свою.
+        // Самосев: источник — собственный APK, копия совпадает с ним —
+        // копирование пропускаем (копировать файл на себя нельзя).
         val copy = File(seedRoot, "$sha.apk")
+        val selfSource = source.absolutePath == copy.absolutePath
         val temporary = File(seedRoot, "$sha.apk.tmp")
         check(seedRoot.mkdirs() || seedRoot.isDirectory) { "Cannot create seed directory" }
         try {
-            Files.copy(source.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            try {
-                Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-                Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            if (!selfSource) {
+                Files.copy(source.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                try {
+                    Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
             }
         } catch (error: Exception) {
             temporary.delete()
@@ -263,6 +384,8 @@ class ApkSeeder @Inject constructor(
         if (row.direction != "INCOMING" || row.state != "COMPLETE") return "Файл ещё не скачан целиком"
         if (!row.displayName.lowercase().endsWith(".apk")) return "Это не APK"
         val file = router.receivedFileFor(row) ?: return "Файл на месте не найден"
+        // Ручная пометка - человек снова хочет раздавать: снимаем запрет.
+        store.saveAutoSeedOptOut(false)
         replaceSeedIfDifferent(row.fileSha256)
         store.saveSeed(
             ApkUpdateStore.SeedInfo(version, row.fileSha256, row.totalBytes, row.displayName, System.currentTimeMillis(), autoReseed),
@@ -273,8 +396,10 @@ class ApkSeeder @Inject constructor(
         return ""
     }
 
-    /** Остановить раздачу: объявление и копия долой. */
+    /** Остановить раздачу: объявление и копия долой. Заодно запоминаем
+     *  «выключено человеком» — самосев её сам не воскресит. */
     suspend fun unmark() {
+        store.saveAutoSeedOptOut(true)
         val info = store.loadSeed() ?: run {
             _seed.value = null
             return
@@ -283,6 +408,117 @@ class ApkSeeder @Inject constructor(
         store.saveSeed(null)
         _seed.value = null
         Log.i(TAG, "unmarked update seed v${info.version}")
+    }
+
+    // ── Автоматический забор скачанного файла (docs/UPDATE_SEEDING.md) ──────
+
+    /**
+     * Версия, вшитая в сам APK (`versionName` из AndroidManifest). Это
+     * надёжнее угадывания по имени файла: человек не вводит ничего.
+     * null — архив не читается (не APK или манифест не разобран).
+     */
+    private fun archiveVersion(file: File): String? = runCatching {
+        val info = appContext.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+        info?.versionName?.takeIf { version -> version.isNotBlank() }
+    }.getOrNull()
+
+    /**
+     * Скачанный файл обновления сам встаёт в раздел «Обновления»:
+     * версия читается из APK (fallback — из имени файла), файл проверяется,
+     * ставится в раздачу соседям и появляется карточка «Обновить до vX»
+     * (если версия новее текущей). Если версия РАВНА текущей (файл поставили,
+     * а раздел не успел его взять) — файл просто становится раздачей:
+     * та же авто-привязка, что и после установки. Возвращает текст ошибки:
+     * пусто — ок.
+     */
+    suspend fun adoptDownloadedApk(file: File, displayName: String? = null): String {
+        runCatching { ensureInit() }.onFailure { Log.w(TAG, "init failed: ${it.message}") }
+        if (!file.isFile) return "Файл не найден"
+        val name = displayName?.takeIf { it.isNotBlank() } ?: file.name
+        // Уже брали этот файл (путь и размер совпадают) — не считаем sha256
+        // большого файла зря при каждом старте. Туда же попадают и окончательные
+        // отказы (не APK, версия не определена, старее текущей): они не станут
+        // браться позже, а пересчитывать их каждые 5 минут не нужно.
+        val already = store.loadAdopted().any { it.path == file.absolutePath && it.sizeBytes == file.length() }
+        if (already) return ""
+        if (!ApkUpdate.looksLikeApk(file)) return "Файл не похож на APK (нет AndroidManifest.xml или classes.dex)"
+        val size = file.length()
+        if (size > GroupWire.MAX_UPDATE_SIZE_BYTES) return "Файл больше 4 ГБ — это не APK обновления"
+        val sha = ApkUpdate.sha256OfFile(file)
+        fun forget(message: String): String {
+            store.addAdopted(
+                ApkUpdateStore.Adopted(file.absolutePath, name, sha, size, System.currentTimeMillis()),
+            )
+            return message
+        }
+        val existingSeed = store.loadSeed()
+        if (existingSeed?.sha256 == sha) {
+            // Уже раздаём именно этот файл — просто помним, что взяли его.
+            return forget("")
+        }
+        val rawVersion = archiveVersion(file)
+            ?: ApkUpdate.versionFromName(name)
+            ?: return forget("Не удалось определить версию файла")
+        val version = ApkUpdate.normalize(rawVersion)
+        if (ApkUpdate.parseVersion(version) == null) return forget("Версия не распознана: $rawVersion")
+        val current = ApkUpdate.normalize(currentAppVersion())
+        val comparison = ApkUpdate.compareVersions(version, current)
+        when {
+            comparison == null -> return forget("Версию $version не с чем сравнить (текущая $current)")
+            comparison < 0 -> return forget("Файл старее текущей версии ($current) — обновлением не станет")
+        }
+        if (existingSeed != null && comparison <= 0) {
+            // Уже раздаём более новую версию — файл с этой (или меньшей)
+            // версией раздачу не заменяет. ИСКЛЮЧЕНИЕ (просьба владельца
+            // 2026-09-19): раздача осталась от ПРЕДЫДУЩЕГО обновления
+            // (старее текущей), а этот файл равен текущей версии — это
+            // ровно то, что теперь раздаём; пересаживаем молча.
+            val seedOutdated = comparison == 0 &&
+                (ApkUpdate.compareVersions(existingSeed.version, current) ?: 1) < 0
+            if (!seedOutdated) return forget("")
+        }
+        val error = startSeeding(file, version, size, name, autoReseed = true)
+        if (error.isNotBlank()) return error
+        store.addAdopted(
+            ApkUpdateStore.Adopted(file.absolutePath, name, sha, size, System.currentTimeMillis()),
+        )
+        if (comparison > 0) {
+            val row = transferDao.getForFile(ApkUpdate.CHAT_ID, sha)
+                .firstOrNull { it.direction == "OUTGOING" && it.state == "SEEDING" }
+            _ready.value = Ready(
+                version = version,
+                name = name,
+                sizeBytes = size,
+                sha256 = sha,
+                transferId = row?.transferId ?: "",
+                sourcePath = File(seedRoot, "$sha.apk").absolutePath,
+            )
+        }
+        Log.i(TAG, "adopted downloaded update v$version from ${file.absolutePath}")
+        return ""
+    }
+
+    /**
+     * Забрать все завершённые загрузки APK у DownloadManager: файл скачивался
+     * с официального сайта (или по ссылке) — сам встаёт в раздел «Обновления»
+     * и начинает раздаваться. Вызывается по ACTION_DOWNLOAD_COMPLETE, при
+     * старте (догнать, скачанное пока приложение было закрыто) и при
+     * открытии настроек.
+     */
+    suspend fun adoptCompletedDownloads() {
+        val downloads = runCatching { updateChecker.completedApkDownloads() }.getOrDefault(emptyList())
+        for (download in downloads) {
+            runCatching { adoptDownloadedApk(download.file, displayName = download.file.name) }
+                .onFailure { Log.w(TAG, "adopt failed for ${download.file.name}: ${it.message}") }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { Log.i(TAG, "adopt skipped ${download.file.name}: $it") }
+        }
+    }
+
+    /** Открылись настройки: заодно догнать завершённые загрузки. */
+    fun pickupDownloadedApks() {
+        scope.launch { runCatching { adoptCompletedDownloads() } }
     }
 
     // ── Сид: ответы на просьбы ──────────────────────────────────────────────
@@ -328,6 +564,49 @@ class ApkSeeder @Inject constructor(
         }
     }
 
+    // ── Патч (раунд 133): ответы на просьбы ─────────────────────────────────
+
+    /**
+     * Узел просит патч (`uppwant`). Отдаю, только если раздаю ИМЕННО его
+     * (тот же sha и те же от/до); конверт — под ключ просителя, как у `upwant`.
+     * Отказ — `upnone` (версия «до», sha патча), чтобы круг просьб не висел.
+     */
+    suspend fun onUpdatePatchWant(senderId: String, packet: GroupWire.Packet.UpdatePatchWant) {
+        val info = store.loadPatchSeed()
+        if (info == null || info.patchSha256 != packet.patchSha256 ||
+            !ApkUpdate.isSame(info.toVersion, packet.toVersion) ||
+            !ApkUpdate.isSame(info.fromVersion, packet.fromVersion)
+        ) {
+            replyNone(packet.toVersion, packet.patchSha256, senderId)
+            return
+        }
+        if (packet.binding.isNotEmpty()) {
+            runCatching {
+                check(uniffi.p2p_core.verifyFileExchangeBinding(packet.binding)) { "bad signature" }
+                check(uniffi.p2p_core.fileExchangeBindingNodeId(packet.binding) == senderId) { "binding of another node" }
+                peerStore.pinFirstSeen(packet.binding, System.currentTimeMillis())
+                MessageSealer.remember(appContext, senderId, packet.binding)
+            }.onFailure { Log.w(TAG, "patch requester binding not pinned (${senderId.takeLast(8)}): ${it.message}") }
+        }
+        val source = transferDao.getForFile(ApkUpdate.CHAT_ID, packet.patchSha256)
+            .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
+        if (source == null) {
+            Log.i(TAG, "patch want from ${senderId.takeLast(8)} for ${packet.patchSha256.take(12)}: copy not ready")
+            replyNone(packet.toVersion, packet.patchSha256, senderId)
+            return
+        }
+        when (router.groupSeeder.offer(source, senderId)) {
+            GroupFileSeeder.OfferResult.SENT ->
+                Log.i(TAG, "patch offered ${packet.fromVersion}->${packet.toVersion} to ${senderId.takeLast(8)}")
+            GroupFileSeeder.OfferResult.NO_KEY -> {
+                router.requestExchangeBinding(senderId)
+                replyNone(packet.toVersion, packet.patchSha256, senderId)
+            }
+            GroupFileSeeder.OfferResult.UNREACHABLE,
+            GroupFileSeeder.OfferResult.BUSY -> replyNone(packet.toVersion, packet.patchSha256, senderId)
+        }
+    }
+
     // ── Проситель: объявления и просьбы ────────────────────────────────────
 
     /**
@@ -355,8 +634,50 @@ class ApkSeeder @Inject constructor(
         Log.i(TAG, "update offer from ${senderId.takeLast(8)}: v${packet.version} (${packet.sizeBytes} B)")
     }
 
-    /** «Нет этой версии» (`upnone`): вычёркиваю сида, спрашиваю следующего. */
+    /**
+     * Сосед раздаёт ПАТЧ (`uppk`, раунд 133): интересен, только если мой
+     * телефон РОВНО той исходной версии, а цель новее — иначе патч неприменим
+     * (собрать APK будет не из чего). По узлу — последнее объявление.
+     */
+    suspend fun onUpdatePatchPack(senderId: String, packet: GroupWire.Packet.UpdatePatchPack) {
+        if (senderId == myId()) return
+        val current = ApkUpdate.normalize(currentAppVersion())
+        if (!ApkUpdate.isSame(packet.fromVersion, current)) return
+        if (!ApkUpdate.isNewer(packet.toVersion, current)) return
+        if (store.loadPatchSeed()?.patchSha256 == packet.patchSha256) return
+        val now = System.currentTimeMillis()
+        val currentOffers = store.loadPatchOffers()
+        val existing = currentOffers.firstOrNull { it.nodeId == senderId }
+        if (existing != null) {
+            val compare = ApkUpdate.compareVersions(packet.toVersion, existing.toVersion) ?: 0
+            if (compare < 0) return
+        }
+        val incoming = ApkUpdateStore.PatchOffer(
+            senderId, packet.fromVersion, packet.toVersion, packet.patchSha256,
+            packet.apkSha256, packet.sizeBytes, now,
+        )
+        val kept = (currentOffers.filterNot { it.nodeId == senderId } + incoming)
+            .filter {
+                ApkUpdate.isSame(it.fromVersion, currentAppVersion()) &&
+                    ApkUpdate.isNewer(it.toVersion, currentAppVersion()) &&
+                    now - it.atMs <= OFFER_TTL_MS
+            }
+        store.savePatchOffers(kept)
+        publishPatchOffers(kept)
+        Log.i(TAG, "patch offer from ${senderId.takeLast(8)}: ${packet.fromVersion}->${packet.toVersion} (${packet.sizeBytes} B)")
+    }
+
+    /** «Нет этой версии» (`upnone`): вычёркиваю сида, спрашиваю следующего.
+     *  Раунд 133: тем же пакетом сид отказывает и в патче (версия «до»). */
     suspend fun onUpdateNone(senderId: String, packet: GroupWire.Packet.UpdateNone) {
+        val pp = patchPending
+        if (pp != null && pp.toVersion == packet.version && pp.sha256 == packet.sha256) {
+            if (senderId == pp.askedSeed || senderId in pp.tried) {
+                pp.tried.add(senderId)
+                scope.launch { runCatching { askPatchNext() }.onFailure { Log.w(TAG, "ask next failed: ${it.message}") } }
+            }
+            return
+        }
         val p = pending ?: return
         if (p.version != packet.version || p.sha256 != packet.sha256) return
         if (senderId == p.askedSeed || senderId in p.tried) {
@@ -372,16 +693,36 @@ class ApkSeeder @Inject constructor(
      * обычный веер объявлений он уже получает по расписанию).
      */
     suspend fun onUpdateAsk(senderId: String, packet: GroupWire.Packet.UpdateAsk) {
-        val info = store.loadSeed() ?: return
-        if (!ApkUpdate.isNewer(info.version, packet.version)) return
+        val info = store.loadSeed()
+        val patchInfo = store.loadPatchSeed()
+        // Раунд 133: патч отвечает РОВНО на версию спрашивающего — она «от».
+        val patchFits = patchInfo != null &&
+            ApkUpdate.isSame(patchInfo.fromVersion, packet.version) &&
+            ApkUpdate.isNewer(patchInfo.toVersion, packet.version)
+        val apkFits = info != null && ApkUpdate.isNewer(info.version, packet.version)
+        if (!patchFits && !apkFits) return
         runCatching {
-            delivery.deliver(
-                ApkUpdate.CHAT_ID,
-                GroupWire.buildUpdatePack(info.version, info.sha256, info.sizeBytes, System.currentTimeMillis()),
-                listOf(senderId),
-            )
+            if (patchFits) {
+                val pi = patchInfo!!
+                delivery.deliver(
+                    ApkUpdate.CHAT_ID,
+                    GroupWire.buildUpdatePatchPack(
+                        pi.fromVersion, pi.toVersion, pi.patchSha256, pi.sizeBytes,
+                        pi.apkSha256, System.currentTimeMillis(),
+                    ),
+                    listOf(senderId),
+                )
+            }
+            if (apkFits) {
+                val si = info!!
+                delivery.deliver(
+                    ApkUpdate.CHAT_ID,
+                    GroupWire.buildUpdatePack(si.version, si.sha256, si.sizeBytes, System.currentTimeMillis()),
+                    listOf(senderId),
+                )
+            }
         }.onFailure { Log.w(TAG, "update ask reply failed: ${it.message}") }
-        Log.i(TAG, "update ask from ${senderId.takeLast(8)} (v${packet.version}): answered v${info.version}")
+        Log.i(TAG, "update ask from ${senderId.takeLast(8)} (v${packet.version}): answered${if (patchFits) " patch" else ""}${if (apkFits) " apk" else ""}")
     }
 
     /**
@@ -408,6 +749,49 @@ class ApkSeeder @Inject constructor(
         startPending(offer.version, offer.sha256, seeds)
     }
 
+    /** Начать качать ПАТЧ, который раздаёт узел [nodeId] (карточка «компактно»). */
+    suspend fun requestPatchUpdate(nodeId: String) {
+        val offer = _patchOffers.value.firstOrNull { it.nodeId == nodeId } ?: return
+        val seeds = _patchOffers.value
+            .filter { it.toVersion == offer.toVersion && it.patchSha256 == offer.patchSha256 }
+            .map { it.nodeId }
+        startPatchPending(offer.fromVersion, offer.toVersion, offer.patchSha256, offer.apkSha256, seeds)
+    }
+
+    /**
+     * Ещё один сид присоединился к приёму общей копии (приёмник принял его
+     * предложение с меткой `grp_apkseed`, K2). Пока сидов меньше
+     * [STRIPE_SEEDS], просим следующего известного сида той же версии —
+     * куски качаются со ВСЕХ телефонов, у которых есть файл, а не с одного.
+     * Вызывается из хука `onOfferAccepted` маршрутизатора.
+     */
+    suspend fun onSeedJoined(chatId: String, seedId: String, fileSha256: String, seedCount: Int) {
+        if (chatId != ApkUpdate.CHAT_ID) return
+        // Раунд 133: полосы собираются и из патча (маленького, но тоже со всех).
+        val pp = patchPending
+        if (pp != null && pp.sha256 == fileSha256) {
+            pp.striping.add(seedId)
+            if (seedCount >= STRIPE_SEEDS) return
+            val me = myId() ?: return
+            val candidates = knownPatchSeedsFor(pp).filter { it != me && it !in pp.striping }
+            if (candidates.isEmpty()) return
+            val next = runCatching { directory.order(candidates) }.getOrDefault(candidates).first()
+            scope.launch { runCatching { askPatchFirst(next, pp) } }
+            Log.i(TAG, "patch stripe: seed ${seedId.takeLast(8)} joined (${seedCount}), asked ${next.takeLast(8)} too")
+            return
+        }
+        val p = pending ?: return
+        if (p.sha256 != fileSha256) return
+        p.striping.add(seedId)
+        if (seedCount >= STRIPE_SEEDS) return
+        val me = myId() ?: return
+        val candidates = knownSeedsFor(p).filter { it != me && it !in p.striping }
+        if (candidates.isEmpty()) return
+        val next = runCatching { directory.order(candidates) }.getOrDefault(candidates).first()
+        scope.launch { runCatching { askFirst(next, p) } }
+        Log.i(TAG, "stripe: seed ${seedId.takeLast(8)} joined v${p.version} ($seedCount), asked ${next.takeLast(8)} too")
+    }
+
     /** Остановить приём: отказ сидам и убрать местную строку. */
     suspend fun cancelDownload() {
         val p = pending ?: return
@@ -423,6 +807,21 @@ class ApkSeeder @Inject constructor(
         Log.i(TAG, "update download cancelled")
     }
 
+    /** Остановить приём патча: отказ сидам и убрать местную строку. */
+    suspend fun cancelPatchDownload() {
+        val p = patchPending ?: return
+        patchPending = null
+        store.savePatchPending(null)
+        for (row in transferDao.getForFile(ApkUpdate.CHAT_ID, p.sha256)) {
+            if (row.direction == "INCOMING" && row.state != "COMPLETE") {
+                runCatching { router.declineIncoming(row) }
+                runCatching { router.dropTransfer(row.transferId) }
+            }
+        }
+        _patchDownload.value = null
+        Log.i(TAG, "patch download cancelled")
+    }
+
     // ── Файловая машина: маршрутизация и завершение ─────────────────────────
 
     /**
@@ -432,7 +831,10 @@ class ApkSeeder @Inject constructor(
      * отклоняется (CANCEL).
      */
     suspend fun routeApkOffer(senderId: String, fileSha256: String): FileTransferReceiver.OfferRouting {
+        // Раунд 133: в apkseed ходят и патчи — предложение патча принимаем,
+        // только если я сам его запрашивал (patchPending).
         val wanted = pending?.sha256 == fileSha256 ||
+            patchPending?.sha256 == fileSha256 ||
             _offers.value.any { it.sha256 == fileSha256 && ApkUpdate.isNewer(it.version, currentAppVersion()) }
         if (!wanted) return FileTransferReceiver.OfferRouting.Unknown
         val rows = transferDao.getForFile(ApkUpdate.CHAT_ID, fileSha256)
@@ -450,6 +852,14 @@ class ApkSeeder @Inject constructor(
      */
     suspend fun onFileReceived(chatId: String, senderId: String, fileSha256: String): Boolean {
         if (chatId != ApkUpdate.CHAT_ID) return false
+        // Раунд 133: получен ПАТЧ (а не целый APK) — собрать, сверить, раздать.
+        if (patchPending?.sha256 == fileSha256) {
+            scope.launch {
+                runCatching { onPatchFileComplete(fileSha256) }
+                    .onFailure { Log.w(TAG, "patch complete handling failed: ${it.message}") }
+            }
+            return true
+        }
         scope.launch {
             runCatching {
                 val row = transferDao.getForFile(ApkUpdate.CHAT_ID, fileSha256)
@@ -485,6 +895,14 @@ class ApkSeeder @Inject constructor(
         val row = transferDao.getForFile(ApkUpdate.CHAT_ID, info.sha256)
             .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
         if (row == null) {
+            if (ApkUpdate.isSame(info.version, currentAppVersion())) {
+                // Самосев своей версии: строка может временно отсутствовать
+                // (подготовка после перезапуска). Не стираем запись - её
+                // достроит ensureSelfSeeding, иначе карточка мигала
+                // «появилась/пропала» (владелец, 2026-09-19).
+                _seed.value = SeedUi(info.version, info.name, info.sizeBytes, null, 0, preparing = true)
+                return
+            }
             Log.i(TAG, "auto reseed: copy of v${info.version} not found, seed cleared")
             store.saveSeed(null)
             _seed.value = null
@@ -494,23 +912,101 @@ class ApkSeeder @Inject constructor(
         scope.launch { runCatching { announce() } }
     }
 
-    /** Установить скачанное обновление (FileProvider, как у UpdateChecker). */
-    suspend fun installReady() {
-        val readyInfo = _ready.value ?: return
-        val row = transferDao.getTransfer(readyInfo.transferId) ?: return
-        val file = router.receivedFileFor(row) ?: return
+    /**
+     * Самосев (просьба владельца 2026-09-19): приложение САМО раздаёт свою
+     * текущую версию — самый свежий APK, что у него есть. Если человек
+     * останавливал раздачу («Остановить раздачу»), не вмешиваемся, пока он
+     * сам не пометит файл. Раздача старее моей — снимается, текущая важнее.
+     */
+    suspend fun ensureSelfSeeding() {
+        if (store.loadAutoSeedOptOut()) return
+        val current = ApkUpdate.normalize(currentAppVersion())
+        if (ApkUpdate.parseVersion(current) == null) return
+        val seed = store.loadSeed()
+        if (seed != null) {
+            val seedVsCurrent = ApkUpdate.compareVersions(seed.version, current)
+            if (seedVsCurrent != null && seedVsCurrent == 0) {
+                // Раздаю ровно свою версию: проверяю, что строка раздачи жива.
+                val row = transferDao.getForFile(ApkUpdate.CHAT_ID, seed.sha256)
+                    .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
+                if (row != null) return
+                Log.i(TAG, "self-seed: строка раздачи v$current потеряна - достраиваю")
+                // Падаем ниже: пересоберём копию и строку заново.
+            } else if (seedVsCurrent == null || seedVsCurrent > 0) {
+                return
+            } else {
+                dropSeedCopy(seed)
+                store.saveSeed(null)
+                _seed.value = null
+                Log.i(TAG, "self-seed: прежняя раздача v${seed.version} устарела, снимаю")
+            }
+        }
+        val source = File(appContext.applicationInfo.sourceDir)
+        if (!source.isFile) return
+        val error = startSeeding(source, current, source.length(), "APU-v$current.apk", autoReseed = true)
+        if (error.isNotBlank()) {
+            Log.w(TAG, "self-seed v$current не вышел: $error")
+        } else {
+            Log.i(TAG, "self-seed: раздаю собственный APK v$current")
+        }
+    }
+
+    /**
+     * Карточки-призраки: «Установить vX», когда моя версия уже не старее vX
+     * (обновились с другого телефона/вручную, а карточка осталась). Прячем
+     * на каждом круге помпы — запрос владельца 2026-09-19.
+     */
+    fun dropStaleReady() {
+        val ready = _ready.value ?: return
+        val current = ApkUpdate.normalize(currentAppVersion())
+        val vsCurrent = ApkUpdate.compareVersions(ready.version, current)
+        if (vsCurrent == null || vsCurrent <= 0) {
+            _ready.value = null
+            Log.i(TAG, "карточка «Установить v${ready.version}» устарела (текущая $current) — скрыта")
+        }
+    }
+
+    /**
+     * Установить скачанное обновление (FileProvider, как у UpdateChecker).
+     * Возвращает текст ошибки для карточки: пусто — установщик запущен.
+     * Ошибки НЕ молчат: молчаливый отказ выглядит как «кнопка не работает»
+     * (так и было: файл принятого обновления лежит в noBackupFilesDir,
+     * которого не было в file_paths.xml — getUriForFile бросал, корутина
+     * умирала молча).
+     */
+    suspend fun installReady(): String {
+        val readyInfo = _ready.value ?: return "Обновление уже установлено — карточка устарела"
+        // Файл обновления: принятая копия (строка INCOMING/COMPLETE) или
+        // скачанный с сайта файл, взятый в раздел автоматически.
+        val file: File? = readyInfo.transferId.takeIf { it.isNotBlank() }
+            ?.let { transferId -> transferDao.getTransfer(transferId)?.let { row -> router.receivedFileFor(row) } }
+            ?.takeIf { it.isFile }
+            ?: readyInfo.sourcePath?.let { path -> File(path) }?.takeIf { it.isFile }
+        if (file == null) {
+            Log.w(TAG, "install refused: update file not found (transfer=${readyInfo.transferId}, source=${readyInfo.sourcePath})")
+            return "Файл обновления не найден на телефоне — скачайте заново"
+        }
         if (ApkUpdate.sha256OfFile(file) != readyInfo.sha256) {
             Log.w(TAG, "install refused: file sha changed")
-            return
+            return "Файл изменился после скачивания — обновление не запущено"
         }
-        val authority = "${appContext.packageName}.fileprovider"
-        val uri = FileProvider.getUriForFile(appContext, authority, file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return runCatching {
+            val authority = "${appContext.packageName}.fileprovider"
+            val uri = FileProvider.getUriForFile(appContext, authority, file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            appContext.startActivity(intent)
+            Log.i(TAG, "install intent started for v${readyInfo.version}")
+            ""
+        }.getOrElse { error ->
+            Log.e(TAG, "install intent failed: ${error.message}")
+            // Нет права «устанавливать неизвестные приложения» — Android
+            // отклоняет запуск установщика; просим включить его для APU.
+            "Android не открыл установщик: ${error.message}. " +
+                "Разрешите APU «устанавливать неизвестные приложения» в настройках системы"
         }
-        runCatching { appContext.startActivity(intent) }
-            .onFailure { Log.e(TAG, "install intent failed: ${it.message}") }
     }
 
     /** Список принятых APK (для «Раздать полученный») — не чаще, чем в помпе. */
@@ -531,11 +1027,26 @@ class ApkSeeder @Inject constructor(
         if (now - lastReceivedScanAtMs > RECEIVED_SCAN_INTERVAL_MS) {
             lastReceivedScanAtMs = now
             runCatching { scanReceivedApks() }.onFailure { Log.w(TAG, "received scan failed: ${it.message}") }
+            runCatching { adoptCompletedDownloads() }.onFailure { Log.w(TAG, "download adopt failed: ${it.message}") }
+            runCatching { dropStaleReady() }
+            runCatching { ensureSelfSeeding() }.onFailure { Log.w(TAG, "self-seed failed: ${it.message}") }
+            // Раунд 133: патч-раздача и патч-просьба живут в той же помпе.
+            runCatching { sweepPatchState(now) }.onFailure { Log.w(TAG, "patch sweep failed: ${it.message}") }
+            runCatching { sweepPatchSeed() }.onFailure { Log.w(TAG, "patch seed sweep failed: ${it.message}") }
+            runCatching { ensurePatchSeeding() }.onFailure { Log.w(TAG, "patch seeding failed: ${it.message}") }
         }
     }
 
     /** Узел появился в сети: если он сид моей просьбы — спрашиваю сразу. */
     suspend fun onPeerOnline(nodeId: String) {
+        val pp = patchPending
+        if (pp != null && nodeId in knownPatchSeedsFor(pp) &&
+            System.currentTimeMillis() - pp.askedAtMs > PRESENCE_REASK_MIN_MS
+        ) {
+            pp.tried.clear()
+            scope.launch { runCatching { askPatchFirst(nodeId, pp) } }
+            return
+        }
         val p = pending ?: return
         val seeds = knownSeedsFor(p)
         if (nodeId in seeds && System.currentTimeMillis() - p.askedAtMs > PRESENCE_REASK_MIN_MS) {
@@ -561,6 +1072,16 @@ class ApkSeeder @Inject constructor(
             }
             _download.value = downloadRow(saved.version, saved.sha256)
         }
+        // Раунд 133: патч-просьба и патч-объявления (перезапуск).
+        store.loadPatchPending()?.let { saved ->
+            patchPending = PendingPatchAsk(saved.fromVersion, saved.toVersion, saved.patchSha256, saved.apkSha256, saved.startedAtMs).also {
+                it.attempts = saved.attempts
+                it.askedSeed = saved.askedSeed.ifBlank { null }
+                it.askedAtMs = saved.askedAtMs
+                saved.seeds.forEach { seed -> it.tried.add(seed) }
+            }
+        }
+        runCatching { publishPatchOffers(store.loadPatchOffers()) }
         // Готовое скачанное (перезапуск): карточка «Установить».
         runCatching {
             val completed = transferDao.getCompleted()
@@ -575,8 +1096,37 @@ class ApkSeeder @Inject constructor(
                 }
             }
         }
+        // Раздаём версию НОВЕЕ установленной (официальную загрузку взяли в
+        // раздел, но поставить ещё не успели): карточка «Установить» — та же
+        // копия из [seedRoot], имя файла уже записано в раздаче.
+        runCatching {
+            val info = store.loadSeed()
+            if (_ready.value == null && info != null && ApkUpdate.isNewer(info.version, currentAppVersion())) {
+                val copy = File(seedRoot, "${info.sha256}.apk")
+                if (copy.isFile && ApkUpdate.sha256OfFile(copy) == info.sha256) {
+                    val row = transferDao.getForFile(ApkUpdate.CHAT_ID, info.sha256)
+                        .firstOrNull { it.direction == "OUTGOING" && it.state == "SEEDING" }
+                    _ready.value = Ready(
+                        version = info.version,
+                        name = info.name,
+                        sizeBytes = info.sizeBytes,
+                        sha256 = info.sha256,
+                        transferId = row?.transferId ?: "",
+                        sourcePath = copy.absolutePath,
+                    )
+                }
+            }
+        }
         runCatching { maybeAutoReseed() }
+        runCatching { dropStaleReady() }
         runCatching { scanReceivedApks() }
+        // Скачанное с официального сайта, пока приложение было закрыто:
+        // само встанет в раздел и начнёт раздаваться. В фоне: adopt берёт
+        // тот же mutex (startSeeding), а initFromDisk уже под ним — прямой
+        // вызов здесь дал бы дедлок.
+        scope.launch { runCatching { adoptCompletedDownloads() } }
+        // Самосев тоже берёт mutex (startSeeding) — только в фоне, как adopt.
+        scope.launch { runCatching { ensureSelfSeeding() } }
         refreshSeedState(now)
     }
 
@@ -584,6 +1134,268 @@ class ApkSeeder @Inject constructor(
         val ui = offers.map { Offer(it.nodeId, it.version, it.sha256, it.sizeBytes, it.atMs) }
             .sortedWith(Comparator { a, b -> ApkUpdate.compareVersions(b.version, a.version) ?: 0 })
         _offers.value = ui
+    }
+
+    private fun publishPatchOffers(offers: List<ApkUpdateStore.PatchOffer>) {
+        val ui = offers.map {
+            PatchOfferUi(it.nodeId, it.fromVersion, it.toVersion, it.patchSha256, it.apkSha256, it.sizeBytes, it.atMs)
+        }.sortedWith(Comparator { a, b -> ApkUpdate.compareVersions(b.toVersion, a.toVersion) ?: 0 })
+        _patchOffers.value = ui
+    }
+
+    // ── Патч (раунд 133): внутренняя машина ─────────────────────────────────
+
+    /**
+     * Патч, оставленный компактной загрузкой с сайта (хук [updateChecker
+     * .onPatchKept]): сохранить файл в разделе раздачи и запомнить метаданные.
+     * Копию в `apkseed` и объявление достроит помпа (ensurePatchSeeding):
+     * установщик может перезапустить приложение посреди подготовки.
+     */
+    private suspend fun adoptPatchFromSite(patchFile: File, fromRaw: String, toRaw: String, apkShaRaw: String) {
+        runCatching { ensureInit() }.onFailure { Log.w(TAG, "init failed: ${it.message}") }
+        if (!patchFile.isFile) return
+        val from = ApkUpdate.normalize(fromRaw)
+        val to = ApkUpdate.normalize(toRaw)
+        val apkSha = apkShaRaw.lowercase()
+        if (ApkUpdate.parseVersion(from) == null || ApkUpdate.parseVersion(to) == null ||
+            !GroupWire.isSha256(apkSha)
+        ) {
+            Log.w(TAG, "patch keep skipped: bad meta ($fromRaw -> $toRaw)")
+            return
+        }
+        val sha = ApkUpdate.sha256OfFile(patchFile)
+        if (store.loadPatchSeed()?.patchSha256 == sha) return
+        check(seedRoot.mkdirs() || seedRoot.isDirectory) { "Cannot create seed directory" }
+        val copy = File(seedRoot, "$sha.bspatch")
+        if (patchFile.absolutePath != copy.absolutePath) {
+            try {
+                Files.copy(patchFile.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            } catch (error: Exception) {
+                Log.w(TAG, "patch copy failed: ${error.message}")
+                return
+            }
+        }
+        store.savePatchSeed(
+            ApkUpdateStore.PatchSeed(
+                from, to, sha, apkSha, copy.length(),
+                ApkUpdate.patchName(from, to), System.currentTimeMillis(), "",
+            ),
+        )
+        Log.i(TAG, "patch kept for swarm: $from -> $to (${copy.length()} B)")
+    }
+
+    /**
+     * Раздача патча: общая копия в `apkseed` (если ещё не построена) и
+     * объявление `uppk`. Достроивает то, что не успел adoptPatchFromSite
+     * (в том числе после перезапуска установщиком).
+     */
+    private suspend fun ensurePatchSeeding() {
+        val info = store.loadPatchSeed() ?: return
+        val copy = File(seedRoot, "${info.patchSha256}.bspatch")
+        if (!copy.isFile) {
+            Log.w(TAG, "patch seed file lost (${info.name}) — patch seed cleared")
+            store.savePatchSeed(null)
+            return
+        }
+        var current = info
+        val ready = transferDao.getForFile(ApkUpdate.CHAT_ID, info.patchSha256)
+            .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
+        if (ready == null) {
+            val prepared = mutex.withLock {
+                runCatching {
+                    preparation.get().prepareGroupCopy(
+                        source = copy,
+                        displayName = info.name,
+                        mediaType = "application/octet-stream",
+                        messageId = ApkUpdate.CHAT_ID,
+                        groupId = ApkUpdate.CHAT_ID,
+                        expectedSha256 = info.patchSha256,
+                    )
+                }.onFailure { Log.w(TAG, "patch seed prepare failed: ${it.message}") }.getOrNull()
+            } ?: return
+            current = info.copy(transferId = prepared.transferId)
+            store.savePatchSeed(current)
+        }
+        announcePatch(current)
+    }
+
+    /** Объявить патч-раздачу всем известным узлам (своё расписание). */
+    private suspend fun announcePatch(info: ApkUpdateStore.PatchSeed) {
+        val now = System.currentTimeMillis()
+        if (now - lastPatchAnnounceAtMs < ANNOUNCE_INTERVAL_MS) return
+        val targets = knownNodes()
+        if (targets.isEmpty()) return
+        val text = GroupWire.buildUpdatePatchPack(
+            info.fromVersion, info.toVersion, info.patchSha256, info.sizeBytes, info.apkSha256, now,
+        )
+        runCatching { delivery.deliver(ApkUpdate.CHAT_ID, text, targets) }
+            .onFailure { Log.w(TAG, "patch announce failed: ${it.message}") }
+        lastPatchAnnounceAtMs = now
+        Log.i(TAG, "patch announced ${info.fromVersion}->${info.toVersion} to ${targets.size} node(s)")
+    }
+
+    private suspend fun startPatchPending(
+        fromVersion: String,
+        toVersion: String,
+        sha256: String,
+        apkSha256: String,
+        seeds: List<String>,
+    ) {
+        val now = System.currentTimeMillis()
+        val p = PendingPatchAsk(fromVersion, toVersion, sha256, apkSha256, now)
+        seeds.forEach { p.tried.add(it) }
+        patchPending = p
+        store.savePatchPending(
+            ApkUpdateStore.PatchPending(fromVersion, toVersion, sha256, apkSha256, now, 0, "", 0L, seeds),
+        )
+        _ready.value = null // новое скачивание перезаписывает «Готово»
+        askPatchNext()
+    }
+
+    private suspend fun knownPatchSeedsFor(p: PendingPatchAsk): Set<String> {
+        val fromOffers = store.loadPatchOffers()
+            .filter { it.toVersion == p.toVersion && it.patchSha256 == p.sha256 }
+            .map { it.nodeId }
+        val fromDisk = store.loadPatchPending()?.seeds.orEmpty()
+        return (fromOffers + fromDisk).toSet()
+    }
+
+    private suspend fun askPatchNext() {
+        val p = patchPending ?: return
+        val me = myId() ?: return
+        val candidates = knownPatchSeedsFor(p).filter { it != me }
+        if (candidates.isEmpty()) {
+            Log.w(TAG, "patch ask: no known seeds for ${p.fromVersion}->${p.toVersion}")
+            return
+        }
+        val ordered = runCatching { directory.order(candidates) }.getOrDefault(candidates)
+        val seed = ordered.firstOrNull { it !in p.tried } ?: run {
+            p.tried.clear()
+            ordered.firstOrNull { it !in p.tried } ?: return
+        }
+        askPatchFirst(seed, p)
+    }
+
+    private suspend fun askPatchFirst(preferred: String, p: PendingPatchAsk) {
+        val me = myId() ?: return
+        if (preferred == me) return
+        val now = System.currentTimeMillis()
+        p.tried.add(preferred)
+        p.askedSeed = preferred
+        p.askedAtMs = now
+        p.attempts++
+        store.savePatchPending(
+            ApkUpdateStore.PatchPending(
+                p.fromVersion, p.toVersion, p.sha256, p.apkSha256,
+                p.startedAtMs, p.attempts, preferred, now, knownPatchSeedsFor(p).toList(),
+            ),
+        )
+        val binding = runCatching { FileExchangeKeyStore.publicBinding(appContext) }.getOrNull() ?: ByteArray(0)
+        val text = GroupWire.buildUpdatePatchWant(p.fromVersion, p.toVersion, p.sha256, binding)
+        runCatching { delivery.deliver(ApkUpdate.CHAT_ID, text, listOf(preferred)) }
+            .onFailure { Log.w(TAG, "patch want to ${preferred.takeLast(8)} failed: ${it.message}") }
+        Log.i(TAG, "patch want ${p.fromVersion}->${p.toVersion} to ${preferred.takeLast(8)} attempt=${p.attempts}")
+    }
+
+    private suspend fun clearPatchPending() {
+        patchPending = null
+        store.savePatchPending(null)
+        _patchDownload.value = null
+    }
+
+    /** Свежий ход приёма патча (для карточки) + гигиена состояния в помпе. */
+    private suspend fun sweepPatchState(now: Long) {
+        val p = patchPending
+        if (p == null) {
+            if (_patchDownload.value != null) _patchDownload.value = null
+        } else {
+            val row = transferDao.getForFile(ApkUpdate.CHAT_ID, p.sha256)
+                .firstOrNull { it.direction == "INCOMING" && it.state != "COMPLETE" && it.state != "FAILED" }
+            _patchDownload.value = row?.let { PatchDownload(p.toVersion, it.transferredBytes, it.totalBytes) }
+        }
+        val offers = store.loadPatchOffers()
+        val kept = offers.filter {
+            ApkUpdate.isSame(it.fromVersion, currentAppVersion()) &&
+                ApkUpdate.isNewer(it.toVersion, currentAppVersion()) &&
+                now - it.atMs <= OFFER_TTL_MS
+        }
+        if (kept.size != offers.size) store.savePatchOffers(kept)
+        publishPatchOffers(kept)
+        reaskPatch(now)
+    }
+
+    /**
+     * Патч для версии СТАРШЕ моей больше не нужен: соседи с той версией
+     * возьмут целый APK у моего самосева. Память и копия — долой.
+     */
+    private suspend fun sweepPatchSeed() {
+        val info = store.loadPatchSeed() ?: return
+        val vs = ApkUpdate.compareVersions(info.toVersion, currentAppVersion())
+        if (vs == null || vs < 0) {
+            for (row in transferDao.getForFile(ApkUpdate.CHAT_ID, info.patchSha256)) {
+                if (row.direction == "OUTGOING") {
+                    runCatching { router.groupSeeder.forget(row.transferId) }
+                    runCatching { router.dropTransfer(row.transferId) }
+                }
+            }
+            runCatching { File(seedRoot, "${info.patchSha256}.bspatch").delete() }
+            store.savePatchSeed(null)
+            Log.i(TAG, "patch seed ${info.fromVersion}->${info.toVersion} stale — dropped")
+        }
+    }
+
+    /**
+     * Патч получен целиком: собрать APK из установленного + разницы, сверить
+     * с объявленным sha256 релиза; карточка «Установить»; и СРАЗУ раздать:
+     * патч — соседям с той же исходной версией, собранный APK — всем
+     * остальным (тот же путь, что у скачанного с сайта).
+     */
+    private suspend fun onPatchFileComplete(fileSha256: String) {
+        val p = patchPending ?: return
+        if (p.sha256 != fileSha256) return
+        val row = transferDao.getForFile(ApkUpdate.CHAT_ID, fileSha256)
+            .firstOrNull { it.direction == "INCOMING" && it.state == "COMPLETE" } ?: return
+        val patchFile = router.receivedFileFor(row) ?: return
+        patchPending = null
+        store.savePatchPending(null)
+        _patchDownload.value = null
+        if (ApkUpdate.sha256OfFile(patchFile) != p.sha256) {
+            Log.w(TAG, "received patch sha mismatch — dropped")
+            return
+        }
+        val base = File(appContext.applicationInfo.sourceDir)
+        if (!base.isFile) {
+            Log.w(TAG, "no installed base apk — cannot apply patch")
+            return
+        }
+        val built = File(seedRoot, "${p.apkSha256}.apk")
+        if (!ApkDiffPatch.apply(base, patchFile, built) ||
+            ApkUpdate.sha256OfFile(built) != p.apkSha256
+        ) {
+            Log.w(TAG, "patch apply/verify failed (${p.fromVersion}->${p.toVersion}) — built dropped")
+            runCatching { built.delete() }
+            return
+        }
+        // Патч остаётся раздачей для соседей с той же исходной версией:
+        // строка-источник — его INCOMING/COMPLETE, перешифровки нет.
+        val info = ApkUpdateStore.PatchSeed(
+            p.fromVersion, p.toVersion, p.sha256, p.apkSha256, patchFile.length(),
+            ApkUpdate.patchName(p.fromVersion, p.toVersion), System.currentTimeMillis(), row.transferId,
+        )
+        store.savePatchSeed(info)
+        scope.launch { runCatching { announcePatch(info) } }
+        // Собранный APK — та же авто-раздача, что у скачанного с сайта.
+        val error = startSeeding(built, p.toVersion, built.length(), "APU-v${p.toVersion}.apk", autoReseed = true)
+        if (error.isNotBlank()) Log.w(TAG, "auto seed of built apk failed: $error")
+        _ready.value = Ready(
+            version = p.toVersion,
+            name = "APU-v${p.toVersion}.apk",
+            sizeBytes = built.length(),
+            sha256 = p.apkSha256,
+            transferId = "",
+            sourcePath = built.absolutePath,
+        )
+        Log.i(TAG, "patch applied ${p.fromVersion}->${p.toVersion}: ready to install (${built.length()} B)")
     }
 
     private fun myId(): String? = RustBridge.nodeId()
@@ -721,6 +1533,21 @@ class ApkSeeder @Inject constructor(
         askNext()
     }
 
+    /** Патч-просьба: те же правила, что у APK-просьбы (раунд 133). */
+    private suspend fun reaskPatch(now: Long) {
+        val p = patchPending ?: return
+        if (now - p.startedAtMs > PENDING_TTL_MS || p.attempts >= MAX_ATTEMPTS) {
+            clearPatchPending()
+            return
+        }
+        val row = transferDao.getForFile(ApkUpdate.CHAT_ID, p.sha256)
+            .firstOrNull { it.direction == "INCOMING" && it.state != "COMPLETE" && it.state != "FAILED" }
+        if (row != null) return // куски приходят
+        val interval = (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
+        if (now - p.askedAtMs < interval) return
+        askPatchNext()
+    }
+
     private suspend fun clearPending() {
         pending = null
         store.savePending(null)
@@ -793,15 +1620,24 @@ class ApkSeeder @Inject constructor(
      * (APU-v11.70.29.apk, «APU 11.70.29 beta.apk»). null — не найдено,
      * попросим у человека.
      */
-    private fun guessVersionFromName(fileName: String): String? =
-        Regex("""(\d{1,4}(?:\.\d{1,4}){1,3})""").find(fileName)?.value
+    private fun guessVersionFromName(fileName: String): String? = ApkUpdate.versionFromName(fileName)
 
     private suspend fun scanReceivedApks() {
         val rows = runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())
             .filter { it.direction == "INCOMING" && it.chatId != ApkUpdate.CHAT_ID && it.displayName.lowercase().endsWith(".apk") }
+        val current = ApkUpdate.normalize(currentAppVersion())
         val list = rows.mapNotNull { row ->
             val file = router.receivedFileFor(row) ?: return@mapNotNull null
             if (!file.isFile) return@mapNotNull null
+            // Сначала версия из самого APK; если не читается — из имени.
+            val versionGuess = archiveVersion(file) ?: guessVersionFromName(row.displayName)
+            // Прошлые версии обновлением уже не станут: карточки-призраки
+            // вроде «11.70.22 получен» болтаться не должны (владелец,
+            // 2026-09-19). Нераспознанные не трогаем — вдруг это APK.
+            if (versionGuess != null) {
+                val vsCurrent = ApkUpdate.compareVersions(ApkUpdate.normalize(versionGuess), current)
+                if (vsCurrent != null && vsCurrent <= 0) return@mapNotNull null
+            }
             ReceivedApk(
                 transferId = row.transferId,
                 chatId = row.chatId,
@@ -809,7 +1645,7 @@ class ApkSeeder @Inject constructor(
                 displayName = row.displayName,
                 sizeBytes = row.totalBytes,
                 atMs = row.updatedAtMs,
-                versionGuess = guessVersionFromName(row.displayName),
+                versionGuess = versionGuess,
             )
         }.sortedByDescending { it.atMs }
             .take(MAX_RECEIVED_LIST)
@@ -834,5 +1670,7 @@ class ApkSeeder @Inject constructor(
         /** Список «Полученных APK» в настройках: не больше стольких. */
         const val MAX_RECEIVED_LIST = 20
         const val RECEIVED_SCAN_INTERVAL_MS = 5L * 60 * 1000
+        /** Сколько сидов одновременно шлют полосы кусков (K2, как у групп). */
+        const val STRIPE_SEEDS = 3
     }
 }

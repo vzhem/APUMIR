@@ -4,6 +4,7 @@ import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -67,6 +68,8 @@ fun ContactsScreen(
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
     // Контакт, которого приглашаем в группы: не null - открыт выбор групп.
     var inviteFor by remember { mutableStateOf<Contact?>(null) }
+    // Раунд 175: «Поделиться контактом» - сначала выбор пути (в APU / наружу).
+    var shareTarget by remember { mutableStateOf<Contact?>(null) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -195,25 +198,6 @@ fun ContactsScreen(
                         key = { it.id }
                     ) { contact ->
                         // ContactCard expects Chat, create a minimal Chat from Contact
-                        val ctx = LocalContext.current
-                        val shareContact = {
-                            try {
-                                    val link = ContactShareLink.build(contact.id, contact.displayName, contact.username)
-                                    // Наружу - короткой https-ссылкой: apu:// в чужих
-                                    // мессенджерах не кликабельна. Сервис молчит -
-                                    // уйдёт прежняя ссылка.
-                                    ShortShare.shareText(ctx, link, "Поделиться контактом") { shared ->
-                                        // Доллар НЕ экранируем: с ${'$'} в
-                                        // сообщение уходил сам текст
-                                        // "${contact.displayName}" вместо имени,
-                                        // а вместо ссылки - "${link}".
-                                        "Мой контакт ${contact.displayName} в APU. " +
-                                            "Открой ссылку для добавления:\n$shared"
-                                    }
-                                } catch (_: Exception) {
-                                }
-                            Unit
-                        }
                         // Пузырь контакта — тот же ContactCard, что на главной:
                         // владелец просил, чтобы списки выглядели одинаково.
                         ContactCard(
@@ -229,7 +213,6 @@ fun ContactsScreen(
                             onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                             username = contact.username,
                             kind = BubbleKind.Personal,
-                            onShareClick = shareContact,
                             menuActions = listOf(
                                 BubbleMenuAction(
                                     title = "Написать",
@@ -258,7 +241,7 @@ fun ContactsScreen(
                                 BubbleMenuAction(
                                     title = "Поделиться контактом",
                                     icon = Icons.Default.Share,
-                                    onClick = { shareContact() },
+                                    onClick = { shareTarget = contact },
                                 ),
                                 BubbleMenuAction(
                                     title = "Удалить контакт",
@@ -312,6 +295,19 @@ fun ContactsScreen(
                 viewModel.buildGroupInvites(ids) { invites ->
                     AppShare.shareGroupInvites(context, invites)
                 }
+            },
+        )
+    }
+
+    // Раунд 175: выбор адресата внутри APU - выбранному уходит ссылка контакта.
+    shareTarget?.let { shared ->
+        ShareContactChooserDialog(
+            sharedName = shared.displayName,
+            contacts = viewModel.contacts.collectAsState().value.filter { it.id != shared.id },
+            onDismiss = { shareTarget = null },
+            onPick = { to ->
+                shareTarget = null
+                viewModel.sendContactCard(to.id, to.displayName, shared)
             },
         )
     }
