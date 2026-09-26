@@ -120,6 +120,8 @@ fun ChatListScreen(
     var confirmGroup by remember { mutableStateOf<InboxGroup?>(null) }
     // Как приглашать: QR при личной встрече или обычная ссылка.
     var inviteChoice by remember { mutableStateOf<InboxGroup?>(null) }
+    // Раунд 175: «Поделиться контактом» из списка чатов - выбор адресата в APU.
+    var shareCardFor by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     // Листалка разделов. Страницы едут за пальцем, поэтому выбранный раздел и
@@ -264,15 +266,7 @@ fun ChatListScreen(
                                             menuOpen = false
                                             showConnectDialog = true
                                         },
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    scrollBehavior = scrollBehavior,
-                )
-
-                // Полоска разделов: во всю ширину экрана и пролистывается
+                   а разделов: во всю ширину экрана и пролистывается
                 // пальцем вбок - разделов может стать больше, чем влезает.
                 ApuTabBar(
                     titles = uiState.sections.map { it.title },
@@ -938,6 +932,11 @@ private fun SectionPage(
                                         },
                                     ),
                                     BubbleMenuAction(
+                                        title = "Поделиться контактом",
+                                        icon = Icons.Default.Share,
+                                        onClick = { shareCardFor = item.chat },
+                                    ),
+                                    BubbleMenuAction(
                                         title = "Отметить прочитанным",
                                         icon = Icons.Default.DoneAll,
                                         onClick = { onMarkChatRead(item.chat.id) },
@@ -1262,6 +1261,10 @@ private fun formatGroupTime(timestamp: Long): String {
 
 /**
  * За сколько строк до конца загруженного просить следующую страницу.
+ * Запас нужен, чтобы список догрузился ДО того, как человек упрётся в конец.
+ */
+private const val LOAD_MORE_THRESHOLD = 10
+ сколько строк до конца загруженного просить следующую страницу.
  * Запас нужен, чтобы список догрузился ДО того, как человек упрётся в конец.
  */
 private const val LOAD_MORE_THRESHOLD = 10

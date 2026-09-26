@@ -67,6 +67,8 @@ fun ContactsScreen(
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
     // Контакт, которого приглашаем в группы: не null - открыт выбор групп.
     var inviteFor by remember { mutableStateOf<Contact?>(null) }
+    // Раунд 175: «Поделиться контактом» - сначала выбор пути (в APU / наружу).
+    var shareTarget by remember { mutableStateOf<Contact?>(null) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -431,6 +433,19 @@ private fun InviteToGroupsDialog(
                 TextButton(
                     onClick = { onShare(selected.toList()) },
                     enabled = selected.isNotEmpty(),
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Другим приложением")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+,
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
