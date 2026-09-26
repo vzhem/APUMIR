@@ -340,6 +340,11 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 178: кэш публичного IP - сеть не дёргаем чаще раза в 10 минут. */
+    private var lastPublicIp: String? = null
+    private var lastPublicIpAt: Long = 0L
+    private val publicIpTtlMs: Long = 10L * 60 * 1000
+
     init {
         observeMyHearts()
         loadSettings()
@@ -493,17 +498,28 @@ class SettingsViewModel @Inject constructor(
                 "unknown"
             }
 
-            // Публичный IP: каким нас видит интернет. Определяем внешним
-            // сервисом; без сети честно пишем, что недоступен.
+            // Публичный IP: каким нас видит интернет. Раунд 178 (аудит
+            // нагрузки): сетевой запрос - не чаще раза в 10 минут, в
+            // остальное время показываем свежий кэш; слабые телефоны и
+            // мобильный трафик не дёргаем при каждом открытии профиля.
             val publicIp = withContext(Dispatchers.IO) {
-                runCatching {
-                    val conn = java.net.URL("https://api.ipify.org?text=true")
-                        .openConnection() as java.net.HttpURLConnection
-                    conn.connectTimeout = 5000
-                    conn.readTimeout = 5000
-                    conn.inputStream.bufferedReader().use { it.readText().trim() }
-                        .takeIf { it.isNotBlank() }
-                }.getOrNull()
+                val now = System.currentTimeMillis()
+                val cached = lastPublicIp
+                if (cached != null && now - lastPublicIpAt < publicIpTtlMs) {
+                    cached
+                } else {
+                    runCatching {
+                        val conn = java.net.URL("https://api.ipify.org?text=true")
+                            .openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 5000
+                        conn.readTimeout = 5000
+                        conn.inputStream.bufferedReader().use { it.readText().trim() }
+                            .takeIf { it.isNotBlank() }
+                    }.getOrNull()?.also {
+                        lastPublicIp = it
+                        lastPublicIpAt = now
+                    } ?: cached
+                }
             }
 
             // Чтение настроек и сборка ссылки трогают диск - тоже в фон.

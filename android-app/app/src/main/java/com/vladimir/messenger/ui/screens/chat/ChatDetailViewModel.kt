@@ -784,15 +784,27 @@ class ChatDetailViewModel @Inject constructor(
                 )
             }.getOrDefault(false)
         }
-        check(sent) { "телефон собеседника недоступен" }
+        // Раунд 178: гифка больше НЕ ждёт собеседника. Отправилось - хорошо;
+        // нет - карточка всё равно появляется в чате и встаёт в телефонную
+        // очередь QUEUED_OFFLINE: доставим сами при его появлении в сети
+        // (retryPendingMessagesForPeer/FULL SYNC по presence), а байты он
+        // доберёт из роя у хранителей - я среди них.
         chatRepository.insertGifRefMessage(
             chatId = chatId,
             recipientId = recipientId,
             messageId = messageId,
             sha256 = sha256,
             timestamp = System.currentTimeMillis(),
+            status = if (sent) "LOCAL_FILE"
+            else com.vladimir.messenger.domain.model.MessageStatus.QUEUED_OFFLINE.name,
         )
-        _uiState.update { it.copy(scrollToBottom = true) }
+        _uiState.update {
+            it.copy(
+                scrollToBottom = true,
+                swarmStatus = if (sent) null
+                else "Гифка будет доставлена, когда собеседник появится в сети",
+            )
+        }
         // Раунд 131: я мог только что скачать эту гифку - объявить каталог,
         // чтобы все узнали хранителя и смогли тихо забрать байты.
         runCatching {

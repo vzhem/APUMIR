@@ -346,6 +346,8 @@ class ChatRepository @Inject constructor(
         messageId: String,
         sha256: String,
         timestamp: Long,
+        /** Раунд 178: QUEUED_OFFLINE - собеседник офлайн, досылаем сами. */
+        status: String = "LOCAL_FILE",
     ): Boolean {
         if (messageDao.messageExists(messageId)) return false
         val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
@@ -356,7 +358,7 @@ class ChatRepository @Inject constructor(
             content = content,
             timestamp = timestamp,
             isFromMe = true,
-            status = "LOCAL_FILE",
+            status = status,
             channel = MessageChannel.STORE_FORWARD.name,
             recipientId = recipientId,
         )
