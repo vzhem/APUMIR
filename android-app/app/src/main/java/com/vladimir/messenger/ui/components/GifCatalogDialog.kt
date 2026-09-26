@@ -10,6 +10,7 @@ import androidx.compose.animation.animateColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -141,7 +142,38 @@ fun GifCatalogBody(
     onRequestSwarm: (SwarmGif) -> Unit,
     onRequestThumbs: (List<SwarmGif>) -> Unit = {},
     onAddOwnGif: (android.net.Uri) -> Unit = {},
+    /** Раунд 174: долгое нажатие на свою гифку - удалить из сети. */
+    onRemoveOwnGif: ((com.vladimir.messenger.data.gif.GifLibEntry) -> Unit)? = null,
 ) {
+    // Раунд 174: подтверждение удаления своей гифки.
+    var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.gif.GifLibEntry?>(null) }
+    if (removeCandidate != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { removeCandidate = null },
+            title = { Text("Удалить гифку?") },
+            text = {
+                Text(
+                    "Гифка исчезнет из вашей библиотеки и из общего каталога сети на всех телефонах. У тех, кто уже успел её скачать, копия останется.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        val entry = removeCandidate
+                        removeCandidate = null
+                        if (entry != null) onRemoveOwnGif?.invoke(entry)
+                    },
+                ) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { removeCandidate = null }) {
+                    Text("Отмена")
+                }
+            },
+        )
+    }
     var query by remember { mutableStateOf("") }
     // Раунд 129: живой поиск - начинается с первой буквы (пауза 450 мс).
     LaunchedEffect(query) {
@@ -243,11 +275,23 @@ fun GifCatalogBody(
                         com.vladimir.messenger.data.gif.GifLibrary
                             .previewFile(context, entry.sha256)?.absolutePath
                     }
-                    Box(
-                        modifier = Modifier
+                    // Раунд 174: долгое нажатие на свою гифку - удалить из сети.
+                    val myCellModifier = if (onRemoveOwnGif != null) {
+                        Modifier
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { onAttachLocal(entry) },
+                            .combinedClickable(
+                                onClick = { onAttachLocal(entry) },
+                                onLongClick = { removeCandidate = entry },
+                            )
+                    } else {
+                        Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onAttachLocal(entry) }
+                    }
+                    Box(
+                        modifier = myCellModifier,
                     ) {
                         if (preview != null) {
                             AsyncImage(

@@ -19,6 +19,7 @@ package com.vladimir.messenger.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,6 +110,10 @@ fun InputPanelDialog(
     onAddStickerZip: (android.net.Uri) -> Unit = {},
     /** Выбрали стикер из сети - скачать тихо у хранителей и отправить. */
     onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
+    /** Раунд 174: удалить свой стикер из библиотеки и сети. */
+    onRemoveSticker: ((com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) -> Unit)? = null,
+    /** Раунд 174: удалить свою гифку из библиотеки и сети. */
+    onRemoveGif: ((com.vladimir.messenger.data.gif.GifLibEntry) -> Unit)? = null,
     // ── Эмодзи ──
     onEmoji: (String) -> Unit,
     onOpened: () -> Unit = {},
@@ -190,6 +195,7 @@ fun InputPanelDialog(
                         onRequestSwarm = onRequestSwarm,
                         onRequestThumbs = onRequestThumbs,
                         onAddOwnGif = onAddOwnGif,
+                        onRemoveOwnGif = onRemoveGif,
                     )
                 } else {
                     StickerSection(
@@ -201,6 +207,7 @@ fun InputPanelDialog(
                         onAddSticker = onAddSticker,
                         onAddStickerZip = onAddStickerZip,
                         onRequestSwarmSticker = onRequestSwarmSticker,
+                        onRemoveSticker = onRemoveSticker,
                     )
                 }
             }
@@ -341,7 +348,38 @@ private fun StickerSection(
     onAddSticker: (android.net.Uri) -> Unit,
     onAddStickerZip: (android.net.Uri) -> Unit = {},
     onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit,
+    /** Раунд 174: долгое нажатие на стикер в «Мои» - удалить из сети. */
+    onRemoveSticker: ((com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) -> Unit)? = null,
 ) {
+    // Раунд 174: подтверждение удаления стикера из библиотеки и сети.
+    var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry?>(null) }
+    if (removeCandidate != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { removeCandidate = null },
+            title = { Text("Удалить стикер?") },
+            text = {
+                Text(
+                    "Стикер исчезнет из вашей библиотеки и из общего каталога «Из сети» на всех телефонах. У тех, кто уже успел его скачать, копия останется.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        val entry = removeCandidate
+                        removeCandidate = null
+                        if (entry != null) onRemoveSticker?.invoke(entry)
+                    },
+                ) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { removeCandidate = null }) {
+                    Text("Отмена")
+                }
+            },
+        )
+    }
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val panelContext = androidx.compose.ui.platform.LocalContext.current
@@ -458,7 +496,7 @@ private fun StickerSection(
                 modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp),
             )
         }
-        rowStickers(stickers, "m", onSticker)
+        rowStickers(stickers, "m", onSticker, onRemove = { removeCandidate = it })
         item(key = "hs", span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 "Из сети",
@@ -547,17 +585,31 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.rowStickers(
     entries: List<StickerLibrary.StickerEntry>,
     prefix: String,
     onSticker: (StickerLibrary.StickerEntry) -> Unit,
+    /** Раунд 174: долгое нажатие - удалить (только для «Моих»). */
+    onRemove: ((StickerLibrary.StickerEntry) -> Unit)? = null,
 ) {
     gridEntries(
         entries,
         key = { "$prefix-${it.sha256}" },
     ) { entry ->
-        Box(
-            modifier = Modifier
+        val cellModifier = if (onRemove != null) {
+            Modifier
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                .clickable { onSticker(entry) },
+                .combinedClickable(
+                    onClick = { onSticker(entry) },
+                    onLongClick = { onRemove(entry) },
+                )
+        } else {
+            Modifier
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                .clickable { onSticker(entry) }
+        }
+        Box(
+            modifier = cellModifier,
         ) {
             // Раунд 170: анимированные стикеры (gif/webp/webm) живут в сетке.
             StickerAnimated(

@@ -529,6 +529,36 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     /**
+     * Раунд 174: удалить свой стикер случайно закинули). Из библиотеки,
+     * каталог роя переобъявляется сразу - у абонентов исчезнет из
+     * «Из сети». Кто уже скачал - у того остаётся (E2E).
+     */
+    fun removeSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { stickerLibrary.deleteBySha(entry.sha256) }
+            announceAdded()
+            refreshStickers()
+        }
+    }
+
+    /**
+     * Раунд 174: удалить свою гифку из библиотеки и роевого каталога.
+     */
+    fun removeOwnGif(sha256: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.deleteOwn(appContext, sha256)
+            }
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = true,
+                )
+            }
+            onGifCatalogOpened()
+        }
+    }
+
+    /**
      * Отправить стикер в личный чат: картинкой (та же файловая машина, что у
      * скрепки), но сразу - без диалога выбора. Стикер встаёт в «Недавние».
      */

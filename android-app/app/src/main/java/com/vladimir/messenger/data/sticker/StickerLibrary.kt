@@ -196,6 +196,27 @@ class StickerLibrary @Inject constructor(
     fun entryOf(sha256: String): StickerEntry? =
         all().firstOrNull { it.sha256 == sha256 }
 
+    /**
+     * Раунд 174: удалить свой стикер случайно закинули). Убирается из
+     * индекса, стираются файл и миниатюра; следующий syncWithSwarm
+     * (force) переобъявит каталог - у абонентов стикер исчезнет из
+     * «Из сети». Кто уже успел скачать - у того копия остаётся (E2E).
+     */
+    @Synchronized
+    fun deleteBySha(sha256: String): Boolean {
+        if (entryOf(sha256) == null) return false
+        val body = buildString {
+            append(INDEX_HEADER).append('\n')
+            for (entry in all()) {
+                if (entry.sha256 != sha256) append(format(entry)).append('\n')
+            }
+        }
+        val saved = writeIndex(body)
+        File(root, "$sha256.img").delete()
+        File(root, "t$sha256.jpg").delete()
+        return saved
+    }
+
     // ── Недавние ────────────────────────────────────────────────────────────
 
     /** Последние отправленные: sha + время, свежие вверху. */

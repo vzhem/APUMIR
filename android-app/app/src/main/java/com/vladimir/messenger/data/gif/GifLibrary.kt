@@ -303,6 +303,24 @@ object GifLibrary {
         mutex.withLock { loadIndex(context) }
     }
 
+    /**
+     * Раунд 174: удалить свою гифку случайно закинули). Из индекса и с
+     * диска; следующий syncWithSwarm (force) переобъявит каталог - у
+     * абонентов гифка исчезнет из сети. Скачанные раньше не отзываются.
+     */
+    suspend fun deleteOwn(context: Context, sha256: String): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!isSafeSha(sha256)) return@withContext false
+            mutex.withLock {
+                val items = loadIndex(context)
+                if (items.none { it.sha256 == sha256 }) return@withLock false
+                saveIndex(context, items.filter { it.sha256 != sha256 })
+            }
+            File(dir(context), "$sha256.gif").delete()
+            File(dir(context), "$sha256.jpg").delete()
+            true
+        }
+
     suspend fun bySha(context: Context, sha256: String): GifLibEntry? =
         entries(context).firstOrNull { it.sha256 == sha256 }
 

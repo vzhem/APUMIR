@@ -207,6 +207,8 @@ fun GroupChatScreen(
                 showGifCatalog = false
                 viewModel.sendSticker(it)
             },
+            onRemoveSticker = { viewModel.removeSticker(it) },
+            onRemoveGif = { viewModel.removeOwnGif(it.sha256) },
             onAddSticker = { uri -> viewModel.addSticker(uri) },
             onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
             onRequestSwarmSticker = { swarm -> viewModel.requestSwarmSticker(swarm) },
