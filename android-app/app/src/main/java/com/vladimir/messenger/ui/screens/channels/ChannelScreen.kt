@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -308,6 +310,7 @@ fun ChannelScreen(
                                 post = post,
                                 canEdit = myId.isNotBlank() &&
                                     (post.authorId == myId || uiState.channel?.ownerId == myId),
+                                onTogglePin = { viewModel.togglePostPin(post) },
                                 onEdit = { editingPost = post },
                                 onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
                                 onSaveToFavorites = { viewModel.savePostToFavorites(post) },
@@ -422,6 +425,8 @@ private fun PostCard(
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к посту (рой, этап 10); null - файла нет. */
     fileCard: FileCardState? = null,
+    /** Раунд 173: закрепить/открепить пост. */
+    onTogglePin: () -> Unit = {},
 ) {
     var showReactions by remember { mutableStateOf(false) }
     // Подпись «📎 имя (размер)» - для старых версий; здесь её заменяет карточка.
@@ -472,7 +477,7 @@ private fun PostCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     // Раунд 173: закрепить/открепить пост канала.
-                    IconButton(onClick = { viewModel.togglePostPin(post) }, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
                         Icon(
                             androidx.compose.material.icons.Icons.Filled.PushPin,
                             contentDescription = if (post.isPinned) "Открепить" else "Закрепить",
