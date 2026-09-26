@@ -9,7 +9,6 @@ package com.vladimir.messenger.util
 // с предзаполненным узлом - тот же механизм, что у ссылок из «Контактов».
 // =============================================================================
 
-import com.vladimir.messenger.data.group.ApuLink
 import com.vladimir.messenger.data.repository.ChatRepository
 
 /** Распознанная карточка контакта внутри сообщения-приглашения. */
