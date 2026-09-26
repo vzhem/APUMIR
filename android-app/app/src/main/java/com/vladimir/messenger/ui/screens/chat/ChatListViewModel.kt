@@ -578,11 +578,16 @@ class ChatListViewModel @Inject constructor(
                     sharedUsername = "",
                 )
             }.getOrDefault(false)
-            android.widget.Toast.makeText(
-                appContext,
-                if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт",
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
+            // Раунд 181: Toast только с главного потока - из фонового
+            // приложение падало сразу после отправки (в «Контактах»
+            // подтверждение идёт через StateFlow и потому не падало).
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    appContext,
+                    if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
         }
     }
 

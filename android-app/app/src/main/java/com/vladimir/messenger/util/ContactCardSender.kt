@@ -26,9 +26,12 @@ object ContactCardSender {
      * не менялся.
      */
     fun parseCard(content: String): ContactInviteCard? {
-        if (!content.startsWith("Contact \u00ab")) return null
-        val name = content.substringAfter("Contact \u00ab", "").substringBefore("\u00bb").trim()
-        if (name.isEmpty() || !content.contains(" in APU")) return null
+        // Раунд 181: отправитель пишет по-русски («Контакт «Имя» в APU»),
+        // а парсер ждал английское «Contact» - карточка не узнавалась,
+        // получатель видел сырой текст с некликабельной ссылкой.
+        if (!content.startsWith("Контакт \u00ab") && !content.startsWith("Contact \u00ab")) return null
+        val name = content.substringAfter("\u00ab", "").substringBefore("\u00bb").trim()
+        if (name.isEmpty() || (!content.contains(" в APU") && !content.contains(" in APU"))) return null
         val link = content.lineSequence()
             .map { it.trim() }
             .lastOrNull { it.startsWith(ApuLink.SCHEME + "://") || it.startsWith("p2pmessenger://") }
