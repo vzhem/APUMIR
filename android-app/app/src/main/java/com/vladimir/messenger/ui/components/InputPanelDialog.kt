@@ -581,6 +581,7 @@ private fun StickerSection(
 }
 
 /** Стикеры одного пака в сетке. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun androidx.compose.foundation.lazy.grid.LazyGridScope.rowStickers(
     entries: List<StickerLibrary.StickerEntry>,
     prefix: String,

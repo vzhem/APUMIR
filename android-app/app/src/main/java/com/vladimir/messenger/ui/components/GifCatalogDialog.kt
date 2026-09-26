@@ -127,6 +127,7 @@ fun GifCatalogDialog(
  * диалога и из единой панели ввода.
  */
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 fun GifCatalogBody(
     myGifs: List<GifLibEntry>,
     swarmGifs: List<SwarmGif>,
