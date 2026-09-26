@@ -17,6 +17,10 @@ class NetworkChangeReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "NetworkChange"
+        private const val PREFS_NAME = "apu_network_rx"
+
+        /** Не чаще раза в 10 секунд - шторм смен сети гасим. */
+        private const val DEBOUNCE_MS = 10_000L
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -62,11 +66,4 @@ class NetworkChangeReceiver : BroadcastReceiver() {
         }.start()
     }
 
-    companion object {
-        private const val TAG = "NetworkChange"
-        private const val PREFS_NAME = "apu_network_rx"
-
-        /** Не чаще раза в 10 секунд - шторм смен сети гасим. */
-        private const val DEBOUNCE_MS = 10_000L
-    }
 }
