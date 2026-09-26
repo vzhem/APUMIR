@@ -1026,6 +1026,9 @@ class CoreServerService : Service() {
         // immediately; this cadence must not throttle an active transfer.
         filePumpJob = serviceScope.launch {
             kotlinx.coroutines.delay(INITIAL_FILE_PUMP_DELAY_MS)
+            // Раунд 179: счётчик циклов - очередь сообщений сливаем раз в
+            // минуту (3 цикла по 20 с), независимо от presence-пульсов.
+            var chatQueueCycle = 0
             while (isActive) {
                 try {
                     fileTransferRouter.pumpOutgoing()
@@ -1058,6 +1061,17 @@ class CoreServerService : Service() {
                     groupRepository.pumpDeletions()
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group deletion pump error: ${ex.message}")
+                }
+                // Раунд 179: недоставленные сообщения (гифки-ссылки и текст
+                // QUEUED_OFFLINE) - сами доехут, когда адресат появится;
+                // пустая очередь стоит один дешёвый запрос.
+                chatQueueCycle++
+                if (chatQueueCycle % 3 == 0) {
+                    try {
+                        chatRepository.pumpQueuedOffline()
+                    } catch (ex: Exception) {
+                        Log.w(TAG, "Chat queue pump error: ${ex.message}")
+                    }
                 }
                 delay(FILE_PUMP_INTERVAL_MS)
             }

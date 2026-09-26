@@ -47,6 +47,10 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC")
     suspend fun getPendingOutgoingMessages(): List<MessageEntity>
 
+    /** Раунд 179: вся офлайн-очередь (любой чат) - для периодического слива. */
+    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE' ORDER BY timestamp ASC LIMIT :limit")
+    suspend fun getQueuedOfflineMessages(limit: Int): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentOutgoingMessagesForChat(chatId: String, limit: Int): List<MessageEntity>
 
