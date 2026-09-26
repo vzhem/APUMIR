@@ -249,13 +249,23 @@ Latest = **v11.74.71** (2026-09-26): удаление своего из роя
   ```powershell
   cd C:\APU-M8
   git fetch origin --tags --force
-  powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\make_update_patch.ps1 -FromTag v11.74.<старая> -ToTag v11.74.<новая> -Upload
+  git checkout -B arena/01a0b575-apumir origin/arena/01a0b575-apumir
+  dir tools\ci\make_update_patch.ps1
   ```
 
-  Все недостающие сразу (цикл 40..69 -> 70):
+  ВАЖНО: скрипта НЕТ на main (main - старая база без tools/ci) -
+  держать ПК на рабочей ветке (ошибка «параметр -File не существует»,
+  2026-09-26, дважды). Если dir не показал файл - ветка не та.
+  Несохранённые личные файлы спрятать заранее: git stash -u
+  (вернуть позже: git stash pop).
+
+  Один патч: powershell -NoProfile -ExecutionPolicy Bypass -File
+  tools\ci\make_update_patch.ps1 -FromTag v11.74.<старая> -ToTag v11.74.<новая> -Upload
+
+  Все недостающие сразу (цикл 40..70 -> 71):
 
   ```powershell
-  40..69 | ForEach-Object { powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\make_update_patch.ps1 -FromTag ("v11.74." + $_) -ToTag v11.74.70 -Upload }
+  40..70 | ForEach-Object { powershell -NoProfile -ExecutionPolicy Bypass -File tools\ci\make_update_patch.ps1 -FromTag ("v11.74." + $_) -ToTag v11.74.71 -Upload }
   ```
   (к .29 патч от .28 пока НЕ приложен). apk 40 369 350 Б, sha256
   `4acf7812…8c0a`, тег на `e1e9cec`.
