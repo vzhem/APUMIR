@@ -266,7 +266,15 @@ fun ChatListScreen(
                                             menuOpen = false
                                             showConnectDialog = true
                                         },
-                   а разделов: во всю ширину экрана и пролистывается
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    scrollBehavior = scrollBehavior,
+                )
+
+                // Полоска разделов: во всю ширину экрана и пролистывается
                 // пальцем вбок - разделов может стать больше, чем влезает.
                 ApuTabBar(
                     titles = uiState.sections.map { it.title },
@@ -387,6 +395,20 @@ fun ChatListScreen(
     var inviteApu by remember { mutableStateOf<InboxGroup?>(null) }
 
     // Как приглашать: QR при встрече или ссылка кому угодно.
+    // Раунд 175: «Поделиться контактом» - выбор адресата внутри APU.
+    shareCardFor?.let { shared ->
+        ShareContactChooserDialog(
+            sharedName = shared.contactName,
+            contacts = viewModel.contacts.collectAsStateWithLifecycle(initialValue = emptyList())
+                .value.filter { it.id != shared.contactId },
+            onDismiss = { shareCardFor = null },
+            onPick = { to ->
+                shareCardFor = null
+                viewModel.sendContactCard(to.id, to.displayName, shared.contactId, shared.contactName)
+            },
+        )
+    }
+
     inviteChoice?.let { group ->
         val what = if (group.isChannel) "канал" else "группу"
         AlertDialog(
@@ -1261,10 +1283,6 @@ private fun formatGroupTime(timestamp: Long): String {
 
 /**
  * За сколько строк до конца загруженного просить следующую страницу.
- * Запас нужен, чтобы список догрузился ДО того, как человек упрётся в конец.
- */
-private const val LOAD_MORE_THRESHOLD = 10
- сколько строк до конца загруженного просить следующую страницу.
  * Запас нужен, чтобы список догрузился ДО того, как человек упрётся в конец.
  */
 private const val LOAD_MORE_THRESHOLD = 10

@@ -4,6 +4,7 @@ import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -318,6 +319,19 @@ fun ContactsScreen(
         )
     }
 
+    // Раунд 175: выбор адресата внутри APU - выбранному уходит ссылка контакта.
+    shareTarget?.let { shared ->
+        ShareContactChooserDialog(
+            sharedName = shared.displayName,
+            contacts = viewModel.contacts.collectAsState().value.filter { it.id != shared.id },
+            onDismiss = { shareTarget = null },
+            onPick = { to ->
+                shareTarget = null
+                viewModel.sendContactCard(to.id, to.displayName, shared)
+            },
+        )
+    }
+
     // Короткий отчёт об отправке приглашения.
     val toast by viewModel.toast.collectAsState()
     LaunchedEffect(toast) {
@@ -433,19 +447,6 @@ private fun InviteToGroupsDialog(
                 TextButton(
                     onClick = { onShare(selected.toList()) },
                     enabled = selected.isNotEmpty(),
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Другим приложением")
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
-        },
-    )
-}
-,
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
