@@ -192,6 +192,12 @@ class ChatRepository @Inject constructor(
                 if (ok) {
                     messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
                     sent++
+                } else {
+                    // Раунд 182 (аудит-3): первая же неудача - скорее всего
+                    // адресат ещё недоступен, а попытка стоит до ~10 с.
+                    // Остаток очереди - следующая минута, вместо десятков
+                    // попыток подряд.
+                    break
                 }
             }
         } catch (e: Exception) {

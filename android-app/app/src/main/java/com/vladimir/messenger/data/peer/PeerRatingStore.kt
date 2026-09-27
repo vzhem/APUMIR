@@ -185,12 +185,21 @@ object PeerRatingStore {
     }
 
     /** Узел дал о себе знать. */
+    // Раунд 182 (аудит-3): наблюдение пишется в настройки ЦЕЛИКОМ
+    // (load+save всего JSON), а пульсы приходят каждые несколько секунд -
+    // получалась непрерывная запись на диск. Одного узла считаем не чаще
+    // раза в 30 с: рейтинг лишь грубая подсказка, точность не нужна.
+    private val lastSightingMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     fun recordSighting(
         context: Context,
         peerId: String,
         address: String? = null,
         nowMs: Long = System.currentTimeMillis(),
     ) {
+        val lastWritten = lastSightingMs[peerId] ?: 0L
+        if (nowMs - lastWritten < 30_000L) return
+        lastSightingMs[peerId] = nowMs
         update(context, peerId) { old ->
             val clean = address?.trim().orEmpty()
             old.copy(
