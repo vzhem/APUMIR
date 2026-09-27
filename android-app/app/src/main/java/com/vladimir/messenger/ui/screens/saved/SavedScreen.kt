@@ -226,9 +226,25 @@ fun SavedScreen(
                     val scope = rememberCoroutineScope()
                     val pinnedItems = uiState.items.filter { it.isPinned }
                     Box(modifier = Modifier.fillMaxSize()) {
+                    // Раунд 188: панель закрепа ПОСТОЯННО видна над списком -
+                    // раньше уезжала вместе с лентой (владелец: «закрепы всегда
+                    // видны в верхней части экрана»).
+                    Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+                        if (pinnedItems.isNotEmpty()) {
+                            SavedPinnedBar(
+                                pinned = pinnedItems,
+                                onTap = { id ->
+                                    val idx = uiState.items.indexOfFirst { it.id == id }
+                                    if (idx >= 0) scope.launch {
+                                        scrollState.animateScrollToItem(idx)
+                                    }
+                                },
+                                onUnpin = { viewModel.togglePin(it) },
+                            )
+                        }
                     LazyColumn(
                         state = scrollState,
-                        modifier = Modifier.fillMaxSize().padding(padding),
+                        modifier = Modifier.fillMaxWidth().weight(1f),
                         // Снизу больше места: круглая кнопка «+» висит поверх
                         // списка и накрывала «Поделиться» и текст у последней
                         // записи - как раньше в ленте канала.
@@ -240,21 +256,6 @@ fun SavedScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        if (pinnedItems.isNotEmpty()) {
-                            item(key = "pinned-bar") {
-                                SavedPinnedBar(
-                                    pinned = pinnedItems,
-                                    // +1: карточка закрепа сама занимает строку ленты.
-                                    onTap = { id ->
-                                        val idx = uiState.items.indexOfFirst { it.id == id }
-                                        if (idx >= 0) scope.launch {
-                                            scrollState.animateScrollToItem(idx + 1)
-                                        }
-                                    },
-                                    onUnpin = { viewModel.togglePin(it) },
-                                )
-                            }
-                        }
                         items(uiState.items, key = { it.id }) { item ->
                             SavedItemBubble(
                                 item = item,
@@ -270,6 +271,7 @@ fun SavedScreen(
                                 },
                             )
                         }
+                    }
                     }
                     ApuScrollbar(state = scrollState)
                     }
