@@ -469,7 +469,7 @@ class ChatDetailViewModel @Inject constructor(
                 if (result == null) {
                     state.copy(
                         gifLoading = false,
-                        gifError = "Каталог недоступен: сервер не отвечает или ключ GIF ещё не настроен",
+                        gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
                     )
                 } else {
                     val (items, next) = result

@@ -15,7 +15,9 @@ import android.media.MediaMetadataRetriever
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -210,8 +212,15 @@ fun StickerViewer(file: File?, onDismiss: () -> Unit) {
                 file = file,
                 contentDescription = "Стикер",
                 contentScale = ContentScale.Fit,
+                // Раунд 191: тап должен УВЕЛИЧИВАТЬ стикер. Раньше здесь был
+                // только sizeIn (потолок 320 dp), а Image сворачивался в
+                // натуральный размер кадра (~100 dp) - получалось «как в
+                // каталоге», меньше, чем в чате. Теперь задаём точный размер:
+                // почти вся ширина экрана (на планшете - до 480 dp).
                 modifier = Modifier
-                    .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp),
+                    .sizeIn(maxWidth = 480.dp, maxHeight = 480.dp)
+                    .fillMaxWidth(0.97f)
+                    .aspectRatio(1f),
             )
         }
     }
