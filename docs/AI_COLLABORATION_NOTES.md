@@ -9498,6 +9498,15 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-26 (раунд 184) - v11.74.81: аудит-5 (форматтеры времени).**
+  SimpleDateFormat+Calendar создавались заново при каждой перерисовке
+  каждого пузыря/строки (MessageBubble, ContactCard, ChatListScreen
+  formatGroupTime, GroupChatScreen topicTimeLabel). Фикс: remember(ts,
+  час/3_600_000) на месте вызова - считается раз, обновляется максимум
+  через час («Вчера» -> дата). Каналы уже были с remember; списки -
+  buildState в фоне, не тронуты. check138 success; v11.74.81 = 77aa279,
+  run 36303537180, APK 40 582 294, digest f6d87e45…0bf, latest.
+
 - **2026-09-26 (раунд 183) - v11.74.80: аудит-4 (логи).**
   Отладочные логи на горячих путях погейчены за BuildConfig.DEBUG:
   (1) sendMessage «ROUTING DEBUG» - 7 строк/сообщение -> компакт,
