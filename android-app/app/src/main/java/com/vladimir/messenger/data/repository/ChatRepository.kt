@@ -87,12 +87,6 @@ class ChatRepository @Inject constructor(
             val chat = chatDao.getChatById(chatId)
             val rawId = if (recipientId.isBlank()) chat?.contactId ?: "" else recipientId
             
-            Log.i(TAG, "📨 ROUTING DEBUG:")
-            Log.i(TAG, "  chatId=$chatId")
-            Log.i(TAG, "  input recipientId='$recipientId'")
-            Log.i(TAG, "  chat.contactId='${chat?.contactId}'")
-            Log.i(TAG, "  chat.contactName='${chat?.contactName}'")
-            Log.i(TAG, "  rawId='$rawId'")
             
             val actualRecipientId = when {
                 rawId.startsWith("pk_") -> rawId
@@ -100,7 +94,12 @@ class ChatRepository @Inject constructor(
                 else -> rawId
             }
             
-            Log.i(TAG, "  actualRecipientId='$actualRecipientId'")
+            // Раунд 183 (аудит-4): отладочная роспись на КАЖДОЕ отправленное
+            // сообщение - только в debug-сборке (в release строковые склейки
+            // и logcat на каждое сообщение были лишними).
+            if (com.vladimir.messenger.BuildConfig.DEBUG) {
+                Log.i(TAG, "📨 ROUTING: chatId=$chatId '$recipientId' -> '$actualRecipientId'")
+            }
 
             // ШАГ 2: Создать entity с recipientId
             val entity = MessageEntity(

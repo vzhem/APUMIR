@@ -208,10 +208,14 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             getMessagesUseCase(chatId)
                 .collect { messages ->
-                    android.util.Log.i("ChatDetailVM", "📥 Received ${messages.size} messages for chatId=$chatId")
-                    // Показать последние 5 сообщений
-                    messages.takeLast(5).forEach { msg ->
-                        android.util.Log.i("ChatDetailVM", "  🔹 msg: id=${msg.id.take(8)} isFromMe=${msg.isFromMe} status=${msg.status} content=${msg.content.take(20)}")
+                    // Раунд 183 (аудит-4): дамп последних сообщений на КАЖДУЮ
+                    // эмиссию Room - только в debug-сборке: строковые склейки
+                    // и logcat гнали диск/ЦП зря при каждом обновлении чата.
+                    if (com.vladimir.messenger.BuildConfig.DEBUG) {
+                        android.util.Log.i("ChatDetailVM", "📥 Received ${messages.size} messages for chatId=$chatId")
+                        messages.takeLast(5).forEach { msg ->
+                            android.util.Log.i("ChatDetailVM", "  🔹 msg: id=${msg.id.take(8)} isFromMe=${msg.isFromMe} status=${msg.status} content=${msg.content.take(20)}")
+                        }
                     }
                     val wasEmpty = _uiState.value.messages.isEmpty()
                     _uiState.update { state ->
