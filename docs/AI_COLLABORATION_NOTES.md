@@ -9498,6 +9498,15 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-26 (раунд 189) - v11.74.85: карточки приглашений в
+  группы/каналы.** GroupInviteCardSender (build+parseCard; понимает
+  новый текст, AppShare «Присоединяйся...» и старый «Приглашение в...»);
+  sendGroupInviteToChats шлёт карточку с about из GroupEntity;
+  MessageBubble.GroupInviteCardView («Вступить»/«Подписаться»);
+  ChatDetailViewModel +GroupRepository, joinByInviteLink (expandLink ->
+  joinByLink, статусы в Toast). check142 success; v11.74.85 = acb712d,
+  run 36324681892, APK 40 582 290, digest f73bfd97…a5c, latest.
+
 - **2026-09-26 (раунд 188) - v11.74.84: панель закрепа всегда сверху.**
   Владелец: «закрепы всегда видны в верхней части экрана». SavedPinnedBar
   из строки ленты -> фиксированный Column над LazyColumn (лента
