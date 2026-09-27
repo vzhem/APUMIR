@@ -13,6 +13,8 @@ package com.vladimir.messenger.ui.screens.saved
 
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -40,6 +42,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -218,6 +222,9 @@ fun SavedScreen(
                 else -> {
                     // Бегунок справа: видно, где мы в длинном списке.
                     val scrollState = rememberLazyListState()
+                    // Раунд 187: закреплённое - карточкой над списком.
+                    val scope = rememberCoroutineScope()
+                    val pinnedItems = uiState.items.filter { it.isPinned }
                     Box(modifier = Modifier.fillMaxSize()) {
                     LazyColumn(
                         state = scrollState,
@@ -233,6 +240,21 @@ fun SavedScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
+                        if (pinnedItems.isNotEmpty()) {
+                            item(key = "pinned-bar") {
+                                SavedPinnedBar(
+                                    pinned = pinnedItems,
+                                    // +1: карточка закрепа сама занимает строку ленты.
+                                    onTap = { id ->
+                                        val idx = uiState.items.indexOfFirst { it.id == id }
+                                        if (idx >= 0) scope.launch {
+                                            scrollState.animateScrollToItem(idx + 1)
+                                        }
+                                    },
+                                    onUnpin = { viewModel.togglePin(it) },
+                                )
+                            }
+                        }
                         items(uiState.items, key = { it.id }) { item ->
                             SavedItemBubble(
                                 item = item,
@@ -240,6 +262,7 @@ fun SavedScreen(
                                 onShare = { viewModel.share(item) },
                                 onExport = { viewModel.requestExport(item) },
                                 onDelete = { confirmDelete = item },
+                                onTogglePin = { viewModel.togglePin(item) },
                                 onOpenOrigin = if (item.originId.isNotBlank()) {
                                     { onOpenOrigin(item) }
                                 } else {
@@ -457,6 +480,8 @@ private fun SavedItemBubble(
     onDelete: () -> Unit,
     /** Есть куда вернуться - показываем «Перейти к оригиналу». */
     onOpenOrigin: (() -> Unit)? = null,
+    /** Раунд 187: закрепить/открепить запись. */
+    onTogglePin: () -> Unit = {},
 ) {
     val time = remember(item.savedAtMs) {
         SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.savedAtMs))
@@ -642,6 +667,16 @@ private fun SavedItemBubble(
                     )
                 }
             }
+            // Раунд 187: закрепить/открепить; золотая булавка = закреплено.
+            IconButton(onClick = onTogglePin, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    Icons.Default.PushPin,
+                    contentDescription = if (item.isPinned) "Открепить" else "Закрепить",
+                    modifier = Modifier.size(18.dp),
+                    tint = if (item.isPinned) MaterialTheme.colorScheme.primary
+                           else ApuBubbleMutedColor,
+                )
+            }
             IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
                 Icon(
                     Icons.Default.Delete,
@@ -709,5 +744,66 @@ private fun SavedAddBubble(
         contentAlignment = Alignment.Center,
     ) {
         Text(label, fontWeight = FontWeight.Bold, color = Color.White)
+    }
+}
+
+/**
+ * Раунд 187: карточка закреплённого над списком «Избранного».
+ * Тап по строке - лента прыгает к записи; крестик - открепить.
+ */
+@Composable
+private fun SavedPinnedBar(
+    pinned: List<SavedItemEntity>,
+    onTap: (String) -> Unit,
+    onUnpin: (SavedItemEntity) -> Unit,
+) {
+    if (pinned.isEmpty()) return
+    ApuBubble(modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Default.PushPin,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "Закреплённое",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        pinned.forEach { item ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onTap(item.id) }
+                    .padding(vertical = 6.dp),
+            ) {
+                Text(
+                    text = if (item.kind == SavedItemsRepository.KIND_FILE) {
+                        item.fileName.ifBlank { "Файл" }
+                    } else {
+                        item.text.replace("\n", " ").take(80)
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onUnpin(item) }, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Открепить",
+                        modifier = Modifier.size(16.dp),
+                        tint = ApuBubbleMutedColor,
+                    )
+                }
+            }
+        }
     }
 }

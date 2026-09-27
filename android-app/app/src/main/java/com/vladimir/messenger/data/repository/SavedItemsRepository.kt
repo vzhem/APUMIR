@@ -117,6 +117,13 @@ class SavedItemsRepository @Inject constructor(
 
     suspend fun delete(id: String) = dao.delete(id)
 
+    /**
+     * Раунд 187: закрепить/открепить запись «Избранного». pinnedAtMs -
+     * порядок среди закреплённых (позже закрепил - выше).
+     */
+    suspend fun setPinned(id: String, pinned: Boolean) =
+        dao.setPinned(id, pinned, if (pinned) System.currentTimeMillis() else 0L)
+
     /** Запись по id (чтобы при удалении подчистить свой локальный файл). */
     suspend fun get(id: String): SavedItemEntity? = dao.get(id)
 

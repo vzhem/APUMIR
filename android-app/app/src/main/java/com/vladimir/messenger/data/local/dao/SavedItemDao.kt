@@ -22,6 +22,10 @@ interface SavedItemDao {
     @Query("DELETE FROM saved_items WHERE id = :id")
     suspend fun delete(id: String)
 
+    /** Раунд 187: закрепление записи; pinnedAtMs - порядок среди закреплённых. */
+    @Query("UPDATE saved_items SET isPinned = :pinned, pinnedAtMs = :atMs WHERE id = :id")
+    suspend fun setPinned(id: String, pinned: Boolean, atMs: Long)
+
     /** Уже сохранён этот файл? Чтобы не плодить дубли при повторной пересылке. */
     @Query("SELECT * FROM saved_items WHERE transferId = :transferId LIMIT 1")
     suspend fun byTransfer(transferId: String): SavedItemEntity?

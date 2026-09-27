@@ -51,8 +51,21 @@ class SavedViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.observeAll().collect { items ->
-                _uiState.update { it.copy(items = items, isLoading = false) }
+                // Раунд 187: закреплённое всегда сверху; среди закреплённых -
+                // по времени закрепления, остальные - по времени сохранения.
+                val sorted = items.sortedWith(
+                    compareByDescending<SavedItemEntity> { it.isPinned }
+                        .thenByDescending { if (it.isPinned) it.pinnedAtMs else it.savedAtMs },
+                )
+                _uiState.update { it.copy(items = sorted, isLoading = false) }
             }
+        }
+    }
+
+    /** Раунд 187: закрепить/открепить запись - закреплённое всегда сверху. */
+    fun togglePin(item: SavedItemEntity) {
+        viewModelScope.launch {
+            runCatching { repository.setPinned(item.id, !item.isPinned) }
         }
     }
 

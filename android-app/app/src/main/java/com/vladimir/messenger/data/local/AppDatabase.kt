@@ -48,7 +48,7 @@ import com.vladimir.messenger.data.local.dao.PostSignerDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 20
+const val APP_DATABASE_VERSION = 21
 
 @Database(
     entities = [
@@ -441,6 +441,18 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "ALTER TABLE `file_transfers` ADD COLUMN `custodianNodeId` TEXT NOT NULL DEFAULT ''"
+                )
+            }
+        }
+
+        /** Раунд 187: закрепы в «Избранном» - честная миграция, данные целы. */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `saved_items` ADD COLUMN `isPinned` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE `saved_items` ADD COLUMN `pinnedAtMs` INTEGER NOT NULL DEFAULT 0"
                 )
             }
         }
