@@ -184,7 +184,12 @@ fun MessageBubble(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     Text(
-                        text = formatMessageTime(message.timestamp),
+                        // Раунд 184 (аудит-5): SimpleDateFormat+Calendar создавались
+                        // заново на каждую перерисовку каждого пузыря. remember
+                        // кэширует результат; часовой маркер - «Вчера» обновится.
+                        text = remember(message.timestamp, System.currentTimeMillis() / 3_600_000L) {
+                            formatMessageTime(message.timestamp)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isOwn) messenger.messageBubbleOwnText.copy(alpha = 0.7f)
                                 else messenger.messageBubbleOtherText.copy(alpha = 0.6f),

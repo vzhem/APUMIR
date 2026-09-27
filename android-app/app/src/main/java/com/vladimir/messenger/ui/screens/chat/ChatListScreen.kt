@@ -1244,7 +1244,11 @@ private fun GroupCard(
         Column(horizontalAlignment = Alignment.End) {
             if (group.timeMs != null) {
                 Text(
-                        text = formatGroupTime(group.timeMs),
+                        // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
+                        // на каждую перерисовку строки группы.
+                        text = remember(group.timeMs, System.currentTimeMillis() / 3_600_000L) {
+                            formatGroupTime(group.timeMs)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF5A6472),
                 )

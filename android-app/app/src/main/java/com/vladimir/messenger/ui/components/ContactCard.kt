@@ -188,7 +188,11 @@ fun ContactCard(
             // Время последнего сообщения
             if (chat.lastMessageTime != null) {
                 Text(
-                    text  = formatChatTime(chat.lastMessageTime),
+                    // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
+                    // на каждую перерисовку строки списка.
+                    text  = remember(chat.lastMessageTime, System.currentTimeMillis() / 3_600_000L) {
+                        formatChatTime(chat.lastMessageTime)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (chat.unreadCount > 0)
                         MaterialTheme.colorScheme.primary

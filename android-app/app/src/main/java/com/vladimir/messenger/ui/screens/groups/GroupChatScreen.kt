@@ -1285,7 +1285,11 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    topicTimeLabel(topic.lastMessageAtMs),
+                    // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
+                    // на каждую перерисовку строки темы.
+                    remember(topic.lastMessageAtMs, System.currentTimeMillis() / 3_600_000L) {
+                        topicTimeLabel(topic.lastMessageAtMs)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF5A6472),
                 )
