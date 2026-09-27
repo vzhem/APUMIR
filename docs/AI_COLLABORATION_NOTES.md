@@ -9506,6 +9506,9 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   ChatDetailViewModel +GroupRepository, joinByInviteLink (expandLink ->
   joinByLink, статусы в Toast). check142 success; v11.74.85 = acb712d,
   run 36324681892, APK 40 582 290, digest f73bfd97…a5c, latest.
+  ПК-патчи владельца (self-check ok, загружены на релизы): 82 -> 83,
+  83 -> 84 (14 731 KB) и 84 -> 85 (14 736 KB, reused 6168/raw 3740,
+  sha совпал с digest); ДЫРА 72 -> 73 остаётся (фолбэк - целый APK).
 
 - **2026-09-26 (раунд 188) - v11.74.84: панель закрепа всегда сверху.**
   Владелец: «закрепы всегда видны в верхней части экрана». SavedPinnedBar
