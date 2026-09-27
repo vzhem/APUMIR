@@ -74,6 +74,15 @@ fun ChatDetailScreen(
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // Раунд 189: результат «Вступить/Подписаться» - всплывающей подсказкой.
+    val inviteStatus by viewModel.inviteStatus.collectAsStateWithLifecycle()
+    val toastContext = LocalContext.current
+    LaunchedEffect(inviteStatus) {
+        inviteStatus?.let {
+            android.widget.Toast.makeText(toastContext, it, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.consumeInviteStatus()
+        }
+    }
     val listState = rememberLazyListState()
     var activeMessage by remember { mutableStateOf<Message?>(null) }
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
@@ -556,6 +565,7 @@ fun ChatDetailScreen(
                                     isSelected = activeMessage?.id == message.id,
                                     linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
                                     onContactInvite = onAddContactInvite,
+                                    onGroupInvite = { viewModel.joinByInviteLink(it) },
                                     // Одно нажатие - сразу пузырь с реакциями:
                                     // владелец просил ставить их в один тап.
                                     // Остальные действия - долгое нажатие.

@@ -74,6 +74,7 @@ class ChatDetailViewModel @Inject constructor(
     private val fileTransferRouter: FileTransferRouter,
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
+    private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
@@ -197,6 +198,42 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     /** Раунд 173: закрепить/открепить сообщение личного чата. */
+    /** Статус вступления по карточке приглашения (для всплывающей подсказки). */
+    private val _inviteStatus = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val inviteStatus: kotlinx.coroutines.flow.StateFlow<String?> = _inviteStatus.asStateFlow()
+    fun consumeInviteStatus() { _inviteStatus.value = null }
+
+    /**
+     * Раунд 189: тап «Вступить»/«Подписаться» на карточке приглашения -
+     * та же механика, что у ссылок сообществ: короткая https-ссылка
+     * раскрывается сервисом, дальше заявка или вход.
+     */
+    fun joinByInviteLink(link: String) {
+        if (link.isBlank()) return
+        viewModelScope.launch {
+            val expanded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { groupRepository.expandLink(link) }.getOrNull()
+            }
+            if (expanded == null) {
+                _inviteStatus.value = "Нет связи с сервисом APU - попробуйте позже"
+                return@launch
+            }
+            val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { groupRepository.joinByLink(expanded) }.getOrNull()
+            }
+            _inviteStatus.value = when (outcome) {
+                is com.vladimir.messenger.data.group.JoinOutcome.Joined ->
+                    if (outcome.isChannel) "Вы подписались: " + outcome.title
+                    else "Вы вступили: " + outcome.title
+                is com.vladimir.messenger.data.group.JoinOutcome.RequestSent ->
+                    "Заявка отправлена: " + outcome.title
+                is com.vladimir.messenger.data.group.JoinOutcome.Failed ->
+                    "Не удалось войти: " + outcome.reason
+                null -> "Не удалось войти - попробуйте позже"
+            }
+        }
+    }
+
     fun togglePin(messageId: String, pinned: Boolean) {
         viewModelScope.launch {
             runCatching { chatRepository.setMessagePinned(messageId, pinned) }

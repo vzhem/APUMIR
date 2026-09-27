@@ -616,7 +616,19 @@ class ChatListViewModel @Inject constructor(
                     failed++
                     continue
                 }
-                val body = "Приглашение в $what «$title»:\n$link"
+                // Раунд 189: приглашение КАРТОЧКОЙ - заголовок, описание,
+                // ссылка; получатель увидит пузырь «Вступить»/«Подписаться».
+                val group = runCatching { groupDao.getGroupById(groupId) }.getOrNull()
+                val body = if (group != null) {
+                    com.vladimir.messenger.util.GroupInviteCardSender.build(
+                        isChannel = group.isChannel,
+                        title = title,
+                        about = group.about,
+                        link = link,
+                    )
+                } else {
+                    "Приглашение в $what «$title»:\n$link"
+                }
                 val result = chatRepository.sendMessage(chatId, chat.contactId, body)
                 if (result.isSuccess) sent++ else failed++
             }

@@ -61,6 +61,8 @@ fun MessageBubble(
     onLongClick: (() -> Unit)? = null,
     /** Раунд 176: тап по «Добавить контакт» в карточке-приглашении. */
     onContactInvite: ((inviteLink: String) -> Unit)? = null,
+    /** Раунд 189: тап по «Вступить»/«Подписаться» в карточке группы/канала. */
+    onGroupInvite: ((link: String) -> Unit)? = null,
 ) {
     val isOwn = message.isFromMe
     val context = LocalContext.current
@@ -101,11 +103,22 @@ fun MessageBubble(
                     com.vladimir.messenger.util.ContactCardSender.parseCard(message.content)
                 }
 
+                // Раунд 189: приглашение в группу/канал - тоже карточкой.
+                val groupCard = remember(message.content) {
+                    com.vladimir.messenger.util.GroupInviteCardSender.parseCard(message.content)
+                }
+
                 if (inviteCard != null && onContactInvite != null) {
                     ContactInviteCardView(
                         card = inviteCard,
                         textColor = textColor,
                         onAdd = { onContactInvite(inviteCard.inviteLink) },
+                    )
+                } else if (groupCard != null && onGroupInvite != null) {
+                    GroupInviteCardView(
+                        card = groupCard,
+                        textColor = textColor,
+                        onJoin = { onGroupInvite(groupCard.link) },
                     )
                 } else if (imageUrl != null) {
                     ImagePreview(
@@ -305,6 +318,48 @@ private fun ContactInviteCardView(
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text("Добавить контакт")
+        }
+    }
+}
+
+
+/**
+ * Раунд 189: карточка приглашения в группу/канал: название жирным,
+ * описание ниже, золотой пузырь «Вступить»/«Подписаться».
+ */
+@Composable
+private fun GroupInviteCardView(
+    card: com.vladimir.messenger.util.GroupInviteCard,
+    textColor: Color,
+    onJoin: () -> Unit,
+) {
+    Column {
+        Text(
+            text = card.title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+        )
+        if (card.about.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = card.about,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor.copy(alpha = 0.75f),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onJoin,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (card.isChannel) "Подписаться" else "Вступить")
         }
     }
 }
