@@ -9498,6 +9498,16 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-26 (раунд 187) - v11.74.83: закрепы в «Избранном»
+  (миграция v20->21).** Последняя точка «закрепы везде» (р173).
+  SavedItemEntity +isPinned/+pinnedAtMs; MIGRATION_20_21 = честный
+  ALTER TABLE, зарегистрирован до fallbackToDestructive (данные
+  телефонов целы); DAO setPinned; VM сортировка (закреп сверху, среди
+  закрепов - pinnedAtMs); UI: булавка на записи (золотая=закреплён),
+  SavedPinnedBar над списком (тап -> scroll idx+1, крестик -> откреп).
+  check140 success; v11.74.83 = edb275e, run 36311239915, APK
+  40 582 290, digest 17bc449d…d15, latest. «Закрепы везде» ЗАКРЫТО.
+
 - **2026-09-26 (раунд 186) - v11.74.82: аудит-6.**
   (1) PeerRatingStore: полная запись рейтинга 30 с -> 3 мин
   (SIGHTING_WRITE_INTERVAL_MS); при 20 узлах было до 40 перезаписей
