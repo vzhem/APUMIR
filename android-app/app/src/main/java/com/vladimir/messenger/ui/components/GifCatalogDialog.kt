@@ -83,6 +83,8 @@ fun GifCatalogDialog(
     next: String,
     loading: Boolean,
     error: String?,
+    /** Раунд 192: мягкое сообщение (сохранённое при перегрузке сервера). */
+    notice: String? = null,
     onSearch: (String) -> Unit,
     onMore: () -> Unit,
     onAttach: (GifItem) -> Unit,
@@ -106,6 +108,7 @@ fun GifCatalogDialog(
                 next = next,
                 loading = loading,
                 error = error,
+                notice = notice,
                 onSearch = onSearch,
                 onMore = onMore,
                 onAttach = onAttach,
@@ -136,6 +139,8 @@ fun GifCatalogBody(
     next: String,
     loading: Boolean,
     error: String?,
+    /** Раунд 192: мягкое сообщение (сохранённое при перегрузке сервера). */
+    notice: String? = null,
     onSearch: (String) -> Unit,
     onMore: () -> Unit,
     onAttach: (GifItem) -> Unit,
@@ -261,6 +266,16 @@ fun GifCatalogBody(
                 color = MaterialTheme.colorScheme.error,
             )
         } else {
+            if (notice != null) {
+                Text(
+                    notice,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                )
+            }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 modifier = Modifier

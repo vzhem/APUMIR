@@ -53,6 +53,8 @@ data class ChatDetailUiState(
     val gifNext: String = "",
     val gifLoading: Boolean = false,
     val gifError: String? = null,
+    /** Раунд 192: мягкая плашка, когда показываем сохранённые результаты. */
+    val gifNotice: String? = null,
     /** Раунд 121: свой каталог роя. tab: "swarm" | "external". */
     val gifTab: String = "swarm",
     val myGifs: List<com.vladimir.messenger.data.gif.GifLibEntry> = emptyList(),
@@ -465,12 +467,40 @@ class ChatDetailViewModel @Inject constructor(
         }
         viewModelScope.launch {
             val result = runCatching { botApi.gifSearch(query, pos) }.getOrNull()
+            // Раунд 192: успех первой страницы - в кэш (файл), чтобы при
+            // недоступном сервере каталог продолжал работать сохранённым.
+            if (result != null && !more) {
+                com.vladimir.messenger.data.gif.GifSearchCache.save(
+                    appContext, query, result.first, result.second,
+                )
+            }
             _uiState.update { state ->
                 if (result == null) {
-                    state.copy(
-                        gifLoading = false,
-                        gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
-                    )
+                    // Сервер недоступен (лимит/сеть): показываем сохранённое.
+                    val cached = if (more) null
+                    else runCatching {
+                        com.vladimir.messenger.data.gif.GifSearchCache.load(appContext, query)
+                    }.getOrNull()
+                    when {
+                        cached != null -> state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
+                                "Скачать и отправить можно как обычно",
+                            gifItems = cached.first,
+                            gifNext = "",
+                        )
+                        more -> state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNext = "",
+                        )
+                        else -> state.copy(
+                            gifLoading = false,
+                            gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
+                        )
+                    }
                 } else {
                     val (items, next) = result
                     if (items.isEmpty() && state.gifItems.isEmpty()) {
@@ -479,6 +509,7 @@ class ChatDetailViewModel @Inject constructor(
                         state.copy(
                             gifLoading = false,
                             gifError = null,
+                            gifNotice = null,
                             gifItems = (state.gifItems + items).distinctBy { it.id },
                             gifNext = next,
                         )
@@ -489,7 +520,7 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     fun closeGifCatalog() {
-        _uiState.update { it.copy(gifItems = emptyList(), gifNext = "", gifError = null) }
+        _uiState.update { it.copy(gifItems = emptyList(), gifNext = "", gifError = null, gifNotice = null) }
     }
 
     // ── Свой каталог роя (раунд 121) ────────────────────────────────────

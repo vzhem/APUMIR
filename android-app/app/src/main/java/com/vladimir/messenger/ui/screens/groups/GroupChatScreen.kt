@@ -184,6 +184,7 @@ fun GroupChatScreen(
             next = uiState.gifNext,
             loading = uiState.gifLoading,
             error = uiState.gifError,
+            notice = uiState.gifNotice,
             onSearch = { viewModel.searchGifs(it) },
             onMore = { viewModel.searchGifs("", more = true) },
             onAttach = { item ->

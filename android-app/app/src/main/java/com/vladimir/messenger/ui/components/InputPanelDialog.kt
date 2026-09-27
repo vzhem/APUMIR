@@ -93,6 +93,8 @@ fun InputPanelDialog(
     next: String,
     loading: Boolean,
     error: String?,
+    /** Раунд 192: мягкое сообщение (сохранённое при перегрузке сервера). */
+    notice: String? = null,
     onSearch: (String) -> Unit,
     onMore: () -> Unit,
     onAttach: (GifItem) -> Unit,
@@ -188,6 +190,7 @@ fun InputPanelDialog(
                         next = next,
                         loading = loading,
                         error = error,
+                        notice = notice,
                         onSearch = onSearch,
                         onMore = onMore,
                         onAttach = onAttach,
