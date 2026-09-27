@@ -157,6 +157,9 @@ object PeerRatingStore {
 
     private val lock = Any()
 
+    /** Раунд 186: полный load+save рейтинга - не чаще раза в 3 минуты на узел. */
+    private const val SIGHTING_WRITE_INTERVAL_MS = 180_000L
+
     /** Все наблюдения, отсортированные по рейтингу: лучший первым. */
     fun ranked(context: Context, nowMs: Long = System.currentTimeMillis()): List<PeerStats> =
         load(context).values.sortedWith(
@@ -187,8 +190,10 @@ object PeerRatingStore {
     /** Узел дал о себе знать. */
     // Раунд 182 (аудит-3): наблюдение пишется в настройки ЦЕЛИКОМ
     // (load+save всего JSON), а пульсы приходят каждые несколько секунд -
-    // получалась непрерывная запись на диск. Одного узла считаем не чаще
-    // раза в 30 с: рейтинг лишь грубая подсказка, точность не нужна.
+    // получалась непрерывная запись на диск.
+    // Раунд 186 (аудит-6): раз в 30 с на узел при оживлённой сети - это всё
+    // ещё десятки полных перезаписей в минуту; рейтинг - грубая подсказка
+    // «кому слать в первую очередь», 3 минуты для него достаточно.
     private val lastSightingMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     fun recordSighting(
@@ -198,7 +203,7 @@ object PeerRatingStore {
         nowMs: Long = System.currentTimeMillis(),
     ) {
         val lastWritten = lastSightingMs[peerId] ?: 0L
-        if (nowMs - lastWritten < 30_000L) return
+        if (nowMs - lastWritten < SIGHTING_WRITE_INTERVAL_MS) return
         lastSightingMs[peerId] = nowMs
         update(context, peerId) { old ->
             val clean = address?.trim().orEmpty()

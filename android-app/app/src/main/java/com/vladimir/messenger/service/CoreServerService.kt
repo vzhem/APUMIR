@@ -1444,7 +1444,11 @@ class CoreServerService : Service() {
                             Log.i(TAG, "🟢 ONLINE: $peerName")
                         }
                         if (lightTouch) return  // пульс учли, тяжёлую синхру не дёргаем
-                        Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
+                        // Раунд 186 (аудит-6): повторяется на каждый «тяжёлый»
+                        // пульс (раз в 30 с на узел) - в релизе не пишем.
+                        if (com.vladimir.messenger.BuildConfig.DEBUG) {
+                            Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
+                        }
                         // Настоящее имя из presence подменяет заглушку. Раньше
                         // условие требовало, чтобы старое имя начиналось с
                         // «Contact » ИЛИ было ровно «Anonymous», а имя из QR
@@ -1474,7 +1478,10 @@ class CoreServerService : Service() {
                             // копия имени. Дёшево и только при полном пульсе.
                             chatRepository.updateContactName(peerId, existing.displayName)
                         }
-                        Log.i(TAG, "✅ Обновлён существующий контакт: $peerName")
+                        // Раунд 186 (аудит-6): то же - только для отладки.
+                        if (com.vladimir.messenger.BuildConfig.DEBUG) {
+                            Log.i(TAG, "✅ Обновлён существующий контакт: $peerName")
+                        }
                         
                         // FULL SYNC только для существующих контактов
                         serviceScope.launch {
