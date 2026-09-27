@@ -215,6 +215,9 @@ class ApkSeeder @Inject constructor(
     @Volatile private var initDone = false
     @Volatile private var lastAnnounceAtMs = 0L
     @Volatile private var lastReceivedScanAtMs = 0L
+    // Раунд 193: авто-опрос соседей «есть что новее?» (upask) - рой сам
+    // узнаёт о версиях, даже когда relay-воркер недоступен (лимит облака).
+    @Volatile private var lastAutoAskAtMs = 0L
 
     /**
      * Скачался наш файл обновления (DownloadManager шлёт ACTION_DOWNLOAD_COMPLETE):
@@ -742,6 +745,29 @@ class ApkSeeder @Inject constructor(
         return targets.size
     }
 
+    /**
+     * Раунд 193: авто-опрос соседей «есть что-нибудь новее моей версии?» -
+     * то же, что кнопка «Проверить», но тихо и по расписанию: раз в 2 часа,
+     * пятерым известным узлам (веер ограничен - рой любого размера). Ответы -
+     * обычные `upk`, карточки в настройках появляются сами. Так рой узнаёт
+     * о релизах даже при недоступном relay-воркере; сайт остаётся
+     * ускорителем, а не источником истины.
+     */
+    private suspend fun askPeersPeriodically(now: Long) {
+        if (now - lastAutoAskAtMs < AUTO_ASK_INTERVAL_MS) return
+        if (pending != null || patchPending != null) return
+        if (_offers.value.isNotEmpty() || _patchOffers.value.isNotEmpty()) return
+        lastAutoAskAtMs = now
+        val version = ApkUpdate.normalize(currentAppVersion())
+        if (ApkUpdate.parseVersion(version) == null) return
+        val targets = knownNodes().take(AUTO_ASK_FANOUT)
+        if (targets.isEmpty()) return
+        runCatching {
+            delivery.deliver(ApkUpdate.CHAT_ID, GroupWire.buildUpdateAsk(version), targets)
+        }.onFailure { Log.w(TAG, "auto update ask failed: ${it.message}") }
+        Log.i(TAG, "auto update ask v$version -> ${targets.size} node(s)")
+    }
+
     /** Начать качать объявленную версию (карточка «Скачать»). */
     suspend fun requestUpdate(nodeId: String) {
         val offer = _offers.value.firstOrNull { it.nodeId == nodeId } ?: return
@@ -1021,6 +1047,7 @@ class ApkSeeder @Inject constructor(
         runCatching { ensureInit() }.onFailure { Log.w(TAG, "init failed: ${it.message}") }
         val now = System.currentTimeMillis()
         runCatching { reask(now) }.onFailure { Log.w(TAG, "reask failed: ${it.message}") }
+        runCatching { askPeersPeriodically(now) }.onFailure { Log.w(TAG, "auto ask failed: ${it.message}") }
         runCatching { refreshDownloadState() }.onFailure { Log.w(TAG, "download state failed: ${it.message}") }
         runCatching { refreshSeedState(now) }.onFailure { Log.w(TAG, "seed state failed: ${it.message}") }
         runCatching { sweepOffers(now) }.onFailure { Log.w(TAG, "sweep offers failed: ${it.message}") }
@@ -1657,6 +1684,9 @@ class ApkSeeder @Inject constructor(
 
         /** Объявление раздачи: не чаще раза в столько. */
         const val ANNOUNCE_INTERVAL_MS = 10L * 60 * 1000
+        /** Раунд 193: авто-upask - раз в 2 часа, пятерым соседям. */
+        private const val AUTO_ASK_INTERVAL_MS = 2L * 60 * 60 * 1000
+        private const val AUTO_ASK_FANOUT = 5
         /** Объявление соседа живёт столько, а потом тихо сгорает. */
         const val OFFER_TTL_MS = 3L * 24 * 60 * 60 * 1000
         /** Моя просьба живёт сутки (как у файлов групп). */
