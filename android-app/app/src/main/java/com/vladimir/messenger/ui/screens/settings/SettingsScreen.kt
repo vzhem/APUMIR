@@ -1029,7 +1029,9 @@ private fun SettingsTabContent(
                         SettingsItem(
                             icon     = Icons.Default.NetworkCheck,
                             title    = "Сообщения сети",
-                            subtitle = uiState.mqttLink,
+                            // Раунд 190: человекочитаемая строка; если разбор
+                            // не удался - сырая, как раньше.
+                            subtitle = uiState.mqttHuman.ifBlank { uiState.mqttLink },
                             onClick  = { showMqttDialog = true },
                         )
                     }
@@ -1089,27 +1091,34 @@ private fun SettingsTabContent(
     }
 
     if (showMqttDialog) {
-        val mqttText = buildString {
-            append(uiState.mqttLink)
-            append("\n\n")
-            append("tcp … — прямое соединение с брокером; ")
-            append("wss-мост — обход «жёсткой» сети через relay-домен, ")
-            append("включается сам, когда прямые брокеры недоступны.")
-            append("\n\n")
-            append("ConnAck N с назад — когда брокер последний раз ")
-            append("подтверждал связь. Если счётчик растёт вместе с ")
-            append("ошибками — этот путь сеть режет; приложение само ")
-            append("переберёт пути (прямой ↔ мост).")
-            append("\n\n")
-            append("ошибка … — последнее, что не получилось.")
+        // Раунд 190: диалог по-человечески. В «Скопировать» идёт и сырая
+        // строка ядра - по ней в чате разработки видно режим, ConnAck и
+        // точный текст ошибки.
+        val mqttHumanText = buildString {
+            if (uiState.mqttHuman.isNotBlank()) {
+                append(uiState.mqttHuman)
+                append("\n\n")
+                append("Путь выбирается сам: сначала прямой, если сеть его ")
+                append("не пропускает — через обходной канал, и потом обратно. ")
+                append("Нажимать ничего не нужно.")
+                if (uiState.mqttLink.contains(", ошибка ")) {
+                    append("\n\nПоследняя заминка — не страшно: приложение ")
+                    append("перебирает пути, пока не найдёт рабочий.")
+                }
+            } else {
+                append(uiState.mqttLink)
+            }
         }
         AlertDialog(
             onDismissRequest = { showMqttDialog = false },
             title = { Text("Сеть сообщений") },
-            text = { Text(mqttText) },
+            text = { Text(mqttHumanText) },
             confirmButton = {
                 TextButton(onClick = {
-                    mqttClipboard.setText(androidx.compose.ui.text.AnnotatedString(mqttText))
+                    val forDiagnostics = listOf(uiState.mqttHuman, uiState.mqttLink)
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n\n")
+                    mqttClipboard.setText(androidx.compose.ui.text.AnnotatedString(forDiagnostics))
                     showMqttDialog = false
                 }) { Text("Скопировать") }
             },
