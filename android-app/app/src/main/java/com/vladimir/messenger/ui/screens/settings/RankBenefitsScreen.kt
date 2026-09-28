@@ -59,6 +59,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
     // Счётчик обновляется после промокода: увеличиваем метку - и ранг с
     // числом друзей перечитываются из хранилища.
     var refresh by remember { mutableIntStateOf(0) }
+    var showInviteShare by remember { mutableStateOf(false) }
     val qualified = remember(refresh) { ReferralRankStore.qualifiedDirectCount(context) }
     val earned = remember(refresh) { ReferralRankStore.earnedDirectCount(context) }
     val promoBonus = remember(refresh) { PromoCodes.bonus(context) }
@@ -112,11 +113,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Button(
-                                onClick = {
-                                    OwnInvite.link(context)?.let { link ->
-                                        ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
-                                    }
-                                },
+                                onClick = { showInviteShare = true },
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
@@ -227,6 +224,22 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
             ApuScrollbar(state = scrollState)
         }
     }
+    }
+
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        com.vladimir.messenger.ui.components.InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                OwnInvite.link(context)?.let { link ->
+                    ShortShare.shareInvite(
+                        context, OwnInvite.displayName(context), link, attach,
+                    )
+                }
+            },
+        )
     }
 }
 

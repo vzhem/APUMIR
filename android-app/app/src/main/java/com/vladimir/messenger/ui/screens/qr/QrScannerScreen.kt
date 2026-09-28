@@ -240,6 +240,7 @@ private fun MyCodePane() {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
+    var showInviteShare by remember { mutableStateOf(false) }
 
     // Ссылка может быть ещё не готова на первом запуске (ключи создаются),
     // поэтому держим её отдельным nullable и разворачиваем один раз ниже.
@@ -319,7 +320,7 @@ private fun MyCodePane() {
                 Text(if (copied) "Скопировано" else "Копировать")
             }
             Button(
-                onClick = { ShortShare.shareInvite(context, displayName, link) },
+                onClick = { showInviteShare = true },
                 modifier = Modifier.weight(1f),
             ) {
                 Icon(Icons.Default.Share, contentDescription = null)
@@ -329,5 +330,17 @@ private fun MyCodePane() {
         }
 
         Spacer(Modifier.height(8.dp))
+    }
+
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        com.vladimir.messenger.ui.components.InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                ShortShare.shareInvite(context, displayName, link, attach)
+            },
+        )
     }
 }

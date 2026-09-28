@@ -68,6 +68,7 @@ fun ContactsScreen(
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
     // Контакт, которого приглашаем в группы: не null - открыт выбор групп.
     var inviteFor by remember { mutableStateOf<Contact?>(null) }
+    var showInviteShare by remember { mutableStateOf(false) }
     // Раунд 175: «Поделиться контактом» - сначала выбор пути (в APU / наружу).
     var shareTarget by remember { mutableStateOf<Contact?>(null) }
 
@@ -99,9 +100,7 @@ fun ContactsScreen(
                     // Пригласить друга — в один тап, прямо из списка контактов.
                     IconButton(
                         onClick = {
-                            OwnInvite.link(context)?.let { link ->
-                                ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
-                            }
+                            showInviteShare = true
                         },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = "Пригласить друга")
@@ -172,9 +171,7 @@ fun ContactsScreen(
                     // Пустой список - самое место, чтобы позвать первого друга.
                     OutlinedButton(
                         onClick = {
-                            OwnInvite.link(context)?.let { link ->
-                                ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
-                            }
+                            showInviteShare = true
                         },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null)
@@ -274,6 +271,22 @@ fun ContactsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = null }) { Text("Отмена") }
+            },
+        )
+    }
+
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        com.vladimir.messenger.ui.components.InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                OwnInvite.link(context)?.let { link ->
+                    ShortShare.shareInvite(
+                        context, OwnInvite.displayName(context), link, attach,
+                    )
+                }
             },
         )
     }

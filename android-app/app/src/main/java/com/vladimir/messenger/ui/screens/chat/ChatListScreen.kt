@@ -81,6 +81,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.link.ShortShare
+import com.vladimir.messenger.ui.components.InviteAttachDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,6 +122,9 @@ fun ChatListScreen(
     var confirmGroup by remember { mutableStateOf<InboxGroup?>(null) }
     // Как приглашать: QR при личной встрече или обычная ссылка.
     var inviteChoice by remember { mutableStateOf<InboxGroup?>(null) }
+    // Раунд 200: галочка «приложить APK» перед отправкой приглашения.
+    var showInviteShare by remember { mutableStateOf(false) }
+    var groupLinkShare by remember { mutableStateOf<InboxGroup?>(null) }
     // Раунд 175: «Поделиться контактом» из списка чатов - выбор адресата в APU.
     var shareCardFor by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -276,19 +280,7 @@ fun ChatListScreen(
                                         leadingIcon = { ShimmerIcon(Icons.Default.PersonAdd) },
                                         onClick = {
                                             menuOpen = false
-                                            val link = runCatching { OwnInvite.link(context) }.getOrNull()
-                                            if (link.isNullOrBlank()) {
-                                                android.widget.Toast.makeText(
-                                                    context, "Личность ещё не создана",
-                                                    android.widget.Toast.LENGTH_SHORT,
-                                                ).show()
-                                            } else {
-                                                ShortShare.shareInvite(
-                                                    context,
-                                                    OwnInvite.displayName(context),
-                                                    link,
-                                                )
-                                            }
+                                            showInviteShare = true
                                         },
                                     )
                                 }
@@ -460,11 +452,7 @@ fun ChatListScreen(
                     InviteActionBubble("Отправить ссылку", filled = true) {
                         val chosen = group
                         inviteChoice = null
-                        viewModel.shareGroupInvite(chosen.id) { title, link ->
-                            // Раунд 162: каналу - «канал», группе - «группа».
-                            com.vladimir.messenger.util.AppShare
-                                .shareGroupInvite(context, title, link, chosen.isChannel)
-                        }
+                        groupLinkShare = chosen
                     }
                     Spacer(Modifier.height(8.dp))
                     InviteActionBubble("Отправить в APU", filled = true) {
@@ -747,16 +735,57 @@ fun ChatListScreen(
     // раздел QR (значок в шапке) показывает свой код, копирует ссылку и
     // делится ею — одно место вместо трёх.
 
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                val link = runCatching { OwnInvite.link(context) }.getOrNull()
+                if (link.isNullOrBlank()) {
+                    android.widget.Toast.makeText(
+                        context, "Личность ещё не создана",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else {
+                    ShortShare.shareInvite(
+                        context,
+                        OwnInvite.displayName(context),
+                        link,
+                        attach,
+                    )
+                }
+            },
+        )
+    }
+    if (groupLinkShare != null) {
+        val chosenGroup = groupLinkShare!!
+        InviteAttachDialog(
+            title = if (chosenGroup.isChannel) "Пригласить в канал" else "Пригласить в группу",
+            onDismiss = { groupLinkShare = null },
+            onShare = { attach ->
+                groupLinkShare = null
+                viewModel.shareGroupInvite(chosenGroup.id) { title, link ->
+                    // Раунд 162: каналу - «канал», группе - «группа».
+                    com.vladimir.messenger.util.AppShare.shareGroupInvite(
+                        context, title, link, chosenGroup.isChannel, attach,
+                    )
+                }
+            },
+        )
+    }
+
     // Connect dialog
     if (showConnectDialog) {
         AlertDialog(
             onDismissRequest = { showConnectDialog = false },
-            title = { Text("одключиться по ссылке") },
+            title = { Text("Подключиться по ссылке") },
             text = {
                 OutlinedTextField(
                     value = connectLink,
                     onValueChange = { connectLink = it },
-                    label = { Text("ставьте ссылку p2pm://...") },
+                    label = { Text("Вставьте ссылку p2pm://...") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
@@ -773,7 +802,7 @@ fun ChatListScreen(
                         connectLink = ""
                         showConnectDialog = false
                     }
-                }) { Text("одключиться") }
+                }) { Text("Подключиться") }
             },
             dismissButton = {
                 TextButton(onClick = { showConnectDialog = false }) { Text("тмена") }

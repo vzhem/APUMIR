@@ -21,7 +21,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -66,13 +72,29 @@ fun InviteShareCard(
 
         Spacer(Modifier.height(12.dp))
 
+        // Раунд 200: галочка «приложить APK» - владелец: «на случай, у кого
+        // мало интернета трафика». По умолчанию ВКЛ.
+        var attachApk by remember { mutableStateOf(true) }
+        Row(
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            modifier = Modifier
+                .clickable { attachApk = !attachApk }
+                .padding(horizontal = 4.dp),
+        ) {
+            Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+            Text(
+                "Приложить установочный файл (APK)",
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+            )
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { clipboard.setText(AnnotatedString(link)) }) {
                 Text("Копировать")
             }
             // Наружу - короткой https-ссылкой (кликабельна везде); QR выше
             // остаётся прежней ссылкой, сканер разбирает её без сети.
-            Button(onClick = { ShortShare.shareInvite(context, displayName, link) }) {
+            Button(onClick = { ShortShare.shareInvite(context, displayName, link, attachApk) }) {
                 Text("Поделиться")
             }
         }

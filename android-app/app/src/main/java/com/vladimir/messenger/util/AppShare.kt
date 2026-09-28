@@ -125,8 +125,16 @@ object AppShare {
      * копируем в фоне - 40 МБ не должны морозить интерфейс; любая неудача
      * (нет файла, нет места, приложение не открылось) - обычный текст.
      */
-    fun shareInvite(context: Context, displayName: String, contactLink: String) {
-        shareTextWithApk(context, inviteText(displayName, contactLink), "Пригласить в APUMIR")
+    /** Раунд 200: [attachApk] - по галочке (по умолчанию ВКЛ, решение владельца). */
+    fun shareInvite(
+        context: Context,
+        displayName: String,
+        contactLink: String,
+        attachApk: Boolean = true,
+    ) {
+        val text = inviteText(displayName, contactLink)
+        if (attachApk) shareTextWithApk(context, text, "Пригласить в APUMIR")
+        else shareText(context, text, "Пригласить в APUMIR")
     }
 
     /** Текст + установочный APK; не вышло - обычный текст, как раньше. */
@@ -155,9 +163,10 @@ object AppShare {
     private fun shareApkWithText(context: Context, text: String, title: String): Boolean {
         val src = File(context.applicationInfo.sourceDir)
         if (!src.isFile) return false
+        // Раунд 200: versionName уже несёт «v» (v11.74.94) - не удваиваем.
         val version = runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull()?.takeIf { !it.isNullOrBlank() } ?: "latest"
+        }.getOrNull()?.takeIf { !it.isNullOrBlank() }?.removePrefix("v") ?: "latest"
         val dir = File(context.cacheDir, "invite").apply { mkdirs() }
         val named = File(dir, "APU-v$version.apk")
         if (!named.isFile || named.length() != src.length()) {
