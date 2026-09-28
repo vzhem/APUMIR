@@ -443,7 +443,7 @@ private fun InviteToGroupsDialog(
                     Text("Отправить в APU")
                 }
                 TextButton(
-                    onClick = { onShare(selected.toList()) },
+                    onClick = { onShare(selected.toList(), attachApk) },
                     enabled = selected.isNotEmpty(),
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null)
