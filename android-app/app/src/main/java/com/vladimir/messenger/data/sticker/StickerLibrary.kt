@@ -529,11 +529,14 @@ class StickerLibrary @Inject constructor(
             chatRepository: ChatRepository,
             sha256: String,
             holders: List<String>,
+            /** Раунд 206: кнопка «обновить» - сбросить паузу и спросить ВСЕХ. */
+            force: Boolean = false,
+            maxTargets: Int = 3,
         ): String? = withContext(Dispatchers.IO) {
             val app = context.applicationContext
             val now = System.currentTimeMillis()
             val last = wantSentAt[sha256]
-            if (last != null && now - last < 2 * 60_000L) return@withContext ""
+            if (!force && last != null && now - last < 2 * 60_000L) return@withContext ""
             wantSentAt[sha256] = now
             while (wantSentAt.size > 64) {
                 val oldest = wantSentAt.entries.minByOrNull { it.value } ?: break
@@ -547,7 +550,7 @@ class StickerLibrary @Inject constructor(
             var sentTo = 0
             val firstName = StringBuilder()
             for (holder in ranked) {
-                if (sentTo >= 3) break
+                if (sentTo >= maxTargets) break
                 val chat = chatRepository.getChatByContactId(holder) ?: continue
                 val sent = RustBridge.sendMessage(
                     UUID.randomUUID().toString(), chat.id, holder,

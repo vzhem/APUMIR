@@ -164,6 +164,9 @@ fun ChatDetailScreen(
             onAddSticker = { uri -> viewModel.addSticker(uri) },
             onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
             onRemoveSticker = { viewModel.removeSticker(it) },
+            // Раунд 206: пустые плитки сами докачиваются; ↻ - всем держателям.
+            onAutoFetchSticker = { viewModel.autoFetchSticker(it) },
+            onRetryFetchSticker = { viewModel.retryFetchSticker(it) },
             onRemoveGif = { viewModel.removeOwnGif(it.sha256) },
             onRequestSwarmSticker = { swarm ->
                 showGifCatalog = false

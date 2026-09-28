@@ -640,6 +640,19 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update { it.copy(error = it.attachmentsLockedHint) }
             return
         }
+        // Раунд 206: непрорисованный стикер не отправляем «пустышкой» -
+        // сначала тихо докачиваем у роя, приедет - уйдёт сам.
+        if (!entry.file.isFile) {
+            val swarm = _swarmStickers.value.firstOrNull { it.sha256 == entry.sha256 }
+            if (swarm != null) {
+                autoFetchSticker(swarm)
+                pendingSwarmStickerSha = entry.sha256
+                _uiState.update { it.copy(swarmStatus = "Стикер подгружается из сети - сразу отправим") }
+            } else {
+                _uiState.update { it.copy(error = "Файл стикера пропал с телефона - докачать его неоткуда") }
+            }
+            return
+        }
         viewModelScope.launch {
             _uiState.update { it.copy(isPreparingFile = true, error = null) }
             var targetRecipientId: String? = null
@@ -723,6 +736,49 @@ class ChatDetailViewModel @Inject constructor(
                         null -> "Сеть пока не отвечает - попробуйте позже"
                         "" -> "Уже качаем этот стикер"
                         else -> "Качается с $holder - сейчас отправим"
+                    },
+                )
+            }
+        }
+    }
+
+    /**
+     * Раунд 206: тихая докачка плитки без файла (панель сама, при открытии).
+     * Без плашек и без «отправить по приезде» - просто вернуть файл домой.
+     */
+    fun autoFetchSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
+        viewModelScope.launch {
+            val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                stickerLibrary.entryOf(swarm.sha256)
+            }
+            if (local != null) return@launch
+            com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
+            runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
+                    appContext, chatRepository, swarm.sha256, swarm.holders,
+                )
+            }
+        }
+    }
+
+    /** Раунд 206: «обновить» - сброс паузы, просьба ВСЕМ держателям (до 12). */
+    fun retryFetchSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
+            _uiState.update { it.copy(swarmStatus = "Просим у всех держателей сети…") }
+            val holder = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
+                    appContext, chatRepository, swarm.sha256, swarm.holders,
+                    force = true,
+                    maxTargets = 12,
+                )
+            }.getOrNull()
+            _uiState.update {
+                it.copy(
+                    swarmStatus = when (holder) {
+                        null -> "Сеть пока не отвечает - попробуйте позже"
+                        "" -> "Уже качаем этот стикер"
+                        else -> "Просили: $holder"
                     },
                 )
             }

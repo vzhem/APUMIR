@@ -298,6 +298,9 @@ fun GroupChatScreen(
             onAddSticker = { uri -> viewModel.addSticker(uri) },
             onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
             onRequestSwarmSticker = { swarm -> viewModel.requestSwarmSticker(swarm) },
+            // Раунд 206: пустые плитки сами докачиваются; ↻ - всем держателям.
+            onAutoFetchSticker = { viewModel.autoFetchSticker(it) },
+            onRetryFetchSticker = { viewModel.retryFetchSticker(it) },
             onEmoji = { emoji -> draft += emoji },
             onOpened = { viewModel.refreshStickers() },
             onDismiss = {

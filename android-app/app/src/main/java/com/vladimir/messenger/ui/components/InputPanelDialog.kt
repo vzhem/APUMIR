@@ -114,6 +114,10 @@ fun InputPanelDialog(
     onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
     /** Раунд 174: удалить свой стикер из библиотеки и сети. */
     onRemoveSticker: ((com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) -> Unit)? = null,
+    /** Раунд 206: пустые плитки тихо докачиваются сами при открытии панели. */
+    onAutoFetchSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
+    /** Раунд 206: «обновить» (↻) - повторная просьба ВСЕМ держателям сети. */
+    onRetryFetchSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
     /** Раунд 174: удалить свою гифку из библиотеки и сети. */
     onRemoveGif: ((com.vladimir.messenger.data.gif.GifLibEntry) -> Unit)? = null,
     // ── Эмодзи ──
@@ -211,6 +215,8 @@ fun InputPanelDialog(
                         onAddStickerZip = onAddStickerZip,
                         onRequestSwarmSticker = onRequestSwarmSticker,
                         onRemoveSticker = onRemoveSticker,
+                        onAutoFetchSticker = onAutoFetchSticker,
+                        onRetryFetchSticker = onRetryFetchSticker,
                     )
                 }
             }
@@ -357,7 +363,24 @@ private fun StickerSection(
     onRequestSwarmSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit,
     /** Раунд 174: долгое нажатие на стикер в «Мои» - удалить из сети. */
     onRemoveSticker: ((com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) -> Unit)? = null,
+    /** Раунд 206: тихая докачка пустых плиток (сам, при открытии). */
+    onAutoFetchSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
+    /** Раунд 206: «обновить» (↻) - повторная просьба ВСЕМ держателям. */
+    onRetryFetchSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
 ) {
+    // Раунд 206: пустые плитки сами просятся домой - тихо докачиваем из
+    // роя (владелец: «если пустые - автоматически подгрузились»). Мерно,
+    // с паузой; повторные вызовы дедуплицируются паузой want-запросов.
+    androidx.compose.runtime.LaunchedEffect(stickers, recents, swarm, thumbTick) {
+        val missing = (recents + stickers)
+            .filter { !it.file.isFile }
+            .mapNotNull { entry -> swarm.firstOrNull { it.sha256 == entry.sha256 } }
+            .take(8)
+        missing.forEach { target ->
+            onAutoFetchSticker(target)
+            kotlinx.coroutines.delay(600)
+        }
+    }
     // Раунд 174: подтверждение удаления стикера из библиотеки и сети.
     var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry?>(null) }
     if (removeCandidate != null) {
@@ -496,7 +519,8 @@ private fun StickerSection(
         // Раунд 205: плитки без файла - докачка из сети (владелец: «есть
         // не загружаемые стикеры» - пустые клетки в Недавних и Моих).
         rowStickers(recents, "r", onSticker, swarm = swarm, tick = thumbTick,
-            onRequestSwarmSticker = onRequestSwarmSticker)
+            onRequestSwarmSticker = onRequestSwarmSticker,
+            onRetryFetchSticker = onRetryFetchSticker)
         item(key = "hm", span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 "Мои стикеры",
@@ -508,7 +532,8 @@ private fun StickerSection(
         }
         rowStickers(stickers, "m", onSticker, onRemove = { removeCandidate = it },
             swarm = swarm, tick = thumbTick,
-            onRequestSwarmSticker = onRequestSwarmSticker)
+            onRequestSwarmSticker = onRequestSwarmSticker,
+            onRetryFetchSticker = onRetryFetchSticker)
         item(key = "hs", span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 "Из сети",
@@ -606,6 +631,8 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.rowStickers(
     tick: String = "",
     /** Раунд 205: докачать стикер у хранителей. */
     onRequestSwarmSticker: ((com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit)? = null,
+    /** Раунд 206: «обновить» - повторная просьба ВСЕМ держателям сети. */
+    onRetryFetchSticker: ((com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit)? = null,
 ) {
     gridEntries(
         entries,
@@ -681,15 +708,32 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.rowStickers(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(
-                    if (canFetch) "⤓" else "×",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(3.dp),
-                )
+                if (canFetch && swarmMatch != null && onRetryFetchSticker != null) {
+                    // Раунд 206: пузырь «обновить» со стрелкой по кругу -
+                    // повторная просьба ВСЕМ держателям сети (владелец).
+                    Text(
+                        "↻",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(3.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            .clickable { onRetryFetchSticker(swarmMatch) }
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                } else if (!canFetch) {
+                    Text(
+                        "×",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(3.dp),
+                    )
+                }
             }
         }
     }
