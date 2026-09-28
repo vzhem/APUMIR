@@ -420,7 +420,7 @@ class SettingsViewModel @Inject constructor(
     /** Кнопка «Восстановить» (диалог карточки «Сервер»). */
     fun restoreAddressBookNow() {
         viewModelScope.launch {
-            _uiState.update { it.copy(addrBookMessage = "Загружаю…") }
+            _uiState.update { it.copy(addrBookMessage = "Спрашиваю рой…") }
             val result = runCatching { addressBookBackup.restoreNowForce() }
                 .getOrElse { "Не получилось: ${it.message}" }
             _uiState.update { it.copy(addrBookMessage = result) }

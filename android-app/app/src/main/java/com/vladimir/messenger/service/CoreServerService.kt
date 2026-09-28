@@ -692,6 +692,7 @@ class CoreServerService : Service() {
                         runCatching { addressBookBackup.backupIfDue() }
                             .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
                         runCatching { addressBookBackup.swarmHourlyTick() }
+                        runCatching { addressBookBackup.autoRestoreIfEmpty() }
                             .onFailure { Log.w(TAG, "AddressBook swarm tick: ${it.message}") }
                         kotlinx.coroutines.delay(60 * 60 * 1000L)
                     }

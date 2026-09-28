@@ -45,6 +45,9 @@ class AddressBookBackup @Inject constructor(
         private const val KEY_LAST_BACKUP_SHA = "addrbook_backup_sha"
         private const val KEY_LAST_RESTORE_AT = "addrbook_restore_at"
         private const val AUTO_INTERVAL_MS = 6L * 60 * 60 * 1000
+        /** Раунд 194: молча спрашивать рой при пустой азбуке - не чаще раза в 6 часов. */
+        private const val KEY_LAST_SWARM_RESTORE_AT = "addrbook_swarm_restore_at"
+        private const val SWARM_RESTORE_RETRY_MS = 6L * 60 * 60 * 1000
 
         fun shelfFor(nodeId: String): String = "addrbook|$nodeId"
 
@@ -175,12 +178,14 @@ class AddressBookBackup @Inject constructor(
         val nodeId = prefs().getString("node_id", null)
             ?: return@withContext "Личность ещё не создана"
         val privateKey = privateKey() ?: return@withContext "Личность ещё не создана"
+        // Раунд 194 (план разгрузки, шаг 3): рой - ОСНОВНОЙ путь восстановления,
+        // сервер - запасной (он же нужен только для самой первой загрузки).
+        // Обычное восстановление больше не тратит запросы лимитированного воркера.
+        val fromSwarm = askSwarm(privateKey)
+        if (fromSwarm != null) return@withContext fromSwarm
         val sealed = botApi.fetchAddressBook(shelfFor(nodeId))
         if (sealed == null) {
-            // Сервер молчит или копии нет — спрашиваем рой.
-            val fromSwarm = askSwarm(privateKey)
-            if (fromSwarm != null) return@withContext fromSwarm
-            return@withContext "На сервере копии нет, рой тоже не отдал — попробуйте позже"
+            return@withContext "Рой молчал, на сервере копии нет — попробуйте позже"
         }
         val parsed = parseEnvelope(sealed, privateKey)
             ?: return@withContext "Копия не открылась вашим ключом"
@@ -275,6 +280,23 @@ class AddressBookBackup @Inject constructor(
             return "Рой отдал ${envelopes.size} копий, но нового ничего: все адреса уже в азбуке"
         }
         return "Из ${envelopes.size} копий роя в азбуку добавлено $added адресов (стало ${localEntryCount()}) — вступит в силу после перезапуска приложения"
+    }
+
+    /**
+     * Раунд 194: своя азбука пуста (свежая установка, файл потерян) -
+     * молча спросить рой и влить копии. Сервер остаётся для самой первой
+     * загрузки (restoreBeforeStart до старта движка, когда роя у узла ещё
+     * нет). Не чаще [SWARM_RESTORE_RETRY_MS]; зовёт петля сервиса.
+     */
+    suspend fun autoRestoreIfEmpty(): Unit = withContext(Dispatchers.IO) {
+        val file = bookFile(context)
+        if (file.isFile && file.length() > 4) return@withContext
+        val privateKey = privateKey() ?: return@withContext
+        val now = System.currentTimeMillis()
+        if (now - prefs().getLong(KEY_LAST_SWARM_RESTORE_AT, 0L) < SWARM_RESTORE_RETRY_MS) return@withContext
+        prefs().edit().putLong(KEY_LAST_SWARM_RESTORE_AT, now).apply()
+        val result = askSwarm(privateKey)
+        Log.i(TAG, "swarm auto-restore: ${result ?: "рой молчал"}")
     }
 
     /** Свежий конверт для раздачи по рою (шифруем на месте). */
