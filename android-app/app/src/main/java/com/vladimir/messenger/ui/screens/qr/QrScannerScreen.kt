@@ -339,7 +339,15 @@ private fun MyCodePane() {
             onDismiss = { showInviteShare = false },
             onShare = { attach ->
                 showInviteShare = false
-                ShortShare.shareInvite(context, displayName, link, attach)
+                val link = maybeLink
+                if (link.isNullOrBlank()) {
+                    android.widget.Toast.makeText(
+                        context, "Личность ещё не создана",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else {
+                    ShortShare.shareInvite(context, displayName, link, attach)
+                }
             },
         )
     }
