@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.filled.Refresh
@@ -48,6 +49,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -463,14 +465,33 @@ fun GroupsScreen(
     // Как приглашать: показываем QR или отправляем ссылку.
     inviteChoice?.let { group ->
         val what = if (group.isChannel) "канал" else "группу"
+        // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
+        // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
+        var attachApk by remember { mutableStateOf(true) }
         AlertDialog(
             onDismissRequest = { inviteChoice = null },
             title = { Text("Пригласить в $what") },
             text = {
-                Text(
-                    "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
-                        "Ссылку можно отправить кому угодно - по ней вход как обычно."
-                )
+                Column {
+                    Text(
+                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
+                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { attachApk = !attachApk }
+                            .padding(horizontal = 4.dp),
+                    ) {
+                        Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                        Text(
+                            "Приложить установочный файл (APK)",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -487,7 +508,7 @@ fun GroupsScreen(
                     inviteChoice = null
                     viewModel.shareInvite(chosen.id) { title, link ->
                         // Раунд 162: каналу - «канал».
-                        AppShare.shareGroupInvite(context, title, link, chosen.isChannel)
+                        AppShare.shareGroupInvite(context, title, link, chosen.isChannel, attachApk)
                     }
                 }) { Text("Отправить ссылку") }
             },

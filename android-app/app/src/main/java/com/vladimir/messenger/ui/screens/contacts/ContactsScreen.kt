@@ -290,10 +290,10 @@ fun ContactsScreen(
                 viewModel.sendGroupInvites(contact.id, contact.displayName, ids)
             },
             // Через другие приложения: тем, у кого APU ещё не стоит.
-            onShare = { ids ->
+            onShare = { ids, attachApk ->
                 inviteFor = null
                 viewModel.buildGroupInvites(ids) { invites ->
-                    AppShare.shareGroupInvites(context, invites)
+                    AppShare.shareGroupInvites(context, invites, attachApk)
                 }
             },
         )
@@ -338,10 +338,14 @@ private fun InviteToGroupsDialog(
     groups: List<InvitableGroup>,
     onDismiss: () -> Unit,
     onSendInApp: (List<String>) -> Unit,
-    onShare: (List<String>) -> Unit,
+    /** Раунд 198: вторым аргументом - «приложить установочный APK». */
+    onShare: (List<String>, Boolean) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     val selected = remember { mutableStateListOf<String>() }
+    // Раунд 198: получатель извне может быть без APU - по умолчанию
+    // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
+    var attachApk by remember { mutableStateOf(true) }
     val shown = remember(groups, query) {
         val q = query.trim().lowercase()
         if (q.isEmpty()) groups else groups.filter { it.title.lowercase().contains(q) }
@@ -361,7 +365,21 @@ private fun InviteToGroupsDialog(
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     singleLine = true,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { attachApk = !attachApk }
+                        .padding(horizontal = 4.dp),
+                ) {
+                    Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                    Text(
+                        "Приложить установочный файл (APK)",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
                 if (groups.isEmpty()) {
                     Text(
                         "Пока нет групп со ссылкой-приглашением",

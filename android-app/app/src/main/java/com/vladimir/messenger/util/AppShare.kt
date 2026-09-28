@@ -80,24 +80,38 @@ object AppShare {
         return sb.toString()
     }
 
-    /** Поделиться приглашениями сразу в несколько групп или каналов. */
-    fun shareGroupInvites(context: Context, invites: List<Pair<String, String>>) {
+    /**
+     * Поделиться приглашениями сразу в несколько групп или каналов.
+     * Раунд 198: [attachApk] - приложить установочный APK (получателю извне
+     * APU может не быть; по умолчанию выключено - зовущий решает галочкой).
+     */
+    fun shareGroupInvites(
+        context: Context,
+        invites: List<Pair<String, String>>,
+        attachApk: Boolean = false,
+    ) {
         if (invites.isEmpty()) return
-        shareText(context, groupsInviteText(invites), "Пригласить в группу")
+        val text = groupsInviteText(invites)
+        if (attachApk) shareTextWithApk(context, text, "Пригласить в группу")
+        else shareText(context, text, "Пригласить в группу")
     }
 
-    /** Поделиться приглашением в группу/канал (раунд 162: честное слово). */
+    /**
+     * Поделиться приглашением в группу/канал (раунд 162: честное слово).
+     * Раунд 198: [attachApk] - приложить установочный APK для получателя
+     * вне APU.
+     */
     fun shareGroupInvite(
         context: Context,
         groupTitle: String,
         link: String,
         isChannel: Boolean = false,
+        attachApk: Boolean = false,
     ) {
-        shareText(
-            context,
-            groupInviteText(groupTitle, link, isChannel),
-            if (isChannel) "Пригласить в канал" else "Пригласить в группу",
-        )
+        val text = groupInviteText(groupTitle, link, isChannel)
+        val title = if (isChannel) "Пригласить в канал" else "Пригласить в группу"
+        if (attachApk) shareTextWithApk(context, text, title)
+        else shareText(context, text, title)
     }
 
     /**
@@ -112,11 +126,14 @@ object AppShare {
      * (нет файла, нет места, приложение не открылось) - обычный текст.
      */
     fun shareInvite(context: Context, displayName: String, contactLink: String) {
-        val text = inviteText(displayName, contactLink)
-        val title = "Пригласить в APUMIR"
+        shareTextWithApk(context, inviteText(displayName, contactLink), "Пригласить в APUMIR")
+    }
+
+    /** Текст + установочный APK; не вышло - обычный текст, как раньше. */
+    private fun shareTextWithApk(context: Context, text: String, title: String) {
         Thread {
             val shared = runCatching { shareApkWithText(context, text, title) }
-                .onFailure { android.util.Log.w("AppShare", "apk invite failed: ${it.message}") }
+                .onFailure { android.util.Log.w("AppShare", "apk share failed: ${it.message}") }
                 .getOrDefault(false)
             if (!shared) runCatching { shareText(context, text, title) }
         }.start()

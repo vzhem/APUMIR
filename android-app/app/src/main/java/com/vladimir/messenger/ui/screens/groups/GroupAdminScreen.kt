@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -61,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
@@ -982,6 +984,9 @@ private fun InviteCard(
     val bitmap = remember(invite.link) { QrCodeGenerator.generateQrCode(invite.link) }
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
+    // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
+    var attachApk by remember { mutableStateOf(true) }
 
     ApuBubble {
         Column {
@@ -1019,11 +1024,25 @@ private fun InviteCard(
                     )
                 }
             }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { attachApk = !attachApk }
+                    .padding(horizontal = 4.dp),
+            ) {
+                Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                Text(
+                    "Приложить установочный файл (APK)",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { clipboard.setText(AnnotatedString(invite.shareLink)) }) {
                     Text("Копировать")
                 }
-                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink, isChannel) }) {
+                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink, isChannel, attachApk) }) {
                     Text("Поделиться")
                 }
                 // Отозвать и удалить ссылку может только администратор:
