@@ -39,6 +39,8 @@ import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
 import com.vladimir.messenger.ui.components.ApuMainTabBar
+import com.vladimir.messenger.ui.components.ChatWallpaper
+import androidx.compose.foundation.layout.fillMaxSize
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
@@ -310,6 +312,14 @@ fun MessengerNavGraph(
         }
     }
 
+    // Раунд 202 (владелец: «при переходе мелькает белая полоса»): под
+    // переходами экранов просвечивал ДЕФОЛТНЫЙ белый фон окна. Обои APU
+    // под NavHost - постоянная подложка: на каком бы кадре слайда ни
+    // остановилась анимация, снизу всегда свой фон, а не белый.
+    androidx.compose.foundation.layout.Box(
+        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+    ) {
+    ChatWallpaper()
     NavHost(
         navController    = navController,
         startDestination = startDestination,
@@ -836,6 +846,7 @@ fun MessengerNavGraph(
                 }
             )
         }
+    }
     }
 }
 
