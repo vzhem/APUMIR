@@ -151,7 +151,14 @@ class IdentityBackup @Inject constructor(
         val nick = IdentityVault.normalizeNickname(nickname) ?: return RestoreResult.WrongPassword
         val shelf = IdentityVault.shelfFor(nick) ?: return RestoreResult.WrongPassword
 
-        val fetched = botApi.fetchIdentityVault(shelf) ?: return RestoreResult.NotFound
+        // Раунд 207: null - сервер недоступен (не путать с пустой полкой!);
+        // пустая строка - сервер ответил «под этим ником сундука нет».
+        val fetched = botApi.fetchIdentityVault(shelf)
+        if (fetched == null) {
+            Log.w(TAG, "Vault fetch failed: server unreachable")
+            return RestoreResult.NetworkFailed
+        }
+        if (fetched.isEmpty()) return RestoreResult.NotFound
         val sealed = runCatching { Base64.decode(fetched, Base64.NO_WRAP) }.getOrNull()
             ?: return RestoreResult.NotFound
         // Неверный пароль и порченый сундук намеренно неотличимы: иначе сундук

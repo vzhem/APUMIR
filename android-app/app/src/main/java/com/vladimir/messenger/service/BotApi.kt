@@ -264,13 +264,31 @@ class BotApi @Inject constructor(
      */
     suspend fun fetchIdentityVault(shelf: String): String? = withContext(Dispatchers.IO) {
         try {
-            val response = getJson("$REGISTRY_URL/vault/get?shelf=$shelf") ?: return@withContext null
-            val json = JSONObject(response)
-            if (json.has("error")) {
-                Log.i(TAG, "Vault fetch: ${json.optString("error")}")
-                return@withContext null
+            // Раунд 207: сервер отвечает {"error":"not found"} на пустую полку
+            // и {"vault":…} на занятую. Пустая полка и недоступная сеть - разные
+            // вещи: второй намеренно возвращаем null, чтобы на другом
+            // устройстве не писали «ничего не сохранено» при сбое сети.
+            val conn = (java.net.URL("$REGISTRY_URL/vault/get?shelf=$shelf").openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = HTTP_TIMEOUT
+                readTimeout = HTTP_TIMEOUT
             }
-            json.optString("vault", "").takeIf { it.isNotBlank() }
+            try {
+                val code = conn.responseCode
+                if (code != 200) {
+                    Log.w(TAG, "GET vault/get returned $code")
+                    return@withContext null
+                }
+                val response = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+                val json = JSONObject(response)
+                if (json.has("error")) {
+                    Log.i(TAG, "Vault fetch: ${json.optString("error")}")
+                    return@withContext ""
+                }
+                json.optString("vault", "").takeIf { it.isNotBlank() }
+            } finally {
+                conn.disconnect()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Vault fetch failed", e)
             null
