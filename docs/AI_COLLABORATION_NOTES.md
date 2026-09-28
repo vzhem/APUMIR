@@ -9498,6 +9498,20 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-27 (раунды 197-198) - v11.74.93: приглашения с APK.**
+  Владелец: другу из другой сети - к приглашению свежий APK, «чтобы
+  друг смог установить сразу из входящего сообщения»; группам/каналам
+  наружу - тоже, «а лучше галочку». Источник - установленный файл
+  (sourceDir), копия в cacheDir/invite/APU-v<версия>.apk (root-path
+  FileProvider уже покрывал), фон, fallback - текст. shareInvite -
+  всегда с APK; shareGroupInvite/shareGroupInvites + attachApk, галочка
+  в 3 местах (GroupsScreen диалог, GroupAdminScreen карточка,
+  ContactsScreen InviteToGroupsDialog, onShare + Boolean). Внутри APU -
+  без вложения. Грабли: check151 красный (пропустил внутренний вызов
+  onShare - annotation «No value passed for parameter p2»), check152
+  зелёный. v11.74.93 = b854f30, run 36384888887, APK 40 598 678,
+  digest a1c8e601…6df, latest.
+
 - **2026-09-27 (раунд 196) - v11.74.92: прокси - кнопка работает,
   список 500.** Владелец: «выводимый список сократить хотя бы до 500.
   И нужно чтобы удаление не рабочих прокси по кнопке работало».
