@@ -44,6 +44,21 @@ class UpdateChecker @Inject constructor(
          * со своего домена. Исходник — tools/worker/p2p_relay_worker.js.
          */
         private const val RELAY_BASE = "https://p2p-relay.1985vzhem.workers.dev"
+
+        /**
+         * Раунд 195 (план разгрузки, шаг 4): авто-проверка версии через наш
+         * воркер - не чаще раза в 12 часов + случайный сдвиг 0-6 часов
+         * (у каждой установки свой, против «стада» на сбросе лимита в
+         * полночь UTC). Ручная проверка (кнопки) - без ограничений.
+         * О новой версии рой и так сообщает сам (авто-upask, р193), сайт -
+         * ускоритель. Пытаемся редко даже при НЕудаче: недоступный воркер
+         * не долбим.
+         */
+        private const val RELAY_CHECK_PREFS = "update_check_prefs"
+        private const val KEY_RELAY_CHECK_AT = "relay_check_at"
+        private const val KEY_RELAY_CHECK_JITTER = "relay_check_jitter"
+        private const val RELAY_CHECK_MIN_MS = 12L * 60 * 60 * 1000
+        private const val RELAY_CHECK_JITTER_MS = 6L * 60 * 60 * 1000
     }
 
     /**
@@ -118,8 +133,33 @@ class UpdateChecker @Inject constructor(
      * сведениями, а APK отдаёт со своего домена (/update/apk). Так обновление
      * находится и скачивается без VPN в жёстких сетях.
      */
-    suspend fun checkForUpdate(currentVersion: String): ReleaseInfo? = withContext(Dispatchers.IO) {
-        checkGitHub(currentVersion) ?: checkViaRelay(currentVersion)
+    suspend fun checkForUpdate(currentVersion: String, manual: Boolean = false): ReleaseInfo? =
+        withContext(Dispatchers.IO) {
+            checkGitHub(currentVersion) ?: relayIfDue(currentVersion, manual)
+        }
+
+    /**
+     * Раунд 195: relay-проверка по расписанию (авто) или сразу (кнопка).
+     * Метка времени ставится ДО запроса: недоступный/лимитированный воркер
+     * не долбится каждым открытием приложения - одну попытку за окно.
+     */
+    private suspend fun relayIfDue(currentVersion: String, manual: Boolean): ReleaseInfo? {
+        val prefs = context.getSharedPreferences(RELAY_CHECK_PREFS, Context.MODE_PRIVATE)
+        if (!manual) {
+            val now = System.currentTimeMillis()
+            val jitter = prefs.getLong(KEY_RELAY_CHECK_JITTER, -1L).let { stored ->
+                if (stored >= 0) stored
+                else (0..RELAY_CHECK_JITTER_MS).random().also { fresh ->
+                    prefs.edit().putLong(KEY_RELAY_CHECK_JITTER, fresh).apply()
+                }
+            }
+            if (now - prefs.getLong(KEY_RELAY_CHECK_AT, 0L) < RELAY_CHECK_MIN_MS + jitter) {
+                Log.d(TAG, "relay check skipped: not due yet")
+                return null
+            }
+            prefs.edit().putLong(KEY_RELAY_CHECK_AT, now).apply()
+        }
+        return checkViaRelay(currentVersion)
     }
 
     /** Прямой запрос к GitHub Releases API (как раньше; null — недоступен). */

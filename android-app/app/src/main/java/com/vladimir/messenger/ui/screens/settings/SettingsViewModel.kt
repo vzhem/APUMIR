@@ -263,7 +263,7 @@ class SettingsViewModel @Inject constructor(
             val currentVersion = runCatching {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
             }.getOrDefault("0")
-            val release = runCatching { updateChecker.checkForUpdate(currentVersion) }.getOrNull()
+            val release = runCatching { updateChecker.checkForUpdate(currentVersion, manual = true) }.getOrNull()
             _officialRelease.value = release
             _updatesChecking.value = false
             // Соседи отвечают на `upask` не мгновенно: предложения доедут

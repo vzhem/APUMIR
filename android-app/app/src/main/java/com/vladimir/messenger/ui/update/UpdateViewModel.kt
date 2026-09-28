@@ -47,7 +47,7 @@ class UpdateViewModel @Inject constructor(
             try {
                 _uiState.update { it.copy(isChecking = true, error = null) }
                 
-                val release = updateChecker.checkForUpdate(currentVersion)
+                val release = updateChecker.checkForUpdate(currentVersion, manual = true)
                 
                 _uiState.update { 
                     it.copy(
