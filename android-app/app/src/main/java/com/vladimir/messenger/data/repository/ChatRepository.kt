@@ -78,6 +78,10 @@ class ChatRepository @Inject constructor(
         )
     }
 
+    /** Раунд 203: адресаты «Поделиться в APU» - друзья из списка чатов. */
+    suspend fun forwardFriends(): List<com.vladimir.messenger.data.local.entity.ChatEntity> =
+        chatDao.getAllChats()
+
     suspend fun sendMessage(chatId: String, recipientId: String, content: String): Result<Message> {
         return try {
             val messageId = UUID.randomUUID().toString()

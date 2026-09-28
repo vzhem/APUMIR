@@ -86,6 +86,9 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
     var activeMessage by remember { mutableStateOf<Message?>(null) }
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
+    // Раунд 203: «Поделиться в APU» - пересылка с указанием источника.
+    var forwardMessage by remember { mutableStateOf<Message?>(null) }
+
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
     var deleteForAllTarget by remember { mutableStateOf<Message?>(null) }
     // Сообщение, для которого открыт выбор реакции.
@@ -612,6 +615,16 @@ fun ChatDetailScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(modifier = Modifier.height(12.dp))
+                    // Раунд 203: переслать сообщение другу или в группу/канал.
+                    TextButton(
+                        onClick = {
+                            showCopyDialog = null
+                            forwardMessage = message
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Поделиться в APU", modifier = Modifier.fillMaxWidth())
+                    }
                     TextButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
@@ -723,6 +736,75 @@ fun ChatDetailScreen(
                 TextButton(onClick = { showCopyDialog = null }) { Text("Закрыть") }
             },
         )
+    }
+
+    // Раунд 203: «Поделиться в APU» - выбрать друга, группу+тему или
+    // канал+пост; над пересылаемым текстом пишется ссылка на источник.
+    forwardMessage?.let { original ->
+        val fCtx = androidx.compose.ui.platform.LocalContext.current
+        var fLoading by remember { mutableStateOf(true) }
+        var fTargets by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTarget>>(emptyList())
+        }
+        var fPicked by remember { mutableStateOf<com.vladimir.messenger.ui.components.ForwardTarget?>(null) }
+        var fTopics by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTopic>>(emptyList())
+        }
+        var fTopicsLoading by remember { mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(original.id) {
+            fTargets = viewModel.forwardTargets()
+            fLoading = false
+        }
+        androidx.compose.runtime.LaunchedEffect(fPicked?.id) {
+            val picked = fPicked ?: return@LaunchedEffect
+            fTopicsLoading = true
+            fTopics = viewModel.forwardTopics(picked.id)
+            fTopicsLoading = false
+        }
+        val sourceLabel = contactName.ifBlank { "чат" }
+        com.vladimir.messenger.ui.components.ForwardChooserDialog(
+            targets = fTargets,
+            loading = fLoading,
+            onDismiss = { forwardMessage = null },
+            onPick = { target ->
+                if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                    forwardMessage = null
+                    viewModel.forwardMessage(original.content, sourceLabel, target) { ok ->
+                        Toast.makeText(
+                            fCtx,
+                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                } else {
+                    fPicked = target
+                }
+            },
+        )
+        fPicked?.let { target ->
+            com.vladimir.messenger.ui.components.ForwardTopicPickerDialog(
+                targetTitle = target.title,
+                isChannel = target.isChannel,
+                topics = fTopics,
+                loading = fTopicsLoading,
+                onDismiss = { fPicked = null },
+                onPick = { topic ->
+                    fPicked = null
+                    forwardMessage = null
+                    viewModel.forwardMessage(
+                        original.content,
+                        sourceLabel,
+                        target.copy(topicId = topic.id, topicTitle = topic.name),
+                    ) { ok ->
+                        Toast.makeText(
+                            fCtx,
+                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                },
+            )
+        }
     }
 
     // Раунд 135: подтверждение удаления у всех - сообщение пропадёт и у

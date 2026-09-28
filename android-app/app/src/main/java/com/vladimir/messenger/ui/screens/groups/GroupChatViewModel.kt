@@ -1075,6 +1075,53 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch { reactionRepository.removeMine(groupId, messageId) }
     }
 
+    // Раунд 203: «Поделиться в APU» - друзья, группы+темы, каналы+посты.
+    suspend fun forwardTargets(): List<com.vladimir.messenger.ui.components.ForwardTarget> {
+        val friends = chatRepository.forwardFriends().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.FRIEND,
+                it.id,
+                it.contactName,
+            )
+        }
+        val groups = groupRepository.forwardGroups().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.GROUP,
+                it.id,
+                it.title,
+                it.isChannel,
+            )
+        }
+        return friends + groups
+    }
+
+    /** Темы группы / посты канала для второго шага выбора цели. */
+    suspend fun forwardTopics(groupId: String): List<com.vladimir.messenger.ui.components.ForwardTopic> =
+        groupRepository.forwardTopics(groupId).map {
+            com.vladimir.messenger.ui.components.ForwardTopic(it.id, it.name, it.iconEmoji)
+        }
+
+    /**
+     * Раунд 203: переслать текст в выбранную цель. Над пересылаемым
+     * пишется ссылка на источник: «↩ Переслано из «…»».
+     */
+    fun forwardMessage(
+        text: String,
+        sourceLabel: String,
+        target: com.vladimir.messenger.ui.components.ForwardTarget,
+        onResult: (Boolean) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val body = "↩ Переслано из «" + sourceLabel + "»" + "\n\n" + text
+            val res = if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                chatRepository.sendMessage(target.id, "", body)
+            } else {
+                groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            onResult(res.isSuccess)
+        }
+    }
+
     private companion object {
         /** Пока ветка открыта, просьба о комментариях повторяется с таким шагом. */
         const val COMMENTS_REFRESH_MS = 60_000L

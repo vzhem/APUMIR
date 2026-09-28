@@ -170,6 +170,77 @@ fun GroupChatScreen(
         )
     }
 
+    // Раунд 203: «Поделиться в APU» в группах и каналах - та же пересылка
+    // с указанием источника, что и в личном чате.
+    var forwardPayload by remember {
+        mutableStateOf<com.vladimir.messenger.ui.components.ForwardPayload?>(null)
+    }
+    forwardPayload?.let { payload ->
+        val fCtx = androidx.compose.ui.platform.LocalContext.current
+        var fLoading by remember { mutableStateOf(true) }
+        var fTargets by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTarget>>(emptyList())
+        }
+        var fPicked by remember { mutableStateOf<com.vladimir.messenger.ui.components.ForwardTarget?>(null) }
+        var fTopics by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTopic>>(emptyList())
+        }
+        var fTopicsLoading by remember { mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(payload) {
+            fTargets = viewModel.forwardTargets()
+            fLoading = false
+        }
+        androidx.compose.runtime.LaunchedEffect(fPicked?.id) {
+            val picked = fPicked ?: return@LaunchedEffect
+            fTopicsLoading = true
+            fTopics = viewModel.forwardTopics(picked.id)
+            fTopicsLoading = false
+        }
+        com.vladimir.messenger.ui.components.ForwardChooserDialog(
+            targets = fTargets,
+            loading = fLoading,
+            onDismiss = { forwardPayload = null },
+            onPick = { target ->
+                if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                    forwardPayload = null
+                    viewModel.forwardMessage(payload.text, payload.label, target) { ok ->
+                        android.widget.Toast.makeText(
+                            fCtx,
+                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                } else {
+                    fPicked = target
+                }
+            },
+        )
+        fPicked?.let { target ->
+            com.vladimir.messenger.ui.components.ForwardTopicPickerDialog(
+                targetTitle = target.title,
+                isChannel = target.isChannel,
+                topics = fTopics,
+                loading = fTopicsLoading,
+                onDismiss = { fPicked = null },
+                onPick = { topic ->
+                    fPicked = null
+                    forwardPayload = null
+                    viewModel.forwardMessage(
+                        payload.text,
+                        payload.label,
+                        target.copy(topicId = topic.id, topicTitle = topic.name),
+                    ) { ok ->
+                        android.widget.Toast.makeText(
+                            fCtx,
+                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                },
+            )
+        }
+    }
+
     if (showGifCatalog) {
         // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
         // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
@@ -642,6 +713,21 @@ fun GroupChatScreen(
                         canPin = uiState.canPin,
                         onTogglePin = { viewModel.togglePin(message.id, !message.isPinned) },
                         onSaveToFavorites = { viewModel.saveToFavorites(message.content) },
+                        onShareToApu = {
+                            // Раунд 203: источник - группа; для чужих сообщений
+                            // добавляем автора после названия.
+                            val author = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
+                            val base = uiState.group?.title ?: "группа"
+                            val label = if (!message.isFromMe && !author.isNullOrBlank()) {
+                                base + " · автор: " + author
+                            } else {
+                                base
+                            }
+                            forwardPayload = com.vladimir.messenger.ui.components.ForwardPayload(
+                                message.content,
+                                label,
+                            )
+                        },
                         reactions = uiState.reactions[message.id].orEmpty(),
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
@@ -1330,6 +1416,8 @@ private fun MessageBubble(
     canPin: Boolean,
     onTogglePin: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
+    /** Раунд 203: «Поделиться в APU» - переслать сообщение с источником. */
+    onShareToApu: () -> Unit = {},
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
@@ -1472,6 +1560,14 @@ private fun MessageBubble(
             }
         }
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            // Раунд 203: переслать сообщение другу или в другую группу/канал.
+            DropdownMenuItem(
+                text = { Text("Поделиться в APU") },
+                onClick = {
+                    showMenu = false
+                    onShareToApu()
+                },
+            )
             DropdownMenuItem(
                 text = { Text("Поставить реакцию") },
                 onClick = {

@@ -763,6 +763,17 @@ class GroupRepository(
 
     // ── Отправка сообщения ────────────────────────────────────────────────────
 
+    /** Раунд 203: адресаты «Поделиться в APU» - группы и каналы, где я остался. */
+    suspend fun forwardGroups(): List<com.vladimir.messenger.data.local.entity.GroupEntity> =
+        groupDao.getGroups().filter { !it.isLeft }
+
+    /** Раунд 203: темы группы (посты канала); пустой список - если тем нет. */
+    suspend fun forwardTopics(groupId: String): List<com.vladimir.messenger.data.local.entity.GroupTopicEntity> {
+        val topics = groupDao.getTopics(groupId)
+        if (topics.isNotEmpty()) return topics
+        return groupDao.getGeneralTopic(groupId)?.let { listOf(it) } ?: emptyList()
+    }
+
     /**
      * Сообщение в тему. [photos] - фотографии поста (jpeg base64), каждая
      * уходит отдельными пакетами-кусками ВСЛЕД за текстом: один пакет с
