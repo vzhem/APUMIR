@@ -1441,6 +1441,8 @@ private fun MessageBubble(
     onSaveToFavorites: () -> Unit = {},
     /** Раунд 203: «Поделиться в APU» - переслать сообщение с источником. */
     onShareToApu: () -> Unit = {},
+    /** Раунд 203: тап по шапке-источнику пересылки. */
+    onOpenForward: ((com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit)? = null,
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
