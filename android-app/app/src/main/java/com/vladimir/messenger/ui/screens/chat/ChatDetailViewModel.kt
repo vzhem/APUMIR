@@ -1174,6 +1174,9 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 203: локальный файл стикера/роя по sha - для пересланных визиток. */
+    fun localSwarmFile(sha256: String): java.io.File? = stickerLibrary.fileOf(sha256)
+
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }

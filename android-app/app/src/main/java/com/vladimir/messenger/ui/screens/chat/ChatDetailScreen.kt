@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -95,6 +96,11 @@ fun ChatDetailScreen(
     // Раунд 203: «Поделиться в APU» - пересылка с указанием источника.
     var forwardMessage by remember { mutableStateOf<Message?>(null) }
     val fwdScope = androidx.compose.runtime.rememberCoroutineScope()
+    // Раунд 203: подтверждение пересылки - плашка по центру экрана.
+    var fwdSent by remember { mutableStateOf(false) }
+    if (fwdSent) {
+        com.vladimir.messenger.ui.components.ForwardSentOverlay(visible = true, onTimeout = { fwdSent = false })
+    }
 
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
     var deleteForAllTarget by remember { mutableStateOf<Message?>(null) }
@@ -566,15 +572,93 @@ fun ChatDetailScreen(
                                 // Раунд 203: у пересланного служебные строки
                                 // (маркер+шапка) впереди - узнаём гифку в теле.
                                 val fwdBody = remember(message.id) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
-                                if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(fwdBody)) {
-                                    com.vladimir.messenger.ui.components.GifRefCard(
-                                        content = fwdBody,
-                                        modifier = Modifier.align(
-                                            if (message.isFromMe) Alignment.End else Alignment.Start
-                                        ),
-                                        onEnsure = { sha -> viewModel.ensureGifRef(sha) },
+                                val onForwardTap: (com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit = { ref ->
+                                    fwdScope.launch {
+                                        when (val open = viewModel.resolveForwardTap(ref)) {
+                                            is com.vladimir.messenger.util.ForwardMarker.Open.Chat ->
+                                                onOpenChat(open.chatId, open.contactName, open.contactId)
+                                            is com.vladimir.messenger.util.ForwardMarker.Open.Group ->
+                                                onOpenGroup(open.groupId, open.topicId)
+                                            is com.vladimir.messenger.util.ForwardMarker.Open.Join ->
+                                                onJoinByLink(open.link)
+                                            is com.vladimir.messenger.util.ForwardMarker.Open.Missing ->
+                                                Toast.makeText(toastContext, open.message, Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                                val fwdSource = remember(message.id) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
+                                val fwdHasHeader = remember(message.id) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
+                                // Раунд 203: над карточками (гифка, файл/стикер) шапку
+                                // рисует сам экран - карточки про источник не знают.
+                                @Composable fun CardForwardHeader() {
+                                    if (!fwdHasHeader) return
+                                    val fwdLabel = fwdSource?.label
+                                        ?: com.vladimir.messenger.util.ForwardMarker.plainHeaderLabel(message.content)
+                                    Text(
+                                        "↩ Переслано из «" + fwdLabel + "»",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        textDecoration = TextDecoration.Underline,
+                                        color = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable(enabled = fwdSource != null) { if (fwdSource != null) onForwardTap(fwdSource) }
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
                                     )
-                                } else MessageBubble(
+                                }
+                                // Раунд 203: пересланный файл/стикер - визитка без
+                                // передачи: рисуем стикер из локальной библиотеки,
+                                // иначе честную карточку, но не «код».
+                                val fwdFile = remember(fwdBody) { com.vladimir.messenger.util.GroupFileMarker.parse(fwdBody) }
+                                val fwdLocal = remember(message.id, fwdFile?.sha256) {
+                                    fwdFile?.let { viewModel.localSwarmFile(it.sha256) }
+                                }
+                                when {
+                                    fwdFile != null -> {
+                                        CardForwardHeader()
+                                        if (fwdLocal != null &&
+                                            (com.vladimir.messenger.util.GroupFileMarker.isAnimatedImage(fwdFile) ||
+                                                com.vladimir.messenger.util.GroupFileMarker.isSticker(fwdFile))
+                                        ) {
+                                            var showFullFwd by remember(message.id) { mutableStateOf(false) }
+                                            com.vladimir.messenger.ui.components.StickerAnimated(
+                                                file = fwdLocal,
+                                                contentDescription = fwdFile.displayName,
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                                modifier = Modifier
+                                                    .align(if (message.isFromMe) Alignment.End else Alignment.Start)
+                                                    .sizeIn(maxWidth = 340.dp, maxHeight = 320.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .clickable { showFullFwd = true },
+                                            )
+                                            if (showFullFwd) {
+                                                com.vladimir.messenger.ui.components.PhotoViewer(
+                                                    photos = listOf(
+                                                        com.vladimir.messenger.ui.components.PhotoSource.File(fwdLocal.path)
+                                                    ),
+                                                    onDismiss = { showFullFwd = false },
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                com.vladimir.messenger.util.GroupFileMarker.caption(fwdFile) +
+                                                    "\nфайла нет на этом телефоне",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.align(Alignment.Start),
+                                            )
+                                        }
+                                    }
+                                    com.vladimir.messenger.data.gif.GifLibrary.isGifRef(fwdBody) -> {
+                                        CardForwardHeader()
+                                        com.vladimir.messenger.ui.components.GifRefCard(
+                                            content = fwdBody,
+                                            modifier = Modifier.align(
+                                                if (message.isFromMe) Alignment.End else Alignment.Start
+                                            ),
+                                            onEnsure = { sha -> viewModel.ensureGifRef(sha) },
+                                        )
+                                    }
+                                    else -> MessageBubble(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
                                     linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
@@ -591,25 +675,9 @@ fun ChatDetailScreen(
                                         activeMessage = message
                                         showCopyDialog = message
                                     },
-                                    onOpenForward = { ref ->
-                                        fwdScope.launch {
-                                            when (val open = viewModel.resolveForwardTap(ref)) {
-                                                is com.vladimir.messenger.util.ForwardMarker.Open.Chat ->
-                                                    onOpenChat(open.chatId, open.contactName, open.contactId)
-                                                is com.vladimir.messenger.util.ForwardMarker.Open.Group ->
-                                                    onOpenGroup(open.groupId, open.topicId)
-                                                is com.vladimir.messenger.util.ForwardMarker.Open.Join ->
-                                                    onJoinByLink(open.link)
-                                                is com.vladimir.messenger.util.ForwardMarker.Open.Missing ->
-                                                    Toast.makeText(
-                                                        toastContext,
-                                                        open.message,
-                                                        Toast.LENGTH_SHORT,
-                                                    ).show()
-                                            }
-                                        }
-                                    }
+                                    onOpenForward = onForwardTap
                                 )
+                                }
                                 // Реакции живут отдельной строкой под пузырём -
                                 // внутрь его класть нельзя, там своя ширина.
                                 com.vladimir.messenger.ui.components.ReactionRow(
@@ -801,11 +869,11 @@ fun ChatDetailScreen(
                 if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                     forwardMessage = null
                     viewModel.forwardMessage(original.content, sourceLabel, target) { ok ->
-                        Toast.makeText(
-                            fCtx,
-                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 } else {
                     fPicked = target
@@ -827,11 +895,11 @@ fun ChatDetailScreen(
                         sourceLabel,
                         target.copy(topicId = topic.id, topicTitle = topic.name),
                     ) { ok ->
-                        Toast.makeText(
-                            fCtx,
-                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
             )

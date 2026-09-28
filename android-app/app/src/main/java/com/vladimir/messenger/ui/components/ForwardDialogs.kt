@@ -1,11 +1,13 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -190,4 +192,35 @@ fun ForwardTopicPickerDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
+}
+
+/** Раунд 203: подтверждение пересылки - плашка по центру экрана (владелец). */
+@Composable
+fun ForwardSentOverlay(visible: Boolean, onTimeout: () -> Unit) {
+    androidx.compose.runtime.LaunchedEffect(visible) {
+        if (visible) {
+            kotlinx.coroutines.delay(2200)
+            onTimeout()
+        }
+    }
+    if (!visible) return
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 40.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "✓ Отправлено",
+            color = androidx.compose.ui.graphics.Color.White,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier
+                .background(
+                    androidx.compose.ui.graphics.Color(0xCC1E2430),
+                    androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                )
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+        )
+    }
 }

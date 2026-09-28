@@ -184,6 +184,11 @@ fun GroupChatScreen(
     }
     val fwdScope = rememberCoroutineScope()
     val fwdCtx = androidx.compose.ui.platform.LocalContext.current
+    // Раунд 203: подтверждение пересылки - плашка по центру экрана.
+    var fwdSent by remember { mutableStateOf(false) }
+    if (fwdSent) {
+        com.vladimir.messenger.ui.components.ForwardSentOverlay(visible = true, onTimeout = { fwdSent = false })
+    }
     forwardPayload?.let { payload ->
         val fCtx = androidx.compose.ui.platform.LocalContext.current
         var fLoading by remember { mutableStateOf(true) }
@@ -213,11 +218,11 @@ fun GroupChatScreen(
                 if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                     forwardPayload = null
                     viewModel.forwardMessage(payload.text, payload.label, target) { ok ->
-                        android.widget.Toast.makeText(
-                            fCtx,
-                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                 } else {
                     fPicked = target
@@ -239,11 +244,11 @@ fun GroupChatScreen(
                         payload.label,
                         target.copy(topicId = topic.id, topicTitle = topic.name),
                     ) { ok ->
-                        android.widget.Toast.makeText(
-                            fCtx,
-                            if (ok) "Переслано: " + target.title else "Не удалось переслать",
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
             )
