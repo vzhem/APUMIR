@@ -75,6 +75,8 @@ fun ChatDetailScreen(
     onOpenChat: (chatId: String, contactName: String, contactId: String) -> Unit = { _, _, _ -> },
     /** Раунд 203: тап по источнику пересылки - открыть группу/канал (тему). */
     onOpenGroup: (groupId: String, topicId: String?) -> Unit = { _, _ -> },
+    /** Раунд 203: источника нет на телефоне - карточка «Вступить»/«Подписаться». */
+    onJoinByLink: (link: String) -> Unit = {},
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -593,10 +595,12 @@ fun ChatDetailScreen(
                                                     onOpenChat(open.chatId, open.contactName, open.contactId)
                                                 is com.vladimir.messenger.util.ForwardMarker.Open.Group ->
                                                     onOpenGroup(open.groupId, open.topicId)
-                                                com.vladimir.messenger.util.ForwardMarker.Open.Missing ->
+                                                is com.vladimir.messenger.util.ForwardMarker.Open.Join ->
+                                                    onJoinByLink(open.link)
+                                                is com.vladimir.messenger.util.ForwardMarker.Open.Missing ->
                                                     Toast.makeText(
                                                         toastContext,
-                                                        "Источник недоступен: нет такого чата или группы на телефоне",
+                                                        open.message,
                                                         Toast.LENGTH_SHORT,
                                                     ).show()
                                             }

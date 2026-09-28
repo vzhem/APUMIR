@@ -480,6 +480,9 @@ fun MessengerNavGraph(
                         navController.navigate(Screen.GroupChat.createRoute(gId))
                     }
                 },
+                onJoinByLink = { link ->
+                    navController.navigate(Screen.Groups.createJoinRoute(link))
+                },
             )
         }
 
@@ -765,6 +768,9 @@ fun MessengerNavGraph(
                     } else {
                         navController.navigate(Screen.GroupChat.createRoute(gId))
                     }
+                },
+                onJoinByLink = { link ->
+                    navController.navigate(Screen.Groups.createJoinRoute(link))
                 },
             )
         }

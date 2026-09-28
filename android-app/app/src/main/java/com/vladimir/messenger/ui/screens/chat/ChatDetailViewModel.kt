@@ -1146,14 +1146,28 @@ class ChatDetailViewModel @Inject constructor(
         return if (!ref.isGroup) {
             val chat = chatRepository.forwardChatByContact(ref.id)
             if (chat == null) {
-                com.vladimir.messenger.util.ForwardMarker.Open.Missing
+                com.vladimir.messenger.util.ForwardMarker.Open.Missing("Этого человека нет в контактах на этом телефоне")
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Chat(chat.id, chat.contactName, chat.contactId)
             }
         } else {
             val group = groupRepository.forwardGroupById(ref.id)
             if (group == null || group.isLeft) {
-                com.vladimir.messenger.util.ForwardMarker.Open.Missing
+                // Раунд 203 (владелец): вместо «недоступно» - вступить/подписаться.
+                if (ref.slug.isNotBlank()) {
+                    com.vladimir.messenger.util.ForwardMarker.Open.Join(
+                        com.vladimir.messenger.data.group.GroupInviteLinks.build(
+                            ref.slug,
+                            ref.id,
+                            ref.ownerId.takeIf { it.isNotBlank() },
+                            ref.isChannel,
+                            false,
+                            ref.topicId.takeIf { it.isNotBlank() },
+                        )
+                    )
+                } else {
+                    com.vladimir.messenger.util.ForwardMarker.Open.Missing("Нет ссылки-приглашения для этой группы")
+                }
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Group(group.id, ref.topicId.takeIf { it.isNotBlank() })
             }

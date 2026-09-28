@@ -12,23 +12,44 @@ object ForwardMarker {
     const val HEADER = "↩ Переслано из «"
 
     /** Откуда переслано: p - друг (id = узел контакта), g - группа/канал. */
-    data class Ref(val isGroup: Boolean, val id: String, val topicId: String, val label: String)
+    data class Ref(
+        val isGroup: Boolean,
+        val id: String,
+        val topicId: String,
+        val label: String,
+        /** Ссылка-приглашение: слаг, владелец, «это канал» - для «Вступить». */
+        val slug: String = "",
+        val ownerId: String = "",
+        val isChannel: Boolean = false,
+    )
 
     /** Куда открывать источник на телефоне читателя. */
     sealed class Open {
         data class Chat(val chatId: String, val contactName: String, val contactId: String) : Open()
         data class Group(val groupId: String, val topicId: String?) : Open()
-        object Missing : Open()
+        /** Группы/канала нет на телефоне - предложить вступить по ссылке. */
+        data class Join(val link: String) : Open()
+        data class Missing(val message: String) : Open()
     }
 
     /**
      * Тело пересланного: маркер, шапка для старых версий, пустая строка,
      * сам текст. Маркер и шапку пузыри прячут - рисуют свою шапку.
      */
-    fun buildBody(isGroup: Boolean, id: String, topicId: String, label: String, text: String): String {
+    fun buildBody(
+        isGroup: Boolean,
+        id: String,
+        topicId: String,
+        label: String,
+        text: String,
+        slug: String = "",
+        ownerId: String = "",
+        isChannel: Boolean = false,
+    ): String {
         val safeLabel = label.replace("|", "/").trim()
         val marker = if (isGroup) {
-            "APUFWD1|g|" + id + "|" + topicId + "|" + safeLabel
+            "APUFWD1|g|" + id + "|" + topicId + "|" + slug + "|" + ownerId + "|" +
+                (if (isChannel) "1" else "0") + "|" + safeLabel
         } else {
             "APUFWD1|p|" + id + "|" + safeLabel
         }
@@ -42,10 +63,20 @@ object ForwardMarker {
         if (parts.size < 4) return null
         return when (parts[1]) {
             "p" -> Ref(false, parts[2], "", parts.drop(3).joinToString("|"))
-            "g" -> if (parts.size >= 5) {
-                Ref(true, parts[2], parts[3], parts.drop(4).joinToString("|"))
-            } else {
-                null
+            "g" -> when {
+                // Полный формат: слаг, владелец, признак канала, название.
+                parts.size >= 8 -> Ref(
+                    true,
+                    parts[2],
+                    parts[3],
+                    parts.drop(7).joinToString("|"),
+                    parts[4],
+                    parts[5],
+                    parts[6] == "1",
+                )
+                // Короткий (первые сборки): только тема и название.
+                parts.size >= 5 -> Ref(true, parts[2], parts[3], parts.drop(4).joinToString("|"))
+                else -> null
             }
             else -> null
         }
