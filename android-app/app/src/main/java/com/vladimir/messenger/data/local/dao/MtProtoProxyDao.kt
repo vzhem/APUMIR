@@ -47,4 +47,14 @@ interface MtProtoProxyDao {
           AND source != 'MANUAL'
     """)
     suspend fun cleanupDead(maxAgeMs: Long, now: Long = System.currentTimeMillis()): Int
+
+    /**
+     * Раунд 196: кнопка «удалить нерабочие» - удалить СРАЗУ всех с
+     * failCount >= 3 (то, что экран показывает как «✗ Нерабочий»).
+     * Прежний запрос ждал 7 дней без проверок - но healthcheck обновляет
+     * lastCheck при каждой попытке, поэтому кнопка всегда удаляла 0.
+     * Ручные (MANUAL) не трогаем - их удаляют по одной с карточки.
+     */
+    @Query("DELETE FROM mtproto_proxies WHERE failCount >= 3 AND source != 'MANUAL'")
+    suspend fun deleteDeadNow(): Int
 }

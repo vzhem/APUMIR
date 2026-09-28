@@ -134,6 +134,17 @@ fun MtProxyListScreen(
                 contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Раунд 196: список ограничен 500 лучшими - сообщаем, сколько всего.
+                if (uiState.totalInPool > uiState.proxies.size) {
+                    item(key = "pool-count") {
+                        Text(
+                            "Показаны ${uiState.proxies.size} лучших из ${uiState.totalInPool} в пуле",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                }
                 items(uiState.proxies, key = { it.id }) { proxy ->
                     MtProxyCard(
                         proxy = proxy,

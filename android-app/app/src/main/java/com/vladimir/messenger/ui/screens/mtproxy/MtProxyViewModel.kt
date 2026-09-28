@@ -18,6 +18,8 @@ import javax.inject.Inject
 
 data class MtProxyUiState(
     val proxies: List<MtProtoProxy> = emptyList(),
+    /** Раунд 196: всего прокси в пуле (список показывает не больше DISPLAY_LIMIT). */
+    val totalInPool: Int = 0,
     val isLoading: Boolean = true,
     val isChecking: Boolean = false,
     val isCollecting: Boolean = false,
@@ -35,13 +37,26 @@ class MtProxyViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(MtProxyUiState())
     val uiState: StateFlow<MtProxyUiState> = _uiState.asStateFlow()
 
+    /** Раунд 196: сколько прокси показываем на экране (остальные в пуле). */
+    private companion object {
+        const val DISPLAY_LIMIT = 500
+    }
+
     init {
         viewModelScope.launch {
             repo.observeAll()
                 .catch { e -> Log.e("MtProxyVM", "Error observing proxies", e) }
                 .collect { proxies ->
                     _uiState.update {
-                        it.copy(proxies = proxies, isLoading = false)
+                        // Раунд 196 (владелец): выводимый список - не больше
+                        // 500 лучших (сортировка в DAO). Пул целиком нужен
+                        // автопилоту, а не экрану: слабые телефоны не
+                        // рисуют тысячи карточек.
+                        it.copy(
+                            proxies = proxies.take(DISPLAY_LIMIT),
+                            totalInPool = proxies.size,
+                            isLoading = false,
+                        )
                     }
                 }
         }
@@ -116,10 +131,19 @@ class MtProxyViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 196: кнопка «удалить нерабочие» - сразу все «✗ Нерабочий». */
     fun cleanupDead() {
         viewModelScope.launch {
-            val deleted = repo.cleanupDead()
-            _uiState.update { it.copy(message = "Удалено мёртвых: $deleted") }
+            val deleted = repo.cleanupDeadNow()
+            _uiState.update {
+                it.copy(
+                    message = if (deleted > 0) {
+                        "Удалено нерабочих: $deleted (добавленные вручную не тронуты)"
+                    } else {
+                        "Нерабочих не нашлось"
+                    }
+                )
+            }
         }
     }
 

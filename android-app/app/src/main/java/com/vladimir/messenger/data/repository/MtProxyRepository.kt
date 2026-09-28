@@ -165,6 +165,16 @@ class MtProxyRepository @Inject constructor(
         return deleted
     }
 
+    /**
+     * Раунд 196: немедленное удаление всех нерабочих (failCount >= 3,
+     * кроме MANUAL) - то, что показывает кнопка в списке прокси.
+     */
+    suspend fun cleanupDeadNow(): Int {
+        val deleted = dao.deleteDeadNow()
+        Log.i(TAG, "cleanupDeadNow removed $deleted dead proxies")
+        return deleted
+    }
+
     suspend fun needsMoreProxies(): Boolean {
         val count = dao.getAll().size
         return count < MIN_POOL_SIZE
