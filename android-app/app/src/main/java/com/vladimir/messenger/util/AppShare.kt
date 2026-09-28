@@ -2,6 +2,8 @@ package com.vladimir.messenger.util
 
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.FileProvider
+import java.io.File
 
 /**
  * Единственная точка «поделиться» в приложении.
@@ -98,9 +100,61 @@ object AppShare {
         )
     }
 
-    /** Поделиться приглашением в APUMIR. */
+    /**
+     * Поделиться приглашением в APUMIR.
+     *
+     * Раунд 197 (владелец): друг приглашается ИЗ ДРУГОЙ СЕТИ - к сообщению
+     * прикладываем свежий APK (наш установленный файл, он на каждом телефоне
+     * и всегда ровно той версии, что у нас). Друг ставит приложение прямо
+     * из входящего сообщения - сайт и GitHub не нужны вовсе. Копия в кэш
+     * с понятным именем APU-v<версия>.apk (у base.apk некрасивое имя);
+     * копируем в фоне - 40 МБ не должны морозить интерфейс; любая неудача
+     * (нет файла, нет места, приложение не открылось) - обычный текст.
+     */
     fun shareInvite(context: Context, displayName: String, contactLink: String) {
-        shareText(context, inviteText(displayName, contactLink), "Пригласить в APUMIR")
+        val text = inviteText(displayName, contactLink)
+        val title = "Пригласить в APUMIR"
+        Thread {
+            val shared = runCatching { shareApkWithText(context, text, title) }
+                .onFailure { android.util.Log.w("AppShare", "apk invite failed: ${it.message}") }
+                .getOrDefault(false)
+            if (!shared) runCatching { shareText(context, text, title) }
+        }.start()
+    }
+
+    /** Приложить установленный APK к тексту приглашения. false - не вышло. */
+    private fun shareApkWithText(context: Context, text: String, title: String): Boolean {
+        val src = File(context.applicationInfo.sourceDir)
+        if (!src.isFile) return false
+        val version = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull()?.takeIf { !it.isNullOrBlank() } ?: "latest"
+        val dir = File(context.cacheDir, "invite").apply { mkdirs() }
+        val named = File(dir, "APU-v$version.apk")
+        if (!named.isFile || named.length() != src.length()) {
+            // Свежая копия с понятным именем; старые версии заодно подчищаем.
+            val tmp = File(dir, named.name + ".tmp")
+            if (tmp.exists()) tmp.delete()
+            src.copyTo(tmp, overwrite = false)
+            if (named.exists()) named.delete()
+            if (!tmp.renameTo(named)) {
+                tmp.delete()
+                return false
+            }
+            dir.listFiles { file -> file.name.endsWith(".apk") && file != named }
+                ?.forEach { it.delete() }
+        }
+        val uri = FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", named,
+        )
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/vnd.android.package-archive"
+            putExtra(Intent.EXTRA_TEXT, text)
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, title))
+        return true
     }
 
     /** Поделиться произвольным текстом (например, ссылкой-приглашением в группу). */
