@@ -368,19 +368,6 @@ private fun StickerSection(
     /** Раунд 206: «обновить» (↻) - повторная просьба ВСЕМ держателям. */
     onRetryFetchSticker: (com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit = {},
 ) {
-    // Раунд 206: пустые плитки сами просятся домой - тихо докачиваем из
-    // роя (владелец: «если пустые - автоматически подгрузились»). Мерно,
-    // с паузой; повторные вызовы дедуплицируются паузой want-запросов.
-    androidx.compose.runtime.LaunchedEffect(stickers, recents, swarm, thumbTick) {
-        val missing = (recents + stickers)
-            .filter { !it.file.isFile }
-            .mapNotNull { entry -> swarm.firstOrNull { it.sha256 == entry.sha256 } }
-            .take(8)
-        missing.forEach { target ->
-            onAutoFetchSticker(target)
-            kotlinx.coroutines.delay(600)
-        }
-    }
     // Раунд 174: подтверждение удаления стикера из библиотеки и сети.
     var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry?>(null) }
     if (removeCandidate != null) {
@@ -417,6 +404,19 @@ private fun StickerSection(
     val thumbTick by remember {
         StickerLibrary.thumbArrivalsFlow()
     }.collectAsState("")
+    // Раунд 206: пустые плитки сами просятся домой - тихо докачиваем из
+    // роя (владелец: «если пустые - автоматически подгрузились»). Мерно,
+    // с паузой; повторные вызовы дедуплицируются паузой want-запросов.
+    androidx.compose.runtime.LaunchedEffect(stickers, recents, swarm, thumbTick) {
+        val missing = (recents + stickers)
+            .filter { !it.file.isFile }
+            .mapNotNull { entry -> swarm.firstOrNull { it.sha256 == entry.sha256 } }
+            .take(8)
+        missing.forEach { target ->
+            onAutoFetchSticker(target)
+            kotlinx.coroutines.delay(600)
+        }
+    }
     // Три пака: Недавние, Мои, Из сети. Сверху сетки - две кнопки «+»,
     // поэтому «Недавние» начинаются с индекса 2 (раунд 170: кнопки вверху,
     // чтобы их не искали под сотней стикеров).
