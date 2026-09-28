@@ -356,6 +356,16 @@ fun MessengerNavGraph(
         composable(route = Screen.Onboarding.route) {
             OnboardingScreen(
                 onRestoreFromFile = { navController.navigate(Screen.ProfileBackup.route) },
+                onJoinByInvite = { pasted ->
+                    // Раунд 204: приглашение друга из онбординга - личная ссылка
+                    // ведёт в добавление контакта (атрибуция и ранг - сами),
+                    // ссылка на группу - в карточку «Вступить».
+                    if (com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(pasted) != null) {
+                        navController.navigate(Screen.Groups.createJoinRoute(pasted))
+                    } else {
+                        navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(pasted)))
+                    }
+                },
                 onProfileCreated = {
                     // РџРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ РїСЂРѕС„РёР»СЏ в†’ РіР»Р°РІРЅС‹Р№ СЌРєСЂР°РЅ
                     // clearBackStack: РЅРµР»СЊР·СЏ РІРµСЂРЅСѓС‚СЊСЃСЏ РЅР°Р·Р°Рґ Рє РѕРЅР±РѕСЂРґРёРЅРіСѓ
