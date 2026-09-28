@@ -135,7 +135,19 @@ object AppShare {
             val shared = runCatching { shareApkWithText(context, text, title) }
                 .onFailure { android.util.Log.w("AppShare", "apk share failed: ${it.message}") }
                 .getOrDefault(false)
-            if (!shared) runCatching { shareText(context, text, title) }
+            if (!shared) {
+                runCatching { shareText(context, text, title) }
+                // Раунд 199 (владелец: «файл не прикрепился»): молчаливый
+                // fallback выглядит как «галочка не работает». Говорим честно.
+                runCatching {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        android.widget.Toast.makeText(
+                            context, "Файл приложить не вышло - отправлен текст со ссылкой",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+            }
         }.start()
     }
 
@@ -164,13 +176,21 @@ object AppShare {
         val uri = FileProvider.getUriForFile(
             context, "${context.packageName}.fileprovider", named,
         )
+        // Раунд 199: БЕЗ clipData меню «Поделиться» на части Android не
+        // пробрасывает разрешение на чтение вложения целевому приложению -
+        // то молча показывало один текст, файл «не прикреплялся».
+        // clipData + флаг на сам chooser - канонический рецепт из документации.
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "application/vnd.android.package-archive"
             putExtra(Intent.EXTRA_TEXT, text)
             putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newRawUri("apk", uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(send, title))
+        val chooser = Intent.createChooser(send, title).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(chooser)
         return true
     }
 

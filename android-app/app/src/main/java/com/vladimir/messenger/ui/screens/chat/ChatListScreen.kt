@@ -80,6 +80,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.util.OwnInvite
+import com.vladimir.messenger.data.link.ShortShare
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -265,6 +266,29 @@ fun ChatListScreen(
                                         onClick = {
                                             menuOpen = false
                                             showConnectDialog = true
+                                        },
+                                    )
+                                    // Раунд 199 (владелец): приглашение - на
+                                    // главной, под рукой. Тот же путь, что и
+                                    // из «Контактов»: текст + установочный APK.
+                                    DropdownMenuItem(
+                                        text = { Text("Пригласить в APU") },
+                                        leadingIcon = { ShimmerIcon(Icons.Default.PersonAdd) },
+                                        onClick = {
+                                            menuOpen = false
+                                            val link = runCatching { OwnInvite.link(context) }.getOrNull()
+                                            if (link.isNullOrBlank()) {
+                                                android.widget.Toast.makeText(
+                                                    context, "Личность ещё не создана",
+                                                    android.widget.Toast.LENGTH_SHORT,
+                                                ).show()
+                                            } else {
+                                                ShortShare.shareInvite(
+                                                    context,
+                                                    OwnInvite.displayName(context),
+                                                    link,
+                                                )
+                                            }
                                         },
                                     )
                                 }
