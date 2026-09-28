@@ -469,7 +469,17 @@ fun MessengerNavGraph(
                 },
                 onAddContactInvite = { link ->
                     navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(link)))
-                }
+                },
+                onOpenChat = { cId, cName, cContact ->
+                    navController.navigate(Screen.ChatDetail.createRoute(cId, cName, cContact))
+                },
+                onOpenGroup = { gId, tId ->
+                    if (tId != null) {
+                        navController.navigate(Screen.GroupChat.createTopicRoute(gId, tId))
+                    } else {
+                        navController.navigate(Screen.GroupChat.createRoute(gId))
+                    }
+                },
             )
         }
 
@@ -744,6 +754,16 @@ fun MessengerNavGraph(
                 onSwitchChannel = { channelId ->
                     navController.navigate(Screen.Channel.createRoute(channelId)) {
                         popUpTo(Screen.GroupChat.route) { inclusive = true }
+                    }
+                },
+                onOpenChat = { cId, cName, cContact ->
+                    navController.navigate(Screen.ChatDetail.createRoute(cId, cName, cContact))
+                },
+                onOpenGroup = { gId, tId ->
+                    if (tId != null) {
+                        navController.navigate(Screen.GroupChat.createTopicRoute(gId, tId))
+                    } else {
+                        navController.navigate(Screen.GroupChat.createRoute(gId))
                     }
                 },
             )

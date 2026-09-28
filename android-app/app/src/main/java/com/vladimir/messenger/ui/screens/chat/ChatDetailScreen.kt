@@ -71,6 +71,10 @@ fun ChatDetailScreen(
     onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     /** Раунд 176: открыть добавление контакта по ссылке из карточки в чате. */
     onAddContactInvite: (String) -> Unit = {},
+    /** Раунд 203: тап по источнику пересылки - открыть чат друга. */
+    onOpenChat: (chatId: String, contactName: String, contactId: String) -> Unit = { _, _, _ -> },
+    /** Раунд 203: тап по источнику пересылки - открыть группу/канал (тему). */
+    onOpenGroup: (groupId: String, topicId: String?) -> Unit = { _, _ -> },
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -88,6 +92,7 @@ fun ChatDetailScreen(
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
     // Раунд 203: «Поделиться в APU» - пересылка с указанием источника.
     var forwardMessage by remember { mutableStateOf<Message?>(null) }
+    val fwdScope = androidx.compose.runtime.rememberCoroutineScope()
 
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
     var deleteForAllTarget by remember { mutableStateOf<Message?>(null) }
@@ -580,6 +585,22 @@ fun ChatDetailScreen(
                                     onLongClick = {
                                         activeMessage = message
                                         showCopyDialog = message
+                                    },
+                                    onOpenForward = { ref ->
+                                        fwdScope.launch {
+                                            when (val open = viewModel.resolveForwardTap(ref)) {
+                                                is com.vladimir.messenger.util.ForwardMarker.Open.Chat ->
+                                                    onOpenChat(open.chatId, open.contactName, open.contactId)
+                                                is com.vladimir.messenger.util.ForwardMarker.Open.Group ->
+                                                    onOpenGroup(open.groupId, open.topicId)
+                                                com.vladimir.messenger.util.ForwardMarker.Open.Missing ->
+                                                    Toast.makeText(
+                                                        toastContext,
+                                                        "Источник недоступен: нет такого чата или группы на телефоне",
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                            }
+                                        }
                                     }
                                 )
                                 // Реакции живут отдельной строкой под пузырём -

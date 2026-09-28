@@ -63,6 +63,8 @@ fun MessageBubble(
     onContactInvite: ((inviteLink: String) -> Unit)? = null,
     /** Раунд 189: тап по «Вступить»/«Подписаться» в карточке группы/канала. */
     onGroupInvite: ((link: String) -> Unit)? = null,
+    /** Раунд 203: тап по шапке-источнику пересылки. */
+    onOpenForward: ((com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit)? = null,
 ) {
     val isOwn = message.isFromMe
     val context = LocalContext.current
@@ -87,25 +89,50 @@ fun MessageBubble(
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Column {
-                val annotatedText = remember(message.content, linkColor) {
-                    buildAnnotatedMessageText(message.content, linkColor)
+                // Раунд 203: шапка-источник пересылки - кликабельная, служебные
+                // строки (маркер + старая шапка) из тела убираем.
+                val fwdRef = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
+                val showFwdHeader = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
+                val displayContent = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
+                if (showFwdHeader) {
+                    val fwdLabel = fwdRef?.label ?: com.vladimir.messenger.util.ForwardMarker.plainHeaderLabel(message.content)
+                    Row(
+                        modifier = Modifier
+                            .padding(bottom = 2.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = fwdRef != null && onOpenForward != null) {
+                                if (fwdRef != null && onOpenForward != null) onOpenForward(fwdRef)
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            "↩ Переслано из «" + fwdLabel + "»",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = TextDecoration.Underline,
+                            color = textColor,
+                        )
+                    }
+                }
+                val annotatedText = remember(displayContent, linkColor) {
+                    buildAnnotatedMessageText(displayContent, linkColor)
                 }
                 // Сообщение из одной ссылки на картинку или гифку показываем
                 // картинкой: клавиатура вставляет гифки именно ссылкой, и в чате
                 // вместо картинки висел текст.
-                val imageUrl = remember(message.content) {
-                    ImageLinkDetector.directImageUrl(message.content)
+                val imageUrl = remember(displayContent) {
+                    ImageLinkDetector.directImageUrl(displayContent)
                 }
                 // Раунд 176: приглашение «поделиться контактом» рисуем карточкой:
                 // имя и ник человека, ниже золотой пузырь «Добавить контакт» -
                 // apu://-ссылка в тексте раньше была некликабельна.
-                val inviteCard = remember(message.content) {
-                    com.vladimir.messenger.util.ContactCardSender.parseCard(message.content)
+                val inviteCard = remember(displayContent) {
+                    com.vladimir.messenger.util.ContactCardSender.parseCard(displayContent)
                 }
 
                 // Раунд 189: приглашение в группу/канал - тоже карточкой.
-                val groupCard = remember(message.content) {
-                    com.vladimir.messenger.util.GroupInviteCardSender.parseCard(message.content)
+                val groupCard = remember(displayContent) {
+                    com.vladimir.messenger.util.GroupInviteCardSender.parseCard(displayContent)
                 }
 
                 if (inviteCard != null && onContactInvite != null) {

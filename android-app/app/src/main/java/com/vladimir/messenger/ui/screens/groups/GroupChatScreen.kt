@@ -89,6 +89,7 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -122,6 +123,10 @@ fun GroupChatScreen(
     onSwitchGroup: (groupId: String) -> Unit = {},
     /** Нажатие на значок канала в левой колонке. */
     onSwitchChannel: (channelId: String) -> Unit = {},
+    /** Раунд 203: тап по источнику пересылки - открыть чат друга. */
+    onOpenChat: (chatId: String, contactName: String, contactId: String) -> Unit = { _, _, _ -> },
+    /** Раунд 203: тап по источнику пересылки - открыть группу/канал (тему). */
+    onOpenGroup: (groupId: String, topicId: String?) -> Unit = { _, _ -> },
     viewModel: GroupChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -175,6 +180,8 @@ fun GroupChatScreen(
     var forwardPayload by remember {
         mutableStateOf<com.vladimir.messenger.ui.components.ForwardPayload?>(null)
     }
+    val fwdScope = rememberCoroutineScope()
+    val fwdCtx = androidx.compose.ui.platform.LocalContext.current
     forwardPayload?.let { payload ->
         val fCtx = androidx.compose.ui.platform.LocalContext.current
         var fLoading by remember { mutableStateOf(true) }
@@ -727,6 +734,22 @@ fun GroupChatScreen(
                                 message.content,
                                 label,
                             )
+                        },
+                        onOpenForward = { ref ->
+                            fwdScope.launch {
+                                when (val open = viewModel.resolveForwardTap(ref)) {
+                                    is com.vladimir.messenger.util.ForwardMarker.Open.Chat ->
+                                        onOpenChat(open.chatId, open.contactName, open.contactId)
+                                    is com.vladimir.messenger.util.ForwardMarker.Open.Group ->
+                                        onOpenGroup(open.groupId, open.topicId)
+                                    com.vladimir.messenger.util.ForwardMarker.Open.Missing ->
+                                        android.widget.Toast.makeText(
+                                            fwdCtx,
+                                            "Источник недоступен: нет такого чата или группы на телефоне",
+                                            android.widget.Toast.LENGTH_SHORT,
+                                        ).show()
+                                }
+                            }
                         },
                         reactions = uiState.reactions[message.id].orEmpty(),
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
@@ -1472,6 +1495,30 @@ private fun MessageBubble(
                 if (!message.isFromMe) {
                     Text(senderName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                 }
+                // Раунд 203: шапка-источник пересылки - кликабельная; служебные
+                // строки (маркер + старая шапка) из тела убираем.
+                val fwdRef = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
+                val showFwdHeader = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
+                if (showFwdHeader) {
+                    val fwdLabel = fwdRef?.label ?: com.vladimir.messenger.util.ForwardMarker.plainHeaderLabel(message.content)
+                    Row(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = fwdRef != null && onOpenForward != null) {
+                                if (fwdRef != null && onOpenForward != null) onOpenForward(fwdRef)
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            "↩ Переслано из «" + fwdLabel + "»",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = TextDecoration.Underline,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
                 // Вложенная картинка едет отдельной служебной строкой внутри
                 // текста. Раньше её печатали как есть, и в комментариях под
                 // постом вместо снимка тянулись экраны «букв».
@@ -1480,9 +1527,11 @@ private fun MessageBubble(
                 }
                 val bodyText = remember(message.content, fileCard?.info) {
                     val words = com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+                    // Раунд 203: маркер и шапку пересылки рисуем отдельно.
+                    val clean = com.vladimir.messenger.util.ForwardMarker.stripHeader(words)
                     // Подпись «📎 имя (размер)» - для старых версий; здесь её
                     // заменяет карточка файла.
-                    if (fileCard != null) GroupFileMarker.stripCaption(words, fileCard.info) else words
+                    if (fileCard != null) GroupFileMarker.stripCaption(clean, fileCard.info) else clean
                 }
                 val attachedBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
                     .rememberAvatar(attachedB64)

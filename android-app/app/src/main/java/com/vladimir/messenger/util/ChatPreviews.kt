@@ -40,6 +40,10 @@ object ChatPreviews {
         if (raw == null) return null
         val t = raw.trim()
         // Ссылка на гифку (раунд 128): «APUGIFREF1|<sha256>».
+        // Раунд 203: пересылка - шапка-источник вместо служебной строки.
+        if (t.startsWith("APUFWD1|")) {
+            ForwardMarker.parseRef(t)?.let { return "↩ Переслано из «" + it.label + "»" }
+        }
         if (t.startsWith("APUGIFREF1|")) return GIF_LABEL
         // Конверт стикер-роя (раунд 139): «APUSTK1|ask|…».
         if (t.startsWith("APUSTK1|")) return "Стикеры"

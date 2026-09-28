@@ -82,6 +82,17 @@ class ChatRepository @Inject constructor(
     suspend fun forwardFriends(): List<com.vladimir.messenger.data.local.entity.ChatEntity> =
         chatDao.getAllChats()
 
+    /** Раунд 203: чат по id - узел источника для маркера пересылки. */
+    suspend fun forwardChatById(chatId: String): com.vladimir.messenger.data.local.entity.ChatEntity? =
+        chatDao.getChatById(chatId)
+
+    /** Раунд 203: чат друга по его узлу - тап по источнику пересылки. */
+    suspend fun forwardChatByContact(contactId: String): com.vladimir.messenger.data.local.entity.ChatEntity? {
+        if (contactId.isBlank()) return null
+        chatDao.getChatByContactId(contactId)?.let { return it }
+        return chatDao.getAllChats().firstOrNull { it.contactId.contains(contactId) }
+    }
+
     suspend fun sendMessage(chatId: String, recipientId: String, content: String): Result<Message> {
         return try {
             val messageId = UUID.randomUUID().toString()

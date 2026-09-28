@@ -1112,13 +1112,39 @@ class GroupChatViewModel @Inject constructor(
         onResult: (Boolean) -> Unit,
     ) {
         viewModelScope.launch {
-            val body = "↩ Переслано из «" + sourceLabel + "»" + "\n\n" + text
+            val topic = _uiState.value.selectedTopicId ?: ""
+            val body = com.vladimir.messenger.util.ForwardMarker.buildBody(
+                true,
+                groupId,
+                topic,
+                sourceLabel,
+                text,
+            )
             val res = if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                 chatRepository.sendMessage(target.id, "", body)
             } else {
                 groupRepository.sendMessage(target.id, target.topicId ?: "", body)
             }
             onResult(res.isSuccess)
+        }
+    }
+
+    /** Раунд 203: тап по источнику пересылки - куда открывать. */
+    suspend fun resolveForwardTap(ref: com.vladimir.messenger.util.ForwardMarker.Ref): com.vladimir.messenger.util.ForwardMarker.Open {
+        return if (!ref.isGroup) {
+            val chat = chatRepository.forwardChatByContact(ref.id)
+            if (chat == null) {
+                com.vladimir.messenger.util.ForwardMarker.Open.Missing
+            } else {
+                com.vladimir.messenger.util.ForwardMarker.Open.Chat(chat.id, chat.contactName, chat.contactId)
+            }
+        } else {
+            val group = groupRepository.forwardGroupById(ref.id)
+            if (group == null || group.isLeft) {
+                com.vladimir.messenger.util.ForwardMarker.Open.Missing
+            } else {
+                com.vladimir.messenger.util.ForwardMarker.Open.Group(group.id, ref.topicId.takeIf { it.isNotBlank() })
+            }
         }
     }
 

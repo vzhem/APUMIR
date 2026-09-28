@@ -767,6 +767,10 @@ class GroupRepository(
     suspend fun forwardGroups(): List<com.vladimir.messenger.data.local.entity.GroupEntity> =
         groupDao.getGroups().filter { !it.isLeft }
 
+    /** Раунд 203: группа/канал по id - тап по источнику пересылки. */
+    suspend fun forwardGroupById(groupId: String): com.vladimir.messenger.data.local.entity.GroupEntity? =
+        groupDao.getGroupById(groupId)
+
     /** Раунд 203: темы группы (посты канала); пустой список - если тем нет. */
     suspend fun forwardTopics(groupId: String): List<com.vladimir.messenger.data.local.entity.GroupTopicEntity> {
         val topics = groupDao.getTopics(groupId)

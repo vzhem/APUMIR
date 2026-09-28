@@ -106,8 +106,8 @@ fun ForwardChooserDialog(
                     if (friends.isNotEmpty()) {
                         Text(
                             "Друзья",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                         )
                         friends.forEach { target ->
                             ForwardRow(target.title) { onPick(target) }
@@ -116,8 +116,9 @@ fun ForwardChooserDialog(
                     if (groups.isNotEmpty()) {
                         Text(
                             "Группы",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp),
                         )
                         groups.forEach { target ->
                             ForwardRow(target.title) { onPick(target) }
@@ -126,8 +127,9 @@ fun ForwardChooserDialog(
                     if (channels.isNotEmpty()) {
                         Text(
                             "Каналы",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp),
                         )
                         channels.forEach { target ->
                             ForwardRow(target.title) { onPick(target) }
@@ -175,13 +177,10 @@ fun ForwardTopicPickerDialog(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 } else {
+                    // Раунд 203: только название - ключ значка (iconEmoji)
+                    // в строке выглядел «странным текстом» (владелец, скрин).
                     topics.forEach { topic ->
-                        val label = if (topic.iconEmoji.isNotBlank()) {
-                            topic.iconEmoji + " " + topic.name
-                        } else {
-                            topic.name
-                        }
-                        ForwardRow(label) { onPick(topic) }
+                        ForwardRow(topic.name) { onPick(topic) }
                     }
                 }
             }
