@@ -138,10 +138,16 @@ class ChatListViewModel @Inject constructor(
      */
     private val myNodeId = CompletableDeferred<String>()
 
+    // Раунд 201 (владелец: «долго этот экран при включении»): конвейер
+    // списка НЕ ждёт готовности узла. myNodeId.await() в пути данных
+    // держал первый кадр, пока ядро поднимается (без сети - особенно
+    // долго). Список собирается сразу из базы; роли владельца/админа
+    // подтянутся отдельным кадром, когда идентификатор прилетит.
+    private val myIdFlow = MutableStateFlow("")
+
     init {
         viewModelScope.launch {
-            myNodeId.complete(
-                withContext(Dispatchers.IO) {
+            val resolved = withContext(Dispatchers.IO) {
                     // Сначала спрашиваем сохранённый идентификатор, и только
                     // если его нет - ядро. Раньше список чатов ЖДАЛ ответа
                     // ядра: пока движок поднимается (а он ждёт сеть), главный
@@ -154,7 +160,8 @@ class ChatListViewModel @Inject constructor(
                     saved?.takeIf { it.isNotBlank() }
                         ?: com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
                 }
-            )
+            myIdFlow.value = resolved
+            myNodeId.complete(resolved)
         }
         observeInbox()
         observeNetworkStatus()
@@ -209,7 +216,8 @@ class ChatListViewModel @Inject constructor(
             combine(
                 sourcesFlow,
                 section,
-            ) { src, current ->
+                myIdFlow,
+            ) { src, current, _ ->
                 Snapshot(src.chats, toInboxGroups(src.groups), src.query, current, src.window, src.total)
             }
                 // Сборка разделов, поиск и сортировка - на рабочем потоке.
@@ -275,7 +283,7 @@ class ChatListViewModel @Inject constructor(
 
     /** Роли считаем один раз на пересчёт, а не на каждую строку списка. */
     private suspend fun toInboxGroups(entities: List<com.vladimir.messenger.data.local.entity.GroupEntity>): List<InboxGroup> {
-        val me = myNodeId.await()
+        val me = myIdFlow.value
         val roles = if (me.isBlank()) {
             emptyMap()
         } else {
