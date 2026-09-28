@@ -721,7 +721,10 @@ fun GroupChatScreen(
                             ?: "Участник " + message.senderId.takeLast(4),
                         canPin = uiState.canPin,
                         onTogglePin = { viewModel.togglePin(message.id, !message.isPinned) },
-                        onSaveToFavorites = { viewModel.saveToFavorites(message.content) },
+                        onSaveToFavorites = {
+                            // Раунд 203: в избранное - без служебных строк пересылки.
+                            viewModel.saveToFavorites(com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content))
+                        },
                         onShareToApu = {
                             // Раунд 203: источник - группа; для чужих сообщений
                             // добавляем автора после названия.
@@ -1555,9 +1558,11 @@ private fun MessageBubble(
                 when {
                     // Раунд 130: ССЫЛКА на гифку - карточка с анимацией;
                     // байты каждый телефон тихо тянет с хранителей сети.
-                    com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content) -> {
+                    // Раунд 203: гифку узнаём в bodyText - он без маркера
+                    // и шапки пересылки.
+                    com.vladimir.messenger.data.gif.GifLibrary.isGifRef(bodyText) -> {
                         com.vladimir.messenger.ui.components.GifRefCard(
-                            content = message.content,
+                            content = bodyText,
                             onEnsure = onEnsureGif,
                         )
                     }

@@ -563,9 +563,12 @@ fun ChatDetailScreen(
                                 ) {
                                 // Раунд 128: ССЫЛКА на гифку - карточка с
                                 // анимацией (байты подтягиваются тихо с сети).
-                                if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content)) {
+                                // Раунд 203: у пересланного служебные строки
+                                // (маркер+шапка) впереди - узнаём гифку в теле.
+                                val fwdBody = remember(message.id) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
+                                if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(fwdBody)) {
                                     com.vladimir.messenger.ui.components.GifRefCard(
-                                        content = message.content,
+                                        content = fwdBody,
                                         modifier = Modifier.align(
                                             if (message.isFromMe) Alignment.End else Alignment.Start
                                         ),
@@ -634,9 +637,11 @@ fun ChatDetailScreen(
             title = { Text("Действия с сообщением") },
             text = {
                 Column {
+                    // Раунд 203: превью без служебных строк пересылки.
+                    val previewText = remember(message.id) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
                     Text(
-                        message.content.take(100) +
-                            if (message.content.length > 100) "..." else "",
+                        previewText.take(100) +
+                            if (previewText.length > 100) "..." else "",
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -708,7 +713,8 @@ fun ChatDetailScreen(
                     if (message.content.isNotBlank()) {
                         TextButton(
                             onClick = {
-                                viewModel.saveTextToFavorites(message.content, contactName)
+                                // Раунд 203: в избранное - без служебных строк.
+                                viewModel.saveTextToFavorites(com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content), contactName)
                                 showCopyDialog = null
                                 resetSelection()
                             },
