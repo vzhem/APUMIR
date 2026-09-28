@@ -251,12 +251,16 @@ private fun SectionPill(
             .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         Text(icon, fontSize = 18.sp)
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(4.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            // Раунд 205: подпись раздела не переносится посреди слова
+            // («Стикер/ы», «Эмодзи/и» на узком экране - владелец, скрин).
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
@@ -489,7 +493,10 @@ private fun StickerSection(
                 )
             }
         }
-        rowStickers(recents, "r", onSticker)
+        // Раунд 205: плитки без файла - докачка из сети (владелец: «есть
+        // не загружаемые стикеры» - пустые клетки в Недавних и Моих).
+        rowStickers(recents, "r", onSticker, swarm = swarm, tick = thumbTick,
+            onRequestSwarmSticker = onRequestSwarmSticker)
         item(key = "hm", span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 "Мои стикеры",
@@ -499,7 +506,9 @@ private fun StickerSection(
                 modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp),
             )
         }
-        rowStickers(stickers, "m", onSticker, onRemove = { removeCandidate = it })
+        rowStickers(stickers, "m", onSticker, onRemove = { removeCandidate = it },
+            swarm = swarm, tick = thumbTick,
+            onRequestSwarmSticker = onRequestSwarmSticker)
         item(key = "hs", span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 "Из сети",
@@ -591,18 +600,31 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.rowStickers(
     onSticker: (StickerLibrary.StickerEntry) -> Unit,
     /** Раунд 174: долгое нажатие - удалить (только для «Моих»). */
     onRemove: ((StickerLibrary.StickerEntry) -> Unit)? = null,
+    /** Раунд 205: каталог «Из сети» - где искать holders для докачки. */
+    swarm: List<com.vladimir.messenger.data.sticker.SwarmSticker> = emptyList(),
+    /** Тик прибытия миниатюр - пересчитывать «файл на месте?». */
+    tick: String = "",
+    /** Раунд 205: докачать стикер у хранителей. */
+    onRequestSwarmSticker: ((com.vladimir.messenger.data.sticker.SwarmSticker) -> Unit)? = null,
 ) {
     gridEntries(
         entries,
         key = { "$prefix-${it.sha256}" },
     ) { entry ->
+        // Раунд 205: файла может не быть (чистили хранилище, перенос,
+        // сбой) - раньше такая плитка была просто ПУСТОЙ клеткой.
+        val fileOk = remember(entry.sha256, tick) { entry.file.isFile }
+        val swarmMatch = remember(entry.sha256, tick) {
+            swarm.firstOrNull { it.sha256 == entry.sha256 }
+        }
+        val canFetch = fileOk || (swarmMatch != null && onRequestSwarmSticker != null)
         val cellModifier = if (onRemove != null) {
             Modifier
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
                 .combinedClickable(
-                    onClick = { onSticker(entry) },
+                    onClick = { if (fileOk) onSticker(entry) },
                     onLongClick = { onRemove(entry) },
                 )
         } else {
@@ -610,21 +632,65 @@ private fun androidx.compose.foundation.lazy.grid.LazyGridScope.rowStickers(
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(10.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-                .clickable { onSticker(entry) }
+                .clickable(enabled = canFetch) {
+                    val remote = swarmMatch
+                    if (fileOk) {
+                        onSticker(entry)
+                    } else if (remote != null) {
+                        onRequestSwarmSticker?.invoke(remote)
+                    }
+                }
         }
         Box(
             modifier = cellModifier,
+            contentAlignment = Alignment.Center,
         ) {
-            // Раунд 170: анимированные стикеры (gif/webp/webm) живут в сетке.
-            StickerAnimated(
-                file = entry.file,
-                contentDescription = entry.name,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .padding(4.dp),
-            )
+            if (fileOk) {
+                // Раунд 170: анимированные стикеры (gif/webp/webm) живут в сетке.
+                StickerAnimated(
+                    file = entry.file,
+                    contentDescription = entry.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .padding(4.dp),
+                )
+            } else {
+                // Раунд 205: нет файла - миниатюра с хранителя (полупрозрачная)
+                // и значок докачки; нажатие качает у хранителей роя.
+                val panelCtx = androidx.compose.ui.platform.LocalContext.current
+                val thumb = remember(entry.sha256, tick) {
+                    StickerLibrary.tinyThumbFile(panelCtx, entry.sha256)
+                }
+                if (thumb != null) {
+                    coil.compose.AsyncImage(
+                        model = thumb,
+                        contentDescription = entry.name,
+                        contentScale = ContentScale.Fit,
+                        alpha = 0.45f,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .padding(4.dp),
+                    )
+                } else {
+                    Text(
+                        "🧩",
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    if (canFetch) "⤓" else "×",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(3.dp),
+                )
+            }
         }
     }
 }
