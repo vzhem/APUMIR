@@ -272,8 +272,8 @@ object ProfileSync {
         } finally {
             conn.disconnect()
         }
-        recordSuccess(context, bytes.size)
-        return UploadResult.Ok(bytes.size)
+        recordSuccess(context, bytes.size.toLong())
+        return UploadResult.Ok(bytes.size.toLong())
     }
 
     /** Что лежит в облаке: дата и размер (без скачивания копии). */

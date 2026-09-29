@@ -103,8 +103,6 @@ fun SettingsScreen(
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
-    // Раунд 223: окно «Синхронизировать аккаунт».
-    var showSyncDialog by remember { mutableStateOf(false) }
     // Вкладок больше нет: профиль - отдельный пункт в списке настроек и
     // отдельная кнопка в нижней панели. Вкладка сверху дублировала их и
     // мешала: список настроек начинался не с начала.
@@ -624,6 +622,8 @@ private fun SettingsTabContent(
     var showMqttDialog by remember { mutableStateOf(false) }
     // Диалог резервной копии адресов (раздел «Сервер»).
     var showAddrBookDialog by remember { mutableStateOf(false) }
+    // Раунд 223: окно «Синхронизировать аккаунт».
+    var showSyncDialog by remember { mutableStateOf(false) }
     val mqttClipboard = LocalClipboardManager.current
     // Бегунок справа: видно, где мы в длинном списке.
     val settingsScrollState = rememberLazyListState()
