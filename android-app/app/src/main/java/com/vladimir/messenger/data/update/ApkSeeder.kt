@@ -533,13 +533,10 @@ class ApkSeeder @Inject constructor(
      * другому сиду). Все отказы — `upnone`, чтобы круг просьб не висел.
      */
     suspend fun onUpdateWant(senderId: String, packet: GroupWire.Packet.UpdateWant) {
-        // Раунд 215: «Я сервер» выключен - обновления другим не раздаю
-        // (сам скачать могу как раньше; просьба уйдёт к другим сидам).
-        if (!com.vladimir.messenger.data.swarm.ServerMode.isEnabled(appContext)) {
-            Log.i(TAG, "update want skipped: subscriber mode (im_the_server=off)")
-            replyNone(packet.version, packet.sha256, senderId)
-            return
-        }
+        // Раунд 216 (уточнение владельца к р215): новый APK обновления - СВОЙ
+        // файл на телефоне и ровно то, что нужно другим телефонам, поэтому
+        // раздаём его ВСЕГДА, и в режиме абонента тоже («Я сервер» = ВЫКЛ).
+        // Гейт р215 снят: сервировка опирается только на свою копию.
         val info = store.loadSeed()
         if (info == null || info.sha256 != packet.sha256 || !ApkUpdate.isSame(info.version, packet.version)) {
             replyNone(packet.version, packet.sha256, senderId)
@@ -582,12 +579,8 @@ class ApkSeeder @Inject constructor(
      * Отказ — `upnone` (версия «до», sha патча), чтобы круг просьб не висел.
      */
     suspend fun onUpdatePatchWant(senderId: String, packet: GroupWire.Packet.UpdatePatchWant) {
-        // Раунд 215: «Я сервер» выключен - патчи другим не раздаю.
-        if (!com.vladimir.messenger.data.swarm.ServerMode.isEnabled(appContext)) {
-            Log.i(TAG, "patch want skipped: subscriber mode (im_the_server=off)")
-            replyNone(packet.toVersion, packet.patchSha256, senderId)
-            return
-        }
+        // Раунд 216: патч - часть той же раздачи обновления, режим абонента
+        // не мешает (у абонента свой скачанный патч).
         val info = store.loadPatchSeed()
         if (info == null || info.patchSha256 != packet.patchSha256 ||
             !ApkUpdate.isSame(info.toVersion, packet.toVersion) ||
