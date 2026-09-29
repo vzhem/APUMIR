@@ -772,12 +772,18 @@ class GroupFileSwarm @Inject constructor(
     ): com.vladimir.messenger.data.local.entity.FileTransferEntity? {
         val seeder = router.groupSeeder
         val rows = transferDao.getForFile(groupId, packet.sha256)
-        // Раунд 216 (уточнение владельца): ВСЁ, что уже есть на телефоне и
-        // нужно рою, раздаётся ВСЕГДА - и в режиме абонента тоже («Я сервер»
-        // = ВЫКЛ): скачанные картинки, гифки, стикеры, файлы групп и каналов.
-        // Гейт р215 снят. «Я сервер»=ВЫКЛ теперь значит ровно одно: НЕ
-        // принимать НОВОЕ чужое на хранение (CustodyPolicy в роутере).
-        var source = rows.firstOrNull { seeder.canSeed(it, router::hasTransferKey) }
+        // Раунд 217 (финальная семантика владельца): «тяжёлое» (картинки,
+        // видео, гифки, большие файлы) абонент («Я сервер»=ВЫКЛ) не
+        // пересылает - это берёт на себя только сервер. Лёгкое, нужное для
+        // связи, несут ВСЕ: маленькие документы и стикеры (это лёгкое по
+        // размеру - черта в ServerMode), APK обновлений (ApkSeeder, без
+        // гейта), текст и резервные копии (свои пути, не здесь).
+        val serveLightOnly = !com.vladimir.messenger.data.swarm.ServerMode.isEnabled(appContext)
+        var source = rows.firstOrNull {
+            seeder.canSeed(it, router::hasTransferKey) &&
+                (!serveLightOnly ||
+                    it.totalBytes <= com.vladimir.messenger.data.swarm.ServerMode.LIGHT_SERVE_MAX_BYTES)
+        }
         if (source == null) {
             // Автор: общая копия ещё не готовилась (первая просьба) - готовим
             // из авторского файла; это долго (хэш + шифрование), но один раз.
