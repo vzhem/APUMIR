@@ -1572,6 +1572,9 @@ private fun MessageBubble(
                         com.vladimir.messenger.ui.components.GifRefCard(
                             content = bodyText,
                             onEnsure = onEnsureGif,
+                            // Раунд 210: точки на гифке - то же меню пузыря
+                            // (реакция/избранное/закрепить), что по удержанию.
+                            onMenu = { showMenu = true },
                         )
                     }
                     attachedBitmap != null -> {

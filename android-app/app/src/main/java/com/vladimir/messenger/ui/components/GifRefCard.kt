@@ -10,6 +10,7 @@ package com.vladimir.messenger.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,8 +19,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -44,6 +50,12 @@ fun GifRefCard(
     modifier: Modifier = Modifier,
     /** Карточка просит VM тихо подтянуть гифку, если её нет в библиотеке. */
     onEnsure: (String) -> Unit = {},
+    /**
+     * Раунд 210: «три точки» в углу гифки - то же меню действий сообщения,
+     * что у текстовых пузырей (владелец: меню должно быть и у гифок).
+     * null - точки не рисуются.
+     */
+    onMenu: (() -> Unit)? = null,
 ) {
     val sha = remember(content) { GifLibrary.gifRefSha(content) }
     if (sha == null) {
@@ -81,6 +93,7 @@ fun GifRefCard(
             .padding(horizontal = 14.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
         if (shownFile != null) {
             // Гифка на месте - живёт и анимирует, как обычная гифка в чате.
             AsyncImage(
@@ -112,6 +125,28 @@ fun GifRefCard(
                     textAlign = TextAlign.Center,
                 )
             }
+        }
+        // Раунд 210: «три точки» в правом верхнем углу гифки - как у картинок
+        // в личке (р44/209): тёмный кружок, белый глиф, тап открывает меню.
+        if (onMenu != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .clickable { onMenu?.invoke() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Действия",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
         }
     }
 }

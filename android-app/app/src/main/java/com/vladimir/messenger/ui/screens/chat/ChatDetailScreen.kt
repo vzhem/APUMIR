@@ -653,13 +653,19 @@ fun ChatDetailScreen(
                                     }
                                     com.vladimir.messenger.data.gif.GifLibrary.isGifRef(fwdBody) -> {
                                         CardForwardHeader()
-                                        com.vladimir.messenger.ui.components.GifRefCard(
-                                            content = fwdBody,
-                                            modifier = Modifier.align(
-                                                if (message.isFromMe) Alignment.End else Alignment.Start
-                                            ),
-                                            onEnsure = { sha -> viewModel.ensureGifRef(sha) },
-                                        )
+                                    com.vladimir.messenger.ui.components.GifRefCard(
+                                        content = fwdBody,
+                                        modifier = Modifier.align(
+                                            if (message.isFromMe) Alignment.End else Alignment.Start
+                                        ),
+                                        onEnsure = { sha -> viewModel.ensureGifRef(sha) },
+                                        // Раунд 210: точки на гифке - то же меню
+                                        // «Действия с сообщением», что по удержанию.
+                                        onMenu = {
+                                            activeMessage = message
+                                            showCopyDialog = message
+                                        },
+                                    )
                                     }
                                     else -> MessageBubble(
                                     message = message,

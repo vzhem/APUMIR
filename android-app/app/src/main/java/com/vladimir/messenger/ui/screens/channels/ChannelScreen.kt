@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -52,6 +53,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -429,6 +432,8 @@ private fun PostCard(
     onTogglePin: () -> Unit = {},
 ) {
     var showReactions by remember { mutableStateOf(false) }
+    // Раунд 210: «три точки» поста - меню действий, как у сообщений в чатах.
+    var showPostMenu by remember { mutableStateOf(false) }
     // Подпись «📎 имя (размер)» - для старых версий; здесь её заменяет карточка.
     val bodyText = remember(post.text, fileCard?.info) {
         if (fileCard != null) GroupFileMarker.stripCaption(post.text, fileCard.info) else post.text
@@ -500,6 +505,67 @@ private fun PostCard(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
+                    }
+                }
+                // Раунд 210: «три точки» поста - то же выпадающее меню действий,
+                // что у сообщений в личке и группе (владелец: меню должно быть
+                // и в каналах). Пункты - уже существующие действия поста.
+                Box {
+                    IconButton(onClick = { showPostMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "Действия с постом",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    DropdownMenu(expanded = showPostMenu, onDismissRequest = { showPostMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Поставить реакцию") },
+                            onClick = {
+                                showPostMenu = false
+                                showReactions = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("В избранное") },
+                            onClick = {
+                                showPostMenu = false
+                                onSaveToFavorites()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Поделиться") },
+                            onClick = {
+                                showPostMenu = false
+                                onSharePost()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (post.isPinned) "Открепить" else "Закрепить") },
+                            onClick = {
+                                showPostMenu = false
+                                onTogglePin()
+                            },
+                        )
+                        if (post.title.isNotBlank() || post.text.isNotBlank()) {
+                            DropdownMenuItem(
+                                text = { Text("Копировать текст") },
+                                onClick = {
+                                    showPostMenu = false
+                                    selectPostText = true
+                                },
+                            )
+                        }
+                        if (canEdit) {
+                            DropdownMenuItem(
+                                text = { Text("Изменить пост") },
+                                onClick = {
+                                    showPostMenu = false
+                                    onEdit()
+                                },
+                            )
+                        }
                     }
                 }
             }

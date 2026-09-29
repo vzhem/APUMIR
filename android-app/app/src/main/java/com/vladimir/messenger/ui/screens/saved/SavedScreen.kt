@@ -47,10 +47,13 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -490,6 +493,8 @@ private fun SavedItemBubble(
         SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.savedAtMs))
     }
     val isFile = item.kind == SavedItemsRepository.KIND_FILE
+    // Раунд 210: «три точки» записи - все действия в одном выпадающем меню.
+    var showRowMenu by remember { mutableStateOf(false) }
     // Раунд 169: сохранённый стикер - парит без пузыря, анимированной
     // картинкой (как в чатах).
     val isStickerItem = isFile && (
@@ -635,6 +640,60 @@ private fun SavedItemBubble(
                 color = ApuBubbleMutedColor,
                 modifier = Modifier.weight(1f),
             )
+            // Раунд 210: «три точки» записи - то же выпадающее меню, что у
+            // сообщений в чатах (владелец: меню должно быть и в избранном).
+            // Пункты - уже существующие действия, ничего нового не заводим.
+            Box {
+                IconButton(onClick = { showRowMenu = true }, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "Действия",
+                        modifier = Modifier.size(18.dp),
+                        tint = ApuBubbleMutedColor,
+                    )
+                }
+                DropdownMenu(expanded = showRowMenu, onDismissRequest = { showRowMenu = false }) {
+                    if (isFile) {
+                        DropdownMenuItem(
+                            text = { Text("Сохранить в телефон") },
+                            onClick = {
+                                showRowMenu = false
+                                onExport()
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Поделиться") },
+                        onClick = {
+                            showRowMenu = false
+                            onShare()
+                        },
+                    )
+                    if (onOpenOrigin != null) {
+                        DropdownMenuItem(
+                            text = { Text("Перейти к оригиналу") },
+                            onClick = {
+                                showRowMenu = false
+                                onOpenOrigin?.invoke()
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(if (item.isPinned) "Открепить" else "Закрепить") },
+                        onClick = {
+                            showRowMenu = false
+                            onTogglePin()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Убрать из избранного", color = MaterialTheme.colorScheme.error) },
+                        onClick = {
+                            showRowMenu = false
+                            onDelete()
+                        },
+                    )
+                }
+            }
             if (!isFile && item.photos.isNotBlank()) {
                 // Репост сохранённого поста дальше - вместе с фотографиями.
                 IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
