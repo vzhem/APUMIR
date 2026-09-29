@@ -772,7 +772,14 @@ class GroupFileSwarm @Inject constructor(
     ): com.vladimir.messenger.data.local.entity.FileTransferEntity? {
         val seeder = router.groupSeeder
         val rows = transferDao.getForFile(groupId, packet.sha256)
-        var source = rows.firstOrNull { seeder.canSeed(it, router::hasTransferKey) }
+        // Раунд 215: «Я сервер» выключен - раздаю только СВОИ файлы (то, что
+        // сам отправил); скачанное чужое другим не отдаю. Свой авторский файл
+        // (подготовка из store ниже) - всегда можно: это мои данные.
+        val onlyOwn = !com.vladimir.messenger.data.swarm.ServerMode.isEnabled(appContext)
+        var source = rows.firstOrNull {
+            seeder.canSeed(it, router::hasTransferKey) &&
+                (!onlyOwn || it.direction == "OUTGOING")
+        }
         if (source == null) {
             // Автор: общая копия ещё не готовилась (первая просьба) - готовим
             // из авторского файла; это долго (хэш + шифрование), но один раз.

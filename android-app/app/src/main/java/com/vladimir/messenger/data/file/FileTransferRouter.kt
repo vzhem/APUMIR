@@ -417,7 +417,13 @@ class FileTransferRouter @Inject constructor(
                 // Держим чужие файлы только для контактов: чужак не должен
                 // занимать место на телефоне. Получатель контактом быть не
                 // обязан - это забота отправителя.
-                acceptsFrom = { originId -> contactDao.getContactById(originId) != null },
+                // Раунд 215: выключатель «Я сервер» - в режиме абонента чужое
+                // на хранение не берём вовсе (свою исходящую очередь это не
+                // задевает: свои данные телефон хранит всегда).
+                acceptsFrom = { originId ->
+                    com.vladimir.messenger.data.swarm.ServerMode.isEnabled(appContext) &&
+                        contactDao.getContactById(originId) != null
+                },
                 headroomBytes = {
                     com.vladimir.messenger.data.swarm.StorageSettings
                         .headroom(appContext, chunkStore.currentStoredBytes())

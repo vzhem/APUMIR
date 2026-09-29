@@ -912,6 +912,34 @@ private fun SettingsTabContent(
             item {
                 SettingsCard {
                     val context = LocalContext.current
+                    // Раунд 215: режим «Я сервер» - телефон решает, хранит ли он
+                    // чужие данные и раздаёт ли их, или работает абонентом
+                    // (только свои неотправленные данные ждут доставки).
+                    val imServer by com.vladimir.messenger.data.swarm.ServerMode.enabled
+                        .collectAsStateWithLifecycle()
+                    SettingsItem(
+                        icon = Icons.Default.Storage,
+                        title = "Я сервер",
+                        subtitle = if (imServer) {
+                            "Включено: телефон хранит чужие файлы на хранении для контактов " +
+                                "не в сети, раздаёт файлы сообществ и обновления другим. " +
+                                "Чем больше телефонов-серверов, тем быстрее сеть."
+                        } else {
+                            "Выключено - режим абонента: телефон хранит и дожидается доставки " +
+                                "только СВОИХ данных (свои неотправленные файлы и сообщения). " +
+                                "Чужое не хранится и не раздаётся; скачать обновление или файл " +
+                                "сообщества можно как раньше."
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = imServer,
+                                onCheckedChange = {
+                                    com.vladimir.messenger.data.swarm.ServerMode.set(context, it)
+                                },
+                            )
+                        },
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     // Квота прочитана в MainActivity.onCreate (StorageSettings.init).
                     val quota by StorageSettings.quotaBytes.collectAsStateWithLifecycle()
                     // Ползунок двигается по положениям шкалы; в настройки и
