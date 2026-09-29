@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Send
@@ -95,6 +96,7 @@ import com.vladimir.messenger.ui.components.FileCardState
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.GroupFileCard
+import com.vladimir.messenger.ui.components.GroupQrInviteDialog
 import com.vladimir.messenger.util.GroupFileMarker
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
@@ -119,6 +121,18 @@ fun ChannelScreen(
     var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
     // Раунд 212: «Поделиться в APU» - выбрать, кому переслать пост.
     var forwardPost by remember { mutableStateOf<ChannelPost?>(null) }
+    // Раунд 213: «три точки» шапки + приглашение по QR коду.
+    var showTopMenu by remember { mutableStateOf(false) }
+    var showQrInvite by remember { mutableStateOf(false) }
+    var qrLink by remember { mutableStateOf<String?>(null) }
+    var qrLoading by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(showQrInvite) {
+        if (showQrInvite) {
+            qrLoading = true
+            qrLink = viewModel.inviteQrLink()
+            qrLoading = false
+        }
+    }
     val context = LocalContext.current
     // Файл поста (рой, этап 10): «Сохранить в папку» открывает системное окно.
     val savePicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -171,6 +185,22 @@ fun ChannelScreen(
                         IconButton(onClick = { onOpenAdmin(uiState.channelId) }) {
                             Icon(Icons.Default.Settings, contentDescription = "Админ-кабинет")
                         }
+                    }
+                    // Раунд 213: «три точки» шапки канала - приглашение по QR
+                    // и будущие действия (пункты в золотых пузырях).
+                    Box {
+                        IconButton(onClick = { showTopMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Ещё")
+                        }
+                        ApuActionsMenu(
+                            expanded = showTopMenu,
+                            onDismiss = { showTopMenu = false },
+                            actions = listOf(
+                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                    showQrInvite = true
+                                },
+                            ),
+                        )
                     }
                 },
             )
@@ -421,6 +451,17 @@ fun ChannelScreen(
                 editingPost = null
             },
             onPickImages = { _, onReady -> onReady(emptyList()) },
+        )
+    }
+
+    // Раунд 213: QR с короткой ссылкой-приглашением; без APU страница
+    // сервиса предлагает установить приложение и подписаться на канал.
+    if (showQrInvite) {
+        GroupQrInviteDialog(
+            isChannel = true,
+            link = qrLink,
+            loading = qrLoading,
+            onDismiss = { showQrInvite = false },
         )
     }
 

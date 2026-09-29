@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
 import androidx.activity.compose.BackHandler
@@ -115,6 +116,7 @@ import com.vladimir.messenger.ui.components.FileCardState
 import com.vladimir.messenger.ui.components.GifCatalogDialog
 import com.vladimir.messenger.ui.components.InputPanelDialog
 import com.vladimir.messenger.ui.components.GroupFileCard
+import com.vladimir.messenger.ui.components.GroupQrInviteDialog
 import com.vladimir.messenger.ui.components.fileIconFor
 import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.ui.components.TopicIconCatalog
@@ -144,6 +146,18 @@ fun GroupChatScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf("") }
     var showNewTopic by remember { mutableStateOf(false) }
+    // Раунд 213: «три точки» шапки + приглашение по QR коду.
+    var showTopMenu by remember { mutableStateOf(false) }
+    var showQrInvite by remember { mutableStateOf(false) }
+    var qrLink by remember { mutableStateOf<String?>(null) }
+    var qrLoading by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(showQrInvite) {
+        if (showQrInvite) {
+            qrLoading = true
+            qrLink = viewModel.inviteQrLink()
+            qrLoading = false
+        }
+    }
     // Файл к сообщению (рой, этап 9): системный выбор → хэш и копия →
     // визитка в тексте; сам файл участники просят у автора и друг у друга.
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -485,6 +499,22 @@ fun GroupChatScreen(
                 actions = {
                     IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Управление группой")
+                    }
+                    // Раунд 213: «три точки» шапки группы/канала - сейчас тут
+                    // приглашение по QR, дальше дополним по просьбам владельца.
+                    Box {
+                        IconButton(onClick = { showTopMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
+                        }
+                        ApuActionsMenu(
+                            expanded = showTopMenu,
+                            onDismiss = { showTopMenu = false },
+                            actions = listOf(
+                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                    showQrInvite = true
+                                },
+                            ),
+                        )
                     }
                 },
             )
@@ -1000,6 +1030,17 @@ fun GroupChatScreen(
                 viewModel.createTopic(name, icon)
                 showNewTopic = false
             },
+        )
+    }
+
+    // Раунд 213: QR с короткой ссылкой-приглашением; без APU страница
+    // сервиса предлагает установить приложение и вступить/подписаться.
+    if (showQrInvite) {
+        GroupQrInviteDialog(
+            isChannel = uiState.group?.isChannel ?: false,
+            link = qrLink,
+            loading = qrLoading,
+            onDismiss = { showQrInvite = false },
         )
     }
 }

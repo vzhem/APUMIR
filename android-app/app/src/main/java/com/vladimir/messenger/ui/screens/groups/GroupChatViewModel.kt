@@ -985,6 +985,13 @@ class GroupChatViewModel @Inject constructor(
         observePinned(topicId)
     }
 
+    /**
+     * Раунд 213: короткая ссылка-приглашение для QR в шапке группы/канала.
+     * Null - бессрочной ссылки нет (её создают в «Ссылках» управления).
+     */
+    suspend fun inviteQrLink(): String? =
+        runCatching { groupRepository.inviteQrLink(groupId) }.getOrNull()
+
     fun createTopic(name: String, iconEmoji: String) {
         viewModelScope.launch {
             groupRepository.createTopic(groupId, name, iconEmoji)

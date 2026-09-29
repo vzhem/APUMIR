@@ -4146,6 +4146,27 @@ class GroupRepository(
      * Действующее бессрочное приглашение без одобрения и без лимита - для
      * ссылок на посты. Если такого ещё нет, создаётся одно и переиспользуется.
      */
+    /**
+     * Раунд 213: короткая ссылка-приглашение для «Пригласить по QR коду»
+     * в шапке группы/канала. Берём бессрочное открытое приглашение (то же,
+     * что у «поделиться постом») и прячем его за кодом /s/<код>: такой QR
+     * открывается любым сканером, а без APU показывает страницу сервиса
+     * «Группа/Канал в APU» с кнопкой установки. Null - пригласить нельзя
+     * (нет группы или нет бессрочной ссылки).
+     */
+    suspend fun inviteQrLink(groupId: String): String? {
+        val group = groupDao.getGroupById(groupId) ?: return null
+        val invite = openInviteFor(groupId) ?: return null
+        return shareLinkFor(
+            GroupInviteLinks.build(
+                slug = invite.slug,
+                groupId = groupId,
+                ownerId = group.ownerId,
+                isChannel = group.isChannel,
+            )
+        )
+    }
+
     private suspend fun openInviteFor(groupId: String): InviteSummary? {
         val group = groupDao.getGroupById(groupId) ?: return null
         val existing = groupDao.getInvites(groupId).firstOrNull {
