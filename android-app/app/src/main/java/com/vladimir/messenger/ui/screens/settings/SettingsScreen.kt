@@ -103,6 +103,8 @@ fun SettingsScreen(
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
+    // Раунд 223: окно «Синхронизировать аккаунт».
+    var showSyncDialog by remember { mutableStateOf(false) }
     // Вкладок больше нет: профиль - отдельный пункт в списке настроек и
     // отдельная кнопка в нижней панели. Вкладка сверху дублировала их и
     // мешала: список настроек начинался не с начала.
@@ -1079,6 +1081,20 @@ private fun SettingsTabContent(
                 }
             }
 
+            // Раунд 223: «Синхронизация» - копия профиля в облаке для
+            // переноса чатов, контактов и ранга на другое устройство.
+            item { SettingsSectionTitle("Синхронизация") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Sync,
+                        title    = "Синхронизировать аккаунт",
+                        subtitle = "Перенести чаты, контакты и ранг на другое устройство",
+                        onClick  = { showSyncDialog = true },
+                    )
+                }
+            }
+
             item { SettingsSectionTitle("О приложении") }
             item {
                 SettingsCard {
@@ -1107,6 +1123,11 @@ private fun SettingsTabContent(
             }
         }
         ApuScrollbar(state = settingsScrollState)
+    }
+
+    // Раунд 223: окно синхронизации аккаунта.
+    if (showSyncDialog) {
+        ProfileSyncDialog(onDismiss = { showSyncDialog = false })
     }
 
     if (showAddrBookDialog) {
