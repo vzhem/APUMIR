@@ -89,6 +89,7 @@ data class ChannelUiState(
 class ChannelViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val groupRepository: GroupRepository,
+    private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val messageDao: MessageDao,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
@@ -535,6 +536,75 @@ class ChannelViewModel @Inject constructor(
             if (!com.vladimir.messenger.util.PhotoShare.open(app, intent, "Поделиться постом")) {
                 _uiState.update { it.copy(error = "Не удалось поделиться") }
             }
+        }
+    }
+
+    // ===== Раунд 212: «Поделиться в APU» - пересылка поста внутрь APU =====
+
+    /** Цели пересылки: друзья и сообщества (тот же список, что в личных чатах). */
+    suspend fun forwardTargets(): List<com.vladimir.messenger.ui.components.ForwardTarget> {
+        val friends = chatRepository.forwardFriends().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.FRIEND,
+                it.id,
+                it.contactName,
+            )
+        }
+        val groups = groupRepository.forwardGroups().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.GROUP,
+                it.id,
+                it.title,
+                it.isChannel,
+            )
+        }
+        return friends + groups
+    }
+
+    /** Темы группы / посты канала для второго шага выбора цели. */
+    suspend fun forwardTopics(groupId: String): List<com.vladimir.messenger.ui.components.ForwardTopic> =
+        groupRepository.forwardTopics(groupId).map {
+            com.vladimir.messenger.ui.components.ForwardTopic(it.id, it.name, it.iconEmoji)
+        }
+
+    /**
+     * Раунд 212 (владелец: в меню канала не хватает «Поделиться в APU»):
+     * переслать пост другу или в группу/канал. Уходит текст поста
+     * (заголовок + текст) с шапкой-источником «↩ Переслано из «канал»» -
+     * по ней открывается сам канал. Фотографии не едут: они живут кусками
+     * своей темы (как при пересылке постов групп, раунд 203).
+     */
+    fun forwardPost(
+        post: ChannelPost,
+        sourceLabel: String,
+        target: com.vladimir.messenger.ui.components.ForwardTarget,
+        onResult: (Boolean) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val words = listOf(post.title, com.vladimir.messenger.util.InlineImage.stripImage(post.text))
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
+            // Слаг и владелец - из бессрочной ссылки канала: попавший в шапку
+            // сможет вступиться, даже если он не участник.
+            val invite = runCatching { groupRepository.postLinkFor(channelId, post.topicId) }
+                .getOrNull()
+                ?.let { com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(it) }
+            val body = com.vladimir.messenger.util.ForwardMarker.buildBody(
+                true,
+                channelId,
+                post.topicId,
+                sourceLabel,
+                words,
+                slug = invite?.slug.orEmpty(),
+                ownerId = invite?.ownerId.orEmpty(),
+                isChannel = true,
+            )
+            val res = if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                chatRepository.sendMessage(target.id, "", body)
+            } else {
+                groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            onResult(res.isSuccess)
         }
     }
 

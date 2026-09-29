@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Search
+import android.widget.Toast
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.MoreVert
@@ -1481,6 +1483,8 @@ private fun MessageBubble(
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
     var showMenu by remember { mutableStateOf(false) }
     var showReactions by remember { mutableStateOf(false) }
+    // Раунд 212: буфер обмена для «Копировать текст» в меню точек.
+    val context = androidx.compose.ui.platform.LocalContext.current
     // Раунд 211: «три точки» на самом пузыре (владелец: и на текстовых тоже).
     // Не рисуем там, где точки уже есть у вложения: файл-карточка (р168)
     // и гифка-ссылка (р210).
@@ -1647,6 +1651,16 @@ private fun MessageBubble(
                             add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
                             add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
                             add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                            // Раунд 212 (аудит: в личке «Копировать всё» есть,
+                            // тут не было) - текст сообщения в буфер обмена.
+                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(
+                                    android.content.ClipData.newPlainText("Сообщение", message.content)
+                                )
+                                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                            })
                             if (canPin) {
                                 add(
                                     ApuAction(
@@ -1683,6 +1697,15 @@ private fun MessageBubble(
                 add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
                 add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
                 add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                // Раунд 212: копирование - как в личном чате («Копировать всё»).
+                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText("Сообщение", message.content)
+                    )
+                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                })
                 // Закреп и из меню - на случай, если кнопка
                 // справа не поместилась или её не заметили.
                 if (canPin) {

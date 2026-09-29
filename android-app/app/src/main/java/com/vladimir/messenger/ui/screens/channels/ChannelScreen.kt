@@ -37,6 +37,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import android.widget.Toast
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -116,6 +117,8 @@ fun ChannelScreen(
     var showNewPost by remember { mutableStateOf(false) }
     // Пост, который сейчас правят (автор или владелец канала).
     var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
+    // Раунд 212: «Поделиться в APU» - выбрать, кому переслать пост.
+    var forwardPost by remember { mutableStateOf<ChannelPost?>(null) }
     val context = LocalContext.current
     // Файл поста (рой, этап 10): «Сохранить в папку» открывает системное окно.
     val savePicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -326,6 +329,8 @@ fun ChannelScreen(
                                 onSaveToFavorites = { viewModel.savePostToFavorites(post) },
                                 // Репост: текст, ссылка и фотографии файлами.
                                 onSharePost = { viewModel.sharePost(context, post) },
+                                // Раунд 212: переслать пост внутрь APU.
+                                onShareToApu = { forwardPost = post },
                                 reactions = uiState.reactions[post.messageId].orEmpty(),
                                 onToggleReaction = { emoji ->
                                     viewModel.toggleReaction(post.messageId, emoji)
@@ -418,6 +423,68 @@ fun ChannelScreen(
             onPickImages = { _, onReady -> onReady(emptyList()) },
         )
     }
+
+    // Раунд 212: пересылка поста внутрь APU - тот же выбор цели, что в
+    // личных чатах (друг или группа/канал с темой). Текст уходит с
+    // шапкой-источником «↩ Переслано из «канал»».
+    forwardPost?.let { post ->
+        val fCtx = androidx.compose.ui.platform.LocalContext.current
+        var fLoading by remember { mutableStateOf(true) }
+        var fTargets by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTarget>>(emptyList())
+        }
+        var fPicked by remember { mutableStateOf<com.vladimir.messenger.ui.components.ForwardTarget?>(null) }
+        var fTopics by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTopic>>(emptyList())
+        }
+        var fTopicsLoading by remember { mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(post.messageId) {
+            fTargets = viewModel.forwardTargets()
+            fLoading = false
+        }
+        androidx.compose.runtime.LaunchedEffect(fPicked?.id) {
+            val picked = fPicked ?: return@LaunchedEffect
+            fTopicsLoading = true
+            fTopics = viewModel.forwardTopics(picked.id)
+            fTopicsLoading = false
+        }
+        val sourceLabel = uiState.channel?.title?.takeIf { it.isNotBlank() } ?: "канал"
+        com.vladimir.messenger.ui.components.ForwardChooserDialog(
+            targets = fTargets,
+            loading = fLoading,
+            onDismiss = { forwardPost = null },
+            onPick = { target ->
+                if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                    forwardPost = null
+                    viewModel.forwardPost(post, sourceLabel, target) { ok ->
+                        if (!ok) Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    fPicked = target
+                }
+            },
+        )
+        fPicked?.let { target ->
+            com.vladimir.messenger.ui.components.ForwardTopicPickerDialog(
+                targetTitle = target.title,
+                isChannel = target.isChannel,
+                topics = fTopics,
+                loading = fTopicsLoading,
+                onDismiss = { fPicked = null },
+                onPick = { topic ->
+                    fPicked = null
+                    forwardPost = null
+                    viewModel.forwardPost(
+                        post,
+                        sourceLabel,
+                        target.copy(topicId = topic.id, topicTitle = topic.name),
+                    ) { ok ->
+                        if (!ok) Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                    }
+                },
+            )
+        }
+    }
 }
 
 @Composable
@@ -430,6 +497,8 @@ private fun PostCard(
     onOpenComments: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
     onSharePost: () -> Unit = {},
+    /** Раунд 212: «Поделиться в APU» - переслать пост внутрь мессенджера. */
+    onShareToApu: () -> Unit = {},
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
@@ -531,9 +600,12 @@ private fun PostCard(
                         expanded = showPostMenu,
                         onDismiss = { showPostMenu = false },
                         actions = buildList {
+                            // Раунд 212: пересылка поста внутрь APU - раньше
+                            // был только системный «Поделиться» наружу.
+                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
                             add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
                             add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
-                            add(ApuAction("Поделиться", Icons.Filled.Send) { onSharePost() })
+                            add(ApuAction("Поделиться…", Icons.Filled.Share) { onSharePost() })
                             add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
                             if (post.title.isNotBlank() || post.text.isNotBlank()) {
                                 add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
@@ -577,6 +649,7 @@ private fun PostCard(
                     state = fileCard,
                     isFromMe = fileCard.isFromMe,
                     messageActions = buildList {
+                        add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
                         add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
                         add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
                         add(ApuAction("Поделиться", Icons.Filled.Send) { onSharePost() })
