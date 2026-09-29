@@ -52,8 +52,6 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -87,6 +85,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.local.entity.SavedItemEntity
 import com.vladimir.messenger.data.repository.SavedItemsRepository
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -652,47 +652,22 @@ private fun SavedItemBubble(
                         tint = ApuBubbleMutedColor,
                     )
                 }
-                DropdownMenu(expanded = showRowMenu, onDismissRequest = { showRowMenu = false }) {
-                    if (isFile) {
-                        DropdownMenuItem(
-                            text = { Text("Сохранить в телефон") },
-                            onClick = {
-                                showRowMenu = false
-                                onExport()
-                            },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text("Поделиться") },
-                        onClick = {
-                            showRowMenu = false
-                            onShare()
-                        },
-                    )
-                    if (onOpenOrigin != null) {
-                        DropdownMenuItem(
-                            text = { Text("Перейти к оригиналу") },
-                            onClick = {
-                                showRowMenu = false
-                                onOpenOrigin?.invoke()
-                            },
-                        )
-                    }
-                    DropdownMenuItem(
-                        text = { Text(if (item.isPinned) "Открепить" else "Закрепить") },
-                        onClick = {
-                            showRowMenu = false
-                            onTogglePin()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Убрать из избранного", color = MaterialTheme.colorScheme.error) },
-                        onClick = {
-                            showRowMenu = false
-                            onDelete()
-                        },
-                    )
-                }
+                // Раунд 211: пункты - золотыми пузырями (общий стиль точек).
+                ApuActionsMenu(
+                    expanded = showRowMenu,
+                    onDismiss = { showRowMenu = false },
+                    actions = buildList {
+                        if (isFile) {
+                            add(ApuAction("Сохранить в телефон", Icons.Filled.Download) { onExport() })
+                        }
+                        add(ApuAction("Поделиться", Icons.Filled.Share) { onShare() })
+                        if (onOpenOrigin != null) {
+                            add(ApuAction("Перейти к оригиналу", Icons.Filled.OpenInNew) { onOpenOrigin?.invoke() })
+                        }
+                        add(ApuAction(if (item.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                        add(ApuAction("Убрать из избранного", Icons.Filled.Delete, destructive = true) { onDelete() })
+                    },
+                )
             }
             if (!isFile && item.photos.isNotBlank()) {
                 // Репост сохранённого поста дальше - вместе с фотографиями.

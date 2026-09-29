@@ -46,6 +46,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -86,6 +91,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.GroupFileCard
 import com.vladimir.messenger.util.GroupFileMarker
 import com.vladimir.messenger.ui.components.HintBubble
@@ -519,54 +526,23 @@ private fun PostCard(
                             modifier = Modifier.size(18.dp),
                         )
                     }
-                    DropdownMenu(expanded = showPostMenu, onDismissRequest = { showPostMenu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Поставить реакцию") },
-                            onClick = {
-                                showPostMenu = false
-                                showReactions = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("В избранное") },
-                            onClick = {
-                                showPostMenu = false
-                                onSaveToFavorites()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Поделиться") },
-                            onClick = {
-                                showPostMenu = false
-                                onSharePost()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (post.isPinned) "Открепить" else "Закрепить") },
-                            onClick = {
-                                showPostMenu = false
-                                onTogglePin()
-                            },
-                        )
-                        if (post.title.isNotBlank() || post.text.isNotBlank()) {
-                            DropdownMenuItem(
-                                text = { Text("Копировать текст") },
-                                onClick = {
-                                    showPostMenu = false
-                                    selectPostText = true
-                                },
-                            )
-                        }
-                        if (canEdit) {
-                            DropdownMenuItem(
-                                text = { Text("Изменить пост") },
-                                onClick = {
-                                    showPostMenu = false
-                                    onEdit()
-                                },
-                            )
-                        }
-                    }
+                    // Раунд 211: пункты - золотыми пузырями (общий стиль).
+                    ApuActionsMenu(
+                        expanded = showPostMenu,
+                        onDismiss = { showPostMenu = false },
+                        actions = buildList {
+                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                            add(ApuAction("Поделиться", Icons.Filled.Send) { onSharePost() })
+                            add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                            if (post.title.isNotBlank() || post.text.isNotBlank()) {
+                                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                            }
+                            if (canEdit) {
+                                add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                            }
+                        },
+                    )
                 }
             }
             if (post.images.isNotEmpty() || post.pendingPhotos > 0) {
@@ -596,7 +572,23 @@ private fun PostCard(
             }
             // Файл поста (рой, этап 10): та же карточка, что в группе.
             if (fileCard != null) {
-                GroupFileCard(state = fileCard, isFromMe = fileCard.isFromMe)
+                // Раунд 211: в точках карточки файла - и весь функционал поста.
+                GroupFileCard(
+                    state = fileCard,
+                    isFromMe = fileCard.isFromMe,
+                    messageActions = buildList {
+                        add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                        add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                        add(ApuAction("Поделиться", Icons.Filled.Send) { onSharePost() })
+                        add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                        if (post.title.isNotBlank() || post.text.isNotBlank()) {
+                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                        }
+                        if (canEdit) {
+                            add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                        }
+                    },
+                )
             }
             // Поставленные реакции - прямо под текстом поста, как в привычных
             // каналах: значок с числом, свой обведён золотом.

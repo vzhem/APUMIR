@@ -167,6 +167,12 @@ fun GroupFileCard(
     modifier: Modifier = Modifier,
     /** Долгое нажатие на картинку: реакции/меню пузыря (групповой чат). */
     onLongPress: (() -> Unit)? = null,
+    /**
+     * Раунд 211: действия СООБЩЕНИЯ для меню точек («Поделиться в APU»,
+     * реакция, закрепить, удалить). Рисуются после файловых - владелец:
+     * в точках должен быть весь функционал, как у текстовых пузырей.
+     */
+    messageActions: List<ApuAction> = emptyList(),
 ) {
     val info = state.info
     val transfer = state.transfer
@@ -320,7 +326,7 @@ fun GroupFileCard(
             ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
                 previewPath != null)
         val hasActions = state.onSave != null || state.onShare != null ||
-            state.onFavorite != null
+            state.onFavorite != null || messageActions.isNotEmpty()
         if (cardHasPreview && hasActions) {
             Box(
                 modifier = Modifier
@@ -350,58 +356,43 @@ fun GroupFileCard(
                 ) {
                     val save = state.onSave
                     if (save != null) {
-                        CardActionBubble("Сохранить в папку", Icons.Filled.Save) {
+                        ApuActionBubble("Сохранить в папку", Icons.Filled.Save) {
                             showActions = false
                             save()
                         }
                     }
                     val share = state.onShare
                     if (share != null) {
-                        CardActionBubble("Поделиться", Icons.Filled.Share) {
+                        ApuActionBubble("Поделиться", Icons.Filled.Share) {
                             showActions = false
                             share()
                         }
                     }
                     val favorite = state.onFavorite
                     if (favorite != null) {
-                        CardActionBubble("В избранное", Icons.Filled.Star) {
+                        // Раунд 211: у карточки в сообществе теперь и действия
+                        // сообщения; файловое различаем подписью, как в личке.
+                        ApuActionBubble("Файл в избранное", Icons.Filled.Star) {
                             showActions = false
                             favorite()
+                        }
+                    }
+                    // Раунд 211: за файловыми - весь функционал сообщения
+                    // (владелец: меню точек должно быть полным).
+                    messageActions.forEach { action ->
+                        ApuActionBubble(
+                            label = action.title,
+                            icon = action.icon,
+                            destructive = action.destructive,
+                        ) {
+                            showActions = false
+                            action.onClick()
                         }
                     }
                 }
             }
         }
     }
-}
-
-/** Пузырь действия карточки (раунд 168): золотой ряд, иконка + подпись. */
-@Composable
-private fun CardActionBubble(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.primary)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            label,
-            color = MaterialTheme.colorScheme.onPrimary,
-            fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.labelLarge,
-        )
-    }
-    Spacer(Modifier.height(6.dp))
 }
 
 /** Значок по типу файла: картинка, видео, звук, PDF, прочее. */

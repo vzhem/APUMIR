@@ -41,6 +41,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -100,6 +105,9 @@ import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuMenuDots
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
 import com.vladimir.messenger.ui.components.GifCatalogDialog
@@ -1473,6 +1481,16 @@ private fun MessageBubble(
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
     var showMenu by remember { mutableStateOf(false) }
     var showReactions by remember { mutableStateOf(false) }
+    // Раунд 211: «три точки» на самом пузыре (владелец: и на текстовых тоже).
+    // Не рисуем там, где точки уже есть у вложения: файл-карточка (р168)
+    // и гифка-ссылка (р210).
+    val bubbleHasOwnDots = fileCard != null || remember(message.content) {
+        com.vladimir.messenger.data.gif.GifLibrary.isGifRef(
+            com.vladimir.messenger.util.ForwardMarker.stripHeader(
+                com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+            )
+        )
+    }
     val time = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
@@ -1480,6 +1498,14 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
     ) {
+        // Раунд 211: точки рядом с пузырём - у своего слева, у чужого справа.
+        if (!bubbleHasOwnDots && message.isFromMe) {
+            ApuMenuDots(
+                onClick = { showMenu = true },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+            Spacer(Modifier.width(2.dp))
+        }
         // Кнопке «Закрепить» справа нужно своё место: пузырь с карточкой
         // файла растягивается на все 300 dp, и на узком экране (лента рядом
         // с колонкой тем) кнопка выдавливалась за край - файл нельзя было
@@ -1615,6 +1641,25 @@ private fun MessageBubble(
                         state = fileCard,
                         isFromMe = message.isFromMe,
                         onLongPress = { showMenu = true },
+                        // Раунд 211: в точках карточки - весь функционал
+                        // сообщения, как у текстовых пузырей.
+                        messageActions = buildList {
+                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                            if (canPin) {
+                                add(
+                                    ApuAction(
+                                        if (message.isPinned) "Открепить" else "Закрепить",
+                                        Icons.Filled.PushPin,
+                                    ) { onTogglePin() }
+                                )
+                            }
+                            if (message.isFromMe) {
+                                add(ApuAction("Удалить у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                                add(ApuAction("Удалить у всех", Icons.Filled.Delete, destructive = true) { onDeleteForAll() })
+                            }
+                        },
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1630,58 +1675,31 @@ private fun MessageBubble(
                 )
             }
         }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            // Раунд 203: переслать сообщение другу или в другую группу/канал.
-            DropdownMenuItem(
-                text = { Text("Поделиться в APU") },
-                onClick = {
-                    showMenu = false
-                    onShareToApu()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Поставить реакцию") },
-                onClick = {
-                    showMenu = false
-                    showReactions = true
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("В избранное") },
-                onClick = {
-                    showMenu = false
-                    onSaveToFavorites()
-                },
-            )
-            // Закреп и из меню долгого нажатия - на случай, если кнопка
-            // справа не поместилась или её не заметили.
-            if (canPin) {
-                DropdownMenuItem(
-                    text = { Text(if (message.isPinned) "Открепить" else "Закрепить") },
-                    onClick = {
-                        showMenu = false
-                        onTogglePin()
-                    },
-                )
-            }
-            // Раунд 135: удаление своего сообщения - у себя и у всех.
-            if (message.isFromMe) {
-                DropdownMenuItem(
-                    text = { Text("Удалить у себя", color = MaterialTheme.colorScheme.error) },
-                    onClick = {
-                        showMenu = false
-                        onDeleteForMe()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Удалить у всех", color = MaterialTheme.colorScheme.error) },
-                    onClick = {
-                        showMenu = false
-                        onDeleteForAll()
-                    },
-                )
-            }
-        }
+        // Раунд 211: меню пузыря - золотыми пузырями (общий стиль точек).
+        ApuActionsMenu(
+            expanded = showMenu,
+            onDismiss = { showMenu = false },
+            actions = buildList {
+                add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                // Закреп и из меню - на случай, если кнопка
+                // справа не поместилась или её не заметили.
+                if (canPin) {
+                    add(
+                        ApuAction(
+                            if (message.isPinned) "Открепить" else "Закрепить",
+                            Icons.Filled.PushPin,
+                        ) { onTogglePin() }
+                    )
+                }
+                // Раунд 135: удаление своего сообщения - у себя и у всех.
+                if (message.isFromMe) {
+                    add(ApuAction("Удалить у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                    add(ApuAction("Удалить у всех", Icons.Filled.Delete, destructive = true) { onDeleteForAll() })
+                }
+            },
+        )
         if (showReactions) {
             val mine = reactions.firstOrNull { it.mine }?.emoji
             com.vladimir.messenger.ui.components.ReactionPickerDialog(
@@ -1697,6 +1715,13 @@ private fun MessageBubble(
                 },
             )
         }
+        }
+        if (!bubbleHasOwnDots && !message.isFromMe) {
+            Spacer(Modifier.width(2.dp))
+            ApuMenuDots(
+                onClick = { showMenu = true },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
         }
         if (canPin) {
             IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {

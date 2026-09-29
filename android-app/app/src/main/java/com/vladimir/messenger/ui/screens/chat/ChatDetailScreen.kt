@@ -684,7 +684,13 @@ fun ChatDetailScreen(
                                         activeMessage = message
                                         showCopyDialog = message
                                     },
-                                    onOpenForward = onForwardTap
+                                    onOpenForward = onForwardTap,
+                                    // Раунд 211: «три точки» на пузыре - то же
+                                    // меню «Действия с сообщением».
+                                    onMenu = {
+                                        activeMessage = message
+                                        showCopyDialog = message
+                                    },
                                 )
                                 }
                                 // Реакции живут отдельной строкой под пузырём -
@@ -722,51 +728,42 @@ fun ChatDetailScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    // Раунд 203: переслать сообщение другу или в группу/канал.
-                    TextButton(
-                        onClick = {
-                            showCopyDialog = null
-                            forwardMessage = message
-                        },
-                        modifier = Modifier.fillMaxWidth(),
+                    // Раунд 211: пункты - золотыми пузырями, как в «точках»
+                    // групп и каналов (владелец: единый стиль). Опасное -
+                    // красным. Состав действий прежний.
+                    com.vladimir.messenger.ui.components.ApuActionBubble(
+                        "Поделиться в APU",
+                        androidx.compose.material.icons.Icons.Filled.Send,
                     ) {
-                        Text("Поделиться в APU", modifier = Modifier.fillMaxWidth())
+                        showCopyDialog = null
+                        forwardMessage = message
                     }
-                    TextButton(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                                as ClipboardManager
-                            val clip = ClipData.newPlainText("Сообщение", message.content)
-                            clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
-                            showCopyDialog = null
-                            resetSelection()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
+                    com.vladimir.messenger.ui.components.ApuActionBubble(
+                        "Копировать всё",
+                        androidx.compose.material.icons.Icons.Filled.ContentCopy,
                     ) {
-                        Text("Копировать всё", modifier = Modifier.fillMaxWidth())
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                            as ClipboardManager
+                        val clip = ClipData.newPlainText("Сообщение", message.content)
+                        clipboard.setPrimaryClip(clip)
+                        Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                        showCopyDialog = null
+                        resetSelection()
                     }
                     // Раунд 173: закрепить/открепить сообщение личного чата.
-                    TextButton(
-                        onClick = {
-                            showCopyDialog = null
-                            viewModel.togglePin(message.id, !message.isPinned)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
+                    com.vladimir.messenger.ui.components.ApuActionBubble(
+                        if (message.isPinned) "Открепить" else "Закрепить",
+                        androidx.compose.material.icons.Icons.Filled.PushPin,
                     ) {
-                        Text(
-                            if (message.isPinned) "Открепить" else "Закрепить",
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                        showCopyDialog = null
+                        viewModel.togglePin(message.id, !message.isPinned)
                     }
-                    TextButton(
-                        onClick = {
-                            showCopyDialog = null
-                            selectTextOf = message.content
-                        },
-                        modifier = Modifier.fillMaxWidth(),
+                    com.vladimir.messenger.ui.components.ApuActionBubble(
+                        "Выделить часть текста",
+                        androidx.compose.material.icons.Icons.Filled.Edit,
                     ) {
-                        Text("Выделить часть текста", modifier = Modifier.fillMaxWidth())
+                        showCopyDialog = null
+                        selectTextOf = message.content
                     }
                     // Раунд 124: у файла/гифки в избранное кладётся САМ ФАЙЛ
                     // (ссылка на принятую передачу), а не пустой текст.
@@ -776,66 +773,50 @@ fun ChatDetailScreen(
                             it.state == "COMPLETE"
                     }
                     if (savedMessageFile != null) {
-                        TextButton(
-                            onClick = {
-                                viewModel.saveToFavorites(savedMessageFile, contactName)
-                                showCopyDialog = null
-                                resetSelection()
-                            },
-                            modifier = Modifier.fillMaxWidth(),
+                        com.vladimir.messenger.ui.components.ApuActionBubble(
+                            "Файл в избранное",
+                            androidx.compose.material.icons.Icons.Filled.Star,
                         ) {
-                            Text("Файл в избранное", modifier = Modifier.fillMaxWidth())
+                            viewModel.saveToFavorites(savedMessageFile, contactName)
+                            showCopyDialog = null
+                            resetSelection()
                         }
                     }
                     if (message.content.isNotBlank()) {
-                        TextButton(
-                            onClick = {
-                                // Раунд 203: в избранное - без служебных строк.
-                                viewModel.saveTextToFavorites(com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content), contactName)
-                                showCopyDialog = null
-                                resetSelection()
-                            },
-                            modifier = Modifier.fillMaxWidth(),
+                        com.vladimir.messenger.ui.components.ApuActionBubble(
+                            "В избранное",
+                            androidx.compose.material.icons.Icons.Filled.Star,
                         ) {
-                            Text("В избранное", modifier = Modifier.fillMaxWidth())
+                            // Раунд 203: в избранное - без служебных строк.
+                            viewModel.saveTextToFavorites(com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content), contactName)
+                            showCopyDialog = null
+                            resetSelection()
                         }
                     }
-                    TextButton(
-                        onClick = {
-                            showCopyDialog = null
-                            reactionFor = message.id
-                        },
-                        modifier = Modifier.fillMaxWidth(),
+                    com.vladimir.messenger.ui.components.ApuActionBubble(
+                        "Поставить реакцию",
+                        androidx.compose.material.icons.Icons.Filled.EmojiEmotions,
                     ) {
-                        Text("Поставить реакцию", modifier = Modifier.fillMaxWidth())
+                        showCopyDialog = null
+                        reactionFor = message.id
                     }
                     // Раунд 135: удаление своего сообщения - у себя и у всех.
                     if (message.isFromMe) {
-                        TextButton(
-                            onClick = {
-                                showCopyDialog = null
-                                viewModel.deleteMessageForMe(message.id)
-                            },
-                            modifier = Modifier.fillMaxWidth(),
+                        com.vladimir.messenger.ui.components.ApuActionBubble(
+                            "Удалить у себя",
+                            androidx.compose.material.icons.Icons.Filled.Delete,
+                            destructive = true,
                         ) {
-                            Text(
-                                "Удалить у себя",
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            showCopyDialog = null
+                            viewModel.deleteMessageForMe(message.id)
                         }
-                        TextButton(
-                            onClick = {
-                                showCopyDialog = null
-                                deleteForAllTarget = message
-                            },
-                            modifier = Modifier.fillMaxWidth(),
+                        com.vladimir.messenger.ui.components.ApuActionBubble(
+                            "Удалить у всех",
+                            androidx.compose.material.icons.Icons.Filled.Delete,
+                            destructive = true,
                         ) {
-                            Text(
-                                "Удалить у всех",
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            showCopyDialog = null
+                            deleteForAllTarget = message
                         }
                     }
                 }

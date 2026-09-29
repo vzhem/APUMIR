@@ -66,6 +66,11 @@ fun MessageBubble(
     onGroupInvite: ((link: String) -> Unit)? = null,
     /** Раунд 203: тап по шапке-источнику пересылки. */
     onOpenForward: ((com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit)? = null,
+    /**
+     * Раунд 211: «три точки» сообщения - то же меню, что по удержанию.
+     * Владелец: точки должны быть и на текстовых пузырях. null - не рисовать.
+     */
+    onMenu: (() -> Unit)? = null,
 ) {
     val isOwn = message.isFromMe
     val context = LocalContext.current
@@ -78,6 +83,15 @@ fun MessageBubble(
             .padding(horizontal = 8.dp, vertical = 2.dp),
         horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start,
     ) {
+        // Раунд 211: «три точки» рядом с пузырём (те же, что у картинок и
+        // гифок) - открывают то же меню действий, что и удержание пальца.
+        if (onMenu != null && isOwn) {
+            ApuMenuDots(
+                onClick = { onMenu?.invoke() },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+            Spacer(Modifier.width(3.dp))
+        }
         Box(
             modifier = Modifier
                 .widthIn(min = 80.dp, max = 280.dp)
@@ -241,6 +255,13 @@ fun MessageBubble(
                     }
                 }
             }
+        }
+        if (onMenu != null && !isOwn) {
+            Spacer(Modifier.width(3.dp))
+            ApuMenuDots(
+                onClick = { onMenu?.invoke() },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
         }
     }
 }
