@@ -721,7 +721,18 @@ fun ChatDetailScreen(
             text = {
                 Column {
                     // Раунд 203: превью без служебных строк пересылки.
-                    val previewText = remember(message.id) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
+                    // Раунд 222 (владелец): служебные маркеры - по-человечески:
+                    // гифка - словом «Гифка» (а не «APUGIFREF1|хэш»), файл -
+                    // «📎 имя (размер)», как на карточке.
+                    val previewText = remember(message.id) {
+                        val stripped = com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content)
+                        when {
+                            com.vladimir.messenger.data.gif.GifLibrary.isGifRef(stripped) -> "Гифка"
+                            else -> com.vladimir.messenger.util.GroupFileMarker.parse(stripped)
+                                ?.let { com.vladimir.messenger.util.GroupFileMarker.caption(it) }
+                                ?: stripped
+                        }
+                    }
                     Text(
                         previewText.take(100) +
                             if (previewText.length > 100) "..." else "",
