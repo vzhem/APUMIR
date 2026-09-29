@@ -77,6 +77,8 @@ fun SettingsScreen(
     onPeerRatingClick: () -> Unit = {},
     /** Никнейм и пароль, которыми личность возвращается после переустановки. */
     onIdentityBackupClick: () -> Unit = {},
+    /** Раунд 219: «Поддержать разработчика» (черновик). */
+    onSupportClick: () -> Unit = {},
     /** Полная копия профиля в файл (чаты, контакты, ключи) и восстановление из него. */
     onProfileBackupClick: () -> Unit = {},
     /**
@@ -1077,6 +1079,14 @@ private fun SettingsTabContent(
             item { SettingsSectionTitle("О приложении") }
             item {
                 SettingsCard {
+                    // Раунд 219: «Поддержать разработчика». Реквизитов в коде
+                    // нет: список способов экран получает из нашего сервиса.
+                    SettingsItem(
+                        icon     = Icons.Default.Favorite,
+                        title    = "Поддержать разработчика",
+                        subtitle = "Переводом напрямую - без комиссий магазинов",
+                        onClick  = onSupportClick,
+                    )
                     SettingsItem(
                         icon     = Icons.Default.Info,
                         title    = "Версия",

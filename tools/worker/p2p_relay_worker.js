@@ -393,6 +393,8 @@ export default {
         return await handleUpdateLatest(request);
       } else if (path === "/update/apk" && request.method === "GET") {
         return await handleUpdateApk();
+      } else if (path === "/support" && request.method === "GET") {
+        return await handleSupport(env);
       } else if (path === "/health") {
         return json({ status: "ok" });
       } else if (path === "/stats" && request.method === "GET") {
@@ -406,6 +408,28 @@ export default {
     }
   },
 };
+
+// ---- раунд 219: способы поддержки разработчика ------------------------------
+// Личные реквизиты НЕ в коде и НЕ в репозитории: владелец сам кладёт их в KV
+// (ключ SUPPORT_WAYS, JSON {"ways":[{"title","details","copy"}]}) через
+// dashboard/wrangler, когда решит их опубликовать. Ключа нет - черновой
+// ответ: приложение показывает «список ещё настраивается».
+async function handleSupport(env) {
+  try {
+    if (env.APU_VAULT) {
+      const raw = await env.APU_VAULT.get("support_ways");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.ways)) {
+          return json({ ok: true, ways: parsed.ways });
+        }
+      }
+    }
+  } catch (e) {
+    // битый JSON в KV - не 500: это публичный маршрут, отдаём черновик
+  }
+  return json({ ok: true, draft: true, ways: [] });
+}
 
 // ---- хранилище личности -----------------------------------------------------
 

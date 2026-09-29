@@ -50,6 +50,7 @@ import com.vladimir.messenger.ui.screens.settings.IdentityBackupScreen
 import com.vladimir.messenger.ui.screens.settings.ProfileBackupScreen
 import com.vladimir.messenger.ui.screens.settings.PeerRatingScreen
 import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
+import com.vladimir.messenger.ui.screens.support.SupportScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
 import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
@@ -127,6 +128,9 @@ sealed class Screen(val route: String) {
     data object IdentityBackup : Screen("identity_backup")
     /** Полная резервная копия профиля в файл и восстановление из него. */
     data object ProfileBackup : Screen("profile_backup")
+
+    /** Раунд 219: «Поддержать разработчика» (черновик; реквизиты - из сервиса). */
+    data object Support : Screen("support")
 
     // Избранное - личное хранилище абонента
     data object Saved : Screen("saved")
@@ -238,6 +242,9 @@ fun MessengerNavGraph(
      */
     pendingChatLink: Pair<String, String?>? = null,
     onChatLinkConsumed: () -> Unit = {},
+    /** Тап по напоминанию «Поддержать APU»: открыть экран поддержки. */
+    pendingOpenSupport: Boolean = false,
+    onSupportLinkConsumed: () -> Unit = {},
 ) {
     // Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ Р°РЅРёРјР°С†РёРё РїРµСЂРµС…РѕРґРѕРІ (РјСЃ)
     val transitionDuration = 300
@@ -247,6 +254,15 @@ fun MessengerNavGraph(
         val link = initialGroupInvite
         if (!link.isNullOrBlank()) {
             navController.navigate(Screen.Groups.createJoinRoute(link))
+        }
+    }
+
+    // Раунд 219: тап по напоминанию «Поддержать APU» - открываем экран
+    // поддержки и гасим флаг, чтобы поворот экрана не открывал снова.
+    LaunchedEffect(pendingOpenSupport) {
+        if (pendingOpenSupport) {
+            navController.navigate(Screen.Support.route)
+            onSupportLinkConsumed()
         }
     }
 
@@ -600,6 +616,11 @@ fun MessengerNavGraph(
 
         composable(route = Screen.RankBenefits.route) {
             RankBenefitsScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // Раунд 219: «Поддержать разработчика» (черновик).
+        composable(route = Screen.Support.route) {
+            SupportScreen(onBackClick = { navController.popBackStack() })
         }
 
         // ------------------------------------------------------------------

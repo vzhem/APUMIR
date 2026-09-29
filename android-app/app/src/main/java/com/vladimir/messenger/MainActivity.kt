@@ -83,6 +83,9 @@ class MainActivity : ComponentActivity() {
      * читаем extras и забываем их - повторный onCreate не ведёт снова.
      */
     private var pendingChatLink by mutableStateOf<Pair<String, String?>?>(null)
+
+    /** Раунд 219: тап по напоминанию «Поддержать APU» - открыть этот экран. */
+    private var pendingOpenSupport by mutableStateOf(false)
     private var pendingGroupInvite by mutableStateOf<String?>(null)
     private var updateRelease by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
 
@@ -131,6 +134,20 @@ class MainActivity : ComponentActivity() {
      * (личный чат / тема группы / пост канала) и сбросит [pendingChatLink].
      */
     private fun handleNotificationTap(intent: Intent?) {
+        // Раунд 219: напоминание «Поддержать APU» (без chatId - смотрим свой
+        // extra первым и НЕ выходим раньше времени).
+        if (intent?.getBooleanExtra(
+                com.vladimir.messenger.data.support.SupportReminderNotifier.EXTRA_OPEN_SUPPORT,
+                false,
+            ) == true
+        ) {
+            pendingOpenSupport = true
+            runCatching {
+                intent.removeExtra(
+                    com.vladimir.messenger.data.support.SupportReminderNotifier.EXTRA_OPEN_SUPPORT
+                )
+            }
+        }
         val chatId = intent?.getStringExtra(
             com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID
         ) ?: return
@@ -456,6 +473,8 @@ class MainActivity : ComponentActivity() {
                         initialGroupInvite = pendingGroupInvite,
                         pendingChatLink = pendingChatLink,
                         onChatLinkConsumed = { pendingChatLink = null },
+                        pendingOpenSupport = pendingOpenSupport,
+                        onSupportLinkConsumed = { pendingOpenSupport = false },
                     )
                 }
                 }
