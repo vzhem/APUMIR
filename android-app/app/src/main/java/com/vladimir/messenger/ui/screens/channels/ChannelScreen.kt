@@ -121,6 +121,12 @@ fun ChannelScreen(
     var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
     // Раунд 212: «Поделиться в APU» - выбрать, кому переслать пост.
     var forwardPost by remember { mutableStateOf<ChannelPost?>(null) }
+    // Раунд 221 (владелец): после «Поделиться в APU» видно, что ушло -
+    // плашка «✓ Отправлено», как в личных чатах и группах.
+    var fwdSent by remember { mutableStateOf(false) }
+    if (fwdSent) {
+        com.vladimir.messenger.ui.components.ForwardSentOverlay(visible = true, onTimeout = { fwdSent = false })
+    }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
     var showTopMenu by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
@@ -498,7 +504,11 @@ fun ChannelScreen(
                 if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                     forwardPost = null
                     viewModel.forwardPost(post, sourceLabel, target) { ok ->
-                        if (!ok) Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 } else {
                     fPicked = target
@@ -520,7 +530,11 @@ fun ChannelScreen(
                         sourceLabel,
                         target.copy(topicId = topic.id, topicTitle = topic.name),
                     ) { ok ->
-                        if (!ok) Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
             )
