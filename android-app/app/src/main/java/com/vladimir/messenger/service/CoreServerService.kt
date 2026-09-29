@@ -847,8 +847,19 @@ class CoreServerService : Service() {
                     }
                 }
             }
-            cloudflareRelay?.start()
-            Log.i(TAG, "Cloudflare relay enabled: $cfUrl")
+            // Раунд 214 (разгрузка воркера): релей-поллинг ВЫКЛЮЧЕН. В воркере
+            // нет маршрутов /poll и /send - каждый телефон поллил каждые 10
+            // секунд и всегда получал 404: ~8 640 ПУСТЫХ запросов в сутки с
+            // телефона, именно это выжигало дневной лимит Cloudflare
+            // (утренний 1027 «plan limits»). Запасной канал сообщений -
+            // Telegram relay выше. Класс сохранён: если маршруты когда-нибудь
+            // вернутся, включается префом cf_relay_enabled (default false).
+            if (prefs.getBoolean("cf_relay_enabled", false)) {
+                cloudflareRelay?.start()
+                Log.i(TAG, "Cloudflare relay enabled by pref: $cfUrl")
+            } else {
+                Log.i(TAG, "Cloudflare relay polling off (no /poll on worker; saves quota)")
+            }
 
                 if (nodeId != null) {
                     prefs.edit()

@@ -1,6 +1,13 @@
 // =============================================================================
 // p2p-relay — worker целиком. Заменить содержимое редактора Cloudflare этим.
 // =============================================================================
+// Раунд 214 (разгрузка): /stats — счётчики вызовов по маршрутам (в памяти
+// изолята, приблизительно, обнуляются при перезапуске); посадочные страницы
+// /i и /s/<код> кэшируются на edge 5 минут (кэшированный ответ НЕ считается
+// вызовом воркера). Приложение больше не поллит релей (маршрутов /poll и
+// /send здесь нет и не было — поллинг давал 8 640 пустых 404 в сутки
+// с телефона и выжигал дневной лимит).
+// =============================================================================
 // Что делает:
 //   /register, /lookup   — реестр узлов (как было);
 //   /version             — сведения об обновлении (как было);
@@ -276,8 +283,64 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/;
 const CONTACT_LINK_PATTERN = /^apu:\/\/a\/[A-Za-z0-9_-]{16,64}(\/[A-Za-z0-9_]{1,32})?$/;
 const GROUP_LINK_PREFIX = "p2pmessenger://group?";
 
+// ---- приборка расхода (раунд 214) ------------------------------------------
+
+/** Счётчики вызовов: в памяти изолята (приблизительно; переживают запросы, не переживают перезапуск). */
+const STATS = { since: new Date().toISOString(), total: 0, routes: {} };
+
+function noteRoute(name) {
+  try {
+    STATS.total++;
+    STATS.routes[name] = (STATS.routes[name] || 0) + 1;
+  } catch (_) {}
+}
+
+/** Схлопнуть персональные пути, чтобы в статистике не было тысячи ключей. */
+function routeName(path) {
+  if (path.startsWith("/s/")) return "/s/<код>";
+  if (path.startsWith("/short/")) return "/short/<код>";
+  if (path.startsWith("/vault/")) return "/vault/*";
+  if (path.startsWith("/addrbook/")) return "/addrbook/*";
+  return path === "" ? "/" : path;
+}
+
+/** Статистика расхода: кто и сколько ест (для владельца). */
+function handleStats() {
+  return json({
+    ok: true,
+    since: STATS.since,
+    total: STATS.total,
+    routes: STATS.routes,
+    note: "счётчики в памяти изолята - приблизительные, обнуляются при перезапуске воркера",
+  });
+}
+
+// Edge-кэш посадочных страниц: закэшированный ответ НЕ считается вызовом
+// воркера. Кэшируем только 200; 404 («ссылки нет») не кэшируем - приглашение
+// могло появиться только что.
+const LANDINGS = caches.default;
+
+async function cachedLanding(request, ctx, build) {
+  const hit = await LANDINGS.match(request);
+  if (hit) {
+    noteRoute("кэш edge: из кэша");
+    return hit;
+  }
+  const res = await build();
+  if (res && res.status === 200) {
+    const headers = new Headers(res.headers);
+    headers.set("Cache-Control", "public, max-age=0, s-maxage=300");
+    const put = new Response(res.body, { status: 200, headers });
+    const serve = put.clone();
+    ctx.waitUntil(LANDINGS.put(request, put));
+    noteRoute("кэш edge: положено");
+    return serve;
+  }
+  return res;
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     // Предполётный запрос отвечаем первым: он приходит методом OPTIONS на
     // любой путь, включая /vault/*, и до разбора маршрутов доходить не должен.
     if (request.method === "OPTIONS") {
@@ -297,11 +360,13 @@ export default {
       return env.MQTT_BRIDGE.get(stub).fetch(request);
     }
 
+    noteRoute(routeName(path) + (request.method === "GET" ? "" : " POST"));
+
     try {
       if (path === "/i" && request.method === "GET") {
-        return handleInviteLanding(url);
+        return cachedLanding(request, ctx, () => handleInviteLanding(url));
       } else if (path.startsWith("/s/") && request.method === "GET") {
-        return await handleShortLanding(path.slice(3), env);
+        return cachedLanding(request, ctx, () => handleShortLanding(path.slice(3), env));
       } else if (path === "/short" && request.method === "POST") {
         return await handleShortCreate(request, env);
       } else if (path.startsWith("/short/") && request.method === "GET") {
@@ -330,7 +395,10 @@ export default {
         return await handleUpdateApk();
       } else if (path === "/health") {
         return json({ status: "ok" });
+      } else if (path === "/stats" && request.method === "GET") {
+        return handleStats();
       } else {
+        noteRoute("404 " + routeName(path));
         return json({ error: "not found", path }, 404);
       }
     } catch (e) {
