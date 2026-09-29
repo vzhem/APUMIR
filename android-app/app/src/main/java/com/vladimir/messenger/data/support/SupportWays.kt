@@ -194,7 +194,7 @@ object SupportReminder {
 
     /** «Показать пример напоминания» - сразу, вне расписания. */
     fun sendTestNotification(context: Context) {
-        notifySupport(context, test = true)
+        SupportReminderNotifier.notifySupport(context, test = true)
     }
 }
 
@@ -265,7 +265,7 @@ class SupportReminderWorker(
             Log.i("SupportReminder", "reminder disabled - nothing to show")
             return Result.success()
         }
-        notifySupport(app)
+        SupportReminderNotifier.notifySupport(app)
         return Result.success()
     }
 }

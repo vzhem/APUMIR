@@ -162,6 +162,7 @@ fun SettingsScreen(
                     onIdentityBackupClick = onIdentityBackupClick,
                     onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
+                    onSupportClick = onSupportClick,
                 )
             }
         }
@@ -613,6 +614,8 @@ private fun SettingsTabContent(
     onIdentityBackupClick: () -> Unit = {},
     onProfileBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
+    /** Раунд 219: «Поддержать разработчика» (черновик). */
+    onSupportClick: () -> Unit = {},
 ) {
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
