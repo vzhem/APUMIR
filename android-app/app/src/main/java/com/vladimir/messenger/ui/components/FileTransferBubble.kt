@@ -239,7 +239,17 @@ fun FileTransferBubble(
                                 modifier = Modifier
                                     .size(28.dp)
                                     .clip(androidx.compose.foundation.shape.CircleShape)
-                                    .clickable { imageMenuOpen.value = true }
+                                    .clickable {
+                                        // Раунд 209: «три точки» открывают ТО ЖЕ
+                                        // меню сообщения, что и удержание пальца
+                                        // (владелец: меню должно быть одно, как на
+                                        // его скрине «Действия с сообщением»).
+                                        // Прежний короткий список файла остаётся
+                                        // только там, где сообщения ещё нет.
+                                        val messageMenu = onLongPress
+                                        if (messageMenu != null) messageMenu()
+                                        else imageMenuOpen.value = true
+                                    }
                                     .padding(6.dp),
                             )
                         }
