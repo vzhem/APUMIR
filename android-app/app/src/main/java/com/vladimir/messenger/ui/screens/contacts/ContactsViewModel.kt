@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.domain.model.Contact
+import com.vladimir.messenger.util.GroupInviteRef
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,7 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-/** Группа или канал в списке «Пригласить в группу». */
+/** Группа или канал в списке «Пригласить в сообщество». */
 data class InvitableGroup(
     val id: String,
     val title: String,
@@ -98,14 +99,15 @@ class ContactsViewModel @Inject constructor(
      */
     fun buildGroupInvites(
         groupIds: Collection<String>,
-        onReady: (List<Pair<String, String>>) -> Unit,
+        onReady: (List<GroupInviteRef>) -> Unit,
     ) {
         if (groupIds.isEmpty()) return
         viewModelScope.launch {
             // Короткие веб-ссылки: в чужом мессенджере кликабельны и не
-            // показывают идентификаторы группы и владельца.
+            // показывают идентификаторы группы и владельца. Раунд 218:
+            // с признаком «канал» - для кнопок «Вступить»/«Подписаться».
             val invites = withContext(Dispatchers.IO) {
-                runCatching { groupRepository.inviteLinksFor(groupIds) }.getOrDefault(emptyList())
+                runCatching { groupRepository.inviteRefsFor(groupIds) }.getOrDefault(emptyList())
             }
             if (invites.isNotEmpty()) onReady(invites)
         }
@@ -141,8 +143,10 @@ class ContactsViewModel @Inject constructor(
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) {
                 // Те же короткие https-ссылки, что и наружу: в пузыре чата
-                // кликабельны только http(s), и по нажатию APU открывает их сам.
-                val invites = runCatching { groupRepository.inviteLinksFor(groupIds) }
+                // кликабельны только http(s), и по нажатию APU открывает их
+                // сам. Раунд 218: с признаком «канал» - карточка получателя
+                // показывает «Подписаться» у каналов и «Вступить» у групп.
+                val invites = runCatching { groupRepository.inviteRefsFor(groupIds) }
                     .getOrDefault(emptyList())
                 if (invites.isEmpty()) return@withContext false
                 val text = com.vladimir.messenger.util.AppShare.groupsInviteText(invites)

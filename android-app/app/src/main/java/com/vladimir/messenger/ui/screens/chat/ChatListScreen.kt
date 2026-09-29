@@ -762,7 +762,7 @@ fun ChatListScreen(
     if (groupLinkShare != null) {
         val chosenGroup = groupLinkShare!!
         InviteAttachDialog(
-            title = if (chosenGroup.isChannel) "Пригласить в канал" else "Пригласить в группу",
+            title = if (chosenGroup.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
             onDismiss = { groupLinkShare = null },
             onShare = { attach ->
                 groupLinkShare = null
@@ -1055,7 +1055,7 @@ private fun SectionPage(
                                             title = if (item.group.isChannel) {
                                                 "Пригласить в канал"
                                             } else {
-                                                "Пригласить в группу"
+                                                "Пригласить в сообщество"
                                             },
                                             icon = Icons.Default.PersonAdd,
                                             onClick = { onInviteToGroup(item.group) },

@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.PersonAdd
@@ -150,7 +151,21 @@ fun MessageBubble(
                     com.vladimir.messenger.util.GroupInviteCardSender.parseCard(displayContent)
                 }
 
-                if (inviteCard != null && onContactInvite != null) {
+                // Раунд 218: мульти-приглашение (несколько сообществ сразу
+                // плюс «Скачать APU») - карточкой со списком и кнопками.
+                // Сырые ссылки с адресом сервиса из пузыря больше не видны.
+                val multiCard = remember(displayContent) {
+                    com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(displayContent)
+                }
+
+                if (multiCard != null && onGroupInvite != null) {
+                    MultiInviteCardView(
+                        card = multiCard,
+                        textColor = textColor,
+                        onOpen = onGroupInvite,
+                        onDownload = { url -> openInstaller(context, url) },
+                    )
+                } else if (inviteCard != null && onContactInvite != null) {
                     ContactInviteCardView(
                         card = inviteCard,
                         textColor = textColor,
@@ -161,6 +176,7 @@ fun MessageBubble(
                         card = groupCard,
                         textColor = textColor,
                         onJoin = { onGroupInvite(groupCard.link) },
+                        onDownload = { url -> openInstaller(context, url) },
                     )
                 } else if (imageUrl != null) {
                     ImagePreview(
@@ -381,6 +397,8 @@ private fun GroupInviteCardView(
     card: com.vladimir.messenger.util.GroupInviteCard,
     textColor: Color,
     onJoin: () -> Unit,
+    /** Раунд 218: кнопка «Скачать APU», если в тексте есть установочная ссылка. */
+    onDownload: (String) -> Unit = {},
 ) {
     Column {
         Text(
@@ -410,5 +428,95 @@ private fun GroupInviteCardView(
             Spacer(Modifier.width(6.dp))
             Text(if (card.isChannel) "Подписаться" else "Вступить")
         }
+        card.apkLink?.let { apk ->
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { onDownload(apk) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Скачать APU")
+            }
+        }
+    }
+}
+
+/**
+ * Раунд 218: карточка мульти-приглашения: заголовок, по блоку на каждое
+ * сообщество с кнопкой «Вступить»/«Подписаться», ниже кнопка «Скачать APU».
+ * Ссылки в сыром тексте спрятаны: владелец просил не показывать адрес
+ * сервиса (и GitHub) в видимой части сообщения.
+ */
+@Composable
+private fun MultiInviteCardView(
+    card: com.vladimir.messenger.util.MultiInviteCard,
+    textColor: Color,
+    onOpen: (String) -> Unit,
+    onDownload: (String) -> Unit,
+) {
+    Column {
+        Text(
+            text = "Приглашение в сообщества",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+        )
+        Spacer(Modifier.height(8.dp))
+        card.items.forEach { item ->
+            Text(
+                text = item.title.ifBlank { if (item.isChannel) "Канал" else "Группа" },
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = textColor,
+            )
+            Text(
+                text = if (item.isChannel) "Канал" else "Группа",
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = { onOpen(item.link) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (item.isChannel) "Подписаться" else "Вступить")
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        card.apkLink?.let { apk ->
+            Button(
+                onClick = { onDownload(apk) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Скачать APU")
+            }
+        }
+    }
+}
+
+/** Кнопка «Скачать APU»: это не приглашение (оно идёт в onOpen), а файл - в браузер. */
+private fun openInstaller(context: android.content.Context, url: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        android.util.Log.i("MessageBubble", "Opening installer URL: " + url)
+    } catch (e: Exception) {
+        android.util.Log.e("MessageBubble", "Failed to open installer URL: " + url, e)
     }
 }

@@ -17,13 +17,13 @@ object AppShare {
     /**
      * Куда ставить приложение.
      *
-     * Ссылка ведёт НА ФАЙЛ, а не на страницу релиза: latest/download/<имя
-     * ассета> — постоянный адрес GitHub для последней публикации, а ассет
-     * называется app-release.apk (его собирает рабочий процесс релиза, см.
-     * scripts/make-release.ps1). Получателю не надо искать файл в списке.
+     * Раунд 218 (владелец: «убери личную информацию»; ещё раунд 157): видимых
+     * ссылок на GitHub больше нет - установочный файл отдаёт наш сервис,
+     * /update/apk всегда раздаёт последний релиз. В чате эта ссылка и вовсе
+     * не видна: приглашение рисуется карточкой с кнопкой «Скачать APU».
      */
     const val INSTALL_LINK =
-        "https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk"
+        "https://p2p-relay.1985vzhem.workers.dev/update/apk"
 
     /**
      * Текст приглашения.
@@ -65,16 +65,20 @@ object AppShare {
     /**
      * Текст приглашения сразу в несколько групп или каналов: по строке на
      * каждую ссылку, ссылка всегда с начала строки - иначе мессенджеры делают
-     * кликабельной только её часть.
+     * кликабельной только её часть. Раунд 218: несём признак «канал» -
+     * получатель видит кнопку «Подписаться», а не «Вступить»; в APU такой
+     * текст рисуется карточкой со списком сообществ.
      */
-    fun groupsInviteText(invites: List<Pair<String, String>>): String {
+    fun groupsInviteText(invites: List<GroupInviteRef>): String {
         if (invites.size == 1) {
-            return groupInviteText(invites[0].first, invites[0].second)
+            val single = invites[0]
+            return groupInviteText(single.title, single.link, single.isChannel)
         }
-        val sb = StringBuilder("Присоединяйся к моим группам в APU.\n")
+        val sb = StringBuilder("Присоединяйся к моим сообществам в APU.\n")
         for (item in invites) {
-            val title = item.first.trim().ifBlank { "Группа" }
-            sb.append("\n").append(title).append(":\n").append(item.second).append("\n")
+            val title = item.title.trim().ifBlank { if (item.isChannel) "Канал" else "Группа" }
+            sb.append("\n").append(if (item.isChannel) "Канал «" else "Группа «")
+                .append(title).append("»:\n").append(item.link).append("\n")
         }
         sb.append("\nСкачать APU:\n").append(INSTALL_LINK)
         return sb.toString()
@@ -87,13 +91,13 @@ object AppShare {
      */
     fun shareGroupInvites(
         context: Context,
-        invites: List<Pair<String, String>>,
+        invites: List<GroupInviteRef>,
         attachApk: Boolean = false,
     ) {
         if (invites.isEmpty()) return
         val text = groupsInviteText(invites)
-        if (attachApk) shareTextWithApk(context, text, "Пригласить в группу")
-        else shareText(context, text, "Пригласить в группу")
+        if (attachApk) shareTextWithApk(context, text, "Пригласить в сообщество")
+        else shareText(context, text, "Пригласить в сообщество")
     }
 
     /**
@@ -109,7 +113,7 @@ object AppShare {
         attachApk: Boolean = false,
     ) {
         val text = groupInviteText(groupTitle, link, isChannel)
-        val title = if (isChannel) "Пригласить в канал" else "Пригласить в группу"
+        val title = if (isChannel) "Пригласить в канал" else "Пригласить в сообщество"
         if (attachApk) shareTextWithApk(context, text, title)
         else shareText(context, text, title)
     }

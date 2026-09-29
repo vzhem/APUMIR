@@ -897,7 +897,7 @@ private fun groupMenuActions(
     )
     add(
         BubbleMenuAction(
-            title = if (group.isChannel) "Пригласить в канал" else "Пригласить в группу",
+            title = if (group.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
             icon = Icons.Filled.PersonAdd,
             onClick = onInvite,
         )

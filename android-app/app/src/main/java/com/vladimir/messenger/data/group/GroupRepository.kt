@@ -28,6 +28,7 @@ import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.util.ChatPreviews
+import com.vladimir.messenger.util.GroupInviteRef
 import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -4099,6 +4100,19 @@ class GroupRepository(
      */
     suspend fun inviteLinksFor(groupIds: Collection<String>): List<Pair<String, String>> =
         groupIds.mapNotNull { id -> runCatching { inviteLinkFor(id) }.getOrNull() }
+
+    /**
+     * Раунд 218: то же, что [inviteLinksFor], но с признаком «канал» - от
+     * него зависит кнопка карточки в чате: «Вступить» или «Подписаться».
+     */
+    suspend fun inviteRefsFor(groupIds: Collection<String>): List<GroupInviteRef> =
+        groupIds.mapNotNull { id ->
+            runCatching {
+                val pair = inviteLinkFor(id)
+                val isChannel = pair?.let { groupDao.getGroupById(id)?.isChannel } ?: false
+                pair?.let { GroupInviteRef(title = it.first, link = it.second, isChannel = isChannel) }
+            }.getOrNull()
+        }
 
     /**
      * Ссылка для QR при личной встрече: вход БЕЗ одобрения.
