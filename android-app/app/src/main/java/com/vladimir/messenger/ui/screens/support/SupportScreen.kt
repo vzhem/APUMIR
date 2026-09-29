@@ -3,7 +3,12 @@ package com.vladimir.messenger.ui.screens.support
 // =============================================================================
 // SUPPORTSCREEN.KT — «Поддержать разработчика» (Настройки)
 // =============================================================================
-// Раунд 219, ЧЕРНОВИК по решению владельца.
+// Раунд 219, ЧЕРНОВИК по решению владельца. Раунд 220: экран переведён в
+// фирменный стиль подменю настроек — пузырь-подсказка (HintBubble) и золотые
+// пузыри действий (ApuActionBubble), как на других экранах раздела; прежние
+// голые Material-карточки выглядели чужеродно (владелец: «нужно... сделать
+// в пузыри в нашем стиле»). И исправлен вход: пункт настроек не открывал
+// экран (NavGraph не передавал onSupportClick).
 //
 // Три блока, «понятно, просто, безопасно»:
 //  1. Зачем нужны самостоятельные переводы (текст).
@@ -32,6 +37,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -44,7 +50,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -64,8 +69,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.support.SupportReminder
+import com.vladimir.messenger.ui.components.ApuActionBubble
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.HintBubble
+import com.vladimir.messenger.ui.components.HintBubbleMutedColor
+import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.swipeBack
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -121,42 +130,42 @@ fun SupportScreen(
                     // ── 1. Зачем ──────────────────────────────────────────
                     item { SectionTitle("Зачем нужны самостоятельные переводы") }
                     item {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            ),
-                            shape = RoundedCornerShape(16.dp),
-                        ) {
-                            Column(Modifier.padding(16.dp)) {
+                        // Фирменный пузырь-подсказка: как на других экранах
+                        // настроек («Зачем это нужно»).
+                        HintBubble {
+                            Column {
                                 Text(
-                                    "APU бесплатный и без рекламы: внутри нет подписок, " +
-                                        "рекламы и продажи данных.",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    "APU бесплатный и без рекламы",
+                                    style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
+                                    color = HintBubbleTextColor,
                                 )
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "Приложение распространяется напрямую, минуя магазины " +
-                                        "приложений. Поэтому встроенных покупок в нём нет, " +
-                                        "а каждый перевод доходит до разработчика целиком: " +
-                                        "магазин удерживал бы 15–30% с каждой покупки. " +
-                                        "Самостоятельный перевод - самый выгодный для " +
-                                        "проекта способ, без посредников.",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    "Внутри нет подписок, рекламы и продажи данных. " +
+                                        "Приложение распространяется напрямую, минуя " +
+                                        "магазины, - поэтому встроенных покупок нет, " +
+                                        "а каждый перевод доходит до разработчика " +
+                                        "целиком: магазин удерживал бы 15–30%. " +
+                                        "Самостоятельный перевод - самый выгодный " +
+                                        "для проекта способ, без посредников.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = HintBubbleMutedColor,
                                 )
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "На что идут переводы: релеи для связи в сложных сетях, " +
-                                        "хранение резервных копий, поиск гифок, работа над " +
-                                        "приложением.",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    "На что идут переводы: релеи для связи в сложных " +
+                                        "сетях, хранение резервных копий, поиск гифок, " +
+                                        "работа над приложением.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = HintBubbleMutedColor,
                                 )
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(6.dp))
                                 Text(
                                     "Поддержка добровольна и ни на что не влияет: " +
                                         "все функции одинаковы у всех.",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    color = HintBubbleMutedColor,
                                 )
                             }
                         }
@@ -165,36 +174,31 @@ fun SupportScreen(
                     // ── 2. Способы перевода ───────────────────────────────
                     item { SectionTitle("Способы перевода") }
                     if (uiState.loading) {
-                        item {
-                            DraftCard("Загружаем способы…")
-                        }
+                        item { DraftBubble("Загружаем способы…") }
                     } else if (uiState.ways.isEmpty()) {
                         item {
                             // Черновое состояние: реквизиты ещё не опубликованы.
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
-                                ),
-                                shape = RoundedCornerShape(16.dp),
-                            ) {
-                                Column(Modifier.padding(16.dp)) {
+                            HintBubble {
+                                Column {
                                     Text(
                                         "Список ещё настраивается",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold,
+                                        color = HintBubbleTextColor,
                                     )
                                     Spacer(Modifier.height(6.dp))
                                     Text(
                                         "Это черновик раздела. Здесь появятся способы " +
                                             "перевода, когда они будут добавлены в сервис.",
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = HintBubbleMutedColor,
                                     )
                                     Spacer(Modifier.height(6.dp))
                                     Text(
                                         "Планируем: перевод по СБП, перевод на карту, " +
                                             "криптопереводы для тех, кто вне России.",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        color = HintBubbleMutedColor,
                                     )
                                 }
                             }
@@ -202,38 +206,44 @@ fun SupportScreen(
                     } else {
                         itemsIndexed(uiState.ways) { _, way ->
                             Card(
+                                shape = RoundedCornerShape(18.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
+                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                                 ),
-                                shape = RoundedCornerShape(16.dp),
                             ) {
                                 Column(Modifier.padding(16.dp)) {
                                     Text(
                                         way.title,
-                                        style = MaterialTheme.typography.titleSmall,
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     Spacer(Modifier.height(4.dp))
                                     Text(
                                         way.details,
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     if (way.copyText.isNotBlank()) {
-                                        Spacer(Modifier.height(4.dp))
-                                        TextButton(onClick = {
-                                            clipboard.setText(AnnotatedString(way.copyText))
-                                            toast = "Скопировано"
-                                        }) {
-                                            Text("Скопировать")
-                                        }
+                                        Spacer(Modifier.height(12.dp))
+                                        // Золотой пузырь действия - фирменный стиль.
+                                        ApuActionBubble(
+                                            label = "Скопировать",
+                                            icon = Icons.Default.ContentCopy,
+                                            onClick = {
+                                                clipboard.setText(AnnotatedString(way.copyText))
+                                                toast = "Скопировано"
+                                            },
+                                        )
                                     }
                                 }
                             }
                         }
                         item {
-                            TextButton(onClick = { viewModel.refresh(force = true) }) {
-                                Text("Обновить список")
-                            }
+                            Text(
+                                "Обновить список можно, закрыв и снова открыв этот экран.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            )
                         }
                     }
 
@@ -242,23 +252,23 @@ fun SupportScreen(
                     item {
                         val reminder = uiState.reminder
                         Card(
+                            shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                             ),
-                            shape = RoundedCornerShape(16.dp),
                         ) {
                             Column(Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
                                             "Напоминать о поддержке",
-                                            style = MaterialTheme.typography.titleSmall,
+                                            style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                         Text(
                                             reminder.humanLine,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
                                     Switch(
@@ -272,7 +282,7 @@ fun SupportScreen(
                                     Text(
                                         "Как часто напоминать",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         FilterChip(
@@ -291,7 +301,7 @@ fun SupportScreen(
                                     Text(
                                         "День месяца: ${reminder.day}-е число",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Slider(
                                         value = reminder.day.toFloat(),
@@ -300,17 +310,31 @@ fun SupportScreen(
                                         steps = 26,
                                     )
 
-                                    TextButton(onClick = {
-                                        viewModel.sendTestNotification()
-                                        toast = "Пример отправлен в уведомления"
-                                    }) {
-                                        Icon(Icons.Default.Favorite, contentDescription = null)
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Показать пример напоминания")
-                                    }
+                                    // Золотой пузырь действия - фирменный стиль.
+                                    ApuActionBubble(
+                                        label = "Показать пример напоминания",
+                                        icon = Icons.Default.Favorite,
+                                        onClick = {
+                                            viewModel.sendTestNotification()
+                                            toast = "Пример отправлен в уведомления"
+                                        },
+                                    )
                                 }
+                            }
+                        }
+                    }
 
-                                Spacer(Modifier.height(8.dp))
+                    item {
+                        // Фирменный пузырь-подсказка про безопасность.
+                        HintBubble {
+                            Column {
+                                Text(
+                                    "Безопасно",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = HintBubbleTextColor,
+                                )
+                                Spacer(Modifier.height(6.dp))
                                 Text(
                                     "APU сам ничего не списывает и платёжных данных не " +
                                         "хранит: напоминание - обычное локальное " +
@@ -318,7 +342,7 @@ fun SupportScreen(
                                         "сами в своём банке; там же, если захотите, можно " +
                                         "включить его регулярным (автоплатёж).",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    color = HintBubbleMutedColor,
                                 )
                             }
                         }
@@ -350,15 +374,12 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun DraftCard(text: String) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(16.dp),
-    ) {
+private fun DraftBubble(text: String) {
+    HintBubble {
         Text(
             text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(16.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = HintBubbleMutedColor,
         )
     }
 }

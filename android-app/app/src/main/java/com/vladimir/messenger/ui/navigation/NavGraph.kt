@@ -584,6 +584,7 @@ fun MessengerNavGraph(
                 onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
                 onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
                 onProfileBackupClick = { navController.navigate(Screen.ProfileBackup.route) },
+                onSupportClick = { navController.navigate(Screen.Support.route) },
             )
         }
 
@@ -595,6 +596,7 @@ fun MessengerNavGraph(
                 },
                 showProfile = true,
                 onBackClick = { navController.popBackStack() },
+                onSupportClick = { navController.navigate(Screen.Support.route) },
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
