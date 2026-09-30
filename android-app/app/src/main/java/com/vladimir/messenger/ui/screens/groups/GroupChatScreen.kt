@@ -144,7 +144,8 @@ fun GroupChatScreen(
     viewModel: GroupChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var draft by remember { mutableStateOf("") }
+    // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
+    // второе устройство личности и возвращается, если чат открыть заново.
     var showNewTopic by remember { mutableStateOf(false) }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
     var showTopMenu by remember { mutableStateOf(false) }
@@ -325,7 +326,7 @@ fun GroupChatScreen(
             // Раунд 206: пустые плитки сами докачиваются; ↻ - всем держателям.
             onAutoFetchSticker = { viewModel.autoFetchSticker(it) },
             onRetryFetchSticker = { viewModel.retryFetchSticker(it) },
-            onEmoji = { emoji -> draft += emoji },
+            onEmoji = { emoji -> viewModel.onDraftChanged(uiState.draft + emoji) },
             onOpened = { viewModel.refreshStickers() },
             onDismiss = {
                 showGifCatalog = false
@@ -949,8 +950,8 @@ fun GroupChatScreen(
                         }
                     }
                     OutlinedTextField(
-                        value = draft,
-                        onValueChange = { draft = it },
+                        value = uiState.draft,
+                        onValueChange = { viewModel.onDraftChanged(it) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .onFocusChanged { inputFocused = it.isFocused },
@@ -971,13 +972,13 @@ fun GroupChatScreen(
                 // Раунд 152: активная «Отправить» - золотая заливка и белый
                 // текст: сразу видно, что сообщение можно отправить (раньше
                 // менялся только оттенок текста - владелец не замечал).
-                val canSend = (draft.isNotBlank() || uiState.stagedFile != null) &&
+                val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile
                 TextButton(
                     enabled = canSend,
                     onClick = {
-                        viewModel.send(draft)
-                        draft = ""
+                        // р237: черновик чистит сама модель после успешной отправки.
+                        viewModel.send(uiState.draft)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
