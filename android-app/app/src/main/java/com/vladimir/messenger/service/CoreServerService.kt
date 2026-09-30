@@ -629,6 +629,15 @@ class CoreServerService : Service() {
                     .onFailure { Log.w(TAG, "Досылка сундука не удалась: ${it.message}") }
             }
 
+            // р226: живое зеркало. Устройство-зеркало НЕ стартует ядро и
+            // релеи: сеть ведёт партнёр той же личности, этот экран живёт
+            // на зеркальных событиях. Партнёр пропал - канал сам попросит
+            // повышение (перезапуск уже с движком).
+            if (prefs.getBoolean("mirror_defer_engine", false)) {
+                startAsMirrorShadow(legacyRoutingId)
+                return@launch
+            }
+
             val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
 
@@ -870,6 +879,13 @@ class CoreServerService : Service() {
                         .apply()
                 }
 
+                // р226: это устройство ведёт сеть - держать зеркало-партнёра
+                // в курсе и отдавать ему хвосты, если он отстал.
+                startMirrorChannel(
+                    nodeId = nodeId ?: legacyRoutingId,
+                    engineUp = true,
+                )
+
                 updateNotification("Сеть APU работает")
                 startEventPolling()
             } else {
@@ -878,6 +894,134 @@ class CoreServerService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    // ── р226: живое зеркало устройств одной личности ────────────────────────
+
+    private var mirror: com.vladimir.messenger.data.mirror.MirrorChannel? = null
+    private val mirrorRestarting = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Тень: движок и релеи не трогаем, живём на событиях партнёра. */
+    private fun startAsMirrorShadow(nodeId: String) {
+        Log.i(TAG, "Mirror shadow: движок не стартуем, живём на событиях партнёра")
+        runCatching { RustBridge.attachContext(applicationContext) }
+        runCatching { RustBridge.ensureCoreOnly() }
+        updateNotification("APU: сеть ведёт другое устройство (зеркало)")
+        startMirrorChannel(nodeId = nodeId, engineUp = false)
+    }
+
+    private fun startMirrorChannel(nodeId: String, engineUp: Boolean) {
+        if (nodeId.isBlank()) return
+        // Без личности зеркалить нечего (полка выводится из узла).
+        val mirrorPrefs = getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        if (!mirrorPrefs.getBoolean("identity_created", false)) return
+        val channel = com.vladimir.messenger.data.mirror.MirrorChannel(
+            context = applicationContext,
+            scope = serviceScope,
+            nodeId = nodeId,
+            deviceTag = com.vladimir.messenger.data.mirror.MirrorSync.deviceTag(applicationContext),
+            engineUp = engineUp,
+            engineSince = if (engineUp) System.currentTimeMillis() else Long.MAX_VALUE,
+            bridge = mirrorBridge(),
+        )
+        mirror = channel
+        com.vladimir.messenger.data.mirror.MirrorHub.channel = channel
+        channel.start()
+    }
+
+    private fun mirrorBridge() = object : com.vladimir.messenger.data.mirror.MirrorChannel.Bridge {
+        override suspend fun maxMessageTimestamp(): Long = chatRepository.maxMessageTimestamp()
+
+        override suspend fun rowsSince(since: Long, limit: Int) =
+            chatRepository.mirrorRowsSince(since, limit)
+
+        override suspend fun pendingOutgoing(limit: Int) =
+            chatRepository.mirrorPendingOutgoing(limit)
+
+        override suspend fun applyIncoming(
+            row: com.vladimir.messenger.data.mirror.MirrorRow,
+            notify: Boolean,
+        ) {
+            val (chatId, name) = chatRepository.applyMirrorIncoming(row)
+            if (notify) {
+                runCatching {
+                    notificationHelper.showMessageNotification(
+                        chatId,
+                        row.senderId,
+                        com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: "Сообщение",
+                        true,
+                        null,
+                    )
+                }
+            }
+        }
+
+        override suspend fun applySent(row: com.vladimir.messenger.data.mirror.MirrorRow) {
+            chatRepository.applyMirrorSent(row)
+        }
+
+        override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
+            // id чатов на устройствах разные - ищем чат по узлу получателя.
+            val chat = chatRepository.getChatByContactId(row.recipientId)
+                ?: chatRepository.getOrCreateChat(
+                    row.recipientId,
+                    NodeIds.autoName(row.recipientId),
+                )
+            chatRepository.sendMessage(
+                chatId = chat.id,
+                recipientId = row.recipientId,
+                content = row.content,
+                fixedMessageId = row.id,
+                fromMirror = true,
+            )
+        }
+
+        override fun onPromote() {
+            val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("mirror_defer_engine", false)
+                .putLong("mirror_role_switch_at", System.currentTimeMillis())
+                .apply()
+            Log.i(TAG, "Mirror: повышение - перезапуск с движком")
+            restartForMirrorRole()
+        }
+
+        override fun onDeferToShadow() {
+            val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("mirror_defer_engine", true)
+                .putLong("mirror_role_switch_at", System.currentTimeMillis())
+                .apply()
+            Log.i(TAG, "Mirror: партнёр старше - ухожу в зеркало")
+            restartForMirrorRole()
+        }
+    }
+
+    /**
+     * Смена роли = штатный перезапуск сервиса (как reconnect): тень поднимет
+     * движок, активный - уйдёт в тень. Защита от частых переключений.
+     */
+    private fun restartForMirrorRole() {
+        if (mirrorRestarting.getAndSet(true)) return
+        // Отдельный scope: serviceScope кан cancell'ится при stopSelf раньше,
+        // чем успеет выполниться перезапуск.
+        val restartScope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob()
+        )
+        restartScope.launch {
+            // Короткая пауза: партнёр должен увидеть смену нашего состояния.
+            kotlinx.coroutines.delay(1500)
+            try {
+                stopServiceSafely()
+                val intent = android.content.Intent(applicationContext, CoreServerService::class.java)
+                applicationContext.startForegroundService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Mirror role restart failed", e)
+            } finally {
+                mirrorRestarting.set(false)
+                restartScope.cancel()
+            }
+        }
     }
 
     /**
@@ -930,6 +1074,8 @@ class CoreServerService : Service() {
         }
         telegramRelay?.stop()
         cloudflareRelay?.stop()
+        com.vladimir.messenger.data.mirror.MirrorHub.close()
+        mirror = null
         Log.i(TAG, "CoreServerService destroyed")
         eventPollingJob?.cancel()
         filePumpJob?.cancel()
@@ -1389,6 +1535,20 @@ class CoreServerService : Service() {
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                     Log.i(TAG, "Saved incoming message to chat ${chat.id}")
+                    // р226: мгновенно отразить входящее на зеркале-партнёре.
+                    mirror?.publishIncoming(
+                        com.vladimir.messenger.data.mirror.MirrorRow(
+                            id = messageId,
+                            chatId = chat.id,
+                            contactName = chat.contactName,
+                            senderId = senderId,
+                            content = text,
+                            timestamp = timestamp,
+                            mine = false,
+                            recipientId = RustBridge.nodeId() ?: "",
+                            status = "DELIVERED",
+                        )
+                    )
                     
                     // Отправить ACK отправителю
                     try {

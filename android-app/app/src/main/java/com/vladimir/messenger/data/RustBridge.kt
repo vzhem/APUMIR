@@ -42,6 +42,22 @@ object RustBridge {
         kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
     )
 
+    /**
+     * р226: инициализировать ядро БЕЗ движка и сети. Нужно зеркалу: там
+     * движок намеренно не запускается (сеть ведёт партнёр), но шифрование
+     * зеркальных кадров (MessageSealer) зовёт функции ядра.
+     */
+    fun ensureCoreOnly() {
+        if (coreInitialized) return
+        try {
+            val initResult = initializeCore()
+            Log.i(TAG, "initializeCore() [mirror-only]: $initResult")
+            coreInitialized = true
+        } catch (ex: Exception) {
+            Log.e(TAG, "ensureCoreOnly error", ex)
+        }
+    }
+
     fun attachContext(context: Context) {
         appContext = context.applicationContext
     }

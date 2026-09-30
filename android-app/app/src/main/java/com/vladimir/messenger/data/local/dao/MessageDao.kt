@@ -14,6 +14,18 @@ interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMessageIgnore(message: MessageEntity): Long
 
+    /** р226: свежесть переписки - обмен «кто отстал» между устройствами. */
+    @Query("SELECT MAX(timestamp) FROM messages")
+    suspend fun maxTimestamp(): Long?
+
+    /** р226: хвост переписки для догана отставшего устройства зеркала. */
+    @Query("SELECT * FROM messages WHERE timestamp > :since ORDER BY timestamp ASC LIMIT :lim")
+    suspend fun messagesSince(since: Long, lim: Int): List<MessageEntity>
+
+    /** р226: неотправленные исходящие тени - перевыслать активному партнёру. */
+    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC LIMIT :lim")
+    suspend fun pendingMirrorOutgoing(lim: Int): List<MessageEntity>
+
     @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE id = :messageId)")
     suspend fun messageExists(messageId: String): Boolean
 

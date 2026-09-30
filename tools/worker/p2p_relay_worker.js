@@ -126,9 +126,16 @@ export class MqttBridge {
   constructor() {
     this.clients = new Set();
     this.retained = new Map(); // topic -> {topic, payload}
+    this.mirror = new Set(); // р226: участники комнаты зеркала (только в инстансах "mirror:*")
   }
 
   async fetch(request) {
+    // р226: комната зеркала - простой звёздный ретранслятор текстовых кадров
+    // между устройствами одной личности. Без логики, без хранения.
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/mirror/")) {
+      return this.mirrorJoin(request, url);
+    }
     if (this.clients.size >= MQTT_MAX_CLIENTS) {
       return json({ error: "broker busy" }, 503);
     }
@@ -164,6 +171,31 @@ export class MqttBridge {
       this.publish(null, client.will.topic, client.will.payload, client.will.retain);
       client.will = null;
     }
+  }
+
+  // ---- р226: комната живого зеркала --------------------------------------
+  async mirrorJoin(request, url) {
+    const dev = (url.searchParams.get("dev") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+    if (!dev) return json({ error: "dev required" }, 400);
+    if (this.mirror.size >= 4) return json({ error: "room full" }, 503);
+    const pair = new WebSocketPair();
+    const server = pair[1];
+    server.accept();
+    const member = { sock: server, dev };
+    this.mirror.add(member);
+    server.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return;
+      if (event.data.length > 512 * 1024) return;
+      for (const other of this.mirror) {
+        if (other !== member) {
+          try { other.sock.send(event.data); } catch (_) { /* кадр не критичен */ }
+        }
+      }
+    });
+    const bye = () => { this.mirror.delete(member); };
+    server.addEventListener("close", bye);
+    server.addEventListener("error", bye);
+    return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
   feed(client, chunk) {
@@ -355,6 +387,16 @@ export default {
     if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
       if (!env.MQTT_BRIDGE) {
         return json({ error: "MQTT_BRIDGE binding is not configured" }, 501);
+      }
+      // р226: /mirror/<полка> - комнаты живого зеркала устройств одной
+      // личности. Отдельные инстансы того же DO (имя "mirror:<полка>"),
+      // MQTT-брокер ("mqtt-bridge") не задет. Полка - секретный путь,
+      // содержимое кадров вдобавок запечатано на устройстве.
+      if (path.startsWith("/mirror/")) {
+        const shelf = path.slice(8).toLowerCase().replace(/[^a-f0-9]/g, "");
+        if (shelf.length < 16 || shelf.length > 32) return json({ error: "bad shelf" }, 400);
+        const mirrorStub = env.MQTT_BRIDGE.idFromName("mirror:" + shelf);
+        return env.MQTT_BRIDGE.get(mirrorStub).fetch(request);
       }
       const stub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
       return env.MQTT_BRIDGE.get(stub).fetch(request);

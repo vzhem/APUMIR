@@ -8,6 +8,8 @@ import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.mirror.MirrorHub
+import com.vladimir.messenger.data.mirror.MirrorRow
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
@@ -93,10 +95,58 @@ class ChatRepository @Inject constructor(
         return chatDao.getAllChats().firstOrNull { it.contactId.contains(contactId) }
     }
 
-    suspend fun sendMessage(chatId: String, recipientId: String, content: String): Result<Message> {
+    suspend fun sendMessage(
+        chatId: String,
+        recipientId: String,
+        content: String,
+        /** р226: чужая строка идёт с СОБСТВЕННЫМ id - одинаковые id на обоих устройствах. */
+        fixedMessageId: String? = null,
+        /** р226: true - строка пришла от зеркала-партнёра, эхо назад не слать. */
+        fromMirror: Boolean = false,
+    ): Result<Message> {
         return try {
-            val messageId = UUID.randomUUID().toString()
+            val messageId = fixedMessageId ?: UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
+
+            // р226: это устройство - зеркало и активный партнёр в сети.
+            // Шифросессия у узла одна, поэтому отправляет партнёр, а строка
+            // остаётся здесь как PENDING до его эха «отправлено».
+            if (!fromMirror) {
+                val mirrorChannel = MirrorHub.routeOutgoing()
+                if (mirrorChannel != null) {
+                    val mirrorChat = chatDao.getChatById(chatId)
+                    val mirrorRecipient = if (recipientId.isNotBlank()) recipientId else mirrorChat?.contactId ?: ""
+                    if (mirrorRecipient.isNotBlank()) {
+                        val mirrorEntity = MessageEntity(
+                            id = messageId,
+                            chatId = chatId,
+                            senderId = "self",
+                            content = content,
+                            timestamp = timestamp,
+                            isFromMe = true,
+                            status = MessageStatus.PENDING.name,
+                            channel = MessageChannel.UNKNOWN.name,
+                            recipientId = mirrorRecipient,
+                        )
+                        messageDao.insertMessage(mirrorEntity)
+                        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+                        val offered = mirrorChannel.publishOutgoing(
+                            MirrorRow(
+                                id = messageId, chatId = chatId, contactName = mirrorChat?.contactName ?: "",
+                                senderId = "self", content = content, timestamp = timestamp,
+                                mine = true, recipientId = mirrorRecipient, status = MessageStatus.PENDING.name,
+                            )
+                        )
+                        if (offered) {
+                            Log.i(TAG, "🪞 sent via mirror partner: $messageId")
+                            return Result.success(mirrorEntity.toDomain())
+                        }
+                        // Партнёр мигнул в момент отправки: строка останется
+                        // PENDING и уйдёт обычным путём, когда это устройство
+                        // само станет активным (насос р179).
+                    }
+                }
+            }
 
             // ШАГ 1: Определить recipientId
             val chat = chatDao.getChatById(chatId)
@@ -156,6 +206,18 @@ class ChatRepository @Inject constructor(
                 messageDao.updateMessageStatus(messageId, MessageStatus.QUEUED_OFFLINE.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.STORE_FORWARD.name)
                 Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
+            }
+
+            // р226: отразить отправленное на зеркале второго устройства.
+            if (!fromMirror) {
+                MirrorHub.publishSentEcho(
+                    id = messageId,
+                    chatId = chatId,
+                    content = content,
+                    ts = timestamp,
+                    recipientId = actualRecipientId,
+                    status = if (sentDirectly) MessageStatus.SENT.name else MessageStatus.QUEUED_OFFLINE.name,
+                )
             }
 
             // Реферальная атрибуция: если контакт добавлен по пригласительной
@@ -311,6 +373,101 @@ class ChatRepository @Inject constructor(
         }
 
         return retried
+    }
+
+    // ── р226: живое зеркало устройств одной личности ────────────────────────
+
+    /** Свежесть переписки - обмен «кто отстал» между устройствами. */
+    suspend fun maxMessageTimestamp(): Long = messageDao.maxTimestamp() ?: 0L
+
+    /** Хвост переписки для догана отставшего устройства. */
+    suspend fun mirrorRowsSince(since: Long, limit: Int): List<MirrorRow> =
+        messageDao.messagesSince(since, limit).map { e ->
+            MirrorRow(
+                id = e.id,
+                chatId = e.chatId,
+                contactName = chatDao.getChatById(e.chatId)?.contactName ?: "",
+                senderId = e.senderId,
+                content = e.content,
+                timestamp = e.timestamp,
+                mine = e.isFromMe,
+                recipientId = e.recipientId,
+                status = e.status,
+            )
+        }
+
+    /** Неотправленные исходящие тени - перевыслать активному партнёру. */
+    suspend fun mirrorPendingOutgoing(limit: Int): List<MirrorRow> =
+        messageDao.pendingMirrorOutgoing(limit).map { e ->
+            MirrorRow(
+                id = e.id,
+                chatId = e.chatId,
+                contactName = chatDao.getChatById(e.chatId)?.contactName ?: "",
+                senderId = "self",
+                content = e.content,
+                timestamp = e.timestamp,
+                mine = true,
+                recipientId = e.recipientId,
+                status = e.status,
+            )
+        }
+
+    /**
+     * Входящее с зеркала. @return (chatId, имя чата) - для уведомления.
+     * Чат ищется по узлу отправителя: id чатов на устройствах разные.
+     */
+    suspend fun applyMirrorIncoming(row: MirrorRow): Pair<String, String> {
+        val chat = getOrCreateChat(
+            row.senderId,
+            row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.senderId) },
+        )
+        saveIncomingMessage(
+            chatId = chat.id,
+            senderId = row.senderId,
+            messageId = row.id,
+            content = row.content,
+            timestamp = row.timestamp,
+            channel = MessageChannel.UNKNOWN,
+            recipientId = row.recipientId,
+        )
+        return Pair(chat.id, chat.contactName)
+    }
+
+    /** Отправленное с зеркала (эхо или доган): своя строка «отправлено». */
+    suspend fun applyMirrorSent(row: MirrorRow) {
+        // id чатов на устройствах разные - чат ищем по узлу получателя.
+        val chat: Chat = if (row.recipientId.isNotBlank()) {
+            getChatByContactId(row.recipientId)
+                ?: getOrCreateChat(row.recipientId, row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.recipientId) })
+        } else {
+            chatDao.getChatById(row.chatId)
+                ?: return
+        }
+        // Статус уважаем чужой: эхо может принести и QUEUED_OFFLINE.
+        val mirrorStatus = when (row.status) {
+            MessageStatus.SENT.name, MessageStatus.QUEUED_OFFLINE.name, MessageStatus.PENDING.name -> row.status
+            else -> MessageStatus.SENT.name
+        }
+        if (messageDao.messageExists(row.id)) {
+            if (getMessageById(row.id)?.isFromMe == true) {
+                messageDao.updateMessageStatus(row.id, mirrorStatus)
+            }
+            return
+        }
+        messageDao.insertMessageIgnore(
+            MessageEntity(
+                id = row.id,
+                chatId = chat.id,
+                senderId = "self",
+                content = row.content,
+                timestamp = row.timestamp,
+                isFromMe = true,
+                status = mirrorStatus,
+                channel = MessageChannel.LOCAL.name,
+                recipientId = row.recipientId,
+            )
+        )
+        chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
     }
 
     suspend fun saveIncomingMessage(
