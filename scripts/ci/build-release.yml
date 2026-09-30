@@ -237,30 +237,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Если мост изменился (то есть менялся lib.udl), кладём его вместе с
-      # собранным ядром обратно в main: иначе локальная сборка владельца и
-      # песочница бота останутся со старым мостом (а старое ядро + новый мост
-      # роняют приложение на старте по контрольным суммам). Только когда тег
-      # стоит на вершине main - так делает бот. Релиз к этому моменту уже
-      # опубликован, поэтому неудача здесь релиз не отменяет.
-      - name: Push regenerated bindings and core back to main
+      # main - единственная ветка правды, и она обязана догонять рабочий
+      # кончик (docs/START_HERE.md, раздел 9). До 2026-09-30 этот шаг молчал,
+      # когда тег стоял НЕ ровно на вершине main: с 2026-09-18 main застрял на
+      # v11.73.0, а все 122 релиза v11.74.0…v11.74.121 прошли мимо - следующая
+      # сессия Arena ветвится от main и читает мёртвый код. Теперь релиз сам
+      # догоняет main (fast-forward до коммита тега), а перегенерированный мост
+      # и собранное ядро, если они менялись, ложатся сверху: старое ядро + новый
+      # мост роняют приложение на старте по контрольным суммам. Пробные теги
+      # (v0.0.0-sandbox-checkN) main не двигают - они для проверки компиляции.
+      # Историю не переписываем: если main ушёл вперёд или в сторону, push
+      # отклоняется сам (non-fast-forward) и в логе остаётся предупреждение.
+      # Релиз к этому моменту уже опубликован, поэтому неудача здесь релиз не
+      # отменяет.
+      - name: Fast-forward main to the release (bindings + rebuilt core)
         if: success()
         continue-on-error: true
         run: |
+          TAG="${GITHUB_REF#refs/tags/}"
           BIND=android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
-          if git diff --quiet -- "$BIND"; then
-            echo "uniffi bindings unchanged - nothing to push"
-            exit 0
-          fi
-          git fetch --depth=1 origin main
-          if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
-            echo "::warning::tag is not at the head of main - regenerated bindings were NOT pushed; take them from the core-bindings artifact of this run"
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::notice::$TAG is not a release tag - main is left alone"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$BIND" \
-            android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so \
-            android-app/app/src/main/jniLibs/armeabi-v7a/libp2p_core.so
-          git commit -m "ci: uniffi bindings + core rebuilt for ${GITHUB_REF#refs/tags/}"
-          git push origin HEAD:main || echo "::warning::push to main failed - take the bindings from the core-bindings artifact of this run"
+          PUSHED=1
+          if git diff --quiet -- "$BIND"; then
+            echo "uniffi bindings unchanged - main goes to the release commit only"
+            git push origin HEAD:main || PUSHED=0
+          else
+            git add "$BIND" \
+              android-app/app/src/main/jniLibs/arm64-v8a/libp2p_core.so \
+              android-app/app/src/main/jniLibs/armeabi-v7a/libp2p_core.so
+            git commit -m "ci: uniffi bindings + core rebuilt for $TAG"
+            git push origin HEAD:main || PUSHED=0
+          fi
+          if [ "$PUSHED" = "1" ]; then
+            echo "::notice::main fast-forwarded to $(git rev-parse HEAD) for $TAG"
+          else
+            echo "::warning::main has commits $TAG does not - fast-forward skipped, main needs a hand sync (scripts/sync-main.ps1); take the rebuilt bindings from the core-bindings artifact of this run"
+          fi

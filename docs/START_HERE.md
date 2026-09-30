@@ -1324,6 +1324,17 @@ INCOMING COMPLETE; контрольный замер скорости файло
 именно её. Агент делает это сам, не дожидаясь напоминания; если fast-forward
 невозможен, это останавливает работу и обсуждается, а не откладывается.
 
+**CI догоняет `main` сам (2026-09-30).** В релизном воркфлоу шаг
+«Fast-forward main to the release (bindings + rebuilt core)» после публикации
+релиза двигает `main` до коммита тега (fast-forward, история не переписывается);
+пробные теги `v0.0.0-sandbox-checkN` `main` не двигают, а non-fast-forward
+отклоняется сам и остаётся предупреждением в логе. Это подстраховка, а не
+замена правилу выше: рабочая ветка по-прежнему догоняет `main` в том же ходе.
+Ставит шаг владелец:
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-release-workflow.ps1`
+(копия воркфлоу живёт в `scripts/ci/build-release.yml` - у GitHub-приложения
+Arena нет права `workflows`).
+
 **Порядок в конце сессии (обязательно):
 
 1. `git fetch origin main` → `git merge origin/main` (втянуть `main` в рабочую
