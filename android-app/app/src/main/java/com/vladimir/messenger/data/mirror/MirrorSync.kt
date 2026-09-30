@@ -173,6 +173,19 @@ object MirrorHub {
         }.getOrDefault(false)
 
     /**
+     * р230: принятый файл готов - рассказать о нём партнёрскому устройству.
+     * Шлёт только активное: у тени сети нет.
+     */
+    fun publishFileMeta(meta: org.json.JSONObject) {
+        runCatching { channel?.publishFileMeta(meta) }
+    }
+
+    /** р230: попросить байты файла у партнёра (тень просит активного). */
+    fun requestFileBytes(transferId: String, displayName: String, totalBytes: Long) {
+        runCatching { channel?.requestFileBytes(transferId, displayName, totalBytes) }
+    }
+
+    /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
      * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
      * поэтому кадр безопасно звать и с активного, и с тени.
@@ -264,6 +277,15 @@ class MirrorChannel(
         suspend fun onActionToPeers(peerId: String, groupId: String, text: String)
         /** р228: на партнёрском устройстве сняли непрочитанное - снять и у себя. */
         suspend fun onReadFromPartner(peerId: String, groupId: String, topicId: String)
+        /**
+         * р230: принятый файл завершился - показать его и на партнёрском
+         * устройстве (строка передачи + карточка в чате).
+         */
+        suspend fun onFileMeta(meta: JSONObject): Boolean
+        /** р230: кусок файла от партнёра - сложить в приёмник. */
+        suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray)
+        /** р230: прочитать кусок своего файла, чтобы отдать партнёру. */
+        suspend fun fileBytesFor(transferId: String, displayName: String, offset: Long, size: Int): ByteArray?
         fun onPromote()
         fun onDeferToShadow()
     }
@@ -405,6 +427,78 @@ class MirrorChannel(
             .put("t", text)
         val sealed = sealPayload(body) ?: return false
         return sendJson(JSONObject().put("t", "ev").put("k", "outenv").put("d", sealed))
+    }
+
+    /**
+     * р230: «файл принят» - метаданные партнёрскому устройству. Байты он
+     * попросит сам ([requestFileBytes]): так передача не начнётся, если
+     * второе устройство сейчас не в сети или файл ему не нужен.
+     */
+    fun publishFileMeta(meta: JSONObject) {
+        if (!engineUp) return
+        if (wsRef.get() == null) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(meta) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "filemeta").put("d", sealed))
+        }
+    }
+
+    /** р230: тень просит у активного байты принятого файла. */
+    fun requestFileBytes(transferId: String, displayName: String, totalBytes: Long): Boolean {
+        if (engineUp) return false
+        if (!canCarryOutgoing()) return false
+        if (transferId.isBlank()) return false
+        val body = JSONObject()
+            .put("id", transferId)
+            .put("name", displayName)
+            .put("size", totalBytes)
+        val sealed = sealPayload(body) ?: return false
+        return sendJson(JSONObject().put("t", "ev").put("k", "reqfile").put("d", sealed))
+    }
+
+    /** р230: отдать партнёру кусок файла (шлёт тот, у кого байты есть). */
+    private fun sendFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) {
+        val body = JSONObject()
+            .put("id", transferId)
+            .put("seq", seq)
+            .put("last", if (last) 1 else 0)
+            .put("b64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+        val sealed = sealPayload(body) ?: return
+        sendJson(JSONObject().put("t", "ev").put("k", "filechunk").put("d", sealed))
+    }
+
+    /**
+     * р230: выдать файл партнёру целиком, порциями. Размер ограничен
+     * [FILE_MIRROR_MAX_BYTES]: канал зеркала идёт через воркер, и гигабайты
+     * по нему гнать нельзя - такие файлы остаются на принявшем устройстве.
+     */
+    private fun serveFile(transferId: String, displayName: String, totalBytes: Long) {
+        if (!engineUp) return
+        if (totalBytes <= 0 || totalBytes > FILE_MIRROR_MAX_BYTES) {
+            Log.i(TAG, "file mirror skipped: $totalBytes B (> $FILE_MIRROR_MAX_BYTES)")
+            return
+        }
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var offset = 0L
+            var seq = 0
+            while (offset < totalBytes) {
+                val want = minOf(FILE_CHUNK_BYTES.toLong(), totalBytes - offset).toInt()
+                val chunk = runCatching {
+                    bridge.fileBytesFor(transferId, displayName, offset, want)
+                }.getOrNull()
+                if (chunk == null || chunk.isEmpty()) {
+                    Log.w(TAG, "file mirror: чтение не удалось на $offset")
+                    return@launch
+                }
+                val isLast = offset + chunk.size >= totalBytes
+                sendFileChunk(transferId, seq, isLast, chunk)
+                seq++
+                offset += chunk.size
+                // Небольшая пауза: канал общий с сообщениями, не забиваем его.
+                kotlinx.coroutines.delay(FILE_CHUNK_PAUSE_MS)
+            }
+            Log.i(TAG, "file mirror: отдано $offset Б ($seq порций) id=$transferId")
+        }
     }
 
     /**
@@ -648,6 +742,44 @@ class MirrorChannel(
                 scope.launch { bridge.onOutgoingFromPartner(row) }
             }
             "batch" -> handleEventBatch(wire)
+            "filemeta" -> {
+                // р230: файл принят на партнёрском устройстве - показать его
+                // и здесь и попросить байты.
+                val meta = openPayload(wire) ?: return
+                scope.launch {
+                    val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
+                    if (applied) {
+                        requestFileBytes(
+                            transferId = meta.optString("id"),
+                            displayName = meta.optString("name"),
+                            totalBytes = meta.optLong("size", 0L),
+                        )
+                    }
+                }
+            }
+            "reqfile" -> {
+                // р230: тень просит байты - отдаём порциями (канал общий).
+                if (!engineUp) return
+                val body = openPayload(wire) ?: return
+                val transferId = body.optString("id")
+                if (transferId.isBlank()) return
+                serveFile(transferId, body.optString("name"), body.optLong("size", 0L))
+            }
+            "filechunk" -> {
+                // р230: порция файла от партнёра - в приёмник.
+                val body = openPayload(wire) ?: return
+                val transferId = body.optString("id")
+                val b64 = body.optString("b64")
+                if (transferId.isBlank() || b64.isBlank()) return
+                val bytes = runCatching {
+                    android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
+                }.getOrNull() ?: return
+                scope.launch {
+                    MirrorHub.duringApply {
+                        bridge.onFileChunk(transferId, body.optInt("seq", 0), body.optInt("last", 0) == 1, bytes)
+                    }
+                }
+            }
             "read" -> {
                 // р228: на партнёре сняли непрочитанное - снимаем и у себя.
                 val body = openPayload(wire) ?: return
@@ -750,5 +882,14 @@ class MirrorChannel(
 
         /** р227: потолок открытого текста зеркального конверта (кадр - 512 КиБ). */
         private const val MAX_ENVELOPE_CHARS = 48_000
+
+        /** р230: порция файла (16 КиБ -> ~22 КиБ base64, влезает в кадр и в потолок конверта). */
+        private const val FILE_CHUNK_BYTES = 16 * 1024
+
+        /** р230: пауза между порциями - канал зеркала общий с сообщениями. */
+        private const val FILE_CHUNK_PAUSE_MS = 60L
+
+        /** р230: больше этого файл через зеркало не гоняем (он остаётся на принявшем устройстве). */
+        const val FILE_MIRROR_MAX_BYTES = 24L * 1024 * 1024
     }
 }

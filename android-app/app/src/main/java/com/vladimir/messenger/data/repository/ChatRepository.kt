@@ -724,6 +724,9 @@ class ChatRepository @Inject constructor(
         chatDao.markAsRead(chatId)
     }
 
+    /** р230: есть ли уже строка с таким идентификатором (для зеркала файлов). */
+    suspend fun messageExists(messageId: String): Boolean = messageDao.messageExists(messageId)
+
     suspend fun updateMessageStatus(messageId: String, status: MessageStatus) {
         messageDao.updateMessageStatus(messageId, status.name)
     }

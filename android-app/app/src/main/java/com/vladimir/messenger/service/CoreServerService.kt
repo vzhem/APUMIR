@@ -996,6 +996,23 @@ class CoreServerService : Service() {
             mirrorApplyRead(peerId, groupId, topicId)
         }
 
+        override suspend fun onFileMeta(meta: org.json.JSONObject): Boolean =
+            runCatching { fileTransferRouter.applyMirrorFileMeta(meta) }
+                .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
+                .getOrDefault(false)
+
+        override suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) {
+            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, seq, last, bytes) }
+                .onFailure { Log.w(TAG, "Mirror file chunk failed: ${it.message}") }
+        }
+
+        override suspend fun fileBytesFor(
+            transferId: String,
+            displayName: String,
+            offset: Long,
+            size: Int,
+        ): ByteArray? = fileTransferRouter.readMirrorFileChunk(transferId, displayName, offset, size)
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)

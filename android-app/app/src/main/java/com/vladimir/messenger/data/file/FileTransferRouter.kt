@@ -215,6 +215,10 @@ class FileTransferRouter @Inject constructor(
                             timestamp = System.currentTimeMillis(),
                             recipientId = RustBridge.nodeId() ?: "",
                         )
+                        // р230: второе устройство той же личности показывает
+                        // тот же файл. Байты (до 24 МБ) оно попросит само.
+                        runCatching { publishMirrorFileMeta(chatId, senderId, messageId, displayName, mediaType, totalBytes, fileSha256) }
+                            .onFailure { Log.w(TAG, "mirror file meta failed: ${it.message}") }
                     }
                 }
                     // Раунд 121: принятая гифка оседает в библиотеке телефона -
@@ -835,6 +839,148 @@ class FileTransferRouter @Inject constructor(
         runCatching { transferDao.deleteTransfer(transferId) }
             .onFailure { Log.w(TAG, "drop transfer failed for $transferId: ${it.message}") }
     }
+
+    /**
+     * р230: рассказать партнёрскому устройству о принятом файле личного чата
+     * (карточка + строка передачи). Шлёт только активное: у тени сети нет.
+     */
+    private suspend fun publishMirrorFileMeta(
+        chatId: String,
+        senderId: String,
+        messageId: String,
+        displayName: String,
+        mediaType: String,
+        totalBytes: Long,
+        fileSha256: String,
+    ) {
+        val transferId = messageId.removePrefix("file-")
+        if (transferId.isBlank() || transferId == messageId) return
+        val row = transferDao.getTransfer(transferId) ?: return
+        if (row.direction != "INCOMING") return
+        val meta = org.json.JSONObject()
+            .put("id", transferId)
+            .put("msg", messageId)
+            .put("peer", senderId)
+            .put("name", displayName)
+            .put("mime", mediaType)
+            .put("size", totalBytes)
+            .put("sha", fileSha256)
+            .put("chunks", row.chunkCount)
+            .put("chunk", row.chunkSize)
+            .put("text", formatPlaceholder(displayName, mediaType, totalBytes))
+            .put("ts", row.createdAtMs)
+        com.vladimir.messenger.data.mirror.MirrorHub.publishFileMeta(meta)
+    }
+
+    /**
+     * р230: применить метаданные файла, пришедшие от партнёрского устройства.
+     * Заводим строку передачи (сразу COMPLETE - байты придут следом) и карточку
+     * в чате, найденном по собеседнику: идентификаторы чатов на устройствах
+     * разные.
+     */
+    suspend fun applyMirrorFileMeta(meta: org.json.JSONObject): Boolean =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val transferId = meta.optString("id")
+        val peer = meta.optString("peer")
+        if (transferId.isBlank() || peer.isBlank()) return@withContext false
+        val chat = chatRepository.getChatByContactId(peer)
+            ?: chatRepository.getOrCreateChat(peer, com.vladimir.messenger.util.NodeIds.autoName(peer))
+        val messageId = meta.optString("msg").ifBlank { FileTransferWire.chatPlaceholderMessageId(transferId) }
+        val name = meta.optString("name")
+        val mime = meta.optString("mime")
+        val size = meta.optLong("size", 0L)
+        val sha = meta.optString("sha")
+        val chunks = meta.optLong("chunks", 1L)
+        val chunkSize = meta.optInt("chunk", 64 * 1024)
+        val timestamp = meta.optLong("ts", System.currentTimeMillis())
+        val existing = transferDao.getTransfer(transferId)
+        if (existing == null) {
+            transferDao.insertTransferIgnore(
+                com.vladimir.messenger.data.local.entity.FileTransferEntity(
+                    transferId = transferId,
+                    messageId = messageId,
+                    chatId = chat.id,
+                    peerNodeId = peer,
+                    direction = "INCOMING",
+                    displayName = name,
+                    mediaType = mime,
+                    totalBytes = size,
+                    chunkSize = chunkSize,
+                    chunkCount = chunks,
+                    fileSha256 = sha,
+                    state = "COMPLETE",
+                    completedChunks = chunks,
+                    transferredBytes = 0,
+                    createdAtMs = timestamp,
+                    expiresAtMs = timestamp + 30L * 24 * 60 * 60 * 1000,
+                    updatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+        }
+        if (chatRepository.messageExists(messageId) != true) {
+            chatRepository.saveIncomingMessage(
+                chatId = chat.id,
+                senderId = peer,
+                messageId = messageId,
+                content = meta.optString("text").ifBlank { formatPlaceholder(name, mime, size) },
+                timestamp = timestamp,
+                recipientId = RustBridge.nodeId() ?: "",
+            )
+        }
+        Log.i(TAG, "mirror file meta applied id=$transferId ($name, $size B)")
+        true
+    }
+
+    /** Куски файла от партнёра: пишем в тот же приёмник, что и обычную передачу. */
+    private val mirrorWriters =
+        java.util.concurrent.ConcurrentHashMap<String, Pair<ReceivedFileStore.Writer, Triple<String, Long, Int>>>()
+
+    /**
+     * р230: порция файла от партнёрского устройства. Пишем через тот же
+     * [ReceivedFileStore], что и обычный приём: имя каталога - идентификатор
+     * передачи, поэтому и открытие файла в чате сработает как обычно.
+     */
+    suspend fun applyMirrorFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val row = transferDao.getTransfer(transferId) ?: return@withContext
+        val entry = mirrorWriters[transferId]
+        val writerState = entry ?: run {
+            val writer = receivedStore.openWriter(transferId, row.displayName, row.totalBytes)
+            val triple = Triple(row.displayName, row.totalBytes, row.chunkSize)
+            mirrorWriters[transferId] = Pair(writer, triple)
+            Pair(writer, triple)
+        }
+        try {
+            writerState.first.write(bytes, bytes.size)
+            if (last) {
+                writerState.first.commit()
+                mirrorWriters.remove(transferId)
+                Log.i(TAG, "mirror file complete id=$transferId (${row.displayName})")
+            }
+        } catch (error: Exception) {
+            runCatching { writerState.first.abort() }
+            runCatching { receivedStore.deleteTransfer(transferId) }
+            mirrorWriters.remove(transferId)
+            Log.w(TAG, "mirror file chunk failed id=$transferId: ${error.message}")
+        }
+    }
+
+    /**
+     * р230: прочитать кусок своего принятого файла, чтобы отдать партнёрскому
+     * устройству (то же, что отдаёт сеть при раздаче).
+     */
+    fun readMirrorFileChunk(transferId: String, displayName: String, offset: Long, size: Int): ByteArray? =
+        runCatching {
+            val file = receivedStore.receivedFile(transferId, displayName) ?: return@runCatching null
+            java.io.RandomAccessFile(file, "r").use { handle ->
+                if (offset >= handle.length()) return@runCatching null
+                val want = minOf(size.toLong(), handle.length() - offset).toInt()
+                val buffer = ByteArray(want)
+                handle.seek(offset)
+                handle.readFully(buffer)
+                buffer
+            }
+        }.getOrNull()
 
     /** Verified plaintext of a completed incoming transfer (app-private storage), if present. */
     fun receivedFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
