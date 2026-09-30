@@ -238,6 +238,18 @@ object MirrorHub {
     }
 
     /**
+     * р238: закрепление/открепление сообщения. Закреп - личное дело человека
+     * (собеседнику он не уходит), но на втором устройстве той же личности
+     * закреп должен быть там же. id сообщения общий у устройств, поэтому
+     * кадра достаточно. При применении чужого кадра не рассылаем повторно.
+     */
+    fun publishPin(messageId: String, pinned: Boolean) {
+        if (messageId.isBlank()) return
+        if (isApplyingFrame()) return
+        runCatching { channel?.publishPin(messageId, pinned) }
+    }
+
+    /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
      * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
      * поэтому кадр безопасно звать и с активного, и с тени.
@@ -348,6 +360,8 @@ class MirrorChannel(
         suspend fun onTypingFromPartner(peerId: String, typing: Boolean)
         /** р236: черновик с партнёрского устройства (текст незакрытой строки). */
         suspend fun onDraftFromPartner(key: String, text: String)
+        /** р238: сообщение закреплено/откреплено на партнёрском устройстве. */
+        suspend fun onPinFromPartner(messageId: String, pinned: Boolean)
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -454,6 +468,17 @@ class MirrorChannel(
         val sealed = sealPayload(JSONObject().put("k", key).put("t", text)) ?: return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sendJson(JSONObject().put("t", "ev").put("k", "draft").put("d", sealed))
+        }
+    }
+
+    /** р238: закреп сообщения - партнёрскому устройству личности. */
+    fun publishPin(messageId: String, pinned: Boolean) {
+        if (wsRef.get() == null) return
+        val sealed = sealPayload(
+            JSONObject().put("id", messageId).put("on", if (pinned) 1 else 0),
+        ) ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendJson(JSONObject().put("t", "ev").put("k", "pin").put("d", sealed))
         }
     }
 
@@ -993,6 +1018,17 @@ class MirrorChannel(
                 val peerId = body.optString("p")
                 if (peerId.isBlank()) return
                 scope.launch { bridge.onTypingFromPartner(peerId, body.optInt("on", 0) == 1) }
+            }
+            "pin" -> {
+                // р238: закреп с партнёрского устройства - закрепить и здесь.
+                val body = openPayload(wire) ?: return
+                val id = body.optString("id")
+                if (id.isBlank()) return
+                scope.launch {
+                    MirrorHub.duringApply {
+                        bridge.onPinFromPartner(id, body.optInt("on", 0) == 1)
+                    }
+                }
             }
             "draft" -> {
                 // р236: черновик с партнёрского устройства - положить под тот

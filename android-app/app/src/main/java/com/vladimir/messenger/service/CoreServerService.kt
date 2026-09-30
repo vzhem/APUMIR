@@ -1051,6 +1051,12 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror draft failed: ${it.message}") }
         }
 
+        override suspend fun onPinFromPartner(messageId: String, pinned: Boolean) {
+            // р238: закреп с партнёрского устройства - тот же закреп здесь.
+            runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+                .onFailure { Log.w(TAG, "Mirror pin failed: ${it.message}") }
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)

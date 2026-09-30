@@ -347,6 +347,9 @@ class ChatDetailViewModel @Inject constructor(
     fun togglePin(messageId: String, pinned: Boolean) {
         viewModelScope.launch {
             runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+            // р238: закреп - личное дело человека, собеседнику он не уходит, но
+            // на втором устройстве ТОЙ ЖЕ личности закреп должен быть там же.
+            runCatching { com.vladimir.messenger.data.mirror.MirrorHub.publishPin(messageId, pinned) }
         }
     }
 

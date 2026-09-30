@@ -9521,6 +9521,16 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   `git push origin v11.74.134` (создать заново) - новый push-событие, новый
   прогон, сборка проходит. Ничего другого делать не нужно.
 
+- **2026-09-30 (раунд 238) - закрепы личных чатов на обоих устройствах.**
+  Закреп в личке был ЧИСТО локальным (ChatDetailViewModel.togglePin ->
+  ChatRepository.setMessagePinned, никакого пакета), поэтому второе устройство
+  о нём не знало. Добавлен кадр ev `pin` {id,on} (publishPin в MirrorHub и
+  MirrorChannel), приём - onPinFromPartner в сервисе -> setMessagePinned под
+  MirrorHub.duringApply. Собеседнику закреп по-прежнему НЕ уходит (это личное
+  дело человека) - в отличие от реакций и чтений, никакой outenv-пересылки нет.
+  Групповые закрепы (packet.pinned в GroupRepository) не трогали - отдельная
+  механика темы/поста.
+
 - **2026-09-30 (раунд 237) - черновики групп и каналов.** Экран группы держал
   текст в Compose-состоянии (`var draft by remember`), поэтому переносить было
   нечего: текст переехал в модель - GroupChatUiState.draft + onDraftChanged()
