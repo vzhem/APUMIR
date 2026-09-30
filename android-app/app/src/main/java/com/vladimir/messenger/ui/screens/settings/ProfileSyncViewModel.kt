@@ -1,13 +1,11 @@
 package com.vladimir.messenger.ui.screens.settings
 
 // =============================================================================
-// PROFILESYNCVIEWMODEL.KT — «Синхронизировать аккаунт»
+// PROFILESYNCVIEWMODEL.KT — «Синхронизировать аккаунт» (прямой перенос)
 // =============================================================================
-// Раунд 225: профили находят себя сами (полка по нику, код - из пароля) и
-// сами синхронизируются (опрос, авто-скачивание, уведомление). Два пути:
-//  - «через сеть APU» - любые сети, включая мобильные (одноразовый релей);
-//  - «по Wi-Fi напрямую» - без интернета (раунд 224).
-// Применение копии - всегда вручную (профиль молча не подменяем).
+// Раунд 224: без облака. Источник собирает копию и раздаёт её напрямую по
+// Wi-Fi одноразовым кодом; приёмник забирает по адресу и коду, дальше -
+// штатный путь файла-копии (stage -> подтверждение -> перезапуск).
 // =============================================================================
 
 import android.content.Context
@@ -17,41 +15,28 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.backup.BackupCipher
 import com.vladimir.messenger.data.backup.BackupManifest
 import com.vladimir.messenger.data.backup.ProfileBackup
-import com.vladimir.messenger.data.backup.ProfileSyncAuto
 import com.vladimir.messenger.data.backup.ProfileSyncDirect
-import com.vladimir.messenger.data.backup.ProfileSyncNet
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Состояние окна синхронизации. */
+/** Состояние окна синхронизации (прямой перенос). */
 data class ProfileSyncUiState(
     val busy: Boolean = false,
     val password: String = "",
-    /** Режим источника: сервер раздачи поднят (Wi-Fi напрямую). */
+    /** Режим источника: сервер раздачи поднят. */
     val sharing: Boolean = false,
     val shareAddress: ProfileSyncDirect.ShareAddress? = null,
-    /** Поля приёмника (Wi-Fi напрямую). */
+    /** Поля приёмника. */
     val pullAddress: String = "",
     val pullToken: String = "",
-    /** «Через сеть APU»: что сейчас видно в релее. */
-    val netChecking: Boolean = false,
-    val netMeta: ProfileSyncNet.NetMeta? = null,
-    val netMessage: String? = null,
-    val netFailed: Boolean = false,
-    val netSent: Boolean = false,
-    /** Авто-проверка по расписанию. */
-    val autoEnabled: Boolean = false,
     /** Скачанная копия, ждущая подтверждения. */
     val staged: BackupManifest? = null,
     val message: String? = null,
@@ -69,32 +54,14 @@ class ProfileSyncViewModel @Inject constructor(
     val uiState: StateFlow<ProfileSyncUiState> = _uiState.asStateFlow()
 
     private var server: ProfileSyncDirect.ShareServer? = null
-    private var pollJob: Job? = null
-
-    init {
-        _uiState.value = _uiState.value.copy(autoEnabled = ProfileSyncAuto.isEnabled(context))
-        // «Сами синхронизировались»: пока окно открыто - сами ищем копию,
-        // сами скачиваем и готовим. Применение - одним тапом человека.
-        pollJob = viewModelScope.launch {
-            while (isActive) {
-                pollNet()
-                delay(15_000)
-            }
-        }
-    }
 
     override fun onCleared() {
-        pollJob?.cancel()
         stopShare()
         super.onCleared()
     }
 
     fun onPasswordChange(value: String) {
         _uiState.value = _uiState.value.copy(password = value.take(128))
-        // Пароль изменился - старый результат авто-поиска мог быть от другого пароля.
-        if (_uiState.value.staged != null && value.length < BackupCipher.MIN_PASSWORD_LENGTH) {
-            _uiState.value = _uiState.value.copy(staged = null)
-        }
     }
 
     fun onPullAddressChange(value: String) {
@@ -105,113 +72,7 @@ class ProfileSyncViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(pullToken = value.take(16).trim())
     }
 
-    private fun hasPassword(): Boolean =
-        _uiState.value.password.length >= BackupCipher.MIN_PASSWORD_LENGTH
-
-    // ── «Через сеть APU»: нашли сами, скачали сами ──────────────────────────
-
-    /** Разовая проверка релея (иначе - по циклу раз в 15 с). */
-    fun pollNet() {
-        if (_uiState.value.busy || _uiState.value.staged != null) return
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(netChecking = true)
-            val meta = ProfileSyncNet.meta(context)
-            _uiState.value = _uiState.value.copy(netChecking = false, netMeta = meta)
-            if (meta != null && hasPassword()) {
-                netFetchAndStage()
-            }
-        }
-    }
-
-    /** Отправить копию этого устройства в сеть APU (одноразово, до забора). */
-    fun netUpload() {
-        if (_uiState.value.busy) return
-        val chars = _uiState.value.password.toCharArray()
-        _uiState.value = _uiState.value.copy(busy = true, netMessage = null, netFailed = false)
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                ProfileSyncNet.uploadBlocking(context, backup, chars)
-            }
-            chars.fill('\u0000')
-            val (message, failed) = when (result) {
-                is ProfileSyncNet.UploadResult.Ok -> {
-                    _uiState.value = _uiState.value.copy(netSent = true)
-                    "Копия в сети APU: второе устройство с тем же ником и паролем " +
-                        "найдёт и заберёт её само. Копия исчезнет после забора " +
-                        "(или через сутки)." to false
-                }
-                ProfileSyncNet.UploadResult.NoIdentity ->
-                    "Сначала создайте профиль" to true
-                ProfileSyncNet.UploadResult.BadPassword ->
-                    "Пароль короткий - нужно минимум ${BackupCipher.MIN_PASSWORD_LENGTH} знаков" to true
-                is ProfileSyncNet.UploadResult.TooBig ->
-                    "Копия ${result.megaBytes} МБ - больше лимита сети APU (24 МБ без медиа)" to true
-                is ProfileSyncNet.UploadResult.Failed ->
-                    "Не удалось отправить: ${result.reason}" to true
-            }
-            _uiState.value = _uiState.value.copy(busy = false, netMessage = message, netFailed = failed)
-        }
-    }
-
-    /** Найти копию в релее и подготовить (используется и опросом, и кнопкой). */
-    fun netFetchAndStage() {
-        if (_uiState.value.busy) return
-        val chars = _uiState.value.password.toCharArray()
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(busy = true, netMessage = null, netFailed = false)
-            when (val fetched = ProfileSyncNet.fetch(context, chars)) {
-                is ProfileSyncNet.FetchResult.Ready -> {
-                    stageDownloaded(Uri.fromFile(fetched.file), chars)
-                }
-                ProfileSyncNet.FetchResult.NotFound -> {
-                    _uiState.value = _uiState.value.copy(
-                        busy = false,
-                        netMessage = "В сети APU копии нет - отправьте её с телефона с данными",
-                        netFailed = true,
-                    )
-                }
-                ProfileSyncNet.FetchResult.WrongPassword -> {
-                    _uiState.value = _uiState.value.copy(
-                        busy = false,
-                        netMessage = "Копия защищена другим паролем - введите пароль с основного устройства",
-                        netFailed = true,
-                    )
-                }
-                is ProfileSyncNet.FetchResult.Failed -> {
-                    _uiState.value = _uiState.value.copy(
-                        busy = false,
-                        netMessage = "Не удалось забрать: ${fetched.reason}",
-                        netFailed = true,
-                    )
-                }
-            }
-            chars.fill('\u0000')
-        }
-    }
-
-    /** Включить/выключить фоновую авто-проверку (раз в ~6 ч, с уведомлением). */
-    fun setAutoEnabled(enabled: Boolean) {
-        if (enabled) {
-            val chars = _uiState.value.password.toCharArray()
-            val ok = ProfileSyncAuto.enable(context, chars)
-            chars.fill('\u0000')
-            _uiState.value = _uiState.value.copy(
-                autoEnabled = ok,
-                netMessage = if (ok) "Авто-проверка включена: раз в ~6 часов, с уведомлением"
-                else "Не удалось: нужен пароль от ${BackupCipher.MIN_PASSWORD_LENGTH} знаков",
-                netFailed = !ok,
-            )
-        } else {
-            ProfileSyncAuto.disable(context)
-            _uiState.value = _uiState.value.copy(
-                autoEnabled = false,
-                netMessage = "Авто-проверка выключена",
-                netFailed = false,
-            )
-        }
-    }
-
-    // ── Wi-Fi напрямую (раунд 224) ──────────────────────────────────────────
+    // ── Источник: собрать копию и раздавать ─────────────────────────────────
 
     /** Собрать копию этого устройства и поднять одноразовую раздачу. */
     fun startShare() {
@@ -278,7 +139,9 @@ class ProfileSyncViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(sharing = false, shareAddress = null)
     }
 
-    /** Забрать копию по адресу и коду (Wi-Fi напрямую). */
+    // ── Приёмник: забрать копию напрямую ────────────────────────────────────
+
+    /** Забрать копию по адресу и коду, открыть паролем и подготовить. */
     fun pullAndStage() {
         if (_uiState.value.busy) return
         val address = _uiState.value.pullAddress.trim().removePrefix("http://").removePrefix("https://")
@@ -313,8 +176,6 @@ class ProfileSyncViewModel @Inject constructor(
             chars.fill('\u0000')
         }
     }
-
-    // ── Общий финал: подготовка и применение ────────────────────────────────
 
     private suspend fun stageDownloaded(source: Uri, chars: CharArray) {
         val staged = withContext(Dispatchers.IO) { backup.stage(source, chars) }

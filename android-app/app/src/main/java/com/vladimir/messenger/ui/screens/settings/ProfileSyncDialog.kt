@@ -1,38 +1,29 @@
 package com.vladimir.messenger.ui.screens.settings
 
 // =============================================================================
-// PROFILESYNCDIALOG.KT — окно «Синхронизировать аккаунт»
+// PROFILESYNCDIALOG.KT — окно «Синхронизировать аккаунт» (прямой перенос)
 // =============================================================================
-// Раунд 225: два пути - «через сеть APU» (любые сети, включая мобильные;
-// профили находят себя сами по нику, код выводится из пароля, авто-опрос,
-// авто-скачивание) и «по Wi-Fi напрямую» (без интернета, раунд 224).
-// Фирменный стиль: пузыри ApuActionBubble, QR белым боксом (р213).
+// Раунд 224: без облака. Источник показывает QR и код; приёмник вводит адрес
+// и код (или сканирует QR любым сканером) и забирает копию напрямую.
+// Фирменный стиль: пузыри ApuActionBubble, QR белым боксом (как р213).
 // =============================================================================
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -71,16 +62,15 @@ fun ProfileSyncDialog(
         text = {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Переносит чаты, контакты, сообщества, ранг и настройки " +
-                        "между вашими устройствами. Ничего нигде не хранится: " +
-                        "по пути идут только зашифрованные байты. Нужен один ник " +
-                        "и один пароль («Защита личности») на обоих устройствах. " +
-                        "Получённые файлы (картинки, видео) остаются на телефонах.",
+                    "Прямой перенос чатов, контактов, сообществ, ранга и настроек " +
+                        "между вашими устройствами по сети Wi-Fi - БЕЗ облака, " +
+                        "ничего нигде не хранится. Пароль копии - тот же, что в " +
+                        "«Защите личности». Получённые файлы (картинки, видео) " +
+                        "остаются на телефонах.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -89,82 +79,14 @@ fun ProfileSyncDialog(
                     value = ui.password,
                     onValueChange = viewModel::onPasswordChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Пароль копии (с обоих устройств одинаковый)") },
+                    label = { Text("Пароль копии") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
 
-                // ── Через сеть APU: любые сети, находят себя сами ───────
+                // ── Источник: раздача копии ─────────────────────────────
                 Text(
-                    "Через сеть APU - любые сети (Wi-Fi и мобильный интернет)",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "Устройства находят себя сами: и отправителю, и приёмнику " +
-                        "достаточно одного ника и пароля - вводить адреса не нужно.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                ApuActionBubble(
-                    label = if (ui.busy) "Синхронизируем…" else "Отправить копию в сеть APU",
-                    icon = Icons.Default.CloudSync,
-                    onClick = { viewModel.netUpload() },
-                )
-                if (ui.netSent) {
-                    Text(
-                        "Копия ждёт второе устройство и исчезнет после забора.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                ui.netMeta?.let { meta ->
-                    Text(
-                        "В сети APU есть копия от " +
-                            SimpleDateFormat("d.MM HH:mm", Locale.getDefault()).format(Date(meta.timeMs)) +
-                            ", ${humanBytes(meta.sizeBytes)}.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    TextButton(onClick = viewModel::netFetchAndStage) {
-                        Text("Забрать копию по паролю")
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Проверять самому автоматически",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            "Раз в ~6 часов: сама найдёт и приготовит, сообщит в уведомлении",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = ui.autoEnabled,
-                        onCheckedChange = { viewModel.setAutoEnabled(it) },
-                    )
-                }
-                ui.netMessage?.let { message ->
-                    Text(
-                        message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (ui.netFailed) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-
-                HorizontalDivider()
-
-                // ── Wi-Fi напрямую: без интернета ────────────────────────
-                Text(
-                    "По Wi-Fi напрямую - без интернета",
+                    "Телефон с данными",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -176,26 +98,22 @@ fun ProfileSyncDialog(
                     )
                 } else {
                     ui.shareAddress?.let { address ->
+                        // QR белым боксом, как приглашение (р213).
                         val qrBitmap = remember(address.qrPayload) {
                             QrCodeGenerator.generateQrCode(address.qrPayload, 512)
                         }
                         qrBitmap?.let {
-                            Box(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Box(
-                                        modifier = Modifier
-                                            .background(Color.White, RoundedCornerShape(12.dp))
-                                            .padding(8.dp),
-                                    ) {
-                                        Image(
-                                            bitmap = it.asImageBitmap(),
-                                            contentDescription = "QR передачи копии",
-                                            modifier = Modifier.size(200.dp),
-                                        )
-                                    }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                androidx.compose.foundation.layout.Box(
+                                    modifier = Modifier
+                                        .background(Color.White, RoundedCornerShape(12.dp))
+                                        .padding(8.dp),
+                                ) {
+                                    Image(
+                                        bitmap = it.asImageBitmap(),
+                                        contentDescription = "QR передачи копии",
+                                        modifier = Modifier.size(200.dp),
+                                    )
                                 }
                             }
                         }
@@ -219,6 +137,13 @@ fun ProfileSyncDialog(
                         }
                     }
                 }
+
+                // ── Приёмник: забрать копию ─────────────────────────────
+                Text(
+                    "Новое устройство (пустое)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 androidx.compose.material3.OutlinedTextField(
                     value = ui.pullAddress,
                     onValueChange = viewModel::onPullAddressChange,
@@ -241,15 +166,12 @@ fun ProfileSyncDialog(
 
                 // ── Подготовленная копия: подтверждение ─────────────────
                 ui.staged?.let { manifest ->
-                    Spacer(Modifier.height(4.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(4.dp))
                     val created = SimpleDateFormat("d.MM.yyyy HH:mm", Locale.getDefault())
                         .format(Date(manifest.createdAtMs))
                     Text(
-                        "Копия готова: ${manifest.displayName.ifBlank { "без имени" }} от $created, " +
-                            "версия APU ${manifest.appVersionName}. Применить на этом устройстве? " +
-                            "Текущие данные будут заменены.",
+                        "Копия: ${manifest.displayName.ifBlank { "без имени" }} от $created, " +
+                            "версия APU ${manifest.appVersionName}. Применить? " +
+                            "Текущие данные этого устройства будут заменены.",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -288,9 +210,4 @@ fun ProfileSyncDialog(
             ) { Text("Закрыть") }
         },
     )
-}
-
-private fun humanBytes(bytes: Long): String = when {
-    bytes >= 1L shl 20 -> String.format(java.util.Locale.US, "%.1f МБ", bytes / (1024.0 * 1024))
-    else -> String.format(java.util.Locale.US, "%.0f КБ", bytes / 1024.0)
 }
