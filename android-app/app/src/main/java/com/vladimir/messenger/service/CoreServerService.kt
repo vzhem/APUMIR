@@ -1019,7 +1019,7 @@ class CoreServerService : Service() {
                 Log.e(TAG, "Mirror role restart failed", e)
             } finally {
                 mirrorRestarting.set(false)
-                restartScope.cancel()
+                restartScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
             }
         }
     }

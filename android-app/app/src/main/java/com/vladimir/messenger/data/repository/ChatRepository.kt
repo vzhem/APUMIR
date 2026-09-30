@@ -440,8 +440,8 @@ class ChatRepository @Inject constructor(
             getChatByContactId(row.recipientId)
                 ?: getOrCreateChat(row.recipientId, row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.recipientId) })
         } else {
-            chatDao.getChatById(row.chatId)
-                ?: return
+            val entity = chatDao.getChatById(row.chatId) ?: return
+            Chat(id = entity.id, contactId = entity.contactId, contactName = entity.contactName)
         }
         // Статус уважаем чужой: эхо может принести и QUEUED_OFFLINE.
         val mirrorStatus = when (row.status) {
