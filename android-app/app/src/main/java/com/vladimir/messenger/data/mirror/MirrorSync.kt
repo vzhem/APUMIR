@@ -205,6 +205,17 @@ object MirrorHub {
     }
 
     /**
+     * р234: изменение азбуки адресов (контакт добавлен, переименован,
+     * удалён). Шлём в обе стороны: база у каждого устройства своя, а
+     * список людей должен совпадать. Повторно не рассылаем при применении
+     * чужого кадра - иначе «принял - отправил» замкнулось бы петлёй.
+     */
+    fun publishContact(signal: org.json.JSONObject) {
+        if (isApplyingFrame()) return
+        runCatching { channel?.publishContact(signal) }
+    }
+
+    /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
      * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
      * поэтому кадр безопасно звать и с активного, и с тени.
@@ -309,6 +320,8 @@ class MirrorChannel(
         suspend fun onFilePullStart(transferId: String)
         /** р233: звонковый сигнал партнёрского устройства (звонит на обоих). */
         suspend fun onCallFromPartner(signal: JSONObject)
+        /** р234: контакт изменился на партнёрском устройстве. */
+        suspend fun onContactFromPartner(signal: JSONObject)
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -385,6 +398,15 @@ class MirrorChannel(
         val sealed = sealPayload(signal) ?: return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sendJson(JSONObject().put("t", "ev").put("k", "call").put("d", sealed))
+        }
+    }
+
+    /** р234: изменение контакта - партнёрскому устройству (списки должны совпадать). */
+    fun publishContact(signal: JSONObject) {
+        if (wsRef.get() == null) return
+        val sealed = sealPayload(signal) ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendJson(JSONObject().put("t", "ev").put("k", "contact").put("d", sealed))
         }
     }
 
@@ -908,6 +930,14 @@ class MirrorChannel(
                 // снять его при ответе/завершении на той стороне.
                 val body = openPayload(wire) ?: return
                 scope.launch { bridge.onCallFromPartner(body) }
+            }
+            "contact" -> {
+                // р234: контакт добавлен/переименован/удалён на партнёре -
+                // привести свою азбуку адресов к тому же виду.
+                val body = openPayload(wire) ?: return
+                scope.launch {
+                    MirrorHub.duringApply { bridge.onContactFromPartner(body) }
+                }
             }
             "claim" -> {
                 // р231: партнёр-тень просит движок (отправка файла со второго

@@ -1023,6 +1023,11 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror call signal failed: ${it.message}") }
         }
 
+        override suspend fun onContactFromPartner(signal: org.json.JSONObject) {
+            runCatching { contactRepository.applyMirrorContact(signal) }
+                .onFailure { Log.w(TAG, "Mirror contact failed: ${it.message}") }
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)
