@@ -621,7 +621,8 @@ private fun SettingsTabContent(
     // локальные для этого экрана.
     var showMqttDialog by remember { mutableStateOf(false) }
     // р240: диагностика синхронизации устройств одной личности.
-    var showSyncDialog by remember { mutableStateOf(false) }
+    // (имя с Mirror: showSyncDialog занят окном «Синхронизировать аккаунт»)
+    var showMirrorDiag by remember { mutableStateOf(false) }
     // Диалог резервной копии адресов (раздел «Сервер»).
     var showAddrBookDialog by remember { mutableStateOf(false) }
     // Раунд 223: окно «Синхронизировать аккаунт».
@@ -825,7 +826,7 @@ private fun SettingsTabContent(
                         icon     = Icons.Default.Refresh,
                         title    = "Диагностика синхронизации",
                         subtitle = "Роль устройства, партнёр, канал, недоотправленные",
-                        onClick  = { showSyncDialog = true },
+                        onClick  = { showMirrorDiag = true },
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(
@@ -1201,10 +1202,10 @@ private fun SettingsTabContent(
         )
     }
 
-    if (showSyncDialog) {
+    if (showMirrorDiag) {
         val syncText = com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
         AlertDialog(
-            onDismissRequest = { showSyncDialog = false },
+            onDismissRequest = { showMirrorDiag = false },
             title = { Text("Синхронизация устройств") },
             text = {
                 Text(
@@ -1221,11 +1222,11 @@ private fun SettingsTabContent(
                             com.vladimir.messenger.data.mirror.MirrorHub.debugStatus(),
                         ),
                     )
-                    showSyncDialog = false
+                    showMirrorDiag = false
                 }) { Text("Скопировать") }
             },
             dismissButton = {
-                TextButton(onClick = { showSyncDialog = false }) { Text("Закрыть") }
+                TextButton(onClick = { showMirrorDiag = false }) { Text("Закрыть") }
             },
         )
     }
