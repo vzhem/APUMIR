@@ -457,9 +457,11 @@ async function handlePsyncPut(slot, request, env) {
   if (blob.length > MAX_PSYNC_B64) return json({ error: "too large" }, 413);
   const check = (request.headers.get("X-Apu-Check") || "").toLowerCase().replace(/[^a-f0-9]/g, "");
   if (check.length !== 64) return json({ error: "bad check" }, 400);
+  const dev = (request.headers.get("X-Apu-Device") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
   await env.APU_VAULT.put(key, blob, { expirationTtl: 86400 });
   await env.APU_VAULT.put(key + ":c", check, { expirationTtl: 86400 });
-  await env.APU_VAULT.put(key + ":m", JSON.stringify({ exists: true, time: Date.now(), size: blob.length }), { expirationTtl: 86400 });
+  await env.APU_VAULT.put(key + ":d", dev, { expirationTtl: 86400 });
+  await env.APU_VAULT.put(key + ":m", JSON.stringify({ exists: true, time: Date.now(), size: blob.length, dev: dev }), { expirationTtl: 86400 });
   return json({ success: true, size: blob.length });
 }
 
@@ -470,7 +472,13 @@ async function handlePsyncGet(slot, url, request, env) {
   if (url.searchParams.get("meta") === "1") {
     const meta = await env.APU_VAULT.get(key + ":m");
     if (!meta) return json({ error: "not found" }, 404);
-    return new Response(meta, { headers: { "Content-Type": "application/json" } });
+    let out = meta;
+    try {
+      const m = JSON.parse(meta);
+      m.dev = (await env.APU_VAULT.get(key + ":d")) || "";
+      out = JSON.stringify(m);
+    } catch (e) { /* отдаём метку как есть */ }
+    return new Response(out, { headers: { "Content-Type": "application/json" } });
   }
   const code = (request.headers.get("X-Apu-Code") || "").trim();
   if (!code) return json({ error: "code required" }, 401);
@@ -483,6 +491,7 @@ async function handlePsyncGet(slot, url, request, env) {
   // Одноразовость: стереть сразу после забора (и ключ проверки, и метку).
   await env.APU_VAULT.delete(key);
   await env.APU_VAULT.delete(key + ":c");
+  await env.APU_VAULT.delete(key + ":d");
   await env.APU_VAULT.delete(key + ":m");
   return new Response(blob, {
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },

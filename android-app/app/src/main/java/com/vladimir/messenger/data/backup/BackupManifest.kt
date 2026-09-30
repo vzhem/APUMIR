@@ -25,6 +25,8 @@ data class BackupManifest(
     val includesReceived: Boolean,
     val receivedFiles: Int = 0,
     val receivedBytes: Long = 0L,
+    /** Грубый отпечаток данных (числа записей): одинаковые копии не дёргают авто-уведомлениями. */
+    val dataFp: String = "",
 ) {
     fun encode(): String = buildString {
         append("apu-backup-manifest\n")
@@ -39,6 +41,7 @@ data class BackupManifest(
         append("includes_received=").append(if (includesReceived) 1 else 0).append('\n')
         append("received_files=").append(receivedFiles).append('\n')
         append("received_bytes=").append(receivedBytes).append('\n')
+        append("data_fp=").append(dataFp.filter { it.isDigit() || it in 'a'..'f' }).append('\n')
     }
 
     companion object {
@@ -70,6 +73,7 @@ data class BackupManifest(
                     includesReceived = map["includes_received"] == "1",
                     receivedFiles = map["received_files"]?.toInt() ?: 0,
                     receivedBytes = map["received_bytes"]?.toLong() ?: 0L,
+                    dataFp = map["data_fp"] ?: "",
                 )
             } catch (_: IllegalArgumentException) {
                 null

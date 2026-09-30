@@ -66,19 +66,20 @@ object ProfileSyncNet {
     /** Лимит релея: 24 МБ base64 (копия без медиа обычно 1-5 МБ). */
     const val MAX_B64_CHARS = 24_000_000
 
-    /** Итог ручной отправки. */
+    /** Итог ручной отправки. fp - отпечаток данных отправленной копии. */
     sealed interface UploadResult {
-        data class Ok(val bytes: Long) : UploadResult
+        data class Ok(val bytes: Long, val fp: String = "") : UploadResult
         data object NoIdentity : UploadResult
         data object BadPassword : UploadResult
         data class TooBig(val megaBytes: Int) : UploadResult
         data class Failed(val reason: String) : UploadResult
     }
 
-    /** Метка «в сети есть копия» (без скачивания). */
+    /** Метка «в сети есть копия» (без скачивания). dev - чьё устройство выложило. */
     data class NetMeta(
         val timeMs: Long,
         val sizeBytes: Long,
+        val dev: String = "",
     )
 
     sealed interface FetchResult {
@@ -115,6 +116,13 @@ object ProfileSyncNet {
             .getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .getString("my_username", "") ?: ""
 
+    /** Идентификатор этого устройства: свою копию на полке отличаем от чужой. */
+    fun nodeIdOf(context: Context): String =
+        context.applicationContext
+            .getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            .let { prefs -> prefs.getString("node_id", null) ?: prefs.getString("existing_public_key", null) }
+            ?: ""
+
     // ── Отправка ────────────────────────────────────────────────────────────
 
     /**
@@ -144,11 +152,13 @@ object ProfileSyncNet {
         if (b64.length > MAX_B64_CHARS) {
             return UploadResult.TooBig((bytes.size / (1024L * 1024L)).toInt() + 1)
         }
+        // Выкладываем с меткой устройства: авто-режим отличит свою копию от чужой.
         val conn = (URL(baseUrl() + slot).openConnection() as HttpURLConnection).apply {
             requestMethod = "PUT"
             doOutput = true
             setRequestProperty("Content-Type", "text/plain")
             setRequestProperty("X-Apu-Check", sha256(code))
+            setRequestProperty("X-Apu-Device", nodeIdOf(context))
             connectTimeout = HTTP_TIMEOUT
             readTimeout = READ_TIMEOUT
         }
@@ -161,7 +171,7 @@ object ProfileSyncNet {
         } finally {
             conn.disconnect()
         }
-        return UploadResult.Ok(bytes.size.toLong())
+        return UploadResult.Ok(bytes.size.toLong(), created.dataFp)
     }
 
     /** Есть ли копия в релее (без скачивания). */
@@ -180,7 +190,7 @@ object ProfileSyncNet {
                         conn.inputStream.bufferedReader().use { it.readText() }
                     )
                     if (!json.optBoolean("exists", false)) null
-                    else NetMeta(json.optLong("time", 0L), json.optLong("size", 0L))
+                    else NetMeta(json.optLong("time", 0L), json.optLong("size", 0L), dev = json.optString("dev", ""))
                 } finally {
                     conn.disconnect()
                 }
@@ -240,6 +250,36 @@ object ProfileSyncAuto {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun isEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
+
+    private const val KEY_EVER_FETCHED = "ever_fetched"
+    private const val KEY_EVER_APPLIED = "ever_applied"
+    private const val KEY_APPLIED_FP = "applied_fp"
+    private const val KEY_MY_FP = "my_upload_fp"
+
+    /** Тянули чужую копию, но ещё не применили: свою на полку не класть. */
+    fun everFetched(context: Context): Boolean = prefs(context).getBoolean(KEY_EVER_FETCHED, false)
+
+    fun everApplied(context: Context): Boolean = prefs(context).getBoolean(KEY_EVER_APPLIED, false)
+
+    fun noteFetchedShelf(context: Context) {
+        prefs(context).edit().putBoolean(KEY_EVER_FETCHED, true).apply()
+    }
+
+    /** Копия применена: запомнить отпечаток (одинаковые больше не дёргают). */
+    fun markApplied(context: Context, fingerprint: String) {
+        prefs(context).edit()
+            .putBoolean(KEY_EVER_APPLIED, true)
+            .putString(KEY_APPLIED_FP, fingerprint ?: "")
+            .apply()
+    }
+
+    fun appliedFp(context: Context): String = prefs(context).getString(KEY_APPLIED_FP, "") ?: ""
+
+    fun myUploadFp(context: Context): String = prefs(context).getString(KEY_MY_FP, "") ?: ""
+
+    fun noteMyUpload(context: Context, fingerprint: String) {
+        prefs(context).edit().putString(KEY_MY_FP, fingerprint ?: "").apply()
+    }
 
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val WRAP_ALIAS = "apu_profile_sync_pw_v2"
@@ -379,31 +419,59 @@ class ProfileSyncWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext
         if (!ProfileSyncAuto.isEnabled(app)) return Result.success()
-        if (EntryPointAccessors.fromApplication(app, ProfileSyncEntryPoint::class.java)
-                .profileBackup().hasStaged()
-        ) {
-            return Result.success() // уже ждёт подтверждения - не трогаем
-        }
+        val backup = EntryPointAccessors.fromApplication(app, ProfileSyncEntryPoint::class.java)
+            .profileBackup()
+        if (backup.hasStaged()) return Result.success() // уже ждёт подтверждения - не трогаем
         val password = ProfileSyncAuto.unwrap(app) ?: return Result.success()
-        val meta = ProfileSyncNet.meta(app) ?: return Result.success()
-        when (val fetched = ProfileSyncNet.fetch(app, password)) {
-            is ProfileSyncNet.FetchResult.Ready -> {
-                val staged = EntryPointAccessors.fromApplication(app, ProfileSyncEntryPoint::class.java)
-                    .profileBackup().stage(android.net.Uri.fromFile(fetched.file), password)
-                if (staged is ProfileBackup.StageResult.Ready) {
-                    ProfileSyncAuto.notifyReady(
-                        app,
-                        "Копия «${staged.manifest.displayName.ifBlank { "без имени" }}» готова " +
-                            "к переносу. Настройки → Синхронизировать аккаунт → Применить.",
-                    )
-                } else {
-                    EntryPointAccessors.fromApplication(app, ProfileSyncEntryPoint::class.java)
-                        .profileBackup().discardStaged()
+        try {
+            val meta = ProfileSyncNet.meta(app)
+            val myNode = ProfileSyncNet.nodeIdOf(app)
+            val foreign = meta != null && meta.dev.isNotBlank() && meta.dev != myNode
+            if (foreign) {
+                // Чужая копия на полке: сами качаем, сами готовим. Применение - руками.
+                when (val fetched = ProfileSyncNet.fetch(app, password)) {
+                    is ProfileSyncNet.FetchResult.Ready -> {
+                        ProfileSyncAuto.noteFetchedShelf(app)
+                        when (val staged = backup.stage(android.net.Uri.fromFile(fetched.file), password)) {
+                            is ProfileBackup.StageResult.Ready -> {
+                                val fp = staged.manifest.dataFp
+                                val known = fp.isNotBlank() &&
+                                    (fp == ProfileSyncAuto.appliedFp(app) ||
+                                        fp == ProfileSyncAuto.myUploadFp(app))
+                                if (known) {
+                                    backup.discardStaged() // такие данные уже есть - без спама
+                                } else {
+                                    ProfileSyncAuto.notifyReady(
+                                        app,
+                                        "Копия «${staged.manifest.displayName.ifBlank { "без имени" }}» готова " +
+                                            "к переносу. Настройки → Синхронизировать аккаунт → Применить.",
+                                    )
+                                }
+                            }
+                            else -> backup.discardStaged()
+                        }
+                    }
+                    else -> Unit // нет копии / не наш код / сеть - тихо ждать следующего раза
+                }
+            } else {
+                // Полка пуста (или там наша же старая копия): сами выкладываем свежую,
+                // чтобы второе устройство нашло нас без всяких нажатий. Приёмник, ещё
+                // не применивший чужую копию, полку не трогает - не затирать её пустым.
+                val stale = meta != null && meta.dev == myNode &&
+                    System.currentTimeMillis() - meta.timeMs > 12L * 60 * 60 * 1000
+                val blocked = ProfileSyncAuto.everFetched(app) && !ProfileSyncAuto.everApplied(app)
+                if ((meta == null || stale) && !blocked) {
+                    when (val up = ProfileSyncNet.uploadBlocking(app, backup, password)) {
+                        is ProfileSyncNet.UploadResult.Ok -> ProfileSyncAuto.noteMyUpload(app, up.fp)
+                        else -> Unit // нет профиля / сеть - тихо
+                    }
                 }
             }
-            else -> Unit // нет копии / не наш код - тихо ждать следующего раза
+        } catch (e: Exception) {
+            Log.w("ProfileSyncWorker", "auto tick failed: ${e.message}")
+        } finally {
+            password.fill('\u0000')
         }
-        password.fill('\u0000')
         return Result.success()
     }
 }

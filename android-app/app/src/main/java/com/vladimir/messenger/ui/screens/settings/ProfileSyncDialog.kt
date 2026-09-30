@@ -128,8 +128,11 @@ fun ProfileSyncDialog(
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    TextButton(onClick = viewModel::netFetchAndStage) {
-                        Text("Забрать копию по паролю")
+                    val mine = meta.dev.isNotBlank() && meta.dev == ui.myNodeId
+                    if (!mine) {
+                        TextButton(onClick = viewModel::netFetchAndStage) {
+                            Text("Забрать копию по паролю")
+                        }
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -52,6 +52,8 @@ data class ProfileSyncUiState(
     val netSent: Boolean = false,
     /** Авто-проверка по расписанию. */
     val autoEnabled: Boolean = false,
+    /** Идентификатор этого устройства: свою копию на полке не предлагаем забирать. */
+    val myNodeId: String = "",
     /** Скачанная копия, ждущая подтверждения. */
     val staged: BackupManifest? = null,
     val message: String? = null,
@@ -72,7 +74,10 @@ class ProfileSyncViewModel @Inject constructor(
     private var pollJob: Job? = null
 
     init {
-        _uiState.value = _uiState.value.copy(autoEnabled = ProfileSyncAuto.isEnabled(context))
+        _uiState.value = _uiState.value.copy(
+            autoEnabled = ProfileSyncAuto.isEnabled(context),
+            myNodeId = ProfileSyncNet.nodeIdOf(context),
+        )
         // «Сами синхронизировались»: пока окно открыто - сами ищем копию,
         // сами скачиваем и готовим. Применение - одним тапом человека.
         pollJob = viewModelScope.launch {
@@ -117,8 +122,9 @@ class ProfileSyncViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(netChecking = true)
             val meta = ProfileSyncNet.meta(context)
             _uiState.value = _uiState.value.copy(netChecking = false, netMeta = meta)
-            if (meta != null && hasPassword()) {
-                netFetchAndStage()
+            val foreign = meta != null && meta.dev.isNotBlank() && meta.dev != _uiState.value.myNodeId
+            if (foreign && hasPassword()) {
+                netFetchAndStage() // чужая копия: сами качаем и готовим
             }
         }
     }
@@ -161,6 +167,7 @@ class ProfileSyncViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(busy = true, netMessage = null, netFailed = false)
             when (val fetched = ProfileSyncNet.fetch(context, chars)) {
                 is ProfileSyncNet.FetchResult.Ready -> {
+                    ProfileSyncAuto.noteFetchedShelf(context)
                     stageDownloaded(Uri.fromFile(fetched.file), chars)
                 }
                 ProfileSyncNet.FetchResult.NotFound -> {
@@ -368,6 +375,8 @@ class ProfileSyncViewModel @Inject constructor(
                 )
                 return@launch
             }
+            // Копия применена: авто-режим запоминает отпечаток и не дёргает одинаковым.
+            ProfileSyncAuto.markApplied(context, _uiState.value.staged?.dataFp ?: "")
             _uiState.value = _uiState.value.copy(restarting = true, message = null, failed = false)
             val app = context.applicationContext
             runCatching {
