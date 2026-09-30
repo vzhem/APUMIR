@@ -226,6 +226,18 @@ object MirrorHub {
     }
 
     /**
+     * р236: черновик сообщения - второму устройству личности. Ключ черновика
+     * (адрес собеседника или идентификатор группы) одинаков на обоих
+     * устройствах, поэтому текст переносится как есть. При применении чужого
+     * кадра повторно не рассылаем - иначе получилась бы петля.
+     */
+    fun publishDraft(key: String, text: String) {
+        if (key.isBlank()) return
+        if (isApplyingFrame()) return
+        runCatching { channel?.publishDraft(key, text) }
+    }
+
+    /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
      * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
      * поэтому кадр безопасно звать и с активного, и с тени.
@@ -334,6 +346,8 @@ class MirrorChannel(
         suspend fun onContactFromPartner(signal: JSONObject)
         /** р235: собеседник печатает (увидело партнёрское устройство). */
         suspend fun onTypingFromPartner(peerId: String, typing: Boolean)
+        /** р236: черновик с партнёрского устройства (текст незакрытой строки). */
+        suspend fun onDraftFromPartner(key: String, text: String)
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -430,6 +444,16 @@ class MirrorChannel(
         ) ?: return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sendJson(JSONObject().put("t", "ev").put("k", "typing").put("d", sealed))
+        }
+    }
+
+    /** р236: черновик - партнёрскому устройству личности. */
+    fun publishDraft(key: String, text: String) {
+        if (wsRef.get() == null) return
+        if (text.length > DRAFT_MAX_CHARS) return
+        val sealed = sealPayload(JSONObject().put("k", key).put("t", text)) ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendJson(JSONObject().put("t", "ev").put("k", "draft").put("d", sealed))
         }
     }
 
@@ -970,6 +994,16 @@ class MirrorChannel(
                 if (peerId.isBlank()) return
                 scope.launch { bridge.onTypingFromPartner(peerId, body.optInt("on", 0) == 1) }
             }
+            "draft" -> {
+                // р236: черновик с партнёрского устройства - положить под тот
+                // же ключ (открытый чат подхватит текст сам).
+                val body = openPayload(wire) ?: return
+                val key = body.optString("k")
+                if (key.isBlank()) return
+                scope.launch {
+                    MirrorHub.duringApply { bridge.onDraftFromPartner(key, body.optString("t")) }
+                }
+            }
             "claim" -> {
                 // р231: партнёр-тень просит движок (отправка файла со второго
                 // устройства). Отвечает только активный: уступит - тень сама
@@ -1096,5 +1130,8 @@ class MirrorChannel(
 
         /** р231: не чаще раза в минуту просим передачу роли (это перезапуск на обоих). */
         private const val CLAIM_COOLDOWN_MS = 60_000L
+
+        /** р236: черновик длиннее этого в кадр зеркала не кладём (кадр - 512 КиБ). */
+        private const val DRAFT_MAX_CHARS = 8_000
     }
 }

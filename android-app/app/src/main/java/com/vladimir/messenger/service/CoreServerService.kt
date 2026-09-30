@@ -1045,6 +1045,12 @@ class CoreServerService : Service() {
             }
         }
 
+        override suspend fun onDraftFromPartner(key: String, text: String) {
+            // р236: черновик с партнёрского устройства - под тот же ключ.
+            runCatching { com.vladimir.messenger.data.draft.DraftStore.save(key, text) }
+                .onFailure { Log.w(TAG, "Mirror draft failed: ${it.message}") }
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)

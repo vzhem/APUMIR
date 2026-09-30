@@ -100,12 +100,19 @@ class ChatDetailViewModel @Inject constructor(
     /** р235: сказали ли собеседнику, что мы печатаем (чтобы послать «перестал»). */
     @Volatile private var typingAnnounced = false
 
+    /** р236: черновик этого чата (ключ - адрес собеседника, он общий у устройств). */
+    @Volatile private var draftKey: String = ""
+
+    /** р236: когда последний раз отправляли черновик партнёрскому устройству. */
+    @Volatile private var lastDraftSentAt = 0L
+
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
     init {
         refreshAttachmentRights()
         observePeerTyping()
+        observeDrafts()
         loadMessages()
         observePinned()
         observeContactPresence()
@@ -150,6 +157,42 @@ class ChatDetailViewModel @Inject constructor(
         lastTypingSentAt = now
         typingAnnounced = true
         com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, true)
+    }
+
+    // ── р236: черновики сообщений ───────────────────────────────────────────
+
+    /**
+     * Черновик чата: текст хранится под ключом собеседника, поэтому второй
+     * телефон той же личности видит тот же недописанный текст. Здесь только
+     * сохранение у себя (при каждом изменении) и редкая отправка партнёру
+     * (не чаще раза в 1.5 с - набор текста не должен забивать канал).
+     */
+    private fun saveDraft(text: String) {
+        val key = draftKey
+        if (key.isBlank()) return
+        com.vladimir.messenger.data.draft.DraftStore.save(key, text)
+        val now = System.currentTimeMillis()
+        if (now - lastDraftSentAt < DRAFT_REFRESH_MS && text.isNotEmpty()) return
+        lastDraftSentAt = now
+        com.vladimir.messenger.data.mirror.MirrorHub.publishDraft(key, text)
+    }
+
+    /**
+     * Черновик, приехавший с партнёрского устройства. Подставляем его в поле
+     * только если поле пустое: то, что человек набирает прямо сейчас, чужой
+     * текст затирать не должен.
+     */
+    private fun observeDrafts() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.draft.DraftStore.drafts.collect { drafts ->
+                val key = draftKey
+                if (key.isBlank()) return@collect
+                val text = drafts[key].orEmpty()
+                if (text.isEmpty()) return@collect
+                if (_uiState.value.inputText.isNotBlank()) return@collect
+                _uiState.update { it.copy(inputText = text) }
+            }
+        }
     }
 
     /** Раунд 121: гифка, которую ждали из роя, пришла - сразу отправить. */
@@ -200,6 +243,16 @@ class ChatDetailViewModel @Inject constructor(
                     }.getOrDefault("")
                     // р235: адрес собеседника нужен для «печатает…».
                     if (chat.contactId.isNotBlank()) peerId = chat.contactId
+                    // р236: черновик этого чата (ключ - адрес собеседника)
+                    // подставляем в пустое поле: недописанное с другого
+                    // устройства должно ждать здесь.
+                    if (chat.contactId.isNotBlank() && draftKey.isBlank()) {
+                        draftKey = com.vladimir.messenger.data.draft.DraftStore.dmKey(chat.contactId)
+                        val draft = com.vladimir.messenger.data.draft.DraftStore.load(draftKey)
+                        if (draft.isNotEmpty() && _uiState.value.inputText.isBlank()) {
+                            _uiState.update { it.copy(inputText = draft) }
+                        }
+                    }
                     _uiState.update {
                         it.copy(
                             isContactOnline = chat.isContactOnline,
@@ -379,6 +432,8 @@ class ChatDetailViewModel @Inject constructor(
         _uiState.update { it.copy(inputText = text) }
         // р235: «печатает…» у собеседника, пока в поле есть текст.
         publishTyping(text.isNotBlank())
+        // р236: черновик - и у себя, и на партнёрском устройстве.
+        saveDraft(text)
     }
 
     fun onSendMessage() {
@@ -392,6 +447,8 @@ class ChatDetailViewModel @Inject constructor(
                 .onSuccess {
                     // р235: сообщение ушло - «печатает…» у собеседника гаснет.
                     publishTyping(false)
+                    // р236: текст ушёл - черновик больше не нужен ни здесь, ни там.
+                    saveDraft("")
                     _uiState.update { it.copy(
                         isSending      = false,
                         scrollToBottom = true
@@ -1299,5 +1356,8 @@ class ChatDetailViewModel @Inject constructor(
     private companion object {
         /** р235: не чаще раза в 2.5 с - иначе «печатает…» стал бы потоком пакетов. */
         const val TYPING_REFRESH_MS = 2_500L
+
+        /** р236: черновик уходит партнёру не чаще раза в 1.5 с. */
+        const val DRAFT_REFRESH_MS = 1_500L
     }
 }

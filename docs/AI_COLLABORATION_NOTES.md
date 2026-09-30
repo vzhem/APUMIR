@@ -9498,6 +9498,22 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   check61 зелёный. v11.74.33 = 4171648, run 35850079755 SUCCESS,
   latest, APK 40 402 118 Б, sha256 c5add7f3…9d26.
 
+- **2026-09-30 (раунд 236) - черновики личных переписок на обоих устройствах.**
+  Сделано: data/draft/DraftStore.kt (object, SharedPreferences "apu_drafts",
+  MutableStateFlow<Map<String,String>> для живых обновлений, attach() зовётся
+  из MessengerApplication.onCreate после DeviceIdentityMarker). Ключ черновика
+  УСТОЙЧИВЫЙ, а не локальный id чата: dmKey(contactId)="p:<адрес собеседника>",
+  groupKey="g:<группа>" - поэтому текст переносится зеркалом без похода в базу.
+  Кадр ev `draft` {k,t} (publishDraft в MirrorHub/MirrorChannel, DRAFT_MAX_CHARS
+  8000), приём - onDraftFromPartner в сервисе -> DraftStore.save под
+  duringApply (повторной рассылки нет). В ChatDetailViewModel: saveDraft()
+  пишет у себя при каждом изменении и шлёт партнёру не чаще 1.5 с
+  (DRAFT_REFRESH_MS); черновик восстанавливается при открытии чата, а
+  observeDrafts подставляет чужой текст ТОЛЬКО в пустое поле (набираемое
+  вручную не затирается); после успешной отправки - saveDraft("").
+  ГРАБЛЯ на будущее: экран группы (GroupChatViewModel) пока не подключён к
+  DraftStore - ключ g: есть, вызовов нет; и «печатает…» в группах тоже нет.
+
 - **2026-09-30 (раунд 235) - «печатает…» на обоих устройствах.** Владелец
   сказал «продолжай» после контактов; в приложении индикатора «печатает» НЕ
   БЫЛО вовсе, поэтому раунд начался с заведения функции, а не с зеркалирования.
