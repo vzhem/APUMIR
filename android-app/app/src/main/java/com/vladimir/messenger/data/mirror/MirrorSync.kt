@@ -133,6 +133,25 @@ object MirrorHub {
         runCatching { channel?.publishSentEcho(id, chatId, content, ts, recipientId, status) }
     }
 
+    /** р240: сколько своих сообщений ещё не отправлено (обновляет сервис). */
+    @Volatile private var pendingOutgoing: Int = -1
+
+    fun setPendingOutgoing(count: Int) {
+        pendingOutgoing = count
+    }
+
+    /**
+     * р240: состояние синхронизации устройств одной фразой - для экрана
+     * диагностики. Показывает роль, партнёра, канал и недоотправленные
+     * сообщения: по этим четырём строкам сразу видно, где заминка.
+     */
+    fun debugStatus(): String {
+        val mirror = runCatching { channel?.debugState() }.getOrNull()
+            ?: "зеркало не запущено (устройство одно)"
+        val pending = if (pendingOutgoing < 0) "неизвестно" else pendingOutgoing.toString()
+        return mirror + "\nнедоотправленных сообщений: " + pending
+    }
+
     /** р227: входящий служебный конверт - пусть партнёр применит его у себя. */
     fun publishEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
         runCatching { channel?.publishEnvelope(senderId, chatId, messageId, text) }
@@ -401,6 +420,32 @@ class MirrorChannel(
 
     /** Ведёт ли ЭТО устройство сеть (активное) или живёт зеркалом. */
     fun isEngineUp(): Boolean = engineUp
+
+    /**
+     * р240: человекочитаемое состояние для экрана диагностики (владелец,
+     * Настройки -> «Диагностика синхронизации»). Без имён и секретов: только
+     * роль, партнёр и канал - этого хватает, чтобы понять, почему не едет.
+     */
+    fun debugState(): String {
+        val dev = partnerDev
+        val agoSec = if (dev != null) (System.currentTimeMillis() - partnerLastSeen) / 1000 else -1
+        return buildString {
+            append("роль: ").append(
+                if (engineUp) "ведущий (сеть веду я)" else "зеркало (сети у меня нет)"
+            )
+            append("\nпартнёр: ")
+            if (dev.isNullOrBlank()) {
+                append("не видно")
+            } else {
+                append(dev)
+                append(", ").append(agoSec).append(" с назад")
+                append(", движок у него: ").append(if (partnerEng) "да" else "нет")
+            }
+            append("\nканал зеркала: ")
+                .append(if (wsRef.get() != null) "подключён" else "нет связи")
+            append("\nметка устройства: ").append(deviceTag)
+        }
+    }
 
     /** Активный всегда может нести исходящие; тень - только при живом партнёре. */
     fun canCarryOutgoing(): Boolean =

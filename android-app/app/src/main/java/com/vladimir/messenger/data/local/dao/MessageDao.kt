@@ -205,6 +205,10 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE content LIKE 'APUTYP1|%'")
     suspend fun deleteTypingJunk(): Int
 
+    /** р240: сколько своих сообщений ждёт отправки (для диагностики). */
+    @Query("SELECT COUNT(*) FROM messages WHERE isFromMe = 1 AND status = 'PENDING'")
+    suspend fun countPendingOutgoing(): Int
+
     /** р239: в каких чатах лежит этот мусор и по скольку строк. */
     @Query(
         "SELECT chatId AS chatId, COUNT(*) AS count FROM messages " +

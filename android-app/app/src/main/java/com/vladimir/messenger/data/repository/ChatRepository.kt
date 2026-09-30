@@ -555,6 +555,10 @@ class ChatRepository @Inject constructor(
         return deleted
     }
 
+    /** р240: сколько своих сообщений ещё не ушло (диагностика синхронизации). */
+    suspend fun countPendingOutgoing(): Int =
+        runCatching { messageDao.countPendingOutgoing() }.getOrDefault(-1)
+
     suspend fun getChatById(chatId: String): Chat? {
         return chatDao.getChatById(chatId)?.toDomain()
     }

@@ -547,6 +547,17 @@ class CoreServerService : Service() {
         // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
         EmergencyKeepAliveReceiver.scheduleNext(applicationContext)
 
+        // р240: счётчик недоотправленных - для экрана «Диагностика
+        // синхронизации» в настройках. Обновляем редко: это подсказка, а не
+        // боевой счётчик.
+        serviceScope.launch {
+            while (true) {
+                runCatching { chatRepository.countPendingOutgoing() }
+                    .onSuccess { com.vladimir.messenger.data.mirror.MirrorHub.setPendingOutgoing(it) }
+                kotlinx.coroutines.delay(30_000L)
+            }
+        }
+
         // р239: убрать из базы мусор прошлых версий - служебные пакеты
         // «печатает…», которые r235-r238 успели сохранить как сообщения.
         serviceScope.launch {

@@ -31,16 +31,29 @@ object TypingRouter {
      */
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun publishLocal(peerId: String, chatId: String, typing: Boolean) {
+    /**
+     * @param queueFallback разрешить обычную (надёжную) отправку, если прямой
+     *        канал недоступен. По умолчанию НЕ разрешаем: «печатает…» -
+     *        мимолётный сигнал, а надёжная очередь нужна настоящим сообщениям
+     *        (р240: поток таких пакетов мог забивать очередь и мешать доставке).
+     *        Первый пакет сессии и «перестал» уходят через очередь - чтобы
+     *        индикатор появился даже там, где прямой канал не работает.
+     */
+    fun publishLocal(peerId: String, chatId: String, typing: Boolean, queueFallback: Boolean = false) {
         if (peerId.isBlank() || !peerId.startsWith("pk_")) return
         // р239: себе сигнал не шлём. Бывает, что в контактах есть собственный
         // узел (его даёт «Мой QR» в профиле) - тогда пакет вернулся бы
         // уведомлением «от себя».
         if (peerId == runCatching { RustBridge.nodeId() }.getOrNull()) return
-        scope.launch { publishNow(peerId, chatId, typing) }
+        scope.launch { publishNow(peerId, chatId, typing, queueFallback) }
     }
 
-    private suspend fun publishNow(peerId: String, chatId: String, typing: Boolean) {
+    private suspend fun publishNow(
+        peerId: String,
+        chatId: String,
+        typing: Boolean,
+        queueFallback: Boolean,
+    ) {
         val envelope = TypingWire.build(typing)
         try {
             // Тень: пакет несёт активный партнёр (своей сессии у неё нет).
@@ -53,7 +66,7 @@ object TypingRouter {
                 // Так поток «печатает» не занимает очередь сообщений.
                 val direct = runCatching { RustBridge.sendDirectPayload(peerId, envelope) }
                     .getOrDefault(false)
-                if (!direct) {
+                if (!direct && queueFallback) {
                     RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peerId, envelope)
                 }
                 // Своё действие активного - и партнёрскому устройству личности,

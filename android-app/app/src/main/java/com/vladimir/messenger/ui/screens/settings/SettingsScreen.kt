@@ -620,6 +620,8 @@ private fun SettingsTabContent(
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
     var showMqttDialog by remember { mutableStateOf(false) }
+    // р240: диагностика синхронизации устройств одной личности.
+    var showSyncDialog by remember { mutableStateOf(false) }
     // Диалог резервной копии адресов (раздел «Сервер»).
     var showAddrBookDialog by remember { mutableStateOf(false) }
     // Раунд 223: окно «Синхронизировать аккаунт».
@@ -815,6 +817,15 @@ private fun SettingsTabContent(
                         title = "Собрать данные об абонентах",
                         subtitle = "Запустить поиск пиров по сети",
                         onClick = viewModel::onTriggerGossipDiscovery,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    // р240: по этим четырём строкам сразу видно, почему не
+                    // доходят сообщения: роль, партнёр, канал, недоотправленные.
+                    SettingsItem(
+                        icon     = Icons.Default.Refresh,
+                        title    = "Диагностика синхронизации",
+                        subtitle = "Роль устройства, партнёр, канал, недоотправленные",
+                        onClick  = { showSyncDialog = true },
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(
@@ -1186,6 +1197,35 @@ private fun SettingsTabContent(
             },
             dismissButton = {
                 TextButton(onClick = { showMqttDialog = false }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    if (showSyncDialog) {
+        val syncText = com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
+        AlertDialog(
+            onDismissRequest = { showSyncDialog = false },
+            title = { Text("Синхронизация устройств") },
+            text = {
+                Text(
+                    syncText + "\n\nЕсли недоотправленных много, а партнёр виден - " +
+                        "подождите минуту: строка уйдёт сама, когда связь восстановится.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    // Буфер обмена берём тот же, что у соседнего диалога
+                    // (mqttClipboard объявлен в этой же функции экрана).
+                    mqttClipboard.setText(
+                        androidx.compose.ui.text.AnnotatedString(
+                            com.vladimir.messenger.data.mirror.MirrorHub.debugStatus(),
+                        ),
+                    )
+                    showSyncDialog = false
+                }) { Text("Скопировать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSyncDialog = false }) { Text("Закрыть") }
             },
         )
     }

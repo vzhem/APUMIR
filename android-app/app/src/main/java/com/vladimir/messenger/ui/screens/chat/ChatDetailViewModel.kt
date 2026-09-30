@@ -149,14 +149,20 @@ class ChatDetailViewModel @Inject constructor(
             if (!typingAnnounced) return
             typingAnnounced = false
             lastTypingSentAt = 0L
-            com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, false)
+            // «Перестал» - тоже с запасным путём: иначе индикатор остался бы
+            // висеть, если прямой канал не работает.
+            com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, false, queueFallback = true)
             return
         }
         val now = System.currentTimeMillis()
         if (now - lastTypingSentAt < TYPING_REFRESH_MS) return
         lastTypingSentAt = now
+        // В надёжную очередь попадает только ПЕРВЫЙ пакет сессии: так
+        // индикатор появится даже без прямого канала, а поток обновлений
+        // очередь сообщений не забивает.
+        val first = !typingAnnounced
         typingAnnounced = true
-        com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, true)
+        com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, true, queueFallback = first)
     }
 
     // ── р236: черновики сообщений ───────────────────────────────────────────
