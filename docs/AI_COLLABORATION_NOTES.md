@@ -9531,6 +9531,16 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   Урок следующей сессии: «main отстал» - это не потеря релиза. Проверять
   `git ls-remote origin refs/heads/main` против кончика рабочей ветки и
   открытые PR-ы, а не теги.
+  Дополнение (тот же день, 06:15). Коммиты этой сессии переставлены поверх
+  кончика соседней ветки (`6b707fe4`), `main` = `ea7407b6` - одна линия, ни
+  одного расхождения (проверено `git ls-remote`). PR #17 и #18 GitHub закрыл
+  сам как влившиеся, открытых PR нет. Для песочницы добавлен
+  `scripts/sync-main.sh` (fast-forward `main` через REST API, `force=false`,
+  `--dry-run`), правило - в `START_HERE.md` §9. Грабля прав: у
+  GitHub-приложения Arena есть `contents: write`, но НЕТ `workflows` -
+  `git push` и Contents API для `.github/workflows/*` дают «refusing to allow
+  a GitHub App» / 403 «Resource not accessible by integration», поэтому новый
+  воркфлоу ставит только владелец: `scripts/install-release-workflow.ps1`.
 
 - **2026-09-30 (раунд 225) - v11.74.121: профили находят себя сами и сами синхронизируются; любые сети.**
   Владелец: «профили находили себя сами и сами синхронизировались;

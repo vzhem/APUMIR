@@ -1731,7 +1731,12 @@
   не двигают). Проверка здоровья в начале сессии: `git ls-remote origin
   refs/heads/main` обязан совпадать с кончиком рабочей ветки; не совпал -
   сначала догнать, потом работать. Подробности - `AI_COLLABORATION_NOTES.md`,
-  запись «ремонт моста ветка -> main».
+  запись «ремонт моста ветка -> main».  Догнать `main` из песочницы: `bash scripts/sync-main.sh`
+  (`--dry-run` - только посмотреть); на ПК владельца - `scripts/sync-main.ps1`.
+  Установить новый воркфлоу агент НЕ может (нет права `workflows` - 403 и на
+  `git push`, и на Contents API), это одна команда владельца:
+  `scripts/install-release-workflow.ps1`. Подробности -
+  `AI_COLLABORATION_NOTES.md`, запись «ремонт моста ветка -> main».
 
 - **Тестовый slug не из алфавита** (v11.69.x). В `GroupInviteLinksTest` стоял
   slug `"abcd1234"`, а алфавит `newSlug` без `0 1 I O l`; `isValidSlug` его
