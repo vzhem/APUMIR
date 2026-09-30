@@ -4,6 +4,9 @@ import androidx.room.*
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import kotlinx.coroutines.flow.Flow
 
+/** р239: агрегат для уборки мусора «печатает…» (чат -> сколько строк). */
+data class TypingJunkRow(val chatId: String, val count: Int)
+
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
@@ -194,6 +197,20 @@ interface MessageDao {
 
     @Query("DELETE FROM messages WHERE id = :messageId")
     suspend fun deleteById(messageId: String)
+
+    /**
+     * р239: служебные пакеты «печатает…», ошибочно сохранённые как сообщения
+     * (r235-r238). Возвращает, сколько строк удалено.
+     */
+    @Query("DELETE FROM messages WHERE content LIKE 'APUTYP1|%'")
+    suspend fun deleteTypingJunk(): Int
+
+    /** р239: в каких чатах лежит этот мусор и по скольку строк. */
+    @Query(
+        "SELECT chatId AS chatId, COUNT(*) AS count FROM messages " +
+            "WHERE content LIKE 'APUTYP1|%' GROUP BY chatId"
+    )
+    suspend fun chatsWithTypingJunk(): List<TypingJunkRow>
 
     /**
      * Раунд 135: последнее сообщение чата - пересчёт превью после удаления.

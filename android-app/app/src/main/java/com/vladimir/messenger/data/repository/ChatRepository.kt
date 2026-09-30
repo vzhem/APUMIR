@@ -417,6 +417,10 @@ class ChatRepository @Inject constructor(
      * Чат ищется по узлу отправителя: id чатов на устройствах разные.
      */
     suspend fun applyMirrorIncoming(row: MirrorRow): Pair<String, String> {
+        // р239: служебный пакет с партнёра тоже не сообщение.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
+            return Pair("", "")
+        }
         val chat = getOrCreateChat(
             row.senderId,
             row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.senderId) },
@@ -435,6 +439,8 @@ class ChatRepository @Inject constructor(
 
     /** Отправленное с зеркала (эхо или доган): своя строка «отправлено». */
     suspend fun applyMirrorSent(row: MirrorRow) {
+        // р239: служебный пакет не показываем и как своё сообщение.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) return
         // id чатов на устройствах разные - чат ищем по узлу получателя.
         val chat: Chat = if (row.recipientId.isNotBlank()) {
             getChatByContactId(row.recipientId)
@@ -479,6 +485,20 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
     ) {
+        // р239: страховка на самом сохранении. Служебный пакет приложения
+        // (сегодня это «печатает…») в переписку не попадает ни при каком пути
+        // приёма: даже если разборщик его не узнал, мусорной строки и
+        // уведомления не будет.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(content)) {
+            val typing = com.vladimir.messenger.data.typing.TypingWire.parse(content)
+            if (typing == true) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+            } else if (typing == false) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+            }
+            Log.i(TAG, "service packet not saved to chat: " + content.take(16))
+            return
+        }
         // Защита от дубликатов (FULL SYNC может прислать то же сообщение повторно)
         val exists = messageDao.messageExists(messageId)
         if (exists) {
@@ -508,6 +528,31 @@ class ChatRepository @Inject constructor(
         if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
             runCatching { chatDao.incrementUnread(chatId) }
         }
+    }
+
+    /**
+     * р239: убрать из переписки служебные пакеты «печатает…», которые успели
+     * сохраниться как сообщения (r235-r238). Заодно чинятся превью списка
+     * чатов и счётчик непрочитанных.
+     */
+    suspend fun cleanupTypingJunk(): Int {
+        val chats = runCatching { messageDao.chatsWithTypingJunk() }.getOrDefault(emptyList())
+        val deleted = runCatching { messageDao.deleteTypingJunk() }.getOrDefault(0)
+        if (deleted > 0) {
+            Log.i(TAG, "typing junk removed: $deleted message(s) in ${chats.size} chat(s)")
+            for (row in chats) {
+                runCatching {
+                    chatDao.decrementUnread(row.chatId, row.count)
+                    val last = messageDao.getLatest(row.chatId)
+                    chatDao.updateLastMessage(
+                        row.chatId,
+                        last?.let { com.vladimir.messenger.util.ChatPreviews.human(it.content) ?: it.content }.orEmpty(),
+                        last?.timestamp ?: 0L,
+                    )
+                }
+            }
+        }
+        return deleted
     }
 
     suspend fun getChatById(chatId: String): Chat? {

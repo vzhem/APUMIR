@@ -66,6 +66,10 @@ interface ChatDao {
     @Query("UPDATE chats SET lastMessage = :message, lastMessageTime = :time WHERE id = :chatId")
     suspend fun updateLastMessage(chatId: String, message: String, time: Long)
 
+    /** р239: снять с чата непрочитанные, накрученные мусорными пакетами. */
+    @Query("UPDATE chats SET unreadCount = MAX(0, unreadCount - :count) WHERE id = :chatId")
+    suspend fun decrementUnread(chatId: String, count: Int)
+
     @Query("UPDATE chats SET contactName = :name WHERE contactId = :contactId")
     suspend fun updateContactName(contactId: String, name: String)
 

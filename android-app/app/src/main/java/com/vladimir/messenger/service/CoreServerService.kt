@@ -547,6 +547,13 @@ class CoreServerService : Service() {
         // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
         EmergencyKeepAliveReceiver.scheduleNext(applicationContext)
 
+        // р239: убрать из базы мусор прошлых версий - служебные пакеты
+        // «печатает…», которые r235-r238 успели сохранить как сообщения.
+        serviceScope.launch {
+            runCatching { chatRepository.cleanupTypingJunk() }
+                .onFailure { Log.w(TAG, "Typing junk cleanup failed: ${it.message}") }
+        }
+
         // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
         if (!gossipStarted) {
             gossipStarted = true
@@ -1133,6 +1140,16 @@ class CoreServerService : Service() {
         text: String,
     ): Boolean {
         if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
+        // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
+        val mirrorTyping = com.vladimir.messenger.data.typing.TypingWire.parse(text)
+        if (mirrorTyping != null) {
+            if (mirrorTyping) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+            } else {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+            }
+            return true
+        }
         // Групповой конверт: у группы один и тот же id на всех устройствах,
         // поэтому разбираем его тем же путём, что и обычное входящее.
         if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
@@ -1610,6 +1627,31 @@ class CoreServerService : Service() {
                 }
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
+
+                // р239 (ВАЖНО): «печатает…» - мимолётный служебный сигнал, в
+                // переписке ему места нет. Разбирается ЗДЕСЬ, до зеркала,
+                // авто-создания контакта и сохранения.
+                //
+                // Ловушка, из-за которой это правило появилось: r235 поставил
+                // разбор только в routeIncomingEnvelope (резервный путь CF), а
+                // основной приём P2P живёт здесь - и пакет APUTYP1|1 лёг в чат
+                // сообщением с уведомлением (владелец, скрины 30.09). Поэтому
+                // рядом добавлен и страж в ChatRepository.saveIncomingMessage.
+                val typingSignal = com.vladimir.messenger.data.typing.TypingWire.parse(text)
+                if (typingSignal != null) {
+                    if (typingSignal) {
+                        com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+                    } else {
+                        com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+                    }
+                    // Второму устройству личности - тем же кадром (индикатор
+                    // должен быть на обоих телефонах).
+                    com.vladimir.messenger.data.mirror.MirrorHub.publishTyping(senderId, typingSignal)
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    Log.d(TAG, "Typing packet handled (typing=$typingSignal), not saved")
+                    return
+                }
+
                 try {
                     // р227: служебный конверт (реакция, удаление, просмотр,
                     // сердечко, прочтение, ссылка на гифку) уходит и

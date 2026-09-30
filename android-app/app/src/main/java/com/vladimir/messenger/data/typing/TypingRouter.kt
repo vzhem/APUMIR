@@ -43,7 +43,15 @@ object TypingRouter {
             if (MirrorHub.deliverAction(peerId = peerId, groupId = "", chatId = chatId, text = envelope)) {
                 Log.d(TAG, "typing via mirror partner: $typing")
             } else {
-                RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peerId, envelope)
+                // р239: «печатает…» - мимолётный сигнал, надёжной очереди он не
+                // нужен: сначала лучший канал (прямой QUIC, без хранения и
+                // повторов), и только если он недоступен - обычная отправка.
+                // Так поток «печатает» не занимает очередь сообщений.
+                val direct = runCatching { RustBridge.sendDirectPayload(peerId, envelope) }
+                    .getOrDefault(false)
+                if (!direct) {
+                    RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peerId, envelope)
+                }
                 // Своё действие активного - и партнёрскому устройству личности,
                 // чтобы индикатор был на обоих телефонах.
                 MirrorHub.publishOwnAction(peerId = peerId, groupId = "", chatId = chatId, text = envelope)

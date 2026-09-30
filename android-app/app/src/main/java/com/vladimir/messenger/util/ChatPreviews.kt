@@ -29,7 +29,45 @@ object ChatPreviews {
     fun isServiceEnvelope(raw: String?): Boolean {
         if (raw == null) return false
         val t = raw.trim()
-        return t.startsWith("APUSTK1|") || t.startsWith("APUGIF1|")
+        return t.startsWith("APUSTK1|") || t.startsWith("APUGIF1|") || t.startsWith("APUTYP1|")
+    }
+
+    /**
+     * р239: служебный пакет приложения, которому в переписке не место.
+     *
+     * Список шире, чем [isServiceEnvelope]: страховка на самом сохранении
+     * сообщения (ChatRepository.saveIncomingMessage). Живой пример ошибки:
+     * r235 поставил разбор «печатает…» только в резервный путь приёма, и
+     * пакет APUTYP1|1 лёг в чат сообщением с уведомлением (владелец, 30.09).
+     * Карточки-сообщения (ссылка на гифку, «переслано») здесь НЕ перечислены -
+     * это настоящие сообщения.
+     */
+    private val SERVICE_PACKETS = listOf(
+        "APUTYP1|",      // «печатает…» (r235)
+        "APUSTK1|",      // рой стикеров
+        "APUGIF1|",      // провод гифок
+        "APUCALL1|",     // звонковая сигнализация
+        "APUCALLHS1|",   // завершение звонка
+        "APUDEL1|",      // «удали у всех»
+        "APUDELQ1|",     // очередь удаления
+        "APUREACT1|",    // реакции
+        "APUREAD1|",     // «прочитано»
+        "APUHEART1|",    // сердечки профиля
+        "APUVIEW1|",     // просмотры постов
+        "APUGRP1|",      // групповые конверты
+        "APUBSP1|",      // рассылка поста
+        "APUUDP01|",     // обнаружение устройств в сети
+        "APUMIR1|",      // зеркальные кадры, попавшие в поток сообщений
+        "APUBAK1|",      // копия азбуки адресов
+        "APUREF1|",      // реферальная атрибуция
+        "APUSEAL1|",     // конверт (не вскрылся - значит, не нам)
+    )
+
+    /** Служебный пакет? true - сохранять его как сообщение нельзя. */
+    fun isServicePacket(raw: String?): Boolean {
+        if (raw == null) return false
+        val t = raw.trim()
+        return SERVICE_PACKETS.any { t.startsWith(it) }
     }
 
     /**
@@ -45,6 +83,9 @@ object ChatPreviews {
             ForwardMarker.parseRef(t)?.let { return "↩ Переслано из «" + it.label + "»" }
         }
         if (t.startsWith("APUGIFREF1|")) return GIF_LABEL
+        // «Печатает…» (р235/р239): строка мимолётная, в списке чатов её быть
+        // не должно - показываем человеческое слово.
+        if (t.startsWith("APUTYP1|")) return "печатает…"
         // Конверт стикер-роя (раунд 139): «APUSTK1|ask|…».
         if (t.startsWith("APUSTK1|")) return "Стикеры"
         // Раунд 165: визитка стикера в группе/канале (имя «Стикер…») -
