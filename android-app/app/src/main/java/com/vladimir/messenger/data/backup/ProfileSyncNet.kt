@@ -230,6 +230,7 @@ object ProfileSyncNet {
 object ProfileSyncAuto {
 
     private const val TAG = "ProfileSyncAuto"
+    private const val CHANNEL_ID = "apu_sync_channel"
     private const val PREFS = "apu_profile_sync"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_WRAPPED = "wrapped_password_v1"
