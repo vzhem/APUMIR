@@ -1013,6 +1013,11 @@ class CoreServerService : Service() {
             size: Int,
         ): ByteArray? = fileTransferRouter.readMirrorFileChunk(transferId, displayName, offset, size)
 
+        override suspend fun onFilePullStart(transferId: String) {
+            runCatching { fileTransferRouter.resetMirrorWriter(transferId) }
+                .onFailure { Log.w(TAG, "Mirror LAN pull reset failed: ${it.message}") }
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)

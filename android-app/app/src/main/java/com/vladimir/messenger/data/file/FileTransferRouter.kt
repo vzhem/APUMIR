@@ -1054,6 +1054,15 @@ class FileTransferRouter @Inject constructor(
     }
 
     /**
+     * р232: перед прямым (LAN) приёмом забыть недокачанное зеркальным каналом:
+     * файл придёт целиком, склеивать обрывки нельзя.
+     */
+    suspend fun resetMirrorWriter(transferId: String) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        mirrorWriters.remove(transferId)?.let { runCatching { it.first.abort() } }
+        runCatching { receivedStore.deleteTransfer(transferId) }
+    }
+
+    /**
      * р230: прочитать кусок своего принятого файла, чтобы отдать партнёрскому
      * устройству (то же, что отдаёт сеть при раздаче).
      */

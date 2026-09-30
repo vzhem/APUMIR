@@ -296,6 +296,8 @@ class MirrorChannel(
         suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray)
         /** р230: прочитать кусок своего файла, чтобы отдать партнёру. */
         suspend fun fileBytesFor(transferId: String, displayName: String, offset: Long, size: Int): ByteArray?
+        /** р232: начинается прямой (LAN) приём файла - забыть недокачанное. */
+        suspend fun onFilePullStart(transferId: String)
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -513,8 +515,14 @@ class MirrorChannel(
      */
     private fun serveFile(transferId: String, displayName: String, totalBytes: Long) {
         if (!engineUp) return
-        if (totalBytes <= 0 || totalBytes > FILE_MIRROR_MAX_BYTES) {
-            Log.i(TAG, "file mirror skipped: $totalBytes B (> $FILE_MIRROR_MAX_BYTES)")
+        if (totalBytes <= 0 || totalBytes > MirrorLan.MAX_BYTES) {
+            Log.i(TAG, "file mirror skipped: $totalBytes B (> ${MirrorLan.MAX_BYTES})")
+            return
+        }
+        if (totalBytes > FILE_MIRROR_MAX_BYTES) {
+            // р232: большой файл через зеркальный канал не гоняем - отдаём
+            // напрямую по локальной сети (если партнёр рядом, он заберёт сам).
+            startLanServe(transferId, displayName, totalBytes)
             return
         }
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -537,6 +545,38 @@ class MirrorChannel(
                 kotlinx.coroutines.delay(FILE_CHUNK_PAUSE_MS)
             }
             Log.i(TAG, "file mirror: отдано $offset Б ($seq порций) id=$transferId")
+        }
+    }
+
+    /**
+     * р232: большой файл - поднимаем одноразовый сервер в локальной сети и
+     * говорим партнёру адрес. Если он в другой сети, ничего не выйдет: у него
+     * останется карточка (как и было до этого раунда).
+     */
+    private fun startLanServe(transferId: String, displayName: String, totalBytes: Long) {
+        val host = MirrorLan.localIpv4()
+        if (host == null) {
+            Log.i(TAG, "lan serve impossible: нет локального адреса")
+            return
+        }
+        val sender = MirrorLan.Sender(transferId, totalBytes) { offset, size ->
+            bridge.fileBytesFor(transferId, displayName, offset, size)
+        }
+        val port = sender.start() ?: run {
+            Log.w(TAG, "lan serve: сервер не поднялся")
+            return
+        }
+        Log.i(TAG, "lan serve on $host:$port (${totalBytes} Б, id=${transferId.take(8)})")
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendEvent(
+                "lan",
+                JSONObject()
+                    .put("id", transferId)
+                    .put("host", host)
+                    .put("port", port)
+                    .put("tok", sender.token)
+                    .put("size", totalBytes),
+            )
         }
     }
 
@@ -817,6 +857,27 @@ class MirrorChannel(
                     MirrorHub.duringApply {
                         bridge.onFileChunk(transferId, body.optInt("seq", 0), body.optInt("last", 0) == 1, bytes)
                     }
+                }
+            }
+            "lan" -> {
+                // р232: большой файл отдают напрямую в локальной сети - забрать
+                // самим и сложить в тот же приёмник, что и зеркальные порции.
+                val body = openPayload(wire) ?: return
+                val transferId = body.optString("id")
+                val host = body.optString("host")
+                val port = body.optInt("port", 0)
+                val token = body.optString("tok")
+                val totalBytes = body.optLong("size", 0L)
+                if (transferId.isBlank() || host.isBlank() || port <= 0 || token.isBlank()) return
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    // Недокачанные куски забываем: файл придёт целиком.
+                    runCatching { bridge.onFilePullStart(transferId) }
+                    val pulled = MirrorLan.pull(host, port, token, totalBytes) { seq, last, bytes ->
+                        MirrorHub.duringApply {
+                            bridge.onFileChunk(transferId, seq, last, bytes)
+                        }
+                    }
+                    Log.i(TAG, "lan pull id=${transferId.take(8)} ok=$pulled")
                 }
             }
             "claim" -> {
