@@ -1013,7 +1013,8 @@ class FileTransferRouter @Inject constructor(
      * р230: прочитать кусок своего принятого файла, чтобы отдать партнёрскому
      * устройству (то же, что отдаёт сеть при раздаче).
      */
-    fun readMirrorFileChunk(transferId: String, displayName: String, offset: Long, size: Int): ByteArray? =
+    suspend fun readMirrorFileChunk(transferId: String, displayName: String, offset: Long, size: Int): ByteArray? =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
         runCatching {
             receivedStore.receivedFile(transferId, displayName)?.let { file ->
                 java.io.RandomAccessFile(file, "r").use { handle ->
@@ -1050,6 +1051,7 @@ class FileTransferRouter @Inject constructor(
             plain.fill(0)
             slice
         }.getOrNull()
+        }
 
     /** Verified plaintext of a completed incoming transfer (app-private storage), if present. */
     fun receivedFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
