@@ -118,7 +118,8 @@ object MirrorHub {
      *         (у тени её нет, а у активного сессия одна).
      */
     fun deliverAction(peerId: String, groupId: String, chatId: String, text: String): Boolean =
-        runCatching { channel?.publishOutgoingEnvelope(peerId, groupId, chatId, text) }.getOrDefault(false)
+        runCatching { channel?.publishOutgoingEnvelope(peerId, groupId, chatId, text) == true }
+            .getOrDefault(false)
 
     /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
