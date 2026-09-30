@@ -1089,7 +1089,7 @@ private fun SettingsTabContent(
                     SettingsItem(
                         icon     = Icons.Default.Sync,
                         title    = "Синхронизировать аккаунт",
-                        subtitle = "Прямой перенос по Wi-Fi: телефон → другое устройство, без облака",
+                        subtitle = "Устройства находят себя сами: по Wi-Fi и через сеть APU (мобильные сети)",
                         onClick  = { showSyncDialog = true },
                     )
                 }

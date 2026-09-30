@@ -395,6 +395,10 @@ export default {
         return await handleUpdateApk();
       } else if (path === "/support" && request.method === "GET") {
         return await handleSupport(env);
+      } else if (path.startsWith("/psync/") && request.method === "PUT") {
+        return await handlePsyncPut(path.slice(7), request, env);
+      } else if (path.startsWith("/psync/") && request.method === "GET") {
+        return await handlePsyncGet(path.slice(7), url, request, env);
       } else if (path === "/health") {
         return json({ status: "ok" });
       } else if (path === "/stats" && request.method === "GET") {
@@ -429,6 +433,60 @@ async function handleSupport(env) {
     // битый JSON в KV - не 500: это публичный маршрут, отдаём черновик
   }
   return json({ ok: true, draft: true, ways: [] });
+}
+
+// ---- раунд 225: одноразовая релейная передача копии профиля -----------------
+// «Профили находят себя сами»: полка адресуется отпечатком НИКА (оба
+// устройства знают ник), код забора выводится из ПАРОЛЯ копии на телефоне -
+// в релей вводится только шифробайты. Копия стерётся сразу после забора
+// (fetch-once) и в любом случае через сутки (KV TTL) - не хранилище, а
+// передача. Тело - base64 шифрованного .apubak, идёт насквозь сырым текстом.
+const MAX_PSYNC_B64 = 24_000_000;
+
+function psyncKey(slot) {
+  const clean = String(slot || "").toLowerCase().replace(/[^a-f0-9]/g, "");
+  return clean.length >= 16 && clean.length <= 64 ? "ps2:" + clean : null;
+}
+
+async function handlePsyncPut(slot, request, env) {
+  const key = psyncKey(slot);
+  if (!key) return json({ error: "bad slot" }, 400);
+  if (!env.APU_VAULT) return json({ error: "KV binding is not configured" }, 501);
+  const blob = await request.text();
+  if (!blob || blob.length < 64) return json({ error: "empty blob" }, 400);
+  if (blob.length > MAX_PSYNC_B64) return json({ error: "too large" }, 413);
+  const check = (request.headers.get("X-Apu-Check") || "").toLowerCase().replace(/[^a-f0-9]/g, "");
+  if (check.length !== 64) return json({ error: "bad check" }, 400);
+  await env.APU_VAULT.put(key, blob, { expirationTtl: 86400 });
+  await env.APU_VAULT.put(key + ":c", check, { expirationTtl: 86400 });
+  await env.APU_VAULT.put(key + ":m", JSON.stringify({ exists: true, time: Date.now(), size: blob.length }), { expirationTtl: 86400 });
+  return json({ success: true, size: blob.length });
+}
+
+async function handlePsyncGet(slot, url, request, env) {
+  const key = psyncKey(slot);
+  if (!key) return json({ error: "bad slot" }, 400);
+  if (!env.APU_VAULT) return json({ error: "KV binding is not configured" }, 501);
+  if (url.searchParams.get("meta") === "1") {
+    const meta = await env.APU_VAULT.get(key + ":m");
+    if (!meta) return json({ error: "not found" }, 404);
+    return new Response(meta, { headers: { "Content-Type": "application/json" } });
+  }
+  const code = (request.headers.get("X-Apu-Code") || "").trim();
+  if (!code) return json({ error: "code required" }, 401);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
+  const check = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const stored = await env.APU_VAULT.get(key + ":c");
+  if (!stored || stored !== check) return json({ error: "wrong code" }, 403);
+  const blob = await env.APU_VAULT.get(key);
+  if (!blob) return json({ error: "not found" }, 404);
+  // Одноразовость: стереть сразу после забора (и ключ проверки, и метку).
+  await env.APU_VAULT.delete(key);
+  await env.APU_VAULT.delete(key + ":c");
+  await env.APU_VAULT.delete(key + ":m");
+  return new Response(blob, {
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+  });
 }
 
 // ---- хранилище личности -----------------------------------------------------
