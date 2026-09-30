@@ -110,6 +110,25 @@ object MirrorHub {
         runCatching { channel?.publishEnvelope(senderId, chatId, messageId, text) }
     }
 
+    /**
+     * р228: действие, сделанное на ТЕНИ (реакция, удаление, просмотр,
+     * сердечко, прочтение), -> активному.
+     *
+     * @return true, если конверт ушёл партнёру: тогда своей сети не пробуем
+     *         (у тени её нет, а у активного сессия одна).
+     */
+    fun deliverAction(peerId: String, groupId: String, chatId: String, text: String): Boolean =
+        runCatching { channel?.publishOutgoingEnvelope(peerId, groupId, chatId, text) }.getOrDefault(false)
+
+    /**
+     * р228: переписку прочитали на этом устройстве - снять непрочитанное и
+     * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
+     * поэтому кадр безопасно звать и с активного, и с тени.
+     */
+    fun publishReadSync(peerId: String, groupId: String, topicId: String = "") {
+        runCatching { channel?.publishReadSync(peerId, groupId, topicId) }
+    }
+
     fun close() {
         runCatching { channel?.shutdown() }
         channel = null
@@ -180,6 +199,14 @@ class MirrorChannel(
         suspend fun onOutgoingFromPartner(row: MirrorRow)
         /** р227: применить служебный конверт, пришедший от партнёра. */
         suspend fun applyEnvelope(senderId: String, chatId: String, messageId: String, text: String)
+        /**
+         * р228: действие, сделанное на тени. Активный отправляет конверт
+         * собеседнику (или участникам группы) своей сессией и применяет то же
+         * действие у себя, чтобы устройства не разошлись.
+         */
+        suspend fun onActionFromPartner(peerId: String, groupId: String, chatId: String, text: String)
+        /** р228: на партнёрском устройстве сняли непрочитанное - снять и у себя. */
+        suspend fun onReadFromPartner(peerId: String, groupId: String, topicId: String)
         fun onPromote()
         fun onDeferToShadow()
     }
@@ -252,6 +279,53 @@ class MirrorChannel(
     fun publishOutgoing(row: MirrorRow): Boolean {
         if (engineUp) return false
         return sendEvent("out", row.toJson())
+    }
+
+    /**
+     * р228: действие с тени -> активному. Шлёт только тень и только при
+     * живом партнёре: своей сети у неё нет. Активный отправит конверт
+     * собеседнику или участникам группы своей сессией и применит действие
+     * у себя.
+     *
+     * @param peerId собеседник личного чата (пусто для группового действия)
+     * @param groupId группа/канал (пусто для личного действия)
+     * @return true - кадр ушёл партнёру.
+     */
+    fun publishOutgoingEnvelope(
+        peerId: String,
+        groupId: String,
+        chatId: String,
+        text: String,
+    ): Boolean {
+        if (engineUp) return false
+        if (!canCarryOutgoing()) return false
+        if (text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return false
+        if (peerId.isBlank() && groupId.isBlank()) return false
+        val body = JSONObject()
+            .put("p", peerId)
+            .put("g", groupId)
+            .put("c", chatId)
+            .put("t", text)
+        val sealed = sealPayload(body) ?: return false
+        return sendJson(JSONObject().put("t", "ev").put("k", "outenv").put("d", sealed))
+    }
+
+    /**
+     * р228: снять непрочитанное и на партнёрском устройстве. Шлём в обе
+     * стороны (активный напрямую, тень - тем же каналом): применения кадра
+     * повторно не рассылают, петли нет.
+     */
+    fun publishReadSync(peerId: String, groupId: String, topicId: String) {
+        if (peerId.isBlank() && groupId.isBlank()) return
+        if (wsRef.get() == null) return
+        val body = JSONObject()
+            .put("p", peerId)
+            .put("g", groupId)
+            .put("tp", topicId)
+        val sealed = sealPayload(body) ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendJson(JSONObject().put("t", "ev").put("k", "read").put("d", sealed))
+        }
     }
 
     /**
@@ -495,6 +569,33 @@ class MirrorChannel(
                 scope.launch { bridge.onOutgoingFromPartner(row) }
             }
             "batch" -> handleEventBatch(wire)
+            "read" -> {
+                // р228: на партнёре сняли непрочитанное - снимаем и у себя.
+                val body = openPayload(wire) ?: return
+                scope.launch {
+                    bridge.onReadFromPartner(
+                        peerId = body.optString("p"),
+                        groupId = body.optString("g"),
+                        topicId = body.optString("tp"),
+                    )
+                }
+            }
+            "outenv" -> {
+                // р228: действие тени. Отправляет и применяет активный -
+                // у тени ни сессии, ни сети.
+                if (!engineUp) return
+                val body = openPayload(wire) ?: return
+                val text = body.optString("t")
+                if (text.isBlank()) return
+                scope.launch {
+                    bridge.onActionFromPartner(
+                        peerId = body.optString("p"),
+                        groupId = body.optString("g"),
+                        chatId = body.optString("c"),
+                        text = text,
+                    )
+                }
+            }
             "env" -> {
                 // р227: служебный конверт от партнёра - применяем тем же
                 // разбором, что и на активном устройстве (сети у тени нет).

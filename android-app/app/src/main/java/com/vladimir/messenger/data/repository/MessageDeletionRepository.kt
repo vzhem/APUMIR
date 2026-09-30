@@ -8,6 +8,7 @@ import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.vladimir.messenger.data.mirror.MirrorHub
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,7 +71,11 @@ class MessageDeletionRepository @Inject constructor(
             // пока собеседник её не подтвердит (ack) - если его нет в сети,
             // помпа досылает, как только он появится. Половинных удалений
             // больше нет: у себя стираем сразу, у собеседника - гарантированно.
-            val sent = RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+            // р228: у устройства-зеркала своей сессии нет - конверт несёт
+            // активное; подтверждение собеседника вернётся тем же зеркалом
+            // (оно придёт как служебный конверт и снимет запись из очереди).
+            val viaMirror = MirrorHub.deliverAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)
+            val sent = viaMirror || RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
             outbox.add(
                 DeletionOutbox.Entry(
                     targetId = messageId,
@@ -87,6 +92,29 @@ class MessageDeletionRepository @Inject constructor(
             deleteLocal(chatId, messageId)
             Result.success(Unit)
         }
+
+    /**
+     * р228: удаление сделано на ПАРТНЁРСКОМ устройстве - активный стирает то
+     * же сообщение у себя. Подтверждение не шлём (его отправит вызывающий),
+     * поэтому это не [routeIncoming].
+     */
+    suspend fun applyMirrorOutgoing(peerId: String, text: String): Boolean {
+        if (!text.startsWith("$PREFIX|")) return false
+        val parts = text.split('|')
+        if (parts.size != 4) return true
+        val targetId = parts[2]
+        if (peerId.isBlank() || targetId.isBlank()) return true
+        withContext(Dispatchers.IO) {
+            val chat = chatDao.getChatByContactId(peerId) ?: return@withContext
+            val removed = messageDao.deleteByIdChatAndSender(targetId, chat.id, peerId)
+            if (removed > 0) {
+                reactionDao.deleteForMessage(targetId)
+                refreshPreview(chat.id)
+                Log.i(TAG, "mirror delete applied id=$targetId (партнёрское устройство)")
+            }
+        }
+        return true
+    }
 
     /**
      * Входящий конверт «удали у всех» в личном чате. Возвращает true, если
@@ -150,7 +178,11 @@ class MessageDeletionRepository @Inject constructor(
             }
             val envelope = "$PREFIX|${chat.id}|${entry.targetId}|${entry.atMs}"
             val sent = runCatching {
-                RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, entry.peerId, envelope)
+                if (MirrorHub.deliverAction(entry.peerId, "", chat.id, envelope)) {
+                    true
+                } else {
+                    RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, entry.peerId, envelope)
+                }
             }.getOrDefault(false)
             outbox.markTried(entry, now)
             if (sent) Log.i(TAG, "delete re-sent id=${entry.targetId} to ${entry.peerId.takeLast(8)} (attempt ${entry.attempts + 1})")

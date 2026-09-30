@@ -3350,16 +3350,28 @@ class GroupRepository(
         // проверки получался замкнутый круг: сброс непрочитанных писал в
         // таблицу, поток тем перезапускал ленту, лента снова звала сброс - и
         // так без конца, пока приложение не зависало.
+        var hadTopicUnread = false
         if (!topicId.isNullOrBlank()) {
             val topic = groupDao.getTopicById(topicId)
             if (topic != null && topic.unreadCount > 0) {
                 groupDao.markTopicRead(topicId)
+                hadTopicUnread = true
             }
         }
         val group = groupDao.getGroupById(groupId) ?: return
         val unread = groupDao.sumTopicUnread(groupId)
-        if (group.unreadCount != unread) {
+        val hadGroupUnread = group.unreadCount != unread
+        if (hadGroupUnread) {
             groupDao.setGroupUnread(groupId, unread)
+        }
+        // р228: второе устройство той же личности снимает непрочитанное
+        // вместе с нами - бейджи не расходятся. Кадр шлём ТОЛЬКО когда было
+        // что снимать: экран темы зовёт этот метод на каждом обновлении
+        // ленты, и безусловная отправка превратилась бы в поток кадров.
+        if (hadTopicUnread || hadGroupUnread) {
+            com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(
+                peerId = "", groupId = groupId, topicId = topicId.orEmpty(),
+            )
         }
     }
 
@@ -4069,6 +4081,8 @@ class GroupRepository(
     /** Снять счётчик непрочитанного - пункт меню в пузыре группы. */
     suspend fun markGroupRead(groupId: String) {
         groupDao.markGroupRead(groupId)
+        // р228: снять непрочитанное и на партнёрском устройстве личности.
+        com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(peerId = "", groupId = groupId)
     }
 
     /**

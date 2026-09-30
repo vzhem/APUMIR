@@ -72,6 +72,9 @@ class CoreServerService : Service() {
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
+    @Inject lateinit var counters: com.vladimir.messenger.data.channel.PostCounterRepository
+    @Inject lateinit var swarmBudget: com.vladimir.messenger.data.swarm.SwarmBudget
     @Inject lateinit var gifPreparation: com.vladimir.messenger.data.file.OutgoingFilePreparationService
     @Inject lateinit var stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary
     private var gossipStarted = false
@@ -973,6 +976,20 @@ class CoreServerService : Service() {
             applyMirrorEnvelope(senderId, chatId, messageId, text)
         }
 
+        override suspend fun onActionFromPartner(
+            peerId: String,
+            groupId: String,
+            chatId: String,
+            text: String,
+        ) {
+            mirrorApplyActionLocally(peerId, groupId, text)
+            mirrorSendActionToPeers(peerId, groupId, text)
+        }
+
+        override suspend fun onReadFromPartner(peerId: String, groupId: String, topicId: String) {
+            mirrorApplyRead(peerId, groupId, topicId)
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)
@@ -1063,6 +1080,81 @@ class CoreServerService : Service() {
             return true
         }
         return false
+    }
+
+    /**
+     * р228: на партнёрском устройстве прочитали переписку - снять
+     * непрочитанное здесь. Пишем прямо в базу (не через репозиторий):
+     * применение кадра не должно повторно его рассылать.
+     */
+    private suspend fun mirrorApplyRead(peerId: String, groupId: String, topicId: String) {
+        runCatching {
+            if (groupId.isNotBlank()) {
+                if (topicId.isNotBlank()) groupDao.markTopicRead(topicId)
+                groupDao.markGroupRead(groupId)
+                Log.i(TAG, "Mirror read: непрочитанное группы снято по партнёру")
+                return@runCatching
+            }
+            if (peerId.isBlank()) return@runCatching
+            val chat = chatRepository.getChatByContactId(peerId) ?: return@runCatching
+            chatRepository.markAsRead(chat.id)
+            Log.i(TAG, "Mirror read: непрочитанное чата снято по партнёру")
+        }.onFailure { Log.w(TAG, "Mirror read apply failed: ${it.message}") }
+    }
+
+    /**
+     * р228: действие сделано на теневом устройстве - привести СВОЮ базу в то
+     * же состояние, чтобы устройства не разошлись. Ни сети, ни ответных
+     * отправок здесь нет: конверт в сеть уйдёт отдельно.
+     */
+    private suspend fun mirrorApplyActionLocally(peerId: String, groupId: String, text: String) {
+        if (runCatching { reactionRepository.applyMirrorOutgoing(peerId, groupId, text) }
+                .getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: реакция с тени применена локально")
+            return
+        }
+        if (peerId.isNotBlank() &&
+            runCatching { messageDeletion.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: удаление с тени применено локально")
+            return
+        }
+        if (runCatching { postViews.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        if (runCatching { hearts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        if (runCatching { readReceipts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        Log.w(TAG, "Mirror action: конверт с тени не распознан, только пересылка")
+    }
+
+    /**
+     * р228: отправить конверт, сделанный на тени, в сеть - единственной
+     * сессией активного устройства. Личный чат: собеседнику; групповое
+     * действие: участникам группы по бюджету служебного канала, как это
+     * делает сам репозиторий на активном устройстве.
+     */
+    private suspend fun mirrorSendActionToPeers(peerId: String, groupId: String, text: String) {
+        if (groupId.isNotBlank()) {
+            val group = groupDao.getGroupById(groupId)
+            if (group == null) {
+                Log.w(TAG, "Mirror action: группы $groupId нет на этом устройстве")
+                return
+            }
+            val me = RustBridge.nodeId().orEmpty()
+            val recipients = runCatching { counters.signalTargets(group, me) }.getOrDefault(emptyList())
+            var sent = 0
+            for (peer in recipients) {
+                if (!swarmBudget.tryAcquire(com.vladimir.messenger.data.swarm.SwarmLane.SIGNAL)) break
+                RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), groupId, peer, text)
+                sent++
+            }
+            Log.i(TAG, "Mirror action: групповой конверт ушёл $sent/${recipients.size}")
+            return
+        }
+        if (peerId.isBlank()) return
+        val chat = chatRepository.getChatByContactId(peerId)
+            ?: chatRepository.getOrCreateChat(peerId, NodeIds.autoName(peerId))
+        val sent = RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), chat.id, peerId, text)
+        Log.i(TAG, "Mirror action: конверт ушёл собеседнику ${peerId.takeLast(8)} sent=$sent")
     }
 
     /**

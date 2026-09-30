@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.vladimir.messenger.data.mirror.MirrorHub
 
 /** Сводка реакций одного сообщения: значок, сколько раз и ставил ли я. */
 data class ReactionSummary(
@@ -116,9 +117,14 @@ class ReactionRepository @Inject constructor(
         if (group == null) {
             // Личный чат: один собеседник, бюджет роя не трогаем.
             val peer = chatDao.getChatById(chatId)?.contactId?.takeIf { it.isNotBlank() } ?: return
+            // р228: устройство-зеркало отдаёт действие активному - сессии у
+            // него нет, а у активного она одна на аккаунт.
+            if (MirrorHub.deliverAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)) return
             RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
             return
         }
+        // р228: групповое действие тени - активный разошлёт участникам.
+        if (MirrorHub.deliverAction(peerId = "", groupId = chatId, chatId = chatId, text = envelope)) return
         // Группа: реакция - служебный пакет. Сначала своим и проверенным; когда
         // служебный бюджет телефона исчерпан, остальные её не получат - это
         // лучше, чем задерживать посты и сообщения ради значка. На большом
@@ -134,6 +140,38 @@ class ReactionRepository @Inject constructor(
         if (sent < recipients.size) {
             Log.i(TAG, "reaction fanout capped: $sent/${recipients.size} (signal budget)")
         }
+    }
+
+    /**
+     * р228: реакцию поставили на ПАРТНЁРСКОМ устройстве той же личности -
+     * активное устройство записывает её у себя как СВОЮ (иначе значок не
+     * появится в его интерфейсе). В сеть ничего не уходит: конверт отправляет
+     * вызывающий.
+     */
+    suspend fun applyMirrorOutgoing(peerId: String, groupId: String, text: String): Boolean {
+        if (!ReactionWire.isReactionPacket(text)) return false
+        val packet = ReactionWire.parse(text) ?: return true
+        withContext(Dispatchers.IO) {
+            val localChatId = if (groupId.isNotBlank()) {
+                groupId
+            } else {
+                chatDao.getChatByContactId(peerId)?.id ?: packet.chatId
+            }
+            if (packet.added) {
+                reactionDao.put(
+                    MessageReactionEntity(
+                        messageId = packet.messageId,
+                        nodeId = SELF,
+                        chatId = localChatId,
+                        emoji = packet.emoji,
+                        atMs = packet.atMs,
+                    )
+                )
+            } else {
+                reactionDao.remove(packet.messageId, SELF)
+            }
+        }
+        return true
     }
 
     /**
