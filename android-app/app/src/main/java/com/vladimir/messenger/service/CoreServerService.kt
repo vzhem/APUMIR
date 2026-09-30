@@ -1048,6 +1048,26 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror: партнёр старше - ухожу в зеркало")
             restartForMirrorRole()
         }
+
+        /**
+         * р231: партнёр-тень просит движок, чтобы отправить свой файл (у тени
+         * своей сетевой сессии нет). Уступаем, если сами сейчас ничего не
+         * отдаём; иначе отказ - тень повторит просьбу позже.
+         */
+        override fun onEngineClaimed(): Boolean {
+            if (fileTransferRouter.hasRecentTransferActivity(System.currentTimeMillis())) {
+                Log.i(TAG, "Mirror claim: отказ, передача (отдача или приём) ещё идёт")
+                return false
+            }
+            val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("mirror_defer_engine", true)
+                .putLong("mirror_role_switch_at", System.currentTimeMillis())
+                .apply()
+            Log.i(TAG, "Mirror claim: уступаю движок партнёру (его исходящий файл)")
+            restartForMirrorRole()
+            return true
+        }
     }
 
     /**

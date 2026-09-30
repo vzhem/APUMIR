@@ -186,6 +186,16 @@ object MirrorHub {
     }
 
     /**
+     * р231: тень с готовым исходящим файлом просит движок у активного.
+     * Отправка файла требует своей сетевой сессии, а она может быть только
+     * у одного устройства; активный уступает роль, тень поднимается и шлёт.
+     */
+    fun claimEngine(): Boolean = channel?.claimEngine() == true
+
+    /** Тень и есть живой активный партнёр (значит, просить движок есть у кого). */
+    fun canClaimEngine(): Boolean = channel?.canClaimEngine() == true
+
+    /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
      * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
      * поэтому кадр безопасно звать и с активного, и с тени.
@@ -288,6 +298,11 @@ class MirrorChannel(
         suspend fun fileBytesFor(transferId: String, displayName: String, offset: Long, size: Int): ByteArray?
         fun onPromote()
         fun onDeferToShadow()
+        /**
+         * р231: активного просят уступить движок (партнёр хочет отправить
+         * файл). Возврат true - уступаем и перезапускаемся зеркалом.
+         */
+        fun onEngineClaimed(): Boolean
     }
 
     private val TAG = "MirrorChannel"
@@ -315,6 +330,8 @@ class MirrorChannel(
     private val deferFired = AtomicBoolean(false)
     private val promoteFired = AtomicBoolean(false)
     private var catchupInFlight = false
+    /** р231: когда в последний раз просили движок (передача роли). */
+    @Volatile private var lastClaimAt = 0L
 
     /** Ведёт ли ЭТО устройство сеть (активное) или живёт зеркалом. */
     fun isEngineUp(): Boolean = engineUp
@@ -323,6 +340,28 @@ class MirrorChannel(
     fun canCarryOutgoing(): Boolean =
         if (engineUp) wsRef.get() != null
         else partnerEng && partnerFresh() && wsRef.get() != null
+
+    /**
+     * р231: тень, рядом с которой есть живой активный. Именно у него можно
+     * попросить движок, чтобы отправить файл со второго устройства.
+     */
+    fun canClaimEngine(): Boolean =
+        !engineUp && partnerEng && partnerFresh() && wsRef.get() != null
+
+    /**
+     * р231: попросить у активного движок. Просим один раз в минуту: передача
+     * роли - перезапуск сервиса на обоих устройствах, частить нельзя.
+     */
+    fun claimEngine(): Boolean {
+        if (!canClaimEngine()) return false
+        val now = System.currentTimeMillis()
+        if (now - lastClaimAt < CLAIM_COOLDOWN_MS) return false
+        lastClaimAt = now
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendEvent("claim", JSONObject().put("r", "engine"))
+        }
+        return true
+    }
 
     private fun partnerFresh(): Boolean =
         partnerDev != null && System.currentTimeMillis() - partnerLastSeen < 15_000
@@ -780,6 +819,18 @@ class MirrorChannel(
                     }
                 }
             }
+            "claim" -> {
+                // р231: партнёр-тень просит движок (отправка файла со второго
+                // устройства). Отвечает только активный: уступит - тень сама
+                // поднимется (её сторож видит партнёра без движка).
+                if (!engineUp) return
+                val body = openPayload(wire) ?: return
+                if (body.optString("r") != "engine") return
+                scope.launch {
+                    val defer = runCatching { bridge.onEngineClaimed() }.getOrDefault(false)
+                    Log.i(TAG, "claim: движок просят, уступаю=$defer")
+                }
+            }
             "read" -> {
                 // р228: на партнёре сняли непрочитанное - снимаем и у себя.
                 val body = openPayload(wire) ?: return
@@ -891,5 +942,8 @@ class MirrorChannel(
 
         /** р230: больше этого файл через зеркало не гоняем (он остаётся на принявшем устройстве). */
         const val FILE_MIRROR_MAX_BYTES = 24L * 1024 * 1024
+
+        /** р231: не чаще раза в минуту просим передачу роли (это перезапуск на обоих). */
+        private const val CLAIM_COOLDOWN_MS = 60_000L
     }
 }

@@ -66,6 +66,23 @@ class FileTransferRouter @Inject constructor(
      * отдавать чужой файл получателю имеет смысл, только когда он появился.
      */
     private val onlinePeers = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /**
+     * р231: когда насос последний раз реально двигал исходящие. По этому
+     * времени активное устройство решает, уступать ли движок партнёру-тени,
+     * который просит его ради своего файла.
+     */
+    @Volatile private var lastOutgoingActivityAt = 0L
+
+    /** р231: когда последний раз принимали файловый пакет (передача идёт к нам). */
+    @Volatile private var lastIncomingActivityAt = 0L
+
+    /**
+     * р231: идёт ли передача (отдача или приём) прямо сейчас. Передача роли
+     * движка рвёт сетевую сессию, поэтому во время живой передачи её не
+     * делаем - партнёр повторит просьбу позже.
+     */
+    fun hasRecentTransferActivity(nowMs: Long, windowMs: Long = 20_000L): Boolean =
+        nowMs - lastOutgoingActivityAt < windowMs || nowMs - lastIncomingActivityAt < windowMs
     private lateinit var lanChannel: LanDirectChannel
     /**
      * UDP-каналы файловых пакетов через интернет (мобильная связь,
@@ -538,6 +555,8 @@ class FileTransferRouter @Inject constructor(
             return true
         }
         if (!FileTransferWire.isFilePacketText(text)) return false
+        // р231: к нам идёт файловая передача - передачу роли движка пока не делаем.
+        lastIncomingActivityAt = System.currentTimeMillis()
 
         // Хранение у третьего телефона: хранитель и отправитель могут не
         // иметь общего чата (получатель с хранителем - тем более). Чат здесь
@@ -669,6 +688,10 @@ class FileTransferRouter @Inject constructor(
         // «Приложение не отвечает» вплоть до убийства системы.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             if (!RustBridge.isRunning()) {
+                // р231: мы тень, но у нас есть готовый исходящий файл - своей
+                // сессии нет, поэтому просим движок у активного партнёра.
+                runCatching { maybeClaimEngineForOutgoing() }
+                    .onFailure { Log.w(TAG, "mirror engine claim failed: ${it.message}") }
                 Log.d(TAG, "File pump skipped: engine not running")
                 return@withContext null
             }
@@ -679,10 +702,31 @@ class FileTransferRouter @Inject constructor(
             runCatching { announceOutgoingFilesToMirror(System.currentTimeMillis()) }
                 .onFailure { Log.w(TAG, "mirror outgoing announce failed: ${it.message}") }
             val summary = sender.pumpOnce()
+            if (summary != null && (summary.packetsSent > 0 || summary.transfersPumped > 0)) {
+                lastOutgoingActivityAt = System.currentTimeMillis()
+            }
             pumpCustody()
             runCatching { groupSeeder.pump() }
                 .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
             summary
+        }
+    }
+
+    /**
+     * р231: у тени нет своей сетевой сессии, поэтому исходящий файл со
+     * второго устройства сам не уйдёт. Если партнёр-активный жив, просим у
+     * него движок (передачу роли): активный уходит в зеркало, мы поднимаемся
+     * и отправляем файл как обычно - строка передачи и карточка уже готовы.
+     * Просим только когда есть что отправлять и не чаще раза в минуту.
+     */
+    private suspend fun maybeClaimEngineForOutgoing() {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) return
+        if (!com.vladimir.messenger.data.mirror.MirrorHub.canClaimEngine()) return
+        val pending = transferDao.getActiveOutgoing(System.currentTimeMillis())
+        if (pending.isEmpty()) return
+        val claimed = com.vladimir.messenger.data.mirror.MirrorHub.claimEngine()
+        if (claimed) {
+            Log.i(TAG, "mirror engine claimed for ${pending.size} outgoing transfer(s)")
         }
     }
 
