@@ -1018,6 +1018,11 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror LAN pull reset failed: ${it.message}") }
         }
 
+        override suspend fun onCallFromPartner(signal: org.json.JSONObject) {
+            runCatching { callManager.onMirrorCall(signal) }
+                .onFailure { Log.w(TAG, "Mirror call signal failed: ${it.message}") }
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)
@@ -1062,6 +1067,10 @@ class CoreServerService : Service() {
         override fun onEngineClaimed(): Boolean {
             if (fileTransferRouter.hasRecentTransferActivity(System.currentTimeMillis())) {
                 Log.i(TAG, "Mirror claim: отказ, передача (отдача или приём) ещё идёт")
+                return false
+            }
+            if (callManager.isBusy()) {
+                Log.i(TAG, "Mirror claim: отказ, идёт звонок")
                 return false
             }
             val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)

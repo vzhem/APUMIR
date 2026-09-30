@@ -196,6 +196,15 @@ object MirrorHub {
     fun canClaimEngine(): Boolean = channel?.canClaimEngine() == true
 
     /**
+     * р233: звонковый сигнал партнёрскому устройству. Входящий звонок звонит
+     * на обоих, ответ/завершение/отклонение видны обоим. Шлём с любого
+     * устройства: у звонка, как и у файлов, роли могут меняться.
+     */
+    fun publishCallSignal(signal: org.json.JSONObject) {
+        runCatching { channel?.publishCallSignal(signal) }
+    }
+
+    /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
      * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
      * поэтому кадр безопасно звать и с активного, и с тени.
@@ -298,6 +307,8 @@ class MirrorChannel(
         suspend fun fileBytesFor(transferId: String, displayName: String, offset: Long, size: Int): ByteArray?
         /** р232: начинается прямой (LAN) приём файла - забыть недокачанное. */
         suspend fun onFilePullStart(transferId: String)
+        /** р233: звонковый сигнал партнёрского устройства (звонит на обоих). */
+        suspend fun onCallFromPartner(signal: JSONObject)
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -363,6 +374,18 @@ class MirrorChannel(
             sendEvent("claim", JSONObject().put("r", "engine"))
         }
         return true
+    }
+
+    /**
+     * р233: звонковый сигнал партнёру (звонит на обоих, состояние общее).
+     * Отправка - тем же зеркальным каналом, запечатана на себя.
+     */
+    fun publishCallSignal(signal: JSONObject) {
+        if (wsRef.get() == null) return
+        val sealed = sealPayload(signal) ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendJson(JSONObject().put("t", "ev").put("k", "call").put("d", sealed))
+        }
     }
 
     private fun partnerFresh(): Boolean =
@@ -879,6 +902,12 @@ class MirrorChannel(
                     }
                     Log.i(TAG, "lan pull id=${transferId.take(8)} ok=$pulled")
                 }
+            }
+            "call" -> {
+                // р233: звонковый сигнал партнёра - показать входящий и здесь,
+                // снять его при ответе/завершении на той стороне.
+                val body = openPayload(wire) ?: return
+                scope.launch { bridge.onCallFromPartner(body) }
             }
             "claim" -> {
                 // р231: партнёр-тень просит движок (отправка файла со второго
