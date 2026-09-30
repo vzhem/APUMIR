@@ -338,3 +338,25 @@ object ProfileSyncAuto {
         }.onFailure { Log.w(TAG, "notify failed: ${it.message}") }
     }
 }
+
+/** Точка входа для задачи без Hilt-фабрики. */
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface ProfileSyncEntryPoint {
+    fun profileBackup(): ProfileBackup
+}
+
+/**
+ * Периодическая авто-проверка: нашла копию - скачала, подготовила, сообщила.
+ * Применение по-прежнему только руками (профиль молча не подменяем).
+ */
+class ProfileSyncWorker(
+    context: Context,
+    params: WorkerParameters,
+) : CoroutineWorker(context, params) {
+
+    override suspend fun doWork(): Result {
+        // probe192d: тело убрано (бисекция)
+        return Result.success()
+    }
+}
