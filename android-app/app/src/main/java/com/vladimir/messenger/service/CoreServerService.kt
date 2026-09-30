@@ -274,6 +274,10 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
+        // р227: этот путь (запасной, через облачный релей) - второй вход
+        // служебных конвертов; зеркалу их отдаём так же, как основной путь.
+        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+
         // Раунд 141: каждый страж в защитной обёртке - если какой-то
         // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
         // и уведомления, а не исчезнуть молча.
@@ -960,6 +964,15 @@ class CoreServerService : Service() {
             chatRepository.applyMirrorSent(row)
         }
 
+        override suspend fun applyEnvelope(
+            senderId: String,
+            chatId: String,
+            messageId: String,
+            text: String,
+        ) {
+            applyMirrorEnvelope(senderId, chatId, messageId, text)
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)
@@ -995,6 +1008,61 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror: партнёр старше - ухожу в зеркало")
             restartForMirrorRole()
         }
+    }
+
+    /**
+     * р227: применить служебный конверт, пришедший от партнёра-зеркала.
+     *
+     * Разбор - теми же репозиториями, что и на активном устройстве; сети у
+     * тени нет, поэтому ответные отправки (подтверждения) она не делает - их
+     * сделает активный. Идентификаторы чатов у устройств СВОИ, поэтому личный
+     * чат находим по отправителю, а не по числу из конверта.
+     */
+    private suspend fun applyMirrorEnvelope(
+        senderId: String,
+        chatId: String,
+        messageId: String,
+        text: String,
+    ): Boolean {
+        if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
+        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }
+            .getOrNull() ?: chatId
+        if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: reaction from ${senderId.takeLast(8)} applied")
+            return true
+        }
+        if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
+            return true
+        }
+        if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
+            val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
+            if (refSha != null && localChatId.isNotBlank()) {
+                runCatching {
+                    chatRepository.insertReceivedGifRefMessage(
+                        chatId = localChatId,
+                        senderId = senderId,
+                        messageId = messageId.ifBlank { java.util.UUID.randomUUID().toString() },
+                        sha256 = refSha,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                }.onFailure { Log.w(TAG, "Mirror gif ref insert failed: ${it.message}") }
+                // Байты гифки дотянет следующий этап (прямой канал устройств);
+                // пока карточка живёт в переписке и докачается с хранителей,
+                // когда это устройство снова станет активным.
+            }
+            return true
+        }
+        return false
     }
 
     /**
@@ -1325,6 +1393,13 @@ class CoreServerService : Service() {
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
                 try {
+                    // р227: служебный конверт (реакция, удаление, просмотр,
+                    // сердечко, прочтение, ссылка на гифку) уходит и
+                    // партнёру-зеркалу: тот применит его у себя теми же
+                    // разборщиками. Тексты сюда не попадают - у них свой путь
+                    // (publishIncoming), двойников не будет.
+                    mirror?.publishEnvelope(senderId, chatId, messageId, text)
+
                     // F3: file packets ride the same durable transport but must never be stored
                     // as chat text. Relay cleanup still happens through the per-message ACK below.
                     if (fileTransferRouter.routeIncoming(senderId, chatId, messageId, text)) {

@@ -29,8 +29,14 @@ package com.vladimir.messenger.data.mirror
 
 import android.content.Context
 import android.util.Log
-import com.vladimir.messenger.data.group.GroupInviteLinks
+import com.vladimir.messenger.data.channel.PostViewWire
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
+import com.vladimir.messenger.data.gif.GifLibrary
+import com.vladimir.messenger.data.group.GroupInviteLinks
+import com.vladimir.messenger.data.heart.HeartWire
+import com.vladimir.messenger.data.reaction.ReactionWire
+import com.vladimir.messenger.data.receipt.ReadReceiptWire
+import com.vladimir.messenger.data.repository.MessageDeletionRepository
 import com.vladimir.messenger.data.security.MessageSealer
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
@@ -99,10 +105,32 @@ object MirrorHub {
         runCatching { channel?.publishSentEcho(id, chatId, content, ts, recipientId, status) }
     }
 
+    /** р227: входящий служебный конверт - пусть партнёр применит его у себя. */
+    fun publishEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
+        runCatching { channel?.publishEnvelope(senderId, chatId, messageId, text) }
+    }
+
     fun close() {
         runCatching { channel?.shutdown() }
         channel = null
     }
+}
+
+/**
+ * р227: служебные конверты, которые зеркало гоняет между устройствами одной
+ * личности. Здесь только «безопасные»: их разбор на втором устройстве -
+ * чистая запись в базу (реакция, удаление, просмотр поста, сердечко,
+ * прочтение, ссылка на гифку), без сети и без байтов. Файловые и звонковые
+ * конверты придут отдельными этапами: им нужны байты и своя логика ответа.
+ */
+object MirrorEnvelopes {
+    fun isSafe(text: String): Boolean =
+        ReactionWire.isReactionPacket(text) ||
+            text.startsWith(MessageDeletionRepository.PREFIX + "|") ||
+            PostViewWire.isViewPacket(text) ||
+            HeartWire.isHeartPacket(text) ||
+            ReadReceiptWire.isReadReceipt(text) ||
+            GifLibrary.isGifRef(text)
 }
 
 /** Служебное: тег этого устройства и полка зеркала. */
@@ -150,6 +178,8 @@ class MirrorChannel(
         suspend fun applyIncoming(row: MirrorRow, notify: Boolean)
         suspend fun applySent(row: MirrorRow)
         suspend fun onOutgoingFromPartner(row: MirrorRow)
+        /** р227: применить служебный конверт, пришедший от партнёра. */
+        suspend fun applyEnvelope(senderId: String, chatId: String, messageId: String, text: String)
         fun onPromote()
         fun onDeferToShadow()
     }
@@ -222,6 +252,27 @@ class MirrorChannel(
     fun publishOutgoing(row: MirrorRow): Boolean {
         if (engineUp) return false
         return sendEvent("out", row.toJson())
+    }
+
+    /**
+     * р227: входящий служебный конверт (реакция, удаление, просмотр поста,
+     * сердечко, прочтение, ссылка на гифку) -> зеркалу, чтобы и оно его
+     * применило. Шлёт только активный: у тени сети нет. Кадр маленький,
+     * потолок открытого текста - [MAX_ENVELOPE_CHARS].
+     */
+    fun publishEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
+        if (!engineUp) return
+        if (senderId.isBlank() || text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return
+        if (!MirrorEnvelopes.isSafe(text)) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val body = JSONObject()
+                .put("s", senderId)
+                .put("c", chatId)
+                .put("m", messageId)
+                .put("t", text)
+            val sealed = sealPayload(body) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "env").put("d", sealed))
+        }
     }
 
     // ── Транспорт ────────────────────────────────────────────────────────────
@@ -444,6 +495,21 @@ class MirrorChannel(
                 scope.launch { bridge.onOutgoingFromPartner(row) }
             }
             "batch" -> handleEventBatch(wire)
+            "env" -> {
+                // р227: служебный конверт от партнёра - применяем тем же
+                // разбором, что и на активном устройстве (сети у тени нет).
+                val body = openPayload(wire) ?: return
+                val senderId = body.optString("s")
+                if (senderId.isBlank()) return
+                scope.launch {
+                    bridge.applyEnvelope(
+                        senderId,
+                        body.optString("c"),
+                        body.optString("m"),
+                        body.optString("t"),
+                    )
+                }
+            }
         }
     }
 
@@ -490,5 +556,8 @@ class MirrorChannel(
 
     companion object {
         private const val BATCH_ROWS = 30
+
+        /** р227: потолок открытого текста зеркального конверта (кадр - 512 КиБ). */
+        private const val MAX_ENVELOPE_CHARS = 48_000
     }
 }
