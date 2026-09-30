@@ -30,7 +30,7 @@ package com.vladimir.messenger.data.mirror
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.group.GroupInviteLinks
-import com.vladimir.messenger.data.security.FileExchangeKeyStore
+import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.security.MessageSealer
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
