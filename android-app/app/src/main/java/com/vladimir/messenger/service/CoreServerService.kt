@@ -1599,6 +1599,20 @@ class CoreServerService : Service() {
                     return
                 }
 
+                // р239: сообщение «от себя». Такое бывает, когда в контактах
+                // оказался собственный узел (в профиле есть «Мой QR» - его
+                // можно отсканировать самому). Показывать эхо входящим и
+                // звонить о нём в уведомлении нельзя: владелец, скрин 30.09
+                // 16:40 - «начинаешь печатать - приходит уведомление от меня
+                // же». Своя строка уже лежит в переписке как отправленная,
+                // терять нечего.
+                val myNodeId = RustBridge.nodeId()
+                if (!myNodeId.isNullOrBlank() && senderId == myNodeId) {
+                    Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    return
+                }
+
                 // ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков, иначе
                 // групповые, файловые и служебные пакеты не будут узнаны.
                 //

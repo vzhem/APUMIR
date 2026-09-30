@@ -33,6 +33,10 @@ object TypingRouter {
 
     fun publishLocal(peerId: String, chatId: String, typing: Boolean) {
         if (peerId.isBlank() || !peerId.startsWith("pk_")) return
+        // р239: себе сигнал не шлём. Бывает, что в контактах есть собственный
+        // узел (его даёт «Мой QR» в профиле) - тогда пакет вернулся бы
+        // уведомлением «от себя».
+        if (peerId == runCatching { RustBridge.nodeId() }.getOrNull()) return
         scope.launch { publishNow(peerId, chatId, typing) }
     }
 
