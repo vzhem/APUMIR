@@ -1,49 +1,46 @@
 package com.vladimir.messenger.ui.screens.settings
 
 // =============================================================================
-// PROFILESYNCDIALOG.KT — окно «Синхронизировать аккаунт» (Настройки)
+// PROFILESYNCDIALOG.KT — окно «Синхронизировать аккаунт» (прямой перенос)
 // =============================================================================
-// Раунд 223. В фирменном стиле: пузыри-действия ApuActionBubble, подсказки.
-// Сверху - загрузить/восстановить, ниже - авто-синхронизация с
-// периодичностью. Безопасно: копия зашифрована паролем человека, пароль для
-// авто-режима хранится только завёрнутым ключом этого телефона.
+// Раунд 224: без облака. Источник показывает QR и код; приёмник вводит адрес
+// и код (или сканирует QR любым сканером) и забирает копию напрямую.
+// Фирменный стиль: пузыри ApuActionBubble, QR белым боксом (как р213).
 // =============================================================================
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.vladimir.messenger.data.backup.ProfileSync
 import com.vladimir.messenger.ui.components.ApuActionBubble
+import com.vladimir.messenger.util.QrCodeGenerator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -57,20 +54,23 @@ fun ProfileSyncDialog(
     val context = LocalContext.current
 
     AlertDialog(
-        onDismissRequest = { if (!ui.busy && !ui.restarting) onDismiss() },
+        onDismissRequest = { if (!ui.busy && !ui.restarting) {
+            viewModel.stopShare()
+            onDismiss()
+        } },
         title = { Text("Синхронизировать аккаунт") },
         text = {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Переносит чаты, контакты, сообщества, ранг и настройки на это " +
-                        "устройство из зашифрованной копии в облаке. Пароль копии - " +
-                        "тот же, что в «Защите личности». Получённые файлы " +
-                        "(картинки, видео) остаются на телефонах.",
+                    "Прямой перенос чатов, контактов, сообществ, ранга и настроек " +
+                        "между вашими устройствами по сети Wi-Fi - БЕЗ облака, " +
+                        "ничего нигде не хранится. Пароль копии - тот же, что в " +
+                        "«Защите личности». Получённые файлы (картинки, видео) " +
+                        "остаются на телефонах.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -84,33 +84,87 @@ fun ProfileSyncDialog(
                     visualTransformation = PasswordVisualTransformation(),
                 )
 
-                // Что лежит в облаке.
+                // ── Источник: раздача копии ─────────────────────────────
                 Text(
-                    if (ui.cloud.exists)
-                        "В облаке: копия от " +
-                            SimpleDateFormat("d.MM.yyyy HH:mm", Locale.getDefault())
-                                .format(Date(ui.cloud.timeMs)) +
-                            ", ${ProfileBackupViewModel.humanBytes(ui.cloud.sizeBytes)}"
-                    else "В облаке ещё нет копии",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "Телефон с данными",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
                 )
+                if (!ui.sharing) {
+                    ApuActionBubble(
+                        label = if (ui.busy) "Готовим копию…" else "Передать на другое устройство",
+                        icon = Icons.Default.Wifi,
+                        onClick = { viewModel.startShare() },
+                    )
+                } else {
+                    ui.shareAddress?.let { address ->
+                        // QR белым боксом, как приглашение (р213).
+                        val qrBitmap = remember(address.qrPayload) {
+                            QrCodeGenerator.generateQrCode(address.qrPayload, 512)
+                        }
+                        qrBitmap?.let {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                androidx.compose.foundation.layout.Box(
+                                    modifier = Modifier
+                                        .background(Color.White, RoundedCornerShape(12.dp))
+                                        .padding(8.dp),
+                                ) {
+                                    Image(
+                                        bitmap = it.asImageBitmap(),
+                                        contentDescription = "QR передачи копии",
+                                        modifier = Modifier.size(200.dp),
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            "Или введите на другом устройстве:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "Адрес: ${address.humanAddress}\nКод: ${address.token}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Ожидаем приёмник… копия отдаётся один раз.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = viewModel::stopShare) {
+                            Text("Отменить передачу")
+                        }
+                    }
+                }
 
-                // Загрузить копию этого устройства в облако.
-                ApuActionBubble(
-                    label = if (ui.busy) "Синхронизируем…" else "Загрузить копию в облако",
-                    icon = Icons.Default.CloudSync,
-                    onClick = { viewModel.uploadNow() },
+                // ── Приёмник: забрать копию ─────────────────────────────
+                Text(
+                    "Новое устройство (пустое)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
                 )
-
-                // Скачать копию из облака и подготовить восстановление.
+                androidx.compose.material3.OutlinedTextField(
+                    value = ui.pullAddress,
+                    onValueChange = viewModel::onPullAddressChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Адрес с экрана телефона (192.168.х.х:48126)") },
+                    singleLine = true,
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = ui.pullToken,
+                    onValueChange = viewModel::onPullTokenChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Код (8 знаков)") },
+                    singleLine = true,
+                )
                 ApuActionBubble(
-                    label = "Восстановить из облака",
+                    label = if (ui.busy) "Забираем копию…" else "Забрать копию с телефона",
                     icon = Icons.Default.CloudDownload,
-                    onClick = { viewModel.downloadAndStage() },
+                    onClick = { viewModel.pullAndStage() },
                 )
 
-                // Подготовленная копия: показать, чья она, и спросить подтверждение.
+                // ── Подготовленная копия: подтверждение ─────────────────
                 ui.staged?.let { manifest ->
                     val created = SimpleDateFormat("d.MM.yyyy HH:mm", Locale.getDefault())
                         .format(Date(manifest.createdAtMs))
@@ -135,58 +189,6 @@ fun ProfileSyncDialog(
                     }
                 }
 
-                HorizontalDivider()
-
-                // Авто-синхронизация: надо/не надо и периодичность.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Синхронизировать автоматически",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            if (ui.sync.enabled)
-                                "Копия уходит в облако каждые ${ui.sync.period.title.lowercase()}"
-                            else "Загружать копию в облако по расписанию",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = ui.sync.enabled,
-                        onCheckedChange = { viewModel.setAutoEnabled(it, ui.sync.period) },
-                    )
-                }
-                if (ui.sync.enabled) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ProfileSync.Period.entries.forEach { period ->
-                            androidx.compose.material3.FilterChip(
-                                selected = ui.sync.period == period,
-                                onClick = { viewModel.setPeriod(period) },
-                                label = { Text(period.title) },
-                            )
-                        }
-                    }
-                    Text(
-                        "Последняя загрузка: " +
-                            if (ui.sync.lastUploadAtMs > 0)
-                                SimpleDateFormat("d.MM HH:mm", Locale.getDefault())
-                                    .format(Date(ui.sync.lastUploadAtMs)) +
-                                    ", ${ProfileBackupViewModel.humanBytes(ui.sync.lastUploadBytes)}"
-                            else "ещё не было",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                ui.sync.lastError?.let { error ->
-                    Text(
-                        "Последняя авто-загрузка: $error",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-
                 ui.message?.let { message ->
                     Text(
                         message,
@@ -201,7 +203,10 @@ fun ProfileSyncDialog(
         confirmButton = {
             TextButton(
                 enabled = !ui.busy && !ui.restarting,
-                onClick = onDismiss,
+                onClick = {
+                    viewModel.stopShare()
+                    onDismiss()
+                },
             ) { Text("Закрыть") }
         },
     )

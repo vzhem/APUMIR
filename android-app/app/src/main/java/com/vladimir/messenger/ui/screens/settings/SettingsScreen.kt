@@ -1089,7 +1089,7 @@ private fun SettingsTabContent(
                     SettingsItem(
                         icon     = Icons.Default.Sync,
                         title    = "Синхронизировать аккаунт",
-                        subtitle = "Перенести чаты, контакты и ранг на другое устройство",
+                        subtitle = "Прямой перенос по Wi-Fi: телефон → другое устройство, без облака",
                         onClick  = { showSyncDialog = true },
                     )
                 }

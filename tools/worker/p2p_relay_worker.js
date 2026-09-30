@@ -395,10 +395,6 @@ export default {
         return await handleUpdateApk();
       } else if (path === "/support" && request.method === "GET") {
         return await handleSupport(env);
-      } else if (path.startsWith("/profile/") && request.method === "PUT") {
-        return await handleProfilePut(path.slice(9), request, env);
-      } else if (path.startsWith("/profile/") && request.method === "GET") {
-        return await handleProfileGet(path.slice(9), url, env);
       } else if (path === "/health") {
         return json({ status: "ok" });
       } else if (path === "/stats" && request.method === "GET") {
@@ -433,55 +429,6 @@ async function handleSupport(env) {
     // битый JSON в KV - не 500: это публичный маршрут, отдаём черновик
   }
   return json({ ok: true, draft: true, ways: [] });
-}
-
-// ---- раунд 223: облачная синхронизация профиля («Синхронизировать аккаунт») --
-// Полка psync:<отпечаток никнейма> в KV. Тело - base64 зашифрованного архива
-// .apubak (паролем человека; сервер прочитать не может). WITHOUT JSON: тело
-// идёт насквозь сырым текстом - 10-миллисекундный CPU изолята не тратится на
-// разбор мегабайтов. Время/размер - в metadata KV. Лимит 24 МБ base64.
-const MAX_PROFILE_B64 = 24_000_000;
-
-function profileKey(shelf) {
-  const clean = String(shelf || "").toLowerCase().replace(/[^a-f0-9]/g, "");
-  return clean.length >= 32 && clean.length <= 64 ? "psync:" + clean : null;
-}
-
-async function handleProfilePut(shelf, request, env) {
-  const key = profileKey(shelf);
-  if (!key) return json({ error: "bad shelf" }, 400);
-  if (!env.APU_VAULT) return json({ error: "KV binding is not configured" }, 501);
-  const blob = await request.text();
-  if (!blob || blob.length < 64) return json({ error: "empty blob" }, 400);
-  if (blob.length > MAX_PROFILE_B64) return json({ error: "too large" }, 413);
-  const time = Date.now();
-  await env.APU_VAULT.put(key, blob);
-  // Мета - отдельным крошечным ключом: «что в облаке» не тянет весь архив.
-  await env.APU_VAULT.put(key + ":meta", JSON.stringify({ exists: true, time, size: blob.length }));
-  return json({ success: true, size: blob.length });
-}
-
-async function handleProfileGet(shelf, url, env) {
-  const key = profileKey(shelf);
-  if (!key) return json({ error: "bad shelf" }, 400);
-  if (!env.APU_VAULT) return json({ error: "KV binding is not configured" }, 501);
-  if (url.searchParams.get("meta") === "1") {
-    const meta = await env.APU_VAULT.get(key + ":meta");
-    if (!meta) return json({ error: "not found" }, 404);
-    return new Response(meta, { headers: { "Content-Type": "application/json" } });
-  }
-  const stored = await env.APU_VAULT.get(key);
-  if (!stored) return json({ error: "not found" }, 404);
-  const metaRaw = await env.APU_VAULT.get(key + ":meta");
-  let time = 0;
-  try { time = (JSON.parse(metaRaw || "{}") || {}).time || 0; } catch (e) { time = 0; }
-  return new Response(stored, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Apu-Time": String(time),
-    },
-  });
 }
 
 // ---- хранилище личности -----------------------------------------------------
