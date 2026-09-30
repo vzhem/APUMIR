@@ -390,7 +390,7 @@ export default {
       } else if (path === "/version" && request.method === "GET") {
         return await handleVersion(env);
       } else if (path === "/update/latest" && request.method === "GET") {
-        return await handleUpdateLatest(request);
+        return await handleUpdateLatest(request, env);
       } else if (path === "/update/apk" && request.method === "GET") {
         return await handleUpdateApk();
       } else if (path === "/support" && request.method === "GET") {
@@ -1005,17 +1005,17 @@ async function handleVersion(env) {
 const RELEASE_REPO = "vzhem/APUMIR";
 const RELEASE_ASSET = "app-release.apk";
 
-async function handleUpdateLatest(request) {
+async function handleUpdateLatest(request, env) {
   let upstream;
   try {
     upstream = await fetch("https://api.github.com/repos/" + RELEASE_REPO + "/releases/latest", {
       headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "APU-Relay-Worker" },
     });
   } catch (e) {
-    return json({ error: "github unreachable: " + e.message }, 502);
+    return await serveLatestCache(env, "github unreachable: " + e.message);
   }
   if (!upstream.ok) {
-    return json({ error: "github " + upstream.status }, 502);
+    return await serveLatestCache(env, "github " + upstream.status);
   }
   const data = await upstream.json();
   const payload = {
@@ -1026,10 +1026,34 @@ async function handleUpdateLatest(request) {
     // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
     apk_url: new URL("/update/apk", request.url).toString(),
   };
+  // р225: успешный ответ складываем в KV без срока - когда GitHub начнёт
+  // лимитить запросы с адресов Cloudflare (403), телефоны всё равно увидят
+  // последний известный релиз, а не ошибку.
+  try {
+    if (env && env.APU_VAULT && payload.tag_name) {
+      await env.APU_VAULT.put("upd:latest", JSON.stringify(payload));
+    }
+  } catch (e) { /* кэш не критичен */ }
   return new Response(JSON.stringify(payload), {
     status: 200,
     headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=300" },
   });
+}
+
+/** GitHub лимитит/недоступен: отдать последний известный релиз из KV. */
+async function serveLatestCache(env, reason) {
+  try {
+    if (env && env.APU_VAULT) {
+      const cached = await env.APU_VAULT.get("upd:latest");
+      if (cached) {
+        return new Response(cached, {
+          status: 200,
+          headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=60", "X-Apu-Cache": "stale" },
+        });
+      }
+    }
+  } catch (e) { /* нет кэша - честная ошибка */ }
+  return json({ error: reason }, 502);
 }
 
 async function handleUpdateApk() {
