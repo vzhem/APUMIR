@@ -913,6 +913,9 @@ class CoreServerService : Service() {
         Log.i(TAG, "Mirror shadow: движок не стартуем, живём на событиях партнёра")
         runCatching { RustBridge.attachContext(applicationContext) }
         runCatching { RustBridge.ensureCoreOnly() }
+        // Личность у тени та же, а движка нет: без этого адреса групповые
+        // конверты не применялись бы (проверка «я участник»).
+        runCatching { RustBridge.setShadowNodeId(nodeId) }
         updateNotification("APU: сеть ведёт другое устройство (зеркало)")
         startMirrorChannel(nodeId = nodeId, engineUp = false)
     }
@@ -983,6 +986,9 @@ class CoreServerService : Service() {
             text: String,
         ) {
             mirrorApplyActionLocally(peerId, groupId, text)
+        }
+
+        override suspend fun onActionToPeers(peerId: String, groupId: String, text: String) {
             mirrorSendActionToPeers(peerId, groupId, text)
         }
 
@@ -1042,6 +1048,14 @@ class CoreServerService : Service() {
         text: String,
     ): Boolean {
         if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
+        // Групповой конверт: у группы один и тот же id на всех устройствах,
+        // поэтому разбираем его тем же путём, что и обычное входящее.
+        if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
+            val applied = runCatching { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
+                .getOrDefault(false)
+            if (applied) Log.i(TAG, "Mirror envelope: групповой конверт применён")
+            return applied
+        }
         val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }
             .getOrNull() ?: chatId
         if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
@@ -1108,6 +1122,18 @@ class CoreServerService : Service() {
      * отправок здесь нет: конверт в сеть уйдёт отдельно.
      */
     private suspend fun mirrorApplyActionLocally(peerId: String, groupId: String, text: String) {
+        // Групповой конверт (сообщение, пост, комментарий, тема, закреп,
+        // состав): применяем тем же разбором, что и входящий, но от своего
+        // имени - на партнёрском устройстве это «моё» сообщение.
+        if (groupId.isNotBlank() &&
+            com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)
+        ) {
+            val me = RustBridge.nodeId().orEmpty()
+            runCatching { groupRouter.routeIncoming(me, groupId, "", text) }
+                .onFailure { Log.w(TAG, "Mirror group packet apply failed: ${it.message}") }
+            Log.i(TAG, "Mirror action: групповой конверт применён локально")
+            return
+        }
         if (runCatching { reactionRepository.applyMirrorOutgoing(peerId, groupId, text) }
                 .getOrDefault(false)
         ) {
@@ -1134,6 +1160,18 @@ class CoreServerService : Service() {
      */
     private suspend fun mirrorSendActionToPeers(peerId: String, groupId: String, text: String) {
         if (groupId.isNotBlank()) {
+            // Групповое сообщение/пост: рассылка участникам - штатной доставкой
+            // группы (она же выбирает получателей и ведёт учёт манифестов).
+            if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
+                val report = runCatching { groupRepository.fanoutEnvelope(groupId, text) }
+                    .getOrNull()
+                Log.i(
+                    TAG,
+                    "Mirror action: групповой конверт разослан " +
+                        "${report?.delivered ?: 0}/${report?.attempted ?: 0}",
+                )
+                return
+            }
             val group = groupDao.getGroupById(groupId)
             if (group == null) {
                 Log.w(TAG, "Mirror action: группы $groupId нет на этом устройстве")

@@ -72,6 +72,8 @@ class HeartRepository @Inject constructor(
                 // р228: тень отдаёт сердечко активному - своей сессии у неё нет.
                 if (!MirrorHub.deliverAction(peerId = ownerId, groupId = "", chatId = ownerId, text = envelope)) {
                     RustBridge.sendMessage(UUID.randomUUID().toString(), ownerId, ownerId, envelope)
+                    // р229: своё сердечко - и партнёрскому устройству личности.
+                    MirrorHub.publishOwnAction(peerId = ownerId, groupId = "", chatId = ownerId, text = envelope)
                 }
             }
         }.onFailure { Log.w(TAG, "heart send failed: ${it.message}") }

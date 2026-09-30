@@ -121,10 +121,14 @@ class ReactionRepository @Inject constructor(
             // него нет, а у активного она одна на аккаунт.
             if (MirrorHub.deliverAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)) return
             RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+            // р229: и своё действие активного - партнёрскому устройству.
+            MirrorHub.publishOwnAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)
             return
         }
         // р228: групповое действие тени - активный разошлёт участникам.
         if (MirrorHub.deliverAction(peerId = "", groupId = chatId, chatId = chatId, text = envelope)) return
+        // р229: групповое действие, сделанное здесь, - и партнёрскому устройству.
+        MirrorHub.publishOwnAction(peerId = "", groupId = chatId, chatId = chatId, text = envelope)
         // Группа: реакция - служебный пакет. Сначала своим и проверенным; когда
         // служебный бюджет телефона исчерпан, остальные её не получат - это
         // лучше, чем задерживать посты и сообщения ради значка. На большом

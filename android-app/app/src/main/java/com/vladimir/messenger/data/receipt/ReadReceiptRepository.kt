@@ -59,6 +59,8 @@ class ReadReceiptRepository @Inject constructor(
                 } else {
                     RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
                     Log.i(TAG, "read receipt sent for ${incoming.size} message(s)")
+                    // р229: свой отчёт - и партнёрскому устройству личности.
+                    MirrorHub.publishOwnAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)
                 }
                 // р228: второе устройство той же личности тоже снимает
                 // непрочитанное - иначе бейджи на телефонах разойдутся.

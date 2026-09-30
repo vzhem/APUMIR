@@ -76,6 +76,11 @@ class MessageDeletionRepository @Inject constructor(
             // (оно придёт как служебный конверт и снимет запись из очереди).
             val viaMirror = MirrorHub.deliverAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)
             val sent = viaMirror || RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+            // р229: удаление, сделанное здесь, применяем и на партнёрском
+            // устройстве личности (у собеседника строка остаётся).
+            if (!viaMirror) {
+                MirrorHub.publishOwnAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)
+            }
             outbox.add(
                 DeletionOutbox.Entry(
                     targetId = messageId,

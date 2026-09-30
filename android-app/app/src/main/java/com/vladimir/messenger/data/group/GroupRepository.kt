@@ -4537,12 +4537,42 @@ class GroupRepository(
 
     private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
         val me = myId().orEmpty()
+        // р229: пока применяется зеркальный кадр, тень не рассылает ничего -
+        // иначе ответ на принятое событие уходил бы обратно активному и
+        // возвращался: получилась бы петля. Сети у тени всё равно нет.
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isApplyingFrame() &&
+            !com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()
+        ) {
+            return DeliveryReport(attempted = 0, delivered = 0, failed = emptyList())
+        }
+        // р229: устройство-зеркало своей сессии не имеет - конверт несёт
+        // активное. Возвращаем успех: дальше им занимается партнёр, а своя
+        // база уже обновлена вызывающим кодом.
+        if (com.vladimir.messenger.data.mirror.MirrorHub.deliverGroupEnvelope(groupId, envelope)) {
+            Log.i(TAG, "group envelope via mirror (тень): " + envelope.take(16))
+            return DeliveryReport(attempted = 1, delivered = 1, failed = emptyList())
+        }
+        // р229: и наоборот - конверт, сделанный ЗДЕСЬ, должен доехать до
+        // второго устройства личности (получатели в сети его не видят).
+        com.vladimir.messenger.data.mirror.MirrorHub.publishEnvelope(
+            senderId = me,
+            chatId = groupId,
+            messageId = "",
+            text = envelope,
+        )
         val recipients = groupDao.getMembers(groupId)
             .filter { !it.isBanned }
             .map { it.nodeId }
             .filter { !excludeSelf || it != me }
         return delivery.deliver(groupId, envelope, recipients)
     }
+
+    /**
+     * р229: разослать групповой конверт участникам (для конверта, пришедшего
+     * с партнёрского устройства личности - сеть ведёт активный).
+     */
+    suspend fun fanoutEnvelope(groupId: String, envelope: String): DeliveryReport =
+        broadcast(groupId, envelope, excludeSelf = true)
 
     /**
      * Запоминает автора сообщения, чтобы в ленте было имя, а не обрывок

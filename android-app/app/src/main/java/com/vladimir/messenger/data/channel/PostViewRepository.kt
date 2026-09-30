@@ -76,6 +76,8 @@ class PostViewRepository @Inject constructor(
                 if (MirrorHub.deliverAction(peerId = "", groupId = channelId, chatId = channelId, text = envelope)) {
                     return@runCatching
                 }
+                // р229: свой просмотр - и партнёрскому устройству личности.
+                MirrorHub.publishOwnAction(peerId = "", groupId = channelId, chatId = channelId, text = envelope)
                 val recipients = counters.signalTargets(group, me)
                 var sent = 0
                 for (peer in recipients) {

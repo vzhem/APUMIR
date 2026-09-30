@@ -97,6 +97,34 @@ object MirrorHub {
     @Volatile
     var channel: MirrorChannel? = null
 
+    /**
+     * р229: сейчас применяется зеркальный кадр. Пока флаг стоит, ответные
+     * рассылки тени подавляются: иначе «принял событие - ответил» уходило бы
+     * обратно активному и возвращалось петлёй.
+     */
+    @Volatile
+    @PublishedApi
+    internal var applyingFrame = false
+
+    fun isApplyingFrame(): Boolean = applyingFrame
+
+    /** Ведёт ли это устройство сеть (у тени движка нет). */
+    fun isActiveDevice(): Boolean = channel?.isEngineUp() == true
+
+    /**
+     * Выполнить блок как «применение зеркального кадра». Inline: внутри
+     * зовутся suspend-функции разбора (репозитории), а обычная лямбда их не
+     * пропустит.
+     */
+    inline fun <T> duringApply(block: () -> T): T {
+        applyingFrame = true
+        return try {
+            block()
+        } finally {
+            applyingFrame = false
+        }
+    }
+
     /** Исходящую тени несём через активного партнёра (шифросессия одна). */
     fun routeOutgoing(): MirrorChannel? =
         channel?.takeIf { it.canCarryOutgoing() }
@@ -118,8 +146,31 @@ object MirrorHub {
      *         (у тени её нет, а у активного сессия одна).
      */
     fun deliverAction(peerId: String, groupId: String, chatId: String, text: String): Boolean =
-        runCatching { channel?.publishOutgoingEnvelope(peerId, groupId, chatId, text) == true }
-            .getOrDefault(false)
+        runCatching {
+            if (applyingFrame) false
+            else channel?.publishOutgoingEnvelope(peerId, groupId, chatId, text) == true
+        }.getOrDefault(false)
+
+    /**
+     * р228: СВОЁ действие активного (реакция, удаление, просмотр, сердечко,
+     * прочтение) - отдать партнёрскому устройству, чтобы он показал то же
+     * самое. Шлёт только активный; тень ничего не делает (её действия идут
+     * обратным путём через [deliverAction]).
+     */
+    fun publishOwnAction(peerId: String, groupId: String, chatId: String, text: String) {
+        runCatching { channel?.publishActiveEnvelope(peerId, groupId, chatId, text) }
+    }
+
+    /**
+     * р228: групповой конверт, сделанный на ТЕНИ (сообщение, пост, тема,
+     * закреп, состав) -> активному: тот применит его у себя и разошлёт
+     * участникам одной сессией аккаунта.
+     */
+    fun deliverGroupEnvelope(groupId: String, envelope: String): Boolean =
+        runCatching {
+            if (applyingFrame) false
+            else channel?.publishOutgoingEnvelope("", groupId, groupId, envelope) == true
+        }.getOrDefault(false)
 
     /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
@@ -145,7 +196,8 @@ object MirrorHub {
  */
 object MirrorEnvelopes {
     fun isSafe(text: String): Boolean =
-        ReactionWire.isReactionPacket(text) ||
+        com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text) ||
+            ReactionWire.isReactionPacket(text) ||
             text.startsWith(MessageDeletionRepository.PREFIX + "|") ||
             PostViewWire.isViewPacket(text) ||
             HeartWire.isHeartPacket(text) ||
@@ -201,11 +253,15 @@ class MirrorChannel(
         /** р227: применить служебный конверт, пришедший от партнёра. */
         suspend fun applyEnvelope(senderId: String, chatId: String, messageId: String, text: String)
         /**
-         * р228: действие, сделанное на тени. Активный отправляет конверт
-         * собеседнику (или участникам группы) своей сессией и применяет то же
-         * действие у себя, чтобы устройства не разошлись.
+         * р228: действие, сделанное на партнёрском устройстве - применить у
+         * себя (без сети).
          */
         suspend fun onActionFromPartner(peerId: String, groupId: String, chatId: String, text: String)
+        /**
+         * р228: конверт, сделанный на тени, отправить в сеть. Зовётся только
+         * у активного: у тени своей сессии нет.
+         */
+        suspend fun onActionToPeers(peerId: String, groupId: String, text: String)
         /** р228: на партнёрском устройстве сняли непрочитанное - снять и у себя. */
         suspend fun onReadFromPartner(peerId: String, groupId: String, topicId: String)
         fun onPromote()
@@ -237,6 +293,9 @@ class MirrorChannel(
     private val deferFired = AtomicBoolean(false)
     private val promoteFired = AtomicBoolean(false)
     private var catchupInFlight = false
+
+    /** Ведёт ли ЭТО устройство сеть (активное) или живёт зеркалом. */
+    fun isEngineUp(): Boolean = engineUp
 
     /** Активный всегда может нести исходящие; тень - только при живом партнёре. */
     fun canCarryOutgoing(): Boolean =
@@ -327,6 +386,25 @@ class MirrorChannel(
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sendJson(JSONObject().put("t", "ev").put("k", "read").put("d", sealed))
         }
+    }
+
+    /**
+     * р228: своё (сделанное здесь) действие активного - партнёру, чтобы тот
+     * показал то же самое. У тени партнёром является активный, поэтому кадр
+     * шлёт только ведущее сеть устройство.
+     */
+    fun publishActiveEnvelope(peerId: String, groupId: String, chatId: String, text: String): Boolean {
+        if (!engineUp) return false
+        if (wsRef.get() == null) return false
+        if (text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return false
+        if (peerId.isBlank() && groupId.isBlank()) return false
+        val body = JSONObject()
+            .put("p", peerId)
+            .put("g", groupId)
+            .put("c", chatId)
+            .put("t", text)
+        val sealed = sealPayload(body) ?: return false
+        return sendJson(JSONObject().put("t", "ev").put("k", "outenv").put("d", sealed))
     }
 
     /**
@@ -582,19 +660,28 @@ class MirrorChannel(
                 }
             }
             "outenv" -> {
-                // р228: действие тени. Отправляет и применяет активный -
-                // у тени ни сессии, ни сети.
-                if (!engineUp) return
+                // р228: действие партнёрского устройства. Применяем всегда,
+                // а в сеть отправляем только если сеть ведём мы (у тени
+                // сессии нет, кадр придёт от активного вторым шагом).
                 val body = openPayload(wire) ?: return
                 val text = body.optString("t")
                 if (text.isBlank()) return
                 scope.launch {
-                    bridge.onActionFromPartner(
-                        peerId = body.optString("p"),
-                        groupId = body.optString("g"),
-                        chatId = body.optString("c"),
-                        text = text,
-                    )
+                    MirrorHub.duringApply {
+                        bridge.onActionFromPartner(
+                            peerId = body.optString("p"),
+                            groupId = body.optString("g"),
+                            chatId = body.optString("c"),
+                            text = text,
+                        )
+                    }
+                    if (engineUp) {
+                        bridge.onActionToPeers(
+                            peerId = body.optString("p"),
+                            groupId = body.optString("g"),
+                            text = text,
+                        )
+                    }
                 }
             }
             "env" -> {
@@ -604,12 +691,14 @@ class MirrorChannel(
                 val senderId = body.optString("s")
                 if (senderId.isBlank()) return
                 scope.launch {
-                    bridge.applyEnvelope(
-                        senderId,
-                        body.optString("c"),
-                        body.optString("m"),
-                        body.optString("t"),
-                    )
+                    MirrorHub.duringApply {
+                        bridge.applyEnvelope(
+                            senderId,
+                            body.optString("c"),
+                            body.optString("m"),
+                            body.optString("t"),
+                        )
+                    }
                 }
             }
         }

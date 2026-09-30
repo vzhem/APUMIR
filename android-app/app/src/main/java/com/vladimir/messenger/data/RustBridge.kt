@@ -63,6 +63,19 @@ object RustBridge {
     }
 
     /**
+     * р228: адрес личности для устройства-зеркала. Движка у тени нет (сеть
+     * ведёт партнёр), но личность та же, поэтому без этого `nodeId()` вернул
+     * бы null и групповые конверты не применялись бы (проверка «я участник»).
+     * Ставится только сервисом в режиме зеркала.
+     */
+    @Volatile
+    private var shadowNodeId: String? = null
+
+    fun setShadowNodeId(nodeId: String) {
+        if (nodeId.isNotBlank()) shadowNodeId = nodeId
+    }
+
+    /**
      * M8-C: [relayDbPath] — собственный SQLite-файл durable encrypted relay
      * custody (app-private). Передаётся только после того, как
      * [com.vladimir.messenger.data.security.RelayAtRestMasterKey.installIntoCore]
@@ -229,7 +242,7 @@ object RustBridge {
         "недоступно"
     }
 
-    fun nodeId(): String? = engine?.nodeId()
+    fun nodeId(): String? = engine?.nodeId() ?: shadowNodeId
     fun publicKey(): String? = engine?.publicKey()
 
     fun networkStatus(): String = engine?.networkStatus() ?: "offline"
