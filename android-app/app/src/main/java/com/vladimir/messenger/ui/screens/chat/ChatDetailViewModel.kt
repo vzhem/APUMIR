@@ -33,6 +33,13 @@ data class ChatDetailUiState(
     val pinned: List<Message> = emptyList(),
     /** р235: собеседник сейчас печатает («печатает…» в шапке чата). */
     val isPeerTyping: Boolean = false,
+    /**
+     * р241: переписка с СОБСТВЕННЫМ узлом (в контакты попал свой адрес -
+     * например, отсканировали собственный QR из профиля). Такая переписка
+     * никуда не ведёт: собеседника в ней нет. Показываем честную плашку,
+     * вместо того чтобы молча копить строки «в ожидании».
+     */
+    val isSelfChat: Boolean = false,
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
@@ -249,6 +256,13 @@ class ChatDetailViewModel @Inject constructor(
                     }.getOrDefault("")
                     // р235: адрес собеседника нужен для «печатает…».
                     if (chat.contactId.isNotBlank()) peerId = chat.contactId
+                    // р241: это наш собственный узел? Тогда переписка никуда не
+                    // ведёт - предупреждаем человека прямо в чате.
+                    val selfNode = runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }
+                        .getOrNull()
+                    if (!selfNode.isNullOrBlank()) {
+                        _uiState.update { it.copy(isSelfChat = chat.contactId == selfNode) }
+                    }
                     // р236: черновик этого чата (ключ - адрес собеседника)
                     // подставляем в пустое поле: недописанное с другого
                     // устройства должно ждать здесь.

@@ -353,6 +353,7 @@ fun ChatDetailScreen(
                 onTextChange = viewModel::onInputTextChanged,
                 onSend       = viewModel::onSendMessage,
                 isSending    = uiState.isSending,
+                isSelfChat   = uiState.isSelfChat,
                 canAttach    = uiState.canSendAttachments,
                 onAttach     = {
                     if (uiState.canSendAttachments) {
@@ -970,6 +971,8 @@ private fun MessageInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     isSending: Boolean,
+    /** р241: переписка с собственным узлом - отправлять здесь нечего. */
+    isSelfChat: Boolean = false,
     onAttach: () -> Unit = {},
     isPreparingFile: Boolean = false,
     canAttach: Boolean = true,
@@ -1124,11 +1127,35 @@ private fun MessageInputBar(
 
             Spacer(modifier = Modifier.height(6.dp))
 
+            // р241: переписка с собственным узлом. Такое случается, если в
+            // контакты попал свой же адрес (в профиле есть «Мой QR» - его
+            // легко отсканировать самому). Объясняем честно: собеседника
+            // здесь нет, а устройства одной личности синхронизируются сами.
+            if (isSelfChat) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFFFF3CD))
+                        .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = "Это ваш собственный узел — собеседника здесь нет. " +
+                            "Устройства одного аккаунта синхронизируются сами " +
+                            "(Настройки → «Диагностика синхронизации»).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF1E2430),
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
             // Раунд 152: активность читаем НАПРЯМУЮ из inputState - раньше
             // она шла через родителя (snapshotFlow -> onTextChange ->
             // recomposition), и кнопка активировалась с задержкой; плюс
             // золотая заливка и белый текст (как в темах) - видно сразу.
-            val canSend = inputState.text.isNotBlank() && !isSending
+            val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
             TextButton(
                 onClick = onSend,
                 enabled = canSend,

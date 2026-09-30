@@ -149,7 +149,10 @@ object MirrorHub {
         val mirror = runCatching { channel?.debugState() }.getOrNull()
             ?: "зеркало не запущено (устройство одно)"
         val pending = if (pendingOutgoing < 0) "неизвестно" else pendingOutgoing.toString()
-        return mirror + "\nнедоотправленных сообщений: " + pending
+        val me = runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }.getOrNull().orEmpty()
+        return mirror +
+            "\nмой узел: " + me.take(16).ifBlank { "неизвестен" } +
+            "\nнедоотправленных сообщений: " + pending
     }
 
     /** р227: входящий служебный конверт - пусть партнёр применит его у себя. */
