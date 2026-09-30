@@ -216,6 +216,16 @@ object MirrorHub {
     }
 
     /**
+     * р235: собеседник печатает - второму устройству личности, чтобы
+     * индикатор был на обоих телефонах. Шлёт то устройство, которое
+     * получило пакет из сети (у тени сессии нет).
+     */
+    fun publishTyping(peerId: String, typing: Boolean) {
+        if (peerId.isBlank()) return
+        runCatching { channel?.publishTyping(peerId, typing) }
+    }
+
+    /**
      * р228: переписку прочитали на этом устройстве - снять непрочитанное и
      * на партнёрском, иначе бейджи разойдутся. Ничего не рассылает в сеть,
      * поэтому кадр безопасно звать и с активного, и с тени.
@@ -322,6 +332,8 @@ class MirrorChannel(
         suspend fun onCallFromPartner(signal: JSONObject)
         /** р234: контакт изменился на партнёрском устройстве. */
         suspend fun onContactFromPartner(signal: JSONObject)
+        /** р235: собеседник печатает (увидело партнёрское устройство). */
+        suspend fun onTypingFromPartner(peerId: String, typing: Boolean)
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -407,6 +419,17 @@ class MirrorChannel(
         val sealed = sealPayload(signal) ?: return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sendJson(JSONObject().put("t", "ev").put("k", "contact").put("d", sealed))
+        }
+    }
+
+    /** р235: «собеседник печатает» - партнёрскому устройству личности. */
+    fun publishTyping(peerId: String, typing: Boolean) {
+        if (wsRef.get() == null) return
+        val sealed = sealPayload(
+            JSONObject().put("p", peerId).put("on", if (typing) 1 else 0),
+        ) ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sendJson(JSONObject().put("t", "ev").put("k", "typing").put("d", sealed))
         }
     }
 
@@ -938,6 +961,14 @@ class MirrorChannel(
                 scope.launch {
                     MirrorHub.duringApply { bridge.onContactFromPartner(body) }
                 }
+            }
+            "typing" -> {
+                // р235: печатает собеседник - показать и здесь (на оба
+                // устройства личности индикатор приходит одинаково).
+                val body = openPayload(wire) ?: return
+                val peerId = body.optString("p")
+                if (peerId.isBlank()) return
+                scope.launch { bridge.onTypingFromPartner(peerId, body.optInt("on", 0) == 1) }
             }
             "claim" -> {
                 // р231: партнёр-тень просит движок (отправка файла со второго

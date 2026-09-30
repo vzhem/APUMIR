@@ -297,10 +297,16 @@ fun ChatDetailScreen(
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1E2430),
                             )
+                            // р235: «печатает…» важнее статуса сети и гаснет само.
+                            val peerTyping = uiState.isPeerTyping
                             Text(
-                                text  = if (uiState.isContactOnline) "в сети" else "не в сети",
+                                text = when {
+                                    peerTyping -> "печатает…"
+                                    uiState.isContactOnline -> "в сети"
+                                    else -> "не в сети"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (uiState.isContactOnline)
+                                color = if (peerTyping || uiState.isContactOnline)
                                     MaterialTheme.colorScheme.primary
                                 else
                                     Color(0xFF5A6472),

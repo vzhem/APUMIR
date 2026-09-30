@@ -31,6 +31,8 @@ data class ChatDetailUiState(
     val messages: List<Message> = emptyList(),
     /** Раунд 173: закреплённые сообщения чата (свежие вверху). */
     val pinned: List<Message> = emptyList(),
+    /** р235: собеседник сейчас печатает («печатает…» в шапке чата). */
+    val isPeerTyping: Boolean = false,
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
@@ -89,11 +91,21 @@ class ChatDetailViewModel @Inject constructor(
     // chatId передаётся через навигацию (SavedStateHandle)
     private val chatId: String = checkNotNull(savedStateHandle["chatId"])
 
+    /** р235: собеседник личного чата - ему уходит «печатает…». */
+    @Volatile private var peerId: String = ""
+
+    /** р235: когда последний раз отправляли «печатает» (не чаще раза в 2.5 с). */
+    @Volatile private var lastTypingSentAt = 0L
+
+    /** р235: сказали ли собеседнику, что мы печатаем (чтобы послать «перестал»). */
+    @Volatile private var typingAnnounced = false
+
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
     init {
         refreshAttachmentRights()
+        observePeerTyping()
         loadMessages()
         observePinned()
         observeContactPresence()
@@ -102,6 +114,42 @@ class ChatDetailViewModel @Inject constructor(
         markAsRead()
         observeGifArrivals()
         observeStickerArrivals()
+    }
+
+    /**
+     * р235: «печатает…». Состояние живёт в памяти (TypingPeer) и само гаснет
+     * через несколько секунд после последнего пакета; здесь только показываем
+     * его в шапке чата.
+     */
+    private fun observePeerTyping() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.typing.TypingPeer.typing.collect { typing ->
+                val peer = peerId
+                _uiState.update { it.copy(isPeerTyping = peer.isNotBlank() && typing.contains(peer)) }
+            }
+        }
+    }
+
+    /**
+     * р235: рассказать собеседнику, что мы печатаем. Пакет уходит не чаще раза
+     * в [TYPING_REFRESH_MS] (на каждую букву - нельзя: это лишний трафик), а
+     * когда поле очистили или сообщение ушло - «перестал».
+     */
+    private fun publishTyping(active: Boolean) {
+        val peer = peerId
+        if (peer.isBlank()) return
+        if (!active) {
+            if (!typingAnnounced) return
+            typingAnnounced = false
+            lastTypingSentAt = 0L
+            com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, false)
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastTypingSentAt < TYPING_REFRESH_MS) return
+        lastTypingSentAt = now
+        typingAnnounced = true
+        com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, true)
     }
 
     /** Раунд 121: гифка, которую ждали из роя, пришла - сразу отправить. */
@@ -150,8 +198,15 @@ class ChatDetailViewModel @Inject constructor(
                     val nick = runCatching {
                         contactDao.getContactById(chat.contactId)?.username.orEmpty()
                     }.getOrDefault("")
+                    // р235: адрес собеседника нужен для «печатает…».
+                    if (chat.contactId.isNotBlank()) peerId = chat.contactId
                     _uiState.update {
-                        it.copy(isContactOnline = chat.isContactOnline, contactUsername = nick)
+                        it.copy(
+                            isContactOnline = chat.isContactOnline,
+                            contactUsername = nick,
+                            isPeerTyping = com.vladimir.messenger.data.typing.TypingPeer
+                                .isTyping(chat.contactId),
+                        )
                     }
                     // Сердечки заводим здесь: только тут точно известен адрес
                     // собеседника (в личном чате это contactId).
@@ -322,6 +377,8 @@ class ChatDetailViewModel @Inject constructor(
 
     fun onInputTextChanged(text: String) {
         _uiState.update { it.copy(inputText = text) }
+        // р235: «печатает…» у собеседника, пока в поле есть текст.
+        publishTyping(text.isNotBlank())
     }
 
     fun onSendMessage() {
@@ -333,6 +390,8 @@ class ChatDetailViewModel @Inject constructor(
 
             sendMessageUseCase(chatId, text)
                 .onSuccess {
+                    // р235: сообщение ушло - «печатает…» у собеседника гаснет.
+                    publishTyping(false)
                     _uiState.update { it.copy(
                         isSending      = false,
                         scrollToBottom = true
@@ -1235,5 +1294,10 @@ class ChatDetailViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private companion object {
+        /** р235: не чаще раза в 2.5 с - иначе «печатает…» стал бы потоком пакетов. */
+        const val TYPING_REFRESH_MS = 2_500L
     }
 }

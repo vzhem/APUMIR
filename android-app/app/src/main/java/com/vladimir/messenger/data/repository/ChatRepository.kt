@@ -487,6 +487,9 @@ class ChatRepository @Inject constructor(
         }
         
         Log.i(TAG, "💾 saveIncomingMessage: chatId=$chatId msgId=$messageId ts=$timestamp")
+        // р235: собеседник прислал сообщение - «печатает…» гаснет сразу, не
+        // дожидаясь, пока индикатор протухнет сам (до 6 с).
+        runCatching { com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId) }
         val entity = MessageEntity(
             id = messageId,
             chatId = chatId,

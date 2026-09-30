@@ -331,6 +331,14 @@ class CoreServerService : Service() {
         ) {
             return true
         }
+        // р235: «печатает…» - самый лёгкий служебный пакет; разбирается
+        // последним, чтобы не мешать остальным.
+        if (runCatching {
+                com.vladimir.messenger.data.typing.TypingRouter.routeIncoming(senderId, text)
+            }.getOrDefault(false)
+        ) {
+            return true
+        }
         return false
     }
 
@@ -1028,6 +1036,15 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror contact failed: ${it.message}") }
         }
 
+        override suspend fun onTypingFromPartner(peerId: String, typing: Boolean) {
+            // р235: индикатор «печатает…» - мимолётное состояние в памяти.
+            if (typing) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(peerId)
+            } else {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(peerId)
+            }
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)
@@ -1178,6 +1195,9 @@ class CoreServerService : Service() {
      * отправок здесь нет: конверт в сеть уйдёт отдельно.
      */
     private suspend fun mirrorApplyActionLocally(peerId: String, groupId: String, text: String) {
+        // р235: «печатает…» с тени - локально показывать нечего (это наше
+        // собственное состояние), пакет просто уходит собеседнику.
+        if (com.vladimir.messenger.data.typing.TypingWire.isTypingPacket(text)) return
         // Групповой конверт (сообщение, пост, комментарий, тема, закреп,
         // состав): применяем тем же разбором, что и входящий, но от своего
         // имени - на партнёрском устройстве это «моё» сообщение.
