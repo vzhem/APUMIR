@@ -222,6 +222,11 @@ object ProfileSyncNet {
         }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Авто-проверка по расписанию: само ищет копию, само скачивает и готовит,
+// уведомляет «копия готова к применению». Применение - всегда руками.
+// ─────────────────────────────────────────────────────────────────────────────
+
 object ProfileSyncAuto {
 
     private const val TAG = "ProfileSyncAuto"
@@ -250,8 +255,7 @@ object ProfileSyncAuto {
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build(),
+                .build()
         )
         return generator.generateKey()
     }
@@ -272,7 +276,17 @@ object ProfileSyncAuto {
             .putBoolean(KEY_ENABLED, true)
             .putString(KEY_WRAPPED, wrapped)
             .apply()
-        // probe192c: вставка WorkManager убрана (бисекция)
+        val request = PeriodicWorkRequestBuilder<ProfileSyncWorker>(6, TimeUnit.HOURS)
+            .setConstraints(
+                Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.MINUTES)
+            .build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            WORK_NAME,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            request,
+        )
         return true
     }
 
@@ -284,10 +298,17 @@ object ProfileSyncAuto {
 
     /** Проверить сейчас (той же задачей, что по расписанию). */
     fun runNow(context: Context) {
-        // probe192c: вставка WorkManager убрана (бисекция)
+        runCatching {
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_NAME + "_now",
+                ExistingWorkPolicy.KEEP,
+                OneTimeWorkRequestBuilder<ProfileSyncWorker>().build(),
+            )
+        }
     }
 
-    private fun unwrap(context: Context): CharArray? {
+    /** Извлечь запертый пароль (зовёт авто-задача; пароль не покидает телефон). */
+    fun unwrap(context: Context): CharArray? {
         val encoded = prefs(context).getString(KEY_WRAPPED, null) ?: return null
         return try {
             val data = Base64.decode(encoded, Base64.NO_WRAP)
@@ -356,7 +377,33 @@ class ProfileSyncWorker(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        // probe192d: тело убрано (бисекция)
+        val app = applicationContext
+        if (!ProfileSyncAuto.isEnabled(app)) return Result.success()
+        if (EntryPointAccessors.fromApplication(app, ProfileSyncEntryPoint::class.java)
+                .profileBackup().hasStaged()
+        ) {
+            return Result.success() // уже ждёт подтверждения - не трогаем
+        }
+        val password = ProfileSyncAuto.unwrap(app) ?: return Result.success()
+        val meta = ProfileSyncNet.meta(app) ?: return Result.success()
+        when (val fetched = ProfileSyncNet.fetch(app, password)) {
+            is ProfileSyncNet.FetchResult.Ready -> {
+                val staged = EntryPointAccessors.fromApplication(app, ProfileSyncEntryPoint::class.java)
+                    .profileBackup().stage(android.net.Uri.fromFile(fetched.file), password)
+                if (staged is ProfileBackup.StageResult.Ready) {
+                    ProfileSyncAuto.notifyReady(
+                        app,
+                        "Копия «${staged.manifest.displayName.ifBlank { "без имени" }}» готова " +
+                            "к переносу. Настройки → Синхронизировать аккаунт → Применить.",
+                    )
+                } else {
+                    EntryPointAccessors.fromApplication(app, ProfileSyncEntryPoint::class.java)
+                        .profileBackup().discardStaged()
+                }
+            }
+            else -> Unit // нет копии / не наш код - тихо ждать следующего раза
+        }
+        password.fill('\u0000')
         return Result.success()
     }
 }
