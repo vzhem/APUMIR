@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -87,24 +88,48 @@ fun ProfileBackupScreen(
     var includeReceived by remember { mutableStateOf(true) }
     var restorePassword by remember { mutableStateOf("") }
     var autoPeriod by remember { mutableStateOf(BackupSchedule.Period.WEEKLY) }
-    // Вернулись на экран - задача могла отработать, перечитываем итог.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshSchedule() }
+    // Вернулись на экран - задача могла отработать, перечитываем итог; заодно
+    // автопоиск копий (вдруг файл появился или разрешение сохранилось).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshSchedule()
+        viewModel.refreshFoundBackups()
+    }
+    // Закрыть задачу целиком: процесс умрёт следом, а при следующем запуске
+    // копия ляжет на место. Активность ищем по цепочке контекстов. Объявлен
+    // ДО лаунчеров: они сохраняют разрешение через этот же контекст.
+    val activityContext = LocalContext.current
 
     // Диалоги системы: «куда сохранить» и «какой файл открыть». Пароль
     // берём из полей на момент выбора файла.
     val createLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri: Uri? ->
-        if (uri != null) viewModel.create(uri, password, includeReceived)
+        if (uri != null) {
+            // Раунд 250: сохраняем разрешение на созданный файл - автопоиск
+            // восстановления найдёт его в следующий раз без проводника.
+            runCatching {
+                activityContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.create(uri, password, includeReceived)
+        }
     }
     val openLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
-        if (uri != null) viewModel.stage(uri, restorePassword)
+        if (uri != null) {
+            runCatching {
+                activityContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.stage(uri, restorePassword)
+        }
     }
-    // Закрыть задачу целиком: процесс умрёт следом, а при следующем запуске
-    // копия ляжет на место. Активность ищем по цепочке контекстов.
-    val activityContext = LocalContext.current
     val closeApp: () -> Unit = {
         var ctx: android.content.Context = activityContext
         while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) ctx = ctx.baseContext
@@ -134,8 +159,14 @@ fun ProfileBackupScreen(
                 )
             },
         ) { padding ->
+            // imePadding: когда открывается клавиатура (поля паролей), список
+            // сжимается над ней, а прокрутка подводит фокусное поле в зону
+            // видимости - раньше клавиатура закрывала ввод пароля.
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .imePadding(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -466,6 +497,33 @@ fun ProfileBackupScreen(
                                 visualTransformation = PasswordVisualTransformation(),
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            // Раунд 250: копии, найденные на телефоне сами
+                            // (сохранённые разрешения SAF + файл автообновления).
+                            // Предлагаем их первыми: пароль уже введён - тап по
+                            // найденному файлу сразу готовит восстановление.
+                            if (state.foundBackups.isNotEmpty()) {
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    "Найдено на этом телефоне - начните с этого:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                state.foundBackups.forEach { fb ->
+                                    OutlinedButton(
+                                        onClick = { viewModel.stage(fb.uri, restorePassword) },
+                                        enabled = !state.busy && restorePassword.isNotEmpty(),
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(
+                                            fb.name + " · " + ProfileBackupViewModel.humanBytes(fb.size),
+                                            maxLines = 1,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            }
                             Spacer(Modifier.height(12.dp))
                             OutlinedButton(
                                 onClick = { openLauncher.launch(arrayOf("*/*")) },
