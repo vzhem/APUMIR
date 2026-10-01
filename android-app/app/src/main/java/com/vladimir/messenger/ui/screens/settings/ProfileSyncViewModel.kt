@@ -1,7 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
 // =============================================================================
-// PROFILESYNCVIEWMODEL.KT — «Синхронизировать аккаунт»
+// PROFILESYNCVIEWMODEL.KT — разовый перенос профиля
 // =============================================================================
 // Раунд 225: профили находят себя сами (полка по нику, код - из пароля) и
 // сами синхронизируются (опрос, авто-скачивание, уведомление). Два пути:
@@ -52,8 +52,9 @@ data class ProfileSyncUiState(
     val netSent: Boolean = false,
     /** Авто-проверка по расписанию. */
     val autoEnabled: Boolean = false,
-    /** Идентификатор этого устройства: свою копию на полке не предлагаем забирать. */
-    val myNodeId: String = "",
+    /** Идентификатор этой установки; nodeId оставлен для старых меток копии. */
+    val myDeviceId: String = "",
+    val myAccountNodeId: String = "",
     /** Скачанная копия, ждущая подтверждения. */
     val staged: BackupManifest? = null,
     val message: String? = null,
@@ -76,7 +77,8 @@ class ProfileSyncViewModel @Inject constructor(
     init {
         _uiState.value = _uiState.value.copy(
             autoEnabled = ProfileSyncAuto.isEnabled(context),
-            myNodeId = ProfileSyncNet.nodeIdOf(context),
+            myDeviceId = ProfileSyncNet.deviceIdOf(context),
+            myAccountNodeId = ProfileSyncNet.accountNodeIdOf(context),
         )
         // «Сами синхронизировались»: пока окно открыто - сами ищем копию,
         // сами скачиваем и готовим. Применение - одним тапом человека.
@@ -122,7 +124,11 @@ class ProfileSyncViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(netChecking = true)
             val meta = ProfileSyncNet.meta(context)
             _uiState.value = _uiState.value.copy(netChecking = false, netMeta = meta)
-            val foreign = meta != null && meta.dev.isNotBlank() && meta.dev != _uiState.value.myNodeId
+            val foreign = ProfileSyncNet.isForeignDevice(
+                meta,
+                _uiState.value.myDeviceId,
+                _uiState.value.myAccountNodeId,
+            )
             if (foreign && hasPassword()) {
                 netFetchAndStage() // чужая копия: сами качаем и готовим
             }
@@ -204,8 +210,10 @@ class ProfileSyncViewModel @Inject constructor(
             chars.fill('\u0000')
             _uiState.value = _uiState.value.copy(
                 autoEnabled = ok,
-                netMessage = if (ok) "Авто-проверка включена: раз в ~6 часов, с уведомлением"
-                else "Не удалось: нужен пароль от ${BackupCipher.MIN_PASSWORD_LENGTH} знаков",
+                netMessage = if (ok) "Автопоиск включён: телефон проверяет сам в фоне. " +
+                    "Подтверждение понадобится только перед заменой данных."
+                else "Один раз введите пароль из «Защиты личности» (не короче " +
+                    "${BackupCipher.MIN_PASSWORD_LENGTH} знаков); он хранится только в защищённом хранилище телефона.",
                 netFailed = !ok,
             )
         } else {

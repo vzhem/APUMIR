@@ -63,6 +63,12 @@ object ProfileSyncNet {
     private const val HTTP_TIMEOUT = 30_000
     private const val READ_TIMEOUT = 120_000
 
+    // nodeId личности ОДИНАКОВ на всех её телефонах, поэтому по нему нельзя
+    // понять, кто выложил копию. Этот идентификатор установки хранится отдельно
+    // от переносимого профиля (BackupLayout его не экспортирует).
+    private const val DEVICE_PREFS = "apu_profile_sync_device"
+    private const val DEVICE_ID_KEY = "device_id_v1"
+
     /** Лимит релея: 24 МБ base64 (копия без медиа обычно 1-5 МБ). */
     const val MAX_B64_CHARS = 24_000_000
 
@@ -116,12 +122,46 @@ object ProfileSyncNet {
             .getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .getString("my_username", "") ?: ""
 
-    /** Идентификатор этого устройства: свою копию на полке отличаем от чужой. */
-    fun nodeIdOf(context: Context): String =
+    /**
+     * Идентификатор именно этой установки, а не аккаунта. nodeId у всех
+     * телефонов одной личности одинаковый; если помечать им копию, каждое
+     * устройство будет принимать чужую копию за свою и молча её игнорировать.
+     * SharedPreferences `apu_profile_sync_device` не входит в BackupLayout,
+     * поэтому при переносе профиля на новый телефон создаётся новый маркер.
+     */
+    fun deviceIdOf(context: Context): String {
+        val prefs = context.applicationContext
+            .getSharedPreferences(DEVICE_PREFS, Context.MODE_PRIVATE)
+        synchronized(this) {
+            val current = prefs.getString(DEVICE_ID_KEY, null)
+            if (current != null && ProfileSyncDeviceId.isValid(current)) return current
+            val fresh = ProfileSyncDeviceId.newId()
+            // commit синхронный: два одновременных опроса не должны выдать
+            // этому телефону разные id отправителя.
+            prefs.edit().putString(DEVICE_ID_KEY, fresh).commit()
+            return fresh
+        }
+    }
+
+    /** nodeId личности нужен только для распознавания меток старых сборок. */
+    fun accountNodeIdOf(context: Context): String =
         context.applicationContext
             .getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .let { prefs -> prefs.getString("node_id", null) ?: prefs.getString("existing_public_key", null) }
             ?: ""
+
+    /** Это наша копия: новый dev-id либо legacy nodeId старой версии. */
+    fun isOwnDevice(meta: NetMeta?, thisDeviceId: String, accountNodeId: String): Boolean {
+        val owner = meta?.dev?.takeIf { it.isNotBlank() } ?: return false
+        return owner == thisDeviceId || (owner.startsWith("pk_") && owner == accountNodeId)
+    }
+
+    /** Есть копия от другого телефона; пустые/неизвестные метки не скачиваем. */
+    fun isForeignDevice(meta: NetMeta?, thisDeviceId: String, accountNodeId: String): Boolean {
+        val owner = meta?.dev?.takeIf { it.isNotBlank() } ?: return false
+        return if (owner.startsWith("d_")) owner != thisDeviceId
+        else owner.startsWith("pk_") && owner != accountNodeId
+    }
 
     // ── Отправка ────────────────────────────────────────────────────────────
 
@@ -158,7 +198,7 @@ object ProfileSyncNet {
             doOutput = true
             setRequestProperty("Content-Type", "text/plain")
             setRequestProperty("X-Apu-Check", sha256(code))
-            setRequestProperty("X-Apu-Device", nodeIdOf(context))
+            setRequestProperty("X-Apu-Device", deviceIdOf(context))
             connectTimeout = HTTP_TIMEOUT
             readTimeout = READ_TIMEOUT
         }
@@ -230,6 +270,15 @@ object ProfileSyncNet {
                 conn.disconnect()
             }
         }
+}
+
+/** Уникальный 128-битный маркер установки; чистая JVM-логика покрыта unit-тестом. */
+internal object ProfileSyncDeviceId {
+    private val pattern = Regex("^d_[0-9a-f]{32}$")
+
+    fun newId(): String = "d_" + java.util.UUID.randomUUID().toString().replace("-", "")
+
+    fun isValid(value: String): Boolean = pattern.matches(value)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,10 +416,10 @@ object ProfileSyncAuto {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Синхронизация аккаунта",
+            "Перенос профиля",
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
-            description = "Копия профиля готова к переносу на это устройство"
+            description = "Полная копия готова к переносу на новое устройство"
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
@@ -388,7 +437,7 @@ object ProfileSyncAuto {
         val notification: Notification =
             androidx.core.app.NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("Синхронизация аккаунта")
+                .setContentTitle("Перенос профиля")
                 .setContentText(text)
                 .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(text))
                 .setAutoCancel(true)
@@ -425,8 +474,9 @@ class ProfileSyncWorker(
         val password = ProfileSyncAuto.unwrap(app) ?: return Result.success()
         try {
             val meta = ProfileSyncNet.meta(app)
-            val myNode = ProfileSyncNet.nodeIdOf(app)
-            val foreign = meta != null && meta.dev.isNotBlank() && meta.dev != myNode
+            val myDeviceId = ProfileSyncNet.deviceIdOf(app)
+            val accountNodeId = ProfileSyncNet.accountNodeIdOf(app)
+            val foreign = ProfileSyncNet.isForeignDevice(meta, myDeviceId, accountNodeId)
             if (foreign) {
                 // Чужая копия на полке: сами качаем, сами готовим. Применение - руками.
                 when (val fetched = ProfileSyncNet.fetch(app, password)) {
@@ -444,7 +494,7 @@ class ProfileSyncWorker(
                                     ProfileSyncAuto.notifyReady(
                                         app,
                                         "Копия «${staged.manifest.displayName.ifBlank { "без имени" }}» готова " +
-                                            "к переносу. Настройки → Синхронизировать аккаунт → Применить.",
+                                            "к переносу. Настройки → Перенос профиля → Применить.",
                                     )
                                 }
                             }
@@ -457,8 +507,8 @@ class ProfileSyncWorker(
                 // Полка пуста (или там наша же старая копия): сами выкладываем свежую,
                 // чтобы второе устройство нашло нас без всяких нажатий. Приёмник, ещё
                 // не применивший чужую копию, полку не трогает - не затирать её пустым.
-                val stale = meta != null && meta.dev == myNode &&
-                    System.currentTimeMillis() - meta.timeMs > 12L * 60 * 60 * 1000
+                val stale = ProfileSyncNet.isOwnDevice(meta, myDeviceId, accountNodeId) &&
+                    System.currentTimeMillis() - (meta?.timeMs ?: 0L) > 12L * 60 * 60 * 1000
                 val blocked = ProfileSyncAuto.everFetched(app) && !ProfileSyncAuto.everApplied(app)
                 if ((meta == null || stale) && !blocked) {
                     when (val up = ProfileSyncNet.uploadBlocking(app, backup, password)) {

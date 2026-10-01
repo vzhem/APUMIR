@@ -663,10 +663,10 @@ class SettingsViewModel @Inject constructor(
             connAckSec != null && (errSec == null || connAckSec <= errSec) ->
                 "🟢 На связи (подтверждена ${mqttHumanAgo(connAckSec)})"
             connAckSec != null ->
-                "🟡 Перебои: заминка ${mqttHumanAgo(errSec ?: 0)} — " +
-                    mqttHumanError(errText)
+                "🟡 Был перебой ${mqttHumanAgo(errSec ?: 0)} — подключаемся снова сами"
             errSec != null ->
-                "🟡 Подключаемся с трудом (${mqttHumanError(errText)})"
+                "🟡 Нет ответа, соединение восстанавливается автоматически " +
+                    "(${mqttHumanError(errText)})"
             else ->
                 "🟡 Подключаемся…"
         }

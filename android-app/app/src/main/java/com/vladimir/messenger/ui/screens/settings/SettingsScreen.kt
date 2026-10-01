@@ -621,11 +621,11 @@ private fun SettingsTabContent(
     // локальные для этого экрана.
     var showMqttDialog by remember { mutableStateOf(false) }
     // р240: диагностика синхронизации устройств одной личности.
-    // (имя с Mirror: showSyncDialog занят окном «Синхронизировать аккаунт»)
+    // (имя с Mirror: showSyncDialog занят окном переноса профиля)
     var showMirrorDiag by remember { mutableStateOf(false) }
     // Диалог резервной копии адресов (раздел «Сервер»).
     var showAddrBookDialog by remember { mutableStateOf(false) }
-    // Раунд 223: окно «Синхронизировать аккаунт».
+    // Раунд 223: окно разового переноса профиля.
     var showSyncDialog by remember { mutableStateOf(false) }
     val mqttClipboard = LocalClipboardManager.current
     // Бегунок справа: видно, где мы в длинном списке.
@@ -1093,15 +1093,15 @@ private fun SettingsTabContent(
                 }
             }
 
-            // Раунд 223: «Синхронизация» - копия профиля в облаке для
-            // переноса чатов, контактов и ранга на другое устройство.
-            item { SettingsSectionTitle("Синхронизация") }
+            // Обычная синхронизация уже настроенных телефонов идёт в фоне
+            // через живое зеркало. Это окно - только разовый перенос профиля.
+            item { SettingsSectionTitle("Устройства") }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Sync,
-                        title    = "Синхронизировать аккаунт",
-                        subtitle = "Устройства находят себя сами: по Wi-Fi и через сеть APU (мобильные сети)",
+                        title    = "Перенос профиля на новое устройство",
+                        subtitle = "Уже подключённые телефоны синхронизируются сами — без этого окна",
                         onClick  = { showSyncDialog = true },
                     )
                 }
@@ -1176,8 +1176,9 @@ private fun SettingsTabContent(
                 append("не пропускает — через обходной канал, и потом обратно. ")
                 append("Нажимать ничего не нужно.")
                 if (uiState.mqttLink.contains(", ошибка ")) {
-                    append("\n\nПоследняя заминка — не страшно: приложение ")
-                    append("перебирает пути, пока не найдёт рабочий.")
+                    append("\n\nПроверка «Наш сервер» и брокер сообщений — разные ")
+                    append("соединения. Если брокер не ответил, приложение повторяет ")
+                    append("подключение само; отправлять копию профиля не нужно.")
                 }
             } else {
                 append(uiState.mqttLink)
