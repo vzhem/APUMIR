@@ -24,6 +24,7 @@ import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
 import com.vladimir.messenger.data.referral.ReferralRankStore
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import com.vladimir.messenger.service.NotificationHelper
@@ -277,20 +278,28 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
+        // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
+        // путь приёма обязан разбирать его так же, как основной: иначе строка
+        // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
+        // префиксом съедаем, но статус меняем только для разобранного id.
+        if (DeliveryAckWire.isPacket(text)) {
+            val ackedId = DeliveryAckWire.messageId(text)
+            if (ackedId != null) {
+                // ACK-кадр нужен и партнёру той же личности, но не сохраняется.
+                mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                    .onSuccess { changed ->
+                        Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId changed=$changed")
+                    }
+            } else {
+                Log.w(TAG, "malformed delivery ACK on relay path; dropped")
+            }
+            return true
+        }
+
         // р227: этот путь (запасной, через облачный релей) - второй вход
         // служебных конвертов; зеркалу их отдаём так же, как основной путь.
         mirror?.publishEnvelope(senderId, chatId, messageId, text)
-
-        // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
-        // путь приёма обязан разбирать его так же, как основной (см.
-        // handleEvent): иначе строка «ack|…» выросла бы в чат «direct».
-        if (com.vladimir.messenger.data.mirror.MirrorEnvelopes.isServiceAck(text)) {
-            val ackedId = text.substring(4).trim()
-            runCatching {
-                chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
-            }.onSuccess { Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId") }
-            return true
-        }
 
         // Раунд 141: каждый страж в защитной обёртке - если какой-то
         // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
@@ -589,11 +598,13 @@ class CoreServerService : Service() {
             }
         }
 
-        // р239: убрать из базы мусор прошлых версий - служебные пакеты
-        // «печатает…», которые r235-r238 успели сохранить как сообщения.
+        // Убрать из базы мусор прошлых версий: «печатает…» из r235-r238 и
+        // UUID-shaped ACKs, которые клиенты до r247 могли сохранить как текст.
         serviceScope.launch {
             runCatching { chatRepository.cleanupTypingJunk() }
                 .onFailure { Log.w(TAG, "Typing junk cleanup failed: ${it.message}") }
+            runCatching { chatRepository.cleanupDeliveryAckJunk() }
+                .onFailure { Log.w(TAG, "Delivery ACK junk cleanup failed: ${it.message}") }
         }
 
         // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
@@ -815,12 +826,7 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
                                 val messageId = parsed.messageId
-                                val existing = chatRepository.getMessageById(messageId)
-                                if (existing != null && existing.isFromMe &&
-                                    existing.status != MessageStatus.DELIVERED &&
-                                    existing.status != MessageStatus.READ
-                                ) {
-                                    chatRepository.updateMessageStatus(messageId, MessageStatus.DELIVERED)
+                                if (chatRepository.markOutgoingMessageDelivered(messageId)) {
                                     Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
                                 } else {
                                     Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
@@ -833,11 +839,20 @@ class CoreServerService : Service() {
                                 val existingMsg = chatRepository.getMessageById(messageId)
                                 if (existingMsg != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
-                                    // р243: дубликат - это повтор от отправителя,
-                                    // который нашей галочки не увидел. Молчание
-                                    // здесь и было причиной «висит одна галочка»:
-                                    // подтверждение отправляем ЗАНОВО.
-                                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                                    if (DeliveryAckWire.isPacket(existingMsg.content)) {
+                                        // Старый ACK мог быть уже записан до обновления.
+                                        // Он всё равно подтверждает исходящую строку, но
+                                        // ACK самому ACK отправлять нельзя.
+                                        DeliveryAckWire.messageId(existingMsg.content)?.let {
+                                            chatRepository.markOutgoingMessageDelivered(it)
+                                        }
+                                    } else {
+                                        // р243: дубликат - это повтор от отправителя,
+                                        // который нашей галочки не увидел. Молчание
+                                        // здесь и было причиной «висит одна галочка»:
+                                        // подтверждение отправляем ЗАНОВО.
+                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                                    }
                                 } else {
                                     // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
                                     // расшифровки здесь в чат попал бы конверт как текст.
@@ -854,12 +869,17 @@ class CoreServerService : Service() {
                                         // путь. У неизвестного отправителя чат ради
                                         // конверта не создаётся.
                                         val knownChat = chatRepository.getChatByContactId(senderId)
+                                        val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
                                         if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent)) {
                                             Log.i(TAG, "CF service envelope handled msgId=$messageId")
-                                            try {
-                                                RustBridge.sendDeliveryAck(messageId, senderId)
-                                            } catch (e: Exception) {
-                                                Log.w(TAG, "CF envelope ACK failed: " + e.message)
+                                            // Never generate an ACK-of-ACK. RelayEnvelope's own
+                                            // custody receipt below remains a separate protocol.
+                                            if (!isDeliveryAck) {
+                                                try {
+                                                    RustBridge.sendDeliveryAck(messageId, senderId)
+                                                } catch (e: Exception) {
+                                                    Log.w(TAG, "CF envelope ACK failed: " + e.message)
+                                                }
                                             }
                                         } else {
                                             val contact = contactRepository.getContactById(senderId)
@@ -1216,10 +1236,16 @@ class CoreServerService : Service() {
     ): Boolean {
         // р244: подтверждение доставки пришло с партнёрского устройства -
         // помечаем им же и здешнюю строку (переписка общая на обеих).
-        if (com.vladimir.messenger.data.mirror.MirrorEnvelopes.isServiceAck(text)) {
-            val ackedId = text.substring(4).trim()
-            runCatching { chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED) }
-                .onSuccess { Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId") }
+        if (DeliveryAckWire.isPacket(text)) {
+            val ackedId = DeliveryAckWire.messageId(text)
+            if (ackedId != null) {
+                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                    .onSuccess { changed ->
+                        Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId changed=$changed")
+                    }
+            } else {
+                Log.w(TAG, "malformed delivery ACK from mirror; dropped")
+            }
             return true
         }
         if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
@@ -1730,7 +1756,10 @@ class CoreServerService : Service() {
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
 
-                // р243: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
+                // р243/р247: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
+                // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
+                // до v140 не распознавали его, поэтому свежая версия фильтрует
+                // префикс также на последнем общем страже сохранения.
                 //
                 // Подтверждения ходили только через брокера (MQTT): если он
                 // недоступен, сообщение доходило, а вторая галочка не
@@ -1741,17 +1770,24 @@ class CoreServerService : Service() {
                 //
                 // Место важно: разбор идёт ПОСЛЕ расшифровки - конверт до неё
                 // выглядит как «APUSL1|…», и префикс не угадать.
-                if (com.vladimir.messenger.data.mirror.MirrorEnvelopes.isServiceAck(text)) {
-                    // р244: сначала партнёрскому устройству той же личности -
-                    // иначе на нём галочка останется одна, хотя сообщение ушло
-                    // именно с него.
-                    mirror?.publishEnvelope(senderId, chatId, messageId, text)
-                    val ackedId = text.substring(4).trim()
-                    serviceScope.launch {
-                        runCatching {
-                            chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
-                        }.onSuccess { Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId") }
+                if (DeliveryAckWire.isPacket(text)) {
+                    val ackedId = DeliveryAckWire.messageId(text)
+                    if (ackedId != null) {
+                        // р244: сначала партнёрскому устройству той же личности -
+                        // иначе на нём галочка останется одна, хотя сообщение ушло
+                        // именно с него.
+                        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                        serviceScope.launch {
+                            runCatching {
+                                chatRepository.markOutgoingMessageDelivered(ackedId)
+                            }.onSuccess { changed ->
+                                Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId changed=$changed")
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "malformed direct delivery ACK; dropped")
                     }
+                    // ACKs are control packets: no chat row, notification, or ACK-of-ACK.
                     return
                 }
 
@@ -2220,7 +2256,7 @@ class CoreServerService : Service() {
                 Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
                 serviceScope.launch {
                     try {
-                        chatRepository.updateMessageStatus(messageId, com.vladimir.messenger.domain.model.MessageStatus.DELIVERED)
+                        chatRepository.markOutgoingMessageDelivered(messageId)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to mark DELIVERED", e)
                     }

@@ -7,6 +7,9 @@ import kotlinx.coroutines.flow.Flow
 /** р239: агрегат для уборки мусора «печатает…» (чат -> сколько строк). */
 data class TypingJunkRow(val chatId: String, val count: Int)
 
+/** Delivery ACK rows written by pre-fix versions (chat -> how many rows). */
+data class DeliveryAckJunkRow(val chatId: String, val count: Int)
+
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
@@ -35,6 +38,13 @@ interface MessageDao {
 
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
+
+    /** A delivery ACK can update only an outgoing message, and must not downgrade READ. */
+    @Query(
+        "UPDATE messages SET status = 'DELIVERED' WHERE id = :messageId " +
+            "AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT', 'FAILED')"
+    )
+    suspend fun markOutgoingMessageDelivered(messageId: String): Int
 
     /**
      * Чужие сообщения в чате - за них отправителю уходит отчёт «прочитано».
@@ -223,6 +233,19 @@ interface MessageDao {
             "WHERE content LIKE 'APUTYP1|%' GROUP BY chatId"
     )
     suspend fun chatsWithTypingJunk(): List<TypingJunkRow>
+
+    /** Exact UUID-shaped ACK rows accidentally stored as incoming chat messages by older clients. */
+    @Query(
+        "SELECT chatId AS chatId, COUNT(*) AS count FROM messages " +
+            "WHERE isFromMe = 0 AND trim(content) GLOB :pattern GROUP BY chatId"
+    )
+    suspend fun chatsWithDeliveryAckJunk(pattern: String): List<DeliveryAckJunkRow>
+
+    @Query("SELECT content FROM messages WHERE isFromMe = 0 AND trim(content) GLOB :pattern")
+    suspend fun deliveryAckJunkContents(pattern: String): List<String>
+
+    @Query("DELETE FROM messages WHERE isFromMe = 0 AND trim(content) GLOB :pattern")
+    suspend fun deleteDeliveryAckJunk(pattern: String): Int
 
     /**
      * Раунд 135: последнее сообщение чата - пересчёт превью после удаления.

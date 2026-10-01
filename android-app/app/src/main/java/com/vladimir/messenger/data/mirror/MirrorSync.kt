@@ -35,6 +35,7 @@ import com.vladimir.messenger.data.gif.GifLibrary
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.heart.HeartWire
 import com.vladimir.messenger.data.reaction.ReactionWire
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.receipt.ReadReceiptWire
 import com.vladimir.messenger.data.repository.MessageDeletionRepository
 import com.vladimir.messenger.data.security.MessageSealer
@@ -384,8 +385,7 @@ object MirrorEnvelopes {
      * иначе на втором телефоне той же личности галочка так и останется одна
      * (сообщение видно, а «доставлено» нет).
      */
-    fun isServiceAck(text: String): Boolean =
-        text.startsWith("ack|") && text.length in 5..80
+    fun isServiceAck(text: String): Boolean = DeliveryAckWire.messageId(text) != null
 
     fun isSafe(text: String): Boolean =
         isServiceAck(text) ||

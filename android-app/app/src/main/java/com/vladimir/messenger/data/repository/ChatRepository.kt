@@ -10,6 +10,7 @@ import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.mirror.MirrorHub
 import com.vladimir.messenger.data.mirror.MirrorRow
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
@@ -384,19 +385,22 @@ class ChatRepository @Inject constructor(
 
     /** Хвост переписки для догана отставшего устройства. */
     suspend fun mirrorRowsSince(since: Long, limit: Int): List<MirrorRow> =
-        messageDao.messagesSince(since, limit).map { e ->
-            MirrorRow(
-                id = e.id,
-                chatId = e.chatId,
-                contactName = chatDao.getChatById(e.chatId)?.contactName ?: "",
-                senderId = e.senderId,
-                content = e.content,
-                timestamp = e.timestamp,
-                mine = e.isFromMe,
-                recipientId = e.recipientId,
-                status = e.status,
-            )
-        }
+        messageDao.messagesSince(since, limit)
+            // Do not replay ACK rows left by an older install to a mirror peer.
+            .filterNot { DeliveryAckWire.isPacket(it.content) }
+            .map { e ->
+                MirrorRow(
+                    id = e.id,
+                    chatId = e.chatId,
+                    contactName = chatDao.getChatById(e.chatId)?.contactName ?: "",
+                    senderId = e.senderId,
+                    content = e.content,
+                    timestamp = e.timestamp,
+                    mine = e.isFromMe,
+                    recipientId = e.recipientId,
+                    status = e.status,
+                )
+            }
 
     /** Неотправленные исходящие тени - перевыслать активному партнёру. */
     suspend fun mirrorPendingOutgoing(limit: Int): List<MirrorRow> =
@@ -421,6 +425,7 @@ class ChatRepository @Inject constructor(
     suspend fun applyMirrorIncoming(row: MirrorRow): Pair<String, String> {
         // р239: служебный пакет с партнёра тоже не сообщение.
         if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
+            DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
             return Pair("", "")
         }
         val chat = getOrCreateChat(
@@ -441,8 +446,12 @@ class ChatRepository @Inject constructor(
 
     /** Отправленное с зеркала (эхо или доган): своя строка «отправлено». */
     suspend fun applyMirrorSent(row: MirrorRow) {
-        // р239: служебный пакет не показываем и как своё сообщение.
-        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) return
+        // Служебный пакет не показываем и как своё сообщение. Если он всё же
+        // попал в журнал зеркала, ACK по-прежнему обновляет исходящую строку.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
+            DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
+            return
+        }
         // id чатов на устройствах разные - чат ищем по узлу получателя.
         val chat: Chat = if (row.recipientId.isNotBlank()) {
             getChatByContactId(row.recipientId)
@@ -487,11 +496,14 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
     ) {
-        // р239: страховка на самом сохранении. Служебный пакет приложения
-        // (сегодня это «печатает…») в переписку не попадает ни при каком пути
-        // приёма: даже если разборщик его не узнал, мусорной строки и
-        // уведомления не будет.
+        // р239/р247: страховка на самом сохранении. Служебный пакет приложения
+        // (например, «печатает…» или delivery ACK) в переписку не попадает ни
+        // при каком пути приёма: даже если транспортный разборщик его не узнал,
+        // мусорной строки не будет.
         if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(content)) {
+            // Последний общий страж: даже если входящий ACK обошёл разборщик
+            // конкретного транспорта, он подтверждает строку, но не сохраняется.
+            DeliveryAckWire.messageId(content)?.let { markOutgoingMessageDelivered(it) }
             val typing = com.vladimir.messenger.data.typing.TypingWire.parse(content)
             if (typing == true) {
                 com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
@@ -570,6 +582,41 @@ class ChatRepository @Inject constructor(
         val deleted = runCatching { messageDao.deleteTypingJunk() }.getOrDefault(0)
         if (deleted > 0) {
             Log.i(TAG, "typing junk removed: $deleted message(s) in ${chats.size} chat(s)")
+            for (row in chats) {
+                runCatching {
+                    chatDao.decrementUnread(row.chatId, row.count)
+                    val last = messageDao.getLatest(row.chatId)
+                    chatDao.updateLastMessage(
+                        row.chatId,
+                        last?.let { com.vladimir.messenger.util.ChatPreviews.human(it.content) ?: it.content }.orEmpty(),
+                        last?.timestamp ?: 0L,
+                    )
+                }
+            }
+        }
+        return deleted
+    }
+
+    /**
+     * Remove UUID-shaped delivery ACKs written as chat rows by receivers that
+     * predate the direct-ACK handler. Repair the unread count and chat preview
+     * so an update also cleans up the visible residue from that protocol bug.
+     */
+    suspend fun cleanupDeliveryAckJunk(): Int {
+        val pattern = DeliveryAckWire.persistedUuidAckGlobPattern
+        val chats = runCatching { messageDao.chatsWithDeliveryAckJunk(pattern) }
+            .getOrDefault(emptyList())
+        val oldAcks = runCatching { messageDao.deliveryAckJunkContents(pattern) }
+            .getOrDefault(emptyList())
+        // Preserve the receipt's meaning while removing its accidental chat row.
+        oldAcks.forEach { content ->
+            if (DeliveryAckWire.isPersistedUuidAck(content)) {
+                DeliveryAckWire.messageId(content)?.let { markOutgoingMessageDelivered(it) }
+            }
+        }
+        val deleted = runCatching { messageDao.deleteDeliveryAckJunk(pattern) }.getOrDefault(0)
+        if (deleted > 0) {
+            Log.i(TAG, "delivery ACK junk removed: $deleted message(s) in ${chats.size} chat(s)")
             for (row in chats) {
                 runCatching {
                     chatDao.decrementUnread(row.chatId, row.count)
@@ -874,6 +921,12 @@ class ChatRepository @Inject constructor(
 
     suspend fun updateMessageStatus(messageId: String, status: MessageStatus) {
         messageDao.updateMessageStatus(messageId, status.name)
+    }
+
+    /** ACKs only acknowledge our outgoing rows; an old ACK cannot downgrade READ. */
+    suspend fun markOutgoingMessageDelivered(messageId: String): Boolean {
+        if (messageId.isBlank()) return false
+        return messageDao.markOutgoingMessageDelivered(messageId) > 0
     }
 
     private fun ChatEntity.toDomain() = Chat(
