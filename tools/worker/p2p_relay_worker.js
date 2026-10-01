@@ -490,6 +490,11 @@ function psyncKey(slot) {
   return clean.length >= 16 && clean.length <= 64 ? "ps2:" + clean : null;
 }
 
+// Раунд 257: копия хранится ОДНИМ ключом (конверт JSON) вместо четырёх -
+// каждая выкладка и каждый забор = одна запись KV, а не четыре. Дневной
+// лимит записей бесплатного плана KV теперь почти невозможно исчерпать.
+// Старые клиенты не меняются: их протокол (тело + заголовки) тот же, а
+// чтение ниже понимает и старый четырёхключевой макет.
 async function handlePsyncPut(slot, request, env) {
   const key = psyncKey(slot);
   if (!key) return json({ error: "bad slot" }, 400);
@@ -500,42 +505,93 @@ async function handlePsyncPut(slot, request, env) {
   const check = (request.headers.get("X-Apu-Check") || "").toLowerCase().replace(/[^a-f0-9]/g, "");
   if (check.length !== 64) return json({ error: "bad check" }, 400);
   const dev = (request.headers.get("X-Apu-Device") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
-  await env.APU_VAULT.put(key, blob, { expirationTtl: 86400 });
-  await env.APU_VAULT.put(key + ":c", check, { expirationTtl: 86400 });
-  await env.APU_VAULT.put(key + ":d", dev, { expirationTtl: 86400 });
-  await env.APU_VAULT.put(key + ":m", JSON.stringify({ exists: true, time: Date.now(), size: blob.length, dev: dev }), { expirationTtl: 86400 });
+  const envelope = JSON.stringify({
+    v: 2,
+    blob: blob,
+    check: check,
+    dev: dev,
+    time: Date.now(),
+    size: blob.length,
+  });
+  await env.APU_VAULT.put(key, envelope, { expirationTtl: 86400 });
+  // Страховка от старого макета: прежние 4 ключа больше не пишем, а старые
+  // хвосты того же слота стираем (одна запись вместо четырёх новых).
+  await env.APU_VAULT.delete(key + ":c").catch(() => {});
   return json({ success: true, size: blob.length });
+}
+
+// Читает конверт v2 либо старый четырёхключевой макет. Возвращает
+// { blob, check, dev, time, size } или null, если полка пуста.
+async function psyncRead(key, env) {
+  const raw = await env.APU_VAULT.get(key);
+  if (raw) {
+    const trimmed = raw.trimStart();
+    if (trimmed.startsWith("{")) {
+      try {
+        const e = JSON.parse(raw);
+        if (e && e.blob && e.check) {
+          return { blob: e.blob, check: e.check, dev: e.dev || "", time: e.time || 0, size: e.size || e.blob.length };
+        }
+      } catch (e) { /* ниже - старый макет */ }
+    } else {
+      // Старый макет: в основном ключе лежал сам blob.
+      const check = (await env.APU_VAULT.get(key + ":c")) || "";
+      const dev = (await env.APU_VAULT.get(key + ":d")) || "";
+      let time = 0;
+      let size = raw.length;
+      try {
+        const m = JSON.parse((await env.APU_VAULT.get(key + ":m")) || "{}");
+        time = m.time || 0;
+        size = m.size || raw.length;
+      } catch (e) { /* метка не обязательна */ }
+      return { blob: raw, check: check, dev: dev, time: time, size: size };
+    }
+  }
+  // Совсем старый макет без основного blob-ключа невозможен (blob писался
+  // всегда), но на всякий случай пробуем метку.
+  const meta = await env.APU_VAULT.get(key + ":m");
+  if (!meta) return null;
+  const blob = await env.APU_VAULT.get(key);
+  if (!blob) return null;
+  const check = (await env.APU_VAULT.get(key + ":c")) || "";
+  const dev = (await env.APU_VAULT.get(key + ":d")) || "";
+  let time = 0;
+  let size = blob.length;
+  try {
+    const m = JSON.parse(meta);
+    time = m.time || 0;
+    size = m.size || blob.length;
+  } catch (e) { /* метка битая - не важна */ }
+  return { blob: blob, check: check, dev: dev, time: time, size: size };
+}
+
+async function psyncDelete(key, env) {
+  await env.APU_VAULT.delete(key);
+  await env.APU_VAULT.delete(key + ":c").catch(() => {});
+  await env.APU_VAULT.delete(key + ":d").catch(() => {});
+  await env.APU_VAULT.delete(key + ":m").catch(() => {});
 }
 
 async function handlePsyncGet(slot, url, request, env) {
   const key = psyncKey(slot);
   if (!key) return json({ error: "bad slot" }, 400);
   if (!env.APU_VAULT) return json({ error: "KV binding is not configured" }, 501);
+  const entry = await psyncRead(key, env);
   if (url.searchParams.get("meta") === "1") {
-    const meta = await env.APU_VAULT.get(key + ":m");
-    if (!meta) return json({ error: "not found" }, 404);
-    let out = meta;
-    try {
-      const m = JSON.parse(meta);
-      m.dev = (await env.APU_VAULT.get(key + ":d")) || "";
-      out = JSON.stringify(m);
-    } catch (e) { /* отдаём метку как есть */ }
-    return new Response(out, { headers: { "Content-Type": "application/json" } });
+    if (!entry) return json({ error: "not found" }, 404);
+    return new Response(
+      JSON.stringify({ exists: true, time: entry.time, size: entry.size, dev: entry.dev }),
+      { headers: { "Content-Type": "application/json" } },
+    );
   }
   const code = (request.headers.get("X-Apu-Code") || "").trim();
   if (!code) return json({ error: "code required" }, 401);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
   const check = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  const stored = await env.APU_VAULT.get(key + ":c");
-  if (!stored || stored !== check) return json({ error: "wrong code" }, 403);
-  const blob = await env.APU_VAULT.get(key);
-  if (!blob) return json({ error: "not found" }, 404);
-  // Одноразовость: стереть сразу после забора (и ключ проверки, и метку).
-  await env.APU_VAULT.delete(key);
-  await env.APU_VAULT.delete(key + ":c");
-  await env.APU_VAULT.delete(key + ":d");
-  await env.APU_VAULT.delete(key + ":m");
-  return new Response(blob, {
+  if (!entry || !entry.check || entry.check !== check) return json({ error: "wrong code" }, 403);
+  // Одноразовость: стереть сразу после забора.
+  await psyncDelete(key, env);
+  return new Response(entry.blob, {
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
   });
 }

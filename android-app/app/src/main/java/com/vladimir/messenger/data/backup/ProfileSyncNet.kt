@@ -343,8 +343,16 @@ object ProfileSyncAuto {
 
     fun myUploadFp(context: Context): String = prefs(context).getString(KEY_MY_FP, "") ?: ""
 
+    private const val KEY_LAST_UPLOAD_AT = "last_upload_at"
+
+    /** Раунд 257: когда последний раз выкладывали копию (троттлинг записей KV). */
+    fun lastUploadAtMs(context: Context): Long = prefs(context).getLong(KEY_LAST_UPLOAD_AT, 0L)
+
     fun noteMyUpload(context: Context, fingerprint: String) {
-        prefs(context).edit().putString(KEY_MY_FP, fingerprint ?: "").apply()
+        prefs(context).edit()
+            .putString(KEY_MY_FP, fingerprint ?: "")
+            .putLong(KEY_LAST_UPLOAD_AT, System.currentTimeMillis())
+            .apply()
     }
 
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
@@ -594,7 +602,11 @@ class ProfileSyncWorker(
                 val stale = ProfileSyncNet.isOwnDevice(meta, myDeviceId, accountNodeId) &&
                     System.currentTimeMillis() - (meta?.timeMs ?: 0L) > 12L * 60 * 60 * 1000
                 val blocked = ProfileSyncAuto.everFetched(app) && !ProfileSyncAuto.everApplied(app)
-                if ((meta == null || stale) && !blocked) {
+                // Раунд 257: выкладка = 4 записи KV на реле (дневной лимит на
+                // бесплатном плане) - не чаще раза в 2 часа даже при пустой полке.
+                val uploadThrottled =
+                    System.currentTimeMillis() - ProfileSyncAuto.lastUploadAtMs(app) < 2L * 60 * 60 * 1000
+                if ((meta == null || stale) && !blocked && !uploadThrottled) {
                     when (val up = ProfileSyncNet.uploadBlocking(app, backup, password)) {
                         is ProfileSyncNet.UploadResult.Ok -> ProfileSyncAuto.noteMyUpload(app, up.fp)
                         else -> Unit // нет профиля / сеть - тихо
