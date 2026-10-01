@@ -627,6 +627,8 @@ private fun SettingsTabContent(
     var showAddrBookDialog by remember { mutableStateOf(false) }
     // Раунд 223: окно разового переноса профиля.
     var showSyncDialog by remember { mutableStateOf(false) }
+    // Раунд 249: подтверждение выхода из APU.
+    var showLogoutDialog by remember { mutableStateOf(false) }
     val mqttClipboard = LocalClipboardManager.current
     // Бегунок справа: видно, где мы в длинном списке.
     val settingsScrollState = rememberLazyListState()
@@ -774,6 +776,15 @@ private fun SettingsTabContent(
                         // всё: чаты, контакты, сообщества, ключи, ранг, настройки.
                         subtitle = "Сохранить всё в файл и восстановить после переустановки",
                         onClick  = onProfileBackupClick,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    // Раунд 249: выход из профиля - телефон возвращается на
+                    // экран входа, где можно войти под другим логином.
+                    SettingsItem(
+                        icon     = Icons.Default.Logout,
+                        title    = "Выйти из APU",
+                        subtitle = "Выйти и войти под другим логином",
+                        onClick  = { showLogoutDialog = true },
                     )
                 }
             }
@@ -1140,6 +1151,50 @@ private fun SettingsTabContent(
     // Раунд 223: окно синхронизации аккаунта.
     if (showSyncDialog) {
         ProfileSyncDialog(onDismiss = { showSyncDialog = false })
+    }
+
+    // Раунд 249: подтверждение выхода. Текст честно говорит, что будет со
+    // старым профилем: без «Защиты личности» вернуться в него нельзя.
+    if (showLogoutDialog) {
+        val nick = uiState.protectedNick
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            icon = { Icon(Icons.Default.Logout, contentDescription = null) },
+            title = { Text("Выйти из APU?") },
+            text = {
+                Text(
+                    buildString {
+                        append(
+                            "Чаты, контакты и ключи на этом телефоне будут стёрты. " +
+                                "Приложение откроет экран входа - войдите под другим " +
+                                "логином или создайте новый профиль.",
+                        )
+                        append("\n\n")
+                        if (nick.isNullOrBlank()) {
+                            append(
+                                "ВНИМАНИЕ: «Защита личности» не настроена. Вернуться в " +
+                                    "текущий профиль после выхода будет НЕЛЬЗЯ. Если хотите " +
+                                    "сохранить его - отмените выход и задайте никнейм и пароль " +
+                                    "в «Защита личности».",
+                            )
+                        } else {
+                            append(
+                                "Вернуться в текущий профиль можно в любой момент: на экране " +
+                                    "входа вкладка «Я уже зарегистрирован», никнейм @$nick и ваш пароль.",
+                            )
+                        }
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.logout() }) {
+                    Text("Выйти", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") }
+            },
+        )
     }
 
     if (showAddrBookDialog) {
