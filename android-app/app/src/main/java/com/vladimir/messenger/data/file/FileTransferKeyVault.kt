@@ -16,6 +16,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Device-bound wrapping vault. Plain transfer keys are exposed only to one bounded callback. */
 object FileTransferKeyVault {
+    private const val TAG = "FileTransferKeyVault"
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val PRODUCTION_ALIAS = "apu_file_transfer_wrap_v1"
     private const val KEY_FILE = "key.v1"
@@ -71,7 +72,12 @@ object FileTransferKeyVault {
                     persistWrapped(file, transferId, it, ensureWrapKey(alias))
                 } catch (error: Exception) {
                     it.fill(0)
-                    throw KeyUnavailableException("Cannot create wrapped transfer key", error)
+                    // Раунд 255: в текст попадает первопричина - по скриншоту
+                    // сразу видно, что отказало (Keystore, диск, права).
+                    throw KeyUnavailableException(
+                        "Cannot create wrapped transfer key: ${describe(error)}",
+                        error,
+                    )
                 }
             }
         }
@@ -122,7 +128,10 @@ object FileTransferKeyVault {
         } catch (error: KeyUnavailableException) {
             throw error
         } catch (error: Exception) {
-            throw KeyUnavailableException("Cannot import wrapped transfer key", error)
+            throw KeyUnavailableException(
+                "Cannot import wrapped transfer key: ${describe(error)}",
+                error,
+            )
         } finally {
             copy.fill(0)
         }
@@ -145,6 +154,12 @@ object FileTransferKeyVault {
     private fun persistWrapped(file: File, transferId: String, key: ByteArray, wrapKey: SecretKey) {
         check(!file.exists()) { "Wrapped transfer key already exists" }
         val parent = file.parentFile ?: throw KeyUnavailableException("Missing transfer key directory")
+        if (parent.isFile) {
+            // Раунд 255: путь занят обычным файлом (битая копия/восстановление) -
+            // освобождаем его, иначе mkdirs молча отказывает.
+            android.util.Log.e(TAG, "transfer key dir path occupied by a file, replacing")
+            parent.delete()
+        }
         check(parent.mkdirs() || parent.isDirectory) { "Cannot create transfer key directory" }
         check(!Files.isSymbolicLink(parent.toPath())) { "Symbolic transfer key directory rejected" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -188,7 +203,10 @@ object FileTransferKeyVault {
         } catch (error: KeyUnavailableException) {
             throw error
         } catch (error: Exception) {
-            throw KeyUnavailableException("Cannot unwrap existing transfer key", error)
+            throw KeyUnavailableException(
+                "Cannot unwrap existing transfer key: ${describe(error)}",
+                error,
+            )
         } finally {
             envelope.fill(0)
         }
@@ -226,6 +244,26 @@ object FileTransferKeyVault {
 
     private fun ensureWrapKey(alias: String): SecretKey {
         existingWrapKey(alias)?.let { return it }
+        return try {
+            generateWrapKey(alias)
+        } catch (first: Exception) {
+            // Раунд 255: битый алиас Keystore лечится пересозданием. Это
+            // безопасно именно здесь: рядом нет ни одного завёрнутого ключа,
+            // который держался бы за старый экземпляр (файла ключа нет).
+            android.util.Log.e(TAG, "wrap key generation failed, recreating alias", first)
+            runCatching {
+                KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }.deleteEntry(alias)
+            }
+            try {
+                generateWrapKey(alias)
+            } catch (second: Exception) {
+                second.addSuppressed(first)
+                throw second
+            }
+        }
+    }
+
+    private fun generateWrapKey(alias: String): SecretKey {
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
         generator.init(
             KeyGenParameterSpec.Builder(
@@ -238,5 +276,19 @@ object FileTransferKeyVault {
                 .build()
         )
         return generator.generateKey()
+    }
+
+    /** Раунд 255: цепочка причин в человекочитаемом виде для тоста и логов. */
+    private fun describe(error: Throwable): String {
+        val parts = LinkedHashSet<String>()
+        var current: Throwable? = error
+        var depth = 0
+        while (current != null && depth < 6) {
+            val text = current.javaClass.simpleName + (current.message?.let { ": $it" } ?: "")
+            parts += text
+            current = current.cause
+            depth++
+        }
+        return parts.joinToString(" -> ").ifBlank { "unknown error" }
     }
 }
