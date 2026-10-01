@@ -492,7 +492,7 @@ fun ProfileBackupScreen(
                                     // нового сохранения: нашли/выбрали файл,
                                     // ввели его пароль.
                                     Text(
-                                        "Сохраните копию в файл — или включите обновление заново на уже " +\n                                            "готовом файле: найденном ниже либо выбранном в проводнике. " +\n                                            "Понадобится пароль этого файла.",
+                                        "Сохраните копию в файл — или включите обновление заново на уже " +                                            "готовом файле: найденном ниже либо выбранном в проводнике. " +                                            "Понадобится пароль этого файла.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -640,7 +640,7 @@ fun ProfileBackupScreen(
                     Text(target.name, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Телефон будет перезаписывать этот файл по расписанию. " +\n                            "Нужен пароль именно этого файла.",
+                        "Телефон будет перезаписывать этот файл по расписанию. " +                            "Нужен пароль именно этого файла.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
