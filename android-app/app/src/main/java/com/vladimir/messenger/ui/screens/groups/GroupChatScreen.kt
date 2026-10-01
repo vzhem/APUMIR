@@ -119,6 +119,8 @@ import com.vladimir.messenger.ui.components.GroupFileCard
 import com.vladimir.messenger.ui.components.GroupQrInviteDialog
 import com.vladimir.messenger.ui.components.fileIconFor
 import com.vladimir.messenger.ui.components.ImagePreview
+import com.vladimir.messenger.ui.components.TopicEmojiCatalog
+import com.vladimir.messenger.ui.components.TopicEmojiPicker
 import com.vladimir.messenger.ui.components.TopicIconCatalog
 import com.vladimir.messenger.ui.components.TopicIconView
 import com.vladimir.messenger.util.ImageLinkDetector
@@ -1811,6 +1813,9 @@ private fun MessageBubble(
 private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var icon by remember { mutableStateOf(TopicIconCatalog.DEFAULT) }
+    // Значки тем: по умолчанию эмодзи - сетка с поиском и недавними, как в
+    // Telegram («сделай прям копию»); фирменные живые значки - второй таб.
+    var emojiMode by remember { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Новая тема") },
@@ -1818,7 +1823,7 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 430.dp)
+                    .heightIn(max = 470.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -1838,39 +1843,70 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
                         color = Color(0xFF5A6472),
                     )
                 }
-                // Живые значки уже анимированы прямо в сетке выбора; сетка
-                // ленивая, чтобы 105 анимаций не тормозили телефон.
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 340.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(4.dp),
-                ) {
-                    gridItems(TopicIconCatalog.kinds, key = { it }) { kind ->
-                        val selected = kind == icon
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFE8EEF5))
-                                .then(
-                                    if (selected) {
-                                        Modifier.border(
-                                            2.dp,
-                                            MaterialTheme.colorScheme.primary,
-                                            RoundedCornerShape(12.dp),
-                                        )
-                                    } else {
-                                        Modifier
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Эмодзи (как в Telegram)" to true, "Живые" to false)
+                        .forEach { (label, mode) ->
+                            val sel = emojiMode == mode
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (sel) Color.White else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (sel) MaterialTheme.colorScheme.primary
+                                        else Color(0xFFE8EEF5),
+                                    )
+                                    .clickable {
+                                        if (emojiMode != mode) {
+                                            emojiMode = mode
+                                            // При переключении - дефолт своего каталога,
+                                            // чтобы сетка подсвечивала выбор.
+                                            icon = if (mode) TopicEmojiCatalog.EMOJIS.first()
+                                            else TopicIconCatalog.DEFAULT
+                                        }
                                     }
-                                )
-                                .clickable { icon = kind },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            AnimatedTopicIcon(kind, Modifier.size(36.dp))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                }
+                if (emojiMode) {
+                    TopicEmojiPicker(selected = icon, onPick = { icon = it })
+                } else {
+                    // Живые значки уже анимированы прямо в сетке выбора; сетка
+                    // ленивая, чтобы 105 анимаций не тормозили телефон.
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(5),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(4.dp),
+                    ) {
+                        gridItems(TopicIconCatalog.kinds, key = { it }) { kind ->
+                            val selected = kind == icon
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFE8EEF5))
+                                    .then(
+                                        if (selected) {
+                                            Modifier.border(
+                                                2.dp,
+                                                MaterialTheme.colorScheme.primary,
+                                                RoundedCornerShape(12.dp),
+                                            )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .clickable { icon = kind },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                AnimatedTopicIcon(kind, Modifier.size(36.dp))
+                            }
                         }
                     }
                 }
