@@ -570,6 +570,12 @@ class CoreServerService : Service() {
             while (true) {
                 runCatching { chatRepository.countPendingOutgoing() }
                     .onSuccess { com.vladimir.messenger.data.mirror.MirrorHub.setPendingOutgoing(it) }
+                // р243: держим свежим кэш своего адреса - он нужен и без
+                // зеркала (страж «печатает», отсев сообщений от себя).
+                runCatching {
+                    com.vladimir.messenger.data.mirror.MirrorHub
+                        .noteSelfNodeId(RustBridge.nodeId().orEmpty())
+                }
                 if (sincePump >= 2) {
                     sincePump = 0
                     runCatching { chatRepository.pumpPendingOutgoing() }

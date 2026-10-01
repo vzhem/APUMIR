@@ -155,9 +155,8 @@ object MirrorHub {
     /** Свой адрес из кэша: безопасно вызывать с главного потока. */
     fun nodeIdCached(): String = selfNodeId
 
-    private fun refreshSelfNodeId() {
-        val id = runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }
-            .getOrNull().orEmpty()
+    /** Обновить кэш адреса. Зовёт канал зеркала: он и так знает свой узел. */
+    internal fun noteSelfNodeId(id: String) {
         if (id.isNotBlank()) selfNodeId = id
     }
 
@@ -598,8 +597,9 @@ class MirrorChannel(
     fun start() {
         closedByUs = false
         ensureSelfBinding()
-        // р243: свой адрес нужен сразу - до первого прохода цикла.
-        refreshSelfNodeId()
+        // р243: свой адрес нужен сразу - до первого прохода цикла. Канал его и
+        // так знает (получен при создании), поэтому вызова в ядро нет.
+        MirrorHub.noteSelfNodeId(nodeId)
         connect()
         loopJob = scope.launch { maintenanceLoop() }
     }
@@ -911,9 +911,9 @@ class MirrorChannel(
         while (kotlin.coroutines.coroutineContext.isActive) {
             val now = System.currentTimeMillis()
             runCatching { myMaxTs = bridge.maxMessageTimestamp() }
-            // р243: свежий свой адрес - он нужен на каждом сообщении и на
-            // каждом нажатии клавиши, но не должен стоить вызова в ядро там.
-            refreshSelfNodeId()
+            // р243: свой адрес нужен на каждом сообщении и на каждом нажатии
+            // клавиши, но не должен стоить вызова в ядро там - держим кэш.
+            MirrorHub.noteSelfNodeId(nodeId)
             // Партнёр протух - забыть его состояние.
             if (partnerDev != null && now - partnerLastSeen > 30_000) {
                 partnerDev = null

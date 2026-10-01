@@ -405,11 +405,34 @@ class ChatDetailViewModel @Inject constructor(
                         lastReadReportedId = newestIncoming.id
                         runCatching { readReceipts.reportRead(chatId) }
                     }
+                    // р241/р243: свой ли это узел - решаем здесь, по уже
+                    // загруженной переписке: у входящих в поле «получатель»
+                    // стоит наш собственный адрес. Вызова в ядро нет, поэтому
+                    // обновление чата набор текста не тормозит.
+                    // ВАЖНО: адрес берём только у ВХОДЯЩИХ - у своих
+                    // отправленных в этом поле стоит адрес собеседника, и по
+                    // нему любой обычный чат выглядел бы «перепиской с собой».
+                    val selfNode = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
+                        .ifBlank {
+                            messages.firstNotNullOfOrNull { msg ->
+                                if (msg.isFromMe) null
+                                else msg.recipientId.takeIf { it.startsWith("pk_") }
+                            }.orEmpty()
+                        }
+                    // Адрес собеседника: из наблюдения за чатом, а если оно ещё
+                    // не успело прийти - прямо из базы, чтобы плашка не
+                    // запаздывала на первой отрисовке.
+                    val peerForSelf = peerId.ifBlank {
+                        runCatching { chatRepository.getChatById(chatId)?.contactId }
+                            .getOrNull().orEmpty()
+                    }
+                    val isSelf = selfNode.isNotBlank() && peerForSelf == selfNode
                     val wasEmpty = _uiState.value.messages.isEmpty()
                     _uiState.update { state ->
                         state.copy(
                             messages      = messages,
                             isLoading     = false,
+                            isSelfChat    = isSelf,
                             // Автопрокрутка при первой загрузке или новом сообщении
                             scrollToBottom = wasEmpty || messages.lastOrNull()?.isFromMe == true
                         )
