@@ -67,6 +67,11 @@ fun ContactCard(
     val avatars by AvatarStore.avatars.collectAsState()
     // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
     val avatarBitmap = AvatarBitmaps.rememberAvatar(avatars[chat.contactId])
+    // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
+    val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
+    val draftText = drafts[
+        com.vladimir.messenger.data.draft.DraftStore.dmKey(chat.contactId)
+    ].orEmpty()
 
     Row(
         modifier = modifier
@@ -153,17 +158,28 @@ fun ContactCard(
 
             Spacer(modifier = Modifier.height(2.dp))
 
-            // Превью последнего сообщения
-            Text(
-                // Раунд 155: служебные строки (гифки/стикеры) -
-                // человеческими подписями.
-                text      = com.vladimir.messenger.util.ChatPreviews.human(chat.lastMessage)
-                    ?: "Нет сообщений",
-                style     = MaterialTheme.typography.bodySmall,
-                color     = Color(0xFF5A6472),
-                maxLines  = 1,
-                overflow  = TextOverflow.Ellipsis,
-            )
+            // Превью последнего сообщения; черновик (раунд 255) - красным,
+            // как в больших мессенджерах: сразу видно, что текст не отправлен.
+            if (draftText.isNotEmpty()) {
+                Text(
+                    text     = "Черновик: $draftText",
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = Color(0xFFC62828),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    // Раунд 155: служебные строки (гифки/стикеры) -
+                    // человеческими подписями.
+                    text      = com.vladimir.messenger.util.ChatPreviews.human(chat.lastMessage)
+                        ?: "Нет сообщений",
+                    style     = MaterialTheme.typography.bodySmall,
+                    color     = Color(0xFF5A6472),
+                    maxLines  = 1,
+                    overflow  = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))

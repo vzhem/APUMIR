@@ -13,6 +13,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /** Device-bound wrapping vault. Plain transfer keys are exposed only to one bounded callback. */
 object FileTransferKeyVault {
@@ -65,11 +66,11 @@ object FileTransferKeyVault {
         validateNamespace(transferId, alias, root)
         val file = keyFile(root, transferId)
         val key = if (file.exists()) {
-            unwrapExisting(file, transferId, existingWrapKey(alias))
+            unwrapWithCandidates(file, transferId, alias, root)
         } else {
             ByteArray(FileTransferKeyEnvelope.KEY_BYTES).also(SecureRandom()::nextBytes).also {
                 try {
-                    persistWrapped(file, transferId, it, ensureWrapKey(alias))
+                    persistWrapped(file, transferId, it, resolveWrapKey(alias, root))
                 } catch (error: Exception) {
                     it.fill(0)
                     // Раунд 255: в текст попадает первопричина - по скриншоту
@@ -98,7 +99,7 @@ object FileTransferKeyVault {
         validateNamespace(transferId, alias, root)
         val file = keyFile(root, transferId)
         if (!file.isFile) throw KeyUnavailableException("Wrapped transfer key is absent")
-        val key = unwrapExisting(file, transferId, existingWrapKey(alias))
+        val key = unwrapWithCandidates(file, transferId, alias, root)
         return try {
             operation(key)
         } finally {
@@ -114,7 +115,7 @@ object FileTransferKeyVault {
         try {
             val file = keyFile(root, transferId)
             if (file.exists()) {
-                val existing = unwrapExisting(file, transferId, existingWrapKey(alias))
+                val existing = unwrapWithCandidates(file, transferId, alias, root)
                 try {
                     check(MessageDigest.isEqual(existing, copy)) {
                         "Existing wrapped transfer key differs"
@@ -124,7 +125,7 @@ object FileTransferKeyVault {
                 }
                 return
             }
-            persistWrapped(file, transferId, copy, ensureWrapKey(alias))
+            persistWrapped(file, transferId, copy, resolveWrapKey(alias, root))
         } catch (error: KeyUnavailableException) {
             throw error
         } catch (error: Exception) {
@@ -143,7 +144,7 @@ object FileTransferKeyVault {
             validateNamespace(transferId, alias, root)
             val file = keyFile(root, transferId)
             if (!file.exists()) return Mode.ABSENT
-            val key = unwrapExisting(file, transferId, existingWrapKey(alias))
+            val key = unwrapWithCandidates(file, transferId, alias, root)
             key.fill(0)
             Mode.READY
         } catch (_: Exception) {
@@ -261,6 +262,83 @@ object FileTransferKeyVault {
                 throw second
             }
         }
+    }
+
+    /**
+     * Раунд 255: Keystore2 на некоторых прошивках отказывает в генерации
+     * (KeyMint: MEMORY_ALLOCATION_FAILED, «without explicit attestation key»).
+     * Тогда заворачиваем ключ передачи программным AES: файл лежит в приватной
+     * папке приложения (noBackupFilesDir) и без рута никому не доступен -
+     * работоспособность важнее аппаратной привязки.
+     */
+    private fun resolveWrapKey(alias: String, root: File): SecretKey {
+        return try {
+            ensureWrapKey(alias)
+        } catch (error: Exception) {
+            android.util.Log.w(TAG, "Keystore wrap unavailable, software fallback", error)
+            softwareWrapKey(root, createIfMissing = true)
+                ?: throw KeyUnavailableException(
+                    "No wrap key available: ${describe(error)}",
+                    error,
+                )
+        }
+    }
+
+    private const val SOFTWARE_WRAP_FILE = "softwrap.v1"
+    private const val SOFTWARE_KEY_BYTES = 32
+
+    private fun softwareWrapKey(root: File, createIfMissing: Boolean): SecretKey? {
+        val dir = root.parentFile ?: return null
+        val file = File(dir, SOFTWARE_WRAP_FILE)
+        return try {
+            if (file.exists()) {
+                val bytes = file.readBytes()
+                if (bytes.size == SOFTWARE_KEY_BYTES) SecretKeySpec(bytes, "AES") else null
+            } else if (createIfMissing) {
+                if (!dir.isDirectory && !dir.mkdirs()) return null
+                val bytes = ByteArray(SOFTWARE_KEY_BYTES).also(SecureRandom()::nextBytes)
+                file.writeBytes(bytes)
+                runCatching {
+                    file.setReadable(false, false)
+                    file.setReadable(true, true)
+                    file.setWritable(false, false)
+                    file.setWritable(true, true)
+                }
+                SecretKeySpec(bytes, "AES")
+            } else {
+                null
+            }
+        } catch (error: Exception) {
+            android.util.Log.w(TAG, "software wrap key unavailable", error)
+            null
+        }
+    }
+
+    /** Расшифровка перебором: Keystore-обёртка, затем программная (р255). */
+    private fun unwrapWithCandidates(
+        file: File,
+        transferId: String,
+        alias: String,
+        root: File,
+    ): ByteArray {
+        val candidates = mutableListOf<SecretKey>()
+        existingWrapKey(alias)?.let(candidates::add)
+        softwareWrapKey(root, createIfMissing = false)?.let(candidates::add)
+        if (candidates.isEmpty()) {
+            throw KeyUnavailableException("Wrapped key exists without any wrap key available")
+        }
+        var last: Exception? = null
+        for (candidate in candidates) {
+            try {
+                return unwrapExisting(file, transferId, candidate)
+            } catch (error: Exception) {
+                last = error
+            }
+        }
+        throw KeyUnavailableException(
+            "Cannot unwrap existing transfer key: ${describe(last!!)}",
+            last,
+        )
     }
 
     private fun generateWrapKey(alias: String): SecretKey {

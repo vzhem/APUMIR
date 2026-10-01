@@ -1238,6 +1238,11 @@ private fun GroupCard(
     // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
     val groupAvatarBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
         .rememberAvatar(storeAvatars["g:" + group.id])
+    // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
+    val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
+    val draftText = drafts[
+        com.vladimir.messenger.data.draft.DraftStore.groupKey(group.id)
+    ].orEmpty()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -1295,19 +1300,29 @@ private fun GroupCard(
                 color = Color(0xFF8A93A2),
                 maxLines = 1,
             )
-            Text(
-                // Раунд 155: без служебных строк (гифки/стикеры).
-                text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
-                    ?: if (group.isPublic) {
-                    "Публичная группа - ${group.memberCount} уч."
-                } else {
-                    "Частная группа - ${group.memberCount} уч."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF5A6472),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (draftText.isNotEmpty()) {
+                Text(
+                    text = "Черновик: $draftText",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFC62828),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    // Раунд 155: без служебных строк (гифки/стикеры).
+                    text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
+                        ?: if (group.isPublic) {
+                        "Публичная группа - ${group.memberCount} уч."
+                    } else {
+                        "Частная группа - ${group.memberCount} уч."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF5A6472),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))
