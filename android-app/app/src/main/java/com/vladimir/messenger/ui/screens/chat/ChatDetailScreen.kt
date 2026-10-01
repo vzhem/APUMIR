@@ -475,11 +475,8 @@ fun ChatDetailScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        "Закреплённые" + if (uiState.pinned.size > 1) {
-                                            " (" + uiState.pinned.size + ")"
-                                        } else {
-                                            ""
-                                        },
+                                        "Закреплённые (" + uiState.pinned.size + "/" +
+                                            com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
                                         fontWeight = FontWeight.Medium,
                                     )
                                 }

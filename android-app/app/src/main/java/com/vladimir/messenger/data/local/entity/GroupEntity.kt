@@ -36,4 +36,6 @@ data class GroupEntity(
     val lastMessagePreview: String? = null,
     val lastMessageAtMs: Long? = null,
     val unreadCount: Int = 0,
+    /** Pin timestamp in the mixed home inbox; null means unpinned. */
+    val pinnedAtMs: Long? = null,
 )

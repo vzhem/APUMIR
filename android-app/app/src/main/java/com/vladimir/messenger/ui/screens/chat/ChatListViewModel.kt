@@ -6,7 +6,11 @@ import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.usecase.ObserveNetworkStatusUseCase
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.local.dao.InboxPinDao
+import com.vladimir.messenger.data.local.dao.InboxPinKind
+import com.vladimir.messenger.data.local.dao.InboxPinMutation
 import com.vladimir.messenger.data.repository.NetworkStatus
+import com.vladimir.messenger.data.mirror.MirrorHub
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,15 +57,27 @@ data class InboxGroup(
     val myRole: String,
     /** Канал открывается лентой постов, группа - общим чатом. */
     val isChannel: Boolean = false,
+    /** Whether this conversation is pinned on the home inbox. */
+    val isPinned: Boolean = false,
+    val pinnedAtMs: Long? = null,
 )
 
 /** Строка общего списка: личный чат или группа. */
 sealed interface InboxItem {
+    /** Last activity time, used to order unpinned rows and break pin-time ties. */
     val sortKey: Long
+    val isPinned: Boolean
+    val pinnedAtMs: Long?
 
-    data class Personal(val chat: Chat, override val sortKey: Long) : InboxItem
+    data class Personal(val chat: Chat, override val sortKey: Long) : InboxItem {
+        override val isPinned: Boolean get() = chat.isPinned
+        override val pinnedAtMs: Long? get() = chat.pinnedAtMs
+    }
 
-    data class Group(val group: InboxGroup, override val sortKey: Long) : InboxItem
+    data class Group(val group: InboxGroup, override val sortKey: Long) : InboxItem {
+        override val isPinned: Boolean get() = group.isPinned
+        override val pinnedAtMs: Long? get() = group.pinnedAtMs
+    }
 }
 
 data class ChatListUiState(
@@ -106,6 +122,7 @@ data class ChatListUiState(
 class ChatListViewModel @Inject constructor(
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
     private val groupDao: GroupDao,
+    private val inboxPinDao: InboxPinDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
@@ -302,6 +319,8 @@ class ChatListViewModel @Inject constructor(
                 isPublic = g.isPublic,
                 myRole = if (g.ownerId == me) GroupRole.OWNER else roles[g.id] ?: GroupRole.MEMBER,
                 isChannel = g.isChannel,
+                isPinned = g.pinnedAtMs != null,
+                pinnedAtMs = g.pinnedAtMs,
             )
         }
     }
@@ -334,10 +353,10 @@ class ChatListViewModel @Inject constructor(
 
         val personal = filteredChats
             .map { InboxItem.Personal(it, it.lastMessageTime ?: 0L) }
-            .sortedByDescending { it.sortKey }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
         val groupItems = filteredGroups
             .map { InboxItem.Group(it, it.timeMs ?: 0L) }
-            .sortedByDescending { it.sortKey }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
 
         val manages = { row: InboxGroup ->
             row.myRole == GroupRole.OWNER || row.myRole == GroupRole.ADMIN
@@ -377,11 +396,28 @@ class ChatListViewModel @Inject constructor(
         )
     }
 
+    /** Main-inbox order: pinned conversations first, then activity time. */
+    private fun compareInboxItems(left: InboxItem, right: InboxItem): Int {
+        if (left.isPinned != right.isPinned) return if (left.isPinned) -1 else 1
+
+        val leftPrimary = if (left.isPinned) left.pinnedAtMs ?: 0L else left.sortKey
+        val rightPrimary = if (right.isPinned) right.pinnedAtMs ?: 0L else right.sortKey
+        val primaryOrder = rightPrimary.compareTo(leftPrimary)
+        if (primaryOrder != 0) return primaryOrder
+
+        val activityOrder = right.sortKey.compareTo(left.sortKey)
+        if (activityOrder != 0) return activityOrder
+        return stableInboxKey(left).compareTo(stableInboxKey(right))
+    }
+
+    private fun stableInboxKey(item: InboxItem): String = when (item) {
+        is InboxItem.Personal -> "chat:" + item.chat.id
+        is InboxItem.Group -> "group:" + item.group.id
+    }
+
     /**
-     * Слияние двух уже упорядоченных списков.
-     *
-     * Общая сортировка склеенного списка - лишняя работа: обе половины уже
-     * стоят по времени. Идём по ним разом и берём тот, что свежее.
+     * Merge two already ordered lists with the same pinned/activity comparator.
+     * This avoids sorting the combined list a second time.
      */
     private fun merge(a: List<InboxItem>, b: List<InboxItem>): List<InboxItem> {
         if (a.isEmpty()) return b
@@ -390,7 +426,7 @@ class ChatListViewModel @Inject constructor(
         var i = 0
         var j = 0
         while (i < a.size && j < b.size) {
-            if (a[i].sortKey >= b[j].sortKey) out.add(a[i++]) else out.add(b[j++])
+            if (compareInboxItems(a[i], b[j]) <= 0) out.add(a[i++]) else out.add(b[j++])
         }
         while (i < a.size) out.add(a[i++])
         while (j < b.size) out.add(b[j++])
@@ -476,6 +512,45 @@ class ChatListViewModel @Inject constructor(
         // Поле ввода откликается сразу, а пересчёт списка ждёт паузы в наборе.
         _uiState.update { it.copy(searchQuery = query) }
         searchQuery.value = query
+    }
+
+    /** Pins a personal chat by stable contact id (chat row ids differ per device). */
+    fun togglePersonalPin(chat: Chat) {
+        setConversationPinned(InboxPinKind.PERSONAL, chat.contactId, !chat.isPinned)
+    }
+
+    /** Groups and channels share the same ten-slot home-inbox limit. */
+    fun toggleGroupPin(group: InboxGroup) {
+        setConversationPinned(InboxPinKind.GROUP, group.id, !group.isPinned)
+    }
+
+    private fun setConversationPinned(kind: InboxPinKind, itemId: String, pinned: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val atMs = if (pinned) System.currentTimeMillis() else 0L
+            val result = when (kind) {
+                InboxPinKind.PERSONAL -> inboxPinDao.setPersonalPinned(itemId, pinned, atMs)
+                InboxPinKind.GROUP -> inboxPinDao.setGroupPinned(itemId, pinned, atMs)
+            }
+            when (result) {
+                InboxPinMutation.UPDATED ->
+                    MirrorHub.publishInboxPin(kind.wireValue, itemId, pinned, atMs)
+                InboxPinMutation.LIMIT_REACHED -> withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        com.vladimir.messenger.data.local.InboxPinPolicy.LIMIT_REACHED_MESSAGE,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                InboxPinMutation.NOT_FOUND -> withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        "Эта беседа больше недоступна",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                InboxPinMutation.UNCHANGED -> Unit
+            }
+        }
     }
 
     // ── Действия меню «⋮» в пузырях ───────────────────────────────────────

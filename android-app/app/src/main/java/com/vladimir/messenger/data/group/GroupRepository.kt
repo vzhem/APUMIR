@@ -2,9 +2,11 @@ package com.vladimir.messenger.data.group
 
 import android.util.Log
 import com.vladimir.messenger.ui.theme.AvatarStore
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
@@ -3125,13 +3127,40 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.Pin -> {
-                if (groupDao.getMember(packet.groupId, me) == null) return
-                messageDao.updatePinned(
-                    packet.messageId,
-                    packet.pinned,
-                    if (packet.pinned) clock() else null,
-                    if (packet.pinned) senderId else null,
+                val localMember = groupDao.getMember(packet.groupId, me) ?: return
+                if (localMember.isBanned) return
+                val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (sender.isBanned || !GroupPermissions.canPinMessages(sender.role, sender.permissions)) {
+                    Log.w(TAG, "unauthorized group pin ignored group=${packet.groupId} sender=$senderId")
+                    return
+                }
+                val message = messageDao.getMessageById(packet.messageId) ?: return
+                if (message.chatId != packet.groupId || message.topicId.orEmpty() != packet.topicId) {
+                    Log.w(TAG, "group pin target mismatch ignored group=${packet.groupId}")
+                    return
+                }
+                val group = groupDao.getGroupById(packet.groupId)
+                if (packet.pinned && group?.isChannel == true &&
+                    messageDao.firstTextMessageIdInTopic(packet.groupId, packet.topicId) == packet.messageId
+                ) {
+                    Log.w(TAG, "channel post pin ignored in discussion group=${packet.groupId}")
+                    return
+                }
+                val result = messageDao.updatePinnedWithinTopicLimit(
+                    chatId = packet.groupId,
+                    topicId = packet.topicId,
+                    messageId = packet.messageId,
+                    pinned = packet.pinned,
+                    atMs = if (packet.pinned) clock() else null,
+                    by = if (packet.pinned) senderId else null,
                 )
+                when (result) {
+                    MessagePinMutation.LIMIT_REACHED ->
+                        Log.w(TAG, "group pin limit exceeded group=${packet.groupId} topic=${packet.topicId}")
+                    MessagePinMutation.SCOPE_CONFLICT ->
+                        Log.w(TAG, "group pin scope conflict ignored group=${packet.groupId} message=${packet.messageId}")
+                    else -> Unit
+                }
             }
 
             is GroupWire.Packet.RosterRequest -> {
@@ -3313,6 +3342,9 @@ class GroupRepository(
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) {
+            return Result.failure(SecurityException("Вы заблокированы в этой группе"))
+        }
         if (!GroupPermissions.canPinMessages(member.role, member.permissions)) {
             return Result.failure(SecurityException("Закреплять сообщения могут только администраторы с таким правом"))
         }
@@ -3321,8 +3353,33 @@ class GroupRepository(
         if (message.chatId != groupId) {
             return Result.failure(IllegalArgumentException("Сообщение из другой группы"))
         }
-        messageDao.updatePinned(messageId, pinned, if (pinned) clock() else null, if (pinned) me else null)
-        broadcast(groupId, GroupWire.buildPin(groupId, message.topicId.orEmpty(), messageId, pinned), excludeSelf = true)
+        val topicId = message.topicId.orEmpty()
+        if (pinned && groupDao.getGroupById(groupId)?.isChannel == true &&
+            messageDao.firstTextMessageIdInTopic(groupId, topicId) == messageId
+        ) {
+            return Result.failure(
+                IllegalStateException("Закрепите публикацию в ленте канала; в обсуждении закрепляются комментарии"),
+            )
+        }
+        val result = messageDao.updatePinnedWithinTopicLimit(
+            chatId = groupId,
+            topicId = topicId,
+            messageId = messageId,
+            pinned = pinned,
+            atMs = if (pinned) clock() else null,
+            by = if (pinned) me else null,
+        )
+        when (result) {
+            MessagePinMutation.LIMIT_REACHED ->
+                return Result.failure(IllegalStateException(MessagePinPolicy.LIMIT_REACHED_MESSAGE))
+            MessagePinMutation.SCOPE_CONFLICT ->
+                return Result.failure(IllegalStateException(MessagePinPolicy.SCOPE_CONFLICT_MESSAGE))
+            MessagePinMutation.NOT_FOUND ->
+                return Result.failure(IllegalStateException("Сообщение уже недоступно в этой теме"))
+            MessagePinMutation.UNCHANGED -> return Result.success(Unit)
+            MessagePinMutation.UPDATED -> Unit
+        }
+        broadcast(groupId, GroupWire.buildPin(groupId, topicId, messageId, pinned), excludeSelf = true)
         return Result.success(Unit)
     }
 
@@ -4239,6 +4296,14 @@ class GroupRepository(
         if (member.role == GroupRole.OWNER) {
             return Result.failure(IllegalArgumentException("Владелец не может выйти из группы без передачи прав"))
         }
+        // Выход убирает строку из главного списка, поэтому освобождаем и
+        // закреплённое место на всех зеркалах этой личности.
+        com.vladimir.messenger.data.mirror.MirrorHub.publishInboxPin(
+            kind = "group",
+            itemId = groupId,
+            pinned = false,
+            pinnedAtMs = 0L,
+        )
         groupDao.deleteMember(groupId, me)
         groupDao.markLeft(groupId)
         backgroundScope.launch {

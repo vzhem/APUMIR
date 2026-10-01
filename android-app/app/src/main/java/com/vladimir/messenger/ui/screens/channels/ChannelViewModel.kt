@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.GroupSummary
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.util.InlineImage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -113,7 +115,6 @@ class ChannelViewModel @Inject constructor(
         observe()
         observeReactions()
         observeTransfers()
-        observePinned()
         // Вступивший позже не застал посты - просим у владельца последние
         // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
         viewModelScope.launch {
@@ -126,19 +127,31 @@ class ChannelViewModel @Inject constructor(
         }
     }
 
-    /** Раунд 173: закреплённые посты канала - живой поток в шапку. */
-    private fun observePinned() {
-        viewModelScope.launch {
-            messageDao.observePinnedChannelPosts(channelId).collect { list ->
-                _uiState.update { it.copy(pinnedPostIds = list.map { e -> e.id }) }
-            }
-        }
-    }
-
-    /** Раунд 173: закрепить/открепить пост канала. */
+    /** Закрепить/открепить пост канала (личное закреп, до 10; зеркалится своим устройствам). */
     fun togglePostPin(post: ChannelPost) {
         viewModelScope.launch {
-            runCatching { messageDao.updatePinned(post.messageId, !post.isPinned, if (!post.isPinned) System.currentTimeMillis() else null, null) }
+            val pinned = !post.isPinned
+            val result = runCatching { chatRepository.setMessagePinned(post.messageId, pinned) }
+                .getOrElse { error ->
+                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }
+                    return@launch
+                }
+            when (result) {
+                MessagePinMutation.LIMIT_REACHED ->
+                    _uiState.update { it.copy(error = MessagePinPolicy.LIMIT_REACHED_MESSAGE) }
+                MessagePinMutation.SCOPE_CONFLICT ->
+                    _uiState.update { it.copy(error = MessagePinPolicy.SCOPE_CONFLICT_MESSAGE) }
+                MessagePinMutation.NOT_FOUND ->
+                    _uiState.update { it.copy(error = "Пост уже недоступен") }
+                MessagePinMutation.UPDATED,
+                MessagePinMutation.UNCHANGED -> {
+                    // Закреп личный, поэтому не рассылаем его подписчикам
+                    // канала; только переносим на другое своё устройство.
+                    runCatching {
+                        com.vladimir.messenger.data.mirror.MirrorHub.publishPin(post.messageId, pinned)
+                    }
+                }
+            }
         }
     }
 
@@ -331,7 +344,8 @@ class ChannelViewModel @Inject constructor(
                     ChannelPost(
                         topicId = topic.id,
                         messageId = first.id,
-                        isPinned = first.isPinned,
+                        // В ленте показываем только личный закреп, не GroupWire-пин темы.
+                        isPinned = first.isPinned && first.pinnedBy == null,
                         title = topic.name,
                         // Длинный текст едет кусками (рой, этап 3): склеиваем;
                         // пока куски в пути - текст с многоточием.
@@ -380,6 +394,8 @@ class ChannelViewModel @Inject constructor(
                     it.copy(
                         channel = snapshot.channel,
                         posts = snapshot.posts,
+                        // В ленте закрепляются именно публикации, а не комментарии.
+                        pinnedPostIds = snapshot.posts.filter { it.isPinned }.map { it.messageId },
                         canPost = snapshot.canPost,
                         myId = snapshot.myId,
                         isLoading = false,

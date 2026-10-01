@@ -5,7 +5,9 @@ import com.vladimir.messenger.domain.model.MessageChannel
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ChatDao
+import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.mirror.MirrorHub
@@ -25,6 +27,7 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
+    private val groupDao: GroupDao,
     private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
@@ -71,14 +74,34 @@ class ChatRepository @Inject constructor(
     fun observePinnedChatMessages(chatId: String): Flow<List<Message>> =
         messageDao.observePinnedChatMessages(chatId).map { list -> list.map { e -> e.toDomain() } }
 
-    /** Раунд 173: закрепить/открепить сообщение (личка и канальные посты). */
-    suspend fun setMessagePinned(messageId: String, pinned: Boolean) {
-        messageDao.updatePinned(
-            messageId,
-            pinned,
-            if (pinned) System.currentTimeMillis() else null,
-            null,
-        )
+    /**
+     * Закрепить/открепить личное сообщение или публикацию канала.
+     * В личке лимит общий для чата; у канала — для публикаций всей ленты.
+     */
+    suspend fun setMessagePinned(messageId: String, pinned: Boolean): MessagePinMutation {
+        val message = messageDao.getMessageById(messageId) ?: return MessagePinMutation.NOT_FOUND
+        val group = groupDao.getGroupById(message.chatId)
+        val atMs = if (pinned) System.currentTimeMillis() else null
+        return when {
+            group?.isChannel == true -> messageDao.updatePinnedChannelPostWithinLimit(
+                channelId = message.chatId,
+                messageId = messageId,
+                pinned = pinned,
+                atMs = atMs,
+                by = null,
+            )
+            group != null || !message.topicId.isNullOrBlank() -> {
+                // Group pins must pass through GroupRepository/GroupWire so
+                // local and remote permission checks cannot be bypassed.
+                MessagePinMutation.NOT_FOUND
+            }
+            else -> messageDao.updatePinnedWithinChatLimit(
+                messageId = messageId,
+                pinned = pinned,
+                atMs = atMs,
+                by = null,
+            )
+        }
     }
 
     /** Раунд 203: адресаты «Поделиться в APU» - друзья из списка чатов. */
@@ -839,6 +862,7 @@ class ChatRepository @Inject constructor(
         if (chats.size < 2) return chats.firstOrNull()?.toDomain()
 
         val keep = chats.maxByOrNull { it.lastMessageTime ?: 0L } ?: return null
+        val pinnedAtMs = chats.mapNotNull { it.pinnedAtMs }.maxOrNull()
         var unread = 0
         for (chat in chats) {
             unread += chat.unreadCount
@@ -847,7 +871,7 @@ class ChatRepository @Inject constructor(
             chatDao.deleteChatById(chat.id)
             Log.i(TAG, "mergeDuplicateChats: ${chat.id} слит в ${keep.id} для $contactId")
         }
-        val merged = keep.copy(unreadCount = unread)
+        val merged = keep.copy(unreadCount = unread, pinnedAtMs = pinnedAtMs)
         chatDao.updateChat(merged)
         return merged.toDomain()
     }
@@ -937,6 +961,8 @@ class ChatRepository @Inject constructor(
         lastMessageTime = lastMessageTime,
         unreadCount = unreadCount,
         isContactOnline = isContactOnline,
+        isPinned = pinnedAtMs != null,
+        pinnedAtMs = pinnedAtMs,
     )
 
     private fun MessageEntity.toDomain() = Message(

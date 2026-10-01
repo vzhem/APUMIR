@@ -1,8 +1,18 @@
 package com.vladimir.messenger.data.local.dao
 
 import androidx.room.*
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import kotlinx.coroutines.flow.Flow
+
+/** Результат атомарного изменения закрепа. */
+enum class MessagePinMutation {
+    UPDATED,
+    UNCHANGED,
+    LIMIT_REACHED,
+    SCOPE_CONFLICT,
+    NOT_FOUND,
+}
 
 /** р239: агрегат для уборки мусора «печатает…» (чат -> сколько строк). */
 data class TypingJunkRow(val chatId: String, val count: Int)
@@ -99,7 +109,7 @@ interface MessageDao {
     fun observeAll(): Flow<List<MessageEntity>>
 
     // ── Группы и темы (v8) ──────────────────────────────────────────────────
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC, id ASC")
     fun observeTopicMessages(chatId: String, topicId: String): Flow<List<MessageEntity>>
 
     /**
@@ -108,41 +118,139 @@ interface MessageDao {
      * Нужно ленте канала: пост - это первое сообщение темы, а число
      * комментариев считается по остальным сообщениям той же темы.
      */
-    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC, id ASC")
     fun observeChatMessages(chatId: String): Flow<List<MessageEntity>>
 
-    // Закрепы читаются в разрезе темы: закреп из одной темы не должен висеть
-    // вверху другой (фильтр topicId обязателен, иначе закреп общий на группу).
+    // Общие GroupWire-закрепы одной темы: личный pin публикации канала
+    // (pinnedBy == null) не попадает в список обсуждения.
     @Query(
         "SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
-            "AND isPinned = 1 ORDER BY pinnedAtMs DESC"
+            "AND isPinned = 1 AND pinnedBy IS NOT NULL ORDER BY pinnedAtMs DESC"
     )
     fun observePinnedMessages(chatId: String, topicId: String): Flow<List<MessageEntity>>
 
     @Query(
         "SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
-            "AND isPinned = 1 ORDER BY pinnedAtMs DESC"
+            "AND isPinned = 1 AND pinnedBy IS NOT NULL ORDER BY pinnedAtMs DESC"
     )
     suspend fun getPinnedMessages(chatId: String, topicId: String): List<MessageEntity>
 
-    // Раунд 173: закрепы БЕЗ темы - личные чаты и посты канала (у поста
-    // своя тема, поэтому фильтр по topicId здесь нельзя).
+    // Закрепы личного чата без темы. Публикации канала имеют topicId и
+    // отображаются по потоку публикаций, а не этим запросом.
     @Query(
         "SELECT * FROM messages WHERE chatId = :chatId " +
             "AND (topicId IS NULL OR topicId = '') AND isPinned = 1 " +
+            "AND pinnedBy IS NULL " +
             "ORDER BY pinnedAtMs DESC"
     )
     fun observePinnedChatMessages(chatId: String): Flow<List<MessageEntity>>
 
-    // Закрепы канала: посты живут в своих темах - берём все пиннутые чата.
+    // Личные закрепы канала. Комментарии с общим GroupWire-pin имеют pinnedBy.
     @Query(
         "SELECT * FROM messages WHERE chatId = :chatId AND isPinned = 1 " +
-            "ORDER BY pinnedAtMs DESC"
+            "AND pinnedBy IS NULL ORDER BY pinnedAtMs DESC"
     )
     fun observePinnedChannelPosts(chatId: String): Flow<List<MessageEntity>>
 
+    @Query("SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND isPinned = 1 AND pinnedBy IS NULL")
+    suspend fun countPinnedInChat(chatId: String): Int
+
+    @Query(
+        "SELECT COUNT(*) FROM messages WHERE chatId = :chatId " +
+            "AND COALESCE(topicId, '') = :topicId AND isPinned = 1 AND pinnedBy IS NOT NULL"
+    )
+    suspend fun countPinnedInTopic(chatId: String, topicId: String): Int
+
+    /** Первый обычный текст темы — публикация канала; APUIMGP1 — только служебные части. */
+    @Query(
+        "SELECT id FROM messages WHERE chatId = :chatId " +
+            "AND COALESCE(topicId, '') = :topicId AND content NOT LIKE 'APUIMGP1:%' " +
+            "ORDER BY timestamp ASC, id ASC LIMIT 1"
+    )
+    suspend fun firstTextMessageIdInTopic(chatId: String, topicId: String): String?
+
+    /** Количество закреплённых публикаций канала (комментарии не считаются). */
+    @Query(
+        "SELECT COUNT(*) FROM messages AS pinned WHERE pinned.chatId = :chatId " +
+            "AND pinned.isPinned = 1 AND pinned.pinnedBy IS NULL " +
+            "AND pinned.topicId IS NOT NULL AND pinned.topicId != '' " +
+            "AND pinned.content NOT LIKE 'APUIMGP1:%' AND pinned.id IN (" +
+            "SELECT head.id FROM messages AS head WHERE head.chatId = :chatId " +
+            "AND head.topicId IS NOT NULL AND head.topicId != '' " +
+            "AND head.content NOT LIKE 'APUIMGP1:%' AND head.id = (" +
+            "SELECT first.id FROM messages AS first WHERE first.chatId = head.chatId " +
+            "AND first.topicId = head.topicId AND first.content NOT LIKE 'APUIMGP1:%' " +
+            "ORDER BY first.timestamp ASC, first.id ASC LIMIT 1))"
+    )
+    suspend fun countPinnedChannelPosts(chatId: String): Int
+
     @Query("UPDATE messages SET isPinned = :pinned, pinnedAtMs = :atMs, pinnedBy = :by WHERE id = :messageId")
     suspend fun updatePinned(messageId: String, pinned: Boolean, atMs: Long?, by: String?)
+
+    /** Лимит закрепов личного чата: максимум 10 на chatId; лента канала считает публикации отдельно. */
+    @Transaction
+    suspend fun updatePinnedWithinChatLimit(
+        messageId: String,
+        pinned: Boolean,
+        atMs: Long?,
+        by: String?,
+    ): MessagePinMutation {
+        val message = getMessageById(messageId) ?: return MessagePinMutation.NOT_FOUND
+        if (message.isPinned && message.pinnedBy != null) return MessagePinMutation.SCOPE_CONFLICT
+        if (message.isPinned == pinned) return MessagePinMutation.UNCHANGED
+        if (pinned && !MessagePinPolicy.canAddPin(countPinnedInChat(message.chatId))) {
+            return MessagePinMutation.LIMIT_REACHED
+        }
+        updatePinned(messageId, pinned, atMs, by)
+        return MessagePinMutation.UPDATED
+    }
+
+    /** Лимит закрепов публикаций канала: максимум 10 на всю ленту, комментарии идут по темам. */
+    @Transaction
+    suspend fun updatePinnedChannelPostWithinLimit(
+        channelId: String,
+        messageId: String,
+        pinned: Boolean,
+        atMs: Long?,
+        by: String?,
+    ): MessagePinMutation {
+        val message = getMessageById(messageId) ?: return MessagePinMutation.NOT_FOUND
+        val topicId = message.topicId?.takeIf { it.isNotBlank() }
+            ?: return MessagePinMutation.NOT_FOUND
+        if (message.chatId != channelId || firstTextMessageIdInTopic(channelId, topicId) != messageId) {
+            return MessagePinMutation.NOT_FOUND
+        }
+        if (message.isPinned && message.pinnedBy != null) return MessagePinMutation.SCOPE_CONFLICT
+        if (message.isPinned == pinned) return MessagePinMutation.UNCHANGED
+        if (pinned && !MessagePinPolicy.canAddPin(countPinnedChannelPosts(channelId))) {
+            return MessagePinMutation.LIMIT_REACHED
+        }
+        updatePinned(messageId, pinned, atMs, by)
+        return MessagePinMutation.UPDATED
+    }
+
+    /** Лимит закрепов одной темы группы/обсуждения канала: максимум 10 на пару chatId/topicId. */
+    @Transaction
+    suspend fun updatePinnedWithinTopicLimit(
+        chatId: String,
+        topicId: String,
+        messageId: String,
+        pinned: Boolean,
+        atMs: Long?,
+        by: String?,
+    ): MessagePinMutation {
+        val message = getMessageById(messageId) ?: return MessagePinMutation.NOT_FOUND
+        if (message.chatId != chatId || message.topicId.orEmpty() != topicId) {
+            return MessagePinMutation.NOT_FOUND
+        }
+        if (message.isPinned && message.pinnedBy == null) return MessagePinMutation.SCOPE_CONFLICT
+        if (message.isPinned == pinned) return MessagePinMutation.UNCHANGED
+        if (pinned && !MessagePinPolicy.canAddPin(countPinnedInTopic(chatId, topicId))) {
+            return MessagePinMutation.LIMIT_REACHED
+        }
+        updatePinned(messageId, pinned, atMs, by)
+        return MessagePinMutation.UPDATED
+    }
 
     @Query("SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND topicId = :topicId")
     suspend fun countTopicMessages(chatId: String, topicId: String): Int
@@ -151,7 +259,7 @@ interface MessageDao {
      * Сообщения темы разом, без подписки: нужны владельцу канала, чтобы
      * дослать опоздавшему подписчику пост с фотографиями.
      */
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC, id ASC")
     suspend fun getTopicMessages(chatId: String, topicId: String): List<MessageEntity>
 
     /** Время самого свежего сообщения темы (null - тема пуста); без загрузки всей темы. */
@@ -176,7 +284,7 @@ interface MessageDao {
     @Query(
         "SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
             "AND content NOT LIKE :partPattern AND timestamp > :afterMs AND timestamp < :beforeMs " +
-            "ORDER BY timestamp DESC LIMIT :limit"
+            "ORDER BY timestamp DESC, id DESC LIMIT :limit"
     )
     suspend fun getTopicTextsBetween(
         chatId: String,
@@ -190,7 +298,7 @@ interface MessageDao {
     /** Самые ранние текстовые сообщения темы (первое - пост), не больше [limit]. */
     @Query(
         "SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId " +
-            "AND content NOT LIKE :partPattern ORDER BY timestamp ASC LIMIT :limit"
+            "AND content NOT LIKE :partPattern ORDER BY timestamp ASC, id ASC LIMIT :limit"
     )
     suspend fun getTopicTextsOldest(chatId: String, topicId: String, partPattern: String, limit: Int): List<MessageEntity>
 

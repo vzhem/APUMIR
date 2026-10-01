@@ -940,12 +940,15 @@ class GroupChatViewModel @Inject constructor(
                 val inline = com.vladimir.messenger.util.InlineImage
                 val parts = all.filter { inline.isPart(it.content) }
                 val list = all.filter { !inline.isPart(it.content) }.map { m ->
-                    if (inline.textTail(m.content) == null) {
+                    val expanded = if (inline.textTail(m.content) == null) {
                         m
                     } else {
                         val own = parts.filter { it.senderId == m.senderId }.map { it.content }
                         m.copy(content = inline.expandContent(m.id, m.content, own))
                     }
+                    // В обсуждении показываем общие GroupWire-закрепы;
+                    // личный закреп публикации канала остаётся только в ленте.
+                    expanded.copy(isPinned = expanded.isPinned && expanded.pinnedBy != null)
                 }
                 _uiState.update { it.copy(messages = list, moreComments = moreComments(topicId, list.size)) }
                 // Раунд 144: первый выпуск ленты - захватить непрочитанные

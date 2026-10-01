@@ -286,11 +286,8 @@ fun ChannelScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    "Закреплённые" + if (uiState.pinnedPostIds.size > 1) {
-                                        " (" + uiState.pinnedPostIds.size + ")"
-                                    } else {
-                                        ""
-                                    },
+                                    "Закреплённые (" + uiState.pinnedPostIds.size + "/" +
+                                        com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
                                     fontWeight = FontWeight.Medium,
                                 )
                             }

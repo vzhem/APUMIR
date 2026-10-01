@@ -74,6 +74,7 @@ class CoreServerService : Service() {
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
+    @Inject lateinit var inboxPinDao: com.vladimir.messenger.data.local.dao.InboxPinDao
     @Inject lateinit var counters: com.vladimir.messenger.data.channel.PostCounterRepository
     @Inject lateinit var swarmBudget: com.vladimir.messenger.data.swarm.SwarmBudget
     @Inject lateinit var gifPreparation: com.vladimir.messenger.data.file.OutgoingFilePreparationService
@@ -1126,9 +1127,42 @@ class CoreServerService : Service() {
         }
 
         override suspend fun onPinFromPartner(messageId: String, pinned: Boolean) {
-            // р238: закреп с партнёрского устройства - тот же закреп здесь.
+            // Личные закрепы сообщений и публикаций канала должны совпадать
+            // на обоих устройствах человека; групповые закрепы идут GroupWire.
             runCatching { chatRepository.setMessagePinned(messageId, pinned) }
                 .onFailure { Log.w(TAG, "Mirror pin failed: ${it.message}") }
+                .onSuccess { result ->
+                    when (result) {
+                        com.vladimir.messenger.data.local.dao.MessagePinMutation.LIMIT_REACHED ->
+                            Log.w(TAG, "Mirror pin ignored: local pin limit reached")
+                        com.vladimir.messenger.data.local.dao.MessagePinMutation.SCOPE_CONFLICT ->
+                            Log.w(TAG, "Mirror pin ignored: target belongs to another pin scope")
+                        else -> Unit
+                    }
+                }
+        }
+
+        override suspend fun onInboxPinFromPartner(
+            kind: String,
+            itemId: String,
+            pinned: Boolean,
+            pinnedAtMs: Long,
+        ) {
+            val pinKind = com.vladimir.messenger.data.local.dao.InboxPinKind.fromWireValue(kind)
+                ?: return
+            val result = when (pinKind) {
+                com.vladimir.messenger.data.local.dao.InboxPinKind.PERSONAL ->
+                    inboxPinDao.setPersonalPinned(itemId, pinned, pinnedAtMs)
+                com.vladimir.messenger.data.local.dao.InboxPinKind.GROUP ->
+                    inboxPinDao.setGroupPinned(itemId, pinned, pinnedAtMs)
+            }
+            when (result) {
+                com.vladimir.messenger.data.local.dao.InboxPinMutation.LIMIT_REACHED ->
+                    Log.w(TAG, "Mirror inbox pin ignored: local ten-pin limit reached")
+                com.vladimir.messenger.data.local.dao.InboxPinMutation.NOT_FOUND ->
+                    Log.w(TAG, "Mirror inbox pin ignored: local conversation not found")
+                else -> Unit
+            }
         }
 
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {

@@ -9,7 +9,9 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileTransferRouter
 import com.vladimir.messenger.data.file.OutgoingFilePreparationService
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -336,7 +338,6 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
-    /** Раунд 173: закрепить/открепить сообщение личного чата. */
     /** Статус вступления по карточке приглашения (для всплывающей подсказки). */
     private val _inviteStatus = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     val inviteStatus: kotlinx.coroutines.flow.StateFlow<String?> = _inviteStatus.asStateFlow()
@@ -375,10 +376,30 @@ class ChatDetailViewModel @Inject constructor(
 
     fun togglePin(messageId: String, pinned: Boolean) {
         viewModelScope.launch {
-            runCatching { chatRepository.setMessagePinned(messageId, pinned) }
-            // р238: закреп - личное дело человека, собеседнику он не уходит, но
-            // на втором устройстве ТОЙ ЖЕ личности закреп должен быть там же.
-            runCatching { com.vladimir.messenger.data.mirror.MirrorHub.publishPin(messageId, pinned) }
+            val result = runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+                .getOrElse { error ->
+                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }
+                    return@launch
+                }
+            when (result) {
+                MessagePinMutation.LIMIT_REACHED -> {
+                    _uiState.update { it.copy(error = MessagePinPolicy.LIMIT_REACHED_MESSAGE) }
+                }
+                MessagePinMutation.SCOPE_CONFLICT -> {
+                    _uiState.update { it.copy(error = MessagePinPolicy.SCOPE_CONFLICT_MESSAGE) }
+                }
+                MessagePinMutation.NOT_FOUND -> {
+                    _uiState.update { it.copy(error = "Сообщение не найдено") }
+                }
+                MessagePinMutation.UPDATED,
+                MessagePinMutation.UNCHANGED -> {
+                    // Закреп личный: собеседнику не уходит, но совпадает на
+                    // втором устройстве этого же человека.
+                    runCatching {
+                        com.vladimir.messenger.data.mirror.MirrorHub.publishPin(messageId, pinned)
+                    }
+                }
+            }
         }
     }
 
