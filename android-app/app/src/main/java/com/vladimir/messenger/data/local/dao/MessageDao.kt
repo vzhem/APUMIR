@@ -62,6 +62,14 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC")
     suspend fun getPendingOutgoingMessages(): List<MessageEntity>
 
+    /**
+     * р245: содержимое последних строк переписки - для насоса медиа. По нему
+     * тень находит ссылки на гифки, байтов которых у неё ещё нет, и просит их
+     * у активного устройства.
+     */
+    @Query("SELECT content FROM messages ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun recentContents(limit: Int): List<String>
+
     /** Раунд 179: вся офлайн-очередь (любой чат) - для периодического слива. */
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE' ORDER BY timestamp ASC LIMIT :limit")
     suspend fun getQueuedOfflineMessages(limit: Int): List<MessageEntity>

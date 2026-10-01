@@ -576,6 +576,30 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * р245: медиа с телефона-зеркала.
+     *
+     * Отправка файла требует СВОЕЙ сетевой сессии: у тени её нет, и подготовка
+     * передачи падала на незакреплённом ключе получателя («файл не отправлен»).
+     * Поэтому сначала просим движок у активного партнёра (передача роли, р231)
+     * и ждём, пока он поднимется здесь. Если партнёра нет - просто продолжаем:
+     * дальше всё как обычно, с понятной ошибкой, если ключа действительно нет.
+     */
+    private suspend fun claimEngineForMediaIfNeeded() {
+        if (RustBridge.isRunning()) return
+        if (!com.vladimir.messenger.data.mirror.MirrorHub.canClaimEngine()) return
+        com.vladimir.messenger.data.mirror.MirrorHub.claimEngine()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val deadline = System.currentTimeMillis() + 15_000L
+            while (!RustBridge.isRunning() && System.currentTimeMillis() < deadline) {
+                kotlinx.coroutines.delay(400L)
+            }
+        }
+        if (!RustBridge.isRunning()) {
+            android.util.Log.i("ChatDetailVM", "р245: движок не поднялся, пробуем как есть")
+        }
+    }
+
     fun onFileSelected(uri: Uri) {
         if (_uiState.value.isPreparingFile) return
         // Второй рубеж: даже если кнопку обошли, подготовка файла не пройдёт.
@@ -587,6 +611,8 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isPreparingFile = true) }
             var targetRecipientId: String? = null
             try {
+                // р245: с телефона-зеркала сначала забираем движок у активного.
+                claimEngineForMediaIfNeeded()
                 val chat = chatRepository.getChatById(chatId)
                     ?: error("Чат недоступен")
                 val recipientId = chat.contactId
@@ -837,6 +863,8 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isPreparingFile = true, error = null) }
             var targetRecipientId: String? = null
             try {
+                // р245: с телефона-зеркала сначала забираем движок (как и файл).
+                claimEngineForMediaIfNeeded()
                 val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
                 val recipientId = chat.contactId
                 targetRecipientId = recipientId
@@ -1084,6 +1112,20 @@ class ChatDetailViewModel @Inject constructor(
         val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
         val recipientId = chat.contactId
         val messageId = UUID.randomUUID().toString()
+        // р245: это устройство без сети (зеркало)? Тогда ссылку отправляет
+        // партнёр-активный. Раньше вызов шёл в ядро напрямую: движка здесь нет,
+        // отправка возвращала false, и строка висела «в ожидании» вечно -
+        // гифка с телефона-зеркала до собеседника не доходила вовсе.
+        val viaMirror = chatRepository.sendGifRefViaMirror(
+            chatId = chatId,
+            recipientId = recipientId,
+            sha256 = sha256,
+            messageId = messageId,
+        )
+        if (viaMirror) {
+            _uiState.update { it.copy(scrollToBottom = true) }
+            return
+        }
         val sent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 RustBridge.sendMessage(

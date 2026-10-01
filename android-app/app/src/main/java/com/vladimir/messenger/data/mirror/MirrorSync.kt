@@ -266,6 +266,30 @@ object MirrorHub {
     }
 
     /**
+     * р245: попросить у партнёра байты ГИФКИ по её отпечатку.
+     *
+     * Гифка ходит по переписке ссылкой, а байты каждый телефон тянет сам.
+     * Активному есть откуда (роя хранителей он видит), а у тени сети нет - её
+     * карточка оставалась пустой. Теперь тень просит байты у активного: гонять
+     * гифку по зеркальному каналу (десятки-сотни килобайт) можно.
+     */
+    fun requestGifBytes(sha256: String) {
+        runCatching { channel?.requestGifBytes(sha256) }
+    }
+
+    /**
+     * р245: отдать байты гифки партнёру БЕЗ просьбы.
+     *
+     * Так делает тень, когда отправляет гифку из своей библиотеки: сети у неё
+     * нет, поэтому хранителем для собеседника она быть не может - байты
+     * уходят активному, тот кладёт их в свою библиотеку и объявляет каталог
+     * рою. Иначе у собеседника (и у активного) карточка осталась бы пустой.
+     */
+    fun pushGifBytes(sha256: String) {
+        runCatching { channel?.pushGifBytes(sha256) }
+    }
+
+    /**
      * р231: тень с готовым исходящим файлом просит движок у активного.
      * Отправка файла требует своей сетевой сессии, а она может быть только
      * у одного устройства; активный уступает роль, тень поднимается и шлёт.
@@ -603,6 +627,13 @@ class MirrorChannel(
         }
     }
 
+    /** р245: когда в последний раз просили байты гифки (не частим просьбами). */
+    private val gifRequestedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** р245: недособранные гифки, которые шлёт партнёр. */
+    private val gifIncoming =
+        java.util.concurrent.ConcurrentHashMap<String, java.io.ByteArrayOutputStream>()
+
     private fun partnerFresh(): Boolean =
         partnerDev != null && System.currentTimeMillis() - partnerLastSeen < 15_000
 
@@ -748,6 +779,124 @@ class MirrorChannel(
         val sealed = sealPayload(body) ?: return
         sendJson(JSONObject().put("t", "ev").put("k", "filechunk").put("d", sealed))
     }
+
+    /**
+     * р245: тень просит байты гифки у активного. Гифка небольшая (единицы
+     * мегабайт), но канал зеркала общий с сообщениями, поэтому порции те же,
+     * что у файлов, и с той же паузой.
+     *
+     * Повторы намеренно редкие: просьба может уйти раньше, чем активный сам
+     * скачает байты с хранителей, - тогда он их не отдаст, а мы попробуем
+     * снова следующим заходом.
+     */
+    fun requestGifBytes(sha256: String): Boolean {
+        if (engineUp) return false
+        if (!canCarryOutgoing()) return false
+        if (!isHexSha(sha256)) return false
+        val now = System.currentTimeMillis()
+        val last = gifRequestedAt[sha256] ?: 0L
+        if (now - last < GIF_REQUEST_COOLDOWN_MS) return false
+        gifRequestedAt[sha256] = now
+        val sealed = sealPayload(JSONObject().put("sha", sha256)) ?: return false
+        return sendJson(JSONObject().put("t", "ev").put("k", "reqgif").put("d", sealed))
+    }
+
+    /** р245: порция байтов гифки партнёру. */
+    private fun sendGifChunk(sha256: String, seq: Int, last: Boolean, bytes: ByteArray) {
+        val body = JSONObject()
+            .put("sha", sha256)
+            .put("seq", seq)
+            .put("last", if (last) 1 else 0)
+            .put("b64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+        val sealed = sealPayload(body) ?: return
+        sendJson(JSONObject().put("t", "ev").put("k", "gifchunk").put("d", sealed))
+    }
+
+    /**
+     * р245: отдать гифку партнёру, если байты у нас есть. Байтов нет - молчим:
+     * значит, мы сами ещё не скачали их с хранителей (или это ссылка вовсе без
+     * локальной копии). Тень повторит просьбу позже.
+     */
+    private fun serveGif(sha256: String) {
+        if (!engineUp) return
+        val file = com.vladimir.messenger.data.gif.GifLibrary.gifFile(context, sha256)
+            ?: com.vladimir.messenger.data.gif.GifLibrary.previewFile(context, sha256)
+            ?: run {
+                Log.i(TAG, "gif mirror: байтов нет локально " + sha256.take(8))
+                return
+            }
+        sendGifFile(sha256, file)
+    }
+
+    /**
+     * р245: тень отдаёт байты гифки из своей библиотеки без просьбы - активный
+     * положит их к себе и объявит рой (см. [MirrorHub.pushGifBytes]).
+     */
+    fun pushGifBytes(sha256: String): Boolean {
+        if (engineUp) return false
+        if (!canCarryOutgoing()) return false
+        if (!isHexSha(sha256)) return false
+        val file = com.vladimir.messenger.data.gif.GifLibrary.gifFile(context, sha256) ?: return false
+        sendGifFile(sha256, file)
+        return true
+    }
+
+    /** Отправка байтов гифки порциями (общая для отдачи по просьбе и push). */
+    private fun sendGifFile(sha256: String, file: java.io.File) {
+        if (file.length() > GIF_MIRROR_MAX_BYTES) {
+            // Канал зеркала идёт через воркер и общий с сообщениями: совсем
+            // большой гифке (или гифке-видео) здесь не место. Такая остаётся
+            // там, где её скачали.
+            Log.i(TAG, "gif mirror: пропуск, " + file.length() + " Б > " + GIF_MIRROR_MAX_BYTES)
+            return
+        }
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val bytes = runCatching { file.readBytes() }.getOrNull()
+            if (bytes == null || bytes.isEmpty()) return@launch
+            var offset = 0
+            var seq = 0
+            while (offset < bytes.size) {
+                val end = minOf(offset + GIF_CHUNK_BYTES, bytes.size)
+                sendGifChunk(sha256, seq, end >= bytes.size, bytes.copyOfRange(offset, end))
+                seq++
+                offset = end
+                kotlinx.coroutines.delay(FILE_CHUNK_PAUSE_MS)
+            }
+            Log.i(TAG, "gif mirror: отдано " + bytes.size + " Б (" + seq + " порций) " + sha256.take(8))
+        }
+    }
+
+    /**
+     * р245: порция гифки от партнёра. Складываем в библиотеку тем же путём, что
+     * и принятую по рою: карточка в чате оживёт сама (GifLibrary оповещает
+     * подписчиков).
+     */
+    private suspend fun applyGifChunk(sha256: String, last: Boolean, bytes: ByteArray) {
+        val buf = gifIncoming.getOrPut(sha256) { java.io.ByteArrayOutputStream() }
+        if (buf.size() + bytes.size > GIF_MIRROR_MAX_BYTES) {
+            gifIncoming.remove(sha256)
+            Log.w(TAG, "gif mirror: слишком много байтов " + sha256.take(8) + ", бросаю")
+            return
+        }
+        buf.write(bytes)
+        if (!last) return
+        gifIncoming.remove(sha256)
+        val all = buf.toByteArray()
+        if (all.isEmpty()) return
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val tmp = java.io.File(context.cacheDir, "gif-mirror-" + sha256.take(16) + ".gif")
+            runCatching {
+                tmp.outputStream().use { it.write(all) }
+                com.vladimir.messenger.data.gif.GifLibrary.addFromFile(context, tmp, null, null)
+                tmp.delete()
+            }.onFailure { Log.w(TAG, "gif mirror: не сохранилось " + sha256.take(8) + ": " + it.message) }
+        }
+        Log.i(TAG, "gif mirror: получено " + all.size + " Б " + sha256.take(8))
+    }
+
+    /** Отпечаток гифки - 64 знака шестнадцатеричных. */
+    private fun isHexSha(sha: String): Boolean =
+        sha.length == 64 && sha.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
 
     /**
      * р230: выдать файл партнёру целиком, порциями. Размер ограничен
@@ -1103,6 +1252,30 @@ class MirrorChannel(
                     }
                 }
             }
+            "reqgif" -> {
+                // р245: тень просит байты гифки - отдаём, если они у нас есть.
+                if (!engineUp) return
+                val body = openPayload(wire) ?: return
+                val sha = body.optString("sha")
+                if (sha.isBlank()) return
+                serveGif(sha)
+            }
+            "gifchunk" -> {
+                // р245: порция гифки от партнёра - в библиотеку.
+                val body = openPayload(wire) ?: return
+                val sha = body.optString("sha")
+                val b64 = body.optString("b64")
+                if (sha.isBlank() || b64.isBlank()) return
+                val bytes = runCatching {
+                    android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
+                }.getOrNull() ?: return
+                scope.launch {
+                    if (body.optInt("seq", 0) == 0) Log.i(TAG, "gif mirror: порции гифки " + sha.take(8))
+                    MirrorHub.duringApply {
+                        applyGifChunk(sha, body.optInt("last", 0) == 1, bytes)
+                    }
+                }
+            }
             "lan" -> {
                 // р232: большой файл отдают напрямую в локальной сети - забрать
                 // самим и сложить в тот же приёмник, что и зеркальные порции.
@@ -1284,6 +1457,15 @@ class MirrorChannel(
 
         /** р230: порция файла (16 КиБ -> ~22 КиБ base64, влезает в кадр и в потолок конверта). */
         private const val FILE_CHUNK_BYTES = 16 * 1024
+
+        /** р245: порция байтов гифки - та же логика, что у файловых порций. */
+        private const val GIF_CHUNK_BYTES = 16 * 1024
+
+        /** р245: как часто повторять просьбу о байтах одной гифки. */
+        private const val GIF_REQUEST_COOLDOWN_MS = 90_000L
+
+        /** р245: потолок гифки, которую гоним по зеркальному каналу. */
+        private const val GIF_MIRROR_MAX_BYTES = 8L * 1024 * 1024
 
         /** р230: пауза между порциями - канал зеркала общий с сообщениями. */
         private const val FILE_CHUNK_PAUSE_MS = 60L

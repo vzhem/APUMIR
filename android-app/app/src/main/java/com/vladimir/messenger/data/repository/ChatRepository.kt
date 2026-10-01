@@ -634,6 +634,69 @@ class ChatRepository @Inject constructor(
      * одна; байты каждый телефон тихо подтягивает с хранителей. Превью в
      * списке чатов - аккуратное, без служебной строки.
      */
+    /**
+     * р245: содержимое свежих строк переписки - для насоса медиа в сервисе. Сам
+     * разбор (какие это гифки и есть ли уже байты) живёт в сервисе: ему
+     * доступен контекст, а библиотеке гифок он нужен.
+     */
+    suspend fun recentMessageContents(limit: Int = 24): List<String> =
+        runCatching { messageDao.recentContents(limit) }.getOrDefault(emptyList())
+
+    /**
+     * р245: отправить ССЫЛКУ на гифку, когда сети у этого устройства нет.
+     *
+     * Раньше гифка с телефона-зеркала уходила вызовом ядра напрямую: движка
+     * здесь нет, отправка возвращала false, строка вставала в очередь
+     * «в ожидании» - и так и висела, потому что своей сети у тени не будет
+     * никогда. Теперь кадр уходит партнёру-активному, он и отправляет.
+     *
+     * @return true - кадр принят партнёром (строка остаётся здесь как PENDING
+     *         до его эха «отправлено»).
+     */
+    suspend fun sendGifRefViaMirror(
+        chatId: String,
+        recipientId: String,
+        sha256: String,
+        messageId: String,
+    ): Boolean =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val channel = com.vladimir.messenger.data.mirror.MirrorHub.routeOutgoing() ?: return@withContext false
+            val chat = chatDao.getChatById(chatId) ?: return@withContext false
+            val peer = recipientId.ifBlank { chat.contactId }
+            if (peer.isBlank()) return@withContext false
+            val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+            val timestamp = System.currentTimeMillis()
+            val inserted = insertGifRefMessage(
+                chatId = chatId,
+                recipientId = peer,
+                messageId = messageId,
+                sha256 = sha256,
+                timestamp = timestamp,
+                status = MessageStatus.PENDING.name,
+            )
+            if (!inserted) return@withContext false
+            val offered = channel.publishOutgoing(
+                com.vladimir.messenger.data.mirror.MirrorRow(
+                    id = messageId,
+                    chatId = chatId,
+                    contactName = chat.contactName,
+                    senderId = "self",
+                    content = content,
+                    timestamp = timestamp,
+                    mine = true,
+                    recipientId = peer,
+                    status = MessageStatus.PENDING.name,
+                ),
+            )
+            if (offered) {
+                Log.i(TAG, "🪞 gif ref sent via mirror partner: $messageId")
+                // р245: и сразу байты - активный положит их в свою библиотеку и
+                // объявит рой, иначе и у него, и у собеседника карточка пустая.
+                com.vladimir.messenger.data.mirror.MirrorHub.pushGifBytes(sha256)
+            }
+            offered
+        }
+
     suspend fun insertGifRefMessage(
         chatId: String,
         recipientId: String,

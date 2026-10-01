@@ -578,6 +578,11 @@ class CoreServerService : Service() {
                     sincePump = 0
                     runCatching { chatRepository.pumpPendingOutgoing() }
                         .onFailure { Log.w(TAG, "pending pump failed: ${it.message}") }
+                    // р245: медиа. У тени нет сети, поэтому байты гифок ей
+                    // взять неоткуда - просим у активного партнёра. Карточка в
+                    // чате к этому моменту уже есть, оживёт по приходу байтов.
+                    runCatching { pumpMirrorMedia() }
+                        .onFailure { Log.w(TAG, "media pump failed: ${it.message}") }
                 }
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
@@ -1175,6 +1180,34 @@ class CoreServerService : Service() {
      * сделает активный. Идентификаторы чатов у устройств СВОИ, поэтому личный
      * чат находим по отправителю, а не по числу из конверта.
      */
+    /**
+     * р245: насос медиа. Только для устройства-зеркала: у него нет сети, и
+     * байты гифок взять ему неоткуда, кроме активного партнёра. Ищем ссылки в
+     * свежей переписке, которых нет в библиотеке, и просим по одной за заход
+     * (канал зеркала общий с сообщениями - не забиваем его).
+     */
+    private suspend fun pumpMirrorMedia() {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) {
+            // Активный: байты гифок могли прийти от тени (push) - объявляем
+            // каталог рою, чтобы собеседник знал, у кого их забрать.
+            runCatching { gifLibraryBootstrap() }
+                .onFailure { Log.w(TAG, "gif catalog announce failed: ${it.message}") }
+            return
+        }
+        val app = applicationContext
+        val contents = chatRepository.recentMessageContents(24)
+        var asked = 0
+        for (content in contents) {
+            if (asked >= 2) break
+            if (!com.vladimir.messenger.data.gif.GifLibrary.isGifRef(content)) continue
+            val sha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(content) ?: continue
+            if (com.vladimir.messenger.data.gif.GifLibrary.gifFile(app, sha) != null) continue
+            com.vladimir.messenger.data.mirror.MirrorHub.requestGifBytes(sha)
+            asked++
+        }
+        if (asked > 0) Log.i(TAG, "media pump: запрошено $asked гифк(а) у активного")
+    }
+
     private suspend fun applyMirrorEnvelope(
         senderId: String,
         chatId: String,
