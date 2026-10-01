@@ -31,6 +31,15 @@ data class ChatDetailUiState(
     val messages: List<Message> = emptyList(),
     /** Раунд 173: закреплённые сообщения чата (свежие вверху). */
     val pinned: List<Message> = emptyList(),
+    /** р235: собеседник сейчас печатает («печатает…» в шапке чата). */
+    val isPeerTyping: Boolean = false,
+    /**
+     * р241: переписка с СОБСТВЕННЫМ узлом (в контакты попал свой адрес -
+     * например, отсканировали собственный QR из профиля). Такая переписка
+     * никуда не ведёт: собеседника в ней нет. Показываем честную плашку,
+     * вместо того чтобы молча копить строки «в ожидании».
+     */
+    val isSelfChat: Boolean = false,
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
@@ -89,11 +98,31 @@ class ChatDetailViewModel @Inject constructor(
     // chatId передаётся через навигацию (SavedStateHandle)
     private val chatId: String = checkNotNull(savedStateHandle["chatId"])
 
+    /** р235: собеседник личного чата - ему уходит «печатает…». */
+    @Volatile private var peerId: String = ""
+
+    /** р235: когда последний раз отправляли «печатает» (не чаще раза в 2.5 с). */
+    @Volatile private var lastTypingSentAt = 0L
+
+    /** р235: сказали ли собеседнику, что мы печатаем (чтобы послать «перестал»). */
+    @Volatile private var typingAnnounced = false
+
+    /** р236: черновик этого чата (ключ - адрес собеседника, он общий у устройств). */
+    @Volatile private var draftKey: String = ""
+
+    /** р236: когда последний раз отправляли черновик партнёрскому устройству. */
+    @Volatile private var lastDraftSentAt = 0L
+
+    /** р242: по какому входящему уже отправлен отчёт «прочитано» (чат открыт). */
+    @Volatile private var lastReadReportedId: String = ""
+
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
     init {
         refreshAttachmentRights()
+        observePeerTyping()
+        observeDrafts()
         loadMessages()
         observePinned()
         observeContactPresence()
@@ -102,6 +131,90 @@ class ChatDetailViewModel @Inject constructor(
         markAsRead()
         observeGifArrivals()
         observeStickerArrivals()
+    }
+
+    /**
+     * р235: «печатает…». Состояние живёт в памяти (TypingPeer) и само гаснет
+     * через несколько секунд после последнего пакета; здесь только показываем
+     * его в шапке чата.
+     */
+    private fun observePeerTyping() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.typing.TypingPeer.typing.collect { typing ->
+                val peer = peerId
+                _uiState.update { it.copy(isPeerTyping = peer.isNotBlank() && typing.contains(peer)) }
+            }
+        }
+    }
+
+    /**
+     * р235: рассказать собеседнику, что мы печатаем. Пакет уходит не чаще раза
+     * в [TYPING_REFRESH_MS] (на каждую букву - нельзя: это лишний трафик), а
+     * когда поле очистили или сообщение ушло - «перестал».
+     */
+    private fun publishTyping(active: Boolean) {
+        val peer = peerId
+        if (peer.isBlank()) return
+        // р243: в переписке с собственным узлом сигнал не нужен - он вернулся бы
+        // уведомлением «от себя». Признак берём из состояния (р241): вызова в
+        // ядро здесь нет, набор текста не должен ждать JNI.
+        if (_uiState.value.isSelfChat) return
+        if (!active) {
+            if (!typingAnnounced) return
+            typingAnnounced = false
+            lastTypingSentAt = 0L
+            // «Перестал» - тоже с запасным путём: иначе индикатор остался бы
+            // висеть, если прямой канал не работает.
+            com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, false, queueFallback = true)
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastTypingSentAt < TYPING_REFRESH_MS) return
+        lastTypingSentAt = now
+        // В надёжную очередь попадает только ПЕРВЫЙ пакет сессии: так
+        // индикатор появится даже без прямого канала, а поток обновлений
+        // очередь сообщений не забивает.
+        val first = !typingAnnounced
+        typingAnnounced = true
+        com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, true, queueFallback = first)
+    }
+
+    // ── р236: черновики сообщений ───────────────────────────────────────────
+
+    /**
+     * Черновик чата: текст хранится под ключом собеседника, поэтому второй
+     * телефон той же личности видит тот же недописанный текст. Здесь только
+     * сохранение у себя (при каждом изменении) и редкая отправка партнёру
+     * (не чаще раза в 1.5 с - набор текста не должен забивать канал).
+     */
+    private fun saveDraft(text: String) {
+        val key = draftKey
+        if (key.isBlank()) return
+        com.vladimir.messenger.data.draft.DraftStore.save(key, text)
+        // р243: партнёрскому устройству черновик в свой же чат не шлём (см. выше).
+        if (_uiState.value.isSelfChat) return
+        val now = System.currentTimeMillis()
+        if (now - lastDraftSentAt < DRAFT_REFRESH_MS && text.isNotEmpty()) return
+        lastDraftSentAt = now
+        com.vladimir.messenger.data.mirror.MirrorHub.publishDraft(key, text)
+    }
+
+    /**
+     * Черновик, приехавший с партнёрского устройства. Подставляем его в поле
+     * только если поле пустое: то, что человек набирает прямо сейчас, чужой
+     * текст затирать не должен.
+     */
+    private fun observeDrafts() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.draft.DraftStore.drafts.collect { drafts ->
+                val key = draftKey
+                if (key.isBlank()) return@collect
+                val text = drafts[key].orEmpty()
+                if (text.isEmpty()) return@collect
+                if (_uiState.value.inputText.isNotBlank()) return@collect
+                _uiState.update { it.copy(inputText = text) }
+            }
+        }
     }
 
     /** Раунд 121: гифка, которую ждали из роя, пришла - сразу отправить. */
@@ -142,6 +255,9 @@ class ChatDetailViewModel @Inject constructor(
      */
     private fun observeContactPresence() {
         viewModelScope.launch {
+            // р243: пока чат не опознан, считаем его обычным: плашка «это ваш
+            // узел» появляется после загрузки переписки (р241), а не после
+            // вызова в ядро. Набор текста от этого не зависит.
             chatRepository.observeChat(chatId).collect { chat ->
                 if (chat != null) {
                     // Заодно подтягиваем @никнейм: он живёт в таблице контактов
@@ -150,8 +266,29 @@ class ChatDetailViewModel @Inject constructor(
                     val nick = runCatching {
                         contactDao.getContactById(chat.contactId)?.username.orEmpty()
                     }.getOrDefault("")
+                    // р235: адрес собеседника нужен для «печатает…».
+                    if (chat.contactId.isNotBlank()) peerId = chat.contactId
+                    // р241/р243: свой ли это узел, решает загрузка переписки:
+                    // она сравнивает адрес собеседника со «своим» адресом из
+                    // уже полученных сообщений (recipientId). Ядро здесь не
+                    // опрашиваем - этот код идёт при каждом обновлении чата.
+                    // р236: черновик этого чата (ключ - адрес собеседника)
+                    // подставляем в пустое поле: недописанное с другого
+                    // устройства должно ждать здесь.
+                    if (chat.contactId.isNotBlank() && draftKey.isBlank()) {
+                        draftKey = com.vladimir.messenger.data.draft.DraftStore.dmKey(chat.contactId)
+                        val draft = com.vladimir.messenger.data.draft.DraftStore.load(draftKey)
+                        if (draft.isNotEmpty() && _uiState.value.inputText.isBlank()) {
+                            _uiState.update { it.copy(inputText = draft) }
+                        }
+                    }
                     _uiState.update {
-                        it.copy(isContactOnline = chat.isContactOnline, contactUsername = nick)
+                        it.copy(
+                            isContactOnline = chat.isContactOnline,
+                            contactUsername = nick,
+                            isPeerTyping = com.vladimir.messenger.data.typing.TypingPeer
+                                .isTyping(chat.contactId),
+                        )
                     }
                     // Сердечки заводим здесь: только тут точно известен адрес
                     // собеседника (в личном чате это contactId).
@@ -239,6 +376,9 @@ class ChatDetailViewModel @Inject constructor(
     fun togglePin(messageId: String, pinned: Boolean) {
         viewModelScope.launch {
             runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+            // р238: закреп - личное дело человека, собеседнику он не уходит, но
+            // на втором устройстве ТОЙ ЖЕ личности закреп должен быть там же.
+            runCatching { com.vladimir.messenger.data.mirror.MirrorHub.publishPin(messageId, pinned) }
         }
     }
 
@@ -256,11 +396,43 @@ class ChatDetailViewModel @Inject constructor(
                             android.util.Log.i("ChatDetailVM", "  🔹 msg: id=${msg.id.take(8)} isFromMe=${msg.isFromMe} status=${msg.status} content=${msg.content.take(20)}")
                         }
                     }
+                    // р242: чат открыт на экране - новое входящее читаем сразу и
+                    // сообщаем собеседнику. Раньше отчёт уходил только при
+                    // открытии чата: если человек сидел в переписке, у собеседника
+                    // так и оставалась одна галочка.
+                    val newestIncoming = messages.lastOrNull { !it.isFromMe }
+                    if (newestIncoming != null && newestIncoming.id != lastReadReportedId) {
+                        lastReadReportedId = newestIncoming.id
+                        runCatching { readReceipts.reportRead(chatId) }
+                    }
+                    // р241/р243: свой ли это узел - решаем здесь, по уже
+                    // загруженной переписке: у входящих в поле «получатель»
+                    // стоит наш собственный адрес. Вызова в ядро нет, поэтому
+                    // обновление чата набор текста не тормозит.
+                    // ВАЖНО: адрес берём только у ВХОДЯЩИХ - у своих
+                    // отправленных в этом поле стоит адрес собеседника, и по
+                    // нему любой обычный чат выглядел бы «перепиской с собой».
+                    val selfNode = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
+                        .ifBlank {
+                            messages.firstNotNullOfOrNull { msg ->
+                                if (msg.isFromMe) null
+                                else msg.recipientId.takeIf { it.startsWith("pk_") }
+                            }.orEmpty()
+                        }
+                    // Адрес собеседника: из наблюдения за чатом, а если оно ещё
+                    // не успело прийти - прямо из базы, чтобы плашка не
+                    // запаздывала на первой отрисовке.
+                    val peerForSelf = peerId.ifBlank {
+                        runCatching { chatRepository.getChatById(chatId)?.contactId }
+                            .getOrNull().orEmpty()
+                    }
+                    val isSelf = selfNode.isNotBlank() && peerForSelf == selfNode
                     val wasEmpty = _uiState.value.messages.isEmpty()
                     _uiState.update { state ->
                         state.copy(
                             messages      = messages,
                             isLoading     = false,
+                            isSelfChat    = isSelf,
                             // Автопрокрутка при первой загрузке или новом сообщении
                             scrollToBottom = wasEmpty || messages.lastOrNull()?.isFromMe == true
                         )
@@ -322,6 +494,10 @@ class ChatDetailViewModel @Inject constructor(
 
     fun onInputTextChanged(text: String) {
         _uiState.update { it.copy(inputText = text) }
+        // р235: «печатает…» у собеседника, пока в поле есть текст.
+        publishTyping(text.isNotBlank())
+        // р236: черновик - и у себя, и на партнёрском устройстве.
+        saveDraft(text)
     }
 
     fun onSendMessage() {
@@ -333,6 +509,10 @@ class ChatDetailViewModel @Inject constructor(
 
             sendMessageUseCase(chatId, text)
                 .onSuccess {
+                    // р235: сообщение ушло - «печатает…» у собеседника гаснет.
+                    publishTyping(false)
+                    // р236: текст ушёл - черновик больше не нужен ни здесь, ни там.
+                    saveDraft("")
                     _uiState.update { it.copy(
                         isSending      = false,
                         scrollToBottom = true
@@ -396,6 +576,30 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * р245: медиа с телефона-зеркала.
+     *
+     * Отправка файла требует СВОЕЙ сетевой сессии: у тени её нет, и подготовка
+     * передачи падала на незакреплённом ключе получателя («файл не отправлен»).
+     * Поэтому сначала просим движок у активного партнёра (передача роли, р231)
+     * и ждём, пока он поднимется здесь. Если партнёра нет - просто продолжаем:
+     * дальше всё как обычно, с понятной ошибкой, если ключа действительно нет.
+     */
+    private suspend fun claimEngineForMediaIfNeeded() {
+        if (RustBridge.isRunning()) return
+        if (!com.vladimir.messenger.data.mirror.MirrorHub.canClaimEngine()) return
+        com.vladimir.messenger.data.mirror.MirrorHub.claimEngine()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val deadline = System.currentTimeMillis() + 15_000L
+            while (!RustBridge.isRunning() && System.currentTimeMillis() < deadline) {
+                kotlinx.coroutines.delay(400L)
+            }
+        }
+        if (!RustBridge.isRunning()) {
+            android.util.Log.i("ChatDetailVM", "р245: движок не поднялся, пробуем как есть")
+        }
+    }
+
     fun onFileSelected(uri: Uri) {
         if (_uiState.value.isPreparingFile) return
         // Второй рубеж: даже если кнопку обошли, подготовка файла не пройдёт.
@@ -407,6 +611,8 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isPreparingFile = true) }
             var targetRecipientId: String? = null
             try {
+                // р245: с телефона-зеркала сначала забираем движок у активного.
+                claimEngineForMediaIfNeeded()
                 val chat = chatRepository.getChatById(chatId)
                     ?: error("Чат недоступен")
                 val recipientId = chat.contactId
@@ -657,6 +863,8 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isPreparingFile = true, error = null) }
             var targetRecipientId: String? = null
             try {
+                // р245: с телефона-зеркала сначала забираем движок (как и файл).
+                claimEngineForMediaIfNeeded()
                 val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
                 val recipientId = chat.contactId
                 targetRecipientId = recipientId
@@ -904,6 +1112,20 @@ class ChatDetailViewModel @Inject constructor(
         val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
         val recipientId = chat.contactId
         val messageId = UUID.randomUUID().toString()
+        // р245: это устройство без сети (зеркало)? Тогда ссылку отправляет
+        // партнёр-активный. Раньше вызов шёл в ядро напрямую: движка здесь нет,
+        // отправка возвращала false, и строка висела «в ожидании» вечно -
+        // гифка с телефона-зеркала до собеседника не доходила вовсе.
+        val viaMirror = chatRepository.sendGifRefViaMirror(
+            chatId = chatId,
+            recipientId = recipientId,
+            sha256 = sha256,
+            messageId = messageId,
+        )
+        if (viaMirror) {
+            _uiState.update { it.copy(scrollToBottom = true) }
+            return
+        }
         val sent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 RustBridge.sendMessage(
@@ -1235,5 +1457,13 @@ class ChatDetailViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private companion object {
+        /** р235: не чаще раза в 2.5 с - иначе «печатает…» стал бы потоком пакетов. */
+        const val TYPING_REFRESH_MS = 2_500L
+
+        /** р236: черновик уходит партнёру не чаще раза в 1.5 с. */
+        const val DRAFT_REFRESH_MS = 1_500L
     }
 }

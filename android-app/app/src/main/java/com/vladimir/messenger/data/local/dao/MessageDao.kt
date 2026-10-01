@@ -4,6 +4,12 @@ import androidx.room.*
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import kotlinx.coroutines.flow.Flow
 
+/** р239: агрегат для уборки мусора «печатает…» (чат -> сколько строк). */
+data class TypingJunkRow(val chatId: String, val count: Int)
+
+/** Delivery ACK rows written by pre-fix versions (chat -> how many rows). */
+data class DeliveryAckJunkRow(val chatId: String, val count: Int)
+
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
@@ -33,6 +39,13 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
 
+    /** A delivery ACK can update only an outgoing message, and must not downgrade READ. */
+    @Query(
+        "UPDATE messages SET status = 'DELIVERED' WHERE id = :messageId " +
+            "AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT', 'FAILED')"
+    )
+    suspend fun markOutgoingMessageDelivered(messageId: String): Int
+
     /**
      * Чужие сообщения в чате - за них отправителю уходит отчёт «прочитано».
      * Берём последние: старые он уже видел отмеченными.
@@ -58,6 +71,14 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC")
     suspend fun getPendingOutgoingMessages(): List<MessageEntity>
+
+    /**
+     * р245: содержимое последних строк переписки - для насоса медиа. По нему
+     * тень находит ссылки на гифки, байтов которых у неё ещё нет, и просит их
+     * у активного устройства.
+     */
+    @Query("SELECT content FROM messages ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun recentContents(limit: Int): List<String>
 
     /** Раунд 179: вся офлайн-очередь (любой чат) - для периодического слива. */
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE' ORDER BY timestamp ASC LIMIT :limit")
@@ -194,6 +215,37 @@ interface MessageDao {
 
     @Query("DELETE FROM messages WHERE id = :messageId")
     suspend fun deleteById(messageId: String)
+
+    /**
+     * р239: служебные пакеты «печатает…», ошибочно сохранённые как сообщения
+     * (r235-r238). Возвращает, сколько строк удалено.
+     */
+    @Query("DELETE FROM messages WHERE content LIKE 'APUTYP1|%'")
+    suspend fun deleteTypingJunk(): Int
+
+    /** р240: сколько своих сообщений ждёт отправки (для диагностики). */
+    @Query("SELECT COUNT(*) FROM messages WHERE isFromMe = 1 AND status = 'PENDING'")
+    suspend fun countPendingOutgoing(): Int
+
+    /** р239: в каких чатах лежит этот мусор и по скольку строк. */
+    @Query(
+        "SELECT chatId AS chatId, COUNT(*) AS count FROM messages " +
+            "WHERE content LIKE 'APUTYP1|%' GROUP BY chatId"
+    )
+    suspend fun chatsWithTypingJunk(): List<TypingJunkRow>
+
+    /** Exact UUID-shaped ACK rows accidentally stored as incoming chat messages by older clients. */
+    @Query(
+        "SELECT chatId AS chatId, COUNT(*) AS count FROM messages " +
+            "WHERE isFromMe = 0 AND trim(content) GLOB :pattern GROUP BY chatId"
+    )
+    suspend fun chatsWithDeliveryAckJunk(pattern: String): List<DeliveryAckJunkRow>
+
+    @Query("SELECT content FROM messages WHERE isFromMe = 0 AND trim(content) GLOB :pattern")
+    suspend fun deliveryAckJunkContents(pattern: String): List<String>
+
+    @Query("DELETE FROM messages WHERE isFromMe = 0 AND trim(content) GLOB :pattern")
+    suspend fun deleteDeliveryAckJunk(pattern: String): Int
 
     /**
      * Раунд 135: последнее сообщение чата - пересчёт превью после удаления.

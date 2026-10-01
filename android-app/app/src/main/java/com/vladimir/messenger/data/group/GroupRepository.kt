@@ -3350,16 +3350,28 @@ class GroupRepository(
         // проверки получался замкнутый круг: сброс непрочитанных писал в
         // таблицу, поток тем перезапускал ленту, лента снова звала сброс - и
         // так без конца, пока приложение не зависало.
+        var hadTopicUnread = false
         if (!topicId.isNullOrBlank()) {
             val topic = groupDao.getTopicById(topicId)
             if (topic != null && topic.unreadCount > 0) {
                 groupDao.markTopicRead(topicId)
+                hadTopicUnread = true
             }
         }
         val group = groupDao.getGroupById(groupId) ?: return
         val unread = groupDao.sumTopicUnread(groupId)
-        if (group.unreadCount != unread) {
+        val hadGroupUnread = group.unreadCount != unread
+        if (hadGroupUnread) {
             groupDao.setGroupUnread(groupId, unread)
+        }
+        // р228: второе устройство той же личности снимает непрочитанное
+        // вместе с нами - бейджи не расходятся. Кадр шлём ТОЛЬКО когда было
+        // что снимать: экран темы зовёт этот метод на каждом обновлении
+        // ленты, и безусловная отправка превратилась бы в поток кадров.
+        if (hadTopicUnread || hadGroupUnread) {
+            com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(
+                peerId = "", groupId = groupId, topicId = topicId.orEmpty(),
+            )
         }
     }
 
@@ -4069,6 +4081,8 @@ class GroupRepository(
     /** Снять счётчик непрочитанного - пункт меню в пузыре группы. */
     suspend fun markGroupRead(groupId: String) {
         groupDao.markGroupRead(groupId)
+        // р228: снять непрочитанное и на партнёрском устройстве личности.
+        com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(peerId = "", groupId = groupId)
     }
 
     /**
@@ -4523,12 +4537,42 @@ class GroupRepository(
 
     private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
         val me = myId().orEmpty()
+        // р229: пока применяется зеркальный кадр, тень не рассылает ничего -
+        // иначе ответ на принятое событие уходил бы обратно активному и
+        // возвращался: получилась бы петля. Сети у тени всё равно нет.
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isApplyingFrame() &&
+            !com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()
+        ) {
+            return DeliveryReport(attempted = 0, delivered = 0, failed = emptyList())
+        }
+        // р229: устройство-зеркало своей сессии не имеет - конверт несёт
+        // активное. Возвращаем успех: дальше им занимается партнёр, а своя
+        // база уже обновлена вызывающим кодом.
+        if (com.vladimir.messenger.data.mirror.MirrorHub.deliverGroupEnvelope(groupId, envelope)) {
+            Log.i(TAG, "group envelope via mirror (тень): " + envelope.take(16))
+            return DeliveryReport(attempted = 1, delivered = 1, failed = emptyList())
+        }
+        // р229: и наоборот - конверт, сделанный ЗДЕСЬ, должен доехать до
+        // второго устройства личности (получатели в сети его не видят).
+        com.vladimir.messenger.data.mirror.MirrorHub.publishEnvelope(
+            senderId = me,
+            chatId = groupId,
+            messageId = "",
+            text = envelope,
+        )
         val recipients = groupDao.getMembers(groupId)
             .filter { !it.isBanned }
             .map { it.nodeId }
             .filter { !excludeSelf || it != me }
         return delivery.deliver(groupId, envelope, recipients)
     }
+
+    /**
+     * р229: разослать групповой конверт участникам (для конверта, пришедшего
+     * с партнёрского устройства личности - сеть ведёт активный).
+     */
+    suspend fun fanoutEnvelope(groupId: String, envelope: String): DeliveryReport =
+        broadcast(groupId, envelope, excludeSelf = true)
 
     /**
      * Запоминает автора сообщения, чтобы в ленте было имя, а не обрывок

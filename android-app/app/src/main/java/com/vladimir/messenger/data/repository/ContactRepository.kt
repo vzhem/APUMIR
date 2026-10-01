@@ -45,6 +45,8 @@ class ContactRepository @Inject constructor(
             )
 
             contactDao.insertContact(entity)
+            // р234: тот же контакт должен появиться на партнёрском устройстве.
+            publishContact("put", entity)
             Result.success(entity.toDomain())
         } catch (e: Exception) {
             Result.failure(e)
@@ -77,6 +79,8 @@ class ContactRepository @Inject constructor(
     suspend fun updateDisplayName(contactId: String, name: String) {
         contactDao.updateDisplayName(contactId, name)
         chatRepository.updateContactName(contactId, name)
+        // р234: имя поменялось здесь - пусть поменяется и на втором устройстве.
+        contactDao.getContactById(contactId)?.let { publishContact("put", it) }
     }
 
     // updateUsername уже есть ниже, рядом с renameContact - второй такой же
@@ -159,6 +163,8 @@ class ContactRepository @Inject constructor(
         val entity = contactDao.getContactById(contactId) ?: return
         contactDao.deleteContact(entity)
         runCatching { chatRepository.deleteChatsOf(contactId) }
+        // р234: удаление контакта (и его чата) - на оба устройства.
+        publishContact("del", entity)
     }
 
     /**
@@ -261,6 +267,75 @@ class ContactRepository @Inject constructor(
         }
     }
 
+    // ── р234: азбука адресов на обоих устройствах ───────────────────────────
+
+    /**
+     * Рассказать партнёрскому устройству про изменение контакта. Кадр
+     * небольшой (идентификатор, имя, @имя, отпечаток) и запечатан на себя;
+     * при применении чужого кадра повторно не рассылается - следит MirrorHub.
+     */
+    private fun publishContact(action: String, entity: ContactEntity) {
+        if (entity.id.isBlank()) return
+        runCatching {
+            com.vladimir.messenger.data.mirror.MirrorHub.publishContact(
+                org.json.JSONObject()
+                    .put("a", action)
+                    .put("id", entity.id)
+                    .put("name", entity.displayName)
+                    .put("user", entity.username)
+                    .put("fp", entity.fingerprint),
+            )
+        }
+    }
+
+    /**
+     * р234: контакт добавлен/переименован/удалён на партнёрском устройстве.
+     * Чат заводим или переименовываем тем же путём, что и при обычном
+     * добавлении, иначе на телефоне остался бы «Contact a1b2c3d4».
+     * Своего движка у тени нет, поэтому [RustBridge.addContact] - под
+     * runCatching: на ведущем он тем же вызовом попадёт в ядро.
+     */
+    suspend fun applyMirrorContact(signal: org.json.JSONObject) {
+        val id = signal.optString("id")
+        if (id.isBlank()) return
+        if (signal.optString("a") == "del") {
+            val entity = contactDao.getContactById(id) ?: return
+            contactDao.deleteContact(entity)
+            runCatching { chatRepository.deleteChatsOf(id) }
+            Log.i("ContactRepository", "mirror: контакт удалён (${entity.displayName})")
+            return
+        }
+        val name = signal.optString("name")
+        val username = signal.optString("user")
+        val fingerprint = signal.optString("fp").ifBlank { id }
+        val existing = contactDao.getContactById(id)
+        if (existing == null) {
+            runCatching { RustBridge.addContact(id, name.ifBlank { fingerprint }) }
+            contactDao.insertContact(
+                ContactEntity(
+                    id = id,
+                    displayName = name.ifBlank { NodeIds.autoName(id) },
+                    fingerprint = fingerprint,
+                    username = username,
+                ),
+            )
+        } else {
+            contactDao.updateContact(
+                existing.copy(
+                    displayName = name.ifBlank { existing.displayName },
+                    username = username.ifBlank { existing.username },
+                    fingerprint = fingerprint.ifBlank { existing.fingerprint },
+                ),
+            )
+        }
+        runCatching {
+            val shown = name.ifBlank { existing?.displayName ?: NodeIds.autoName(id) }
+            chatRepository.updateContactName(id, shown)
+            chatRepository.getOrCreateChat(id, shown)
+        }
+        Log.i("ContactRepository", "mirror: контакт применён (${name.ifBlank { id.takeLast(8) }})")
+    }
+
     private fun ContactEntity.toDomain() = Contact(
         id = id,
         displayName = displayName,
@@ -272,6 +347,7 @@ class ContactRepository @Inject constructor(
 
     suspend fun updateUsername(contactId: String, username: String) {
         contactDao.updateUsername(contactId, username)
+        contactDao.getContactById(contactId)?.let { publishContact("put", it) }
     }
 
     suspend fun renameContact(contactId: String, newName: String): Result<Unit> {
@@ -282,6 +358,7 @@ class ContactRepository @Inject constructor(
             }
             contactDao.updateDisplayName(existing.id, newName)
             chatRepository.updateContactName(contactId, newName)
+            contactDao.getContactById(existing.id)?.let { publishContact("put", it) }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

@@ -620,9 +620,12 @@ private fun SettingsTabContent(
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
     var showMqttDialog by remember { mutableStateOf(false) }
+    // р240: диагностика синхронизации устройств одной личности.
+    // (имя с Mirror: showSyncDialog занят окном переноса профиля)
+    var showMirrorDiag by remember { mutableStateOf(false) }
     // Диалог резервной копии адресов (раздел «Сервер»).
     var showAddrBookDialog by remember { mutableStateOf(false) }
-    // Раунд 223: окно «Синхронизировать аккаунт».
+    // Раунд 223: окно разового переноса профиля.
     var showSyncDialog by remember { mutableStateOf(false) }
     val mqttClipboard = LocalClipboardManager.current
     // Бегунок справа: видно, где мы в длинном списке.
@@ -815,6 +818,15 @@ private fun SettingsTabContent(
                         title = "Собрать данные об абонентах",
                         subtitle = "Запустить поиск пиров по сети",
                         onClick = viewModel::onTriggerGossipDiscovery,
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    // р240: по этим четырём строкам сразу видно, почему не
+                    // доходят сообщения: роль, партнёр, канал, недоотправленные.
+                    SettingsItem(
+                        icon     = Icons.Default.Refresh,
+                        title    = "Диагностика синхронизации",
+                        subtitle = "Роль устройства, партнёр, канал, недоотправленные",
+                        onClick  = { showMirrorDiag = true },
                     )
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsItem(
@@ -1081,15 +1093,15 @@ private fun SettingsTabContent(
                 }
             }
 
-            // Раунд 223: «Синхронизация» - копия профиля в облаке для
-            // переноса чатов, контактов и ранга на другое устройство.
-            item { SettingsSectionTitle("Синхронизация") }
+            // Обычная синхронизация уже настроенных телефонов идёт в фоне
+            // через живое зеркало. Это окно - только разовый перенос профиля.
+            item { SettingsSectionTitle("Устройства") }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Sync,
-                        title    = "Синхронизировать аккаунт",
-                        subtitle = "Устройства находят себя сами: по Wi-Fi и через сеть APU (мобильные сети)",
+                        title    = "Перенос профиля на новое устройство",
+                        subtitle = "Уже подключённые телефоны синхронизируются сами — без этого окна",
                         onClick  = { showSyncDialog = true },
                     )
                 }
@@ -1164,8 +1176,9 @@ private fun SettingsTabContent(
                 append("не пропускает — через обходной канал, и потом обратно. ")
                 append("Нажимать ничего не нужно.")
                 if (uiState.mqttLink.contains(", ошибка ")) {
-                    append("\n\nПоследняя заминка — не страшно: приложение ")
-                    append("перебирает пути, пока не найдёт рабочий.")
+                    append("\n\nПроверка «Наш сервер» и брокер сообщений — разные ")
+                    append("соединения. Если брокер не ответил, приложение повторяет ")
+                    append("подключение само; отправлять копию профиля не нужно.")
                 }
             } else {
                 append(uiState.mqttLink)
@@ -1186,6 +1199,44 @@ private fun SettingsTabContent(
             },
             dismissButton = {
                 TextButton(onClick = { showMqttDialog = false }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    if (showMirrorDiag) {
+        // р243: текст диагностики - в фоновом потоке. MirrorHub.debugStatus()
+        // спрашивает ядро (JNI), и вызов при отрисовке окна давал «APU не
+        // отвечает» ровно в тот момент, когда человек смотрит на диагностику
+        // (скриншот владельца 30.09 21:20).
+        var syncText by remember { mutableStateOf("Собираю…") }
+        LaunchedEffect(showMirrorDiag) {
+            syncText = withContext(Dispatchers.IO) {
+                com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { showMirrorDiag = false },
+            title = { Text("Синхронизация устройств") },
+            text = {
+                Text(
+                    syncText + "\n\nЕсли недоотправленных много, а партнёр виден - " +
+                        "подождите минуту: строка уйдёт сама, когда связь восстановится.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    // Буфер обмена берём тот же, что у соседнего диалога
+                    // (mqttClipboard объявлен в этой же функции экрана).
+                    // р243: копируем уже собранный текст - повторный вызов
+                    // диагностики (JNI) на главном потоке снова подвесил бы окно.
+                    mqttClipboard.setText(
+                        androidx.compose.ui.text.AnnotatedString(syncText),
+                    )
+                    showMirrorDiag = false
+                }) { Text("Скопировать") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMirrorDiag = false }) { Text("Закрыть") }
             },
         )
     }

@@ -66,6 +66,23 @@ class FileTransferRouter @Inject constructor(
      * отдавать чужой файл получателю имеет смысл, только когда он появился.
      */
     private val onlinePeers = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /**
+     * р231: когда насос последний раз реально двигал исходящие. По этому
+     * времени активное устройство решает, уступать ли движок партнёру-тени,
+     * который просит его ради своего файла.
+     */
+    @Volatile private var lastOutgoingActivityAt = 0L
+
+    /** р231: когда последний раз принимали файловый пакет (передача идёт к нам). */
+    @Volatile private var lastIncomingActivityAt = 0L
+
+    /**
+     * р231: идёт ли передача (отдача или приём) прямо сейчас. Передача роли
+     * движка рвёт сетевую сессию, поэтому во время живой передачи её не
+     * делаем - партнёр повторит просьбу позже.
+     */
+    fun hasRecentTransferActivity(nowMs: Long, windowMs: Long = 20_000L): Boolean =
+        nowMs - lastOutgoingActivityAt < windowMs || nowMs - lastIncomingActivityAt < windowMs
     private lateinit var lanChannel: LanDirectChannel
     /**
      * UDP-каналы файловых пакетов через интернет (мобильная связь,
@@ -111,6 +128,11 @@ class FileTransferRouter @Inject constructor(
         }
     private lateinit var chunkStore: FileTransferChunkStore
     private val receivedStore: ReceivedFileStore
+    /** р230: нужны и вне init - отдача байтов исходящей передачи партнёру. */
+    private lateinit var crypto: FileCryptoGateway
+    private lateinit var keyVault: TransferKeyVaultAccess
+    /** р230: о каких исходящих передачах уже рассказали партнёрскому устройству. */
+    private val mirrorAnnounced = java.util.Collections.synchronizedSet(HashSet<String>())
     private val lastHelloAt = HashMap<String, Long>()
 
     init {
@@ -161,9 +183,9 @@ class FileTransferRouter @Inject constructor(
         )
         val switchingTransport: PacketTransport = SwitchingPacketTransport(transportLocal, lan)
         transport = switchingTransport
-        val crypto: FileCryptoGateway = FfiFileCryptoGateway()
+        crypto = FfiFileCryptoGateway()
         val identity: LocalExchangeIdentity = AndroidLocalExchangeIdentity(appContext)
-        val keyVault: TransferKeyVaultAccess = AndroidTransferKeyVaultAccess(appContext)
+        keyVault = AndroidTransferKeyVaultAccess(appContext)
         val notifier = FileTransferReceiver.FileChatNotifier(
             { chatId, senderId, messageId, displayName, mediaType, totalBytes, fileSha256 ->
                 // Рой APK (docs/UPDATE_SEEDING.md): файл в виртуальное
@@ -215,6 +237,10 @@ class FileTransferRouter @Inject constructor(
                             timestamp = System.currentTimeMillis(),
                             recipientId = RustBridge.nodeId() ?: "",
                         )
+                        // р230: второе устройство той же личности показывает
+                        // тот же файл. Байты (до 24 МБ) оно попросит само.
+                        runCatching { publishMirrorFileMeta(chatId, senderId, messageId, displayName, mediaType, totalBytes, fileSha256) }
+                            .onFailure { Log.w(TAG, "mirror file meta failed: ${it.message}") }
                     }
                 }
                     // Раунд 121: принятая гифка оседает в библиотеке телефона -
@@ -529,6 +555,8 @@ class FileTransferRouter @Inject constructor(
             return true
         }
         if (!FileTransferWire.isFilePacketText(text)) return false
+        // р231: к нам идёт файловая передача - передачу роли движка пока не делаем.
+        lastIncomingActivityAt = System.currentTimeMillis()
 
         // Хранение у третьего телефона: хранитель и отправитель могут не
         // иметь общего чата (получатель с хранителем - тем более). Чат здесь
@@ -660,16 +688,45 @@ class FileTransferRouter @Inject constructor(
         // «Приложение не отвечает» вплоть до убийства системы.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             if (!RustBridge.isRunning()) {
+                // р231: мы тень, но у нас есть готовый исходящий файл - своей
+                // сессии нет, поэтому просим движок у активного партнёра.
+                runCatching { maybeClaimEngineForOutgoing() }
+                    .onFailure { Log.w(TAG, "mirror engine claim failed: ${it.message}") }
                 Log.d(TAG, "File pump skipped: engine not running")
                 return@withContext null
             }
             runCatching { sendHelloHandshakes() }
                 .onFailure { Log.w(TAG, "File HELLO sweep failed: ${it.message}") }
+            // р230: о своих отправленных файлах рассказываем партнёрскому
+            // устройству личности - оно покажет те же карточки.
+            runCatching { announceOutgoingFilesToMirror(System.currentTimeMillis()) }
+                .onFailure { Log.w(TAG, "mirror outgoing announce failed: ${it.message}") }
             val summary = sender.pumpOnce()
+            if (summary != null && (summary.packetsSent > 0 || summary.transfersPumped > 0)) {
+                lastOutgoingActivityAt = System.currentTimeMillis()
+            }
             pumpCustody()
             runCatching { groupSeeder.pump() }
                 .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
             summary
+        }
+    }
+
+    /**
+     * р231: у тени нет своей сетевой сессии, поэтому исходящий файл со
+     * второго устройства сам не уйдёт. Если партнёр-активный жив, просим у
+     * него движок (передачу роли): активный уходит в зеркало, мы поднимаемся
+     * и отправляем файл как обычно - строка передачи и карточка уже готовы.
+     * Просим только когда есть что отправлять и не чаще раза в минуту.
+     */
+    private suspend fun maybeClaimEngineForOutgoing() {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) return
+        if (!com.vladimir.messenger.data.mirror.MirrorHub.canClaimEngine()) return
+        val pending = transferDao.getActiveOutgoing(System.currentTimeMillis())
+        if (pending.isEmpty()) return
+        val claimed = com.vladimir.messenger.data.mirror.MirrorHub.claimEngine()
+        if (claimed) {
+            Log.i(TAG, "mirror engine claimed for ${pending.size} outgoing transfer(s)")
         }
     }
 
@@ -835,6 +892,219 @@ class FileTransferRouter @Inject constructor(
         runCatching { transferDao.deleteTransfer(transferId) }
             .onFailure { Log.w(TAG, "drop transfer failed for $transferId: ${it.message}") }
     }
+
+    /**
+     * р230: рассказать партнёрскому устройству о принятом файле личного чата
+     * (карточка + строка передачи). Шлёт только активное: у тени сети нет.
+     */
+    private suspend fun publishMirrorFileMeta(
+        chatId: String,
+        senderId: String,
+        messageId: String,
+        displayName: String,
+        mediaType: String,
+        totalBytes: Long,
+        fileSha256: String,
+    ) {
+        val transferId = messageId.removePrefix("file-")
+        if (transferId.isBlank() || transferId == messageId) return
+        val row = transferDao.getTransfer(transferId) ?: return
+        com.vladimir.messenger.data.mirror.MirrorHub.publishFileMeta(
+            mirrorFileMeta(row, peer = senderId),
+        )
+    }
+
+    /** р230: описание передачи для партнёрского устройства (оба направления). */
+    private fun mirrorFileMeta(
+        row: com.vladimir.messenger.data.local.entity.FileTransferEntity,
+        peer: String,
+    ): org.json.JSONObject = org.json.JSONObject()
+        .put("id", row.transferId)
+        .put("msg", row.messageId)
+        .put("peer", peer)
+        .put("dir", if (row.direction == "INCOMING") "in" else "out")
+        .put("name", row.displayName)
+        .put("mime", row.mediaType)
+        .put("size", row.totalBytes)
+        .put("sha", row.fileSha256)
+        .put("chunks", row.chunkCount)
+        .put("chunk", row.chunkSize)
+        .put("text", formatPlaceholder(row.displayName, row.mediaType, row.totalBytes))
+        .put("ts", row.createdAtMs)
+
+    /**
+     * р230: рассказать партнёрскому устройству о СВОИХ исходящих передачах -
+     * оно покажет те же отправленные файлы и сможет их открыть. Зовётся из
+     * насоса: передача к этому моменту уже подготовлена.
+     */
+    private suspend fun announceOutgoingFilesToMirror(now: Long) {
+        val active = runCatching { transferDao.getActiveOutgoing(now) }.getOrDefault(emptyList())
+        for (row in active) {
+            if (row.messageId.isBlank()) continue
+            if (!mirrorAnnounced.add(row.transferId)) continue
+            com.vladimir.messenger.data.mirror.MirrorHub.publishFileMeta(
+                mirrorFileMeta(row, peer = row.peerNodeId),
+            )
+        }
+    }
+
+    /**
+     * р230: применить метаданные файла, пришедшие от партнёрского устройства.
+     * Заводим строку передачи (сразу COMPLETE - байты придут следом) и карточку
+     * в чате, найденном по собеседнику: идентификаторы чатов на устройствах
+     * разные.
+     */
+    suspend fun applyMirrorFileMeta(meta: org.json.JSONObject): Boolean =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val transferId = meta.optString("id")
+        val peer = meta.optString("peer")
+        if (transferId.isBlank() || peer.isBlank()) return@withContext false
+        val chat = chatRepository.getChatByContactId(peer)
+            ?: chatRepository.getOrCreateChat(peer, com.vladimir.messenger.util.NodeIds.autoName(peer))
+        val messageId = meta.optString("msg").ifBlank { FileTransferWire.chatPlaceholderMessageId(transferId) }
+        val name = meta.optString("name")
+        val mime = meta.optString("mime")
+        val size = meta.optLong("size", 0L)
+        val sha = meta.optString("sha")
+        val chunks = meta.optLong("chunks", 1L)
+        val chunkSize = meta.optInt("chunk", 64 * 1024)
+        val timestamp = meta.optLong("ts", System.currentTimeMillis())
+        val outgoing = meta.optString("dir") == "out"
+        val existing = transferDao.getTransfer(transferId)
+        if (existing == null) {
+            transferDao.insertTransferIgnore(
+                com.vladimir.messenger.data.local.entity.FileTransferEntity(
+                    transferId = transferId,
+                    messageId = messageId,
+                    chatId = chat.id,
+                    peerNodeId = peer,
+                    direction = if (outgoing) "OUTGOING" else "INCOMING",
+                    displayName = name,
+                    mediaType = mime,
+                    totalBytes = size,
+                    chunkSize = chunkSize,
+                    chunkCount = chunks,
+                    fileSha256 = sha,
+                    state = "COMPLETE",
+                    completedChunks = chunks,
+                    transferredBytes = 0,
+                    createdAtMs = timestamp,
+                    expiresAtMs = timestamp + 30L * 24 * 60 * 60 * 1000,
+                    updatedAtMs = System.currentTimeMillis(),
+                ),
+            )
+        }
+        if (chatRepository.messageExists(messageId) != true) {
+            val content = meta.optString("text").ifBlank { formatPlaceholder(name, mime, size) }
+            if (outgoing) {
+                chatRepository.insertLocalFileMessage(
+                    chatId = chat.id,
+                    recipientId = peer,
+                    messageId = messageId,
+                    content = content,
+                    timestamp = timestamp,
+                )
+            } else {
+                chatRepository.saveIncomingMessage(
+                    chatId = chat.id,
+                    senderId = peer,
+                    messageId = messageId,
+                    content = content,
+                    timestamp = timestamp,
+                    recipientId = RustBridge.nodeId() ?: "",
+                )
+            }
+        }
+        Log.i(TAG, "mirror file meta applied id=$transferId ($name, $size B, out=$outgoing)")
+        true
+    }
+
+    /** Куски файла от партнёра: пишем в тот же приёмник, что и обычную передачу. */
+    private val mirrorWriters =
+        java.util.concurrent.ConcurrentHashMap<String, Pair<ReceivedFileStore.Writer, Triple<String, Long, Int>>>()
+
+    /**
+     * р230: порция файла от партнёрского устройства. Пишем через тот же
+     * [ReceivedFileStore], что и обычный приём: имя каталога - идентификатор
+     * передачи, поэтому и открытие файла в чате сработает как обычно.
+     */
+    suspend fun applyMirrorFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val row = transferDao.getTransfer(transferId) ?: return@withContext
+        val entry = mirrorWriters[transferId]
+        val writerState = entry ?: run {
+            val writer = receivedStore.openWriter(transferId, row.displayName, row.totalBytes)
+            val triple = Triple(row.displayName, row.totalBytes, row.chunkSize)
+            mirrorWriters[transferId] = Pair(writer, triple)
+            Pair(writer, triple)
+        }
+        try {
+            writerState.first.write(bytes, bytes.size)
+            if (last) {
+                writerState.first.commit()
+                mirrorWriters.remove(transferId)
+                Log.i(TAG, "mirror file complete id=$transferId (${row.displayName})")
+            }
+        } catch (error: Exception) {
+            runCatching { writerState.first.abort() }
+            runCatching { receivedStore.deleteTransfer(transferId) }
+            mirrorWriters.remove(transferId)
+            Log.w(TAG, "mirror file chunk failed id=$transferId: ${error.message}")
+        }
+    }
+
+    /**
+     * р232: перед прямым (LAN) приёмом забыть недокачанное зеркальным каналом:
+     * файл придёт целиком, склеивать обрывки нельзя.
+     */
+    suspend fun resetMirrorWriter(transferId: String) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        mirrorWriters.remove(transferId)?.let { runCatching { it.first.abort() } }
+        runCatching { receivedStore.deleteTransfer(transferId) }
+    }
+
+    /**
+     * р230: прочитать кусок своего принятого файла, чтобы отдать партнёрскому
+     * устройству (то же, что отдаёт сеть при раздаче).
+     */
+    suspend fun readMirrorFileChunk(transferId: String, displayName: String, offset: Long, size: Int): ByteArray? =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+        runCatching {
+            receivedStore.receivedFile(transferId, displayName)?.let { file ->
+                java.io.RandomAccessFile(file, "r").use { handle ->
+                    if (offset >= handle.length()) return@runCatching null
+                    val want = minOf(size.toLong(), handle.length() - offset).toInt()
+                    val buffer = ByteArray(want)
+                    handle.seek(offset)
+                    handle.readFully(buffer)
+                    return@runCatching buffer
+                }
+            }
+            // Исходящая передача: своего плейнтекста нет, но куски и ключ у
+            // отправителя есть - расшифровываем и отдаём партнёру то же, что
+            // он получил бы файлом.
+            val row = transferDao.getTransfer(transferId) ?: return@runCatching null
+            val manifestBytes = chunkStore.readManifest(transferId) ?: return@runCatching null
+            val chunkIndex = offset / row.chunkSize
+            val ciphertext = chunkStore.readEncryptedChunk(transferId, chunkIndex)
+                ?: return@runCatching null
+            val plain = try {
+                keyVault.withExistingKey(transferId) { fileKey ->
+                    crypto.decryptChunk(manifestBytes, fileKey, chunkIndex, ciphertext)
+                }
+            } finally {
+                ciphertext.fill(0)
+            }
+            val innerOffset = (offset - chunkIndex * row.chunkSize).toInt()
+            if (innerOffset >= plain.size) {
+                plain.fill(0)
+                return@runCatching null
+            }
+            val want = minOf(size, plain.size - innerOffset)
+            val slice = plain.copyOfRange(innerOffset, innerOffset + want)
+            plain.fill(0)
+            slice
+        }.getOrNull()
+        }
 
     /** Verified plaintext of a completed incoming transfer (app-private storage), if present. */
     fun receivedFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {

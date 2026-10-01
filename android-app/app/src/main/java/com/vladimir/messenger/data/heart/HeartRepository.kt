@@ -10,6 +10,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import com.vladimir.messenger.data.mirror.MirrorHub
 
 /**
  * Сердечки профилям: показатель того, скольким людям человек понравился.
@@ -68,7 +69,12 @@ class HeartRepository @Inject constructor(
         // Владельцу профиля - чтобы счётчик поднялся и у него.
         runCatching {
             HeartWire.build(ownerId, added, now)?.let { envelope ->
-                RustBridge.sendMessage(UUID.randomUUID().toString(), ownerId, ownerId, envelope)
+                // р228: тень отдаёт сердечко активному - своей сессии у неё нет.
+                if (!MirrorHub.deliverAction(peerId = ownerId, groupId = "", chatId = ownerId, text = envelope)) {
+                    RustBridge.sendMessage(UUID.randomUUID().toString(), ownerId, ownerId, envelope)
+                    // р229: своё сердечко - и партнёрскому устройству личности.
+                    MirrorHub.publishOwnAction(peerId = ownerId, groupId = "", chatId = ownerId, text = envelope)
+                }
             }
         }.onFailure { Log.w(TAG, "heart send failed: ${it.message}") }
         added
@@ -80,6 +86,29 @@ class HeartRepository @Inject constructor(
      * @return true, если это был пакет сердечка - тогда служба не сохраняет
      *         его как текст переписки.
      */
+    /**
+     * р228: сердечко поставлено на ПАРТНЁРСКОМ устройстве - активный пишет
+     * его у себя от СВОЕГО имени. В сеть ничего не уходит.
+     */
+    suspend fun applyMirrorOutgoing(text: String): Boolean {
+        if (!HeartWire.isHeartPacket(text)) return false
+        val packet = HeartWire.parse(text) ?: return true
+        val me = RustBridge.nodeId().orEmpty()
+        if (me.isBlank() || packet.ownerId.isBlank()) return true
+        withContext(Dispatchers.IO) {
+            runCatching {
+                if (packet.added) {
+                    heartDao.put(
+                        ProfileHeartEntity(ownerId = packet.ownerId, voterId = me, atMs = packet.atMs)
+                    )
+                } else {
+                    heartDao.remove(packet.ownerId, me)
+                }
+            }.onFailure { Log.w(TAG, "mirror heart apply failed: ${it.message}") }
+        }
+        return true
+    }
+
     suspend fun routeIncoming(senderId: String, text: String): Boolean {
         if (!HeartWire.isHeartPacket(text)) return false
         val packet = HeartWire.parse(text)

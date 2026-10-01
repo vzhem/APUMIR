@@ -1,7 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
 // =============================================================================
-// PROFILESYNCDIALOG.KT — окно «Синхронизировать аккаунт»
+// PROFILESYNCDIALOG.KT — окно разового переноса профиля
 // =============================================================================
 // Раунд 225: два пути - «через сеть APU» (любые сети, включая мобильные;
 // профили находят себя сами по нику, код выводится из пароля, авто-опрос,
@@ -48,6 +48,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.data.backup.ProfileSyncNet
 import com.vladimir.messenger.ui.components.ApuActionBubble
 import com.vladimir.messenger.util.QrCodeGenerator
 import java.text.SimpleDateFormat
@@ -67,7 +68,7 @@ fun ProfileSyncDialog(
             viewModel.stopShare()
             onDismiss()
         } },
-        title = { Text("Синхронизировать аккаунт") },
+        title = { Text("Перенос профиля на новое устройство") },
         text = {
             Column(
                 modifier = Modifier
@@ -76,11 +77,10 @@ fun ProfileSyncDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Переносит чаты, контакты, сообщества, ранг и настройки " +
-                        "между вашими устройствами. Ничего нигде не хранится: " +
-                        "по пути идут только зашифрованные байты. Нужен один ник " +
-                        "и один пароль («Защита личности») на обоих устройствах. " +
-                        "Получённые файлы (картинки, видео) остаются на телефонах.",
+                    "Уже настроенные телефоны с одним профилем синхронизируются " +
+                        "сами в фоне — ничего нажимать не нужно. Это окно только " +
+                        "для разового переноса или восстановления нового телефона. " +
+                        "Данные не заменяются без подтверждения.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -89,7 +89,7 @@ fun ProfileSyncDialog(
                     value = ui.password,
                     onValueChange = viewModel::onPasswordChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Пароль копии (с обоих устройств одинаковый)") },
+                    label = { Text("Пароль из «Защиты личности» (одинаковый на обоих)") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
@@ -128,7 +128,7 @@ fun ProfileSyncDialog(
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    val mine = meta.dev.isNotBlank() && meta.dev == ui.myNodeId
+                    val mine = ProfileSyncNet.isOwnDevice(meta, ui.myDeviceId, ui.myAccountNodeId)
                     if (!mine) {
                         TextButton(onClick = viewModel::netFetchAndStage) {
                             Text("Забрать копию по паролю")
@@ -138,12 +138,13 @@ fun ProfileSyncDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "Проверять самому автоматически",
+                            "Автоматически искать копию",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "Раз в ~6 часов: сама найдёт и приготовит, сообщит в уведомлении",
+                            "Раз в ~6 часов ищет копию в фоне. При первом переносе " +
+                                "спросит подтверждение перед заменой данных",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

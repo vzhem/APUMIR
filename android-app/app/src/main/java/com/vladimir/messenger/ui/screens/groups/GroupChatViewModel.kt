@@ -22,6 +22,8 @@ import javax.inject.Inject
 
 data class GroupChatUiState(
     val groupId: String = "",
+    /** р237: черновик темы (текст поля ввода) - общий для устройств личности. */
+    val draft: String = "",
     val group: GroupSummary? = null,
     /** Все свои группы и каналы — для левой колонки значков на экране чата. */
     val allGroups: List<GroupSummary> = emptyList(),
@@ -93,6 +95,15 @@ class GroupChatViewModel @Inject constructor(
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
 
+    /** р237: черновик группы лежит под ключом группы (он общий у устройств). */
+    @Volatile private var draftKey: String = ""
+
+    /** р237: когда последний раз отправляли черновик партнёрскому устройству. */
+    @Volatile private var lastDraftSentAt = 0L
+
+    /** р237: восстановленный черновик отдан в uiState один раз. */
+    @Volatile private var draftLoaded = false
+
     /**
      * Тема, которую надо открыть сразу. Так канал открывает комментарии
      * конкретного поста, а не первую тему подряд.
@@ -131,6 +142,9 @@ class GroupChatViewModel @Inject constructor(
         }
         // Вступивший позже не застал создание тем - просим список у владельца.
         viewModelScope.launch { groupRepository.requestTopics(groupId) }
+        // р237: черновик темы - из хранилища и от партнёрского устройства.
+        draftKey = com.vladimir.messenger.data.draft.DraftStore.groupKey(groupId)
+        observeDrafts()
         // В канале ещё и сами посты: по ссылке на пост человек попадает сюда,
         // минуя ленту, и без этого видел бы пустые комментарии к пустому посту.
         // Репозиторий сам молчит, если это группа, владелец или уже просили.
@@ -999,6 +1013,38 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    // ── р237: черновик темы ────────────────────────────────────────────────
+
+    /**
+     * Текст поля ввода изменился: держим черновик у себя и (не чаще раза в
+     * 1.5 с) рассказываем партнёрскому устройству - на втором телефоне
+     * той же личности текст должен ждать так же, как здесь.
+     */
+    fun onDraftChanged(text: String) {
+        _uiState.update { it.copy(draft = text) }
+        val key = draftKey
+        if (key.isBlank()) return
+        com.vladimir.messenger.data.draft.DraftStore.save(key, text)
+        val now = System.currentTimeMillis()
+        if (now - lastDraftSentAt < DRAFT_REFRESH_MS && text.isNotEmpty()) return
+        lastDraftSentAt = now
+        com.vladimir.messenger.data.mirror.MirrorHub.publishDraft(key, text)
+    }
+
+    /** р237: черновик с партнёрского устройства - показать, если поле пустое. */
+    private fun observeDrafts() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.draft.DraftStore.drafts.collect { drafts ->
+                val key = draftKey
+                if (key.isBlank()) return@collect
+                val text = drafts[key].orEmpty()
+                if (text.isEmpty()) return@collect
+                if (_uiState.value.draft.isNotBlank()) return@collect
+                _uiState.update { it.copy(draft = text) }
+            }
+        }
+    }
+
     fun send(text: String) {
         val topicId = _uiState.value.selectedTopicId ?: return
         val staged = _uiState.value.stagedFile
@@ -1011,7 +1057,11 @@ class GroupChatViewModel @Inject constructor(
             val body = if (staged == null) text else com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
             groupRepository.sendMessage(groupId, topicId, body)
                 .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(sending = false, stagedFile = null) } }
+                .onSuccess {
+                    // р237: сообщение ушло - черновик пропадает на обоих устройствах.
+                    onDraftChanged("")
+                    _uiState.update { it.copy(sending = false, stagedFile = null) }
+                }
         }
     }
 
@@ -1228,6 +1278,9 @@ class GroupChatViewModel @Inject constructor(
     }
 
     private companion object {
+        /** р237: черновик уходит партнёру не чаще раза в 1.5 с. */
+        const val DRAFT_REFRESH_MS = 1_500L
+
         /** Пока ветка открыта, просьба о комментариях повторяется с таким шагом. */
         const val COMMENTS_REFRESH_MS = 60_000L
     }

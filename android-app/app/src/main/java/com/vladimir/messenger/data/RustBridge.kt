@@ -63,6 +63,19 @@ object RustBridge {
     }
 
     /**
+     * р228: адрес личности для устройства-зеркала. Движка у тени нет (сеть
+     * ведёт партнёр), но личность та же, поэтому без этого `nodeId()` вернул
+     * бы null и групповые конверты не применялись бы (проверка «я участник»).
+     * Ставится только сервисом в режиме зеркала.
+     */
+    @Volatile
+    private var shadowNodeId: String? = null
+
+    fun setShadowNodeId(nodeId: String) {
+        if (nodeId.isNotBlank()) shadowNodeId = nodeId
+    }
+
+    /**
      * M8-C: [relayDbPath] — собственный SQLite-файл durable encrypted relay
      * custody (app-private). Передаётся только после того, как
      * [com.vladimir.messenger.data.security.RelayAtRestMasterKey.installIntoCore]
@@ -229,7 +242,7 @@ object RustBridge {
         "недоступно"
     }
 
-    fun nodeId(): String? = engine?.nodeId()
+    fun nodeId(): String? = engine?.nodeId() ?: shadowNodeId
     fun publicKey(): String? = engine?.publicKey()
 
     fun networkStatus(): String = engine?.networkStatus() ?: "offline"
@@ -567,10 +580,25 @@ object RustBridge {
     fun sendDeliveryAck(messageId: String, recipientId: String): Boolean {
         ackScope.launch {
             try {
-                // Формат: ack|messageId. Внутри ядра он уходит через уже
-                // открытое постоянное соединение, а разовое подключение
-                // остаётся лишь запасным путём.
-                engine?.sendMessageMqtt(recipientId, "ack|$messageId")
+                // р243: ДВА пути, а не один.
+                //
+                // Раньше подтверждение уходило только через брокера (MQTT),
+                // а сообщения едут прямым каналом. Если брокер недоступен -
+                // сообщение доходило, а вторая галочка не появлялась никогда:
+                // ровно жалоба владельца «дошло, а двух синих галочек нет».
+                //
+                // Прямой канал брокера не требует, поэтому сначала он.
+                val payload = "ack|$messageId"
+                // Обёртка sendDirectPayload сама запечатывает полезное (см. ниже):
+                // здесь только выбираем получателя.
+                val direct = runCatching { sendDirectPayload(recipientId, payload) }
+                    .getOrDefault(false)
+                if (direct) {
+                    Log.i(TAG, "direct delivery ACK sent for $messageId")
+                }
+                // Очередь брокера - запасной путь: она хранит подтверждение
+                // до востребования, поэтому дубликат безвреден.
+                engine?.sendMessageMqtt(recipientId, payload)
             } catch (e: Exception) {
                 android.util.Log.w("RustBridge", "sendDeliveryAck failed: ${e.message}")
             }

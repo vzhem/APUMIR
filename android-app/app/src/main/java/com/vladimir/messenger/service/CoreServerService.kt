@@ -24,6 +24,7 @@ import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
 import com.vladimir.messenger.data.referral.ReferralRankStore
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import com.vladimir.messenger.service.NotificationHelper
@@ -72,6 +73,9 @@ class CoreServerService : Service() {
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
+    @Inject lateinit var counters: com.vladimir.messenger.data.channel.PostCounterRepository
+    @Inject lateinit var swarmBudget: com.vladimir.messenger.data.swarm.SwarmBudget
     @Inject lateinit var gifPreparation: com.vladimir.messenger.data.file.OutgoingFilePreparationService
     @Inject lateinit var stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary
     private var gossipStarted = false
@@ -274,6 +278,29 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
+        // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
+        // путь приёма обязан разбирать его так же, как основной: иначе строка
+        // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
+        // префиксом съедаем, но статус меняем только для разобранного id.
+        if (DeliveryAckWire.isPacket(text)) {
+            val ackedId = DeliveryAckWire.messageId(text)
+            if (ackedId != null) {
+                // ACK-кадр нужен и партнёру той же личности, но не сохраняется.
+                mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                    .onSuccess { changed ->
+                        Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId changed=$changed")
+                    }
+            } else {
+                Log.w(TAG, "malformed delivery ACK on relay path; dropped")
+            }
+            return true
+        }
+
+        // р227: этот путь (запасной, через облачный релей) - второй вход
+        // служебных конвертов; зеркалу их отдаём так же, как основной путь.
+        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+
         // Раунд 141: каждый страж в защитной обёртке - если какой-то
         // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
         // и уведомления, а не исчезнуть молча.
@@ -321,6 +348,14 @@ class CoreServerService : Service() {
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
             .getOrDefault(false)
+        ) {
+            return true
+        }
+        // р235: «печатает…» - самый лёгкий служебный пакет; разбирается
+        // последним, чтобы не мешать остальным.
+        if (runCatching {
+                com.vladimir.messenger.data.typing.TypingRouter.routeIncoming(senderId, text)
+            }.getOrDefault(false)
         ) {
             return true
         }
@@ -531,6 +566,46 @@ class CoreServerService : Service() {
         // будильник «+5 минут». Если процесс убьют или усыпят, будильник
         // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
         EmergencyKeepAliveReceiver.scheduleNext(applicationContext)
+
+        // р240: счётчик недоотправленных - для экрана «Диагностика
+        // синхронизации» в настройках. Обновляем редко: это подсказка, а не
+        // боевой счётчик.
+        // р242: тот же цикл раз в минуту досылает PENDING - не полагаемся на
+        // событие «увидели собеседника», которое может быть пропущено.
+        serviceScope.launch {
+            var sincePump = 0
+            while (true) {
+                runCatching { chatRepository.countPendingOutgoing() }
+                    .onSuccess { com.vladimir.messenger.data.mirror.MirrorHub.setPendingOutgoing(it) }
+                // р243: держим свежим кэш своего адреса - он нужен и без
+                // зеркала (страж «печатает», отсев сообщений от себя).
+                runCatching {
+                    com.vladimir.messenger.data.mirror.MirrorHub
+                        .noteSelfNodeId(RustBridge.nodeId().orEmpty())
+                }
+                if (sincePump >= 2) {
+                    sincePump = 0
+                    runCatching { chatRepository.pumpPendingOutgoing() }
+                        .onFailure { Log.w(TAG, "pending pump failed: ${it.message}") }
+                    // р245: медиа. У тени нет сети, поэтому байты гифок ей
+                    // взять неоткуда - просим у активного партнёра. Карточка в
+                    // чате к этому моменту уже есть, оживёт по приходу байтов.
+                    runCatching { pumpMirrorMedia() }
+                        .onFailure { Log.w(TAG, "media pump failed: ${it.message}") }
+                }
+                sincePump++
+                kotlinx.coroutines.delay(30_000L)
+            }
+        }
+
+        // Убрать из базы мусор прошлых версий: «печатает…» из r235-r238 и
+        // UUID-shaped ACKs, которые клиенты до r247 могли сохранить как текст.
+        serviceScope.launch {
+            runCatching { chatRepository.cleanupTypingJunk() }
+                .onFailure { Log.w(TAG, "Typing junk cleanup failed: ${it.message}") }
+            runCatching { chatRepository.cleanupDeliveryAckJunk() }
+                .onFailure { Log.w(TAG, "Delivery ACK junk cleanup failed: ${it.message}") }
+        }
 
         // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
         if (!gossipStarted) {
@@ -751,12 +826,7 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
                                 val messageId = parsed.messageId
-                                val existing = chatRepository.getMessageById(messageId)
-                                if (existing != null && existing.isFromMe &&
-                                    existing.status != MessageStatus.DELIVERED &&
-                                    existing.status != MessageStatus.READ
-                                ) {
-                                    chatRepository.updateMessageStatus(messageId, MessageStatus.DELIVERED)
+                                if (chatRepository.markOutgoingMessageDelivered(messageId)) {
                                     Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
                                 } else {
                                     Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
@@ -769,6 +839,20 @@ class CoreServerService : Service() {
                                 val existingMsg = chatRepository.getMessageById(messageId)
                                 if (existingMsg != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
+                                    if (DeliveryAckWire.isPacket(existingMsg.content)) {
+                                        // Старый ACK мог быть уже записан до обновления.
+                                        // Он всё равно подтверждает исходящую строку, но
+                                        // ACK самому ACK отправлять нельзя.
+                                        DeliveryAckWire.messageId(existingMsg.content)?.let {
+                                            chatRepository.markOutgoingMessageDelivered(it)
+                                        }
+                                    } else {
+                                        // р243: дубликат - это повтор от отправителя,
+                                        // который нашей галочки не увидел. Молчание
+                                        // здесь и было причиной «висит одна галочка»:
+                                        // подтверждение отправляем ЗАНОВО.
+                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                                    }
                                 } else {
                                     // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
                                     // расшифровки здесь в чат попал бы конверт как текст.
@@ -785,12 +869,17 @@ class CoreServerService : Service() {
                                         // путь. У неизвестного отправителя чат ради
                                         // конверта не создаётся.
                                         val knownChat = chatRepository.getChatByContactId(senderId)
+                                        val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
                                         if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent)) {
                                             Log.i(TAG, "CF service envelope handled msgId=$messageId")
-                                            try {
-                                                RustBridge.sendDeliveryAck(messageId, senderId)
-                                            } catch (e: Exception) {
-                                                Log.w(TAG, "CF envelope ACK failed: " + e.message)
+                                            // Never generate an ACK-of-ACK. RelayEnvelope's own
+                                            // custody receipt below remains a separate protocol.
+                                            if (!isDeliveryAck) {
+                                                try {
+                                                    RustBridge.sendDeliveryAck(messageId, senderId)
+                                                } catch (e: Exception) {
+                                                    Log.w(TAG, "CF envelope ACK failed: " + e.message)
+                                                }
                                             }
                                         } else {
                                             val contact = contactRepository.getContactById(senderId)
@@ -906,6 +995,9 @@ class CoreServerService : Service() {
         Log.i(TAG, "Mirror shadow: движок не стартуем, живём на событиях партнёра")
         runCatching { RustBridge.attachContext(applicationContext) }
         runCatching { RustBridge.ensureCoreOnly() }
+        // Личность у тени та же, а движка нет: без этого адреса групповые
+        // конверты не применялись бы (проверка «я участник»).
+        runCatching { RustBridge.setShadowNodeId(nodeId) }
         updateNotification("APU: сеть ведёт другое устройство (зеркало)")
         startMirrorChannel(nodeId = nodeId, engineUp = false)
     }
@@ -960,6 +1052,85 @@ class CoreServerService : Service() {
             chatRepository.applyMirrorSent(row)
         }
 
+        override suspend fun applyEnvelope(
+            senderId: String,
+            chatId: String,
+            messageId: String,
+            text: String,
+        ) {
+            applyMirrorEnvelope(senderId, chatId, messageId, text)
+        }
+
+        override suspend fun onActionFromPartner(
+            peerId: String,
+            groupId: String,
+            chatId: String,
+            text: String,
+        ) {
+            mirrorApplyActionLocally(peerId, groupId, text)
+        }
+
+        override suspend fun onActionToPeers(peerId: String, groupId: String, text: String) {
+            mirrorSendActionToPeers(peerId, groupId, text)
+        }
+
+        override suspend fun onReadFromPartner(peerId: String, groupId: String, topicId: String) {
+            mirrorApplyRead(peerId, groupId, topicId)
+        }
+
+        override suspend fun onFileMeta(meta: org.json.JSONObject): Boolean =
+            runCatching { fileTransferRouter.applyMirrorFileMeta(meta) }
+                .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
+                .getOrDefault(false)
+
+        override suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) {
+            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, seq, last, bytes) }
+                .onFailure { Log.w(TAG, "Mirror file chunk failed: ${it.message}") }
+        }
+
+        override suspend fun fileBytesFor(
+            transferId: String,
+            displayName: String,
+            offset: Long,
+            size: Int,
+        ): ByteArray? = fileTransferRouter.readMirrorFileChunk(transferId, displayName, offset, size)
+
+        override suspend fun onFilePullStart(transferId: String) {
+            runCatching { fileTransferRouter.resetMirrorWriter(transferId) }
+                .onFailure { Log.w(TAG, "Mirror LAN pull reset failed: ${it.message}") }
+        }
+
+        override suspend fun onCallFromPartner(signal: org.json.JSONObject) {
+            runCatching { callManager.onMirrorCall(signal) }
+                .onFailure { Log.w(TAG, "Mirror call signal failed: ${it.message}") }
+        }
+
+        override suspend fun onContactFromPartner(signal: org.json.JSONObject) {
+            runCatching { contactRepository.applyMirrorContact(signal) }
+                .onFailure { Log.w(TAG, "Mirror contact failed: ${it.message}") }
+        }
+
+        override suspend fun onTypingFromPartner(peerId: String, typing: Boolean) {
+            // р235: индикатор «печатает…» - мимолётное состояние в памяти.
+            if (typing) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(peerId)
+            } else {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(peerId)
+            }
+        }
+
+        override suspend fun onDraftFromPartner(key: String, text: String) {
+            // р236: черновик с партнёрского устройства - под тот же ключ.
+            runCatching { com.vladimir.messenger.data.draft.DraftStore.save(key, text) }
+                .onFailure { Log.w(TAG, "Mirror draft failed: ${it.message}") }
+        }
+
+        override suspend fun onPinFromPartner(messageId: String, pinned: Boolean) {
+            // р238: закреп с партнёрского устройства - тот же закреп здесь.
+            runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+                .onFailure { Log.w(TAG, "Mirror pin failed: ${it.message}") }
+        }
+
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
             val chat = chatRepository.getChatByContactId(row.recipientId)
@@ -995,6 +1166,247 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror: партнёр старше - ухожу в зеркало")
             restartForMirrorRole()
         }
+
+        /**
+         * р231: партнёр-тень просит движок, чтобы отправить свой файл (у тени
+         * своей сетевой сессии нет). Уступаем, если сами сейчас ничего не
+         * отдаём; иначе отказ - тень повторит просьбу позже.
+         */
+        override fun onEngineClaimed(): Boolean {
+            if (fileTransferRouter.hasRecentTransferActivity(System.currentTimeMillis())) {
+                Log.i(TAG, "Mirror claim: отказ, передача (отдача или приём) ещё идёт")
+                return false
+            }
+            if (callManager.isBusy()) {
+                Log.i(TAG, "Mirror claim: отказ, идёт звонок")
+                return false
+            }
+            val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("mirror_defer_engine", true)
+                .putLong("mirror_role_switch_at", System.currentTimeMillis())
+                .apply()
+            Log.i(TAG, "Mirror claim: уступаю движок партнёру (его исходящий файл)")
+            restartForMirrorRole()
+            return true
+        }
+    }
+
+    /**
+     * р227: применить служебный конверт, пришедший от партнёра-зеркала.
+     *
+     * Разбор - теми же репозиториями, что и на активном устройстве; сети у
+     * тени нет, поэтому ответные отправки (подтверждения) она не делает - их
+     * сделает активный. Идентификаторы чатов у устройств СВОИ, поэтому личный
+     * чат находим по отправителю, а не по числу из конверта.
+     */
+    /**
+     * р245: насос медиа. Только для устройства-зеркала: у него нет сети, и
+     * байты гифок взять ему неоткуда, кроме активного партнёра. Ищем ссылки в
+     * свежей переписке, которых нет в библиотеке, и просим по одной за заход
+     * (канал зеркала общий с сообщениями - не забиваем его).
+     */
+    private suspend fun pumpMirrorMedia() {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) {
+            // Активный: байты гифок могли прийти от тени (push) - объявляем
+            // каталог рою, чтобы собеседник знал, у кого их забрать.
+            runCatching { gifLibraryBootstrap() }
+                .onFailure { Log.w(TAG, "gif catalog announce failed: ${it.message}") }
+            return
+        }
+        val app = applicationContext
+        val contents = chatRepository.recentMessageContents(24)
+        var asked = 0
+        for (content in contents) {
+            if (asked >= 2) break
+            if (!com.vladimir.messenger.data.gif.GifLibrary.isGifRef(content)) continue
+            val sha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(content) ?: continue
+            if (com.vladimir.messenger.data.gif.GifLibrary.gifFile(app, sha) != null) continue
+            com.vladimir.messenger.data.mirror.MirrorHub.requestGifBytes(sha)
+            asked++
+        }
+        if (asked > 0) Log.i(TAG, "media pump: запрошено $asked гифк(а) у активного")
+    }
+
+    private suspend fun applyMirrorEnvelope(
+        senderId: String,
+        chatId: String,
+        messageId: String,
+        text: String,
+    ): Boolean {
+        // р244: подтверждение доставки пришло с партнёрского устройства -
+        // помечаем им же и здешнюю строку (переписка общая на обеих).
+        if (DeliveryAckWire.isPacket(text)) {
+            val ackedId = DeliveryAckWire.messageId(text)
+            if (ackedId != null) {
+                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                    .onSuccess { changed ->
+                        Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId changed=$changed")
+                    }
+            } else {
+                Log.w(TAG, "malformed delivery ACK from mirror; dropped")
+            }
+            return true
+        }
+        if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
+        // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
+        val mirrorTyping = com.vladimir.messenger.data.typing.TypingWire.parse(text)
+        if (mirrorTyping != null) {
+            if (mirrorTyping) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+            } else {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+            }
+            return true
+        }
+        // Групповой конверт: у группы один и тот же id на всех устройствах,
+        // поэтому разбираем его тем же путём, что и обычное входящее.
+        if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
+            val applied = runCatching { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
+                .getOrDefault(false)
+            if (applied) Log.i(TAG, "Mirror envelope: групповой конверт применён")
+            return applied
+        }
+        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }
+            .getOrNull() ?: chatId
+        if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: reaction from ${senderId.takeLast(8)} applied")
+            return true
+        }
+        if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
+            return true
+        }
+        if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
+            val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
+            if (refSha != null && localChatId.isNotBlank()) {
+                runCatching {
+                    chatRepository.insertReceivedGifRefMessage(
+                        chatId = localChatId,
+                        senderId = senderId,
+                        messageId = messageId.ifBlank { java.util.UUID.randomUUID().toString() },
+                        sha256 = refSha,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                }.onFailure { Log.w(TAG, "Mirror gif ref insert failed: ${it.message}") }
+                // Байты гифки дотянет следующий этап (прямой канал устройств);
+                // пока карточка живёт в переписке и докачается с хранителей,
+                // когда это устройство снова станет активным.
+            }
+            return true
+        }
+        return false
+    }
+
+    /**
+     * р228: на партнёрском устройстве прочитали переписку - снять
+     * непрочитанное здесь. Пишем прямо в базу (не через репозиторий):
+     * применение кадра не должно повторно его рассылать.
+     */
+    private suspend fun mirrorApplyRead(peerId: String, groupId: String, topicId: String) {
+        runCatching {
+            if (groupId.isNotBlank()) {
+                if (topicId.isNotBlank()) groupDao.markTopicRead(topicId)
+                groupDao.markGroupRead(groupId)
+                Log.i(TAG, "Mirror read: непрочитанное группы снято по партнёру")
+                return@runCatching
+            }
+            if (peerId.isBlank()) return@runCatching
+            val chat = chatRepository.getChatByContactId(peerId) ?: return@runCatching
+            chatRepository.markAsRead(chat.id)
+            Log.i(TAG, "Mirror read: непрочитанное чата снято по партнёру")
+        }.onFailure { Log.w(TAG, "Mirror read apply failed: ${it.message}") }
+    }
+
+    /**
+     * р228: действие сделано на теневом устройстве - привести СВОЮ базу в то
+     * же состояние, чтобы устройства не разошлись. Ни сети, ни ответных
+     * отправок здесь нет: конверт в сеть уйдёт отдельно.
+     */
+    private suspend fun mirrorApplyActionLocally(peerId: String, groupId: String, text: String) {
+        // р235: «печатает…» с тени - локально показывать нечего (это наше
+        // собственное состояние), пакет просто уходит собеседнику.
+        if (com.vladimir.messenger.data.typing.TypingWire.isTypingPacket(text)) return
+        // Групповой конверт (сообщение, пост, комментарий, тема, закреп,
+        // состав): применяем тем же разбором, что и входящий, но от своего
+        // имени - на партнёрском устройстве это «моё» сообщение.
+        if (groupId.isNotBlank() &&
+            com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)
+        ) {
+            val me = RustBridge.nodeId().orEmpty()
+            runCatching { groupRouter.routeIncoming(me, groupId, "", text) }
+                .onFailure { Log.w(TAG, "Mirror group packet apply failed: ${it.message}") }
+            Log.i(TAG, "Mirror action: групповой конверт применён локально")
+            return
+        }
+        if (runCatching { reactionRepository.applyMirrorOutgoing(peerId, groupId, text) }
+                .getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: реакция с тени применена локально")
+            return
+        }
+        if (peerId.isNotBlank() &&
+            runCatching { messageDeletion.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: удаление с тени применено локально")
+            return
+        }
+        if (runCatching { postViews.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        if (runCatching { hearts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        if (runCatching { readReceipts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        Log.w(TAG, "Mirror action: конверт с тени не распознан, только пересылка")
+    }
+
+    /**
+     * р228: отправить конверт, сделанный на тени, в сеть - единственной
+     * сессией активного устройства. Личный чат: собеседнику; групповое
+     * действие: участникам группы по бюджету служебного канала, как это
+     * делает сам репозиторий на активном устройстве.
+     */
+    private suspend fun mirrorSendActionToPeers(peerId: String, groupId: String, text: String) {
+        if (groupId.isNotBlank()) {
+            // Групповое сообщение/пост: рассылка участникам - штатной доставкой
+            // группы (она же выбирает получателей и ведёт учёт манифестов).
+            if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
+                val report = runCatching { groupRepository.fanoutEnvelope(groupId, text) }
+                    .getOrNull()
+                Log.i(
+                    TAG,
+                    "Mirror action: групповой конверт разослан " +
+                        "${report?.delivered ?: 0}/${report?.attempted ?: 0}",
+                )
+                return
+            }
+            val group = groupDao.getGroupById(groupId)
+            if (group == null) {
+                Log.w(TAG, "Mirror action: группы $groupId нет на этом устройстве")
+                return
+            }
+            val me = RustBridge.nodeId().orEmpty()
+            val recipients = runCatching { counters.signalTargets(group, me) }.getOrDefault(emptyList())
+            var sent = 0
+            for (peer in recipients) {
+                if (!swarmBudget.tryAcquire(com.vladimir.messenger.data.swarm.SwarmLane.SIGNAL)) break
+                RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), groupId, peer, text)
+                sent++
+            }
+            Log.i(TAG, "Mirror action: групповой конверт ушёл $sent/${recipients.size}")
+            return
+        }
+        if (peerId.isBlank()) return
+        val chat = chatRepository.getChatByContactId(peerId)
+            ?: chatRepository.getOrCreateChat(peerId, NodeIds.autoName(peerId))
+        val sent = RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), chat.id, peerId, text)
+        Log.i(TAG, "Mirror action: конверт ушёл собеседнику ${peerId.takeLast(8)} sent=$sent")
     }
 
     /**
@@ -1296,6 +1708,25 @@ class CoreServerService : Service() {
                     return
                 }
 
+                // р239: сообщение «от себя». Такое бывает, когда в контактах
+                // оказался собственный узел (в профиле есть «Мой QR» - его
+                // можно отсканировать самому). Показывать эхо входящим и
+                // звонить о нём в уведомлении нельзя: владелец, скрин 30.09
+                // 16:40 - «начинаешь печатать - приходит уведомление от меня
+                // же». Своя строка уже лежит в переписке как отправленная,
+                // терять нечего.
+                // р243: адрес из кэша зеркала (обновляется в цикле) - вызов в
+                // ядро на каждом входящем тормозил разбор очереди.
+                val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
+                if (myNodeId.isNotBlank() && senderId == myNodeId) {
+                    Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
+                    // р242: считаем такие пакеты для диагностики - по счётчику
+                    // видно, что «собеседник» это собственный узел.
+                    com.vladimir.messenger.data.mirror.MirrorHub.noteSelfPacket()
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    return
+                }
+
                 // ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков, иначе
                 // групповые, файловые и служебные пакеты не будут узнаны.
                 //
@@ -1324,7 +1755,74 @@ class CoreServerService : Service() {
                 }
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
+
+                // р243/р247: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
+                // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
+                // до v140 не распознавали его, поэтому свежая версия фильтрует
+                // префикс также на последнем общем страже сохранения.
+                //
+                // Подтверждения ходили только через брокера (MQTT): если он
+                // недоступен, сообщение доходило, а вторая галочка не
+                // появлялась никогда - жалоба владельца 30.09. Теперь оно
+                // может прийти и напрямую (RustBridge.sendDeliveryAck), здесь
+                // его узнаём и помечаем своё сообщение доставленным. Строка
+                // служебная - в переписку не попадает.
+                //
+                // Место важно: разбор идёт ПОСЛЕ расшифровки - конверт до неё
+                // выглядит как «APUSL1|…», и префикс не угадать.
+                if (DeliveryAckWire.isPacket(text)) {
+                    val ackedId = DeliveryAckWire.messageId(text)
+                    if (ackedId != null) {
+                        // р244: сначала партнёрскому устройству той же личности -
+                        // иначе на нём галочка останется одна, хотя сообщение ушло
+                        // именно с него.
+                        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                        serviceScope.launch {
+                            runCatching {
+                                chatRepository.markOutgoingMessageDelivered(ackedId)
+                            }.onSuccess { changed ->
+                                Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId changed=$changed")
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "malformed direct delivery ACK; dropped")
+                    }
+                    // ACKs are control packets: no chat row, notification, or ACK-of-ACK.
+                    return
+                }
+
+                // р239 (ВАЖНО): «печатает…» - мимолётный служебный сигнал, в
+                // переписке ему места нет. Разбирается ЗДЕСЬ, до зеркала,
+                // авто-создания контакта и сохранения.
+                //
+                // Ловушка, из-за которой это правило появилось: r235 поставил
+                // разбор только в routeIncomingEnvelope (резервный путь CF), а
+                // основной приём P2P живёт здесь - и пакет APUTYP1|1 лёг в чат
+                // сообщением с уведомлением (владелец, скрины 30.09). Поэтому
+                // рядом добавлен и страж в ChatRepository.saveIncomingMessage.
+                val typingSignal = com.vladimir.messenger.data.typing.TypingWire.parse(text)
+                if (typingSignal != null) {
+                    if (typingSignal) {
+                        com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+                    } else {
+                        com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+                    }
+                    // Второму устройству личности - тем же кадром (индикатор
+                    // должен быть на обоих телефонах).
+                    com.vladimir.messenger.data.mirror.MirrorHub.publishTyping(senderId, typingSignal)
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    Log.d(TAG, "Typing packet handled (typing=$typingSignal), not saved")
+                    return
+                }
+
                 try {
+                    // р227: служебный конверт (реакция, удаление, просмотр,
+                    // сердечко, прочтение, ссылка на гифку) уходит и
+                    // партнёру-зеркалу: тот применит его у себя теми же
+                    // разборщиками. Тексты сюда не попадают - у них свой путь
+                    // (publishIncoming), двойников не будет.
+                    mirror?.publishEnvelope(senderId, chatId, messageId, text)
+
                     // F3: file packets ride the same durable transport but must never be stored
                     // as chat text. Relay cleanup still happens through the per-message ACK below.
                     if (fileTransferRouter.routeIncoming(senderId, chatId, messageId, text)) {
@@ -1535,6 +2033,8 @@ class CoreServerService : Service() {
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                     Log.i(TAG, "Saved incoming message to chat ${chat.id}")
+                    // р242: для диагностики - когда последний раз что-то приходило.
+                    com.vladimir.messenger.data.mirror.MirrorHub.noteIncoming()
                     // р226: мгновенно отразить входящее на зеркале-партнёре.
                     mirror?.publishIncoming(
                         com.vladimir.messenger.data.mirror.MirrorRow(
@@ -1756,7 +2256,7 @@ class CoreServerService : Service() {
                 Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
                 serviceScope.launch {
                     try {
-                        chatRepository.updateMessageStatus(messageId, com.vladimir.messenger.domain.model.MessageStatus.DELIVERED)
+                        chatRepository.markOutgoingMessageDelivered(messageId)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to mark DELIVERED", e)
                     }

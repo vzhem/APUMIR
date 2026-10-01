@@ -46,6 +46,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
         }
         // Must run before Room/services/workers can observe restored stale state.
         DeviceIdentityMarker.discardIfRestored(applicationContext)
+        // р236: черновики сообщений (недописанный текст поля ввода).
+        com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()
         scheduleBoundedRelayWake()
 
