@@ -93,6 +93,14 @@ fun ProfileSyncDialog(
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
+                // Раунд 256: пароль подставлен из входа - вводить ничего не надо.
+                if (ui.passwordAuto) {
+                    Text(
+                        "Пароль подставлен автоматически из входа в аккаунт.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
 
                 // ── Через сеть APU: любые сети, находят себя сами ───────
                 Text(
