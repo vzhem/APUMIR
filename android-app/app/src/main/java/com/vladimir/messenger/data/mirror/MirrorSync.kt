@@ -140,6 +140,27 @@ object MirrorHub {
         pendingOutgoing = count
     }
 
+    /**
+     * р243: собственный адрес узла, взятый из ядра ОДИН раз.
+     *
+     * Раньше `RustBridge.nodeId()` дёргался на каждом нажатии клавиши (страж
+     * «печатает»), на каждом обновлении чата и на каждом входящем сообщении.
+     * Это вызов через JNI в ядро: пока он отвечает, главный поток стоит - у
+     * владельца это выглядело как «приложение подвисает на 5 секунд, когда
+     * начинаешь печатать» и «APU не отвечает». Адрес узла не меняется, пока
+     * работает движок, поэтому кэшируем его и обновляем в цикле обслуживания.
+     */
+    @Volatile private var selfNodeId: String = ""
+
+    /** Свой адрес из кэша: безопасно вызывать с главного потока. */
+    fun nodeIdCached(): String = selfNodeId
+
+    private fun refreshSelfNodeId() {
+        val id = runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }
+            .getOrNull().orEmpty()
+        if (id.isNotBlank()) selfNodeId = id
+    }
+
     /** р242: когда последний раз пришло/ушло настоящее сообщение (диагностика). */
     @Volatile private var lastIncomingAt: Long = 0L
     @Volatile private var lastOutgoingAt: Long = 0L
@@ -182,7 +203,9 @@ object MirrorHub {
         val mirror = runCatching { channel?.debugState() }.getOrNull()
             ?: "зеркало не запущено (устройство одно)"
         val pending = if (pendingOutgoing < 0) "неизвестно" else pendingOutgoing.toString()
-        val me = runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }.getOrNull().orEmpty()
+        val me = selfNodeId.ifBlank {
+            runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }.getOrNull().orEmpty()
+        }
         return mirror +
             "\nмой узел: " + me.take(16).ifBlank { "неизвестен" } +
             "\nпоследнее входящее: " + ago(lastIncomingAt) +
@@ -549,8 +572,10 @@ class MirrorChannel(
     fun publishDraft(key: String, text: String) {
         if (wsRef.get() == null) return
         if (text.length > DRAFT_MAX_CHARS) return
-        val sealed = sealPayload(JSONObject().put("k", key).put("t", text)) ?: return
+        // р243: запечатывание (вызов в ядро + AES) уходит в фоновый поток.
+        // Раньше оно шло прямо по главному - на каждом изменении поля ввода.
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(JSONObject().put("k", key).put("t", text)) ?: return@launch
             sendJson(JSONObject().put("t", "ev").put("k", "draft").put("d", sealed))
         }
     }
@@ -558,10 +583,11 @@ class MirrorChannel(
     /** р238: закреп сообщения - партнёрскому устройству личности. */
     fun publishPin(messageId: String, pinned: Boolean) {
         if (wsRef.get() == null) return
-        val sealed = sealPayload(
-            JSONObject().put("id", messageId).put("on", if (pinned) 1 else 0),
-        ) ?: return
+        // р243: запечатывание - в фоне (см. publishDraft).
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(
+                JSONObject().put("id", messageId).put("on", if (pinned) 1 else 0),
+            ) ?: return@launch
             sendJson(JSONObject().put("t", "ev").put("k", "pin").put("d", sealed))
         }
     }
@@ -572,6 +598,8 @@ class MirrorChannel(
     fun start() {
         closedByUs = false
         ensureSelfBinding()
+        // р243: свой адрес нужен сразу - до первого прохода цикла.
+        refreshSelfNodeId()
         connect()
         loopJob = scope.launch { maintenanceLoop() }
     }
@@ -883,6 +911,9 @@ class MirrorChannel(
         while (kotlin.coroutines.coroutineContext.isActive) {
             val now = System.currentTimeMillis()
             runCatching { myMaxTs = bridge.maxMessageTimestamp() }
+            // р243: свежий свой адрес - он нужен на каждом сообщении и на
+            // каждом нажатии клавиши, но не должен стоить вызова в ядро там.
+            refreshSelfNodeId()
             // Партнёр протух - забыть его состояние.
             if (partnerDev != null && now - partnerLastSeen > 30_000) {
                 partnerDev = null

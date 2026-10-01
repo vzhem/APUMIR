@@ -277,6 +277,19 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
+        // р243: подтверждение доставки, пришедшее прямым каналом. Второй путь
+        // приёма обязан разбирать его так же, как основной (см. handleEvent):
+        // иначе строка «ack|…» выросла бы в чат «direct».
+        if (text.startsWith("ack|")) {
+            val ackedId = text.substring(4).trim()
+            if (ackedId.isNotEmpty()) {
+                runCatching {
+                    chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
+                }.onSuccess { Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId") }
+            }
+            return true
+        }
+
         // р227: этот путь (запасной, через облачный релей) - второй вход
         // служебных конвертов; зеркалу их отдаём так же, как основной путь.
         mirror?.publishEnvelope(senderId, chatId, messageId, text)
@@ -811,6 +824,11 @@ class CoreServerService : Service() {
                                 val existingMsg = chatRepository.getMessageById(messageId)
                                 if (existingMsg != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
+                                    // р243: дубликат - это повтор от отправителя,
+                                    // который нашей галочки не увидел. Молчание
+                                    // здесь и было причиной «висит одна галочка»:
+                                    // подтверждение отправляем ЗАНОВО.
+                                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                                 } else {
                                     // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
                                     // расшифровки здесь в чат попал бы конверт как текст.
@@ -1626,8 +1644,10 @@ class CoreServerService : Service() {
                 // 16:40 - «начинаешь печатать - приходит уведомление от меня
                 // же». Своя строка уже лежит в переписке как отправленная,
                 // терять нечего.
-                val myNodeId = RustBridge.nodeId()
-                if (!myNodeId.isNullOrBlank() && senderId == myNodeId) {
+                // р243: адрес из кэша зеркала (обновляется в цикле) - вызов в
+                // ядро на каждом входящем тормозил разбор очереди.
+                val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
+                if (myNodeId.isNotBlank() && senderId == myNodeId) {
                     Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
                     // р242: считаем такие пакеты для диагностики - по счётчику
                     // видно, что «собеседник» это собственный узел.
@@ -1664,6 +1684,29 @@ class CoreServerService : Service() {
                 }
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
+
+                // р243: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
+                //
+                // Подтверждения ходили только через брокера (MQTT): если он
+                // недоступен, сообщение доходило, а вторая галочка не
+                // появлялась никогда - жалоба владельца 30.09. Теперь оно
+                // может прийти и напрямую (RustBridge.sendDeliveryAck), здесь
+                // его узнаём и помечаем своё сообщение доставленным. Строка
+                // служебная - в переписку не попадает.
+                //
+                // Место важно: разбор идёт ПОСЛЕ расшифровки - конверт до неё
+                // выглядит как «APUSL1|…», и префикс не угадать.
+                if (text.startsWith("ack|")) {
+                    val ackedId = text.substring(4).trim()
+                    if (ackedId.isNotEmpty()) {
+                        serviceScope.launch {
+                            runCatching {
+                                chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
+                            }.onSuccess { Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId") }
+                        }
+                    }
+                    return
+                }
 
                 // р239 (ВАЖНО): «печатает…» - мимолётный служебный сигнал, в
                 // переписке ему места нет. Разбирается ЗДЕСЬ, до зеркала,

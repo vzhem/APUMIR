@@ -155,6 +155,10 @@ class ChatDetailViewModel @Inject constructor(
     private fun publishTyping(active: Boolean) {
         val peer = peerId
         if (peer.isBlank()) return
+        // р243: в переписке с собственным узлом сигнал не нужен - он вернулся бы
+        // уведомлением «от себя». Признак берём из состояния (р241): вызова в
+        // ядро здесь нет, набор текста не должен ждать JNI.
+        if (_uiState.value.isSelfChat) return
         if (!active) {
             if (!typingAnnounced) return
             typingAnnounced = false
@@ -187,6 +191,8 @@ class ChatDetailViewModel @Inject constructor(
         val key = draftKey
         if (key.isBlank()) return
         com.vladimir.messenger.data.draft.DraftStore.save(key, text)
+        // р243: партнёрскому устройству черновик в свой же чат не шлём (см. выше).
+        if (_uiState.value.isSelfChat) return
         val now = System.currentTimeMillis()
         if (now - lastDraftSentAt < DRAFT_REFRESH_MS && text.isNotEmpty()) return
         lastDraftSentAt = now
@@ -249,6 +255,9 @@ class ChatDetailViewModel @Inject constructor(
      */
     private fun observeContactPresence() {
         viewModelScope.launch {
+            // р243: пока чат не опознан, считаем его обычным: плашка «это ваш
+            // узел» появляется после загрузки переписки (р241), а не после
+            // вызова в ядро. Набор текста от этого не зависит.
             chatRepository.observeChat(chatId).collect { chat ->
                 if (chat != null) {
                     // Заодно подтягиваем @никнейм: он живёт в таблице контактов
@@ -259,13 +268,10 @@ class ChatDetailViewModel @Inject constructor(
                     }.getOrDefault("")
                     // р235: адрес собеседника нужен для «печатает…».
                     if (chat.contactId.isNotBlank()) peerId = chat.contactId
-                    // р241: это наш собственный узел? Тогда переписка никуда не
-                    // ведёт - предупреждаем человека прямо в чате.
-                    val selfNode = runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }
-                        .getOrNull()
-                    if (!selfNode.isNullOrBlank()) {
-                        _uiState.update { it.copy(isSelfChat = chat.contactId == selfNode) }
-                    }
+                    // р241/р243: свой ли это узел, решает загрузка переписки:
+                    // она сравнивает адрес собеседника со «своим» адресом из
+                    // уже полученных сообщений (recipientId). Ядро здесь не
+                    // опрашиваем - этот код идёт при каждом обновлении чата.
                     // р236: черновик этого чата (ключ - адрес собеседника)
                     // подставляем в пустое поле: недописанное с другого
                     // устройства должно ждать здесь.

@@ -44,7 +44,10 @@ object TypingRouter {
         // р239: себе сигнал не шлём. Бывает, что в контактах есть собственный
         // узел (его даёт «Мой QR» в профиле) - тогда пакет вернулся бы
         // уведомлением «от себя».
-        if (peerId == runCatching { RustBridge.nodeId() }.getOrNull()) return
+        // р243: адрес берём из кэша зеркала, а не вызовом в ядро: этот код
+        // идёт с главного потока на каждое нажатие клавиши, и ожидание JNI
+        // в нём - та самая «заморозка на 5 секунд при наборе».
+        if (peerId == MirrorHub.nodeIdCached()) return
         scope.launch { publishNow(peerId, chatId, typing, queueFallback) }
     }
 

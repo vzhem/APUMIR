@@ -1203,7 +1203,16 @@ private fun SettingsTabContent(
     }
 
     if (showMirrorDiag) {
-        val syncText = com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
+        // р243: текст диагностики - в фоновом потоке. MirrorHub.debugStatus()
+        // спрашивает ядро (JNI), и вызов при отрисовке окна давал «APU не
+        // отвечает» ровно в тот момент, когда человек смотрит на диагностику
+        // (скриншот владельца 30.09 21:20).
+        var syncText by remember { mutableStateOf("Собираю…") }
+        LaunchedEffect(showMirrorDiag) {
+            syncText = withContext(Dispatchers.IO) {
+                com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
+            }
+        }
         AlertDialog(
             onDismissRequest = { showMirrorDiag = false },
             title = { Text("Синхронизация устройств") },
@@ -1217,10 +1226,10 @@ private fun SettingsTabContent(
                 TextButton(onClick = {
                     // Буфер обмена берём тот же, что у соседнего диалога
                     // (mqttClipboard объявлен в этой же функции экрана).
+                    // р243: копируем уже собранный текст - повторный вызов
+                    // диагностики (JNI) на главном потоке снова подвесил бы окно.
                     mqttClipboard.setText(
-                        androidx.compose.ui.text.AnnotatedString(
-                            com.vladimir.messenger.data.mirror.MirrorHub.debugStatus(),
-                        ),
+                        androidx.compose.ui.text.AnnotatedString(syncText),
                     )
                     showMirrorDiag = false
                 }) { Text("Скопировать") }
