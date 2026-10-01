@@ -330,6 +330,12 @@ class MainActivity : ComponentActivity() {
         requestIgnoreBatteryOptimizations()
         startCoreService()
         checkForUpdates()
+        // Раунд 251: убираем из «Скачанных» наш мусор `.trashed-*APU*` -
+        // остатки старых APK обновлений, которые DownloadManager не стирает,
+        // а переименовывает. В фоне, на загрузку экрана не влияет.
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.update.DownloadTrashCleanup.clean(applicationContext)
+        }
         handleNotificationTap(intent)
 
         ThemeModeHolder.init(this)

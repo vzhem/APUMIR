@@ -268,6 +268,44 @@ class ProfileBackupViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Раунд 251: «флажок» автообновления для остановленного расписания
+     * (например, после восстановления профиля): включить заново на уже
+     * существующем файле - найденном на телефоне или выбранном в проводнике.
+     * Пароль - от самого файла; он заворачивается ключом телефона.
+     */
+    fun enableAutoUpdateFor(target: Uri, password: String, includeReceived: Boolean, period: BackupSchedule.Period) {
+        if (_uiState.value.busy) return
+        _uiState.update { it.copy(busy = true, busyText = "Включаем обновление…", message = null, failed = false) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                BackupSchedule.enable(context, target, password.toCharArray(), includeReceived, period)
+            }
+            val schedule = withContext(Dispatchers.IO) { BackupSchedule.state(context) }
+            when (result) {
+                BackupSchedule.EnableResult.Ok -> _uiState.update {
+                    it.copy(
+                        busy = false,
+                        schedule = schedule,
+                        message = "Автообновление включено: файл будет перезаписываться ${period.title}.",
+                        failed = false,
+                    )
+                }
+                BackupSchedule.EnableResult.NoPersistentAccess -> _uiState.update {
+                    it.copy(
+                        busy = false,
+                        schedule = schedule,
+                        message = "Это хранилище не даёт постоянного доступа к файлу — обновлять его " +\n                            "автоматически нельзя. Сохраните копию в «Файлы» телефона или на карту памяти.",
+                        failed = true,
+                    )
+                }
+                is BackupSchedule.EnableResult.Failed -> _uiState.update {
+                    it.copy(busy = false, schedule = schedule, message = "Не удалось включить: ${result.reason}", failed = true)
+                }
+            }
+        }
+    }
+
     fun setAutoPeriod(period: BackupSchedule.Period) {
         viewModelScope.launch(Dispatchers.IO) {
             BackupSchedule.setPeriod(context, period)

@@ -88,6 +88,10 @@ fun ProfileBackupScreen(
     var includeReceived by remember { mutableStateOf(true) }
     var restorePassword by remember { mutableStateOf("") }
     var autoPeriod by remember { mutableStateOf(BackupSchedule.Period.WEEKLY) }
+    // Раунд 251: файл, на котором включаем автообновление заново (найденный
+    // или выбранный), и его пароль из диалога.
+    var autoAttachTarget by remember { mutableStateOf<FoundBackup?>(null) }
+    var autoAttachPassword by remember { mutableStateOf("") }
     // Вернулись на экран - задача могла отработать, перечитываем итог; заодно
     // автопоиск копий (вдруг файл появился или разрешение сохранилось).
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -128,6 +132,31 @@ fun ProfileBackupScreen(
                 )
             }
             viewModel.stage(uri, restorePassword)
+        }
+    }
+    // Раунд 251: повторный выбор файла для автообновления. Здесь сохраняем
+    // ПРАВО ЗАПИСИ: без него воркер не сможет перезаписывать файл по расписанию.
+    val autoAttachLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                activityContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            var name = "APU backup"
+            runCatching {
+                activityContext.contentResolver.query(
+                    uri,
+                    arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                    null, null, null,
+                )?.use { c -> if (c.moveToFirst()) name = c.getString(0) ?: name }
+            }
+            autoAttachTarget = FoundBackup(uri, name, 0L)
+            autoAttachPassword = ""
         }
     }
     val closeApp: () -> Unit = {
@@ -457,11 +486,51 @@ fun ProfileBackupScreen(
                                         )
                                     }
                                 } else {
+                                    // Раунд 251: расписание остановлено (например,
+                                    // после восстановления профиля), а файл уже
+                                    // есть на телефоне - включаем заново без
+                                    // нового сохранения: нашли/выбрали файл,
+                                    // ввели его пароль.
                                     Text(
-                                        "Сохраните копию в файл — и здесь можно будет включить её обновление.",
+                                        "Сохраните копию в файл — или включите обновление заново на уже " +\n                                            "готовом файле: найденном ниже либо выбранном в проводнике. " +\n                                            "Понадобится пароль этого файла.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    Spacer(Modifier.height(10.dp))
+                                    PeriodChooser(
+                                        selected = autoPeriod,
+                                        enabled = !state.busy,
+                                        onSelect = { autoPeriod = it },
+                                    )
+                                    if (state.foundBackups.isNotEmpty()) {
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            "Найдено на этом телефоне:",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        state.foundBackups.forEach { fb ->
+                                            OutlinedButton(
+                                                onClick = {
+                                                    autoAttachTarget = fb
+                                                    autoAttachPassword = ""
+                                                },
+                                                enabled = !state.busy,
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Text("Обновлять: " + fb.name, maxLines = 1)
+                                            }
+                                            Spacer(Modifier.height(6.dp))
+                                        }
+                                    }
+                                    OutlinedButton(
+                                        onClick = { autoAttachLauncher.launch(arrayOf("*/*")) },
+                                        enabled = !state.busy,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) { Text("Выбрать другой файл…") }
                                 }
                             }
                         }
@@ -559,6 +628,47 @@ fun ProfileBackupScreen(
                 }
             }
         }
+    }
+
+    // Раунд 251: пароль файла, на котором включаем автообновление заново.
+    autoAttachTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { autoAttachTarget = null },
+            title = { Text("Автообновление файла") },
+            text = {
+                Column {
+                    Text(target.name, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Телефон будет перезаписывать этот файл по расписанию. " +\n                            "Нужен пароль именно этого файла.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = autoAttachPassword,
+                        onValueChange = { autoAttachPassword = it },
+                        label = { Text("Пароль файла") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = autoAttachPassword.length >= BackupCipher.MIN_PASSWORD_LENGTH && !state.busy,
+                    onClick = {
+                        val t = target
+                        autoAttachTarget = null
+                        viewModel.enableAutoUpdateFor(t.uri, autoAttachPassword, includeReceived, autoPeriod)
+                    },
+                ) { Text("Включить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { autoAttachTarget = null }) { Text("Отмена") }
+            },
+        )
     }
 }
 
