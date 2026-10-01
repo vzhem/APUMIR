@@ -352,7 +352,19 @@ object MirrorHub {
  * конверты придут отдельными этапами: им нужны байты и своя логика ответа.
  */
 object MirrorEnvelopes {
+    /**
+     * р244: подтверждение доставки («ack|id»).
+     *
+     * Это служебная строка, а не текст переписки. Её получает устройство,
+     * которое приняло сообщение из сети, - и обязано передать партнёрскому,
+     * иначе на втором телефоне той же личности галочка так и останется одна
+     * (сообщение видно, а «доставлено» нет).
+     */
+    fun isServiceAck(text: String): Boolean =
+        text.startsWith("ack|") && text.length in 5..80
+
     fun isSafe(text: String): Boolean =
+        isServiceAck(text) ||
         com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text) ||
             ReactionWire.isReactionPacket(text) ||
             text.startsWith(MessageDeletionRepository.PREFIX + "|") ||

@@ -277,22 +277,20 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
-        // р243: подтверждение доставки, пришедшее прямым каналом. Второй путь
-        // приёма обязан разбирать его так же, как основной (см. handleEvent):
-        // иначе строка «ack|…» выросла бы в чат «direct».
-        if (text.startsWith("ack|")) {
-            val ackedId = text.substring(4).trim()
-            if (ackedId.isNotEmpty()) {
-                runCatching {
-                    chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
-                }.onSuccess { Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId") }
-            }
-            return true
-        }
-
         // р227: этот путь (запасной, через облачный релей) - второй вход
         // служебных конвертов; зеркалу их отдаём так же, как основной путь.
         mirror?.publishEnvelope(senderId, chatId, messageId, text)
+
+        // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
+        // путь приёма обязан разбирать его так же, как основной (см.
+        // handleEvent): иначе строка «ack|…» выросла бы в чат «direct».
+        if (com.vladimir.messenger.data.mirror.MirrorEnvelopes.isServiceAck(text)) {
+            val ackedId = text.substring(4).trim()
+            runCatching {
+                chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
+            }.onSuccess { Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId") }
+            return true
+        }
 
         // Раунд 141: каждый страж в защитной обёртке - если какой-то
         // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
@@ -1183,6 +1181,14 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
+        // р244: подтверждение доставки пришло с партнёрского устройства -
+        // помечаем им же и здешнюю строку (переписка общая на обеих).
+        if (com.vladimir.messenger.data.mirror.MirrorEnvelopes.isServiceAck(text)) {
+            val ackedId = text.substring(4).trim()
+            runCatching { chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED) }
+                .onSuccess { Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId") }
+            return true
+        }
         if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
         // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
         val mirrorTyping = com.vladimir.messenger.data.typing.TypingWire.parse(text)
@@ -1702,14 +1708,16 @@ class CoreServerService : Service() {
                 //
                 // Место важно: разбор идёт ПОСЛЕ расшифровки - конверт до неё
                 // выглядит как «APUSL1|…», и префикс не угадать.
-                if (text.startsWith("ack|")) {
+                if (com.vladimir.messenger.data.mirror.MirrorEnvelopes.isServiceAck(text)) {
+                    // р244: сначала партнёрскому устройству той же личности -
+                    // иначе на нём галочка останется одна, хотя сообщение ушло
+                    // именно с него.
+                    mirror?.publishEnvelope(senderId, chatId, messageId, text)
                     val ackedId = text.substring(4).trim()
-                    if (ackedId.isNotEmpty()) {
-                        serviceScope.launch {
-                            runCatching {
-                                chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
-                            }.onSuccess { Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId") }
-                        }
+                    serviceScope.launch {
+                        runCatching {
+                            chatRepository.updateMessageStatus(ackedId, MessageStatus.DELIVERED)
+                        }.onSuccess { Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId") }
                     }
                     return
                 }
