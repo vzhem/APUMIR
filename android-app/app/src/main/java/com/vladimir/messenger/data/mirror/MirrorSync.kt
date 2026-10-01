@@ -343,15 +343,21 @@ object MirrorHub {
     }
 
     /**
-     * р238: закрепление/открепление сообщения. Закреп - личное дело человека
-     * (собеседнику он не уходит), но на втором устройстве той же личности
-     * закреп должен быть там же. id сообщения общий у устройств, поэтому
+     * Закрепление/открепление личного сообщения или публикации канала.
+     * Собеседнику/подписчикам личный закреп не уходит, но на устройствах
+     * одной личности он совпадает. id сообщения у устройств общий, поэтому
      * кадра достаточно. При применении чужого кадра не рассылаем повторно.
      */
     fun publishPin(messageId: String, pinned: Boolean) {
         if (messageId.isBlank()) return
         if (isApplyingFrame()) return
         runCatching { channel?.publishPin(messageId, pinned) }
+    }
+
+    /** A home-inbox pin; personal ids are contact ids, group ids are stable ids. */
+    fun publishInboxPin(kind: String, itemId: String, pinned: Boolean, pinnedAtMs: Long) {
+        if (kind.isBlank() || itemId.isBlank() || isApplyingFrame()) return
+        runCatching { channel?.publishInboxPin(kind, itemId, pinned, pinnedAtMs) }
     }
 
     /**
@@ -478,6 +484,13 @@ class MirrorChannel(
         suspend fun onDraftFromPartner(key: String, text: String)
         /** р238: сообщение закреплено/откреплено на партнёрском устройстве. */
         suspend fun onPinFromPartner(messageId: String, pinned: Boolean)
+        /** Home-inbox conversation pin changed on the partner device. */
+        suspend fun onInboxPinFromPartner(
+            kind: String,
+            itemId: String,
+            pinned: Boolean,
+            pinnedAtMs: Long,
+        )
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -615,7 +628,7 @@ class MirrorChannel(
         }
     }
 
-    /** р238: закреп сообщения - партнёрскому устройству личности. */
+    /** Личный закреп сообщения/поста канала - партнёрскому устройству личности. */
     fun publishPin(messageId: String, pinned: Boolean) {
         if (wsRef.get() == null) return
         // р243: запечатывание - в фоне (см. publishDraft).
@@ -624,6 +637,21 @@ class MirrorChannel(
                 JSONObject().put("id", messageId).put("on", if (pinned) 1 else 0),
             ) ?: return@launch
             sendJson(JSONObject().put("t", "ev").put("k", "pin").put("d", sealed))
+        }
+    }
+
+    /** Pin or unpin a home-inbox conversation on the partner device. */
+    fun publishInboxPin(kind: String, itemId: String, pinned: Boolean, pinnedAtMs: Long) {
+        if (wsRef.get() == null) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(
+                JSONObject()
+                    .put("kind", kind)
+                    .put("id", itemId)
+                    .put("on", if (pinned) 1 else 0)
+                    .put("at", pinnedAtMs),
+            ) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "inbox_pin").put("d", sealed))
         }
     }
 
@@ -1327,6 +1355,22 @@ class MirrorChannel(
                 scope.launch {
                     MirrorHub.duringApply {
                         bridge.onPinFromPartner(id, body.optInt("on", 0) == 1)
+                    }
+                }
+            }
+            "inbox_pin" -> {
+                val body = openPayload(wire) ?: return
+                val kind = body.optString("kind")
+                val id = body.optString("id")
+                if (kind.isBlank() || id.isBlank()) return
+                scope.launch {
+                    MirrorHub.duringApply {
+                        bridge.onInboxPinFromPartner(
+                            kind = kind,
+                            itemId = id,
+                            pinned = body.optInt("on", 0) == 1,
+                            pinnedAtMs = body.optLong("at", 0L),
+                        )
                     }
                 }
             }

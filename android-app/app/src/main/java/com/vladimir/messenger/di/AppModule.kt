@@ -11,6 +11,7 @@ import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.local.dao.InboxPinDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -47,6 +48,7 @@ object AppModule {
                 AppDatabase.MIGRATION_18_19,
                 AppDatabase.MIGRATION_19_20,
                 AppDatabase.MIGRATION_20_21,
+                AppDatabase.MIGRATION_21_22,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -99,6 +101,9 @@ object AppModule {
     fun provideGroupDao(db: AppDatabase): GroupDao = db.groupDao()
 
     @Provides @Singleton
+    fun provideInboxPinDao(db: AppDatabase): InboxPinDao = db.inboxPinDao()
+
+    @Provides @Singleton
     fun provideDirectoryDao(db: AppDatabase): DirectoryDao = db.directoryDao()
 
     @Provides @Singleton
@@ -111,8 +116,9 @@ object AppModule {
     fun provideChatRepository(
         chatDao: ChatDao,
         messageDao: MessageDao,
+        groupDao: GroupDao,
         referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
-    ): ChatRepository = ChatRepository(chatDao, messageDao, referralAttribution)
+    ): ChatRepository = ChatRepository(chatDao, messageDao, groupDao, referralAttribution)
 
     @Provides @Singleton
     fun provideContactRepository(contactDao: ContactDao, chatRepository: ChatRepository): ContactRepository =

@@ -341,6 +341,13 @@ fun GroupChatScreen(
     // одинаковые пузыри-оболочки постов, и выйти к ленте можно было только
     // вторым нажатием.
     val isChannel = uiState.group?.isChannel == true
+    val channelRootMessageId = if (isChannel) {
+        uiState.messages.firstOrNull {
+            !com.vladimir.messenger.util.InlineImage.isPart(it.content)
+        }?.id
+    } else {
+        null
+    }
     val hasTopics = !isChannel &&
         uiState.group?.topicsEnabled == true &&
         uiState.topics.isNotEmpty()
@@ -629,11 +636,8 @@ fun GroupChatScreen(
                             Text(
                                 "Закреплённые" +
                                     (pinnedTopicName?.let { " · $it" }.orEmpty()) +
-                                    if (uiState.pinned.size > 1) {
-                                        " (" + uiState.pinned.size + ")"
-                                    } else {
-                                        ""
-                                    },
+                                    " (" + uiState.pinned.size + "/" +
+                                    com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
                                 fontWeight = FontWeight.Medium,
                             )
                         }
@@ -768,7 +772,10 @@ fun GroupChatScreen(
                         message = message,
                         senderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
                             ?: "Участник " + message.senderId.takeLast(4),
-                        canPin = uiState.canPin,
+                        // Публикацию закрепляют в ленте канала (лично); в
+                        // обсуждении разрешаем только снять старый общий pin.
+                        canPin = uiState.canPin &&
+                            (message.id != channelRootMessageId || message.isPinned),
                         onTogglePin = { viewModel.togglePin(message.id, !message.isPinned) },
                         onSaveToFavorites = {
                             // Раунд 203: в избранное - без служебных строк пересылки.

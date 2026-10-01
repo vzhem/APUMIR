@@ -400,6 +400,8 @@ fun ChatListScreen(
                         onDeleteChat = { confirmDeleteChat = it },
                         onGroupLeaveOrDelete = { confirmGroup = it },
                         onInviteToGroup = { group -> inviteChoice = group },
+                        onTogglePersonalPin = viewModel::togglePersonalPin,
+                        onToggleGroupPin = viewModel::toggleGroupPin,
                         onLoadMore = viewModel::loadMore,
                     )
                 }
@@ -873,6 +875,9 @@ private fun SectionPage(
     onGroupLeaveOrDelete: (InboxGroup) -> Unit,
     /** Позвать людей в группу или канал. */
     onInviteToGroup: (InboxGroup) -> Unit = {},
+    /** Pin/unpin conversation rows on the home inbox. */
+    onTogglePersonalPin: (com.vladimir.messenger.domain.model.Chat) -> Unit = {},
+    onToggleGroupPin: (InboxGroup) -> Unit = {},
     /** Прокрутка подошла к концу загруженного - пора досыпать страницу. */
     onLoadMore: () -> Unit = {},
 ) {
@@ -980,6 +985,7 @@ private fun SectionPage(
                             is InboxItem.Personal -> ContactCard(
                                 chat    = item.chat,
                                 kind    = BubbleKind.Personal,
+                                showPinnedIndicator = true,
                                 onClick = {
                                     onChatClick(
                                         item.chat.id,
@@ -988,6 +994,11 @@ private fun SectionPage(
                                     )
                                 },
                                 menuActions = listOf(
+                                    BubbleMenuAction(
+                                        title = if (item.chat.isPinned) "Открепить" else "Закрепить",
+                                        icon = Icons.Filled.PushPin,
+                                        onClick = { onTogglePersonalPin(item.chat) },
+                                    ),
                                     BubbleMenuAction(
                                         title = "Открыть чат",
                                         icon = Icons.Default.Forum,
@@ -1037,6 +1048,13 @@ private fun SectionPage(
                             is InboxItem.Group -> GroupCard(
                                 group   = item.group,
                                 menuActions = buildList {
+                                    add(
+                                        BubbleMenuAction(
+                                            title = if (item.group.isPinned) "Открепить" else "Закрепить",
+                                            icon = Icons.Filled.PushPin,
+                                            onClick = { onToggleGroupPin(item.group) },
+                                        )
+                                    )
                                     add(
                                         BubbleMenuAction(
                                             title = if (item.group.isChannel) "Открыть канал" else "Открыть группу",
@@ -1295,8 +1313,9 @@ private fun GroupCard(
         Spacer(modifier = Modifier.width(8.dp))
 
         Column(horizontalAlignment = Alignment.End) {
-            if (group.timeMs != null) {
-                Text(
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (group.timeMs != null) {
+                    Text(
                         // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
                         // на каждую перерисовку строки группы.
                         text = remember(group.timeMs, System.currentTimeMillis() / 3_600_000L) {
@@ -1304,7 +1323,17 @@ private fun GroupCard(
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF5A6472),
-                )
+                    )
+                }
+                if (group.isPinned) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Filled.PushPin,
+                        contentDescription = "Закреплено в главном списке",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
             }
             if (group.unreadCount > 0) {
                 Box(

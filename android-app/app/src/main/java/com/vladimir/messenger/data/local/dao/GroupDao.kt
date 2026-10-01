@@ -19,13 +19,25 @@ interface GroupDao {
     // ── Группы ────────────────────────────────────────────────────────────────
     // Каналы лежат в той же таблице, поэтому в выборках групп они отсекаются:
     // иначе канал показывался бы и в списке групп, и в списке каналов.
-    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY lastMessageAtMs DESC")
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC"
+    )
     fun observeGroups(): Flow<List<GroupEntity>>
 
-    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY lastMessageAtMs DESC")
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC"
+    )
     suspend fun getGroups(): List<GroupEntity>
 
-    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 ORDER BY lastMessageAtMs DESC")
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC"
+    )
     fun observeChannels(): Flow<List<GroupEntity>>
 
     // ── Окна для главного экрана ──────────────────────────────────────────
@@ -34,13 +46,15 @@ interface GroupDao {
 
     @Query(
         "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 " +
-            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+            "ORDER BY CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC LIMIT :limit"
     )
     fun observeGroupsWindow(limit: Int): Flow<List<GroupEntity>>
 
     @Query(
         "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 " +
-            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+            "ORDER BY CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC LIMIT :limit"
     )
     fun observeChannelsWindow(limit: Int): Flow<List<GroupEntity>>
 
@@ -48,7 +62,8 @@ interface GroupDao {
     @Query(
         "SELECT * FROM groups WHERE isLeft = 0 AND (" +
             "title LIKE '%' || :query || '%' OR lastMessagePreview LIKE '%' || :query || '%') " +
-            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+            "ORDER BY CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC LIMIT :limit"
     )
     fun searchGroups(query: String, limit: Int): Flow<List<GroupEntity>>
 
@@ -132,7 +147,7 @@ interface GroupDao {
     @Query("UPDATE groups SET ownerId = :ownerId WHERE id = :groupId")
     suspend fun updateGroupOwner(groupId: String, ownerId: String)
 
-    @Query("UPDATE groups SET isLeft = 1 WHERE id = :groupId")
+    @Query("UPDATE groups SET isLeft = 1, pinnedAtMs = NULL WHERE id = :groupId")
     suspend fun markLeft(groupId: String)
 
     /** Возврат в группу после одобрения заявки: снимает признак выхода. */

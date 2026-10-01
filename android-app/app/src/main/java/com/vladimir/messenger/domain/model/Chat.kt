@@ -8,4 +8,7 @@ data class Chat(
     val lastMessageTime: Long? = null,
     val unreadCount: Int = 0,
     val isContactOnline: Boolean = false,
+    /** Whether this conversation is pinned on the home inbox. */
+    val isPinned: Boolean = false,
+    val pinnedAtMs: Long? = null,
 )
