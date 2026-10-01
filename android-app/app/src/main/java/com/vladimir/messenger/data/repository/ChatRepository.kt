@@ -196,6 +196,8 @@ class ChatRepository @Inject constructor(
 
             Log.i(TAG, "sendMessage direct=$sentDirectly messageId=$messageId recipient=$actualRecipientId")
 
+            // р242: отметка для диагностики - когда последний раз отправляли.
+            com.vladimir.messenger.data.mirror.MirrorHub.noteOutgoing()
             if (sentDirectly) {
                 messageDao.updateMessageStatus(messageId, MessageStatus.SENT.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.LOCAL.name)
@@ -528,6 +530,34 @@ class ChatRepository @Inject constructor(
         if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
             runCatching { chatDao.incrementUnread(chatId) }
         }
+    }
+
+    /**
+     * р242: досылка НЕДООТПРАВЛЕННОГО (PENDING) без опоры на события сети.
+     *
+     * Раньше досылка шла только по событию «увидели собеседника». Если событие
+     * пропущено (перезапуск движка, смена роли зеркала, тихий реконнект), строка
+     * так и висела «в ожидании» — со стороны это выглядит как «сообщение не
+     * дошло». Теперь раз в минуту проходим по всем PENDING и пробуем снова.
+     * Ошибки глушим: движка нет - просто попробуем в следующий раз.
+     */
+    suspend fun pumpPendingOutgoing(): Int {
+        val pending = runCatching { messageDao.getPendingOutgoingMessages() }.getOrDefault(emptyList())
+        if (pending.isEmpty()) return 0
+        var sent = 0
+        for (msg in pending) {
+            val chat = runCatching { chatDao.getChatById(msg.chatId) }.getOrNull() ?: continue
+            val peer = chat.contactId.ifBlank { msg.recipientId }
+            if (peer.isBlank() || !peer.startsWith("pk_")) continue
+            val ok = runCatching { RustBridge.sendMessage(msg.id, msg.chatId, peer, msg.content) }
+                .getOrDefault(false)
+            if (ok) {
+                runCatching { messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name) }
+                sent++
+            }
+        }
+        if (sent > 0) Log.i(TAG, "pending pump: отправлено $sent из ${pending.size}")
+        return sent
     }
 
     /**

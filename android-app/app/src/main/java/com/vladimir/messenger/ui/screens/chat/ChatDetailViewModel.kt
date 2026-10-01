@@ -113,6 +113,9 @@ class ChatDetailViewModel @Inject constructor(
     /** р236: когда последний раз отправляли черновик партнёрскому устройству. */
     @Volatile private var lastDraftSentAt = 0L
 
+    /** р242: по какому входящему уже отправлен отчёт «прочитано» (чат открыт). */
+    @Volatile private var lastReadReportedId: String = ""
+
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
@@ -386,6 +389,15 @@ class ChatDetailViewModel @Inject constructor(
                         messages.takeLast(5).forEach { msg ->
                             android.util.Log.i("ChatDetailVM", "  🔹 msg: id=${msg.id.take(8)} isFromMe=${msg.isFromMe} status=${msg.status} content=${msg.content.take(20)}")
                         }
+                    }
+                    // р242: чат открыт на экране - новое входящее читаем сразу и
+                    // сообщаем собеседнику. Раньше отчёт уходил только при
+                    // открытии чата: если человек сидел в переписке, у собеседника
+                    // так и оставалась одна галочка.
+                    val newestIncoming = messages.lastOrNull { !it.isFromMe }
+                    if (newestIncoming != null && newestIncoming.id != lastReadReportedId) {
+                        lastReadReportedId = newestIncoming.id
+                        runCatching { readReceipts.reportRead(chatId) }
                     }
                     val wasEmpty = _uiState.value.messages.isEmpty()
                     _uiState.update { state ->

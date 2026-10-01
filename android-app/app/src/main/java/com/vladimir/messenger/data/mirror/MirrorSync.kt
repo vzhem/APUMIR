@@ -140,6 +140,39 @@ object MirrorHub {
         pendingOutgoing = count
     }
 
+    /** р242: когда последний раз пришло/ушло настоящее сообщение (диагностика). */
+    @Volatile private var lastIncomingAt: Long = 0L
+    @Volatile private var lastOutgoingAt: Long = 0L
+
+    fun noteIncoming() {
+        lastIncomingAt = System.currentTimeMillis()
+    }
+
+    fun noteOutgoing() {
+        lastOutgoingAt = System.currentTimeMillis()
+    }
+
+    /**
+     * р242: сколько пакетов пришло от СОБСТВЕННОГО узла (в контакты попал свой
+     * адрес). По этому числу в диагностике сразу видно, что собеседник - это вы
+     * сами: сообщения «не доходят» именно поэтому.
+     */
+    @Volatile private var selfPackets: Int = 0
+
+    fun noteSelfPacket() {
+        selfPackets++
+    }
+
+    private fun ago(at: Long): String {
+        if (at <= 0L) return "не было"
+        val sec = (System.currentTimeMillis() - at) / 1000
+        return when {
+            sec < 90 -> "$sec с назад"
+            sec < 3600 -> "${sec / 60} мин назад"
+            else -> "${sec / 3600} ч назад"
+        }
+    }
+
     /**
      * р240: состояние синхронизации устройств одной фразой - для экрана
      * диагностики. Показывает роль, партнёра, канал и недоотправленные
@@ -152,7 +185,10 @@ object MirrorHub {
         val me = runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }.getOrNull().orEmpty()
         return mirror +
             "\nмой узел: " + me.take(16).ifBlank { "неизвестен" } +
-            "\nнедоотправленных сообщений: " + pending
+            "\nпоследнее входящее: " + ago(lastIncomingAt) +
+            "\nпоследнее исходящее: " + ago(lastOutgoingAt) +
+            "\nнедоотправленных сообщений: " + pending +
+            (if (selfPackets > 0) "\nпакетов от собственного узла отброшено: " + selfPackets else "")
     }
 
     /** р227: входящий служебный конверт - пусть партнёр применит его у себя. */

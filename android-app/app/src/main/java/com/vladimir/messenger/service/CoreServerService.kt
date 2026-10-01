@@ -550,10 +550,19 @@ class CoreServerService : Service() {
         // р240: счётчик недоотправленных - для экрана «Диагностика
         // синхронизации» в настройках. Обновляем редко: это подсказка, а не
         // боевой счётчик.
+        // р242: тот же цикл раз в минуту досылает PENDING - не полагаемся на
+        // событие «увидели собеседника», которое может быть пропущено.
         serviceScope.launch {
+            var sincePump = 0
             while (true) {
                 runCatching { chatRepository.countPendingOutgoing() }
                     .onSuccess { com.vladimir.messenger.data.mirror.MirrorHub.setPendingOutgoing(it) }
+                if (sincePump >= 2) {
+                    sincePump = 0
+                    runCatching { chatRepository.pumpPendingOutgoing() }
+                        .onFailure { Log.w(TAG, "pending pump failed: ${it.message}") }
+                }
+                sincePump++
                 kotlinx.coroutines.delay(30_000L)
             }
         }
@@ -1620,6 +1629,9 @@ class CoreServerService : Service() {
                 val myNodeId = RustBridge.nodeId()
                 if (!myNodeId.isNullOrBlank() && senderId == myNodeId) {
                     Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
+                    // р242: считаем такие пакеты для диагностики - по счётчику
+                    // видно, что «собеседник» это собственный узел.
+                    com.vladimir.messenger.data.mirror.MirrorHub.noteSelfPacket()
                     runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     return
                 }
@@ -1895,6 +1907,8 @@ class CoreServerService : Service() {
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                     Log.i(TAG, "Saved incoming message to chat ${chat.id}")
+                    // р242: для диагностики - когда последний раз что-то приходило.
+                    com.vladimir.messenger.data.mirror.MirrorHub.noteIncoming()
                     // р226: мгновенно отразить входящее на зеркале-партнёре.
                     mirror?.publishIncoming(
                         com.vladimir.messenger.data.mirror.MirrorRow(
