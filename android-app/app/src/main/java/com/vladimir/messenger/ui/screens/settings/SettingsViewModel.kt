@@ -587,6 +587,10 @@ class SettingsViewModel @Inject constructor(
                 .edit()
                 .putString("display_name", clean)
                 .apply()
+            // р246: живой профиль - имя уезжает второму устройству личности.
+            com.vladimir.messenger.data.mirror.ProfileMirror.noteLocalChange(
+                context, com.vladimir.messenger.data.mirror.ProfileMirror.FIELD_NAME,
+            )
         }
         // Ссылка-приглашение несёт имя, поэтому пересобираем её сразу.
         loadSettings()

@@ -41,5 +41,9 @@ object ThemeModeHolder {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, value.storedValue).apply()
         _mode.value = value
+        // р246: живой профиль - тема совпадает на обоих устройствах личности.
+        com.vladimir.messenger.data.mirror.ProfileMirror.noteLocalChange(
+            context, com.vladimir.messenger.data.mirror.ProfileMirror.FIELD_THEME,
+        )
     }
 }

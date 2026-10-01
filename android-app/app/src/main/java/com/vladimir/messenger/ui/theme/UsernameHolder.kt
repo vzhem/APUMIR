@@ -55,6 +55,10 @@ object UsernameHolder {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, normalized.orEmpty()).apply()
         _name.value = normalized
+        // р246: живой профиль - второму устройству личности сразу.
+        com.vladimir.messenger.data.mirror.ProfileMirror.noteLocalChange(
+            context, com.vladimir.messenger.data.mirror.ProfileMirror.FIELD_NICK,
+        )
     }
 
     fun raiseConflict(context: Context) {

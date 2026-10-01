@@ -272,6 +272,10 @@ fun ChannelScreen(
                         listState.scrollToItem(uiState.posts.lastIndex)
                     }
                 }
+                // Раунд 246: закреп и лента - в Column. Раньше лента в
+                // fillMaxSize-Box рисовалась поверх плашки закрепов
+                // (владелец: «закреп провалился под ленту»).
+                Column(modifier = Modifier.fillMaxSize()) {
                 // Раунд 173: закреплённые посты канала; тап - лента прыгает
                 // к самому посту.
                 if (uiState.pinnedPostIds.isNotEmpty()) {
@@ -325,7 +329,8 @@ fun ChannelScreen(
                     }
                 }
                 // Бегунок справа: в длинном списке видно, где мы находимся.
-                Box(modifier = Modifier.fillMaxSize()) {
+                // Раунд 246: лента берёт остаток Column под закрепом.
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -392,6 +397,7 @@ fun ChannelScreen(
                     }
                     ApuScrollbar(state = listState)
                 }
+                } // Раунд 246: закрыли Column «закреп + лента».
                 }
             }
 

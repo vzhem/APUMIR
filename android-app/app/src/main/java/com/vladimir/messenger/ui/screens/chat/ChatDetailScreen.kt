@@ -463,6 +463,11 @@ fun ChatDetailScreen(
                     }
                     // Раунд 173: закреплённые сообщения личного чата; тап -
                     // лента прыгает к самому сообщению.
+                    // Раунд 246: закреп и лента живут в Column. Раньше оба были
+                    // детьми Box, и лента с fillMaxSize рисовалась ПОВЕРХ
+                    // закрепа - закреп «проваливался под ленту» (скрин владельца
+                    // 01.10: стикер наезжал на плашку «Закреплённые»).
+                    Column(modifier = Modifier.fillMaxSize()) {
                     if (uiState.pinned.isNotEmpty()) {
                         val feedScope = androidx.compose.runtime.rememberCoroutineScope()
                         Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -516,7 +521,8 @@ fun ChatDetailScreen(
                     }
                     LazyColumn(
                         state          = listState,
-                        modifier       = Modifier.fillMaxSize(),
+                        // Раунд 246: лента занимает остаток Column под закрепом.
+                        modifier       = Modifier.weight(1f).fillMaxWidth(),
                         contentPadding = PaddingValues(vertical = 8.dp),
                         reverseLayout  = false,
                     ) {
@@ -710,6 +716,7 @@ fun ChatDetailScreen(
                             }
                         }
                     }
+                    } // Раунд 246: закрыли Column «закреп + лента».
                 }
             }
         }
