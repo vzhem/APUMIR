@@ -669,8 +669,15 @@ class CoreServerService : Service() {
             val legacyRoutingId = existingPubKey
                 ?: prefs.getString("node_id", null)
                 .orEmpty()
+            // Раунд 259: битый Keystore (KeyMint может виснуть надолго) не
+            // должен задерживать старт ядра: потолок 4 с, по таймауту -
+            // честный деград в legacy/RAM-only.
             val signing = if (prefs.getBoolean("identity_created", false)) {
-                IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                    }
+                }
             } else {
                 null
             }
@@ -680,8 +687,12 @@ class CoreServerService : Service() {
                     "keyId=${signing?.keyId?.take(12) ?: "none"}"
             )
             val fileExchange = if (signing != null) {
-                IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
-                    FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
+                            FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                        }
+                    }
                 }
             } else null
             Log.i(
@@ -714,14 +725,22 @@ class CoreServerService : Service() {
                 return@launch
             }
 
-            val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
+            val atRestKeyOk = kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    RelayAtRestMasterKey.installIntoCore(applicationContext)
+                }
+            } ?: false
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
 
             // Азбука адресов: на свежей установке файла ещё нет — тянем
             // облачную копию ДО создания движка (ядро читает файл один раз
             // при старте). На обычном запуске это мгновенный no-op.
-            runCatching { addressBookBackup.restoreBeforeStart() }
-                .onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
+            // Раунд 259: сеть не должна держать ядро - потолок 6 с.
+            runCatching {
+                kotlinx.coroutines.withTimeoutOrNull(6_000) {
+                    addressBookBackup.restoreBeforeStart()
+                }
+            }.onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
 
             // Собственный SQLite-файл relay custody (app-private, WAL).
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath

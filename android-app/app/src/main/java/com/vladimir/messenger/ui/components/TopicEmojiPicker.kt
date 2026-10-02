@@ -222,7 +222,6 @@ fun TopicEmojiPicker(
 ) {
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
-    var recent by remember { mutableStateOf(TopicEmojiRecents.load(context)) }
     val items = remember(query) { TopicEmojiCatalog.search(query) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -236,21 +235,8 @@ fun TopicEmojiPicker(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (query.isBlank() && recent.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                recent.forEach { emoji ->
-                    EmojiCell(emoji, selected) {
-                        onPick(it)
-                        recent = TopicEmojiRecents.load(context)
-                    }
-                }
-            }
-        }
+        // Раунд 259: ленты «недавних» между поиском и сеткой больше нет -
+        // владелец попросил убрать, сетка начинается сразу.
         LazyVerticalGrid(
             columns = GridCells.Fixed(8),
             modifier = Modifier
@@ -265,8 +251,7 @@ fun TopicEmojiPicker(
                     TopicEmojiRecents.note(context, picked)
                     onPick(picked)
                 }
-            }
-        }
+            }        }
     }
 }
 
