@@ -10,10 +10,6 @@ package com.vladimir.messenger.ui.screens.groups
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuSearchField
@@ -35,13 +31,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,15 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CornerRadius
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.text.TextAlign
-import androidx.compose.ui.text.TextOverflow
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import com.vladimir.messenger.ui.components.ApuBubble
@@ -98,7 +81,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupPermissions
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRole
-import com.vladimir.messenger.data.group.GroupStats
 import com.vladimir.messenger.data.group.InviteSummary
 import com.vladimir.messenger.data.group.JoinRequestSummary
 import com.vladimir.messenger.data.group.MemberSummary
@@ -161,6 +143,10 @@ fun GroupAdminScreen(
         if (target >= 0 && target != pagerState.currentPage && !pagerState.isScrollInProgress) {
             pagerState.scrollToPage(target)
         }
+    }
+    // Просмотры могут измениться без изменения карточки группы/канала.
+    LaunchedEffect(tab) {
+        if (tab == AdminTab.Stats) viewModel.refreshStats()
     }
 
     // Подложка на весь экран, в том числе под верхней панелью.
@@ -271,10 +257,12 @@ fun GroupAdminScreen(
                     onDelete = viewModel::deleteInvite,
                 )
 
-                AdminTab.Stats -> StatsTab(
+                AdminTab.Stats -> GroupStatisticsTab(
                     stats = uiState.stats,
                     topics = uiState.topics,
                     isChannel = uiState.group?.isChannel == true,
+                    isRefreshing = uiState.isStatsRefreshing,
+                    onRefresh = viewModel::refreshStats,
                 )
 
                 AdminTab.Permissions -> PermissionsTab(
@@ -1081,226 +1069,6 @@ private fun InviteCard(
     }
 }
 
-
-/**
- * Раунд 268: статистика как в топовых мессенджерах - дашборд: крупные
- * карточки-счётчики, график активности за 7 дней и топ тем с барами.
- * Для каналов те же карточки, но со «подписчиками» и без тем.
- */
-@Composable
-private fun StatsTab(stats: GroupStats?, topics: List<TopicSummary>, isChannel: Boolean = false) {
-    if (stats == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            ApuBubble(modifier = Modifier.padding(24.dp)) {
-                Text("Статистика доступна администраторам")
-            }
-        }
-        return
-    }
-    val gold = Color(0xFFE4B45A)
-    val goldDark = Color(0xFFB98A2E)
-    val dark = Color(0xFF1E2430)
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // Карточки-счётчики 2×2: цифра крупно, иконка в золотом кружке.
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard(
-                icon = Icons.Filled.People,
-                value = stats.memberCount.toString(),
-                label = if (isChannel) "Подписчиков" else "Участников",
-                modifier = Modifier.weight(1f),
-            )
-            StatCard(
-                icon = Icons.Filled.Star,
-                value = stats.adminCount.toString(),
-                label = "Администраторов",
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard(
-                icon = Icons.Filled.Chat,
-                value = stats.totalMessages.toString(),
-                label = "Сообщений всего",
-                modifier = Modifier.weight(1f),
-            )
-            StatCard(
-                icon = if (isChannel) Icons.Filled.PersonAdd else Icons.Filled.Forum,
-                value = if (isChannel) stats.pendingRequests.toString() else stats.topicCount.toString(),
-                label = if (isChannel) "Заявок" else "Тем",
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        // Активность за 7 дней: столбики с подписями и сводка.
-        ApuBubble {
-            Text("Активность за 7 дней", fontWeight = FontWeight.SemiBold, color = dark)
-            val days = stats.last7Days
-            if (days.isEmpty()) {
-                Text(
-                    "Пока нет данных",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApuBubbleMutedColor,
-                )
-            } else {
-                val weekTotal = days.sumOf { it.messageCount }
-                val peak = days.maxByOrNull { it.messageCount }
-                val max = days.maxOf { it.messageCount }.coerceAtLeast(1)
-                Spacer(Modifier.height(10.dp))
-                Canvas(modifier = Modifier.fillMaxWidth().height(110.dp)) {
-                    val gap = 10.dp.toPx()
-                    val barW = (size.width - gap * (days.size - 1)) / days.size
-                    val topPad = 26.dp.toPx()
-                    days.forEachIndexed { i, d ->
-                        val h = ((d.messageCount.toFloat() / max) * (size.height - topPad))
-                            .coerceAtLeast(4.dp.toPx())
-                        val x = i * (barW + gap)
-                        val y = size.height - h
-                        drawRoundRect(
-                            brush = Brush.verticalGradient(listOf(gold, goldDark)),
-                            topLeft = Offset(x, y),
-                            size = Size(barW, h),
-                            cornerRadius = CornerRadius(8.dp.toPx()),
-                        )
-                        // Значение над столбиком.
-                        val paint = android.graphics.Paint().apply {
-                            color = 0xFF5A6472.toInt()
-                            textSize = 24f
-                            textAlign = android.graphics.Paint.Align.CENTER
-                            isAntiAlias = true
-                        }
-                        drawContext.canvas.nativeCanvas.drawText(
-                            d.messageCount.toString(),
-                            x + barW / 2,
-                            y - 8f,
-                            paint,
-                        )
-                    }
-                }
-                // Подписи дат под столбиками.
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    days.forEach { d ->
-                        Text(
-                            shortDay(d.dayKey),
-                            fontSize = 10.sp,
-                            color = ApuBubbleMutedColor,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                StatRow("Сообщений за 7 дней", weekTotal.toString())
-                peak?.let {
-                    StatRow(
-                        "Пик активности",
-                        "${shortDay(it.dayKey)} — ${it.messageCount} сообщ., ${it.senderCount} авт.",
-                    )
-                }
-                StatRow("В среднем в день", (weekTotal / days.size).toString())
-            }
-        }
-
-        // Топ тем с барами (только группы; в каналах тем нет).
-        if (!isChannel && stats.perTopic.isNotEmpty()) {
-            ApuBubble {
-                Text("Активность тем", fontWeight = FontWeight.SemiBold, color = dark)
-                val sorted = stats.perTopic.entries.sortedByDescending { it.value }
-                val max = sorted.first().value.coerceAtLeast(1)
-                sorted.forEach { (topicId, count) ->
-                    // Идентификатор темы человеку ничего не говорит - имя.
-                    val name = topics.firstOrNull { it.id == topicId }
-                        ?.name
-                        ?.takeIf { it.isNotBlank() }
-                        ?: if (topicId.isBlank()) "Без темы" else topicId.take(8)
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            name,
-                            modifier = Modifier.weight(1f),
-                            color = dark,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(count.toString(), fontWeight = FontWeight.SemiBold, color = dark)
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(gold.copy(alpha = 0.18f)),
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth((count.toFloat() / max).coerceAtLeast(0.04f))
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(Brush.horizontalGradient(listOf(gold, goldDark))),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** Карточка-счётчик дашборда: иконка в кружке, крупная цифра, подпись. */
-@Composable
-private fun StatCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    value: String,
-    label: String,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                RoundedCornerShape(18.dp),
-            )
-            .padding(vertical = 14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Color(0xFFE4B45A).copy(alpha = 0.18f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = Color(0xFFB98A2E),
-                modifier = Modifier.size(22.dp),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(value, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E2430))
-        Text(label, fontSize = 12.sp, color = Color(0xFF5A6472))
-    }
-}
-
-/** «2026-09-26» → «26.09» для подписей графика. */
-private fun shortDay(dayKey: String): String {
-    val p = dayKey.split("-")
-    return if (p.size == 3) "${p[2]}.${p[1]}" else dayKey
-}
-
-@Composable
-private fun StatRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(label, modifier = Modifier.weight(1f))
-        Text(value, fontWeight = FontWeight.Medium)
-    }
-}
 
 @Composable
 private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {

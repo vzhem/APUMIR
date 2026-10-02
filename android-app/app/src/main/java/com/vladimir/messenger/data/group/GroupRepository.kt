@@ -4379,25 +4379,42 @@ class GroupRepository(
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupRole.isAdminOrOwner(member.role)) {
+        if (member.isBanned || !GroupRole.isAdminOrOwner(member.role)) {
             return Result.failure(SecurityException("Статистика доступна только администраторам"))
         }
-        val fromKey = dayKey(clock() - (days - 1).toLong() * DAY_MS)
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val keys = GroupStatsCalculator.dayKeys(clock(), days.coerceIn(1, 366))
+        val dailyRows = groupDao.getGroupStatsInRange(groupId, keys.first(), keys.last())
         val members = groupDao.getMembers(groupId)
         val topics = groupDao.getTopics(groupId)
+        val posts = if (group.isChannel) {
+            groupDao.getChannelPostStats(groupId).map { row ->
+                ChannelPostStat(row.topicId, row.publishedAtMs, row.authorId, row.commentCount, row.viewCount)
+            }
+        } else {
+            emptyList()
+        }
         return Result.success(
             GroupStats(
                 groupId = groupId,
                 memberCount = members.count { !it.isBanned },
-                adminCount = members.count { GroupRole.isAdminOrOwner(it.role) },
+                adminCount = members.count { !it.isBanned && GroupRole.isAdminOrOwner(it.role) },
                 topicCount = topics.size,
                 pendingRequests = groupDao.countPendingRequests(groupId),
                 totalMessages = groupDao.totalTopicMessages(groupId),
-                last7Days = groupDao.getGroupStats(groupId, days)
-                    .filter { it.dayKey >= fromKey }
-                    .sortedBy { it.dayKey }
-                    .map { GroupStatDay(it.dayKey, it.messageCount, it.senderCount) },
+                last7Days = GroupStatsCalculator.completeDays(
+                    keys,
+                    dailyRows.map { GroupStatDay(it.dayKey, it.messageCount, it.senderCount) },
+                ),
                 perTopic = topics.associate { it.id to it.messageCount },
+                activeSenders7Days = GroupStatsCalculator.uniqueSenders(dailyRows.map { it.sendersCsv }),
+                channelPosts = posts,
+                publicationsLast7Days = if (group.isChannel) {
+                    GroupStatsCalculator.publicationDays(keys, posts)
+                } else {
+                    emptyList()
+                },
             )
         )
     }

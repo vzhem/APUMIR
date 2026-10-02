@@ -94,6 +94,20 @@ data class GroupStats(
     val totalMessages: Int,
     val last7Days: List<GroupStatDay>,
     val perTopic: Map<String, Int>,
+    /** Уникальные авторы за период, а не сумма авторов отдельных дней. */
+    val activeSenders7Days: Int = 0,
+    /** Публикации канала отдельно от комментариев и служебных частей фото. */
+    val channelPosts: List<ChannelPostStat> = emptyList(),
+    val publicationsLast7Days: List<GroupStatDay> = emptyList(),
+)
+
+/** Счётчики сохранённой публикации, в тех же единицах, что и в ленте канала. */
+data class ChannelPostStat(
+    val topicId: String,
+    val publishedAtMs: Long,
+    val authorId: String,
+    val commentCount: Int,
+    val viewCount: Int,
 )
 
 /** Результат попытки вступить по ссылке-приглашению. */
