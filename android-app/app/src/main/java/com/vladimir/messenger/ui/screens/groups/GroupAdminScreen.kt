@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -779,13 +780,11 @@ private fun MembersTab(
                 }
             }
         }
-        OutlinedTextField(
+        ApuSearchField(
             value = query,
             onValueChange = onQueryChange,
+            placeholder = "Поиск участника по имени или узлу",
             modifier = Modifier.fillMaxWidth().padding(12.dp),
-            placeholder = { Text("Поиск участника по имени или узлу") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            singleLine = true,
         )
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             items(members, key = { it.nodeId }) { member ->

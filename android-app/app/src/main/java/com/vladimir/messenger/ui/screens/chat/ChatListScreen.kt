@@ -1146,23 +1146,39 @@ private fun SearchTextField(
     onQueryChanged: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    // Раунд 265: поиск главного экрана - в фирменном пузыре, как и везде.
     TextField(
         value       = query,
         onValueChange = onQueryChanged,
-        placeholder = { Text("Поиск: чаты, группы, каналы") },
+        placeholder = {
+            Text(
+                "Поиск: чаты, группы, каналы",
+                color = androidx.compose.ui.graphics.Color(0xFF1E2430).copy(alpha = 0.45f),
+            )
+        },
         singleLine  = true,
         colors = TextFieldDefaults.colors(
-            focusedContainerColor   = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedContainerColor   = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
+            unfocusedContainerColor = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
             focusedIndicatorColor   = androidx.compose.ui.graphics.Color.Transparent,
             unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            focusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+            unfocusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+            cursorColor = MaterialTheme.colorScheme.primary,
         ),
         trailingIcon = {
             IconButton(onClick = onClose) {
                 Icon(Icons.Default.Close, "Закрыть поиск")
             }
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            ),
     )
 }
 

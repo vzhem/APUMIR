@@ -4,6 +4,7 @@ import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -114,13 +115,11 @@ fun ContactsScreen(
     ) { paddingValues ->
         Column(Modifier.fillMaxSize().padding(paddingValues)) {
             var query by remember { mutableStateOf("") }
-            OutlinedTextField(
+            ApuSearchField(
                 value = query,
                 onValueChange = { query = it },
+                placeholder = "Поиск: имя или @никнейм",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("Поиск: имя или @никнейм") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
             )
             val shown = remember(contacts, query) {
                 val q = query.trim().lowercase()
@@ -370,13 +369,11 @@ private fun InviteToGroupsDialog(
         title = { Text("Пригласить $contactName") },
         text = {
             Column(Modifier.fillMaxWidth()) {
-                OutlinedTextField(
+                ApuSearchField(
                     value = query,
                     onValueChange = { query = it },
+                    placeholder = "Поиск группы или канала",
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Поиск группы или канала") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    singleLine = true,
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(

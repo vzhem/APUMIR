@@ -110,6 +110,7 @@ import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
 import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuMenuDots
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -1327,12 +1328,10 @@ private fun JoinRequestsSheet(
                 .background(Color(0xFFF7F9FC))
                 .padding(12.dp),
         ) {
-        OutlinedTextField(
+        ApuSearchField(
             value = query,
             onValueChange = onQuery,
-            placeholder = { Text("Поиск заявок") },
-            singleLine = true,
-            shape = RoundedCornerShape(22.dp),
+            placeholder = "Поиск заявок",
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))

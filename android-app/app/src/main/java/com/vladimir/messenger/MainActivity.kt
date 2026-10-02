@@ -335,6 +335,9 @@ class MainActivity : ComponentActivity() {
         // а переименовывает. В фоне, на загрузку экрана не влияет.
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.vladimir.messenger.data.update.DownloadTrashCleanup.clean(applicationContext)
+            // Раунд 265: держим в «Скачанных» максимум один свежий APK -
+            // установленные и старые версии удаляются сами при старте.
+            com.vladimir.messenger.data.update.DownloadTrashCleanup.cleanOldApks(applicationContext)
         }
         handleNotificationTap(intent)
 

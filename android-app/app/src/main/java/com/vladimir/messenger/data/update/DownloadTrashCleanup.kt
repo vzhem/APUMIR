@@ -59,4 +59,71 @@ object DownloadTrashCleanup {
             Log.w(TAG, "trash cleanup failed: ${e.message}")
         }
     }
+
+    /**
+     * Раунд 265: телефон не должен превращаться в кладбище APK. Владелец
+     * нашёл в «Скачанных» десяток APU-v*.apk по 40 МБ после каждого
+     * обновления. Правило при каждом старте:
+     *  - версия файла равна установленной — удаляем (уже установлена, мусор);
+     *  - иначе держим только самую свежую, все старше — удаляем.
+     * Рой-раздачу это НЕ ломает: соседям отдаётся собственный установленный
+     * APK (applicationInfo.sourceDir), а не скачанный файл.
+     */
+    fun cleanOldApks(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val cr = context.contentResolver
+        runCatching {
+            val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?"
+            val args = arrayOf("APU-v%.apk")
+            val ids = mutableListOf<Long>()
+            val names = mutableListOf<String>()
+            val dates = mutableListOf<Long>()
+            cr.query(
+                uri,
+                arrayOf(
+                    MediaStore.Downloads._ID,
+                    MediaStore.Downloads.DISPLAY_NAME,
+                    MediaStore.Downloads.DATE_MODIFIED,
+                ),
+                selection,
+                args,
+                null,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    ids.add(c.getLong(0))
+                    names.add(c.getString(1) ?: "")
+                    dates.add(if (c.isNull(2)) 0L else c.getLong(2))
+                }
+            }
+            if (ids.isEmpty()) return
+            val installed = com.vladimir.messenger.BuildConfig.VERSION_NAME
+            val order = ids.indices.sortedByDescending { dates[it] }
+            var keptNewest = false
+            var deleted = 0
+            for (i in order) {
+                val ver = names[i].removePrefix("APU-v").removeSuffix(".apk")
+                val delete = when {
+                    // Уже установленная версия: файл своё отработал.
+                    ver == installed -> true
+                    // Самая свежая из оставшихся - держим (вдруг впереди установка).
+                    !keptNewest -> {
+                        keptNewest = true
+                        false
+                    }
+                    else -> true
+                }
+                if (delete) {
+                    val rowUri = ContentUris.withAppendedId(uri, ids[i])
+                    val n = runCatching { cr.delete(rowUri, null, null) }.getOrDefault(0)
+                    if (n > 0) deleted++
+                }
+            }
+            if (deleted > 0) {
+                Log.i(TAG, "old APK cleanup: removed $deleted file(s)")
+            }
+        }.onFailure { e ->
+            Log.w(TAG, "old apk cleanup failed: ${e.message}")
+        }
+    }
 }
