@@ -61,6 +61,12 @@ class ChatStyleTest(unittest.TestCase):
                 self.assertNotRegex(text, r"\bCard\(")
                 self.assertIn("ApuBubbleCard", text)
 
+    def test_channel_actions_use_available_material3_button_defaults(self):
+        text = source("screens/channels/ChannelScreen.kt")
+        self.assertNotIn("TextButtonDefaults", text)
+        self.assertIn("import androidx.compose.material3.ButtonDefaults", text)
+        self.assertEqual(text.count("ButtonDefaults.textButtonColors"), 2)
+
     def test_channel_header_uses_cached_avatar_and_keeps_admin_gate(self):
         text = source("screens/channels/ChannelScreen.kt")
         self.assertIn('rememberAvatar(avatars["g:${uiState.channelId}"])', text)

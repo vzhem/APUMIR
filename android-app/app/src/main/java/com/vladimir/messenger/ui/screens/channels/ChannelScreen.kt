@@ -9,7 +9,7 @@ package com.vladimir.messenger.ui.screens.channels
 // =============================================================================
 
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.TextButtonDefaults
+import androidx.compose.material3.ButtonDefaults
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -797,13 +797,13 @@ private fun PostCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(
                     onClick = { showReactions = true },
-                    colors = TextButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
+                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
                 ) {
                     Text("Реакция")
                 }
                 TextButton(
                     onClick = onOpenComments,
-                    colors = TextButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
+                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
