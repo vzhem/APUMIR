@@ -1,5 +1,12 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuBubbleCard
+import com.vladimir.messenger.ui.components.ApuBubbleLinkColor
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.*
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -279,26 +286,15 @@ fun ChatDetailScreen(
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = {
-                    // Раунд 41: имя контакта/группы на белой полосочке со
-                    // скруглениями и золотой рамкой - читается на любой подложке.
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                RoundedCornerShape(18.dp),
-                            )
-                            // Тап по имени открывает карточку собеседника.
-                            .clickable { showPeerProfile = true }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    ) {
+                    // Общий пузырь шапки, как в группах и каналах.
+                    ApuHeaderBubble(onClick = { showPeerProfile = true }) {
                         Column {
                             Text(
                                 contactName,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1E2430),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
                             // р235: «печатает…» важнее статуса сети и гаснет само.
                             val peerTyping = uiState.isPeerTyping
@@ -310,7 +306,7 @@ fun ChatDetailScreen(
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (peerTyping || uiState.isContactOnline)
-                                    MaterialTheme.colorScheme.primary
+                                    ApuBubbleAccentColor
                                 else
                                     Color(0xFF5A6472),
                             )
@@ -327,7 +323,7 @@ fun ChatDetailScreen(
                         IconButton(onClick = { onRenameClick(contactId, contactName) }) {
                             Icon(
                                 Icons.Default.Edit,
-                                contentDescription = "Rename",
+                                contentDescription = "Переименовать",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -397,25 +393,28 @@ fun ChatDetailScreen(
 
                 uiState.messages.isEmpty() -> {
                     Column(
-                        modifier            = Modifier.align(Alignment.Center),
+                        modifier = Modifier.align(Alignment.Center)
+                            .padding(horizontal = 16.dp)
+                            .apuBubbleSurface()
+                            .padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(
                             Icons.Default.Lock,
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
-                            tint     = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            tint     = ApuBubbleAccentColor.copy(alpha = 0.75f),
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             "Сообщения зашифрованы E2E",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = ApuBubbleMutedColor,
                         )
                         Text(
                             "Напишите первое сообщение",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = ApuBubbleMutedColor,
                         )
                     }
                 }
@@ -473,7 +472,7 @@ fun ChatDetailScreen(
                     Column(modifier = Modifier.fillMaxSize()) {
                     if (uiState.pinned.isNotEmpty()) {
                         val feedScope = androidx.compose.runtime.rememberCoroutineScope()
-                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                             Column(modifier = Modifier.padding(8.dp)) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     Icon(
@@ -615,9 +614,9 @@ fun ChatDetailScreen(
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         textDecoration = TextDecoration.Underline,
-                                        color = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                        color = ApuBubbleLinkColor,
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
+                                            .apuBubbleSurface()
                                             .clickable(enabled = fwdSource != null) { if (fwdSource != null) onForwardTap(fwdSource) }
                                             .padding(horizontal = 6.dp, vertical = 2.dp),
                                     )
@@ -660,7 +659,14 @@ fun ChatDetailScreen(
                                                 com.vladimir.messenger.util.GroupFileMarker.caption(fwdFile) +
                                                     "\nфайла нет на этом телефоне",
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                modifier = Modifier.align(Alignment.Start),
+                                                color = if (message.isFromMe)
+                                                    com.vladimir.messenger.ui.theme.LocalMessengerColors.current.messageBubbleOwnText
+                                                else ApuBubbleTextColor,
+                                                modifier = Modifier.align(if (message.isFromMe) Alignment.End else Alignment.Start)
+                                                    .apuBubbleSurface(color = if (message.isFromMe)
+                                                        com.vladimir.messenger.ui.theme.LocalMessengerColors.current.messageBubbleOwn
+                                                    else com.vladimir.messenger.ui.theme.LocalMessengerColors.current.messageBubbleOther)
+                                                    .padding(10.dp),
                                             )
                                         }
                                     }
@@ -683,7 +689,7 @@ fun ChatDetailScreen(
                                     else -> MessageBubble(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
-                                    linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                    linkColor = ApuBubbleLinkColor,
                                     onContactInvite = onAddContactInvite,
                                     onGroupInvite = { viewModel.joinByInviteLink(it) },
                                     // Одно нажатие - сразу пузырь с реакциями:
@@ -1093,10 +1099,7 @@ private fun MessageInputBar(
                     override fun Decoration(content: @Composable () -> Unit) {
                         Box(
                             modifier = Modifier
-                                .background(
-                                    Color.White,
-                                    MaterialTheme.shapes.extraLarge,
-                                )
+                                .apuBubbleSurface(color = Color.White)
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
                             if (inputState.text.isEmpty()) {

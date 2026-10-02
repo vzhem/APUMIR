@@ -7,6 +7,7 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -162,10 +163,15 @@ fun GroupAdminScreen(
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = {
-                    Text(
-                        uiState.group?.title
-                            ?: if (uiState.group?.isChannel == true) "Канал" else "Группа"
-                    )
+                    ApuHeaderBubble {
+                        Text(
+                            uiState.group?.title
+                                ?: if (uiState.group?.isChannel == true) "Канал" else "Группа",
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 navigationIcon = { TextButton(onClick = onBackClick) { Text("Назад") } },
             )

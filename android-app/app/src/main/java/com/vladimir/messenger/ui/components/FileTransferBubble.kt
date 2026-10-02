@@ -64,16 +64,9 @@ fun FileTransferBubble(
      */
     onLongPress: (() -> Unit)? = null,
 ) {
-    val background = if (isFromMe) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val contentColor = if (isFromMe) {
-        Color.White
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
+    val messenger = com.vladimir.messenger.ui.theme.LocalMessengerColors.current
+    val background = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther
+    val bubbleTextColor = if (isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -86,11 +79,12 @@ fun FileTransferBubble(
             transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp")
             )
+        val contentColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground else bubbleTextColor
         Column(
             modifier = Modifier
                 .then(
                     if (stickerFloat) Modifier
-                    else Modifier.background(background, RoundedCornerShape(16.dp))
+                    else Modifier.apuBubbleSurface(color = background)
                 )
                 .padding(if (stickerFloat) 0.dp else 12.dp),
         ) {

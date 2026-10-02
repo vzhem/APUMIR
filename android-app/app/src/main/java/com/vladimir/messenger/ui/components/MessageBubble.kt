@@ -58,7 +58,7 @@ fun MessageBubble(
     message: Message,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
-    linkColor: Color = Color(0xFF4A90E2),
+    linkColor: Color = ApuBubbleLinkColor,
     onTap: () -> Unit = {},
     onLongClick: (() -> Unit)? = null,
     /** Раунд 176: тап по «Добавить контакт» в карточке-приглашении. */
@@ -96,8 +96,10 @@ fun MessageBubble(
         Box(
             modifier = Modifier
                 .widthIn(min = 80.dp, max = 280.dp)
-                .clip(if (isOwn) OwnBubbleShape else OtherBubbleShape)
-                .background(if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther)
+                .apuBubbleSurface(
+                    color = if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther,
+                    shape = if (isOwn) OwnBubbleShape else OtherBubbleShape,
+                )
                 .combinedClickable(
                     onClick = onTap,
                     onLongClick = { onLongClick?.invoke() }

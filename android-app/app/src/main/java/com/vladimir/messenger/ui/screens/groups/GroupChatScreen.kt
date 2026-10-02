@@ -9,6 +9,12 @@ package com.vladimir.messenger.ui.screens.groups
 // выбранной группы идут вертикальным списком, каждая в своём пузыре,
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuBubbleCard
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -65,8 +71,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -109,6 +113,7 @@ import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
+import com.vladimir.messenger.ui.theme.LocalMessengerColors
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ApuActionsMenu
@@ -424,35 +429,14 @@ fun GroupChatScreen(
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = {
-                    // Название группы на белой полосочке со скруглениями и
-                    // золотой рамкой - читается на любой подложке.
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                RoundedCornerShape(18.dp),
-                            )
-                            // Раунд 261: весь пузырь шапки темы (значок, имя,
-                            // описание) тапом открывает редактирование - но
-                            // только тем, кто может управлять темами; у
-                            // остальных тап ничего не делает.
-                            // Раунд 267: пузырь шапки группы/канала тапом
-                            // открывает настройки (аватар, название и т.д.) -
-                            // только админам/владельцу.
-                            .then(
-                                if (topicHeader && selectedTopic != null && uiState.canManageTopics) {
-                                    Modifier.clickable { showEditTopic = true }
-                                } else if (!topicHeader && iAmGroupAdmin) {
-                                    Modifier.clickable { onOpenAdmin(uiState.groupId) }
-                                } else {
-                                    Modifier
-                                }
-                            )
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    ) {
+                    // Права на действия не меняются: тема — только с правом
+                    // управления темами, группа/канал — для админов/владельца.
+                    val openHeader: (() -> Unit)? = when {
+                        topicHeader && selectedTopic != null && uiState.canManageTopics -> ({ showEditTopic = true })
+                        !topicHeader && iAmGroupAdmin -> ({ onOpenAdmin(uiState.groupId) })
+                        else -> null
+                    }
+                    ApuHeaderBubble(onClick = openHeader) {
                         // Аватар группы слева от названия, если задан.
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val storeAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
@@ -623,14 +607,11 @@ fun GroupChatScreen(
                     }
                     if (uiState.canManageTopics) {
                         item {
-                            Card(
+                            ApuBubbleCard(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { showNewTopic = true },
                                 shape = RoundedCornerShape(18.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = Color(0xFFF5F7FA).copy(alpha = 0.6f),
-                                ),
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
@@ -656,7 +637,7 @@ fun GroupChatScreen(
                 val pinnedTopicName = uiState.topics
                     .firstOrNull { it.id == uiState.selectedTopicId }
                     ?.name
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -860,20 +841,19 @@ fun GroupChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                        .apuBubbleSurface()
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp))
+                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp), tint = ApuBubbleAccentColor)
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(staged.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall)
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = ApuBubbleTextColor)
+                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
                     }
                     IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
                     }
                 }
             }
@@ -990,6 +970,7 @@ fun GroupChatScreen(
                             .fillMaxWidth()
                             .onFocusChanged { inputFocused = it.isFocused },
                         placeholder = { Text("Сообщение") },
+                        shape = RoundedCornerShape(18.dp),
                         minLines = 1,
                         maxLines = 6,
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
@@ -997,6 +978,9 @@ fun GroupChatScreen(
                             unfocusedTextColor = Color(0xFF1E2430),
                             focusedContainerColor = Color.White,
                             unfocusedContainerColor = Color.White,
+                            focusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.6f),
+                            unfocusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.35f),
+                            cursorColor = ApuBubbleAccentColor,
                             focusedPlaceholderColor = Color(0xFF5A6472),
                             unfocusedPlaceholderColor = Color(0xFF5A6472),
                         ),
@@ -1441,14 +1425,11 @@ private fun messagesLabel(count: Int): String = when {
 
 @Composable
 private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
-    Card(
+    ApuBubbleCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFF5F7FA).copy(alpha = 0.92f),
-        ),
     ) {
         Row(
             modifier = Modifier.padding(10.dp),
@@ -1609,7 +1590,10 @@ private fun MessageBubble(
         // без фона и тени, только картинка, время и реакции.
         val stickerFloat = fileCard != null && fileCard.previewFile != null &&
             GroupFileMarker.isSticker(fileCard.info)
-        Card(
+        val messenger = LocalMessengerColors.current
+        val bubbleTextColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground
+            else if (message.isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+        ApuBubbleCard(
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .combinedClickable(
@@ -1617,16 +1601,9 @@ private fun MessageBubble(
                     onClick = { showReactions = true },
                     onLongClick = { showMenu = true },
                 ),
-            colors = if (stickerFloat) {
-                CardDefaults.cardColors(containerColor = Color.Transparent)
-            } else {
-                CardDefaults.cardColors()
-            },
-            elevation = if (stickerFloat) {
-                CardDefaults.cardElevation(defaultElevation = 0.dp)
-            } else {
-                CardDefaults.cardElevation()
-            },
+            backgroundColor = if (message.isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther,
+            contentColor = bubbleTextColor,
+            transparent = stickerFloat,
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {
@@ -1652,7 +1629,7 @@ private fun MessageBubble(
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             textDecoration = TextDecoration.Underline,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = bubbleTextColor,
                         )
                     }
                 }
@@ -1722,7 +1699,7 @@ private fun MessageBubble(
                         com.vladimir.messenger.util.InlineImage.photoCount(message.content) > 0 ->
                         Text(
                             "Фото: " + com.vladimir.messenger.util.InlineImage.photoCount(message.content),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = bubbleTextColor.copy(alpha = 0.7f),
                         )
                     bodyText.isBlank() && fileCard != null -> Unit
                     else -> Text(bodyText)
@@ -1767,7 +1744,7 @@ private fun MessageBubble(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(time, style = MaterialTheme.typography.labelSmall)
+                    Text(time, style = MaterialTheme.typography.labelSmall, color = bubbleTextColor.copy(alpha = 0.65f))
                     if (message.isPinned) {
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.Filled.PushPin, contentDescription = "Закреплено", modifier = Modifier.size(12.dp))
