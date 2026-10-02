@@ -41,7 +41,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -270,9 +273,14 @@ fun TopicEmojiPicker(
 @Composable
 private fun EmojiCell(emoji: String, selected: String, onPick: (String) -> Unit) {
     val isSel = emoji == selected
+    // Раунд 258: при тапе эмодзи «подпрыгивает», как в Telegram: резкий
+    // рост и пружинный возврат с лёгким перелётом.
+    val scale = remember { androidx.compose.animation.core.Animatable(1f) }
+    val scope = rememberCoroutineScope()
     Box(
         modifier = Modifier
             .size(40.dp)
+            .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
             .clip(RoundedCornerShape(10.dp))
             .then(
                 if (isSel) {
@@ -283,7 +291,19 @@ private fun EmojiCell(emoji: String, selected: String, onPick: (String) -> Unit)
                     Modifier
                 }
             )
-            .clickable { onPick(emoji) },
+            .clickable {
+                scope.launch {
+                    scale.snapTo(1.35f)
+                    scale.animateTo(
+                        1f,
+                        androidx.compose.animation.core.spring(
+                            dampingRatio = 0.45f,
+                            stiffness = 320f,
+                        ),
+                    )
+                }
+                onPick(emoji)
+            },
         contentAlignment = Alignment.Center,
     ) {
         Text(

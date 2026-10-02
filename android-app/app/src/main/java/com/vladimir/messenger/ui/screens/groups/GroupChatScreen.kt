@@ -79,6 +79,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1834,8 +1835,27 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // Раунд 258: превью значка «подпрыгивает» при смене, как в Telegram.
+                val iconPop = remember { androidx.compose.animation.core.Animatable(1f) }
+                androidx.compose.runtime.LaunchedEffect(icon) {
+                    iconPop.snapTo(1.25f)
+                    iconPop.animateTo(
+                        1f,
+                        androidx.compose.animation.core.spring(
+                            dampingRatio = 0.5f,
+                            stiffness = 300f,
+                        ),
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TopicIconView(icon, 34.dp)
+                    Box(
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = iconPop.value
+                            scaleY = iconPop.value
+                        },
+                    ) {
+                        TopicIconView(icon, 34.dp)
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "Значок темы: " + TopicIconCatalog.describe(icon),
@@ -1844,7 +1864,8 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Эмодзи (как в Telegram)" to true, "Живые" to false)
+                    // Раунд 258: без упоминаний чужих мессенджеров в интерфейсе.
+                    listOf("Эмодзи" to true, "Живые" to false)
                         .forEach { (label, mode) ->
                             val sel = emojiMode == mode
                             Text(
