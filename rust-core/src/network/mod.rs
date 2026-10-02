@@ -39,6 +39,7 @@ pub mod message_queue;
 pub mod nat_types;
 pub mod offline_send;
 pub mod peer_exchange;
+pub mod peer_assistance;
 pub mod presence;
 pub mod presence_scope;
 pub mod quic_client;

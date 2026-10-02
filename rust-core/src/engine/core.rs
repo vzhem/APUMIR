@@ -10,6 +10,7 @@ use crate::storage::models::MessageStatus;
 
 use super::events::{CoreEvent, EventBus};
 use crate::network::direct_transport::{DirectTransport, BoundFrameFactory, BoundFrameHandler, BoundFrameResult};
+use crate::network::peer_assistance::{self, PeerAssistance, AssistOperation};
 use crate::network::peer_exchange::{
     Candidate as DiscoveryCandidate, PeerExchange, is_public_endpoint, valid_node_id,
 };
@@ -496,6 +497,7 @@ pub struct P2PCore {
     address_book: Arc<AddressBook>,
     /// Direct, signed address exchange and persistent reachability/TOFU history.
     peer_exchange: Arc<PeerExchange>,
+    peer_assistance: Arc<PeerAssistance>,
     /// K5-1: копии чужих сообщений, которые держим мы, пока получатель не
     /// появится (см. `network::custody_relay`).
     custody_hold: Arc<CustodyHold>,
@@ -549,6 +551,7 @@ impl P2PCore {
             address_lookup: Arc::new(AddressLookup::new()),
             address_book: Arc::new(AddressBook::open(address_book_path)),
             peer_exchange: Arc::new(PeerExchange::open(peer_exchange_path)),
+            peer_assistance: Arc::new(PeerAssistance::new()),
             custody_hold: Arc::new(CustodyHold::new()),
             custody_offers: Arc::new(CustodyOffers::new()),
             custody_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -811,9 +814,37 @@ impl P2PCore {
                     let own_addr = Arc::clone(&public_addr_arc);
                     let network = Arc::clone(&network_arc);
                     let events = Arc::clone(&events_arc);
+                    let assistance = Arc::clone(&self.peer_assistance);
+                    let transport_slot = Arc::clone(&self.direct);
+                    let lookup = Arc::clone(&self.address_lookup);
+                    let hold = Arc::clone(&self.custody_hold);
+                    let offers = Arc::clone(&self.custody_offers);
+                    let custody_enabled = Arc::clone(&self.custody_enabled);
                     Arc::new(move |bytes: &[u8], binding: [u8; 32], remote: SocketAddr| {
                         let now = crate::storage::models::now_ms();
                         let public = *own_addr.lock().unwrap();
+                        if bytes.starts_with(peer_assistance::ASSIST_MAGIC) {
+                            let Some(effect) = assistance.handle(&identity, &directory, bytes, binding, remote, now) else {
+                                return BoundFrameResult::default();
+                            };
+                            if let Some(payload) = effect.delivery {
+                                // Inner sender/signature and file geometry were checked before
+                                // decrypting/dispatch. Never treat the helper as the message author.
+                                Self::handle_direct_frame(&events, &network, &addrs, &lookup, &hold, &offers,
+                                    custody_enabled.load(std::sync::atomic::Ordering::Relaxed), public, &book, payload);
+                            }
+                            if let Some(transport) = transport_slot.lock().unwrap().clone() {
+                                for (peer, operation) in effect.outbound {
+                                    Self::spawn_assist_send(transport.clone(), Arc::clone(&identity), peer, operation);
+                                }
+                                if let Some((peer, endpoint)) = effect.probe {
+                                    if let Some(request) = directory.probe(&identity, public, &peer.claims.node_id, endpoint, now) {
+                                        Self::spawn_exchange_send(transport, Arc::clone(&identity), Arc::clone(&directory), request);
+                                    }
+                                }
+                            }
+                            return BoundFrameResult { sender: effect.sender, response: None };
+                        }
                         let Some(effect) = directory.handle(&identity, bytes, binding, remote, public, now) else {
                             return BoundFrameResult::default();
                         };
@@ -889,7 +920,7 @@ impl P2PCore {
                         if let Some(identity) = discovery_identity {
                             runtime.spawn(Self::run_peer_exchange(
                                 identity, transport, Arc::clone(&self.peer_exchange),
-                                Arc::clone(&self.presence_scope), Arc::clone(&self.address_book),
+                                Arc::clone(&self.presence_scope), Arc::clone(&self.address_book), Arc::clone(&self.peer_assistance),
                                 Arc::clone(&peer_addrs_arc), Arc::clone(&public_addr_arc),
                                 Arc::clone(&self.address_lookup), node_id.clone(),
                             ));
@@ -1949,12 +1980,38 @@ impl P2PCore {
         }
     }
 
+    fn spawn_assist_send(transport: DirectTransport, identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
+        peer: String, operation: AssistOperation) {
+        tokio::spawn(async move {
+            // Helper service is peer-to-peer only: no arbitrary host dial and no recursive relay.
+            if !transport.has_connection(&peer).await { return; }
+            let destination = peer.clone();
+            let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
+                &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
+            let _ = transport.send_bound(&peer, None, factory).await;
+        });
+    }
+
+    fn spawn_exchange_send(transport: DirectTransport, identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
+        directory: Arc<PeerExchange>, request: crate::network::peer_exchange::PreparedExchange) {
+        tokio::spawn(async move {
+            let directory_for_frame = Arc::clone(&directory);
+            let request_for_frame = request.clone();
+            let factory: BoundFrameFactory = Arc::new(move |binding, remote| {
+                if !directory_for_frame.bind_request(&request_for_frame, binding, remote) { return None; }
+                request_for_frame.encode(&identity, binding)
+            });
+            let sent = transport.send_bound(&request.peer_id, Some(request.endpoint), factory).await;
+            directory.mark_send_result(&request.peer_id, request.endpoint, sent, crate::storage::models::now_ms());
+        });
+    }
+
     /// Direct bootstrap is independent of the broker and the blocking presence/custody thread.
     /// At most two exchanges are in flight, with a six-request/minute ceiling in PeerExchange.
     async fn run_peer_exchange(
         identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
         transport: DirectTransport, directory: Arc<PeerExchange>, scope: Arc<PresenceScope>,
-        book: Arc<AddressBook>, addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
+        book: Arc<AddressBook>, assistance: Arc<PeerAssistance>, addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
         public_addr: Arc<Mutex<Option<SocketAddr>>>, lookup: Arc<AddressLookup>, our_id: String,
     ) {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -1990,19 +2047,16 @@ impl P2PCore {
                 }
                 let own = *public_addr.lock().unwrap();
                 for request in directory.plan(&identity, own, candidates, &wanted, now) {
-                    let transport = transport.clone();
-                    let directory = Arc::clone(&directory);
-                    let signer = Arc::clone(&identity);
-                    tokio::spawn(async move {
-                        let directory_for_frame = Arc::clone(&directory);
-                        let request_for_frame = request.clone();
-                        let factory: BoundFrameFactory = Arc::new(move |binding, remote| {
-                            if !directory_for_frame.bind_request(&request_for_frame, binding, remote) { return None; }
-                            request_for_frame.encode(&signer, binding)
-                        });
-                        let sent = transport.send_bound(&request.peer_id, Some(request.endpoint), factory).await;
-                        directory.mark_send_result(&request.peer_id, request.endpoint, sent, crate::storage::models::now_ms());
-                    });
+                    Self::spawn_exchange_send(transport.clone(), Arc::clone(&identity), Arc::clone(&directory), request);
+                }
+            }
+            // Every enrolled node is an automatic coordinator; ask a small existing
+            // neighbourhood to introduce both parties, using its observed endpoints.
+            for target in wanted.iter().take(2) {
+                if let Some(operation) = assistance.connect_request(target, now) {
+                    for helper in directory.helpers(now).into_iter().filter(|h| h.identity.claims.node_id != *target).take(2) {
+                        Self::spawn_assist_send(transport.clone(), Arc::clone(&identity), helper.identity.claims.node_id, operation.clone());
+                    }
                 }
             }
             // Old phones ignore APUX1. Keep their original DHT protocol, but only one target
@@ -4598,9 +4652,11 @@ impl P2PCore {
             return false;
         };
         tracing::info!("QUIC send start to {} at {:?} ({} bytes)", peer_id, addr, payload.len());
-        let sent = transport.send_blocking(peer_id, addr, payload.into_bytes());
-        if !sent { self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms()); }
-        sent
+        let bytes = payload.into_bytes();
+        let sent = transport.send_blocking(peer_id, addr, bytes.clone());
+        if sent { return true; }
+        self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms());
+        self.send_with_helper(&transport, peer_id, &bytes)
     }
 
     /// K3: бинарный кадр файла уходит стримом с приоритетом данных.
@@ -4615,9 +4671,47 @@ impl P2PCore {
             tracing::warn!("FILE CHUNK to {} skipped: direct transport is down", peer_id);
             return false;
         };
-        let sent = transport.send_file_blocking(peer_id, addr, frame);
-        if !sent { self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms()); }
-        sent
+        let sent = transport.send_file_blocking(peer_id, addr, frame.clone());
+        if sent { return true; }
+        self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms());
+        self.send_with_helper(&transport, peer_id, &frame)
+    }
+
+    /// Online transit does not enable disk custody. True means the RECIPIENT signed
+    /// acceptance after end-to-end decryption, not that an intermediate stream was written.
+    fn send_with_helper(&self, transport: &DirectTransport, recipient: &str, bytes: &[u8]) -> bool {
+        let now = crate::storage::models::now_ms();
+        let Some(identity) = crate::crypto::signing_identity::installed_signing_identity()
+            .filter(|i| Some(i.legacy_routing_node_id()) == self.node_id_str.as_deref()) else { return false; };
+        let helpers: Vec<_> = self.peer_exchange.helpers(now).into_iter()
+            .filter(|h| h.identity.claims.node_id != recipient && h.identity.claims.node_id != identity.legacy_routing_node_id())
+            .take(2).collect();
+        if helpers.is_empty() { return false; }
+        let target = self.peer_exchange.helper_identity(recipient, now);
+        if target.is_none() {
+            if let Some(operation) = self.peer_assistance.connect_request(recipient, now) {
+                for helper in helpers {
+                    let peer = helper.identity.claims.node_id;
+                    let destination = peer.clone(); let operation = operation.clone(); let identity = Arc::clone(&identity);
+                    let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
+                        &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
+                    let _ = transport.send_bound_blocking(&peer, None, factory);
+                }
+            }
+            self.peer_exchange.wake(); return false;
+        }
+        let Some((operation, receipt, packet_id)) = self.peer_assistance.prepare_relay(&identity, &target.unwrap(), bytes, now) else { return false; };
+        for helper in helpers {
+            let peer = helper.identity.claims.node_id;
+            let destination = peer.clone(); let operation = operation.clone(); let identity = Arc::clone(&identity);
+            let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
+                &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
+            if !transport.send_bound_blocking(&peer, None, factory) { continue; }
+            if matches!(receipt.recv_timeout(peer_assistance::RECEIPT_WAIT), Ok(true)) {
+                self.peer_assistance.cancel(packet_id); return true;
+            }
+        }
+        self.peer_assistance.cancel(packet_id); false
     }
 
     pub fn receive_message(

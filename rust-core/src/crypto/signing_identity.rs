@@ -136,6 +136,20 @@ impl InstalledSigningIdentity {
         &self.key_id
     }
 
+    /// Domain-separated helper transport key. Never use the Ed25519 seed directly as
+    /// an X25519 scalar, and never export this derived private key through FFI/storage.
+    pub(crate) fn helper_exchange_key_pair(&self) -> Option<X25519KeyPair> {
+        let mut seed = self.key_pair.secret_key().0;
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"apu-helper-key-v1"), &seed);
+        let mut derived = [0u8; 32];
+        let result = hk.expand(b"apu-helper-x25519-v1", &mut derived);
+        seed.fill(0);
+        if result.is_err() { derived.fill(0); return None; }
+        let pair = X25519KeyPair::from_secret_bytes(&derived).ok();
+        derived.fill(0);
+        pair
+    }
+
     pub(crate) fn sign_security_payload(&self, payload: &[u8]) -> Vec<u8> {
         self.key_pair.sign(payload)
     }

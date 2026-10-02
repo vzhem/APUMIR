@@ -19,10 +19,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::crypto::keys::Ed25519KeyPair;
+use super::peer_assistance::HelperIdentity;
 use crate::crypto::signing_identity::InstalledSigningIdentity;
 
 pub const EXCHANGE_MAGIC: &[u8] = b"APUX1\n";
-pub const MAX_EXCHANGE_BYTES: usize = 16 * 1024;
+pub const MAX_EXCHANGE_BYTES: usize = 24 * 1024;
 pub const MAX_RECORDS: usize = 16;
 pub const MAX_SHARED_IN_REQUEST: usize = 8;
 pub const MAX_TARGETS: usize = 32;
@@ -164,6 +165,8 @@ struct ExchangeClaims {
     records: Vec<SharedRecord>,
     /// The actual requester endpoint on this QUIC session; useful even when STUN is unavailable.
     observed_requester: Option<SocketAddr>,
+    helper_identity: HelperIdentity,
+    target_identities: Vec<HelperIdentity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +194,8 @@ fn decode(bytes: &[u8], recipient: &str, binding: [u8; 32], now: i64) -> Option<
         || c.known.len() != BLOOM_BYTES || c.targets.len() > MAX_TARGETS
         || c.targets.iter().any(|id| !valid_node_id(id)) || c.records.len() > MAX_RECORDS
         || (!c.reply && c.records.len() > MAX_SHARED_IN_REQUEST) || signed.signature.len() != 64
+        || c.target_identities.len() > 8 || !c.helper_identity.verify(now)
+        || c.helper_identity.claims.node_id != c.from || c.helper_identity.claims.signing_key != c.signing_key
     { return None; }
     Ed25519KeyPair::verify(&c.signing_key, &canonical(FRAME_DOMAIN, c)?, &signed.signature).ok()?;
     Some(signed)
@@ -234,6 +239,7 @@ struct StoredDirectory {
     records: Vec<CachedRecord>,
     pins: Vec<(String, [u8; 32])>,
     attempts: Vec<(String, SocketAddr, Attempt)>,
+    #[serde(default)] identities: Vec<HelperIdentity>,
 }
 
 #[derive(Clone)]
@@ -250,6 +256,8 @@ struct Pending {
 #[derive(Default)]
 struct State {
     records: HashMap<(String, SocketAddr), CachedRecord>,
+    identities: HashMap<String, HelperIdentity>,
+    authenticated: HashMap<String, (SocketAddr, i64)>,
     pins: HashMap<String, [u8; 32]>,
     attempts: HashMap<(String, SocketAddr), Attempt>,
     pending: HashMap<String, Pending>,
@@ -289,6 +297,13 @@ impl PreparedExchange {
     }
 }
 
+#[derive(Clone)]
+pub struct AuthenticatedHelperPeer {
+    pub identity: HelperIdentity,
+    pub endpoint: SocketAddr,
+    pub checked_at_ms: i64,
+}
+
 pub struct ExchangeEffect {
     pub sender_id: String,
     pub response: Option<Vec<u8>>,
@@ -317,6 +332,12 @@ impl PeerExchange {
                         if stored.version == 1 {
                             for (id, key) in stored.pins.into_iter().take(MAX_PINNED_IDENTITIES) {
                                 if valid_node_id(&id) { state.pins.insert(id, key); }
+                            }
+                            for identity in stored.identities.into_iter().take(MAX_DIRECTORY_ENTRIES) {
+                                if identity.verify(now) && state.pins.get(&identity.claims.node_id)
+                                    .map(|key| key == &identity.claims.signing_key).unwrap_or(true) {
+                                    state.identities.insert(identity.claims.node_id.clone(), identity);
+                                }
                             }
                             for record in stored.records.into_iter().take(MAX_DIRECTORY_ENTRIES) {
                                 let c = &record.lease.claims;
@@ -350,7 +371,7 @@ impl PeerExchange {
 
     pub fn reset_session(&self) {
         let mut s = self.state.lock().unwrap();
-        s.pending.clear(); s.next_round_ms = 0; s.observed_own = None; s.self_lease = None;
+        s.pending.clear(); s.authenticated.clear(); s.next_round_ms = 0; s.observed_own = None; s.self_lease = None;
         self.wake();
     }
 
@@ -358,6 +379,46 @@ impl PeerExchange {
         if self.wake.load(Ordering::Relaxed) { return true; }
         let s = self.state.lock().unwrap();
         now >= s.next_round_ms || s.pending.values().any(|p| now >= p.deadline_ms)
+    }
+
+    pub fn pinned_key(&self, id: &str) -> Option<[u8; 32]> { self.state.lock().unwrap().pins.get(id).copied() }
+
+    pub fn helper_identity(&self, id: &str, now: i64) -> Option<HelperIdentity> {
+        self.state.lock().unwrap().identities.get(id).filter(|identity| identity.claims.expires_at_ms > now).cloned()
+    }
+
+    pub fn authenticated_peer(&self, id: &str, now: i64) -> Option<AuthenticatedHelperPeer> {
+        let s = self.state.lock().unwrap();
+        let (endpoint, at) = *s.authenticated.get(id)?;
+        if now.saturating_sub(at) > HEALTHY_REFRESH_MS + ONLINE_WINDOW_MS { return None; }
+        let identity = s.identities.get(id)?.clone();
+        if identity.claims.expires_at_ms <= now { return None; }
+        Some(AuthenticatedHelperPeer { identity, endpoint, checked_at_ms: at })
+    }
+
+    pub fn helpers(&self, now: i64) -> Vec<AuthenticatedHelperPeer> {
+        let ids: Vec<String> = self.state.lock().unwrap().authenticated.keys().cloned().collect();
+        let mut peers: Vec<_> = ids.iter().filter_map(|id| self.authenticated_peer(id, now)).collect();
+        peers.sort_by_key(|p| (!is_public_endpoint(p.endpoint), -p.checked_at_ms, p.identity.claims.node_id.clone()));
+        peers
+    }
+
+    pub fn accept_identity_hint(&self, identity: &HelperIdentity, now: i64) -> bool {
+        if !identity.verify(now) { return false; }
+        let mut s = self.state.lock().unwrap();
+        if s.pins.get(&identity.claims.node_id).map(|k| k != &identity.claims.signing_key).unwrap_or(false) { return false; }
+        if s.identities.len() >= MAX_DIRECTORY_ENTRIES && !s.identities.contains_key(&identity.claims.node_id) { return false; }
+        s.identities.insert(identity.claims.node_id.clone(), identity.clone()); s.dirty = true;
+        true
+    }
+
+    /// A valid end-to-end box proves the signing key, but not direct network reachability.
+    pub fn accept_end_to_end_identity(&self, identity: &HelperIdentity, now: i64) -> bool {
+        if !self.accept_identity_hint(identity, now) { return false; }
+        let mut s = self.state.lock().unwrap();
+        if s.pins.len() >= MAX_PINNED_IDENTITIES && !s.pins.contains_key(&identity.claims.node_id) { return false; }
+        s.pins.insert(identity.claims.node_id.clone(), identity.claims.signing_key); s.dirty = true;
+        true
     }
 
     pub fn observed_own_addr(&self, now: i64) -> Option<SocketAddr> {
@@ -478,7 +539,9 @@ impl PeerExchange {
                 from: identity.legacy_routing_node_id().to_string(), to: c.node_id.clone(), nonce,
                 created_at_ms: now, channel_binding: [0; 32],
                 signing_key: match identity.public_key().try_into() { Ok(k) => k, Err(_) => return Vec::new() },
-                known: known_bloom(&s, now), targets: target_list.clone(), records, observed_requester: None };
+                known: known_bloom(&s, now), targets: target_list.clone(), records, observed_requester: None,
+                helper_identity: match HelperIdentity::create(identity, now) { Some(i) => i, None => return Vec::new() },
+                target_identities: Vec::new() };
             s.pending.insert(c.node_id.clone(), Pending { nonce, endpoint: c.endpoint,
                 deadline_ms: now.saturating_add(REPLY_TIMEOUT_MS), stream_delivered: false, binding: None, had_targets: !target_list.is_empty() });
             s.sent.push_back(now);
@@ -489,6 +552,26 @@ impl PeerExchange {
         }
         s.next_round_ms = now.saturating_add(if target_list.is_empty() { HEALTHY_REFRESH_MS } else { 5_000 });
         out
+    }
+
+    /// Coordinated simultaneous dial; still consumes the same bounded discovery budget.
+    pub fn probe(&self, identity: &InstalledSigningIdentity, own: Option<SocketAddr>, peer: &str,
+        endpoint: SocketAddr, now: i64) -> Option<PreparedExchange> {
+        if !valid_node_id(peer) || peer == identity.legacy_routing_node_id() || !is_public_endpoint(endpoint) { return None; }
+        let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
+        if s.pending.len() >= MAX_PARALLEL_EXCHANGES || s.sent.len() >= MAX_REQUESTS_PER_MINUTE || s.pending.contains_key(peer) { return None; }
+        if s.attempts.get(&(peer.into(), endpoint)).map(|a| a.failures > 0 && a.retry_at_ms > now).unwrap_or(false) { return None; }
+        refresh_self(&mut s, identity, own, now);
+        let mut nonce = [0; 16]; OsRng.fill_bytes(&mut nonce);
+        let claims = ExchangeClaims { version: 1, reply: false, from: identity.legacy_routing_node_id().into(),
+            to: peer.into(), nonce, created_at_ms: now, channel_binding: [0; 32], signing_key: identity.public_key().try_into().ok()?,
+            known: known_bloom(&s, now), targets: Vec::new(),
+            records: select_records(&s, &[], &[], identity.legacy_routing_node_id(), MAX_SHARED_IN_REQUEST, now),
+            observed_requester: None, helper_identity: HelperIdentity::create(identity, now)?, target_identities: Vec::new() };
+        s.pending.insert(peer.into(), Pending { nonce, endpoint, deadline_ms: now.saturating_add(REPLY_TIMEOUT_MS),
+            stream_delivered: false, binding: None, had_targets: false });
+        s.sent.push_back(now);
+        Some(PreparedExchange { peer_id: peer.into(), endpoint, claims })
     }
 
     /// Process only session-bound signed frames. The sender is online; all records about OTHER
@@ -529,6 +612,14 @@ impl PeerExchange {
         // Only the directly signed session establishes a TOFU pin, never a forwarded lease.
         if !s.pins.contains_key(&c.from) && s.pins.len() >= MAX_PINNED_IDENTITIES { return None; }
         s.pins.insert(c.from.clone(), c.signing_key);
+        s.identities.insert(c.from.clone(), c.helper_identity.clone());
+        s.authenticated.insert(c.from.clone(), (remote, now));
+        for hint in &c.target_identities {
+            if hint.verify(now) && s.pins.get(&hint.claims.node_id).map(|k| k == &hint.claims.signing_key).unwrap_or(true)
+                && (s.identities.len() < MAX_DIRECTORY_ENTRIES || s.identities.contains_key(&hint.claims.node_id)) {
+                s.identities.insert(hint.claims.node_id.clone(), hint.clone());
+            }
+        }
         let a = s.attempts.entry((c.from.clone(), remote)).or_default();
         a.verified_at_ms = now; a.failures = 0; a.failed_at_ms = 0;
         a.retry_at_ms = now.saturating_add(if urgent { 60_000 } else { HEALTHY_REFRESH_MS });
@@ -573,7 +664,9 @@ impl PeerExchange {
                 from: identity.legacy_routing_node_id().to_string(), to: c.from.clone(), nonce: c.nonce,
                 created_at_ms: now, channel_binding: binding,
                 signing_key: identity.public_key().try_into().ok()?, known: known_bloom(&s, now),
-                targets: Vec::new(), records, observed_requester: Some(remote) })
+                targets: Vec::new(), records, observed_requester: Some(remote),
+                helper_identity: HelperIdentity::create(identity, now)?,
+                target_identities: c.targets.iter().filter_map(|id| s.identities.get(id).cloned()).take(8).collect() })
         };
         self.wake();
         Some(ExchangeEffect { sender_id: c.from, response, candidates: learned, sender_endpoint: remote })
@@ -589,7 +682,8 @@ impl PeerExchange {
             cleanup(&mut s, now);
             let snapshot = StoredDirectory { version: 1, records: s.records.values().cloned().collect(),
                 pins: s.pins.iter().map(|(id, key)| (id.clone(), *key)).collect(),
-                attempts: s.attempts.iter().map(|((id, addr), a)| (id.clone(), *addr, a.clone())).collect() };
+                attempts: s.attempts.iter().map(|((id, addr), a)| (id.clone(), *addr, a.clone())).collect(),
+                identities: s.identities.values().cloned().collect() };
             s.dirty = false; s.saved_at_ms = now;
             snapshot
         };
@@ -636,6 +730,8 @@ fn fail(s: &mut State, id: &str, endpoint: SocketAddr, now: i64) {
 
 fn cleanup(s: &mut State, now: i64) {
     s.records.retain(|_, r| r.lease.claims.expires_at_ms > now);
+    s.identities.retain(|_, i| i.claims.expires_at_ms > now);
+    s.authenticated.retain(|_, (_, at)| now.saturating_sub(*at) <= HEALTHY_REFRESH_MS + ONLINE_WINDOW_MS);
     while s.sent.front().map(|at| now.saturating_sub(*at) >= 60_000).unwrap_or(false) { s.sent.pop_front(); }
     s.received.retain(|(_, _, at)| now.saturating_sub(*at) <= FRAME_LIFETIME_MS + CLOCK_SKEW_MS);
     s.last_inbound.retain(|_, at| now.saturating_sub(*at) <= FRAME_LIFETIME_MS + CLOCK_SKEW_MS);

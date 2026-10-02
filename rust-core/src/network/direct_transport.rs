@@ -404,6 +404,16 @@ impl DirectTransport {
         matches!(tokio::time::timeout(DIRECT_SEND_BUDGET, reply_rx).await, Ok(Ok(true)))
     }
 
+    pub fn send_bound_blocking(&self, peer_id: &str, addr: Option<SocketAddr>, factory: BoundFrameFactory) -> bool {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let command = Command::Send { peer_id: peer_id.into(), job: SendJob {
+            addr, payload: FramePayload::Bound(factory), kind: JobKind::Interactive,
+            reply: Reply::Blocking(tx), enqueued_at: Instant::now(),
+        }};
+        if self.tx.try_send(command).is_err() { return false; }
+        matches!(rx.recv_timeout(DIRECT_SEND_BUDGET), Ok(true))
+    }
+
     /// Есть ли живое соединение с узлом (исходящее или усыновлённое).
     pub async fn has_connection(&self, peer_id: &str) -> bool {
         self.shared.pool.get(peer_id.as_bytes()).await.is_some()
@@ -479,7 +489,8 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
                 continue;
             }
         };
-        let (sender, response) = if payload.starts_with(super::peer_exchange::EXCHANGE_MAGIC) {
+        let (sender, response) = if payload.starts_with(super::peer_exchange::EXCHANGE_MAGIC)
+            || payload.starts_with(super::peer_assistance::ASSIST_MAGIC) {
             let Some(handler) = &shared.on_bound_frame else { continue; };
             let Ok(binding) = conn.peer_exchange_channel_binding() else { continue; };
             let result = handler(&payload, binding, conn.remote_address());
@@ -490,7 +501,7 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
         // Reply on THIS connection, including behind NAT. No dial-back and no 5-second
         // presence-thread queue; the reply itself is bound to the same TLS session.
         if let Some(response) = response {
-            if response.len() <= super::peer_exchange::MAX_EXCHANGE_BYTES {
+            if response.len() <= super::peer_assistance::MAX_ASSIST_BYTES {
                 let reply_conn = conn.clone();
                 tokio::spawn(async move {
                     let _ = tokio::time::timeout(STREAM_TIMEOUT, reply_conn.send_message(&response)).await;
@@ -676,7 +687,7 @@ async fn send_one(
             FramePayload::Bound(factory) => {
                 let Ok(binding) = conn.peer_exchange_channel_binding() else { return SendOutcome::StreamFailed; };
                 let Some(bytes) = factory(binding, conn.remote_address()) else { return SendOutcome::StreamFailed; };
-                if bytes.len() > super::peer_exchange::MAX_EXCHANGE_BYTES { return SendOutcome::StreamFailed; }
+                if bytes.len() > super::peer_assistance::MAX_ASSIST_BYTES { return SendOutcome::StreamFailed; }
                 Cow::Owned(bytes)
             }
         };
