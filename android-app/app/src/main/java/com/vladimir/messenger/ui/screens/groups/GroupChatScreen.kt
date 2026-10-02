@@ -408,7 +408,10 @@ fun GroupChatScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
+        // Раунд 266: клавиатура не закрывает переписку - сообщения и лента
+        // сжимаются над клавиатурой, последнее видно сразу.
         Scaffold(
+        modifier = Modifier.imePadding(),
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
@@ -922,9 +925,8 @@ fun GroupChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                        )
+                        // Раунд 266: фирменная светлая подложка вместо серой.
+                        .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
                         .border(
                             1.dp,
                             MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),

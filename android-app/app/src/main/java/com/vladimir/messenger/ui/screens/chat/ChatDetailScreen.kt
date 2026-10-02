@@ -265,7 +265,10 @@ fun ChatDetailScreen(
             .swipeBack(onBack = onBackClick),
     ) {
         ChatWallpaper()
+        // Раунд 266: клавиатура не закрывает переписку - список сообщений
+        // сжимается над клавиатурой, последние сообщения видны сразу.
         Scaffold(
+        modifier = Modifier.imePadding(),
         containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -1000,22 +1003,28 @@ private fun MessageInputBar(
     // Раунд 45: подложка панели следует теме (светлая/тёмная) и полупрозрачна -
     // обои (фирменные или свои) проходят сквозь неё. Белые пузыри скрепки,
     // поля и стрелки читаются на любом фоне.
-    Surface(
-        // Раунд 149: imePadding - панель поднимается над клавиатурой
-        // (edge-to-edge: adjustResize сам не работает, владелец прислал
-        // скрин с закрытой клавиатурой поля и «Отправить»).
-        modifier  = modifier.fillMaxWidth().imePadding(),
-        shadowElevation = 8.dp,
-        color     = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+    // Раунд 266: фирменный пузырь панели ввода - светлая полупрозрачная
+    // подложка с золотой рамкой вместо серого «квадрата» на обоях.
+    // Раунд 149: imePadding - панель поднимается над клавиатурой.
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .imePadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
         // Раунд 148: как в темах - при наборе скрепка и GIF уходят НАД
         // полем, «Отправить» - своим пузырём во всю ширину ПОД полем.
         var inputFocused by remember { mutableStateOf(false) }
-        Column(
-            modifier = Modifier
-                .navigationBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-        ) {
+        Column {
             if (inputFocused) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
