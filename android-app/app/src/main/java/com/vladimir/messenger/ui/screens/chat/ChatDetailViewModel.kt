@@ -353,7 +353,9 @@ class ChatDetailViewModel @Inject constructor(
     private fun observePinned() {
         viewModelScope.launch {
             chatRepository.observePinnedChatMessages(chatId).collect { pinned ->
-                _uiState.update { it.copy(pinned = pinned) }
+                _uiState.update {
+                    it.copy(pinned = pinned, error = MessagePinPolicy.visibleError(it.error, pinned.size))
+                }
             }
         }
     }
@@ -395,7 +397,7 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     fun togglePin(messageId: String, pinned: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = runCatching { chatRepository.setMessagePinned(messageId, pinned) }
                 .getOrElse { error ->
                     _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }

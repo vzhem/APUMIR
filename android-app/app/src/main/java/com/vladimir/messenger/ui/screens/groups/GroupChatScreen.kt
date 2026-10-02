@@ -111,6 +111,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.TopicSummary
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
 import com.vladimir.messenger.ui.theme.LocalMessengerColors
@@ -366,6 +367,9 @@ fun GroupChatScreen(
         uiState.group?.topicsEnabled == true &&
         uiState.topics.isNotEmpty()
     val showTopicsList = hasTopics && !showFeed
+    val displayedError = MessagePinPolicy.visibleError(
+        uiState.error, uiState.pinned.size, inMessageFeed = !showTopicsList,
+    )
     val selectedTopic = uiState.topics.firstOrNull { it.id == uiState.selectedTopicId }
     val selectedTopicName = selectedTopic?.name
     // Внутри темы группы наверху крупно - сама тема (значок и имя), а
@@ -585,9 +589,9 @@ fun GroupChatScreen(
                 )
             }
 
-            if (uiState.error != null) {
+            if (displayedError != null) {
                 Text(
-                    uiState.error ?: "",
+                    displayedError,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )

@@ -51,6 +51,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.FileTransferBubble
 import com.vladimir.messenger.ui.components.MessageBubble
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import android.content.ClipData
@@ -214,8 +215,9 @@ fun ChatDetailScreen(
 
     // SnackBar для ошибок
     val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(uiState.error) {
-        uiState.error?.let {
+    val displayedError = MessagePinPolicy.visibleError(uiState.error, uiState.pinned.size)
+    LaunchedEffect(displayedError) {
+        displayedError?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
         }

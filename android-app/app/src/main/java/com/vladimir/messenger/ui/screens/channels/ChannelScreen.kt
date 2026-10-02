@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import com.vladimir.messenger.data.local.MessagePinPolicy
+
 // =============================================================================
 // CHANNELSCREEN.KT - лента канала
 // =============================================================================
@@ -432,7 +434,7 @@ fun ChannelScreen(
                 }
             }
 
-            uiState.error?.let { message ->
+            MessagePinPolicy.visibleError(uiState.error, uiState.pinnedPostIds.size)?.let { message ->
                 Text(
                     message,
                     color = MaterialTheme.colorScheme.error,

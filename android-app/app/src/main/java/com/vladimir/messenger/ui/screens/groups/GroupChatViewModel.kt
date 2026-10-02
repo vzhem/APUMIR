@@ -9,6 +9,7 @@ import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -856,7 +857,13 @@ class GroupChatViewModel @Inject constructor(
                         ?: requestedTopicId?.takeIf { id -> topics.any { it.id == id } }
                         ?: topics.firstOrNull { it.isGeneral }?.id
                         ?: topics.firstOrNull()?.id
-                    state.copy(topics = topics, selectedTopicId = selected)
+                    val changed = selected != state.selectedTopicId
+                    state.copy(
+                        topics = topics,
+                        selectedTopicId = selected,
+                        pinned = if (changed) emptyList() else state.pinned,
+                        error = if (changed) MessagePinPolicy.visibleError(state.error, 0) else state.error,
+                    )
                 }
                 val selected = _uiState.value.selectedTopicId
                 // Ленту и закрепы перезапускаем ТОЛЬКО при смене темы.
@@ -991,13 +998,24 @@ class GroupChatViewModel @Inject constructor(
         pinnedJob?.cancel()
         pinnedJob = viewModelScope.launch {
             groupRepository.observePinned(groupId, topicId).collect { list ->
-                _uiState.update { it.copy(pinned = list) }
+                _uiState.update { state ->
+                    if (state.selectedTopicId != topicId) state else state.copy(
+                        pinned = list,
+                        error = MessagePinPolicy.visibleError(state.error, list.size),
+                    )
+                }
             }
         }
     }
 
     fun selectTopic(topicId: String) {
-        _uiState.update { it.copy(selectedTopicId = topicId, pinned = emptyList()) }
+        _uiState.update {
+            it.copy(
+                selectedTopicId = topicId,
+                pinned = emptyList(),
+                error = MessagePinPolicy.visibleError(it.error, 0),
+            )
+        }
         observeMessages(topicId)
         observePinned(topicId)
     }
@@ -1131,9 +1149,17 @@ class GroupChatViewModel @Inject constructor(
     }
 
     fun togglePin(messageId: String, pinned: Boolean) {
-        viewModelScope.launch {
+        val topicAtRequest = _uiState.value.selectedTopicId
+        viewModelScope.launch(Dispatchers.IO) {
             groupRepository.setPinned(groupId, messageId, pinned)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { error ->
+                    _uiState.update { state ->
+                        // A delayed failure in the previous topic must not leak into this one.
+                        if (error.message == MessagePinPolicy.LIMIT_REACHED_MESSAGE &&
+                            state.selectedTopicId != topicAtRequest
+                        ) state else state.copy(error = error.message)
+                    }
+                }
         }
     }
 
