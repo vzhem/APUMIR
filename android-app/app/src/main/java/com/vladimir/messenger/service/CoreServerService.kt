@@ -670,6 +670,8 @@ class CoreServerService : Service() {
         Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
 
         serviceScope.launch {
+            // Раунд 263: честный статус для сплэша - этап подготовки ключей.
+            CoreStatus.report("Готовим ключи безопасности…")
             // R0.5/S3: legacy routing ID остаётся неизменным; реальный Ed25519
             // signing sidecar устанавливается до engine start и пока используется
             // только diagnostics/future signed features.
@@ -744,6 +746,10 @@ class CoreServerService : Service() {
             // повышение (перезапуск уже с движком).
             if (prefs.getBoolean("mirror_defer_engine", false)) {
                 startAsMirrorShadow(legacyRoutingId)
+                // Раунд 263: зеркало живёт на событиях партнёра - для
+                // интерфейса это тоже «готово», заставка не нужна.
+                CoreStatus.report("Зеркальный режим: сеть ведёт партнёр")
+                CoreStatus.markReady()
                 return@launch
             }
 
@@ -756,11 +762,14 @@ class CoreServerService : Service() {
             bookDeferred.await()
 
             // Собственный SQLite-файл relay custody (app-private, WAL).
+            CoreStatus.report("Поднимаем ядро и сеть…")
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
             val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath)
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                // Раунд 263: ядро поднято - сплэш может отпустить человека.
+                CoreStatus.markReady()
 
                 // Азбука адресов (docs/ADDRESS_BOOK.md): засевать «свои»,
                 // чтобы в первую же минуту после старта личное presence
@@ -1012,6 +1021,10 @@ class CoreServerService : Service() {
                 startEventPolling()
             } else {
                 updateNotification("Не удалось подключиться")
+                // Раунд 263: движок не поднялся - не держим человека на
+                // заставке: честный ограниченный режим, сплэш отпускаем.
+                CoreStatus.report("Ядро в ограниченном режиме")
+                CoreStatus.markReady()
                 stopServiceSafely()
             }
         }

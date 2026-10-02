@@ -348,7 +348,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Сплэш показывается при запуске приложения (нажатии на иконку).
-            var showSplash by remember { mutableStateOf(true) }
+            // Раунд 263: при тёплом старте (ядро уже поднято) заставка не
+            // нужна вовсе - человек сразу в готовом приложении.
+            var showSplash by remember {
+                mutableStateOf(!com.vladimir.messenger.service.CoreStatus.ready.value)
+            }
             // Роевой спор за @имя: система сняла наше имя - просим новое.
             val usernameConflict by UsernameHolder.conflict.collectAsStateWithLifecycle()
             P2PMessengerTheme(themeMode = themeMode) {

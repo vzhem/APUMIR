@@ -4,27 +4,47 @@ package com.vladimir.messenger.ui.components
 // APPSPLASH.KT
 // =============================================================================
 // Сплэш при запуске приложения: иконка APU во весь экран и анимация передачи
-// данных - светящиеся точки бегут по линиям между «серверами» сети, показывая,
-// что связь наводится. Держится пару секунд и уходит.
+// данных - светящиеся точки бегут по линиям между «серверами» сети.
+// Раунд 263: заставка больше не «выдержка ради красоты». Она держится, пока
+// ядро действительно поднимается (честный статус этапа внизу), и отпускает
+// человека сразу, как ядро готово - с потолком 10 секунд на случай проблем.
+// При тёплом старте (ядро уже работает) сплэш не показывается вовсе.
+// Уход - мягким растворением, как у топовых мессенджеров.
+// Здесь же CoreWarmBar - тонкая полоска «Ядро подключается…» для экранов.
 // =============================================================================
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -35,19 +55,52 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vladimir.messenger.R
+import com.vladimir.messenger.service.CoreStatus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
-private const val SPLASH_MILLIS = 2500L
+/** Золото сети - как акцент темы (её палитровые константы приватные). */
+private val ApuGold = Color(0xFFE4B45A)
+
+/** Пол: сколько заставка живёт, если ядро всё ещё поднимается. */
+private const val SPLASH_MAX_MILLIS = 10_000L
+
+/** Минимум, чтобы заставка не мелькала на быстром железе. */
+private const val SPLASH_MIN_MILLIS = 900L
+
+/** Длительность растворения. */
+private const val SPLASH_FADE_MILLIS = 420
 
 /** Полноэкранный сплэш: иконка во весь экран + бегущие пакеты данных. */
 @Composable
 fun AppSplash(onFinished: () -> Unit) {
-    // Золото сети - как акцент темы (её палитровые константы приватные).
-    val gold = Color(0xFFE4B45A)
+    val gold = ApuGold
+    val coreStage by CoreStatus.stage.collectAsState()
 
+    // Уходит мягко: сначала гаснет прозрачность, потом экран отпускают.
+    var leaving by remember { mutableStateOf(false) }
+    val fade by animateFloatAsState(
+        targetValue = if (leaving) 0f else 1f,
+        animationSpec = tween(SPLASH_FADE_MILLIS),
+        label = "splash-fade",
+    )
+
+    // Ждём реальную готовность ядра (или честный потолок), не меньше
+    // SPLASH_MIN_MILLIS, чтобы заставка не мелькала.
     LaunchedEffect(Unit) {
-        delay(SPLASH_MILLIS)
-        onFinished()
+        val start = System.currentTimeMillis()
+        kotlinx.coroutines.withTimeoutOrNull(SPLASH_MAX_MILLIS) {
+            CoreStatus.ready.first { it }
+        }
+        val elapsed = System.currentTimeMillis() - start
+        if (elapsed < SPLASH_MIN_MILLIS) delay(SPLASH_MIN_MILLIS - elapsed)
+        leaving = true
+    }
+    LaunchedEffect(leaving) {
+        if (leaving) {
+            delay(SPLASH_FADE_MILLIS.toLong())
+            onFinished()
+        }
     }
 
     // Бесконечный прогресс 0..1 - по нему «едут» точки данных.
@@ -67,6 +120,7 @@ fun AppSplash(onFinished: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .alpha(fade)
             .background(Color.Black),
     ) {
         // Иконка APU во весь экран (вектор - масштаб без потерь).
@@ -134,18 +188,62 @@ fun AppSplash(onFinished: () -> Unit) {
             }
         }
 
-        // Подпись внизу.
-        Box(
+        // Внизу: честный этап подъёма ядра + фирменная подпись.
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 48.dp),
-            contentAlignment = Alignment.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            Crossfade(targetState = coreStage, label = "splash-stage") { stage ->
+                Text(
+                    text     = stage,
+                    color    = gold,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
             Text(
-                text     = "APU - связь напрямую, без посредников",
-                color    = gold,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
+                text     = "APU · связь напрямую, без посредников",
+                color    = Color.White.copy(alpha = 0.45f),
+                fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+/**
+ * Раунд 263: тонкая полоска «Ядро подключается…» поверх экрана, пока ядро
+ * ещё доподнимается в фоне. Пустой список не должен выглядеть поломкой.
+ */
+@Composable
+fun CoreWarmBar() {
+    val ready by CoreStatus.ready.collectAsState()
+    androidx.compose.animation.AnimatedVisibility(
+        visible = !ready,
+        enter = androidx.compose.animation.expandVertically() +
+            androidx.compose.animation.fadeIn(),
+        exit = androidx.compose.animation.shrinkVertically() +
+            androidx.compose.animation.fadeOut(),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(ApuGold.copy(alpha = 0.10f))
+                .padding(horizontal = 16.dp, vertical = 3.dp),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(11.dp),
+                strokeWidth = 1.5.dp,
+                color = ApuGold,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Ядро подключается…",
+                color = ApuGold,
+                fontSize = 12.sp,
             )
         }
     }

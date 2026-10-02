@@ -37,6 +37,7 @@ import com.vladimir.messenger.ui.components.SearchOrb
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.CoreWarmBar
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
@@ -179,6 +180,9 @@ fun ChatListScreen(
             Column {
                 // Полоска статуса сети (появляется только при проблемах)
                 NetworkStatusBar(status = uiState.networkStatus)
+                // Раунд 263: пока ядро доподнимается в фоне - тонкая честная
+                // полоска, чтобы пустой список не выглядел поломкой.
+                CoreWarmBar()
 
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
