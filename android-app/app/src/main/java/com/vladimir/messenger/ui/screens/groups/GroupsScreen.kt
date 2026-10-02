@@ -26,6 +26,9 @@ import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -325,7 +328,6 @@ fun GroupsScreen(
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
                                 )
-                                HorizontalDivider()
                             }
                         }
                         if (myChannels.isNotEmpty()) {
@@ -344,7 +346,6 @@ fun GroupsScreen(
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
                                 )
-                                HorizontalDivider()
                             }
                         }
                         // Поиск по сетевому каталогу. Группы и каналы разнесены по
@@ -608,13 +609,23 @@ private fun GroupRow(
     /** Пункты меню «⋮» справа. Пустой список - кнопки нет (каталог сети). */
     menuActions: List<BubbleMenuAction> = emptyList(),
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    // Раунд 264: фирменный пузырь главного экрана - светлая полупрозрачная
+    // подложка с золотой рамкой поверх обоев. Списки выглядят одинаково.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
             com.vladimir.messenger.ui.components.GroupAvatar(
                 groupId = group.id,
                 title = group.title,
@@ -622,7 +633,13 @@ private fun GroupRow(
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(group.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    group.title,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1E2430),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 // Что это - канал или группа - должно быть видно СРАЗУ, иначе
                 // в общем списке они неразличимы.
                 Text(
@@ -647,6 +664,7 @@ private fun GroupRow(
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF1E2430).copy(alpha = 0.7f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -661,7 +679,6 @@ private fun GroupRow(
             // Меню «⋮» - как в пузырях главного экрана: списки должны
             // выглядеть и вести себя одинаково.
             BubbleOverflowMenu(actions = menuActions)
-        }
     }
 }
 
@@ -825,8 +842,20 @@ private fun DirectoryHeader(title: String) {
 /** Строка найденного в сетевом каталоге: чужая публичная группа или канал. */
 @Composable
 private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
+    // Раунд 264: открытые группы и каналы сети - тоже в фирменных пузырях,
+    // как и «мои» сообщества: списки выглядят едино.
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         com.vladimir.messenger.ui.components.GroupAvatar(
@@ -840,11 +869,8 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 entry.title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
-                // Цвет задан явно: строка каталога лежит НЕ в карточке, а прямо
-                // на тёмных обоях, поэтому цвет по умолчанию брался тёмный и
-                // название сливалось с фоном. У «Моих групп» такой беды нет -
-                // там Card сам подбирает цвет текста под свою подложку.
-                color = MaterialTheme.colorScheme.onSurface,
+                // Раунд 264: строка теперь в светлом пузыре - тёмный текст.
+                color = Color(0xFF1E2430),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -856,7 +882,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             Text(
                 if (entry.needsApproval) "Вход по заявке" else "Вход сразу",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color(0xFF1E2430).copy(alpha = 0.7f),
             )
         }
         TextButton(onClick = {
@@ -871,7 +897,6 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             )
         }) { Text(if (entry.isChannel) "Подписаться" else "Вступить") }
     }
-    HorizontalDivider()
 }
 
 /**
