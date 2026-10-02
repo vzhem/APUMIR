@@ -574,6 +574,9 @@ class CoreServerService : Service() {
         // р242: тот же цикл раз в минуту досылает PENDING - не полагаемся на
         // событие «увидели собеседника», которое может быть пропущено.
         serviceScope.launch {
+            // Раунд 261: первая итерация - не сразу: холодному старту важнее
+            // поднять движок, а не считать незавершённые отправки.
+            kotlinx.coroutines.delay(10_000L)
             var sincePump = 0
             while (true) {
                 runCatching { chatRepository.countPendingOutgoing() }
@@ -612,7 +615,10 @@ class CoreServerService : Service() {
         if (!gossipStarted) {
             gossipStarted = true
             serviceScope.launch {
-                kotlinx.coroutines.delay(3000)
+                // Раунд 261: сверки и роевые публикации не нужны в первую
+                // секунду - откладываем на 30 с, чтобы не конкурировать с
+                // подъёмом движка за диск и сеть.
+                kotlinx.coroutines.delay(30_000)
                 // Сверка «Контакты» = главная: у каждого контакта ровно один
                 // чат, дубли схлопнуты. Разово при старте, чтобы разошедшиеся
                 // за прошлые версии списки сошлись сами.
@@ -669,9 +675,24 @@ class CoreServerService : Service() {
             val legacyRoutingId = existingPubKey
                 ?: prefs.getString("node_id", null)
                 .orEmpty()
-            // Раунд 259: битый Keystore (KeyMint может виснуть надолго) не
-            // должен задерживать старт ядра: потолок 4 с, по таймауту -
-            // честный деград в legacy/RAM-only.
+            // Раунд 261: независимые пред-шаги идут ПАРАЛЛЕЛЬНО: движок ждёт
+            // самый медленный, а не сумму всех. Битый Keystore (KeyMint может
+            // виснуть надолго) не задерживает старт: у каждого шага потолок,
+            // по таймауту - честный деград в legacy/RAM-only.
+            val atRestDeferred = kotlinx.coroutines.async {
+                (kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        RelayAtRestMasterKey.installIntoCore(applicationContext)
+                    }
+                }) ?: false
+            }
+            val bookDeferred = kotlinx.coroutines.async {
+                runCatching {
+                    kotlinx.coroutines.withTimeoutOrNull(6_000) {
+                        addressBookBackup.restoreBeforeStart()
+                    }
+                }.onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
+            }
             val signing = if (prefs.getBoolean("identity_created", false)) {
                 kotlinx.coroutines.withTimeoutOrNull(4_000) {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -725,22 +746,13 @@ class CoreServerService : Service() {
                 return@launch
             }
 
-            val atRestKeyOk = kotlinx.coroutines.withTimeoutOrNull(4_000) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    RelayAtRestMasterKey.installIntoCore(applicationContext)
-                }
-            } ?: false
+            // Раунд 261: параллельные пред-шаги к этому моменту уже доделались
+            // (или доехали до своего потолка) - движок стартует без ожидания.
+            val atRestKeyOk = atRestDeferred.await()
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
-
-            // Азбука адресов: на свежей установке файла ещё нет — тянем
-            // облачную копию ДО создания движка (ядро читает файл один раз
-            // при старте). На обычном запуске это мгновенный no-op.
-            // Раунд 259: сеть не должна держать ядро - потолок 6 с.
-            runCatching {
-                kotlinx.coroutines.withTimeoutOrNull(6_000) {
-                    addressBookBackup.restoreBeforeStart()
-                }
-            }.onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
+            // Азбука адресов: на свежей установке облачная копия тянулась
+            // параллельно; ядро читает файл один раз при старте.
+            bookDeferred.await()
 
             // Собственный SQLite-файл relay custody (app-private, WAL).
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath

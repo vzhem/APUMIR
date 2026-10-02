@@ -428,6 +428,17 @@ fun GroupChatScreen(
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                                 RoundedCornerShape(18.dp),
                             )
+                            // Раунд 261: весь пузырь шапки темы (значок, имя,
+                            // описание) тапом открывает редактирование - но
+                            // только тем, кто может управлять темами; у
+                            // остальных тап ничего не делает.
+                            .then(
+                                if (topicHeader && selectedTopic != null && uiState.canManageTopics) {
+                                    Modifier.clickable { showEditTopic = true }
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                     ) {
                         // Аватар группы слева от названия, если задан.
@@ -458,10 +469,7 @@ fun GroupChatScreen(
                                     modifier = Modifier
                                         .size(34.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFE8EEF5))
-                                        // Раунд 260: тап по значку темы -
-                                        // редактирование имени и значка.
-                                        .clickable { showEditTopic = true },
+                                        .background(Color(0xFFE8EEF5)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     TopicIconView(
