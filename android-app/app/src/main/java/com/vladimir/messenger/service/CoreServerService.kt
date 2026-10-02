@@ -37,6 +37,7 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -679,14 +680,14 @@ class CoreServerService : Service() {
             // самый медленный, а не сумму всех. Битый Keystore (KeyMint может
             // виснуть надолго) не задерживает старт: у каждого шага потолок,
             // по таймауту - честный деград в legacy/RAM-only.
-            val atRestDeferred = kotlinx.coroutines.async {
+            val atRestDeferred = async {
                 (kotlinx.coroutines.withTimeoutOrNull(4_000) {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         RelayAtRestMasterKey.installIntoCore(applicationContext)
                     }
                 }) ?: false
             }
-            val bookDeferred = kotlinx.coroutines.async {
+            val bookDeferred = async {
                 runCatching {
                     kotlinx.coroutines.withTimeoutOrNull(6_000) {
                         addressBookBackup.restoreBeforeStart()
