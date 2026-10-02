@@ -17,7 +17,9 @@ import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
 import com.vladimir.messenger.util.NodeIds
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 import javax.inject.Inject
@@ -68,11 +70,15 @@ class ChatRepository @Inject constructor(
         chatDao.getAllChats().map { it.contactId }.filter { it.isNotBlank() }.distinct()
 
     fun observeMessages(chatId: String): Flow<List<Message>> =
-        messageDao.observeMessages(chatId).map { it.map { e -> e.toDomain() } }
+        messageDao.observeMessages(chatId)
+            .map { rows -> rows.map { it.toDomain() } }
+            .flowOn(Dispatchers.Default)
 
     /** Раунд 173: закрепы личного чата (без тем). */
     fun observePinnedChatMessages(chatId: String): Flow<List<Message>> =
-        messageDao.observePinnedChatMessages(chatId).map { list -> list.map { e -> e.toDomain() } }
+        messageDao.observePinnedChatMessages(chatId)
+            .map { rows -> rows.map { it.toDomain() } }
+            .flowOn(Dispatchers.Default)
 
     /**
      * Закрепить/открепить личное сообщение или публикацию канала.
@@ -973,6 +979,8 @@ class ChatRepository @Inject constructor(
         timestamp = timestamp,
         isFromMe = isFromMe,
         status = try { MessageStatus.valueOf(status) } catch (_: Exception) { MessageStatus.PENDING },
+        // Self-chat detection uses the LOCAL recipient; no JNI lookup on opening.
+        recipientId = recipientId,
         // Тема нужна уведомлениям: тап ведёт в место сообщения.
         topicId = topicId,
         isPinned = isPinned,

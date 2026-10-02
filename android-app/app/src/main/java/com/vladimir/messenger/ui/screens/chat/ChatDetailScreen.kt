@@ -385,9 +385,17 @@ fun ChatDetailScreen(
                 },
         ) {
             when {
-                uiState.isLoading -> {
+                uiState.isLoading && uiState.messages.isEmpty() -> {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+
+                uiState.historyError != null && uiState.messages.isEmpty() -> {
+                    ChatHistoryError(
+                        message = uiState.historyError.orEmpty(),
+                        onRetry = viewModel::retryMessages,
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
 
@@ -470,6 +478,13 @@ fun ChatDetailScreen(
                     // закрепа - закреп «проваливался под ленту» (скрин владельца
                     // 01.10: стикер наезжал на плашку «Закреплённые»).
                     Column(modifier = Modifier.fillMaxSize()) {
+                    if (uiState.historyError != null) {
+                        ChatHistoryError(
+                            message = uiState.historyError.orEmpty(),
+                            onRetry = viewModel::retryMessages,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     if (uiState.pinned.isNotEmpty()) {
                         val feedScope = androidx.compose.runtime.rememberCoroutineScope()
                         ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -1196,6 +1211,28 @@ private fun MessageInputBar(
                     color = if (canSend) Color.White else Color(0xFF9AA3AF),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ChatHistoryError(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    ApuBubbleCard(modifier = modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(message, color = ApuBubbleTextColor, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Попробуйте открыть историю ещё раз",
+                color = ApuBubbleMutedColor,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(
+                onClick = onRetry,
+                colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleLinkColor),
+            ) { Text("Повторить") }
         }
     }
 }
