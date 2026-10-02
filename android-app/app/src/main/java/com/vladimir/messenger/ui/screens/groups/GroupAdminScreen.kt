@@ -350,6 +350,7 @@ private fun OverviewTab(
                 value = titleDraft,
                 onValueChange = { titleDraft = it },
                 label = { Text("Название") },
+                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = bubbleFieldColors(),
             )
@@ -357,6 +358,7 @@ private fun OverviewTab(
                 value = aboutDraft,
                 onValueChange = { aboutDraft = it },
                 label = { Text("Описание") },
+                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = bubbleFieldColors(),
             )
@@ -1156,12 +1158,16 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
 /** Цвета поля ввода внутри светлого пузыря: тёмный текст/подпись на светлой
  *  подложке при ЛЮБОЙ теме (в тёмной теме стандартное поле белело). */
 @Composable
+// Раунд 267: поля настроек - в фирменной гамме: золотая рамка (как у
+// пузырей), белая заливка, скругление 18 - никаких серых «канцелярских» линий.
 private fun bubbleFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = Color(0xFF1E2430),
     unfocusedTextColor = Color(0xFF1E2430),
     cursorColor = MaterialTheme.colorScheme.primary,
-    focusedLabelColor = Color(0xFF5A6472),
+    focusedLabelColor = MaterialTheme.colorScheme.primary,
     unfocusedLabelColor = Color(0xFF5A6472),
-    focusedBorderColor = MaterialTheme.colorScheme.primary,
-    unfocusedBorderColor = Color(0xFFB9C2CC),
+    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+    unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+    focusedContainerColor = Color.White,
+    unfocusedContainerColor = Color.White,
 )

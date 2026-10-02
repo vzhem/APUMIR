@@ -187,6 +187,9 @@ fun GroupChatScreen(
     val canDecideRequests = uiState.me?.let {
         com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(it.role)
     } == true
+    // Раунд 267: тап по пузырю шапки группы/канала ведёт в настройки -
+    // но только админам/владельцу, у остальных тап ничего не делает.
+    val iAmGroupAdmin = canDecideRequests
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
@@ -436,9 +439,14 @@ fun GroupChatScreen(
                             // описание) тапом открывает редактирование - но
                             // только тем, кто может управлять темами; у
                             // остальных тап ничего не делает.
+                            // Раунд 267: пузырь шапки группы/канала тапом
+                            // открывает настройки (аватар, название и т.д.) -
+                            // только админам/владельцу.
                             .then(
                                 if (topicHeader && selectedTopic != null && uiState.canManageTopics) {
                                     Modifier.clickable { showEditTopic = true }
+                                } else if (!topicHeader && iAmGroupAdmin) {
+                                    Modifier.clickable { onOpenAdmin(uiState.groupId) }
                                 } else {
                                     Modifier
                                 }
