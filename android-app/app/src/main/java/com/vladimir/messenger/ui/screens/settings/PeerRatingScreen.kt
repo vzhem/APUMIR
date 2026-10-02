@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
 // =============================================================================
 // PEERRATINGSCREEN.KT — «Узлы сети»: кто из собеседников надёжный ретранслятор
 // =============================================================================
@@ -32,8 +35,6 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -89,7 +90,7 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("Узлы сети") },
+                    title = { ApuSettingsHeader("Узлы сети") },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -163,11 +164,9 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
 @Composable
 private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
     val score = peer.score(nowMs)
-    Card(
+    ApuSettingsCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F7FA).copy(alpha = 0.94f)),
-    ) {
+        ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {

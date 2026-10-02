@@ -179,6 +179,7 @@ begin "local-first chat history (Kotlin + source contracts)"
 if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-pin-notice.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-splash-scene.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-settings-style.py >>"$LOG" 2>&1 && \
    bash scripts/ci/check-chat-history.sh >>"$LOG" 2>&1; then
     say "local-first chat history: OK"
 else

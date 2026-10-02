@@ -12,6 +12,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuSettingsDivider
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+import com.vladimir.messenger.ui.components.ApuSettingsItem
+import com.vladimir.messenger.ui.components.ApuSettingsLayout
+import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
+import com.vladimir.messenger.ui.components.ApuProfileQuickAction
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import com.vladimir.messenger.ui.components.swipeBack
 import android.content.Context
 import android.content.Intent
@@ -100,6 +118,7 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
+    val contextForToast = LocalContext.current
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
@@ -127,10 +146,7 @@ fun SettingsScreen(
                     scrolledContainerColor = Color.Transparent,
                         ),
                         title = {
-                            Text(
-                                if (showProfile) "Профиль" else "Настройки",
-                                fontWeight = FontWeight.Bold,
-                            )
+                            ApuSettingsHeader(if (showProfile) "Профиль" else "Настройки")
                         },
                         navigationIcon = {
                             IconButton(onClick = onBackClick) {
@@ -146,7 +162,10 @@ fun SettingsScreen(
                     paddingValues = paddingValues,
                     uiState = uiState,
                     onMyQr = { showMyQrDialog = true },
-                    onCopyLink = { clipboardManager.setText(AnnotatedString(uiState.inviteLink)) },
+                    onCopyLink = {
+                        clipboardManager.setText(AnnotatedString(uiState.inviteLink))
+                        android.widget.Toast.makeText(contextForToast, "Ссылка скопирована", android.widget.Toast.LENGTH_SHORT).show()
+                    },
                     onUsername = { showUsernameDialog = true },
                     onEditName = { showNameDialog = true },
                     onShareProfile = onShareProfileClick,
@@ -173,7 +192,7 @@ fun SettingsScreen(
         var nameValue by remember(uiState.displayName) {
             mutableStateOf(uiState.displayName.takeIf { it != "Anonymous" }.orEmpty())
         }
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showNameDialog = false },
             title = { Text("Ваше имя") },
             text = {
@@ -207,7 +226,7 @@ fun SettingsScreen(
         val usernameContext = LocalContext.current
         val currentUsername by UsernameHolder.name.collectAsStateWithLifecycle()
         var usernameValue by remember { mutableStateOf(currentUsername.orEmpty()) }
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showUsernameDialog = false },
             title = { Text("Ваш @никнейм") },
             text = {
@@ -253,7 +272,7 @@ fun SettingsScreen(
             QrCodeGenerator.generateQrCode(uiState.inviteLink)
         }
 
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showMyQrDialog = false },
             title = { Text("Мой QR-код") },
             text = {
@@ -361,171 +380,119 @@ private fun ProfileTabContent(
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
+                ApuSettingsCard(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        // Свой аватар: картинка из галереи либо инициалы.
-                        MyAvatar(
-                            displayName = uiState.displayName,
-                            modifier = Modifier.size(96.dp),
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        // Имя правится прямо отсюда: тап по строке (или по
-                        // карандашу) открывает диалог.
+                        Box(
+                            modifier = Modifier.size(104.dp)
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { showAvatarPicker = true },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier.size(100.dp)
+                                    .border(2.dp, ApuBubbleAccentColor.copy(alpha = 0.38f), CircleShape)
+                                    .padding(5.dp),
+                            ) {
+                                MyAvatar(displayName = uiState.displayName, modifier = Modifier.fillMaxSize(), size = 88)
+                            }
+                            Box(
+                                modifier = Modifier.align(Alignment.BottomEnd).size(30.dp)
+                                    .clip(CircleShape).background(ApuBubbleAccentColor)
+                                    .border(2.dp, ApuBubbleSurfaceColor, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.PhotoCamera,
+                                    contentDescription = "Изменить аватар",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
                         Row(
+                            modifier = Modifier.heightIn(min = 44.dp)
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onEditName),
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { onEditName() },
                         ) {
                             Text(
                                 uiState.displayName,
-                                style = MaterialTheme.typography.titleLarge,
+                                style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.weight(1f, fill = false),
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Изменить имя",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
+                            Spacer(Modifier.width(8.dp))
+                            Icon(Icons.Default.Edit, contentDescription = "Изменить имя", tint = ApuBubbleAccentColor, modifier = Modifier.size(18.dp))
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            if (myUsername.isNullOrBlank()) {
-                                "@никнейм не задан"
-                            } else {
-                                "@$myUsername"
-                            },
+                            if (myUsername.isNullOrBlank()) "Задать @никнейм" else "@$myUsername",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = ApuBubbleAccentColor,
                             fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable(onClick = onUsername).padding(vertical = 4.dp),
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        // Сердечки: скольким людям понравился профиль. Своё
-                        // сердечко себе не поставить, поэтому здесь только
-                        // счётчик, без нажатия.
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Favorite,
-                                contentDescription = null,
-                                tint = Color(0xFFE0245E),
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                uiState.heartCount.toString(),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                if (uiState.heartCount == 0) {
-                                    "пока нет сердечек"
-                                } else {
-                                    "рейтинг профиля"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            uiState.fingerprint,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    // Кнопки в два ряда: текст целиком умещается.
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick  = onMyQr,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Мой QR", maxLines = 1)
-                        }
-                        OutlinedButton(
-                            onClick  = onCopyLink,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Ссылка", maxLines = 1)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick  = onUsername,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            // Собака уже нарисована иконкой - в подписи её быть не
-                            // должно, иначе на кнопке видно две «@».
-                            Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Никнейм", maxLines = 1)
-                        }
-                        OutlinedButton(
-                            onClick  = { showAvatarPicker = true },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Аватар", maxLines = 1)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick  = onEditName,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Изменить имя", maxLines = 1)
-                        }
-                    }
-                    if (avatarUri != null) {
+                        Spacer(Modifier.height(8.dp))
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
+                            modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xFFE0245E).copy(alpha = 0.07f))
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            TextButton(onClick = { AvatarHolder.set(context, null) }) {
-                                Text("Убрать аватар")
+                            Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE0245E), modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(uiState.heartCount.toString(), fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                if (uiState.heartCount == 0) "пока нет сердечек" else "рейтинг профиля",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Box(
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                .background(ApuBubbleAccentColor.copy(alpha = 0.04f)).padding(10.dp),
+                        ) {
+                            SelectionContainer {
+                                Text(
+                                    uiState.fingerprint,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = ApuBubbleMutedColor,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
+                        Spacer(Modifier.height(14.dp))
+                        val actions = listOf(
+                            Triple("Мой QR", Icons.Default.QrCode, onMyQr),
+                            Triple("Ссылка", Icons.Default.ContentCopy, onCopyLink),
+                            Triple("Никнейм", Icons.Default.AlternateEmail, onUsername),
+                            Triple("Аватар", Icons.Default.AccountCircle, { showAvatarPicker = true }),
+                        )
+                        val fontScale = LocalDensity.current.fontScale
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val columns = ApuSettingsLayout.profileActionColumns(maxWidth.value, fontScale)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                actions.chunked(columns).forEach { group ->
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        group.forEach { (title, icon, click) ->
+                                            ApuProfileQuickAction(title, icon, click, modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (avatarUri != null) {
+                            Spacer(Modifier.height(6.dp))
+                            TextButton(onClick = { AvatarHolder.set(context, null) }) { Text("Убрать аватар") }
+                        }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
 
@@ -645,33 +612,12 @@ private fun SettingsTabContent(
             item { SettingsSectionTitle("Мой профиль") }
             item {
                 SettingsCard {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(onClick = onProfileClick)
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Default.Person,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Профиль", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "Имя, никнейм, мой QR-код и приглашения",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    SettingsItem(
+                        icon = Icons.Default.Person,
+                        title = "Профиль",
+                        subtitle = "Имя, никнейм, мой QR-код и приглашения",
+                        onClick = onProfileClick,
+                    )
                 }
             }
 
@@ -683,25 +629,10 @@ private fun SettingsTabContent(
                 SettingsCard {
                     val context = LocalContext.current
                     val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
-                    ThemeMode.entries.forEach { mode ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { ThemeModeHolder.set(context, mode) }
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(
-                                selected = themeMode == mode,
-                                onClick = { ThemeModeHolder.set(context, mode) },
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(mode.title, style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
+                    ThemeModeChoices(selected = themeMode, onSelect = { ThemeModeHolder.set(context, it) })
 
                     // Свои обои: из галереи или стандартные в тон теме.
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    ApuSettingsDivider()
                     val customWallpaper by WallpaperHolder.uri.collectAsStateWithLifecycle()
                     val wallpaperPicker = rememberLauncherForActivityResult(
                         ActivityResultContracts.GetContent()
@@ -717,16 +648,13 @@ private fun SettingsTabContent(
                             WallpaperHolder.set(context, uri.toString())
                         }
                     }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Обои (подложка)", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (customWallpaper != null) {
+                    SettingsItem(
+                        icon = Icons.Default.Wallpaper,
+                        title = "Обои",
+                        subtitle = if (customWallpaper != null) "Своя картинка из галереи" else "Стандартные, в тон теме",
+                        onClick = { wallpaperPicker.launch("image/*") },
+                    )
+                    if (customWallpaper != null) {
                                     "Своя картинка из галереи"
                                 } else {
                                     "Стандартные, в тон теме"
@@ -768,7 +696,7 @@ private fun SettingsTabContent(
                         subtitle = "Никнейм и пароль, чтобы вернуть себя после переустановки",
                         onClick  = onIdentityBackupClick,
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.Save,
                         title    = "Резервная копия",
@@ -777,7 +705,7 @@ private fun SettingsTabContent(
                         subtitle = "Сохранить всё в файл и восстановить после переустановки",
                         onClick  = onProfileBackupClick,
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     // Раунд 249: выход из профиля - телефон возвращается на
                     // экран входа, где можно войти под другим логином.
                     SettingsItem(
@@ -800,7 +728,7 @@ private fun SettingsTabContent(
                             StatusDot(status = uiState.connectionStatus)
                         }
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.People,
                         // Было «Подключено пиров» - слово из документации, а не
@@ -810,27 +738,27 @@ private fun SettingsTabContent(
                         subtitle = "${uiState.connectedPeers} на связи - открыть оценку",
                         onClick  = onPeerRatingClick,
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.Public,
                         title    = "Публичный IP",
                         subtitle = uiState.publicIp ?: "Не удалось определить (нет сети?)",
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon  = Icons.Default.RestartAlt,
                         title = "Перезапустить сетевой движок",
                         subtitle = "Пересоединиться со всеми пирами",
                         onClick = viewModel::onRestartEngine,
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon  = Icons.Default.Refresh,
                         title = "Собрать данные об абонентах",
                         subtitle = "Запустить поиск пиров по сети",
                         onClick = viewModel::onTriggerGossipDiscovery,
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     // р240: по этим четырём строкам сразу видно, почему не
                     // доходят сообщения: роль, партнёр, канал, недоотправленные.
                     SettingsItem(
@@ -839,7 +767,7 @@ private fun SettingsTabContent(
                         subtitle = "Роль устройства, партнёр, канал, недоотправленные",
                         onClick  = { showMirrorDiag = true },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.VpnKey,
                         title    = "Туннель через прокси",
@@ -851,7 +779,7 @@ private fun SettingsTabContent(
                             )
                         },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     // Настройка прокси стоит рядом с выключателем прокси, а не
                     // отдельным разделом: раньше два прокси-пункта жили в разных
                     // концах экрана.
@@ -876,7 +804,7 @@ private fun SettingsTabContent(
                         subtitle = "Отменяет незавершённые отправки и чистит их очереди",
                         onClick  = viewModel::onCancelStalledTransfers,
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.CleaningServices,
                         title    = "Очистить завершённые",
@@ -924,7 +852,7 @@ private fun SettingsTabContent(
                             }
                         }
                     }
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     SettingsItem(
                         icon = Icons.Default.Groups,
                         title = "Кому первому",
@@ -969,7 +897,7 @@ private fun SettingsTabContent(
                             )
                         },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    ApuSettingsDivider()
                     // Квота прочитана в MainActivity.onCreate (StorageSettings.init).
                     val quota by StorageSettings.quotaBytes.collectAsStateWithLifecycle()
                     // Ползунок двигается по положениям шкалы; в настройки и
@@ -1157,7 +1085,7 @@ private fun SettingsTabContent(
     // старым профилем: без «Защиты личности» вернуться в него нельзя.
     if (showLogoutDialog) {
         val nick = uiState.protectedNick
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showLogoutDialog = false },
             icon = { Icon(Icons.Default.Logout, contentDescription = null) },
             title = { Text("Выйти из APU?") },
@@ -1198,7 +1126,7 @@ private fun SettingsTabContent(
     }
 
     if (showAddrBookDialog) {
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showAddrBookDialog = false },
             title = { Text("Резервная копия адресов") },
             text = {
@@ -1239,7 +1167,7 @@ private fun SettingsTabContent(
                 append(uiState.mqttLink)
             }
         }
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showMqttDialog = false },
             title = { Text("Сеть сообщений") },
             text = { Text(mqttHumanText) },
@@ -1269,7 +1197,7 @@ private fun SettingsTabContent(
                 com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
             }
         }
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showMirrorDiag = false },
             title = { Text("Синхронизация устройств") },
             text = {
@@ -1306,24 +1234,64 @@ private fun SettingsTabContent(
 // =============================================================================
 
 @Composable
-private fun SettingsSectionTitle(title: String) {
-    Text(
-        text     = title,
-        style    = MaterialTheme.typography.labelLarge,
-        color    = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
-    )
+private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
+    val fontScale = LocalDensity.current.fontScale
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        val horizontal = ApuSettingsLayout.horizontalThemeChoices(maxWidth.value, fontScale)
+        Column(modifier = Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val groups = if (horizontal) listOf(ThemeMode.entries.toList()) else ThemeMode.entries.map { listOf(it) }
+            groups.forEach { group ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    group.forEach { mode ->
+                        val checked = selected == mode
+                        val shape = RoundedCornerShape(14.dp)
+                        val label = when (mode) {
+                            ThemeMode.SYSTEM -> "Авто"
+                            ThemeMode.LIGHT -> "День"
+                            ThemeMode.DARK -> "Ночь"
+                        }
+                        val icon = when (mode) {
+                            ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
+                            ThemeMode.LIGHT -> Icons.Default.LightMode
+                            ThemeMode.DARK -> Icons.Default.DarkMode
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f).clip(shape)
+                                .background(if (checked) ApuBubbleAccentColor else ApuBubbleAccentColor.copy(alpha = 0.06f))
+                                .border(1.dp, ApuBubbleAccentColor.copy(alpha = if (checked) 0.7f else 0.16f), shape)
+                                .selectable(checked, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = { onSelect(mode) })
+                                .heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            val ink = if (checked) Color(0xFFFFF8E6) else ApuBubbleAccentColor
+                            Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
+                            Text(label, style = MaterialTheme.typography.labelLarge, color = ink, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+            Text(
+                if (selected == ThemeMode.SYSTEM) "Тема меняется вместе с настройками телефона" else "Выбрано: ${selected.title.lowercase()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = ApuBubbleMutedColor,
+            )
+        }
+    }
 }
 
 @Composable
+private fun SettingsSectionTitle(title: String) = ApuSettingsSectionTitle(title)
+
+@Composable
 private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-    ) {
-        Column(content = content)
-    }
+    ApuSettingsCard(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        content = content,
+    )
 }
 
 @Composable
@@ -1333,41 +1301,7 @@ private fun SettingsItem(
     subtitle: String? = null,
     onClick: (() -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // Переливающийся значок, как в меню списка чатов: раздел настроек
-        // выглядит с ним заодно с остальным приложением.
-        com.vladimir.messenger.ui.components.ShimmerIcon(
-            imageVector = icon,
-            size = 22.dp,
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        trailingContent?.invoke()
-        if (onClick != null) {
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
+) = ApuSettingsItem(icon, title, subtitle, onClick, trailingContent)
 
 /**
  * Карточка «Обновления» (docs/UPDATE_SEEDING.md): APK раздаётся телефонами
@@ -1421,7 +1355,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 },
                 subtitle = "${s.name}, ${StoragePolicy.format(s.sizeBytes)}; получили: ${s.served}",
             )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
                 title   = "Остановить раздачу",
@@ -1448,7 +1382,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 subtitle = StoragePolicy.format(d.receivedBytes) + " из " + StoragePolicy.format(d.totalBytes) +
                     "; кусками от " + offers.size.coerceAtLeast(1).toString() + " сосед(ей)",
             )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
                 title   = "Остановить приём",
@@ -1463,7 +1397,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 subtitle = StoragePolicy.format(pd.receivedBytes) + " из " + StoragePolicy.format(pd.totalBytes) +
                     " — качаем только разницу версий",
             )
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
                 title   = "Остановить приём",
@@ -1560,7 +1494,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         )
         // «Проверить новую версию»: спросить соседей (upask) + посмотреть
         // официальный релиз. Пока идёт — кнопка замирает на «Проверяю…».
-        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+        ApuSettingsDivider()
         SettingsItem(
             icon    = Icons.Default.Refresh,
             title   = if (checking) "Проверяю…" else "Проверить новую версию",
@@ -1614,7 +1548,7 @@ private fun ApkVersionDialog(
     reading: Boolean = false,
 ) {
     var version by remember(initialVersion) { mutableStateOf(initialVersion) }
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {

@@ -47,11 +47,14 @@ PIN_POLICY="$BASE/main/java/com/vladimir/messenger/data/local/MessagePinPolicy.k
 PIN_TEST="$BASE/test/java/com/vladimir/messenger/data/local/MessagePinPolicyTest.kt"
 SPLASH_MATH="$BASE/main/java/com/vladimir/messenger/ui/components/SplashOrbitGeometry.kt"
 SPLASH_TEST="$BASE/test/java/com/vladimir/messenger/ui/components/SplashOrbitGeometryTest.kt"
+SETTINGS_LAYOUT="$BASE/main/java/com/vladimir/messenger/ui/components/ApuSettingsLayout.kt"
+SETTINGS_TEST="$BASE/test/java/com/vladimir/messenger/ui/components/ApuSettingsLayoutTest.kt"
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
-    "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST"
+    "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
     com.vladimir.messenger.data.local.MessagePinPolicyTest \
-    com.vladimir.messenger.ui.components.SplashOrbitGeometryTest
+    com.vladimir.messenger.ui.components.SplashOrbitGeometryTest \
+    com.vladimir.messenger.ui.components.ApuSettingsLayoutTest

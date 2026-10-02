@@ -1,5 +1,10 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
 // =============================================================================
 // PROFILEBACKUPSCREEN.KT — «Резервная копия»
 // =============================================================================
@@ -30,10 +35,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -180,7 +182,7 @@ fun ProfileBackupScreen(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("Резервная копия") },
+                    title = { ApuSettingsHeader("Резервная копия") },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -234,11 +236,8 @@ fun ProfileBackupScreen(
                 // Подготовленная копия ждёт перезапуска - это главное, показываем первым.
                 state.stagedManifest?.let { manifest ->
                     item {
-                        Card(
-                            shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
-                            ),
+                        ApuSettingsCard(
+                            highlighted = true,
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
@@ -293,12 +292,7 @@ fun ProfileBackupScreen(
                 }
 
                 if (state.hasIdentity) item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 "Сделать резервную копию",
@@ -401,12 +395,7 @@ fun ProfileBackupScreen(
                 val schedule = state.schedule
                 val scheduleError = schedule?.lastError
                 if (state.hasIdentity && (state.lastSaved != null || (schedule != null && schedule.enabled) || scheduleError != null)) item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 "Обновлять копию автоматически",
@@ -539,12 +528,7 @@ fun ProfileBackupScreen(
                 }
 
                 item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 "Восстановить из файла",
@@ -633,9 +617,9 @@ fun ProfileBackupScreen(
 
     // Раунд 251: пароль файла, на котором включаем автообновление заново.
     autoAttachTarget?.let { target ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { autoAttachTarget = null },
-            title = { Text("Автообновление файла") },
+            title = { ApuSettingsHeader("Автообновление файла") },
             text = {
                 Column {
                     Text(target.name, style = MaterialTheme.typography.bodyMedium)

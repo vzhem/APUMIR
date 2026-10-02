@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+
 // =============================================================================
 // PROFILESYNCDIALOG.KT — окно разового переноса профиля
 // =============================================================================
@@ -29,7 +31,6 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -63,7 +64,7 @@ fun ProfileSyncDialog(
     val ui by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = { if (!ui.busy && !ui.restarting) {
             viewModel.stopShare()
             onDismiss()
