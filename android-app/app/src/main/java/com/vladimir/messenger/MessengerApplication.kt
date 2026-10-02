@@ -50,6 +50,18 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()
         scheduleBoundedRelayWake()
+        // Раунд 260: ядро стартует как можно раньше - ещё до отрисовки
+        // первого экрана, чтобы к открытию чатов движок уже поднимался.
+        // На фоновых пробуждениях система может запретить - там сервис
+        // поднимут будильник и приёмник сети, как и раньше.
+        runCatching {
+            val coreIntent = android.content.Intent(this, com.vladimir.messenger.service.CoreServerService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(coreIntent)
+            } else {
+                startService(coreIntent)
+            }
+        }.onFailure { android.util.Log.w("MessengerApp", "early core start skipped: ${it.message}") }
 
         // Automatic collection is an Organizer (20 qualified referrals) entitlement.
         try {

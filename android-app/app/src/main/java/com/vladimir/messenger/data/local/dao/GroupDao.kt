@@ -287,6 +287,10 @@ interface GroupDao {
     @Query("UPDATE group_topics SET name = :name WHERE id = :topicId")
     suspend fun renameTopic(topicId: String, name: String)
 
+    // Раунд 260: смена значка темы (эмодзи/живой значок).
+    @Query("UPDATE group_topics SET iconEmoji = :emoji WHERE id = :topicId")
+    suspend fun updateTopicIcon(topicId: String, emoji: String)
+
     @Query("UPDATE group_topics SET isClosed = :closed WHERE id = :topicId")
     suspend fun updateTopicClosed(topicId: String, closed: Boolean)
 

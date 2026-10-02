@@ -742,6 +742,28 @@ class GroupRepository(
         Result.success(Unit)
     }
 
+    /**
+     * Раунд 260: правка темы из шапки (имя + значок) одним действием и
+     * рассылкой TopicUpdated, чтобы остальные устройства обновились сразу.
+     */
+    suspend fun updateTopic(topicId: String, name: String, iconEmoji: String): Result<Unit> =
+        withTopicAdminRight(topicId) {
+            val clean = name.trim()
+            if (clean.isEmpty()) {
+                return@withTopicAdminRight Result.failure(IllegalArgumentException("Пустое название"))
+            }
+            val topic = groupDao.getTopicById(topicId)
+                ?: return@withTopicAdminRight Result.failure(IllegalStateException("Тема не найдена"))
+            groupDao.renameTopic(topicId, clean.take(MAX_TOPIC_CHARS))
+            groupDao.updateTopicIcon(topicId, iconEmoji.take(16))
+            broadcast(
+                topic.groupId,
+                GroupWire.buildTopicUpdated(topic.groupId, topicId, clean, iconEmoji),
+                excludeSelf = true,
+            )
+            Result.success(Unit)
+        }
+
     suspend fun setTopicClosed(topicId: String, closed: Boolean): Result<Unit> =
         withTopicAdminRight(topicId) {
             groupDao.updateTopicClosed(topicId, closed)
@@ -3058,6 +3080,17 @@ class GroupRepository(
                         createdAtMs = clock(),
                     )
                 )
+            }
+
+            // Раунд 260: правка темы принимается только от участника с
+            // правом управлять темами и только для уже известных тем.
+            is GroupWire.Packet.TopicUpdated -> {
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (!GroupPermissions.canManageTopics(sender.role, sender.permissions)) return
+                if (groupDao.getTopicById(packet.topicId) == null) return
+                groupDao.renameTopic(packet.topicId, packet.name.take(MAX_TOPIC_CHARS))
+                groupDao.updateTopicIcon(packet.topicId, packet.iconEmoji.take(16))
             }
 
             is GroupWire.Packet.JoinRequest -> {

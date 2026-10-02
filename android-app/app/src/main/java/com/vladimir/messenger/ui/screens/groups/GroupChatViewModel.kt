@@ -1016,6 +1016,14 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 260: правка темы из шапки (имя + значок). */
+    fun updateTopic(topicId: String, name: String, iconEmoji: String) {
+        viewModelScope.launch {
+            groupRepository.updateTopic(topicId, name, iconEmoji)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
     // ── р237: черновик темы ────────────────────────────────────────────────
 
     /**

@@ -150,6 +150,8 @@ fun GroupChatScreen(
     // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
     // второе устройство личности и возвращается, если чат открыть заново.
     var showNewTopic by remember { mutableStateOf(false) }
+    // Раунд 260: тап по значку темы в шапке открывает её редактирование.
+    var showEditTopic by remember { mutableStateOf(false) }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
     var showTopMenu by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
@@ -456,7 +458,10 @@ fun GroupChatScreen(
                                     modifier = Modifier
                                         .size(34.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFE8EEF5)),
+                                        .background(Color(0xFFE8EEF5))
+                                        // Раунд 260: тап по значку темы -
+                                        // редактирование имени и значка.
+                                        .clickable { showEditTopic = true },
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     TopicIconView(
@@ -1040,6 +1045,22 @@ fun GroupChatScreen(
             onCreate = { name, icon ->
                 viewModel.createTopic(name, icon)
                 showNewTopic = false
+            },
+        )
+    }
+
+    // Раунд 260: тап по значку темы в шапке - смена имени и значка темы.
+    if (showEditTopic && selectedTopic != null) {
+        val topic = selectedTopic
+        NewTopicDialog(
+            title = "Редактирование темы",
+            confirmLabel = "Сохранить",
+            initialName = topic.name,
+            initialIcon = topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
+            onDismiss = { showEditTopic = false },
+            onCreate = { name, icon ->
+                viewModel.updateTopic(topic.id, name, icon)
+                showEditTopic = false
             },
         )
     }
@@ -1811,15 +1832,23 @@ private fun MessageBubble(
 }
 
 @Composable
-private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var icon by remember { mutableStateOf(TopicIconCatalog.DEFAULT) }
-    // Значки тем: по умолчанию эмодзи - сетка с поиском и недавними, как в
-    // Telegram («сделай прям копию»); фирменные живые значки - второй таб.
+private fun NewTopicDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String, String) -> Unit,
+    // Раунд 260: тот же диалог работает и как «Редактирование темы».
+    title: String = "Новая тема",
+    confirmLabel: String = "Создать",
+    initialName: String = "",
+    initialIcon: String = TopicIconCatalog.DEFAULT,
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var icon by remember { mutableStateOf(initialIcon) }
+    // Значки тем: по умолчанию эмодзи - сетка с поиском; фирменные живые
+    // значки - второй таб.
     var emojiMode by remember { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Новая тема") },
+        title = { Text(title) },
         text = {
             Column(
                 modifier = Modifier
@@ -1937,7 +1966,7 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = { onCreate(name, icon) },
-            ) { Text("Создать") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
     )
