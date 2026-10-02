@@ -9,7 +9,10 @@ use crate::ffi::storage_ffi::StorageManagerFfi;
 use crate::storage::models::MessageStatus;
 
 use super::events::{CoreEvent, EventBus};
-use crate::network::direct_transport::DirectTransport;
+use crate::network::direct_transport::{DirectTransport, BoundFrameFactory, BoundFrameHandler, BoundFrameResult};
+use crate::network::peer_exchange::{
+    Candidate as DiscoveryCandidate, PeerExchange, is_public_endpoint, valid_node_id,
+};
 use crate::network::file_wire::{FileChunkDataV1, FileFrameV1, FILE_WIRE_MAGIC};
 use crate::network::router::Router;
 use crate::network::dht::{RoutingTable, DhtNodeInfo};
@@ -491,6 +494,8 @@ pub struct P2PCore {
     /// `apu_peer_addresses.json` рядом с relay-базой. `None`-путь у
     /// движка без durability — тогда азбука в памяти и не пишется.
     address_book: Arc<AddressBook>,
+    /// Direct, signed address exchange and persistent reachability/TOFU history.
+    peer_exchange: Arc<PeerExchange>,
     /// K5-1: копии чужих сообщений, которые держим мы, пока получатель не
     /// появится (см. `network::custody_relay`).
     custody_hold: Arc<CustodyHold>,
@@ -521,6 +526,8 @@ impl P2PCore {
             .as_ref()
             .and_then(|p| std::path::Path::new(p).parent().map(|d| d.to_path_buf()))
             .map(|d| d.join("apu_peer_addresses.json"));
+        let peer_exchange_path = address_book_path.as_ref()
+            .and_then(|p| p.parent().map(|dir| dir.join("apu_peer_directory.json")));
         Self {
             state: EngineState::Uninitialized,
             config,
@@ -541,6 +548,7 @@ impl P2PCore {
             own_addr_changed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             address_lookup: Arc::new(AddressLookup::new()),
             address_book: Arc::new(AddressBook::open(address_book_path)),
+            peer_exchange: Arc::new(PeerExchange::open(peer_exchange_path)),
             custody_hold: Arc::new(CustodyHold::new()),
             custody_offers: Arc::new(CustodyOffers::new()),
             custody_enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -606,6 +614,7 @@ impl P2PCore {
         });
 
         self.node_id_str = Some(node_id.clone());
+        self.peer_exchange.reset_session();
 
         // Азбука адресов: загруженные при открытии записи сразу
         // становятся известными адресами. Дальше личное presence
@@ -792,6 +801,64 @@ impl P2PCore {
                         .insert(sender.to_string(), addr);
                     address_book_inbound.record(sender, addr);
                 });
+                let discovery_identity = crate::crypto::signing_identity::installed_signing_identity()
+                    .filter(|identity| identity.legacy_routing_node_id() == node_id);
+                let on_exchange: Option<BoundFrameHandler> = discovery_identity.as_ref().map(|identity| {
+                    let identity = Arc::clone(identity);
+                    let directory = Arc::clone(&self.peer_exchange);
+                    let addrs = Arc::clone(&peer_addrs_arc);
+                    let book = Arc::clone(&self.address_book);
+                    let own_addr = Arc::clone(&public_addr_arc);
+                    let network = Arc::clone(&network_arc);
+                    let events = Arc::clone(&events_arc);
+                    Arc::new(move |bytes: &[u8], binding: [u8; 32], remote: SocketAddr| {
+                        let now = crate::storage::models::now_ms();
+                        let public = *own_addr.lock().unwrap();
+                        let Some(effect) = directory.handle(&identity, bytes, binding, remote, public, now) else {
+                            return BoundFrameResult::default();
+                        };
+                        let observations = book.observations();
+                        // Third-party leases are hints only. They do not overwrite an address
+                        // that still works, and do not create online peers or contact/profile data.
+                        for (id, addr, observed_at) in effect.candidates {
+                            if id == identity.legacy_routing_node_id() { continue; }
+                            let current = addrs.lock().unwrap().get(&id).copied();
+                            let learned_at = observations.get(&id).map(|(_, at)| *at).unwrap_or(0);
+                            if current.is_none() || directory.needs_lookup(&id, current, learned_at, now) {
+                                {
+                                    let mut addresses = addrs.lock().unwrap();
+                                    addresses.insert(id.clone(), addr);
+                                    addresses.insert(format!("{}_public", id), addr);
+                                }
+                                book.record_observed_at(&id, addr, observed_at);
+                                book.record_observed_at(&format!("{}_public", id), addr, observed_at);
+                            }
+                        }
+                        // The directly signed session, unlike the forwarded hints, is live now.
+                        {
+                            let mut addresses = addrs.lock().unwrap();
+                            addresses.insert(effect.sender_id.clone(), effect.sender_endpoint);
+                            if is_public_endpoint(effect.sender_endpoint) {
+                                addresses.insert(format!("{}_public", effect.sender_id), effect.sender_endpoint);
+                            }
+                        }
+                        book.record(&effect.sender_id, effect.sender_endpoint);
+                        let known = network.peers().into_iter().find(|p| p.peer_id == effect.sender_id);
+                        let is_new = known.is_none();
+                        let mut info = known.unwrap_or_else(|| PeerInfo::new(effect.sender_id.clone(), "Абонент".into()));
+                        info.is_direct = true;
+                        network.add_peer(info);
+                        network.touch_peer(&effect.sender_id);
+                        network.set_status(NetworkStatus::Connected);
+                        if is_new {
+                            events.emit(CoreEvent::PeerDiscovered {
+                                peer_id: effect.sender_id.clone(), display_name: "Абонент".into(),
+                                is_local: !is_public_endpoint(effect.sender_endpoint),
+                            });
+                        }
+                        BoundFrameResult { sender: Some(effect.sender_id), response: effect.response }
+                    }) as BoundFrameHandler
+                });
                 let handle = runtime.handle().clone();
                 // Отдельный поток: block_on запрещён изнутри другого runtime
                 // (тесты), а из потока Kotlin - можно; так работает везде.
@@ -802,6 +869,7 @@ impl P2PCore {
                                 quic_port,
                                 on_frame,
                                 Some(on_inbound),
+                                on_exchange,
                             ))
                         })
                         .join()
@@ -817,7 +885,17 @@ impl P2PCore {
 
                 match transport {
                     Some((transport, side)) => {
-                        *direct_slot.lock().unwrap() = Some(transport);
+                        *direct_slot.lock().unwrap() = Some(transport.clone());
+                        if let Some(identity) = discovery_identity {
+                            runtime.spawn(Self::run_peer_exchange(
+                                identity, transport, Arc::clone(&self.peer_exchange),
+                                Arc::clone(&self.presence_scope), Arc::clone(&self.address_book),
+                                Arc::clone(&peer_addrs_arc), Arc::clone(&public_addr_arc),
+                                Arc::clone(&self.address_lookup), node_id.clone(),
+                            ));
+                        } else {
+                            tracing::info!("PEER EXCHANGE: no real signing sidecar; legacy discovery retained");
+                        }
                         // STUN с того же сокета: отражённый адрес = адрес,
                         // на котором мы реально слушаем.
                         runtime.spawn(async move {
@@ -919,15 +997,17 @@ impl P2PCore {
         quic_port: u16,
         on_frame: crate::network::direct_transport::FrameHandler,
         on_inbound: Option<crate::network::direct_transport::InboundHandler>,
+        on_exchange: Option<BoundFrameHandler>,
     ) -> Option<(DirectTransport, crate::network::quic_client::UdpSideChannel)> {
         let any = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
         let mut last_error = String::new();
         for attempt in 0..6u32 {
             let port = if attempt < 5 { quic_port } else { 0 };
-            match DirectTransport::start_with_inbound(
+            match DirectTransport::start_with_handlers(
                 SocketAddr::new(any, port),
                 Arc::clone(&on_frame),
                 on_inbound.clone(),
+                on_exchange.clone(),
             ) {
                 Ok((transport, side)) => {
                     if port == 0 {
@@ -1333,7 +1413,8 @@ impl P2PCore {
             {
                 let mut addrs = peer_addrs.lock().unwrap();
                 if let Some(target_addr) = reply.addr {
-                    if reply.target_id != reply.from_id && !addrs.contains_key(&reply.target_id) {
+                    if reply.target_id != reply.from_id && (!addrs.contains_key(&reply.target_id)
+                        || lookup.may_refresh_from(&reply.target_id, &reply.from_id, crate::storage::models::now_ms())) {
                         addrs.insert(reply.target_id.clone(), target_addr);
                         recorded += 1;
                         // Азбука адресов: адрес из DHT-ответа — тоже наш.
@@ -1352,7 +1433,7 @@ impl P2PCore {
                     address_book.record(node_id, *node_addr);
                 }
             }
-            lookup.forget(&reply.target_id);
+            if recorded > 0 { lookup.forget(&reply.target_id); }
             network.touch_peer(&reply.from_id);
             if recorded > 0 {
                 tracing::info!(
@@ -1868,66 +1949,98 @@ impl P2PCore {
         }
     }
 
-    /// K4-2: кого и о чём спросить, чтобы найти адреса «своих», которых мы
-    /// ещё не знаем по адресу.
-    ///
-    /// Возвращает готовые к отправке тройки (кому, куда, что). Спрашиваем не
-    /// больше [`MAX_ASK_PEERS`] соседей и не чаще кулдауна на цель (см.
-    /// [`AddressLookup::should_ask`]) - иначе поиск превратился бы в поток
-    /// вопросов. Спрашиваем только «своих»: чужие нам адресов не расскажут,
-    /// а трафик в большой сети экономить нужно.
+    /// Direct bootstrap is independent of the broker and the blocking presence/custody thread.
+    /// At most two exchanges are in flight, with a six-request/minute ceiling in PeerExchange.
+    async fn run_peer_exchange(
+        identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
+        transport: DirectTransport, directory: Arc<PeerExchange>, scope: Arc<PresenceScope>,
+        book: Arc<AddressBook>, addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
+        public_addr: Arc<Mutex<Option<SocketAddr>>>, lookup: Arc<AddressLookup>, our_id: String,
+    ) {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut generation = 0;
+        let mut legacy_at = crate::storage::models::now_ms().saturating_add(20_000);
+        loop {
+            ticker.tick().await;
+            let now = crate::storage::models::now_ms();
+            let updated = book.generation();
+            if updated != generation { generation = updated; directory.wake(); }
+            directory.flush(false, now);
+            if !directory.due(now) && now < legacy_at { continue; }
+            let observations = book.observations();
+            let addresses = addrs.lock().unwrap().clone();
+            let wanted: Vec<String> = scope.all_own().into_iter().filter(|id| {
+                let addr = addresses.get(id).copied().or_else(|| addresses.get(&format!("{}_public", id)).copied());
+                let learned = observations.get(id).or_else(|| observations.get(&format!("{}_public", id)))
+                    .map(|(_, at)| *at).unwrap_or(0);
+                directory.needs_lookup(id, addr, learned, now)
+            }).collect();
+            if directory.due(now) {
+                let mut candidates: Vec<DiscoveryCandidate> = addresses.iter().filter_map(|(key, addr)| {
+                    let id = key.strip_suffix("_public").unwrap_or(key);
+                    if !valid_node_id(id) || id == our_id { return None; }
+                    Some(DiscoveryCandidate { node_id: id.to_string(), endpoint: *addr,
+                        learned_at_ms: observations.get(key).map(|(_, at)| *at).unwrap_or(0), live_connection: false })
+                }).collect();
+                candidates.sort_by_key(|c| directory.priority(c, now));
+                // Pooled connections cost no network request to check. Limit the local checks too.
+                for candidate in candidates.iter_mut().take(32) {
+                    candidate.live_connection = transport.has_connection(&candidate.node_id).await;
+                }
+                let own = *public_addr.lock().unwrap();
+                for request in directory.plan(&identity, own, candidates, &wanted, now) {
+                    let transport = transport.clone();
+                    let directory = Arc::clone(&directory);
+                    let signer = Arc::clone(&identity);
+                    tokio::spawn(async move {
+                        let directory_for_frame = Arc::clone(&directory);
+                        let request_for_frame = request.clone();
+                        let factory: BoundFrameFactory = Arc::new(move |binding, remote| {
+                            if !directory_for_frame.bind_request(&request_for_frame, binding, remote) { return None; }
+                            request_for_frame.encode(&signer, binding)
+                        });
+                        let sent = transport.send_bound(&request.peer_id, Some(request.endpoint), factory).await;
+                        directory.mark_send_result(&request.peer_id, request.endpoint, sent, crate::storage::models::now_ms());
+                    });
+                }
+            }
+            // Old phones ignore APUX1. Keep their original DHT protocol, but only one target
+            // per minute / up to three neighbours, and never block the discovery worker on dial.
+            if now >= legacy_at {
+                legacy_at = now.saturating_add(60_000);
+                for (peer, addr, bytes) in Self::plan_address_queries(
+                    &scope, &lookup, &addrs, &directory, &our_id, now, &wanted,
+                ) {
+                    let transport = transport.clone();
+                    tokio::spawn(async move { let _ = transport.send(&peer, Some(addr), bytes).await; });
+                }
+            }
+        }
+    }
+
+    /// Legacy lookup remains compatible with N-1, but must not choose arbitrary HashMap entries.
+    /// Public/recently verified neighbours rank first; batch PEX is preferred on upgraded peers.
     fn plan_address_queries(
-        scope: &Arc<PresenceScope>,
-        lookup: &Arc<AddressLookup>,
-        peer_addrs: &Arc<Mutex<HashMap<String, SocketAddr>>>,
-        our_id: &str,
-        now_ms: i64,
-        missing: &[String],
+        _scope: &Arc<PresenceScope>, lookup: &Arc<AddressLookup>,
+        peer_addrs: &Arc<Mutex<HashMap<String, SocketAddr>>>, directory: &Arc<PeerExchange>,
+        our_id: &str, now_ms: i64, missing: &[String],
     ) -> Vec<(String, SocketAddr, Vec<u8>)> {
-        if missing.is_empty() {
-            return Vec::new();
+        if missing.is_empty() { return Vec::new(); }
+        let mut ask_peers: Vec<DiscoveryCandidate> = peer_addrs.lock().unwrap().iter()
+            .filter(|(id, _)| valid_node_id(id) && id.as_str() != our_id)
+            .map(|(id, addr)| DiscoveryCandidate { node_id: id.clone(), endpoint: *addr,
+                learned_at_ms: 0, live_connection: false }).collect();
+        ask_peers.sort_by_key(|candidate| directory.priority(candidate, now_ms));
+        ask_peers.truncate(MAX_ASK_PEERS);
+        if ask_peers.is_empty() { return Vec::new(); }
+        let Some(target_id) = missing.iter().find(|id| lookup.should_ask(id, now_ms)) else { return Vec::new(); };
+        lookup.mark_asked(target_id, now_ms);
+        if peer_addrs.lock().unwrap().contains_key(target_id) {
+            lookup.request_refresh_from(target_id, ask_peers.iter().map(|p| p.node_id.clone()).collect(), now_ms);
         }
-        let mut ask_peers: Vec<(String, SocketAddr)> = Vec::new();
-        {
-            let addrs = peer_addrs.lock().unwrap();
-            for (peer_id, peer_addr) in addrs.iter() {
-                if ask_peers.len() >= MAX_ASK_PEERS {
-                    break;
-                }
-                if !peer_id.starts_with("pk_") || !scope.is_own(peer_id) {
-                    continue;
-                }
-                let mut is_missing = false;
-                for target_id in missing.iter() {
-                    if target_id == peer_id {
-                        is_missing = true;
-                        break;
-                    }
-                }
-                if is_missing {
-                    continue;
-                }
-                ask_peers.push((peer_id.clone(), *peer_addr));
-            }
-        }
-        if ask_peers.is_empty() {
-            return Vec::new();
-        }
-        let mut planned: Vec<(String, SocketAddr, Vec<u8>)> = Vec::new();
-        for target_id in missing.iter() {
-            if !lookup.should_ask(target_id, now_ms) {
-                continue;
-            }
-            lookup.mark_asked(target_id, now_ms);
-            for (peer_id, peer_addr) in ask_peers.iter() {
-                planned.push((
-                    peer_id.clone(),
-                    *peer_addr,
-                    query_payload(our_id, target_id).into_bytes(),
-                ));
-            }
-        }
-        planned
+        ask_peers.into_iter().map(|peer| (peer.node_id, peer.endpoint,
+            query_payload(our_id, target_id).into_bytes())).collect()
     }
 
     /// K4-1: личный presence «своим» по прямому QUIC.
@@ -1950,6 +2063,10 @@ impl P2PCore {
 
         let scope = Arc::clone(&self.presence_scope);
         let lookup = Arc::clone(&self.address_lookup);
+        let directory = Arc::clone(&self.peer_exchange);
+        let address_book = Arc::clone(&self.address_book);
+        let modern_discovery = crate::crypto::signing_identity::installed_signing_identity()
+            .map(|identity| identity.legacy_routing_node_id() == node_id).unwrap_or(false);
         let hold = Arc::clone(&self.custody_hold);
         let offers = Arc::clone(&self.custody_offers);
         // K5-2: файловая кастодия - тот же поток отдаёт куски получателям и
@@ -2050,15 +2167,18 @@ impl P2PCore {
                 // спрашиваем соседей напрямую - без брокера. Идёт и в
                 // маленькой сети: это просто ещё одна возможность найти
                 // адрес, когда брокер молчит.
-                if ticks % OWN_LOOKUP_TICKS == 0 {
+                if !modern_discovery && ticks % OWN_LOOKUP_TICKS == 0 {
                     let candidates = scope.next_batch(MAX_OWN_PER_ROUND);
+                    let observed = address_book.observations();
                     let missing: Vec<String> = {
                         let addrs = peer_addrs.lock().unwrap();
                         candidates
                             .into_iter()
                             .filter(|peer_id| {
-                                !addrs.contains_key(peer_id)
-                                    && !addrs.contains_key(&format!("{}_public", peer_id))
+                                let addr = addrs.get(peer_id).copied()
+                                    .or_else(|| addrs.get(&format!("{}_public", peer_id)).copied());
+                                let at = observed.get(peer_id).map(|(_, at)| *at).unwrap_or(0);
+                                directory.needs_lookup(peer_id, addr, at, now_ms)
                             })
                             .collect()
                     };
@@ -2066,6 +2186,7 @@ impl P2PCore {
                         &scope,
                         &lookup,
                         &peer_addrs,
+                        &directory,
                         &node_id,
                         now_ms,
                         &missing,
@@ -3929,7 +4050,7 @@ impl P2PCore {
             None => return String::new(),
         };
         let public_addr = self.public_addr.lock().unwrap();
-        match *public_addr {
+        match (*public_addr).or_else(|| self.peer_exchange.observed_own_addr(crate::storage::models::now_ms())) {
             // K1: адрес из STUN спрошен с самого QUIC-сокета, значит порт в
             // нём - настоящее внешнее отображение нашего QUIC. Раньше сюда
             // подставлялся TCP 7778 при IP от чужого сокета.
@@ -3991,6 +4112,7 @@ impl P2PCore {
         // Азбука адресов: последние адреса дожили до конца — сохраняем
         // (docs/ADDRESS_BOOK.md). В памяти без файла — молча проходим.
         self.address_book.flush();
+        self.peer_exchange.flush(true, crate::storage::models::now_ms());
         self.state = EngineState::Stopped;
         self.events.emit(CoreEvent::EngineStopped);
     }
@@ -4071,6 +4193,8 @@ impl P2PCore {
             tracing::warn!("Gossip: manual trigger ignored, engine is not running");
             return false;
         }
+        self.peer_exchange.wake();
+        let direct_available = self.direct.lock().unwrap().is_some();
         match self.mqtt_outbound_tx.as_ref() {
             Some(sender) => match sender.try_send(MqttOutboundCommand::AnnounceNow) {
                 Ok(()) => {
@@ -4079,12 +4203,12 @@ impl P2PCore {
                 }
                 Err(error) => {
                     tracing::warn!("Gossip: manual announce command rejected: {}", error);
-                    false
+                    direct_available
                 }
             },
             None => {
-                tracing::warn!("Gossip: MQTT outbound channel unavailable");
-                false
+                tracing::info!("Discovery: direct exchange requested; MQTT channel unavailable");
+                direct_available
             }
         }
     }
@@ -4474,7 +4598,9 @@ impl P2PCore {
             return false;
         };
         tracing::info!("QUIC send start to {} at {:?} ({} bytes)", peer_id, addr, payload.len());
-        transport.send_blocking(peer_id, addr, payload.into_bytes())
+        let sent = transport.send_blocking(peer_id, addr, payload.into_bytes());
+        if !sent { self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms()); }
+        sent
     }
 
     /// K3: бинарный кадр файла уходит стримом с приоритетом данных.
@@ -4489,7 +4615,9 @@ impl P2PCore {
             tracing::warn!("FILE CHUNK to {} skipped: direct transport is down", peer_id);
             return false;
         };
-        transport.send_file_blocking(peer_id, addr, frame)
+        let sent = transport.send_file_blocking(peer_id, addr, frame);
+        if !sent { self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms()); }
+        sent
     }
 
     pub fn receive_message(
@@ -5640,6 +5768,41 @@ mod tests {
         engine.start();
         assert_eq!(engine.public_key(), Some("pk_test".into()));
     }
+    #[test]
+    fn legacy_lookup_public_neighbours_first_and_only_one_target_per_round() {
+        let directory = Arc::new(PeerExchange::open(None));
+        let scope = Arc::new(PresenceScope::new());
+        let lookup = Arc::new(AddressLookup::new());
+        let id = |n: u8| format!("pk_{}", format!("{n:02x}").repeat(32));
+        let addrs = Arc::new(Mutex::new(HashMap::from([
+            (id(2), "192.168.1.2:7777".parse::<SocketAddr>().unwrap()),
+            (id(3), "8.8.8.8:7777".parse::<SocketAddr>().unwrap()),
+            (id(4), "1.1.1.1:7777".parse::<SocketAddr>().unwrap()),
+        ])));
+        let frames = P2PCore::plan_address_queries(&scope, &lookup, &addrs, &directory,
+            &id(1), 1_000_000, &[id(8), id(9)]);
+        assert_eq!(frames.len(), 3, "not six requests for two missing targets");
+        assert!(is_public_endpoint(frames[0].1));
+        assert!(is_public_endpoint(frames[1].1));
+        assert!(frames.iter().all(|(_, _, bytes)| parse_query(&String::from_utf8_lossy(bytes)).unwrap().target_id == id(8)));
+    }
+
+    #[test]
+    fn actively_refreshed_legacy_target_can_replace_a_failed_saved_address() {
+        let events = EventBus::with_defaults(); let network = NetworkManagerFfi::new();
+        let responder = format!("pk_{}", "22".repeat(32));
+        let target = format!("pk_{}", "33".repeat(32));
+        let old: SocketAddr = "8.8.8.8:7777".parse().unwrap();
+        let fresh: SocketAddr = "1.1.1.1:7777".parse().unwrap();
+        let addrs = Arc::new(Mutex::new(HashMap::from([(target.clone(), old)])));
+        let lookup = Arc::new(AddressLookup::new());
+        lookup.request_refresh_from(&target, vec![responder.clone()], crate::storage::models::now_ms());
+        P2PCore::handle_direct_frame(&events, &network, &addrs, &lookup,
+            &Arc::new(CustodyHold::new()), &Arc::new(CustodyOffers::new()), false, None,
+            &Arc::new(AddressBook::open(None)), reply_payload(&responder, &target, Some(fresh), &[]).into_bytes());
+        assert_eq!(addrs.lock().unwrap().get(&target).copied(), Some(fresh));
+    }
+
 }
 
 

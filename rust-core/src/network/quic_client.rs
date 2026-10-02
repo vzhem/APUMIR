@@ -294,6 +294,16 @@ impl QuicConnection {
         )
     }
 
+    /// Separate exporter domain for peer discovery: a captured signed directory frame
+    /// cannot be replayed on another QUIC session or as a file-session handshake.
+    pub(crate) fn peer_exchange_channel_binding(&self) -> QuicResult<[u8; 32]> {
+        let mut binding = [0u8; 32];
+        self.inner.export_keying_material(
+            &mut binding, b"EXPORTER-APU-PEER-EXCHANGE-v1", b"",
+        ).map_err(|_| QuicClientError::TlsConfig("peer exchange TLS exporter failed".into()))?;
+        Ok(binding)
+    }
+
     /// Export a per-connection TLS channel binding for the signed F4 handshake.
     pub(crate) fn file_session_channel_binding(
         &self,

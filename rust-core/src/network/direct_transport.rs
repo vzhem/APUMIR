@@ -35,6 +35,7 @@
 //! изменений: для них это QUIC-клиент, который не закрывает соединение
 //! после первого стрима.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -97,6 +98,23 @@ const LANE_QUEUE_CAPACITY: usize = 64;
 /// `None`. По нему пул усыновляет входящее соединение.
 pub type FrameHandler = Arc<dyn Fn(Vec<u8>) -> Option<String> + Send + Sync + 'static>;
 
+/// Discovery frames are created/verified against the real connection's TLS exporter.
+/// Existing text/file handlers and their wire formats are deliberately unchanged.
+pub type BoundFrameFactory = Arc<dyn Fn([u8; 32], SocketAddr) -> Option<Vec<u8>> + Send + Sync + 'static>;
+pub type BoundFrameHandler = Arc<dyn Fn(&[u8], [u8; 32], SocketAddr) -> BoundFrameResult + Send + Sync + 'static>;
+
+#[derive(Default)]
+pub struct BoundFrameResult {
+    pub sender: Option<String>,
+    pub response: Option<Vec<u8>>,
+}
+
+enum FramePayload {
+    Plain(Vec<u8>),
+    Bound(BoundFrameFactory),
+}
+
+
 /// Хук адреса (docs/ADDRESS_BOOK.md): реальный адрес входящего
 /// соединения — самый свежий адрес, который вообще возможен. Срабатывает
 /// при «усыновлении» (новое входящее соединение от узла, с которым живого
@@ -146,7 +164,7 @@ struct SendJob {
     /// возможна только по уже живому соединению из пула (например,
     /// усыновлённому входящему от узла за симметричным NAT).
     addr: Option<SocketAddr>,
-    payload: Vec<u8>,
+    payload: FramePayload,
     kind: JobKind,
     reply: Reply,
     /// Когда поставлена в очередь. Если вызывающий уже отчаялся ждать
@@ -179,6 +197,7 @@ struct Shared {
     /// Хук адреса входящего соединения (docs/ADDRESS_BOOK.md). `None` —
     /// без азбуки (старые вызовы, тесты).
     on_inbound: Option<InboundHandler>,
+    on_bound_frame: Option<BoundFrameHandler>,
 }
 
 impl Shared {
@@ -241,6 +260,15 @@ impl DirectTransport {
         on_frame: FrameHandler,
         on_inbound: Option<InboundHandler>,
     ) -> Result<(Self, UdpSideChannel), String> {
+        Self::start_with_handlers(bind_addr, on_frame, on_inbound, None)
+    }
+
+    pub fn start_with_handlers(
+        bind_addr: SocketAddr,
+        on_frame: FrameHandler,
+        on_inbound: Option<InboundHandler>,
+        on_bound_frame: Option<BoundFrameHandler>,
+    ) -> Result<(Self, UdpSideChannel), String> {
         let (client, side) =
             QuicClient::new_with_side_channel(bind_addr).map_err(|e| e.to_string())?;
         let shared = Arc::new(Shared {
@@ -251,6 +279,7 @@ impl DirectTransport {
             )),
             on_frame,
             on_inbound,
+            on_bound_frame,
         });
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
         tokio::spawn(run_accept_loop(Arc::clone(&shared)));
@@ -301,7 +330,7 @@ impl DirectTransport {
             peer_id: peer_id.to_string(),
             job: SendJob {
                 addr,
-                payload,
+                payload: FramePayload::Plain(payload),
                 kind,
                 reply: Reply::Blocking(reply_tx),
                 enqueued_at: Instant::now(),
@@ -344,7 +373,7 @@ impl DirectTransport {
             peer_id: peer_id.to_string(),
             job: SendJob {
                 addr,
-                payload,
+                payload: FramePayload::Plain(payload),
                 kind,
                 reply: Reply::Async(reply_tx),
                 enqueued_at: Instant::now(),
@@ -357,6 +386,22 @@ impl DirectTransport {
             Ok(Ok(sent)) => sent,
             _ => false,
         }
+    }
+
+    /// Prepare a signed discovery frame only after selecting the actual (possibly pooled)
+    /// connection. The factory is short, synchronous and must not do filesystem/network I/O.
+    pub async fn send_bound(
+        &self, peer_id: &str, addr: Option<SocketAddr>, factory: BoundFrameFactory,
+    ) -> bool {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let command = Command::Send {
+            peer_id: peer_id.to_string(),
+            job: SendJob { addr, payload: FramePayload::Bound(factory), kind: JobKind::Interactive,
+                reply: Reply::Async(reply_tx), enqueued_at: Instant::now() },
+        };
+        // Discovery never waits for space behind a large file/message queue.
+        if self.tx.try_send(command).is_err() { return false; }
+        matches!(tokio::time::timeout(DIRECT_SEND_BUDGET, reply_rx).await, Ok(Ok(true)))
     }
 
     /// Есть ли живое соединение с узлом (исходящее или усыновлённое).
@@ -434,7 +479,24 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
                 continue;
             }
         };
-        let sender = (shared.on_frame)(payload);
+        let (sender, response) = if payload.starts_with(super::peer_exchange::EXCHANGE_MAGIC) {
+            let Some(handler) = &shared.on_bound_frame else { continue; };
+            let Ok(binding) = conn.peer_exchange_channel_binding() else { continue; };
+            let result = handler(&payload, binding, conn.remote_address());
+            (result.sender, result.response)
+        } else {
+            ((shared.on_frame)(payload), None)
+        };
+        // Reply on THIS connection, including behind NAT. No dial-back and no 5-second
+        // presence-thread queue; the reply itself is bound to the same TLS session.
+        if let Some(response) = response {
+            if response.len() <= super::peer_exchange::MAX_EXCHANGE_BYTES {
+                let reply_conn = conn.clone();
+                tokio::spawn(async move {
+                    let _ = tokio::time::timeout(STREAM_TIMEOUT, reply_conn.send_message(&response)).await;
+                });
+            }
+        }
         if !inbound {
             continue;
         }
@@ -600,7 +662,7 @@ async fn send_one(
     shared: &Arc<Shared>,
     peer_id: &str,
     addr: Option<SocketAddr>,
-    payload: &[u8],
+    payload: &FramePayload,
     kind: JobKind,
 ) -> SendOutcome {
     let key = peer_id.as_bytes().to_vec();
@@ -609,18 +671,27 @@ async fn send_one(
             return SendOutcome::ConnectFailed;
         };
         let conn = acquired.conn;
+        let bytes: Cow<'_, [u8]> = match payload {
+            FramePayload::Plain(bytes) => Cow::Borrowed(bytes.as_slice()),
+            FramePayload::Bound(factory) => {
+                let Ok(binding) = conn.peer_exchange_channel_binding() else { return SendOutcome::StreamFailed; };
+                let Some(bytes) = factory(binding, conn.remote_address()) else { return SendOutcome::StreamFailed; };
+                if bytes.len() > super::peer_exchange::MAX_EXCHANGE_BYTES { return SendOutcome::StreamFailed; }
+                Cow::Owned(bytes)
+            }
+        };
         let mut timed_out = false;
         let write = async {
             match kind {
-                JobKind::Interactive => conn.send_message(payload).await,
-                JobKind::FileData => conn.send_file_data(payload).await,
+                JobKind::Interactive => conn.send_message(&bytes).await,
+                JobKind::FileData => conn.send_file_data(&bytes).await,
             }
         };
         match tokio::time::timeout(STREAM_TIMEOUT, write).await {
             Ok(Ok(())) => {
                 tracing::info!(
                     "DIRECT: sent {} bytes to {} at {} ({})",
-                    payload.len(),
+                    bytes.len(),
                     peer_id,
                     conn.remote_address(),
                     if !acquired.pooled {
@@ -632,7 +703,14 @@ async fn send_one(
                     }
                 );
                 if !acquired.pooled {
-                    conn.close(b"one-shot done");
+                    if matches!(payload, FramePayload::Bound(_)) {
+                        // A full pool must not close the discovery session before its signed reply.
+                        let response_conn = conn.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(super::peer_exchange::REPLY_TIMEOUT_MS as u64)).await;
+                            response_conn.close(b"one-shot discovery done");
+                        });
+                    } else { conn.close(b"one-shot done"); }
                 }
                 return SendOutcome::Sent;
             }
@@ -1035,4 +1113,58 @@ mod tests {
         assert_eq!(m2, b"2");
         println!("✅ forget → новое соединение");
     }
+    #[tokio::test]
+    async fn signed_directory_uses_real_tls_session_and_returns_on_same_connection() {
+        use super::super::peer_exchange::{Candidate, PeerExchange};
+        use crate::crypto::signing_identity::InstalledSigningIdentity;
+        let identity = |n: u8| Arc::new(InstalledSigningIdentity::from_seed(
+            1, format!("pk_{}", format!("{n:02x}").repeat(32)), &[n; 32],
+        ).unwrap());
+        let a = identity(1); let b = identity(2);
+        let da = Arc::new(PeerExchange::open(None)); let db = Arc::new(PeerExchange::open(None));
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let a_handler: BoundFrameHandler = {
+            let a = Arc::clone(&a); let da = Arc::clone(&da);
+            Arc::new(move |bytes, binding, remote| {
+                match da.handle(&a, bytes, binding, remote, None, crate::storage::models::now_ms()) {
+                    Some(effect) => {
+                        let _ = tx.send(effect.sender_id.clone());
+                        BoundFrameResult { sender: Some(effect.sender_id), response: effect.response }
+                    }
+                    None => BoundFrameResult::default(),
+                }
+            })
+        };
+        let b_handler: BoundFrameHandler = {
+            let b = Arc::clone(&b); let db = Arc::clone(&db);
+            Arc::new(move |bytes, binding, remote| {
+                match db.handle(&b, bytes, binding, remote, None, crate::storage::models::now_ms()) {
+                    Some(effect) => BoundFrameResult { sender: Some(effect.sender_id), response: effect.response },
+                    None => BoundFrameResult::default(),
+                }
+            })
+        };
+        let (server, _) = DirectTransport::start_with_handlers(any_port(), noop_handler(), None, Some(b_handler)).unwrap();
+        let (client, _) = DirectTransport::start_with_handlers(any_port(), noop_handler(), None, Some(a_handler)).unwrap();
+        let now = crate::storage::models::now_ms();
+        // A public candidate is just a hint. The local test deliberately routes it through a
+        // different real endpoint, proving that the factory uses the actual selected session.
+        let request = da.plan(&a, None, vec![Candidate {
+            node_id: b.legacy_routing_node_id().into(), endpoint: "8.8.8.8:7777".parse().unwrap(),
+            learned_at_ms: now, live_connection: false,
+        }], &[], now).remove(0);
+        let factory: BoundFrameFactory = {
+            let a = Arc::clone(&a); let da = Arc::clone(&da); let request = request.clone();
+            Arc::new(move |binding, remote| {
+                if !da.bind_request(&request, binding, remote) { return None; }
+                request.encode(&a, binding)
+            })
+        };
+        assert!(client.send_bound(b.legacy_routing_node_id(), Some(server.local_addr()), factory).await);
+        let sender = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
+        assert_eq!(sender, b.legacy_routing_node_id());
+        assert!(server.has_connection(a.legacy_routing_node_id()).await, "NAT-side requester is adopted for replies");
+        client.shutdown(); server.shutdown();
+    }
+
 }
