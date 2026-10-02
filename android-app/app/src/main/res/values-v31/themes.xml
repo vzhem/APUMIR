@@ -1,6 +1,6 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
     <style name="Theme.P2PMessenger" parent="android:Theme.Material.Light.NoActionBar">
-        <!-- Match the first native frame; Compose still controls the actual app theme. -->
         <item name="android:windowBackground">#010A16</item>
+        <item name="android:windowSplashScreenBackground">#010A16</item>
     </style>
 </resources>
