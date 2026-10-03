@@ -188,7 +188,10 @@ jobs:
           BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)"
           echo "using $BT"
           echo "$APU_KS_B64" | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/apu-release.jks"
-          printf '%s' "$APU_KS_PASS" > "$RUNNER_TEMP/apu-release.pass"
+          # apksigner consumes each file password source once, so identical
+          # keystore/key passwords still need separate files.
+          printf '%s' "$APU_KS_PASS" > "$RUNNER_TEMP/apu-release-ks.pass"
+          printf '%s' "$APU_KS_PASS" > "$RUNNER_TEMP/apu-release-key.pass"
           # Старый ключ первым: им подписываются v1/v2 для Android 8; новым -
           # v3 для Android 9+ (rotation-min-sdk-version 28), где и живёт
           # родословная. Старый ключ после этого обновлять приложение не может.
@@ -196,14 +199,14 @@ jobs:
             --ks android-app/app/p2p-release.jks --ks-pass pass:p2p2026release \
             --ks-key-alias p2p --key-pass pass:p2p2026release \
             --next-signer \
-            --ks "$RUNNER_TEMP/apu-release.jks" --ks-pass "file:$RUNNER_TEMP/apu-release.pass" \
-            --ks-key-alias "$APU_KS_ALIAS" --key-pass "file:$RUNNER_TEMP/apu-release.pass" \
+            --ks "$RUNNER_TEMP/apu-release.jks" --ks-pass "file:$RUNNER_TEMP/apu-release-ks.pass" \
+            --ks-key-alias "$APU_KS_ALIAS" --key-pass "file:$RUNNER_TEMP/apu-release-key.pass" \
             --lineage "$LINEAGE" --rotation-min-sdk-version 28 \
             --v4-signing-enabled false \
             --out "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
           "$BT/apksigner" verify --verbose --print-certs "$APK_DIR/app-release-rotated.apk"
           mv -f "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
-          rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release.pass"
+          rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release-ks.pass" "$RUNNER_TEMP/apu-release-key.pass"
           echo "signed with the rotated key"
 
       - name: Create Release
