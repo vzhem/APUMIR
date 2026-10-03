@@ -49,7 +49,7 @@ import com.vladimir.messenger.data.local.dao.PostSignerDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 22
+const val APP_DATABASE_VERSION = 23
 
 @Database(
     entities = [
@@ -464,6 +464,20 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `chats` ADD COLUMN `pinnedAtMs` INTEGER")
                 db.execSQL("ALTER TABLE `groups` ADD COLUMN `pinnedAtMs` INTEGER")
+            }
+        }
+
+        /** Indexes keep per-chat history and the notification window off full-table scans. */
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_messages_chatId_timestamp` " +
+                        "ON `messages` (`chatId`, `timestamp`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_messages_isFromMe_timestamp` " +
+                        "ON `messages` (`isFromMe`, `timestamp`)"
+                )
             }
         }
 

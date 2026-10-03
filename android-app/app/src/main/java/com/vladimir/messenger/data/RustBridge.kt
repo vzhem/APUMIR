@@ -17,6 +17,10 @@ import uniffi.p2p_core.createEngineDurable
 import uniffi.p2p_core.createEngineWithKeys
 import uniffi.p2p_core.getVersion
 import uniffi.p2p_core.initializeCore
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 
 object RustBridge {
 
@@ -27,7 +31,78 @@ object RustBridge {
     private var engine: P2pCoreHandle? = null
 
     @Volatile
+    private var engineRunning: Boolean = false
+
+    @Volatile
+    private var cachedNodeId: String? = null
+
+    @Volatile
+    private var cachedPublicKey: String? = null
+
+    @Volatile
+    private var cachedNetworkStatus: String = "offline"
+
+    @Volatile
+    private var cachedConnectedPeers: Long = 0L
+
+    @Volatile
     private var coreInitialized: Boolean = false
+
+    // Engine start/stop operations share one FIFO executor. In particular, a new service
+    // start is queued after the previous service's asynchronous shutdown, so lifecycle work
+    // can never race into two native engines or accidentally cancel a required stop.
+    private val lifecycleThread = AtomicReference<Thread?>()
+    private val lifecycleExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "apu-core-lifecycle").also { thread ->
+            thread.isDaemon = true
+            lifecycleThread.set(thread)
+        }
+    }
+
+    private fun isMainThread(): Boolean {
+        val mainLooper = android.os.Looper.getMainLooper() ?: return false
+        return android.os.Looper.myLooper() === mainLooper
+    }
+
+    private fun rejectMainThreadCall(operation: String): Boolean {
+        if (!isMainThread()) return false
+        Log.w(TAG, "$operation refused on the main thread", Throwable("main-thread native call"))
+        return true
+    }
+
+    private fun <T> onLifecycleThread(block: () -> T): T {
+        if (Thread.currentThread() === lifecycleThread.get()) return block()
+        val future = lifecycleExecutor.submit(Callable<T> { block() })
+        try {
+            return future.get()
+        } catch (e: InterruptedException) {
+            // In particular, cancelling a WorkManager relay wake interrupts its bounded sleep,
+            // whose finally block stops the worker-owned engine before the queue advances.
+            future.cancel(true)
+            Thread.currentThread().interrupt()
+            throw e
+        } catch (e: ExecutionException) {
+            when (val cause = e.cause) {
+                is RuntimeException -> throw cause
+                is Error -> throw cause
+                else -> throw IllegalStateException("Core lifecycle task failed", cause)
+            }
+        }
+    }
+
+    private fun enqueueLifecycle(block: () -> Unit) {
+        try {
+            lifecycleExecutor.execute {
+                try {
+                    block()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Asynchronous core lifecycle task failed", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not queue core lifecycle task", e)
+        }
+    }
 
     /**
      * Контекст приложения для шифрования переписки. Точка отправки не suspend
@@ -48,6 +123,20 @@ object RustBridge {
      * зеркальных кадров (MessageSealer) зовёт функции ядра.
      */
     fun ensureCoreOnly() {
+        if (coreInitialized) return
+        if (isMainThread()) {
+            Log.w(TAG, "ensureCoreOnly queued off the main thread")
+            enqueueLifecycle { ensureCoreOnlyLocked() }
+            return
+        }
+        try {
+            onLifecycleThread { ensureCoreOnlyLocked() }
+        } catch (ex: Exception) {
+            Log.e(TAG, "ensureCoreOnly error", ex)
+        }
+    }
+
+    private fun ensureCoreOnlyLocked() {
         if (coreInitialized) return
         try {
             val initResult = initializeCore()
@@ -72,7 +161,10 @@ object RustBridge {
     private var shadowNodeId: String? = null
 
     fun setShadowNodeId(nodeId: String) {
-        if (nodeId.isNotBlank()) shadowNodeId = nodeId
+        if (nodeId.isNotBlank()) {
+            shadowNodeId = nodeId
+            cachedNodeId = nodeId
+        }
     }
 
     /**
@@ -82,16 +174,39 @@ object RustBridge {
      * попытался установить at-rest ключ: установленный ключ + путь =
      * durable-encrypted режим; без ключа движок честно уйдёт в RAM-only.
      */
-    @Synchronized
     fun initialize(
         displayName: String,
         existingPublicKey: String? = null,
         existingPrivateKey: String? = null,
         relayDbPath: String? = null,
     ): Boolean {
-        if (engine != null) {
-            Log.w(TAG, "Engine already initialized")
-            return true
+        if (rejectMainThreadCall("initialize")) return false
+        return try {
+            onLifecycleThread {
+                initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
+            }
+        } catch (ex: Exception) {
+            Log.e(TAG, "Failed to initialize engine", ex)
+            false
+        }
+    }
+
+    /** Must run on [lifecycleExecutor], so engine startup is serialized with shutdown. */
+    private fun initializeLocked(
+        displayName: String,
+        existingPublicKey: String?,
+        existingPrivateKey: String?,
+        relayDbPath: String?,
+    ): Boolean {
+        val current = engine
+        if (current != null) {
+            if (runCatching { current.isRunning() }.getOrDefault(false)) {
+                engineRunning = true
+                Log.w(TAG, "Engine already initialized")
+                return true
+            }
+            engine = null
+            engineRunning = false
         }
 
         return try {
@@ -123,30 +238,68 @@ object RustBridge {
             val ok = e.start()
             if (ok) {
                 engine = e
-                Log.i(TAG, "Engine started. NodeId: ${e.nodeId()}")
-                // M8-C: честный режим custody виден в логах (acceptance M8-F).
-                Log.i(
-                    TAG,
-                    "Relay custody mode: ${e.relayCustodyMode()}, quarantined: ${e.relayQuarantineCount()}"
-                )
+                shadowNodeId = null
+                engineRunning = true
+                cachedNetworkStatus = "offline"
+                cachedConnectedPeers = 0L
+                cachedNodeId = runCatching { e.nodeId() }.getOrNull()
+                cachedPublicKey = runCatching { e.publicKey() }.getOrNull()
+                Log.i(TAG, "Engine started. NodeId: $cachedNodeId")
+                // Diagnostics must not turn a successfully-started engine into a failed startup.
+                val custodyMode = runCatching { e.relayCustodyMode() }.getOrDefault("unknown")
+                val quarantined = runCatching { e.relayQuarantineCount() }.getOrDefault(0uL)
+                Log.i(TAG, "Relay custody mode: $custodyMode, quarantined: $quarantined")
             } else {
+                engine = null
+                engineRunning = false
                 Log.e(TAG, "Engine.start() returned false")
             }
             ok
         } catch (ex: Exception) {
+            engineRunning = false
             Log.e(TAG, "Failed to initialize engine", ex)
             false
         }
     }
 
-    @Synchronized
+    /**
+     * A service stop is requested on the Android main thread. Queue the actual native stop so
+     * onDestroy never waits for a QUIC/relay call holding the engine's internal mutex.
+     */
     fun shutdown() {
+        if (isMainThread()) {
+            shutdownAsync()
+            return
+        }
         try {
-            engine?.stop()
-            engine = null
+            onLifecycleThread { shutdownLocked() }
+        } catch (ex: Exception) {
+            Log.e(TAG, "Error stopping engine", ex)
+        }
+    }
+
+    fun shutdownAsync() {
+        enqueueLifecycle { shutdownLocked() }
+    }
+
+    private fun shutdownLocked() {
+        val current = engine
+        if (current == null) {
+            engineRunning = false
+            cachedNetworkStatus = "offline"
+            cachedConnectedPeers = 0L
+            return
+        }
+        try {
+            current.stop()
             Log.i(TAG, "Engine stopped")
         } catch (ex: Exception) {
             Log.e(TAG, "Error stopping engine", ex)
+        } finally {
+            if (engine === current) engine = null
+            engineRunning = false
+            cachedNetworkStatus = "offline"
+            cachedConnectedPeers = 0L
         }
     }
 
@@ -161,12 +314,9 @@ object RustBridge {
     /**
      * M8-E slice 1: одно bounded receive-only окно для WorkManager.
      *
-     * Монитор объекта удерживается на всём окне намеренно: обычный foreground
-     * service не сможет одновременно создать второй engine. Если service уже
-     * владеет engine, worker только просит bounded gossip и НЕ останавливает его.
-     * Если engine поднят worker-ом, он гарантированно остановится в finally.
+     * The entire wake window is one serialized lifecycle task: a foreground service cannot
+     * create another native engine while this worker owns the bounded engine instance.
      */
-    @Synchronized
     fun runBoundedRelayWake(
         displayName: String,
         existingPublicKey: String?,
@@ -177,41 +327,62 @@ object RustBridge {
         require(activeWindowMillis in 1_000L..MAX_RELAY_WAKE_WINDOW_MILLIS) {
             "relay wake window must be 1s..${MAX_RELAY_WAKE_WINDOW_MILLIS}ms"
         }
-
-        if (engine?.isRunning() == true) {
-            return RelayWakeResult(
-                engineStartedByWorker = false,
-                gossipTriggered = triggerGossipDiscovery(),
-                custodyMode = relayCustodyMode(),
-                quarantineCount = relayQuarantineCount(),
-            )
-        }
-
-        val started = initialize(
-            displayName = displayName,
-            existingPublicKey = existingPublicKey,
-            existingPrivateKey = existingPrivateKey,
-            relayDbPath = relayDbPath,
-        )
-        if (!started) {
+        if (rejectMainThreadCall("runBoundedRelayWake")) {
             return RelayWakeResult(false, false, "disabled", 0L)
         }
 
         return try {
-            val gossipTriggered = triggerGossipDiscovery()
-            Thread.sleep(activeWindowMillis)
-            RelayWakeResult(
-                engineStartedByWorker = true,
-                gossipTriggered = gossipTriggered,
-                custodyMode = relayCustodyMode(),
-                quarantineCount = relayQuarantineCount(),
-            )
-        } finally {
-            shutdown()
+            onLifecycleThread {
+                val current = engine
+                if (current != null && runCatching { current.isRunning() }.getOrDefault(false)) {
+                    engineRunning = true
+                    RelayWakeResult(
+                        engineStartedByWorker = false,
+                        gossipTriggered = triggerGossipDiscovery(),
+                        custodyMode = relayCustodyMode(),
+                        quarantineCount = relayQuarantineCount(),
+                    )
+                } else if (!initializeLocked(
+                        displayName,
+                        existingPublicKey,
+                        existingPrivateKey,
+                        relayDbPath,
+                    )
+                ) {
+                    RelayWakeResult(false, false, "disabled", 0L)
+                } else {
+                    try {
+                        val gossipTriggered = triggerGossipDiscovery()
+                        Thread.sleep(activeWindowMillis)
+                        RelayWakeResult(
+                            engineStartedByWorker = true,
+                            gossipTriggered = gossipTriggered,
+                            custodyMode = relayCustodyMode(),
+                            quarantineCount = relayQuarantineCount(),
+                        )
+                    } finally {
+                        shutdownLocked()
+                    }
+                }
+            }
+        } catch (ex: Exception) {
+            Log.e(TAG, "Bounded relay wake failed", ex)
+            RelayWakeResult(false, false, "disabled", 0L)
         }
     }
 
-    fun isRunning(): Boolean = engine?.isRunning() == true
+    /** Main-thread reads are cache-only; a native state check can wait on the engine mutex. */
+    fun isRunning(): Boolean {
+        if (isMainThread()) return engineRunning
+        val current = engine
+        if (current == null) {
+            engineRunning = false
+            return false
+        }
+        val running = runCatching { current.isRunning() }.getOrDefault(false)
+        engineRunning = running
+        return running
+    }
 
     /**
      * Раунд 171: есть ли у телефона хоть какой-то сетевой интерфейс (LAN
@@ -242,11 +413,37 @@ object RustBridge {
         "недоступно"
     }
 
-    fun nodeId(): String? = engine?.nodeId() ?: shadowNodeId
-    fun publicKey(): String? = engine?.publicKey()
+    fun nodeId(): String? {
+        // Identity is stable for an engine lifetime and is cached at start; avoid taking the
+        // native mutex on every keystroke, message, file packet, or Room invalidation.
+        (cachedNodeId ?: shadowNodeId)?.let { return it }
+        if (isMainThread()) return null
+        return engine?.let { runCatching { it.nodeId() }.getOrNull() }
+            ?.takeIf { it.isNotBlank() }
+            ?.also { cachedNodeId = it }
+    }
 
-    fun networkStatus(): String = engine?.networkStatus() ?: "offline"
-    fun connectedPeers(): Long = engine?.connectedPeers()?.toLong() ?: 0L
+    fun publicKey(): String? {
+        cachedPublicKey?.let { return it }
+        if (isMainThread()) return null
+        return engine?.let { runCatching { it.publicKey() }.getOrNull() }
+            ?.takeIf { it.isNotBlank() }
+            ?.also { cachedPublicKey = it }
+    }
+
+    fun networkStatus(): String {
+        if (isMainThread()) return cachedNetworkStatus
+        val liveStatus = engine?.let { runCatching { it.networkStatus() }.getOrNull() }
+        if (liveStatus != null) cachedNetworkStatus = liveStatus
+        return liveStatus ?: cachedNetworkStatus
+    }
+
+    fun connectedPeers(): Long {
+        if (isMainThread()) return cachedConnectedPeers
+        val livePeers = engine?.let { runCatching { it.connectedPeers().toLong() }.getOrNull() }
+        if (livePeers != null) cachedConnectedPeers = livePeers
+        return livePeers ?: cachedConnectedPeers
+    }
 
     fun triggerGossipDiscovery(): Boolean {
         return try {
@@ -292,12 +489,9 @@ object RustBridge {
         recipientId: String,
         text: String
     ): Boolean {
-        // Вызов блокирующий: прямой QUIC ждёт до 5 с на соединение и до 5 с на
-        // запись. С главного потока это «APU не отвечает». Не падаем - лог с
-        // трассой, чтобы виновника было видно в logcat, а не угадывать.
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            Log.w(TAG, "sendMessage on the main thread (chat=$chatId)", Throwable("main-thread send"))
-        }
+        // Native send may wait several seconds while holding the engine mutex. Refuse it on
+        // main as a final safety net; all production callers must dispatch through IO first.
+        if (rejectMainThreadCall("sendMessage(chat=$chatId)")) return false
         return try {
             // Rust owns the persistent direct/offline mesh send path. A false result means the
             // message remains phone-owned QUEUED_OFFLINE; do not create a transient MQTT session
@@ -382,6 +576,7 @@ object RustBridge {
     }
 
     fun addContact(userId: String, displayName: String): Boolean {
+        if (rejectMainThreadCall("addContact")) return false
         return try {
             engine?.addContact(userId, displayName) == true
         } catch (ex: Exception) {
@@ -391,10 +586,12 @@ object RustBridge {
     }
 
     fun generateInvite(): String {
+        if (rejectMainThreadCall("generateInvite")) return ""
         return engine?.generateInvite() ?: ""
     }
 
     fun connectViaInvite(link: String): Boolean {
+        if (rejectMainThreadCall("connectViaInvite")) return false
         android.util.Log.i("RustBridge", "connectViaInvite: $link")
         val result = engine?.connectViaInvite(link) ?: false
         android.util.Log.i("RustBridge", "connectViaInvite result: $result")
@@ -464,18 +661,21 @@ object RustBridge {
      * Параллельный QUIC-поток для файлов: отправка напрямую БЕЗ relay queue.
      * true = QUIC-доставка удалась; false = получатель недоступен напрямую.
      */
-    fun sendDirectPayload(recipientId: String, payload: String): Boolean = try {
-        val handle = engine
-        if (handle != null) {
-            // Прямой путь уже под TLS 1.3, но запечатываем и его: тот же
-            // payload при смене маршрута может уйти через ретранслятор.
-            handle.sendDirectPayload(recipientId, sealOutgoing(recipientId, payload))
-        } else {
+    fun sendDirectPayload(recipientId: String, payload: String): Boolean {
+        if (rejectMainThreadCall("sendDirectPayload")) return false
+        return try {
+            val handle = engine
+            if (handle != null) {
+                // Прямой путь уже под TLS 1.3, но запечатываем и его: тот же
+                // payload при смене маршрута может уйти через ретранслятор.
+                handle.sendDirectPayload(recipientId, sealOutgoing(recipientId, payload))
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "sendDirectPayload failed: ${e.message}")
             false
         }
-    } catch (e: Exception) {
-        Log.w(TAG, "sendDirectPayload failed: ${e.message}")
-        false
     }
 
     /**
@@ -498,22 +698,25 @@ object RustBridge {
         chunkOffset: Int,
         ciphertextChunkLen: Int,
         ciphertext: ByteArray,
-    ): Boolean = try {
-        val handle = engine ?: return false
-        handle.sendFileChunk(
-            recipientId,
-            transferIdHex,
-            chunkIndex,
-            chunkOffset.toUInt(),
-            ciphertextChunkLen.toUInt(),
-            ciphertext,
-        )
-    } catch (e: Throwable) {
-        // Полный catch (Throwable): мост может быть перегенерирован CI под
-        // старое ядро — тогда метод физически отсутствует, и файл должен
-        // уехать текстовым путём, а не ронять передачу.
-        Log.w(TAG, "sendFileChunk failed: ${e.message}")
-        false
+    ): Boolean {
+        if (rejectMainThreadCall("sendFileChunk")) return false
+        return try {
+            val handle = engine ?: return false
+            handle.sendFileChunk(
+                recipientId,
+                transferIdHex,
+                chunkIndex,
+                chunkOffset.toUInt(),
+                ciphertextChunkLen.toUInt(),
+                ciphertext,
+            )
+        } catch (e: Throwable) {
+            // Полный catch (Throwable): мост может быть перегенерирован CI под
+            // старое ядро — тогда метод физически отсутствует, и файл должен
+            // уехать текстовым путём, а не ронять передачу.
+            Log.w(TAG, "sendFileChunk failed: ${e.message}")
+            false
+        }
     }
 
     /** «Любая сеть»: MQTT снова напрямую. */
@@ -533,6 +736,7 @@ object RustBridge {
     }
 
     fun sendMessageMqtt(toNodeId: String, payload: String): Boolean {
+        if (rejectMainThreadCall("sendMessageMqtt")) return false
         return try {
             engine?.sendMessageMqtt(toNodeId, payload) ?: false
         } catch (e: Exception) {
@@ -560,12 +764,8 @@ object RustBridge {
      * Получить публичный ключ текущего устройства.
      */
     fun getPublicKey(nodeId: String): String? {
-        return try {
-            engine?.publicKey()
-        } catch (e: Exception) {
-            android.util.Log.e("RustBridge", "getPublicKey failed", e)
-            null
-        }
+        if (isMainThread()) return cachedPublicKey
+        return publicKey()
     }
 
 

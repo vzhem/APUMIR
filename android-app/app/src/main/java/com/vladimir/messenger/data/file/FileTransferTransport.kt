@@ -10,6 +10,8 @@ import uniffi.p2p_core.openFileKeyEnvelope
 import uniffi.p2p_core.parseFileTransferManifest
 import uniffi.p2p_core.verifyFileExchangeBinding
 import uniffi.p2p_core.fileExchangeBindingNodeId
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Production seams for the file transport owner. All Android/FFI boundaries live here so the
@@ -29,7 +31,9 @@ class RustPacketTransport @Inject constructor() : PacketTransport {
         chatId: String,
         recipientNodeId: String,
         text: String,
-    ): Boolean = RustBridge.sendMessage(messageId, chatId, recipientNodeId, text)
+    ): Boolean = withContext(Dispatchers.IO) {
+        RustBridge.sendMessage(messageId, chatId, recipientNodeId, text)
+    }
 }
 
 /** Local identity/file-exchange access used by the receiver to authenticate an offer. */

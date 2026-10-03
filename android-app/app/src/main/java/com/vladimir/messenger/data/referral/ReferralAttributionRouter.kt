@@ -7,6 +7,8 @@ import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Приём реферальной атрибуции из общего потока сообщений.
@@ -26,12 +28,12 @@ class ReferralAttributionRouter @Inject constructor(
     private val attributionSender: ReferralAttributionSender,
 ) {
 
-    fun routeIncoming(
+    suspend fun routeIncoming(
         senderId: String,
         text: String,
         nowMs: Long = System.currentTimeMillis(),
-    ): Boolean {
-        if (!ReferralWire.isReferralPacket(text)) return false
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (!ReferralWire.isReferralPacket(text)) return@withContext false
 
         val app = context.applicationContext
         when (val packet = ReferralWire.parse(text)) {
@@ -92,7 +94,7 @@ class ReferralAttributionRouter @Inject constructor(
                 }
             }
         }
-        return true
+        true
     }
 
     private fun credit(

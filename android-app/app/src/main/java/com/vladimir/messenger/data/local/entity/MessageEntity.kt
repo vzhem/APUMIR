@@ -2,9 +2,16 @@ package com.vladimir.messenger.data.local.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "messages")
+@Entity(
+    tableName = "messages",
+    indices = [
+        Index(value = ["chatId", "timestamp"], name = "index_messages_chatId_timestamp"),
+        Index(value = ["isFromMe", "timestamp"], name = "index_messages_isFromMe_timestamp"),
+    ],
+)
 data class MessageEntity(
     @PrimaryKey val id: String,
     val chatId: String,

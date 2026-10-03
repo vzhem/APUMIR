@@ -10,14 +10,16 @@ import com.vladimir.messenger.util.OwnInvite
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class IdentityResult(val inviteLink: String, val fingerprint: String)
 
 class CreateIdentityUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    suspend operator fun invoke(name: String): Result<IdentityResult> {
-        return try {
+    suspend operator fun invoke(name: String): Result<IdentityResult> = withContext(Dispatchers.IO) {
+        try {
             // M8-C slice 3: Keystore-мост строго до старта движка; недоступность
             // ключа = честный RAM-only degrade первого запуска.
             val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(context)
@@ -25,14 +27,14 @@ class CreateIdentityUseCase @Inject constructor(
             val relayDbPath = File(context.filesDir, "apu_relay.sqlite").absolutePath
             val isInitialized = RustBridge.initialize(name, relayDbPath = relayDbPath)
             if (!isInitialized) {
-                return Result.failure(Exception("Failed to initialize Rust core"))
+                return@withContext Result.failure(Exception("Failed to initialize Rust core"))
             }
 
             val publicKey = RustBridge.publicKey()
             val nodeId = RustBridge.nodeId()
 
             if (publicKey.isNullOrEmpty() || nodeId.isNullOrEmpty()) {
-                return Result.failure(Exception("Failed to generate keys"))
+                return@withContext Result.failure(Exception("Failed to generate keys"))
             }
 
             // New identity receives a real signing sidecar immediately. Failure

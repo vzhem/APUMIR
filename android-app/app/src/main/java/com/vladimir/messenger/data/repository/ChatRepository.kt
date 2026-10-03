@@ -18,6 +18,7 @@ import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
 import com.vladimir.messenger.util.NodeIds
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -216,9 +217,7 @@ class ChatRepository @Inject constructor(
                 Log.i(TAG, "🚀 SENDING via Rust: messageId=$messageId recipient=$actualRecipientId")
                 // В IO: вызов ядра блокирующий (QUIC до 10 с), а сюда приходят
                 // из viewModelScope, то есть с главного потока.
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    RustBridge.sendMessage(messageId, chatId, actualRecipientId, content)
-                }
+                sendViaRust(messageId, chatId, actualRecipientId, content)
             } else {
                 Log.w(TAG, "❌ sendMessage: recipient id is blank for chatId=$chatId")
                 false
@@ -291,9 +290,7 @@ class ChatRepository @Inject constructor(
                 val peer = chat.contactId
                 if (peer.isBlank()) continue
                 val ok = try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        RustBridge.sendMessage(msg.id, msg.chatId, peer, msg.content)
-                    }
+                    sendViaRust(msg.id, msg.chatId, peer, msg.content)
                 } catch (_: Exception) {
                     false
                 }
@@ -326,7 +323,7 @@ class ChatRepository @Inject constructor(
                 if (chat.contactId != peerId) continue
 
                 Log.i(TAG, "  📤 retry PENDING msg=${msg.id.take(8)} content=${msg.content.take(20)}")
-                val sent = RustBridge.sendMessage(msg.id, msg.chatId, peerId, msg.content)
+                val sent = sendViaRust(msg.id, msg.chatId, peerId, msg.content)
                 Log.i(TAG, "  📤 retry result: sent=$sent")
 
                 if (sent) {
@@ -360,7 +357,7 @@ class ChatRepository @Inject constructor(
                 for (msg in recentMessages) {
                     try {
                         Log.i(TAG, "  🚀 sync msg=${msg.id.take(8)} content=${msg.content.take(20)}")
-                        val sent = RustBridge.sendMessage(msg.id, msg.chatId, peerId, msg.content)
+                        val sent = sendViaRust(msg.id, msg.chatId, peerId, msg.content)
                         Log.i(TAG, "  📤 sync sent=$sent")
                         if (sent) retried++
                     } catch (e: Exception) {
@@ -391,7 +388,7 @@ class ChatRepository @Inject constructor(
             val peerId = chat.contactId
             if (peerId.isBlank()) continue
 
-            val sent = RustBridge.sendMessage(msg.id, msg.chatId, peerId, msg.content)
+            val sent = sendViaRust(msg.id, msg.chatId, peerId, msg.content)
             Log.i(TAG, "retryAllPendingMessages peer=$peerId msg=${msg.id} sent=$sent")
 
             if (sent) {
@@ -590,7 +587,7 @@ class ChatRepository @Inject constructor(
             val chat = runCatching { chatDao.getChatById(msg.chatId) }.getOrNull() ?: continue
             val peer = chat.contactId.ifBlank { msg.recipientId }
             if (peer.isBlank() || !peer.startsWith("pk_")) continue
-            val ok = runCatching { RustBridge.sendMessage(msg.id, msg.chatId, peer, msg.content) }
+            val ok = runCatching { sendViaRust(msg.id, msg.chatId, peer, msg.content) }
                 .getOrDefault(false)
             if (ok) {
                 runCatching { messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name) }
@@ -991,24 +988,37 @@ class ChatRepository @Inject constructor(
     }
 
 
-    /**
-     * Наблюдать за всеми сообщениями во всех чатах (для notifications).
-     */
-    fun observeAllMessages(): Flow<List<Message>> {
-        return messageDao.observeAll().map { entities ->
-            val myNodeId = RustBridge.nodeId() ?: "unknown"
-            entities.filter { entity ->
-                // P2P архитектура: показать только свои + адресованные мне
-                // Широковещательные сообщения шифруются E2E — другие узлы их не видят
-                val isForMe = entity.isFromMe || 
-                              entity.recipientId == myNodeId ||
-                              entity.recipientId.isBlank()  // legacy messages
-                
-                Log.d(TAG, "MESSAGE FILTER: id=${entity.id.take(8)} isFromMe=${entity.isFromMe} recipient=${entity.recipientId.take(16)} myNode=${myNodeId.take(16)} isForMe=$isForMe")
-                
-                isForMe
-            }.map { it.toDomain() }
+    /** Rust send calls may wait for network work; never run them on a caller/UI dispatcher. */
+    private suspend fun sendViaRust(messageId: String, chatId: String, peerId: String, content: String): Boolean =
+        withContext(Dispatchers.IO) {
+            RustBridge.sendMessage(messageId, chatId, peerId, content)
         }
-    }
+
+    /** Observe all messages for callers that explicitly need a full-table stream. */
+    fun observeAllMessages(): Flow<List<Message>> =
+        messageDao.observeAll().map { entities ->
+            val myNodeId = RustBridge.nodeId().orEmpty()
+            entities.asSequence()
+                .filter { entity ->
+                    entity.isFromMe || entity.recipientId == myNodeId || entity.recipientId.isBlank()
+                }
+                .map { it.toDomain() }
+                .toList()
+        }.flowOn(Dispatchers.Default)
+
+    /**
+     * A rolling, bounded stream for service notifications. It queries only the last two minutes
+     * instead of re-reading and logging the complete message database after each insert.
+     */
+    fun observeRecentIncomingMessages(): Flow<List<Message>> =
+        messageDao.observeRecentIncomingWindow()
+            .map { entities ->
+                val myNodeId = RustBridge.nodeId().orEmpty()
+                entities.asSequence()
+                    .filter { it.recipientId == myNodeId || it.recipientId.isBlank() }
+                    .map { it.toDomain() }
+                    .toList()
+            }
+            .flowOn(Dispatchers.Default)
 
 }
