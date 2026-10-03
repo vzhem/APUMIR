@@ -550,7 +550,7 @@ class FileTransferReceiverTest {
             (packet.payload[3].toInt() and 0xff)
 
     private fun chunkPlaintext(index: Long): ByteArray {
-        val start = index * chunkSize
+        val start = (index * chunkSize).toInt()
         return plaintext.copyOfRange(start, minOf(plaintext.size, start + chunkSize))
     }
 

@@ -171,6 +171,59 @@ class FakeFileTransferDao : FileTransferDao {
     override suspend fun getForFile(chatId: String, fileSha256: String): List<FileTransferEntity> =
         transfers.values.filter { it.chatId == chatId && it.fileSha256 == fileSha256 }.sortedBy { it.createdAtMs }
 
+    override suspend fun getCompletedIncomingSameFile(
+        chatId: String,
+        peerNodeId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): FileTransferEntity? =
+        transfers.values
+            .filter {
+                it.direction == "INCOMING" &&
+                    it.state == "COMPLETE" &&
+                    it.chatId == chatId &&
+                    it.peerNodeId == peerNodeId &&
+                    it.fileSha256 == fileSha256 &&
+                    it.expiresAtMs > nowMs
+            }
+            .maxByOrNull { it.createdAtMs }
+
+    override suspend fun getActiveIncomingSameFile(
+        chatId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): FileTransferEntity? =
+        transfers.values
+            .filter {
+                it.direction == "INCOMING" &&
+                    it.state != "COMPLETE" &&
+                    it.state != "FAILED" &&
+                    it.state != "CANCELLED" &&
+                    it.chatId == chatId &&
+                    it.fileSha256 == fileSha256 &&
+                    it.expiresAtMs > nowMs
+            }
+            .maxByOrNull { it.createdAtMs }
+
+    override suspend fun getActiveIncomingSameFileExcept(
+        chatId: String,
+        transferId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): List<FileTransferEntity> =
+        transfers.values
+            .filter {
+                it.direction == "INCOMING" &&
+                    it.state != "COMPLETE" &&
+                    it.state != "FAILED" &&
+                    it.state != "CANCELLED" &&
+                    it.chatId == chatId &&
+                    it.transferId != transferId &&
+                    it.fileSha256 == fileSha256 &&
+                    it.expiresAtMs > nowMs
+            }
+            .sortedBy { it.createdAtMs }
+
     override suspend fun getSeeding(): List<FileTransferEntity> =
         transfers.values.filter { it.direction == "OUTGOING" && it.state == "SEEDING" }
 
