@@ -55,6 +55,14 @@ class FakeMtProtoProxyDao : MtProtoProxyDao {
         val doomed = rows.values
             .filter { it.failCount >= 3 && (now - it.lastCheck) > maxAgeMs && it.source != "MANUAL" }
         doomed.forEach { rows.remove(it.id) }
+        if (doomed.isNotEmpty()) tick.value += 1
+        return doomed.size
+    }
+
+    override suspend fun deleteDeadNow(): Int {
+        val doomed = rows.values.filter { it.failCount >= 3 && it.source != "MANUAL" }
+        doomed.forEach { rows.remove(it.id) }
+        if (doomed.isNotEmpty()) tick.value += 1
         return doomed.size
     }
 }

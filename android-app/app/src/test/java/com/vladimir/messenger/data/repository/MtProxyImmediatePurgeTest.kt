@@ -82,6 +82,22 @@ class MtProxyImmediatePurgeTest {
     }
 
     @Test
+    fun cleanupDeadNowDeletesFailedNonManualProxiesOnly() = runTest {
+        val dao = FakeMtProtoProxyDao()
+        val repo = MtProxyRepository(dao)
+        dao.insert(proxy("dead", failCount = 3))
+        dao.insert(proxy("manual", source = "MANUAL", failCount = 5))
+        dao.insert(proxy("healthy", failCount = 2))
+
+        val deleted = repo.cleanupDeadNow()
+
+        assertEquals(1, deleted)
+        assertNull(dao.getById("dead"))
+        assertTrue(dao.getById("manual") != null)
+        assertTrue(dao.getById("healthy") != null)
+    }
+
+    @Test
     fun activeFlagSwitchesToTheNewBest() = runTest {
         val dao = FakeMtProtoProxyDao()
         val repo = MtProxyRepository(dao)
