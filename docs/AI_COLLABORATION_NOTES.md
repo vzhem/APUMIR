@@ -11290,3 +11290,33 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   группы и несуществующие группы - запись сгорает. check62 зелёный с
   первого раза. v11.74.34 = d03cb21, run 35857192330 SUCCESS, latest,
   APK 40 418 502 Б, sha256 f1f36dae…161b.
+
+## 2026-10-03 — stable v11.74.168 и обновление handoff для нового чата
+
+### Релиз и проверенные факты
+
+- Stable GitHub Release **v11.74.168** опубликован 2026-10-03; `/releases/latest` указывает на него. Release: <https://github.com/vzhem/APUMIR/releases/tag/v11.74.168>.
+- APK workflow `37103048304` завершился SUCCESS на application source commit `720b8b3655db2a3ad07e923ab6ecb424437fc2f9`; APK asset — 43 077 363 байта. Финальный tag target после добавления release notes/checksum — `bba5dcb7485468dede1f67fc795c18d05bf82717`; отличающиеся коммиты после build source содержат только документацию/checksum.
+- GitHub Release API digest APK: `sha256:6497205c2911a1a8be16626d770da6ebc62391fa2563040878a7a479dc1f1b42`. Текст совпадает с `release-upload/app-release.apk.sha256`, включённым в tag. Из-за EOF/SSL-сбоев скачивания APK из CDN независимый локальный hash не считался; checksum-файл является raw-файлом в теге, **не** asset GitHub Release.
+- Финальный tag-workflow `37104703311` прошёл с пропуском пересборки, потому что Release уже существовал. `/releases/latest` повторно проверен после публикации stable.
+- Стиль настроек: `python3 scripts/ci/check-settings-style.py` — 8/8; `git diff --check` — PASS. Проверены локальные Markdown-ссылки во всех 16 изменённых документах: missing targets = 0. Локальный `scripts/ci/check-chat-history.sh` не запущен: Java 17+ отсутствует. Android SDK/ADB и реальные телефоны в этой сессии отсутствовали.
+- Подпись v168: новые `APU_RELEASE_*` secrets отсутствовали, поэтому использован прежний ключ; владелец явно принял этот риск для v168. Ротация ключа остаётся задачей до следующего релиза. USB-бэкап v168 владельцем пока не подтверждён.
+
+### Исправление устаревшего статуса r248
+
+- Старое утверждение в handoff/mirror docs «r248 не выпущено, Latest v11.74.144» более не актуально. В `v11.74.167` (stable release, APK run `37047097395` SUCCESS) и `v11.74.168` находятся лимиты 10 закрепов в личном чате, теме группы и ленте канала, а также `pinnedBy`/DAO-логика. Это подтверждает исходный код и сборку, **не** поведение на телефонах.
+- v168 добавляет адаптивный стиль профиля/настроек; release notes и checksum-ссылка сохранены. Физические UI/pin-тесты этой сессией не проводились.
+
+### Аудит пометок для следующего чата
+
+- `START_HERE.md` получил новый срез v168, корректный read-order для EOF журнала, разделение выпущенного кода и phone/runtime доказательств, а также исправленные карточки/statistics и правила main handoff. Снимок Latest v144 оставлен явно архивным. `NEXT_AI_CHAT_BOOTSTRAP.md` уточнён как redirect-only, не как prompt; его каталог документов тоже приведён к текущему статусу.
+- `AI_HANDOFF.md`, `MIRROR_FULL.md` и `MIRROR_SYNC.md` разделяют stable v167/v168 от незавершённых phone tests; старые записи сохранены как история. Blanket claim «файлы/медиа не зеркалятся» исправлен по релизам v126–127/129/142.
+- `VERSION_STATISTICS.md` получил точные LOC/delta v168 (сравнение source tags v167/v168), APK digest и честную оговорку о неполном backfill между v11.18.0 и v11.74.167.
+- `MASTER_PLAN_v2.md`, `SECURE_FILE_TRANSFER.md`, `OFFLINE_DELIVERY.md`, `CORE_ROADMAP.md`, `CHANNEL_SWARM_DESIGN.md`, `UPDATE_SEEDING.md`, `SWARM_MOBILE.md`, `ADDRESS_BOOK.md` и `CALLS_BOOTSTRAP.md` получили заметные пометки: где реализация/релиз уже изменили старый текст, а где исторический snapshot нельзя принимать за текущий. В частности, звонки уже существуют; прежнее «звонков нет» в bootstrap было неверно для текущего кода.
+- До обновления handoff `origin/main` был `198cca27133cf7a55869fe4eb389aa9e2ba3974d`, на 40 коммитов позади stable release tag. Для текущей передачи выбран PR-маршрут; не запускать `scripts/sync-main.sh`. Перед новым чатом дождаться merge PR и проверить `git ls-remote origin refs/heads/main`.
+
+### Осталось не утверждать как выполненное
+
+- Worker `/mirror`: последняя запись 2026-10-01 говорила «не задеплоен»; deployment status после этого не проверялся. Телефонный mirror checklist, v168 UI и r248 pin caps физически не проверены.
+- Ротация подписи и portable USB backup v168 остаются отдельными задачами владельца.
+- Сам `AI_COLLABORATION_NOTES.md` исторически не полностью хронологичен: эта запись помещена в EOF специально для нового чата; старые результаты находить по заголовкам/поиску, а не предполагать, что любой прежний «последний блок» является текущим.

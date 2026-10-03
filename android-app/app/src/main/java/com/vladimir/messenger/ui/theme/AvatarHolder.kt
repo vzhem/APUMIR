@@ -26,5 +26,9 @@ object AvatarHolder {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, uri.orEmpty()).apply()
         _uri.value = uri?.takeIf { it.isNotBlank() }
+        // р246: живой профиль - аватар уезжает второму устройству личности.
+        com.vladimir.messenger.data.mirror.ProfileMirror.noteLocalChange(
+            context, com.vladimir.messenger.data.mirror.ProfileMirror.FIELD_AV,
+        )
     }
 }

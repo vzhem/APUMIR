@@ -7,6 +7,7 @@ import com.vladimir.messenger.data.local.dao.MessageDao
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.vladimir.messenger.data.mirror.MirrorHub
@@ -65,7 +66,10 @@ class ReadReceiptRepository @Inject constructor(
                 // р228: второе устройство той же личности тоже снимает
                 // непрочитанное - иначе бейджи на телефонах разойдутся.
                 MirrorHub.publishReadSync(peerId = peer, groupId = "")
-            }.onFailure { Log.w(TAG, "read receipt failed: ${it.message}") }
+            }.onFailure {
+                if (it is CancellationException) throw it
+                Log.w(TAG, "read receipt failed: ${it.message}")
+            }
         }
     }
 

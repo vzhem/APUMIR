@@ -354,6 +354,15 @@ object MirrorHub {
         runCatching { channel?.publishPin(messageId, pinned) }
     }
 
+    /**
+     * р246: снимок профиля (имя, ник, тема, аватар, обои) - партнёрскому
+     * устройству. Живая синхронизация профиля: изменил на одном телефоне -
+     * второй подтянет сам, без полной копии и перезапуска.
+     */
+    fun publishProfileState(json: String) {
+        runCatching { channel?.publishProfileState(json) }
+    }
+
     /** A home-inbox pin; personal ids are contact ids, group ids are stable ids. */
     fun publishInboxPin(kind: String, itemId: String, pinned: Boolean, pinnedAtMs: Long) {
         if (kind.isBlank() || itemId.isBlank() || isApplyingFrame()) return
@@ -554,6 +563,9 @@ class MirrorChannel(
             append("\nканал зеркала: ")
                 .append(if (wsRef.get() != null) "подключён" else "нет связи")
             append("\nметка устройства: ").append(deviceTag)
+            // р246: совпадает ли профиль с партнёрским устройством; если нет -
+            // какие поля расходятся (владелец просил видеть расхождения онлайн).
+            append("\n").append(ProfileMirror.diagLine(context))
         }
     }
 
@@ -640,6 +652,19 @@ class MirrorChannel(
         }
     }
 
+    /**
+     * р246: снимок профиля - партнёрскому устройству. Запечатан на самого
+     * себя, как остальные кадры зеркала.
+     */
+    fun publishProfileState(json: String) {
+        if (wsRef.get() == null) return
+        val body = runCatching { JSONObject(json) }.getOrNull() ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(body) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "profstate").put("d", sealed))
+        }
+    }
+
     /** Pin or unpin a home-inbox conversation on the partner device. */
     fun publishInboxPin(kind: String, itemId: String, pinned: Boolean, pinnedAtMs: Long) {
         if (wsRef.get() == null) return
@@ -673,6 +698,11 @@ class MirrorChannel(
         MirrorHub.noteSelfNodeId(nodeId)
         connect()
         loopJob = scope.launch { maintenanceLoop() }
+        // р246: живой профиль - привести картинки к локальным файлам и сразу
+        // показать себя партнёру, чтобы расхождения нашлись сами.
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            ProfileMirror.publishNow(context)
+        }
     }
 
     fun shutdown() {
@@ -1053,12 +1083,15 @@ class MirrorChannel(
         }
     }
 
+    // р246: в hello/hb идёт отпечаток профиля - устройства сами видят, что
+    // профиль разъехался, и запрашивают полный снимок (maybeRequestProfile).
     private fun hello(): JSONObject = JSONObject()
         .put("t", "hello")
         .put("dev", deviceTag)
         .put("eng", if (engineUp) 1 else 0)
         .put("since", if (engineUp) engineSince else 0L)
         .put("max", myMaxTs)
+        .put("pd", ProfileMirror.cachedDigest(context))
 
     private fun heartbeat(): JSONObject = JSONObject()
         .put("t", "hb")
@@ -1066,6 +1099,7 @@ class MirrorChannel(
         .put("eng", if (engineUp) 1 else 0)
         .put("since", if (engineUp) engineSince else 0L)
         .put("max", myMaxTs)
+        .put("pd", ProfileMirror.cachedDigest(context))
 
     private fun sendEvent(kind: String, payload: JSONObject): Boolean {
         if (wsRef.get() == null) return false
@@ -1156,6 +1190,23 @@ class MirrorChannel(
         partnerMaxTs = max
         partnerLastSeen = System.currentTimeMillis()
         maybeCatchup(force = becameFreshMax)
+        // р246: отпечаток профиля партнёра отличается от нашего - запросить
+        // полный снимок и слиться (онлайн-поиск расхождений профиля).
+        ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
+        maybeRequestProfile()
+    }
+
+    /** р246: расхождение отпечатков профиля - запросить снимок (не чаще 10 с). */
+    @Volatile private var lastProfReqAt = 0L
+
+    private fun maybeRequestProfile() {
+        val pd = ProfileMirror.partnerDigest
+        if (pd.isBlank()) return
+        if (pd == ProfileMirror.cachedDigest(context)) return
+        val now = System.currentTimeMillis()
+        if (now - lastProfReqAt < 10_000L) return
+        lastProfReqAt = now
+        sendJson(JSONObject().put("t", "reqprof").put("dev", deviceTag))
     }
 
     /** Отстаю от партнёра - сам запросить хвост. */
@@ -1449,6 +1500,104 @@ class MirrorChannel(
                     }
                 }
             }
+            "profstate" -> {
+                // р246: снимок профиля партнёра - слить поля; если аватар или
+                // обои победили, но байтов ещё нет - попросить их.
+                val body = openPayload(wire) ?: return
+                val incoming = ProfileMirror.State.fromJson(body)
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val need = ProfileMirror.onPartnerState(context, incoming)
+                    need.forEach { kind ->
+                        val name = if (kind == ProfileMirror.FIELD_AV) {
+                            incoming.avName
+                        } else {
+                            incoming.wallName
+                        }
+                        val sealed = sealPayload(
+                            JSONObject().put("k", kind).put("n", name)
+                        ) ?: return@forEach
+                        sendJson(
+                            JSONObject().put("t", "ev").put("k", "reqpbytes").put("d", sealed)
+                        )
+                    }
+                }
+            }
+            "reqprof" -> {
+                // р246: партнёр увидел расхождение отпечатков - отдать снимок.
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    ProfileMirror.publishNow(context)
+                }
+            }
+            "reqpbytes" -> {
+                // р246: партнёр просит байты аватара/обоев - отдать порциями.
+                val body = openPayload(wire) ?: return
+                val kind = body.optString("k")
+                val name = body.optString("n")
+                val file = ProfileMirror.imageFile(context, kind, name) ?: return
+                serveProfileImage(kind, name, file)
+            }
+            "pbytes" -> {
+                // р246: порция картинки профиля от партнёра - сложить и применить.
+                val body = openPayload(wire) ?: return
+                val kind = body.optString("k")
+                val name = body.optString("n")
+                val b64 = body.optString("b64")
+                if (kind.isBlank() || name.isBlank() || b64.isBlank()) return
+                val bytes = runCatching {
+                    android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
+                }.getOrNull() ?: return
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    applyProfileChunk(kind, name, body.optInt("last", 0) == 1, bytes)
+                }
+            }
+        }
+    }
+
+    // ── р246: байты картинок профиля (аватар/обои) ──────────────────────────
+
+    /** Недособранные картинки профиля от партнёра. */
+    private val profIncoming =
+        java.util.concurrent.ConcurrentHashMap<String, java.io.ByteArrayOutputStream>()
+
+    private fun applyProfileChunk(kind: String, name: String, last: Boolean, bytes: ByteArray) {
+        val key = kind + "|" + name
+        val buf = profIncoming.getOrPut(key) { java.io.ByteArrayOutputStream() }
+        if (buf.size() + bytes.size > ProfileMirror.IMAGE_MAX_BYTES) {
+            profIncoming.remove(key)
+            Log.w(TAG, "profile bytes: слишком много $key, бросаю")
+            return
+        }
+        buf.write(bytes)
+        if (!last) return
+        profIncoming.remove(key)
+        val all = buf.toByteArray()
+        if (all.isEmpty()) return
+        ProfileMirror.storeRemoteImage(context, kind, name, all)
+    }
+
+    /** Отдать картинку профиля порциями (те же порции и пауза, что у гифок). */
+    private fun serveProfileImage(kind: String, name: String, file: java.io.File) {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val bytes = runCatching { file.readBytes() }.getOrNull()
+            if (bytes == null || bytes.isEmpty()) return@launch
+            var offset = 0
+            var seq = 0
+            while (offset < bytes.size) {
+                val end = minOf(offset + FILE_CHUNK_BYTES, bytes.size)
+                val body = JSONObject()
+                    .put("k", kind)
+                    .put("n", name)
+                    .put("seq", seq)
+                    .put("last", if (end >= bytes.size) 1 else 0)
+                    .put("b64", android.util.Base64.encodeToString(
+                        bytes.copyOfRange(offset, end), android.util.Base64.NO_WRAP))
+                val sealed = sealPayload(body) ?: return@launch
+                sendJson(JSONObject().put("t", "ev").put("k", "pbytes").put("d", sealed))
+                seq++
+                offset = end
+                kotlinx.coroutines.delay(FILE_CHUNK_PAUSE_MS)
+            }
+            Log.i(TAG, "profile bytes: отдано ${bytes.size} Б ($seq порций) $kind/$name")
         }
     }
 
@@ -1457,6 +1606,10 @@ class MirrorChannel(
     override fun onOpen(webSocket: WebSocket, response: Response) {
         backoffMs = 2_000L
         sendJson(hello())
+        // р246: канал ожил - сразу показать партнёру свой профиль.
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            ProfileMirror.publishNow(context)
+        }
         // Тень: невостребованные исходящие (ушли, пока партнёра не было).
         if (!engineUp) {
             scope.launch {

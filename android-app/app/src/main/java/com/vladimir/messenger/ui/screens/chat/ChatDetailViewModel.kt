@@ -21,6 +21,9 @@ import com.vladimir.messenger.domain.usecase.SendMessageUseCase
 import com.vladimir.messenger.domain.usecase.MarkAsReadUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +48,8 @@ data class ChatDetailUiState(
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
+    /** Local database error, distinct from sending/network errors. */
+    val historyError: String?   = null,
     val isSending: Boolean      = false,
     val isPreparingFile: Boolean = false,
     val error: String?          = null,
@@ -115,11 +120,25 @@ class ChatDetailViewModel @Inject constructor(
     /** р236: когда последний раз отправляли черновик партнёрскому устройству. */
     @Volatile private var lastDraftSentAt = 0L
 
-    /** р242: по какому входящему уже отправлен отчёт «прочитано» (чат открыт). */
-    @Volatile private var lastReadReportedId: String = ""
-
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
+
+    private val historyObserver = ChatHistoryObserver(
+        scope = viewModelScope,
+        messages = { getMessagesUseCase(chatId) },
+        onMessages = ::showLocalMessages,
+        reportRead = {
+            withContext(Dispatchers.IO) {
+                markAsReadUseCase(chatId)
+                readReceipts.reportRead(chatId)
+            }
+        },
+        onLoadError = { error ->
+            android.util.Log.w("ChatDetailVM", "Local history read failed", error)
+            _uiState.update { it.copy(isLoading = false, historyError = "Не удалось прочитать историю чата") }
+        },
+        onReadError = { error -> android.util.Log.w("ChatDetailVM", "Read receipt failed", error) },
+    )
 
     init {
         refreshAttachmentRights()
@@ -287,6 +306,7 @@ class ChatDetailViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isContactOnline = chat.isContactOnline,
+                            isSelfChat = isSelfChat(it.messages, chat.contactId),
                             contactUsername = nick,
                             isPeerTyping = com.vladimir.messenger.data.typing.TypingPeer
                                 .isTyping(chat.contactId),
@@ -333,7 +353,9 @@ class ChatDetailViewModel @Inject constructor(
     private fun observePinned() {
         viewModelScope.launch {
             chatRepository.observePinnedChatMessages(chatId).collect { pinned ->
-                _uiState.update { it.copy(pinned = pinned) }
+                _uiState.update {
+                    it.copy(pinned = pinned, error = MessagePinPolicy.visibleError(it.error, pinned.size))
+                }
             }
         }
     }
@@ -375,7 +397,7 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     fun togglePin(messageId: String, pinned: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val result = runCatching { chatRepository.setMessagePinned(messageId, pinned) }
                 .getOrElse { error ->
                     _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }
@@ -404,62 +426,37 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     private fun loadMessages() {
-        android.util.Log.i("ChatDetailVM", "🔍 loadMessages for chatId=$chatId")
-        viewModelScope.launch {
-            getMessagesUseCase(chatId)
-                .collect { messages ->
-                    // Раунд 183 (аудит-4): дамп последних сообщений на КАЖДУЮ
-                    // эмиссию Room - только в debug-сборке: строковые склейки
-                    // и logcat гнали диск/ЦП зря при каждом обновлении чата.
-                    if (com.vladimir.messenger.BuildConfig.DEBUG) {
-                        android.util.Log.i("ChatDetailVM", "📥 Received ${messages.size} messages for chatId=$chatId")
-                        messages.takeLast(5).forEach { msg ->
-                            android.util.Log.i("ChatDetailVM", "  🔹 msg: id=${msg.id.take(8)} isFromMe=${msg.isFromMe} status=${msg.status} content=${msg.content.take(20)}")
-                        }
-                    }
-                    // р242: чат открыт на экране - новое входящее читаем сразу и
-                    // сообщаем собеседнику. Раньше отчёт уходил только при
-                    // открытии чата: если человек сидел в переписке, у собеседника
-                    // так и оставалась одна галочка.
-                    val newestIncoming = messages.lastOrNull { !it.isFromMe }
-                    if (newestIncoming != null && newestIncoming.id != lastReadReportedId) {
-                        lastReadReportedId = newestIncoming.id
-                        runCatching { readReceipts.reportRead(chatId) }
-                    }
-                    // р241/р243: свой ли это узел - решаем здесь, по уже
-                    // загруженной переписке: у входящих в поле «получатель»
-                    // стоит наш собственный адрес. Вызова в ядро нет, поэтому
-                    // обновление чата набор текста не тормозит.
-                    // ВАЖНО: адрес берём только у ВХОДЯЩИХ - у своих
-                    // отправленных в этом поле стоит адрес собеседника, и по
-                    // нему любой обычный чат выглядел бы «перепиской с собой».
-                    val selfNode = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
-                        .ifBlank {
-                            messages.firstNotNullOfOrNull { msg ->
-                                if (msg.isFromMe) null
-                                else msg.recipientId.takeIf { it.startsWith("pk_") }
-                            }.orEmpty()
-                        }
-                    // Адрес собеседника: из наблюдения за чатом, а если оно ещё
-                    // не успело прийти - прямо из базы, чтобы плашка не
-                    // запаздывала на первой отрисовке.
-                    val peerForSelf = peerId.ifBlank {
-                        runCatching { chatRepository.getChatById(chatId)?.contactId }
-                            .getOrNull().orEmpty()
-                    }
-                    val isSelf = selfNode.isNotBlank() && peerForSelf == selfNode
-                    val wasEmpty = _uiState.value.messages.isEmpty()
-                    _uiState.update { state ->
-                        state.copy(
-                            messages      = messages,
-                            isLoading     = false,
-                            isSelfChat    = isSelf,
-                            // Автопрокрутка при первой загрузке или новом сообщении
-                            scrollToBottom = wasEmpty || messages.lastOrNull()?.isFromMe == true
-                        )
-                    }
-                }
+        _uiState.update { it.copy(isLoading = it.messages.isEmpty(), historyError = null) }
+        historyObserver.start()
+    }
+
+    fun retryMessages() = loadMessages()
+
+    /** No suspend, JNI, database lookup or network send before publishing local rows. */
+    private fun showLocalMessages(messages: List<Message>) {
+        if (com.vladimir.messenger.BuildConfig.DEBUG) {
+            android.util.Log.d("ChatDetailVM", "Local history: ${messages.size} messages")
         }
+        val isSelf = isSelfChat(messages, peerId)
+        _uiState.update { state ->
+            state.copy(
+                messages = messages,
+                isLoading = false,
+                historyError = null,
+                isSelfChat = isSelf,
+                scrollToBottom = state.messages.isEmpty() || messages.lastOrNull()?.isFromMe == true,
+            )
+        }
+    }
+
+    /** Peer metadata arrives independently; history must not wait for a second DB query. */
+    private fun isSelfChat(messages: List<Message>, peer: String): Boolean {
+        val selfNode = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached().ifBlank {
+            messages.firstNotNullOfOrNull { message ->
+                if (message.isFromMe) null else message.recipientId.takeIf { it.startsWith("pk_") }
+            }.orEmpty()
+        }
+        return selfNode.isNotBlank() && peer == selfNode
     }
 
     private fun observeTransfers() {
@@ -505,11 +502,15 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     private fun markAsRead() {
-        viewModelScope.launch {
-            markAsReadUseCase(chatId)
-            // И сообщаем собеседнику: у него галочки станут синими. Сбой не
-            // должен мешать открытию чата, поэтому ошибка только в журнал.
-            runCatching { readReceipts.reportRead(chatId) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Local badge only. The history observer owns the ONE receipt worker.
+                markAsReadUseCase(chatId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.w("ChatDetailVM", "Local unread badge update failed", error)
+            }
         }
     }
 

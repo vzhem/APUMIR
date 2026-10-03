@@ -7,11 +7,13 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -80,7 +82,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupPermissions
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRole
-import com.vladimir.messenger.data.group.GroupStats
 import com.vladimir.messenger.data.group.InviteSummary
 import com.vladimir.messenger.data.group.JoinRequestSummary
 import com.vladimir.messenger.data.group.MemberSummary
@@ -144,6 +145,10 @@ fun GroupAdminScreen(
             pagerState.scrollToPage(target)
         }
     }
+    // Просмотры могут измениться без изменения карточки группы/канала.
+    LaunchedEffect(tab) {
+        if (tab == AdminTab.Stats) viewModel.refreshStats()
+    }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
@@ -158,10 +163,15 @@ fun GroupAdminScreen(
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = {
-                    Text(
-                        uiState.group?.title
-                            ?: if (uiState.group?.isChannel == true) "Канал" else "Группа"
-                    )
+                    ApuHeaderBubble {
+                        Text(
+                            uiState.group?.title
+                                ?: if (uiState.group?.isChannel == true) "Канал" else "Группа",
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 navigationIcon = { TextButton(onClick = onBackClick) { Text("Назад") } },
             )
@@ -253,7 +263,13 @@ fun GroupAdminScreen(
                     onDelete = viewModel::deleteInvite,
                 )
 
-                AdminTab.Stats -> StatsTab(stats = uiState.stats, topics = uiState.topics)
+                AdminTab.Stats -> GroupStatisticsTab(
+                    stats = uiState.stats,
+                    topics = uiState.topics,
+                    isChannel = uiState.group?.isChannel == true,
+                    isRefreshing = uiState.isStatsRefreshing,
+                    onRefresh = viewModel::refreshStats,
+                )
 
                 AdminTab.Permissions -> PermissionsTab(
                     mask = uiState.memberPermissions,
@@ -349,6 +365,7 @@ private fun OverviewTab(
                 value = titleDraft,
                 onValueChange = { titleDraft = it },
                 label = { Text("Название") },
+                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = bubbleFieldColors(),
             )
@@ -356,6 +373,7 @@ private fun OverviewTab(
                 value = aboutDraft,
                 onValueChange = { aboutDraft = it },
                 label = { Text("Описание") },
+                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
                 colors = bubbleFieldColors(),
             )
@@ -779,13 +797,11 @@ private fun MembersTab(
                 }
             }
         }
-        OutlinedTextField(
+        ApuSearchField(
             value = query,
             onValueChange = onQueryChange,
+            placeholder = "Поиск участника по имени или узлу",
             modifier = Modifier.fillMaxWidth().padding(12.dp),
-            placeholder = { Text("Поиск участника по имени или узлу") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            singleLine = true,
         )
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
             items(members, key = { it.nodeId }) { member ->
@@ -1061,65 +1077,6 @@ private fun InviteCard(
 
 
 @Composable
-private fun StatsTab(stats: GroupStats?, topics: List<TopicSummary>) {
-    if (stats == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            ApuBubble(modifier = Modifier.padding(24.dp)) {
-                Text("Статистика доступна администраторам")
-            }
-        }
-        return
-    }
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        ApuBubble {
-            StatRow("Участников", stats.memberCount.toString())
-            StatRow("Администраторов", stats.adminCount.toString())
-            StatRow("Тем", stats.topicCount.toString())
-            StatRow("Заявок в ожидании", stats.pendingRequests.toString())
-            StatRow("Сообщений всего", stats.totalMessages.toString())
-        }
-
-        ApuBubble {
-        Text("Сообщения за 7 дней", fontWeight = FontWeight.Medium)
-        if (stats.last7Days.isEmpty()) {
-            Text(
-                "Пока нет данных",
-                style = MaterialTheme.typography.bodySmall,
-                color = ApuBubbleMutedColor,
-            )
-        } else {
-            stats.last7Days.forEach { day ->
-                StatRow(day.dayKey, "${day.messageCount} сообщ., ${day.senderCount} отправ.")
-            }
-        }
-        }
-
-        ApuBubble {
-        Text("Сообщения по темам", fontWeight = FontWeight.Medium)
-        // Идентификатор темы человеку ничего не говорит — показываем её имя.
-        stats.perTopic.forEach { (topicId, count) ->
-            val name = topics.firstOrNull { it.id == topicId }
-                ?.name
-                ?.takeIf { it.isNotBlank() }
-                ?: if (topicId.isBlank()) "Без темы" else topicId.take(8)
-            StatRow(name, count.toString())
-        }
-        }
-    }
-}
-
-@Composable
-private fun StatRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(label, modifier = Modifier.weight(1f))
-        Text(value, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
 private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
@@ -1157,12 +1114,16 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
 /** Цвета поля ввода внутри светлого пузыря: тёмный текст/подпись на светлой
  *  подложке при ЛЮБОЙ теме (в тёмной теме стандартное поле белело). */
 @Composable
+// Раунд 267: поля настроек - в фирменной гамме: золотая рамка (как у
+// пузырей), белая заливка, скругление 18 - никаких серых «канцелярских» линий.
 private fun bubbleFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = Color(0xFF1E2430),
     unfocusedTextColor = Color(0xFF1E2430),
     cursorColor = MaterialTheme.colorScheme.primary,
-    focusedLabelColor = Color(0xFF5A6472),
+    focusedLabelColor = MaterialTheme.colorScheme.primary,
     unfocusedLabelColor = Color(0xFF5A6472),
-    focusedBorderColor = MaterialTheme.colorScheme.primary,
-    unfocusedBorderColor = Color(0xFFB9C2CC),
+    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+    unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+    focusedContainerColor = Color.White,
+    unfocusedContainerColor = Color.White,
 )

@@ -27,7 +27,9 @@ $ErrorActionPreference = "Stop"
 
 $Account   = "caf1ba3a42dc32ef36978d9ca2bce5ad"
 $Script    = "p2p-relay"
-$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/38368c0edf5394c8da341ee837e7e24025012c8b/tools/worker/p2p_relay_worker.js"
+# Раунд 257: воркер с одноключевым хранением копии (в 4 раза меньше записей
+# KV - дневной лимит бесплатного плана больше не выжигается).
+$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.152/tools/worker/p2p_relay_worker.js"
 
 Write-Host "=== 1/5 Token ===" -ForegroundColor Cyan
 if ([string]::IsNullOrWhiteSpace($Token)) {

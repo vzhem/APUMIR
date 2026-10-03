@@ -1,5 +1,12 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuBubbleCard
+import com.vladimir.messenger.ui.components.ApuBubbleLinkColor
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.*
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -44,6 +51,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.FileTransferBubble
 import com.vladimir.messenger.ui.components.MessageBubble
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import android.content.ClipData
@@ -207,8 +215,9 @@ fun ChatDetailScreen(
 
     // SnackBar для ошибок
     val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(uiState.error) {
-        uiState.error?.let {
+    val displayedError = MessagePinPolicy.visibleError(uiState.error, uiState.pinned.size)
+    LaunchedEffect(displayedError) {
+        displayedError?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
         }
@@ -265,7 +274,10 @@ fun ChatDetailScreen(
             .swipeBack(onBack = onBackClick),
     ) {
         ChatWallpaper()
+        // Раунд 266: клавиатура не закрывает переписку - список сообщений
+        // сжимается над клавиатурой, последние сообщения видны сразу.
         Scaffold(
+        modifier = Modifier.imePadding(),
         containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -276,26 +288,15 @@ fun ChatDetailScreen(
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = {
-                    // Раунд 41: имя контакта/группы на белой полосочке со
-                    // скруглениями и золотой рамкой - читается на любой подложке.
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                RoundedCornerShape(18.dp),
-                            )
-                            // Тап по имени открывает карточку собеседника.
-                            .clickable { showPeerProfile = true }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    ) {
+                    // Общий пузырь шапки, как в группах и каналах.
+                    ApuHeaderBubble(onClick = { showPeerProfile = true }) {
                         Column {
                             Text(
                                 contactName,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1E2430),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             )
                             // р235: «печатает…» важнее статуса сети и гаснет само.
                             val peerTyping = uiState.isPeerTyping
@@ -307,7 +308,7 @@ fun ChatDetailScreen(
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (peerTyping || uiState.isContactOnline)
-                                    MaterialTheme.colorScheme.primary
+                                    ApuBubbleAccentColor
                                 else
                                     Color(0xFF5A6472),
                             )
@@ -324,7 +325,7 @@ fun ChatDetailScreen(
                         IconButton(onClick = { onRenameClick(contactId, contactName) }) {
                             Icon(
                                 Icons.Default.Edit,
-                                contentDescription = "Rename",
+                                contentDescription = "Переименовать",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -386,33 +387,44 @@ fun ChatDetailScreen(
                 },
         ) {
             when {
-                uiState.isLoading -> {
+                uiState.isLoading && uiState.messages.isEmpty() -> {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
 
+                uiState.historyError != null && uiState.messages.isEmpty() -> {
+                    ChatHistoryError(
+                        message = uiState.historyError.orEmpty(),
+                        onRetry = viewModel::retryMessages,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+
                 uiState.messages.isEmpty() -> {
                     Column(
-                        modifier            = Modifier.align(Alignment.Center),
+                        modifier = Modifier.align(Alignment.Center)
+                            .padding(horizontal = 16.dp)
+                            .apuBubbleSurface()
+                            .padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(
                             Icons.Default.Lock,
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
-                            tint     = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            tint     = ApuBubbleAccentColor.copy(alpha = 0.75f),
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             "Сообщения зашифрованы E2E",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = ApuBubbleMutedColor,
                         )
                         Text(
                             "Напишите первое сообщение",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = ApuBubbleMutedColor,
                         )
                     }
                 }
@@ -463,9 +475,21 @@ fun ChatDetailScreen(
                     }
                     // Раунд 173: закреплённые сообщения личного чата; тап -
                     // лента прыгает к самому сообщению.
+                    // Раунд 246: закреп и лента живут в Column. Раньше оба были
+                    // детьми Box, и лента с fillMaxSize рисовалась ПОВЕРХ
+                    // закрепа - закреп «проваливался под ленту» (скрин владельца
+                    // 01.10: стикер наезжал на плашку «Закреплённые»).
+                    Column(modifier = Modifier.fillMaxSize()) {
+                    if (uiState.historyError != null) {
+                        ChatHistoryError(
+                            message = uiState.historyError.orEmpty(),
+                            onRetry = viewModel::retryMessages,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                     if (uiState.pinned.isNotEmpty()) {
                         val feedScope = androidx.compose.runtime.rememberCoroutineScope()
-                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                             Column(modifier = Modifier.padding(8.dp)) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     Icon(
@@ -516,7 +540,8 @@ fun ChatDetailScreen(
                     }
                     LazyColumn(
                         state          = listState,
-                        modifier       = Modifier.fillMaxSize(),
+                        // Раунд 246: лента занимает остаток Column под закрепом.
+                        modifier       = Modifier.weight(1f).fillMaxWidth(),
                         contentPadding = PaddingValues(vertical = 8.dp),
                         reverseLayout  = false,
                     ) {
@@ -606,9 +631,9 @@ fun ChatDetailScreen(
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         textDecoration = TextDecoration.Underline,
-                                        color = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                        color = ApuBubbleLinkColor,
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
+                                            .apuBubbleSurface()
                                             .clickable(enabled = fwdSource != null) { if (fwdSource != null) onForwardTap(fwdSource) }
                                             .padding(horizontal = 6.dp, vertical = 2.dp),
                                     )
@@ -651,7 +676,14 @@ fun ChatDetailScreen(
                                                 com.vladimir.messenger.util.GroupFileMarker.caption(fwdFile) +
                                                     "\nфайла нет на этом телефоне",
                                                 style = MaterialTheme.typography.bodyMedium,
-                                                modifier = Modifier.align(Alignment.Start),
+                                                color = if (message.isFromMe)
+                                                    com.vladimir.messenger.ui.theme.LocalMessengerColors.current.messageBubbleOwnText
+                                                else ApuBubbleTextColor,
+                                                modifier = Modifier.align(if (message.isFromMe) Alignment.End else Alignment.Start)
+                                                    .apuBubbleSurface(color = if (message.isFromMe)
+                                                        com.vladimir.messenger.ui.theme.LocalMessengerColors.current.messageBubbleOwn
+                                                    else com.vladimir.messenger.ui.theme.LocalMessengerColors.current.messageBubbleOther)
+                                                    .padding(10.dp),
                                             )
                                         }
                                     }
@@ -674,7 +706,7 @@ fun ChatDetailScreen(
                                     else -> MessageBubble(
                                     message = message,
                                     isSelected = activeMessage?.id == message.id,
-                                    linkColor = if (message.isFromMe) Color.White else Color(0xFF4A90E2),
+                                    linkColor = ApuBubbleLinkColor,
                                     onContactInvite = onAddContactInvite,
                                     onGroupInvite = { viewModel.joinByInviteLink(it) },
                                     // Одно нажатие - сразу пузырь с реакциями:
@@ -710,6 +742,7 @@ fun ChatDetailScreen(
                             }
                         }
                     }
+                    } // Раунд 246: закрыли Column «закреп + лента».
                 }
             }
         }
@@ -993,22 +1026,28 @@ private fun MessageInputBar(
     // Раунд 45: подложка панели следует теме (светлая/тёмная) и полупрозрачна -
     // обои (фирменные или свои) проходят сквозь неё. Белые пузыри скрепки,
     // поля и стрелки читаются на любом фоне.
-    Surface(
-        // Раунд 149: imePadding - панель поднимается над клавиатурой
-        // (edge-to-edge: adjustResize сам не работает, владелец прислал
-        // скрин с закрытой клавиатурой поля и «Отправить»).
-        modifier  = modifier.fillMaxWidth().imePadding(),
-        shadowElevation = 8.dp,
-        color     = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+    // Раунд 266: фирменный пузырь панели ввода - светлая полупрозрачная
+    // подложка с золотой рамкой вместо серого «квадрата» на обоях.
+    // Раунд 149: imePadding - панель поднимается над клавиатурой.
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .imePadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
         // Раунд 148: как в темах - при наборе скрепка и GIF уходят НАД
         // полем, «Отправить» - своим пузырём во всю ширину ПОД полем.
         var inputFocused by remember { mutableStateOf(false) }
-        Column(
-            modifier = Modifier
-                .navigationBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-        ) {
+        Column {
             if (inputFocused) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -1077,10 +1116,7 @@ private fun MessageInputBar(
                     override fun Decoration(content: @Composable () -> Unit) {
                         Box(
                             modifier = Modifier
-                                .background(
-                                    Color.White,
-                                    MaterialTheme.shapes.extraLarge,
-                                )
+                                .apuBubbleSurface(color = Color.White)
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
                             if (inputState.text.isEmpty()) {
@@ -1177,6 +1213,28 @@ private fun MessageInputBar(
                     color = if (canSend) Color.White else Color(0xFF9AA3AF),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ChatHistoryError(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    ApuBubbleCard(modifier = modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(message, color = ApuBubbleTextColor, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Попробуйте открыть историю ещё раз",
+                color = ApuBubbleMutedColor,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(
+                onClick = onRetry,
+                colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleLinkColor),
+            ) { Text("Повторить") }
         }
     }
 }

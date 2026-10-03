@@ -330,6 +330,15 @@ class MainActivity : ComponentActivity() {
         requestIgnoreBatteryOptimizations()
         startCoreService()
         checkForUpdates()
+        // Раунд 251: убираем из «Скачанных» наш мусор `.trashed-*APU*` -
+        // остатки старых APK обновлений, которые DownloadManager не стирает,
+        // а переименовывает. В фоне, на загрузку экрана не влияет.
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.update.DownloadTrashCleanup.clean(applicationContext)
+            // Раунд 265: держим в «Скачанных» максимум один свежий APK -
+            // установленные и старые версии удаляются сами при старте.
+            com.vladimir.messenger.data.update.DownloadTrashCleanup.cleanOldApks(applicationContext)
+        }
         handleNotificationTap(intent)
 
         ThemeModeHolder.init(this)
@@ -342,7 +351,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Сплэш показывается при запуске приложения (нажатии на иконку).
-            var showSplash by remember { mutableStateOf(true) }
+            // Раунд 263: при тёплом старте (ядро уже поднято) заставка не
+            // нужна вовсе - человек сразу в готовом приложении.
+            var showSplash by remember {
+                mutableStateOf(!com.vladimir.messenger.service.CoreStatus.ready.value)
+            }
             // Роевой спор за @имя: система сняла наше имя - просим новое.
             val usernameConflict by UsernameHolder.conflict.collectAsStateWithLifecycle()
             P2PMessengerTheme(themeMode = themeMode) {

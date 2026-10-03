@@ -166,6 +166,10 @@ class OnboardingViewModel @Inject constructor(
             when (val result = identityBackup.restore(appContext, nick, state.password)) {
                 is com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.Success -> {
                     UsernameHolder.set(appContext, nick)
+                    // Раунд 256: запираем пароль входа для автосинхронизации -
+                    // окно переноса подставит его само, без повторного ввода.
+                    com.vladimir.messenger.data.backup.ProfileSyncAuto
+                        .rememberPassword(appContext, state.password.toCharArray())
                     _uiState.update {
                         it.copy(
                             step = OnboardingStep.ShowInvite,
@@ -266,6 +270,12 @@ class OnboardingViewModel @Inject constructor(
                         saved == com.vladimir.messenger.data.security.IdentityBackup.SaveResult.SavedLocally
                     if (!vaultOk) {
                         Log.w("OnboardingVM", "identity vault not stored: $saved")
+                    }
+                    // Раунд 256: пароль регистрации запираем для автосинхронизации -
+                    // окно переноса подставит его само, без повторного ввода.
+                    if (state.password.isNotEmpty()) {
+                        com.vladimir.messenger.data.backup.ProfileSyncAuto
+                            .rememberPassword(appContext, state.password.toCharArray())
                     }
                     // Ссылку пересобираем ЗДЕСЬ, а не берём из identity:
                     // та строилась до сохранения никнейма и получалась без

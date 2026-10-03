@@ -1,7 +1,9 @@
 package com.vladimir.messenger.ui.screens.settings
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.backup.BackupCipher
@@ -40,7 +42,16 @@ data class ProfileBackupUiState(
     val lastSaved: Uri? = null,
     /** Расписание автообновления (что включено, куда, когда в последний раз). */
     val schedule: BackupSchedule.State? = null,
+    /**
+     * Раунд 250: копии, найденные на телефоне автоматически (по сохранённым
+     * разрешениям SAF и файлу автообновления). Экран предлагает их первыми,
+     * чтобы не рыскать по проводнику.
+     */
+    val foundBackups: List<FoundBackup> = emptyList(),
 )
+
+/** Найденная автоматически копия профиля: uri + человекочитаемое имя и вес. */
+data class FoundBackup(val uri: Uri, val name: String, val size: Long)
 
 /**
  * Экран «Резервная копия»: создать файл и восстановиться из файла.
@@ -67,6 +78,8 @@ class ProfileBackupViewModel @Inject constructor(
             _uiState.update {
                 it.copy(receivedBytes = received, stagedManifest = staged, hasIdentity = hasIdentity, schedule = schedule)
             }
+            // Раунд 250: сразу ищем сохранённые копии - восстановление начнёт с них.
+            _uiState.update { it.copy(foundBackups = scanFoundBackups()) }
         }
     }
 
@@ -76,6 +89,66 @@ class ProfileBackupViewModel @Inject constructor(
             val schedule = BackupSchedule.state(context)
             _uiState.update { it.copy(schedule = schedule) }
         }
+    }
+
+    /**
+     * Раунд 250: автопоиск сохранённых копий - «Восстановить» начинает с них,
+     * а не с проводника. Кандидаты: файл автообновления и все документы, на
+     * которые у приложения осталось разрешение SAF (сохранённые при создании
+     * и открытии копии). Каждый проверяем по магии APUBAK - в подборку не
+     * попадает постороннее.
+     */
+    fun refreshFoundBackups() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val found = scanFoundBackups()
+            _uiState.update { it.copy(foundBackups = found) }
+        }
+    }
+
+    private fun scanFoundBackups(): List<FoundBackup> {
+        val cr = context.contentResolver
+        val candidates = LinkedHashSet<Uri>()
+        runCatching { BackupSchedule.targetUri(context) }.getOrNull()?.let { candidates.add(it) }
+        runCatching {
+            cr.persistedUriPermissions.forEach { p ->
+                if (p.isReadPermission && p.uri.scheme == "content") candidates.add(p.uri)
+            }
+        }
+        val found = mutableListOf<FoundBackup>()
+        for (uri in candidates) {
+            runCatching {
+                if (!isApuBackup(cr, uri)) return@runCatching
+                var name = "APU backup"
+                var size = 0L
+                cr.query(
+                    uri,
+                    arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                    null, null, null,
+                )?.use { c ->
+                    if (c.moveToFirst()) {
+                        name = c.getString(0) ?: name
+                        size = if (c.isNull(1)) 0L else c.getLong(1)
+                    }
+                }
+                found.add(FoundBackup(uri, name, size))
+            }
+        }
+        // Свежие по имени первыми: в имени штамп yyyy-MM-dd_HH-mm.
+        return found.sortedByDescending { it.name }
+    }
+
+    /** Магия файла: первые байты APUBAK. Читается мало, файл не расшифровывается. */
+    private fun isApuBackup(cr: android.content.ContentResolver, uri: Uri): Boolean {
+        val head = ByteArray(BackupCipher.MAGIC.length)
+        var read = 0
+        cr.openInputStream(uri)?.use { ins ->
+            while (read < head.size) {
+                val n = ins.read(head, read, head.size - read)
+                if (n <= 0) break
+                read += n
+            }
+        } ?: return false
+        return read == head.size && String(head, Charsets.US_ASCII) == BackupCipher.MAGIC
     }
 
     /** Имя файла по умолчанию для диалога сохранения. */
@@ -185,6 +258,44 @@ class ProfileBackupViewModel @Inject constructor(
                         schedule = schedule,
                         message = "Это хранилище не даёт постоянного доступа к файлу — обновлять его " +
                             "автоматически нельзя. Сохраните копию в «Файлы» телефона или на карту памяти.",
+                        failed = true,
+                    )
+                }
+                is BackupSchedule.EnableResult.Failed -> _uiState.update {
+                    it.copy(busy = false, schedule = schedule, message = "Не удалось включить: ${result.reason}", failed = true)
+                }
+            }
+        }
+    }
+
+    /**
+     * Раунд 251: «флажок» автообновления для остановленного расписания
+     * (например, после восстановления профиля): включить заново на уже
+     * существующем файле - найденном на телефоне или выбранном в проводнике.
+     * Пароль - от самого файла; он заворачивается ключом телефона.
+     */
+    fun enableAutoUpdateFor(target: Uri, password: String, includeReceived: Boolean, period: BackupSchedule.Period) {
+        if (_uiState.value.busy) return
+        _uiState.update { it.copy(busy = true, busyText = "Включаем обновление…", message = null, failed = false) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                BackupSchedule.enable(context, target, password.toCharArray(), includeReceived, period)
+            }
+            val schedule = withContext(Dispatchers.IO) { BackupSchedule.state(context) }
+            when (result) {
+                BackupSchedule.EnableResult.Ok -> _uiState.update {
+                    it.copy(
+                        busy = false,
+                        schedule = schedule,
+                        message = "Автообновление включено: файл будет перезаписываться ${period.title}.",
+                        failed = false,
+                    )
+                }
+                BackupSchedule.EnableResult.NoPersistentAccess -> _uiState.update {
+                    it.copy(
+                        busy = false,
+                        schedule = schedule,
+                        message = "Это хранилище не даёт постоянного доступа к файлу — обновлять его " +                            "автоматически нельзя. Сохраните копию в «Файлы» телефона или на карту памяти.",
                         failed = true,
                     )
                 }

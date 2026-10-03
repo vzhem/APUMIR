@@ -197,13 +197,12 @@ fun GifCatalogBody(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            ApuSearchField(
                 value = query,
                 onValueChange = { query = it },
+                placeholder = "Поиск: котики, привет…",
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Поиск: котики, привет…") },
-                singleLine = true,
-                trailingIcon = {
+                trailing = {
                     IconButton(onClick = { onSearch(query) }) {
                         Icon(Icons.Filled.Search, contentDescription = "Найти")
                     }

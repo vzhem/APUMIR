@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
 // =============================================================================
 // IDENTITYBACKUPSCREEN.KT — «Защита личности»
 // =============================================================================
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,8 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -83,7 +85,7 @@ fun IdentityBackupScreen(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("Защита личности") },
+                    title = { ApuSettingsHeader("Защита личности") },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -93,7 +95,11 @@ fun IdentityBackupScreen(
             },
         ) { padding ->
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                // Раунд 250: клавиатура сжимает список, а не закрывает поля паролей.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .imePadding(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -127,12 +133,7 @@ fun IdentityBackupScreen(
                 }
 
                 item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 if (state.protectedNickname != null) "Личность защищена" else "Личность не защищена",
@@ -151,12 +152,7 @@ fun IdentityBackupScreen(
                 }
 
                 item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 if (state.protectedNickname != null) "Сменить пароль" else "Задать пароль",
@@ -265,12 +261,7 @@ fun IdentityBackupScreen(
                 }
 
                 item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 "Вернуть свою личность",

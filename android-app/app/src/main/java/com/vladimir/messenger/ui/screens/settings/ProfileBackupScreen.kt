@@ -1,5 +1,10 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
 // =============================================================================
 // PROFILEBACKUPSCREEN.KT — «Резервная копия»
 // =============================================================================
@@ -22,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,8 +36,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -87,24 +91,77 @@ fun ProfileBackupScreen(
     var includeReceived by remember { mutableStateOf(true) }
     var restorePassword by remember { mutableStateOf("") }
     var autoPeriod by remember { mutableStateOf(BackupSchedule.Period.WEEKLY) }
-    // Вернулись на экран - задача могла отработать, перечитываем итог.
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshSchedule() }
+    // Раунд 251: файл, на котором включаем автообновление заново (найденный
+    // или выбранный), и его пароль из диалога.
+    var autoAttachTarget by remember { mutableStateOf<FoundBackup?>(null) }
+    var autoAttachPassword by remember { mutableStateOf("") }
+    // Вернулись на экран - задача могла отработать, перечитываем итог; заодно
+    // автопоиск копий (вдруг файл появился или разрешение сохранилось).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshSchedule()
+        viewModel.refreshFoundBackups()
+    }
+    // Закрыть задачу целиком: процесс умрёт следом, а при следующем запуске
+    // копия ляжет на место. Активность ищем по цепочке контекстов. Объявлен
+    // ДО лаунчеров: они сохраняют разрешение через этот же контекст.
+    val activityContext = LocalContext.current
 
     // Диалоги системы: «куда сохранить» и «какой файл открыть». Пароль
     // берём из полей на момент выбора файла.
     val createLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri: Uri? ->
-        if (uri != null) viewModel.create(uri, password, includeReceived)
+        if (uri != null) {
+            // Раунд 250: сохраняем разрешение на созданный файл - автопоиск
+            // восстановления найдёт его в следующий раз без проводника.
+            runCatching {
+                activityContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            viewModel.create(uri, password, includeReceived)
+        }
     }
     val openLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
-        if (uri != null) viewModel.stage(uri, restorePassword)
+        if (uri != null) {
+            runCatching {
+                activityContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            viewModel.stage(uri, restorePassword)
+        }
     }
-    // Закрыть задачу целиком: процесс умрёт следом, а при следующем запуске
-    // копия ляжет на место. Активность ищем по цепочке контекстов.
-    val activityContext = LocalContext.current
+    // Раунд 251: повторный выбор файла для автообновления. Здесь сохраняем
+    // ПРАВО ЗАПИСИ: без него воркер не сможет перезаписывать файл по расписанию.
+    val autoAttachLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                activityContext.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            var name = "APU backup"
+            runCatching {
+                activityContext.contentResolver.query(
+                    uri,
+                    arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                    null, null, null,
+                )?.use { c -> if (c.moveToFirst()) name = c.getString(0) ?: name }
+            }
+            autoAttachTarget = FoundBackup(uri, name, 0L)
+            autoAttachPassword = ""
+        }
+    }
     val closeApp: () -> Unit = {
         var ctx: android.content.Context = activityContext
         while (ctx is android.content.ContextWrapper && ctx !is android.app.Activity) ctx = ctx.baseContext
@@ -125,7 +182,7 @@ fun ProfileBackupScreen(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("Резервная копия") },
+                    title = { ApuSettingsHeader("Резервная копия") },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -134,8 +191,14 @@ fun ProfileBackupScreen(
                 )
             },
         ) { padding ->
+            // imePadding: когда открывается клавиатура (поля паролей), список
+            // сжимается над ней, а прокрутка подводит фокусное поле в зону
+            // видимости - раньше клавиатура закрывала ввод пароля.
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .imePadding(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -173,11 +236,8 @@ fun ProfileBackupScreen(
                 // Подготовленная копия ждёт перезапуска - это главное, показываем первым.
                 state.stagedManifest?.let { manifest ->
                     item {
-                        Card(
-                            shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.96f),
-                            ),
+                        ApuSettingsCard(
+                            highlighted = true,
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
@@ -232,12 +292,7 @@ fun ProfileBackupScreen(
                 }
 
                 if (state.hasIdentity) item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 "Сделать резервную копию",
@@ -340,12 +395,7 @@ fun ProfileBackupScreen(
                 val schedule = state.schedule
                 val scheduleError = schedule?.lastError
                 if (state.hasIdentity && (state.lastSaved != null || (schedule != null && schedule.enabled) || scheduleError != null)) item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 "Обновлять копию автоматически",
@@ -426,11 +476,51 @@ fun ProfileBackupScreen(
                                         )
                                     }
                                 } else {
+                                    // Раунд 251: расписание остановлено (например,
+                                    // после восстановления профиля), а файл уже
+                                    // есть на телефоне - включаем заново без
+                                    // нового сохранения: нашли/выбрали файл,
+                                    // ввели его пароль.
                                     Text(
-                                        "Сохраните копию в файл — и здесь можно будет включить её обновление.",
+                                        "Сохраните копию в файл — или включите обновление заново на уже " +                                            "готовом файле: найденном ниже либо выбранном в проводнике. " +                                            "Понадобится пароль этого файла.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    Spacer(Modifier.height(10.dp))
+                                    PeriodChooser(
+                                        selected = autoPeriod,
+                                        enabled = !state.busy,
+                                        onSelect = { autoPeriod = it },
+                                    )
+                                    if (state.foundBackups.isNotEmpty()) {
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            "Найдено на этом телефоне:",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        state.foundBackups.forEach { fb ->
+                                            OutlinedButton(
+                                                onClick = {
+                                                    autoAttachTarget = fb
+                                                    autoAttachPassword = ""
+                                                },
+                                                enabled = !state.busy,
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier.fillMaxWidth(),
+                                            ) {
+                                                Text("Обновлять: " + fb.name, maxLines = 1)
+                                            }
+                                            Spacer(Modifier.height(6.dp))
+                                        }
+                                    }
+                                    OutlinedButton(
+                                        onClick = { autoAttachLauncher.launch(arrayOf("*/*")) },
+                                        enabled = !state.busy,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) { Text("Выбрать другой файл…") }
                                 }
                             }
                         }
@@ -438,12 +528,7 @@ fun ProfileBackupScreen(
                 }
 
                 item {
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        ),
-                    ) {
+                    ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
                                 "Восстановить из файла",
@@ -466,6 +551,33 @@ fun ProfileBackupScreen(
                                 visualTransformation = PasswordVisualTransformation(),
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            // Раунд 250: копии, найденные на телефоне сами
+                            // (сохранённые разрешения SAF + файл автообновления).
+                            // Предлагаем их первыми: пароль уже введён - тап по
+                            // найденному файлу сразу готовит восстановление.
+                            if (state.foundBackups.isNotEmpty()) {
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    "Найдено на этом телефоне - начните с этого:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                state.foundBackups.forEach { fb ->
+                                    OutlinedButton(
+                                        onClick = { viewModel.stage(fb.uri, restorePassword) },
+                                        enabled = !state.busy && restorePassword.isNotEmpty(),
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(
+                                            fb.name + " · " + ProfileBackupViewModel.humanBytes(fb.size),
+                                            maxLines = 1,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            }
                             Spacer(Modifier.height(12.dp))
                             OutlinedButton(
                                 onClick = { openLauncher.launch(arrayOf("*/*")) },
@@ -501,6 +613,47 @@ fun ProfileBackupScreen(
                 }
             }
         }
+    }
+
+    // Раунд 251: пароль файла, на котором включаем автообновление заново.
+    autoAttachTarget?.let { target ->
+        ApuSettingsDialog(
+            onDismissRequest = { autoAttachTarget = null },
+            title = { ApuSettingsHeader("Автообновление файла") },
+            text = {
+                Column {
+                    Text(target.name, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Телефон будет перезаписывать этот файл по расписанию. " +                            "Нужен пароль именно этого файла.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = autoAttachPassword,
+                        onValueChange = { autoAttachPassword = it },
+                        label = { Text("Пароль файла") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = autoAttachPassword.length >= BackupCipher.MIN_PASSWORD_LENGTH && !state.busy,
+                    onClick = {
+                        val t = target
+                        autoAttachTarget = null
+                        viewModel.enableAutoUpdateFor(t.uri, autoAttachPassword, includeReceived, autoPeriod)
+                    },
+                ) { Text("Включить") }
+            },
+            dismissButton = {
+                TextButton(onClick = { autoAttachTarget = null }) { Text("Отмена") }
+            },
+        )
     }
 }
 

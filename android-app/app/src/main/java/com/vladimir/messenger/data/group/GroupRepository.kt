@@ -742,6 +742,28 @@ class GroupRepository(
         Result.success(Unit)
     }
 
+    /**
+     * Раунд 260: правка темы из шапки (имя + значок) одним действием и
+     * рассылкой TopicUpdated, чтобы остальные устройства обновились сразу.
+     */
+    suspend fun updateTopic(topicId: String, name: String, iconEmoji: String): Result<Unit> =
+        withTopicAdminRight(topicId) {
+            val clean = name.trim()
+            if (clean.isEmpty()) {
+                return@withTopicAdminRight Result.failure(IllegalArgumentException("Пустое название"))
+            }
+            val topic = groupDao.getTopicById(topicId)
+                ?: return@withTopicAdminRight Result.failure(IllegalStateException("Тема не найдена"))
+            groupDao.renameTopic(topicId, clean.take(MAX_TOPIC_CHARS))
+            groupDao.updateTopicIcon(topicId, iconEmoji.take(16))
+            broadcast(
+                topic.groupId,
+                GroupWire.buildTopicUpdated(topic.groupId, topicId, clean, iconEmoji),
+                excludeSelf = true,
+            )
+            Result.success(Unit)
+        }
+
     suspend fun setTopicClosed(topicId: String, closed: Boolean): Result<Unit> =
         withTopicAdminRight(topicId) {
             groupDao.updateTopicClosed(topicId, closed)
@@ -3060,6 +3082,17 @@ class GroupRepository(
                 )
             }
 
+            // Раунд 260: правка темы принимается только от участника с
+            // правом управлять темами и только для уже известных тем.
+            is GroupWire.Packet.TopicUpdated -> {
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (!GroupPermissions.canManageTopics(sender.role, sender.permissions)) return
+                if (groupDao.getTopicById(packet.topicId) == null) return
+                groupDao.renameTopic(packet.topicId, packet.name.take(MAX_TOPIC_CHARS))
+                groupDao.updateTopicIcon(packet.topicId, packet.iconEmoji.take(16))
+            }
+
             is GroupWire.Packet.JoinRequest -> {
                 val mine = groupDao.getMember(packet.groupId, me) ?: return
                 if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
@@ -4346,25 +4379,42 @@ class GroupRepository(
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupRole.isAdminOrOwner(member.role)) {
+        if (member.isBanned || !GroupRole.isAdminOrOwner(member.role)) {
             return Result.failure(SecurityException("Статистика доступна только администраторам"))
         }
-        val fromKey = dayKey(clock() - (days - 1).toLong() * DAY_MS)
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val keys = GroupStatsCalculator.dayKeys(clock(), days.coerceIn(1, 366))
+        val dailyRows = groupDao.getGroupStatsInRange(groupId, keys.first(), keys.last())
         val members = groupDao.getMembers(groupId)
         val topics = groupDao.getTopics(groupId)
+        val posts = if (group.isChannel) {
+            groupDao.getChannelPostStats(groupId).map { row ->
+                ChannelPostStat(row.topicId, row.publishedAtMs, row.authorId, row.commentCount, row.viewCount)
+            }
+        } else {
+            emptyList()
+        }
         return Result.success(
             GroupStats(
                 groupId = groupId,
                 memberCount = members.count { !it.isBanned },
-                adminCount = members.count { GroupRole.isAdminOrOwner(it.role) },
+                adminCount = members.count { !it.isBanned && GroupRole.isAdminOrOwner(it.role) },
                 topicCount = topics.size,
                 pendingRequests = groupDao.countPendingRequests(groupId),
                 totalMessages = groupDao.totalTopicMessages(groupId),
-                last7Days = groupDao.getGroupStats(groupId, days)
-                    .filter { it.dayKey >= fromKey }
-                    .sortedBy { it.dayKey }
-                    .map { GroupStatDay(it.dayKey, it.messageCount, it.senderCount) },
+                last7Days = GroupStatsCalculator.completeDays(
+                    keys,
+                    dailyRows.map { GroupStatDay(it.dayKey, it.messageCount, it.senderCount) },
+                ),
                 perTopic = topics.associate { it.id to it.messageCount },
+                activeSenders7Days = GroupStatsCalculator.uniqueSenders(dailyRows.map { it.sendersCsv }),
+                channelPosts = posts,
+                publicationsLast7Days = if (group.isChannel) {
+                    GroupStatsCalculator.publicationDays(keys, posts)
+                } else {
+                    emptyList()
+                },
             )
         )
     }

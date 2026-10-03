@@ -34,6 +34,9 @@ object GroupWire {
 
     const val KIND_MESSAGE = "msg"
     const val KIND_TOPIC = "topic"
+    // Раунд 260: переименование/смена значка темы. Старые версии молча
+    // пропускают неизвестный вид - обновление дойдёт после автоапдейта.
+    const val KIND_TOPIC_UPDATED = "topicup"
     const val KIND_JOIN_REQUEST = "req"
     const val KIND_JOIN_DECISION = "reqd"
     const val KIND_PIN = "pin"
@@ -485,6 +488,14 @@ object GroupWire {
             val name: String,
             /** Значок темы (эмодзи). Старые конверты приходили без него. */
             val iconEmoji: String = "",
+        ) : Packet()
+
+        /** Раунд 260: переименование/смена значка существующей темы. */
+        data class TopicUpdated(
+            val groupId: String,
+            val topicId: String,
+            val name: String,
+            val iconEmoji: String,
         ) : Packet()
 
         data class JoinRequest(
@@ -1113,6 +1124,15 @@ object GroupWire {
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}" +
             if (iconEmoji.isNotEmpty()) "|${encode(iconEmoji)}" else ""
 
+    /** Раунд 260: тема переименована и/или сменила значок. */
+    fun buildTopicUpdated(
+        groupId: String,
+        topicId: String,
+        name: String,
+        iconEmoji: String,
+    ): String =
+        "$PREFIX|$KIND_TOPIC_UPDATED|$groupId|$topicId|${encode(name)}|${encode(iconEmoji)}"
+
     fun buildJoinRequest(
         groupId: String,
         displayName: String,
@@ -1438,6 +1458,15 @@ object GroupWire {
                 } else {
                     Packet.TopicCreated(groupId, parts[3], name, icon)
                 }
+            } else {
+                null
+            }
+
+            // Раунд 260: правка темы (имя + значок).
+            KIND_TOPIC_UPDATED -> if (parts.size == 6) {
+                val name = decode(parts[4]) ?: return null
+                val icon = decode(parts[5]).orEmpty()
+                if (name.isBlank()) null else Packet.TopicUpdated(groupId, parts[3], name, icon)
             } else {
                 null
             }

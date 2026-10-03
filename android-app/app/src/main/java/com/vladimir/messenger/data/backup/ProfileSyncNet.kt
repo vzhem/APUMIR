@@ -205,7 +205,16 @@ object ProfileSyncNet {
         try {
             conn.outputStream.use { it.write(b64.toByteArray(Charsets.US_ASCII)) }
             val resp = conn.responseCode
-            if (resp !in 200..299) return UploadResult.Failed("сервис ответил $resp")
+            if (resp !in 200..299) {
+                // Раунд 256: тело ошибки релея ({"error": …}) - в сообщение,
+                // чтобы по скриншоту была видна серверная причина.
+                val detail = runCatching {
+                    conn.errorStream?.readBytes()?.decodeToString()?.trim()?.take(140)
+                }.getOrNull()
+                return UploadResult.Failed(
+                    "сервис ответил $resp" + (detail?.let { ": $it" } ?: ""),
+                )
+            }
         } catch (e: IOException) {
             return UploadResult.Failed(e.message ?: "сеть недоступна")
         } finally {
@@ -256,7 +265,15 @@ object ProfileSyncNet {
                 when (conn.responseCode) {
                     404 -> return@withContext FetchResult.NotFound
                     401, 403 -> return@withContext FetchResult.WrongPassword
-                    !in 200..299 -> return@withContext FetchResult.Failed("сервис ответил ${conn.responseCode}")
+                    !in 200..299 -> {
+                        // Раунд 256: серверная причина - в сообщение.
+                        val detail = runCatching {
+                            conn.errorStream?.readBytes()?.decodeToString()?.trim()?.take(140)
+                        }.getOrNull()
+                        return@withContext FetchResult.Failed(
+                            "сервис ответил ${conn.responseCode}" + (detail?.let { ": $it" } ?: ""),
+                        )
+                    }
                 }
                 val b64 = conn.inputStream.bufferedReader().use { it.readText() }
                 val bytes = Base64.decode(b64, Base64.NO_WRAP)
@@ -326,12 +343,26 @@ object ProfileSyncAuto {
 
     fun myUploadFp(context: Context): String = prefs(context).getString(KEY_MY_FP, "") ?: ""
 
+    private const val KEY_LAST_UPLOAD_AT = "last_upload_at"
+
+    /** Раунд 257: когда последний раз выкладывали копию (троттлинг записей KV). */
+    fun lastUploadAtMs(context: Context): Long = prefs(context).getLong(KEY_LAST_UPLOAD_AT, 0L)
+
     fun noteMyUpload(context: Context, fingerprint: String) {
-        prefs(context).edit().putString(KEY_MY_FP, fingerprint ?: "").apply()
+        prefs(context).edit()
+            .putString(KEY_MY_FP, fingerprint ?: "")
+            .putLong(KEY_LAST_UPLOAD_AT, System.currentTimeMillis())
+            .apply()
     }
 
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val WRAP_ALIAS = "apu_profile_sync_pw_v2"
+    // Раунд 256: префиксы обёртки - чтобы понимать, каким ключом запирали.
+    // На телефонах с битым Keystore (KeyMint MEMORY_ALLOCATION_FAILED)
+    // пароль запирается программным AES в приватных настройках.
+    private const val WRAP_KEYSTORE = "ks:"
+    private const val WRAP_SOFTWARE = "sw:"
+    private const val KEY_SOFTWARE_WRAP = "software_wrap_v1"
 
     private fun keystoreKey(): SecretKey {
         val ks = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
@@ -349,18 +380,59 @@ object ProfileSyncAuto {
         return generator.generateKey()
     }
 
+    private fun softwareKey(context: Context): SecretKey {
+        val stored = prefs(context).getString(KEY_SOFTWARE_WRAP, null)
+        if (stored != null) {
+            val raw = Base64.decode(stored, Base64.NO_WRAP)
+            if (raw.size == 32) return javax.crypto.spec.SecretKeySpec(raw, "AES")
+        }
+        val raw = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        prefs(context).edit()
+            .putString(KEY_SOFTWARE_WRAP, Base64.encodeToString(raw, Base64.NO_WRAP))
+            .apply()
+        return javax.crypto.spec.SecretKeySpec(raw, "AES")
+    }
+
+    /** Раунд 256: запереть пароль; Keystore, а при отказе - программным ключом. */
+    private fun wrapPassword(context: Context, password: CharArray): String? {
+        val plain = String(password).toByteArray(Charsets.UTF_8)
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, keystoreKey())
+            val ct = cipher.doFinal(plain)
+            WRAP_KEYSTORE + Base64.encodeToString(cipher.iv + ct, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "keystore wrap failed, software fallback: ${e.message}")
+            try {
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.ENCRYPT_MODE, softwareKey(context))
+                val ct = cipher.doFinal(plain)
+                WRAP_SOFTWARE + Base64.encodeToString(cipher.iv + ct, Base64.NO_WRAP)
+            } catch (second: Exception) {
+                Log.w(TAG, "software wrap failed: ${second.message}")
+                null
+            }
+        }
+    }
+
+    /**
+     * Раунд 256: запомнить пароль входа без включения расписания - окно
+     * переноса подставит его само, человеку вводить ничего не нужно.
+     */
+    fun rememberPassword(context: Context, password: CharArray): Boolean {
+        if (password.size < BackupCipher.MIN_PASSWORD_LENGTH) return false
+        val wrapped = wrapPassword(context, password) ?: return false
+        prefs(context).edit().putString(KEY_WRAPPED, wrapped).apply()
+        return true
+    }
+
+    fun hasStoredPassword(context: Context): Boolean =
+        prefs(context).getString(KEY_WRAPPED, null) != null
+
     /** Включить авто-проверку (пароль запирается ключом этого телефона). */
     fun enable(context: Context, password: CharArray): Boolean {
         if (password.size < BackupCipher.MIN_PASSWORD_LENGTH) return false
-        val wrapped = try {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, keystoreKey())
-            val ct = cipher.doFinal(String(password).toByteArray(Charsets.UTF_8))
-            Base64.encodeToString(cipher.iv + ct, Base64.NO_WRAP)
-        } catch (e: Exception) {
-            Log.w(TAG, "wrap failed: ${e.message}")
-            return false
-        }
+        val wrapped = wrapPassword(context, password) ?: return false
         prefs(context).edit()
             .putBoolean(KEY_ENABLED, true)
             .putString(KEY_WRAPPED, wrapped)
@@ -399,16 +471,36 @@ object ProfileSyncAuto {
     /** Извлечь запертый пароль (зовёт авто-задача; пароль не покидает телефон). */
     fun unwrap(context: Context): CharArray? {
         val encoded = prefs(context).getString(KEY_WRAPPED, null) ?: return null
-        return try {
-            val data = Base64.decode(encoded, Base64.NO_WRAP)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, keystoreKey(), GCMParameterSpec(128, data, 0, 12))
-            val plain = cipher.doFinal(data, 12, data.size - 12)
-            String(plain, Charsets.UTF_8).toCharArray()
-        } catch (e: Exception) {
-            Log.w(TAG, "unwrap failed: ${e.message}")
-            null
+        val body = when {
+            encoded.startsWith(WRAP_KEYSTORE) -> encoded.substring(WRAP_KEYSTORE.length)
+            encoded.startsWith(WRAP_SOFTWARE) -> encoded.substring(WRAP_SOFTWARE.length)
+            else -> encoded // старые версии писали без префикса (Keystore)
         }
+        val candidates = mutableListOf<SecretKey>()
+        if (!encoded.startsWith(WRAP_SOFTWARE)) {
+            runCatching { candidates += keystoreKey() }
+        }
+        if (!encoded.startsWith(WRAP_KEYSTORE)) {
+            runCatching { candidates += softwareKey(context) }
+        }
+        val data = try {
+            Base64.decode(body, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "unwrap: bad base64: ${e.message}")
+            return null
+        }
+        for (key in candidates) {
+            try {
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, data, 0, 12))
+                val plain = cipher.doFinal(data, 12, data.size - 12)
+                return String(plain, Charsets.UTF_8).toCharArray()
+            } catch (e: Exception) {
+                // не этот ключ - пробуем следующий
+            }
+        }
+        Log.w(TAG, "unwrap failed: no candidate key decrypted")
+        return null
     }
 
     fun ensureChannel(context: Context) {
@@ -510,7 +602,11 @@ class ProfileSyncWorker(
                 val stale = ProfileSyncNet.isOwnDevice(meta, myDeviceId, accountNodeId) &&
                     System.currentTimeMillis() - (meta?.timeMs ?: 0L) > 12L * 60 * 60 * 1000
                 val blocked = ProfileSyncAuto.everFetched(app) && !ProfileSyncAuto.everApplied(app)
-                if ((meta == null || stale) && !blocked) {
+                // Раунд 257: выкладка = 4 записи KV на реле (дневной лимит на
+                // бесплатном плане) - не чаще раза в 2 часа даже при пустой полке.
+                val uploadThrottled =
+                    System.currentTimeMillis() - ProfileSyncAuto.lastUploadAtMs(app) < 2L * 60 * 60 * 1000
+                if ((meta == null || stale) && !blocked && !uploadThrottled) {
                     when (val up = ProfileSyncNet.uploadBlocking(app, backup, password)) {
                         is ProfileSyncNet.UploadResult.Ok -> ProfileSyncAuto.noteMyUpload(app, up.fp)
                         else -> Unit // нет профиля / сеть - тихо

@@ -37,6 +37,7 @@ import com.vladimir.messenger.ui.components.SearchOrb
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.CoreWarmBar
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
@@ -179,6 +180,9 @@ fun ChatListScreen(
             Column {
                 // Полоска статуса сети (появляется только при проблемах)
                 NetworkStatusBar(status = uiState.networkStatus)
+                // Раунд 263: пока ядро доподнимается в фоне - тонкая честная
+                // полоска, чтобы пустой список не выглядел поломкой.
+                CoreWarmBar()
 
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -1142,23 +1146,39 @@ private fun SearchTextField(
     onQueryChanged: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    // Раунд 265: поиск главного экрана - в фирменном пузыре, как и везде.
     TextField(
         value       = query,
         onValueChange = onQueryChanged,
-        placeholder = { Text("Поиск: чаты, группы, каналы") },
+        placeholder = {
+            Text(
+                "Поиск: чаты, группы, каналы",
+                color = androidx.compose.ui.graphics.Color(0xFF1E2430).copy(alpha = 0.45f),
+            )
+        },
         singleLine  = true,
         colors = TextFieldDefaults.colors(
-            focusedContainerColor   = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedContainerColor   = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
+            unfocusedContainerColor = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
             focusedIndicatorColor   = androidx.compose.ui.graphics.Color.Transparent,
             unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            focusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+            unfocusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+            cursorColor = MaterialTheme.colorScheme.primary,
         ),
         trailingIcon = {
             IconButton(onClick = onClose) {
                 Icon(Icons.Default.Close, "Закрыть поиск")
             }
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            ),
     )
 }
 
@@ -1238,6 +1258,11 @@ private fun GroupCard(
     // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
     val groupAvatarBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
         .rememberAvatar(storeAvatars["g:" + group.id])
+    // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
+    val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
+    val draftText = drafts[
+        com.vladimir.messenger.data.draft.DraftStore.groupKey(group.id)
+    ].orEmpty()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -1295,19 +1320,29 @@ private fun GroupCard(
                 color = Color(0xFF8A93A2),
                 maxLines = 1,
             )
-            Text(
-                // Раунд 155: без служебных строк (гифки/стикеры).
-                text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
-                    ?: if (group.isPublic) {
-                    "Публичная группа - ${group.memberCount} уч."
-                } else {
-                    "Частная группа - ${group.memberCount} уч."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF5A6472),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (draftText.isNotEmpty()) {
+                Text(
+                    text = "Черновик: $draftText",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFC62828),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    // Раунд 155: без служебных строк (гифки/стикеры).
+                    text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
+                        ?: if (group.isPublic) {
+                        "Публичная группа - ${group.memberCount} уч."
+                    } else {
+                        "Частная группа - ${group.memberCount} уч."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF5A6472),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))

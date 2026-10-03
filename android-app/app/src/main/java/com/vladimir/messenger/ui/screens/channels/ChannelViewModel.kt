@@ -11,6 +11,7 @@ import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.util.InlineImage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -129,7 +130,7 @@ class ChannelViewModel @Inject constructor(
 
     /** Закрепить/открепить пост канала (личное закреп, до 10; зеркалится своим устройствам). */
     fun togglePostPin(post: ChannelPost) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val pinned = !post.isPinned
             val result = runCatching { chatRepository.setMessagePinned(post.messageId, pinned) }
                 .getOrElse { error ->
@@ -396,6 +397,7 @@ class ChannelViewModel @Inject constructor(
                         posts = snapshot.posts,
                         // В ленте закрепляются именно публикации, а не комментарии.
                         pinnedPostIds = snapshot.posts.filter { it.isPinned }.map { it.messageId },
+                        error = MessagePinPolicy.visibleError(it.error, snapshot.posts.count { post -> post.isPinned }),
                         canPost = snapshot.canPost,
                         myId = snapshot.myId,
                         isLoading = false,

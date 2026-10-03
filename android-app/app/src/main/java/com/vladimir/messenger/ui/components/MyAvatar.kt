@@ -30,6 +30,7 @@ import com.vladimir.messenger.ui.theme.AvatarHolder
 fun MyAvatar(
     displayName: String,
     modifier: Modifier = Modifier,
+    size: Int = 52,
 ) {
     val context = LocalContext.current
     val avatarUri by AvatarHolder.uri.collectAsState()
@@ -56,6 +57,6 @@ fun MyAvatar(
             contentScale = ContentScale.Crop,
         )
     } else {
-        Avatar(name = displayName, modifier = modifier)
+        Avatar(name = displayName, modifier = modifier, size = size)
     }
 }

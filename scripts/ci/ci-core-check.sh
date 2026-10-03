@@ -174,6 +174,23 @@ rustc --version 2>&1 | tee -a "$LOG"
 cargo --version 2>&1 | tee -a "$LOG"
 say "processors: $(nproc 2>/dev/null || echo '?')"
 
+# ── локальная история: source wiring + real Kotlin coroutine regressions ────
+begin "local-first chat history (Kotlin + source contracts)"
+if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-pin-notice.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-splash-scene.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-settings-style.py >>"$LOG" 2>&1 && \
+   bash scripts/ci/check-chat-history.sh >>"$LOG" 2>&1; then
+    say "local-first chat history: OK"
+else
+    FAILED=1
+    FAILED_STEP="local-first chat history (Kotlin + source contracts)"
+    strip_ansi
+    report
+    comment_to_pr
+    exit 1
+fi
+
 # ── 2. компиляция ядра ─────────────────────────────────────────────────────
 begin "cargo check (release, mqtt-dual-broker)"
 if (cd rust-core && cargo check --release --features mqtt-dual-broker >>"$LOG" 2>&1); then

@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,7 @@ pub struct AddressBook {
     path: Option<PathBuf>,
     entries: Mutex<HashMap<String, Entry>>,
     last_save_ms: AtomicI64,
+    generation: AtomicU64,
 }
 
 impl AddressBook {
@@ -116,6 +117,7 @@ impl AddressBook {
             path,
             entries: Mutex::new(entries),
             last_save_ms: AtomicI64::new(0),
+            generation: AtomicU64::new(1),
         }
     }
 
@@ -151,14 +153,31 @@ impl AddressBook {
         out
     }
 
+    /// Timestamp snapshot used for discovery ranking. It is not proof that a peer is online.
+    pub fn observations(&self) -> HashMap<String, (SocketAddr, i64)> {
+        self.entries.lock().unwrap().iter().filter_map(|(id, entry)| {
+            entry.addr.parse::<SocketAddr>().ok().map(|addr| (id.clone(), (addr, entry.seen)))
+        }).collect()
+    }
+
     /// Узнать новый адрес узла (7 точек записи: DHT-ответ, mDNS ×3,
     /// брокер-presence, invite, входящее QUIC-соединение). Возвращает
     /// `true`, если адрес для узла МЕНЯлся (полезно для логов).
+    pub fn generation(&self) -> u64 { self.generation.load(Ordering::Relaxed) }
+
     pub fn record(&self, node_id: &str, addr: SocketAddr) -> bool {
+        self.record_observed_at(node_id, addr, crate::storage::models::now_ms())
+    }
+
+    /// Preserve the observation time when learning somebody else's signed address. Repeated
+    /// forwarding must not turn a yesterday-address into a freshly seen/online subscriber.
+    pub fn record_observed_at(&self, node_id: &str, addr: SocketAddr, observed_at_ms: i64) -> bool {
         if node_id.is_empty() {
             return false;
         }
         let now_ms = crate::storage::models::now_ms();
+        let observed_at_ms = observed_at_ms.max(0).min(now_ms);
+        if now_ms.saturating_sub(observed_at_ms) > ENTRY_TTL_MS { return false; }
         let changed;
         {
             let mut entries = self.entries.lock().unwrap();
@@ -168,7 +187,7 @@ impl AddressBook {
                     if changed {
                         old.addr = addr.to_string();
                     }
-                    old.seen = now_ms;
+                    old.seen = if changed { observed_at_ms } else { old.seen.max(observed_at_ms) };
                 }
                 None => {
                     entries.insert(
@@ -176,13 +195,14 @@ impl AddressBook {
                         Entry {
                             id: node_id.to_string(),
                             addr: addr.to_string(),
-                            seen: now_ms,
+                            seen: observed_at_ms,
                         },
                     );
                     changed = true;
                 }
             }
         }
+        if changed { self.generation.fetch_add(1, Ordering::Relaxed); }
         // Троттлинг: не чаще раза в SAVE_DEBOUNCE_MS (flush при stop
         // всё равно добьёт хвост).
         let last = self.last_save_ms.load(Ordering::Relaxed);
@@ -382,4 +402,21 @@ mod tests {
         assert!(!seed.contains_key("bad"));
         let _ = fs::remove_file(path);
     }
+    #[test]
+    fn relayed_observation_keeps_its_original_age_and_only_address_change_wakes_discovery() {
+        let book = AddressBook::open(None);
+        let now = crate::storage::models::now_ms();
+        let endpoint: SocketAddr = "8.8.8.8:7777".parse().unwrap();
+        let old = now - 60_000;
+        let initial = book.generation();
+        assert!(book.record_observed_at("pk_example", endpoint, old));
+        assert!(book.generation() > initial);
+        let generation = book.generation();
+        assert!(!book.record_observed_at("pk_example", endpoint, old - 1000));
+        assert_eq!(book.observations()["pk_example"].1, old);
+        assert_eq!(book.generation(), generation);
+        assert!(book.record("pk_example", "8.8.4.4:7777".parse().unwrap()));
+        assert!(book.generation() > generation);
+    }
+
 }

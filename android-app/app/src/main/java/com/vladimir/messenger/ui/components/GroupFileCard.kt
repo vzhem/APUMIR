@@ -216,12 +216,14 @@ fun GroupFileCard(
     // карточки (владелец: «без лишних рамок и фонов»).
     // Раунд 170: webm-стикеры тоже парят (StickerAnimated рисует покадрово).
     val stickerFloating = GroupFileMarker.isSticker(info) && previewPath != null
+    val messenger = com.vladimir.messenger.ui.theme.LocalMessengerColors.current
+    val fileTextColor = if (stickerFloating) MaterialTheme.colorScheme.onBackground
+        else if (isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
     Column(
         modifier = Modifier
-            .then(if (stickerFloating) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
             .then(
                 if (stickerFloating) Modifier
-                else Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
+                else Modifier.apuBubbleSurface(color = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther)
             )
             .padding(if (stickerFloating) 0.dp else 8.dp),
     ) {
@@ -237,7 +239,7 @@ fun GroupFileCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 240.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .then(if (stickerFloating) Modifier else Modifier.clip(RoundedCornerShape(8.dp)))
                     .combinedClickable(
                         onClick = { showFull = true },
                         onLongClick = onLongPress,
@@ -266,22 +268,23 @@ fun GroupFileCard(
             ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
                 previewPath != null)
         if (!hasPreview) Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp))
+            Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp), tint = fileTextColor)
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     info.displayName,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
+                    color = fileTextColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(GroupFileMarker.formatSize(info.sizeBytes), style = MaterialTheme.typography.labelSmall)
+                Text(GroupFileMarker.formatSize(info.sizeBytes), style = MaterialTheme.typography.labelSmall, color = fileTextColor.copy(alpha = 0.7f))
             }
             // Кнопка «Скачать»: пока файл не просили и он не идёт.
             if (!isFromMe && transfer == null && !state.pending) {
                 IconButton(onClick = state.onDownload, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.Download, contentDescription = "Скачать")
+                    Icon(Icons.Filled.Download, contentDescription = "Скачать", tint = ApuBubbleAccentColor)
                 }
             }
         }
@@ -306,7 +309,7 @@ fun GroupFileCard(
             else -> status.contains("…") || status.startsWith("Ошибка") || status.startsWith("Раздающ")
         }
         if (statusVisible) {
-            Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+            Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp), color = fileTextColor.copy(alpha = 0.75f))
         }
         if (transfer != null && !complete && transfer.chunkCount > 0 && transfer.state != "FAILED") {
             LinearProgressIndicator(
@@ -316,7 +319,7 @@ fun GroupFileCard(
         }
         if (transfer != null && (transfer.state == "FAILED" || state.stalled) && !isFromMe) {
             TextButton(onClick = state.onDownload, contentPadding = PaddingValues(0.dp)) {
-                Text(if (state.stalled) "Спросить у другого" else "Скачать снова", style = MaterialTheme.typography.labelMedium)
+                Text(if (state.stalled) "Спросить у другого" else "Скачать снова", style = MaterialTheme.typography.labelMedium, color = ApuBubbleAccentColor)
             }
         }
     }
@@ -333,15 +336,14 @@ fun GroupFileCard(
                     .align(Alignment.TopEnd)
                     .padding(6.dp)
                     .size(32.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                    .apuBubbleSurface(shape = CircleShape)
                     .clickable { showActions = true },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     Icons.Filled.MoreVert,
                     contentDescription = "Действия",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = ApuBubbleAccentColor,
                     modifier = Modifier.size(20.dp),
                 )
             }

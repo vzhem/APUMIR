@@ -4,20 +4,16 @@
 > версии APU после code freeze и проверок, но до/сразу после публикации release. Не заменять старые
 > записи: добавлять новую секцию сверху и считать разницу с предыдущей зафиксированной версией.
 
-## ПРОПУЩЕННЫЕ ЗАПИСИ (зафиксировано 2026-08-30)
+## Исторический backfill (обновлено 2026-10-03)
 
-Правило сверху не выполнялось: последняя записанная версия — **v11.17.1**, а
-опубликовано с тех пор ещё девять, и все девять есть как GitHub-релизы:
-v11.18.0, v11.19.0, v11.20.0, v11.21.0, v11.22.0, v11.23.0, v11.24.0,
-v11.25.0, v11.26.0. То есть **v11.17.1 — НЕ текущая версия**; текущий Latest —
-**v11.26.0** (тег `v11.26.0` -> коммит `9f00541`, `app-release.apk`
-36 265 818 байт, sha256 `17976f17cf6d3f14457608b3b8c899b8157c64b7e9c4975b9208f9aacacf56c6`,
-опубликован 2026-08-30T14:10:08Z).
+Старые подробные записи в этом документе заканчиваются v11.17.1/v11.16.23 и не были последовательно
+дозаполнены. Добавлена актуальная запись v11.74.168; **статистические записи для промежуточных
+версий v11.18.0…v11.74.167 всё ещё неполны**. Не считать нижние старые строки текущим Latest.
+Подробности отдельных релизов искать в `docs/RELEASE_NOTES_v*.md` и в журнале collaboration.
 
-Дозаполнять задним числом по полному методу ниже нельзя без пометки: APK и
-дайджесты прошлых версий ещё достижимы через `gh api`, а sha256 сертификата
-подписчика требует keytool. Новая запись должна появляться для каждого
-следующего релиза вовремя.
+Для v11.74.168 APK CDN не удалось скачать в песочницу для независимого локального хэширования.
+Размер и SHA-256 сверены с GitHub Release API, а опубликованный отдельный checksum-файл в теге
+совпал с API digest. Файл суммы не прикреплён как GitHub Release asset.
 
 ## Что считать глобальной версией
 
@@ -46,7 +42,7 @@ v11.25.0, v11.26.0. То есть **v11.17.1 — НЕ текущая верси�
 - Android tests считать отдельно; Rust unit tests внутри `.rs` пока входят в Rust total.
 - Документацию, логи, APK/`.so`, изображения, `.git`, build outputs, `.gradle`, `target`, SDK/JDK,
   caches и `%TEMP%` не считать кодом.
-- Test/release automation (`scripts/*.ps1`, Python/shell) показывать отдельно.
+- Test/release automation (`scripts/**/*.ps1`, `*.py`, `*.sh`) показывать отдельно.
 - Всегда указывать commit, на котором выполнен подсчёт. Не сравнивать цифры, полученные разными
   методами, без явной пометки.
 
@@ -54,23 +50,88 @@ v11.25.0, v11.26.0. То есть **v11.17.1 — НЕ текущая верси�
 
 | Версия | Тип | Дата | Основной код | С generated | Automation | APK bytes | Статус |
 |---|---|---|---:|---:|---:|---:|---|
-| v11.16.23 | stable / Latest | 2026-08-19 | 35 639 | 38 314 | 19 383 | 22 796 416 | опубликован |
-| v11.16.16 | prerelease checkpoint | 2026-08-15 | 31 645 | 34 155 | 17 117 | 22 664 712 | опубликован |
+| v11.74.168 | stable / Latest | 2026-10-03 | 143 096 | 146 640 | 30 795 | 43 077 363 | опубликован |
+| v11.16.23 | stable (исторический срез) | 2026-08-19 | 35 639 | 38 314 | 19 383 | 22 796 416 | опубликован |
+| v11.16.16 | исторический prerelease checkpoint | 2026-08-15 | 31 645 | 34 155 | 17 117 | 22 664 712 | prerelease |
 
 ---
 
-## v11.16.23 — stable durable relay
+## v11.74.168 — stable adaptive profile/settings UI
+
+### Идентификация
+
+- Дата публикации: 2026-10-03; stable GitHub release, `draft=false`, `prerelease=false`, `/releases/latest` → v11.74.168.
+- versionName/versionCode: `v11.74.168` / `11074168`.
+- Application build source: `720b8b3655db2a3ad07e923ab6ecb424437fc2f9`.
+- Release tag target / documentation-and-checksum commit: `bba5dcb7485468dede1f67fc795c18d05bf82717`.
+- Successful APK workflow: `37103048304`; final tag re-trigger `37104703311` skipped the build because the Release already existed.
+- Release: <https://github.com/vzhem/APUMIR/releases/tag/v11.74.168>.
+
+### Строки кода (физические / непустые; подсчёт на теге v11.74.168)
+
+| Категория | Файлов | Всего строк | Непустых строк | Δ к v11.74.167 |
+|---|---:|---:|---:|---:|
+| Rust core `.rs` | 84 | 51 539 | 46 531 | 0 |
+| Rust UniFFI UDL | 1 | 291 | 252 | 0 |
+| Handwritten Android Kotlin | 332 | 90 952 | 84 700 | +123 |
+| Android manifest/XML resources | 9 | 314 | 287 | 0 |
+| **Основной код APU** | **426** | **143 096** | **131 770** | **+123** |
+| Generated UniFFI Kotlin | 1 | 3 544 | 2 901 | 0 |
+| **Основной код + generated** | **427** | **146 640** | **134 671** | **+123** |
+| Android unit/instrumented tests | 106 | 13 663 | 12 153 | +47 |
+| Test/release scripts (`scripts/**/*.ps1`, `*.py`, `*.sh`) | 174 | 30 795 | 28 011 | +122 |
+
+Сравнение выполнено тем же `git show <tag>:<path>` + `splitlines` методом на тегах v11.74.167 и
+v11.74.168. Rust и UDL не изменились; +123 handwritten Kotlin строк, один test-файл и automation.
+
+### APK и подпись
+
+- Release asset: `app-release.apk`, `43 077 363` байта.
+- GitHub API digest / SHA-256: `6497205c2911a1a8be16626d770da6ebc62391fa2563040878a7a479dc1f1b42`.
+- Отдельный файл суммы: `release-upload/app-release.apk.sha256` в теге; публичный raw URL:
+  <https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.168/release-upload/app-release.apk.sha256>.
+  Он связан из заметок релиза, но **не является прикреплённым Release asset**.
+- Android signer certificate fingerprint в этой сессии не снимался с APK: asset CDN скачивался с EOF/SSL-ошибкой. Workflow использовал старый signing key, так как секретов `APU_RELEASE_*` не было; владелец явно принял риск для v168. Ротация остаётся обязательной задачей до следующего выпуска.
+
+### Изменения именно v11.74.168
+
+- Профиль и настройки приведены к единому адаптивному фирменному стилю.
+- Быстрые действия профиля собраны вместе: QR-код, ссылка, никнейм и аватар.
+- Обновлены карточки, заголовки, поля и диалоги; раскладка учитывает узкий экран и крупный шрифт.
+- Единые компоненты применены также к переносу профиля, резервным копиям, рейтингу, прокси и поддержке.
+- Добавлены `ApuSettingsLayoutTest` и `scripts/ci/check-settings-style.py`.
+- r248 лимиты закрепов (личка, темы групп и лента канала; `pinnedBy`/DAO) присутствуют в v168, но впервые вошли в stable v11.74.167 и не являются изменением v168.
+
+### Что проверено для v168
+
+- APK assembly: GitHub Actions run `37103048304` — SUCCESS для source commit `720b8b3…`.
+- Финальный tag run `37104703311` пропустил повторную сборку, поскольку Release уже существовал.
+- `python3 scripts/ci/check-settings-style.py` — 8/8; `git diff --check` — PASS.
+- Телефонная установка/runtime, mirror checklist и pin-cap acceptance в этой сессии не выполнялись. Java 17+, Android SDK и ADB в песочнице отсутствовали; не переносить сюда старую приёмку v11.16.16.
+- API digest и отдельный `.sha256` в теге совпали; APK bytes не скачаны локально из-за EOF/SSL CDN-сбоев. Сертификат подписи из APK в этой сессии не снимался.
+
+### Portable backup
+
+- Перенос v11.74.168 в USB-бэкап владельцем не подтверждён. Старые нижеописанные manifest/restore цифры относились к v11.16.16 и удалены из карточки v168; актуальный чек-лист — `docs/START_HERE.md` §10.
+
+### Известные открытые проверки
+
+- До следующего выпуска выполнить подготовленную ротацию подписи: v168 был собран старым ключом, поскольку secrets `APU_RELEASE_*` отсутствовали; владелец явно принял риск именно для v168.
+- Подтвердить deployment Cloudflare Worker `/mirror` и пройти двухтелефонный checklist v168 из `docs/MIRROR_SYNC.md` §7; отдельно проверить r248 лимиты. Эти проверки не заменяются зелёной сборкой.
+- Текущие проектные задачи и ограничения брать из `docs/START_HERE.md`, `docs/AI_HANDOFF.md` и тематических handoff-документов, а не из старой v11.16.16 секции про M8 relay custody.
+
+## v11.16.23 — stable durable relay (историческая запись)
 
 ### Идентификация
 
 - Дата: 2026-08-19.
 - versionName/versionCode: `v11.16.23` / `11016023`.
-- Тип: stable GitHub release, Latest (явный выбор владельца проекта).
+- Тип: stable GitHub release, Latest на дату публикации (явный выбор владельца проекта).
 - Tested application commit: `bd7c1e3d603b39737641802fd9ff3d4ab8da481b`.
 - Release build source HEAD: `4dfc3a0d600edbe7e999789a9bc94f1ca31ea22f`.
 - Commit подсчёта строк: documentation/release commit, содержащий эту секцию.
 - Release/tag target: `09f7f52fe3822c154b4dcfb7cbdf524d529e17b6`.
-- Release: <https://github.com/vzhem/APUMIR/releases/tag/v11.16.23> (stable, Latest).
+- Release: <https://github.com/vzhem/APUMIR/releases/tag/v11.16.23> (stable release, Latest на дату публикации).
 
 ### Строки кода
 
@@ -100,7 +161,7 @@ Windows build/phone/evidence gates, добавленные во время M8 ac
 - Build state SHA-256: `8981A23C7781683381054CF9E0FF4972D37D274D44586EC72199C3075ABBF759`.
 - GitHub server APK digest: `sha256:85480d5caf57b9318986ba9e61f9a2a68b38ddd814c683b5949d8e22e7ea9a68` — совпадает.
 - Checksum asset: 86 B, server digest `sha256:c83d9d3825c125baac6471141b0819f7813487519283bd6a1870bfe09ba2800c`.
-- Release published `2026-08-18T21:23:39Z`; draft=false, prerelease=false, Latest.
+- Release published `2026-08-18T21:23:39Z`; draft=false, prerelease=false, Latest на дату публикации.
 
 ### Основные изменения
 
@@ -133,7 +194,7 @@ Windows build/phone/evidence gates, добавленные во время M8 ac
 
 ---
 
-## v11.16.16 — test checkpoint
+## v11.16.16 — test checkpoint (историческая prerelease-запись)
 
 ### Идентификация
 
@@ -219,7 +280,7 @@ Android process death/reboot до handoff может потерять чужое
 5. durable receipt/tombstone cleanup и exactly-once UI delivery;
 6. delayed Anna→Zhenya→relay D→Stas acceptance через несовпадающие online-окна.
 
-## v11.17.1 (2026-08-21, ОПУБЛИКОВАН — stable latest)
+## v11.17.1 (2026-08-21, stable опубликован на дату записи; исторический срез)
 
 - Первая публичная версия с передачей файлов (фото/видео/документы) в личных чатах:
   E2E-шифрование (XChaCha20-Poly1305, подписанный конверт ключа, TOFU-пин контакта),
@@ -230,5 +291,5 @@ Android process death/reboot до handoff может потерять чужое
 - CI release-workflow теперь собирает Rust из исходников (NDK 28.2 + cargo-ndk, 3 ABI) —
   устранён класс «stale .so в релизном APK».
 - LOC-дельта к v11.16.16: ~+3900 (Kotlin+Rust+tests+CI; точный подсчёт по тегу).
-- Статус: published stable latest (CI run 32473695695, 11m13s; APK 35,285,255 B;
-  checksum asset добавляется владельцем локально).
+- Статус на дату записи: stable release опубликован (CI run 32473695695, 11m13s; APK 35,285,255 B;
+  checksum asset добавляется владельцем локально). Это не текущий Latest.

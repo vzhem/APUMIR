@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import com.vladimir.messenger.data.local.MessagePinPolicy
+
 // =============================================================================
 // CHANNELSCREEN.KT - лента канала
 // =============================================================================
@@ -8,6 +10,14 @@ package com.vladimir.messenger.ui.screens.channels
 // тема, первое сообщение темы это текст поста, остальные - комментарии.
 // =============================================================================
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.ButtonDefaults
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuBubbleCard
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -58,7 +68,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -167,16 +176,40 @@ fun ChannelScreen(
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = {
-                    Column {
-                        Text(
-                            uiState.channel?.title ?: "Канал",
-                            maxLines = 1,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            "подписчиков: ${uiState.channel?.memberCount ?: 0}",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                    ApuHeaderBubble(
+                        onClick = if (uiState.canPost) ({ onOpenAdmin(uiState.channelId) }) else null,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val avatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                                .collectAsStateWithLifecycle()
+                            val avatar = com.vladimir.messenger.ui.components.AvatarBitmaps
+                                .rememberAvatar(avatars["g:${uiState.channelId}"])
+                            if (avatar != null) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = avatar.asImageBitmap(),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(34.dp).clip(CircleShape),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Column(Modifier.weight(1f, fill = false)) {
+                                Text(
+                                    uiState.channel?.title ?: "Канал",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = ApuBubbleTextColor,
+                                )
+                                Text(
+                                    "Подписчиков: ${uiState.channel?.memberCount ?: 0}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ApuBubbleMutedColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -272,11 +305,15 @@ fun ChannelScreen(
                         listState.scrollToItem(uiState.posts.lastIndex)
                     }
                 }
+                // Раунд 246: закреп и лента - в Column. Раньше лента в
+                // fillMaxSize-Box рисовалась поверх плашки закрепов
+                // (владелец: «закреп провалился под ленту»).
+                Column(modifier = Modifier.fillMaxSize()) {
                 // Раунд 173: закреплённые посты канала; тап - лента прыгает
                 // к самому посту.
                 if (uiState.pinnedPostIds.isNotEmpty()) {
                     val feedScope = androidx.compose.runtime.rememberCoroutineScope()
-                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
                         Column(modifier = Modifier.padding(8.dp)) {
                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Icon(
@@ -325,7 +362,8 @@ fun ChannelScreen(
                     }
                 }
                 // Бегунок справа: в длинном списке видно, где мы находимся.
-                Box(modifier = Modifier.fillMaxSize()) {
+                // Раунд 246: лента берёт остаток Column под закрепом.
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -392,10 +430,11 @@ fun ChannelScreen(
                     }
                     ApuScrollbar(state = listState)
                 }
+                } // Раунд 246: закрыли Column «закреп + лента».
                 }
             }
 
-            uiState.error?.let { message ->
+            MessagePinPolicy.visibleError(uiState.error, uiState.pinnedPostIds.size)?.let { message ->
                 Text(
                     message,
                     color = MaterialTheme.colorScheme.error,
@@ -584,7 +623,7 @@ private fun PostCard(
         )
     }
 
-    Card(
+    ApuBubbleCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
@@ -607,7 +646,7 @@ private fun PostCard(
                     Text(
                         "${post.authorName} - $time",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = ApuBubbleMutedColor,
                     )
                     // Раунд 173: закрепить/открепить пост канала.
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
@@ -615,9 +654,9 @@ private fun PostCard(
                             androidx.compose.material.icons.Icons.Filled.PushPin,
                             contentDescription = if (post.isPinned) "Открепить" else "Закрепить",
                             tint = if (post.isPinned) {
-                                MaterialTheme.colorScheme.primary
+                                ApuBubbleAccentColor
                             } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                                ApuBubbleMutedColor
                             },
                             modifier = Modifier.size(16.dp),
                         )
@@ -630,7 +669,7 @@ private fun PostCard(
                         Icon(
                             Icons.Default.Edit,
                             contentDescription = "Изменить пост",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = ApuBubbleMutedColor,
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -643,7 +682,7 @@ private fun PostCard(
                         Icon(
                             Icons.Default.MoreVert,
                             contentDescription = "Действия с постом",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = ApuBubbleMutedColor,
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -730,14 +769,14 @@ private fun PostCard(
                 Icon(
                     Icons.Default.Visibility,
                     contentDescription = "Просмотры",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = ApuBubbleMutedColor,
                     modifier = Modifier.size(15.dp),
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
                     post.views.toString(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ApuBubbleMutedColor,
                 )
                 val totalReactions = reactions.sumOf { it.count }
                 if (totalReactions > 0) {
@@ -745,24 +784,28 @@ private fun PostCard(
                     Icon(
                         Icons.Default.Favorite,
                         contentDescription = "Реакции",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = ApuBubbleMutedColor,
                         modifier = Modifier.size(15.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
                         totalReactions.toString(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = ApuBubbleMutedColor,
                     )
                 }
             }
-            HorizontalDivider(modifier = Modifier.padding(top = 10.dp))
+            HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = ApuBubbleAccentColor.copy(alpha = 0.2f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { showReactions = true }) {
+                TextButton(
+                    onClick = { showReactions = true },
+                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
+                ) {
                     Text("Реакция")
                 }
                 TextButton(
                     onClick = onOpenComments,
+                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
@@ -784,7 +827,7 @@ private fun PostCard(
                     Icon(
                         Icons.Default.Share,
                         contentDescription = "Поделиться постом",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = ApuBubbleAccentColor,
                     )
                 }
                 // Пост сохраняется себе одним нажатием - так человек забирает
@@ -793,7 +836,7 @@ private fun PostCard(
                     Icon(
                         Icons.Default.BookmarkBorder,
                         contentDescription = "В избранное",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = ApuBubbleAccentColor,
                     )
                 }
             }
@@ -862,7 +905,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
         Text(
             if (pending == 1) "Фото ещё загружается…" else "Фото ещё загружаются…",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = ApuBubbleMutedColor,
             modifier = Modifier.padding(top = 8.dp),
         )
         return
@@ -873,8 +916,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
             .fillMaxWidth()
             .padding(top = 8.dp)
             .height(280.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .apuBubbleSurface(shape = RoundedCornerShape(12.dp)),
     ) {
         HorizontalPager(
             state = pagerState,

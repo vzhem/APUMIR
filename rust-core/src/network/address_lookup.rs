@@ -217,6 +217,8 @@ pub struct AddressLookup {
     outbox: Mutex<Vec<(String, Vec<u8>)>>,
     /// Когда про какую цель спрашивали в последний раз (мс).
     asked: Mutex<HashMap<String, i64>>,
+    /// Replacement of a failed/stale route is allowed only in an active query to these neighbours.
+    refresh: Mutex<HashMap<String, (Vec<String>, i64)>>,
 }
 
 impl AddressLookup {
@@ -224,6 +226,7 @@ impl AddressLookup {
         Self {
             outbox: Mutex::new(Vec::new()),
             asked: Mutex::new(HashMap::new()),
+            refresh: Mutex::new(HashMap::new()),
         }
     }
 
@@ -282,9 +285,24 @@ impl AddressLookup {
         asked.insert(target_id.to_string(), now_ms);
     }
 
+    pub fn request_refresh_from(&self, target: &str, peers: Vec<String>, now: i64) {
+        let mut refresh = self.refresh.lock().unwrap();
+        refresh.retain(|_, (_, until)| *until > now);
+        if refresh.len() >= MAX_TRACKED_TARGETS && !refresh.contains_key(target) { return; }
+        refresh.insert(target.to_string(), (peers.into_iter().take(MAX_ASK_PEERS).collect(),
+            now.saturating_add(LOOKUP_COOLDOWN_MS)));
+    }
+
+    pub fn may_refresh_from(&self, target: &str, responder: &str, now: i64) -> bool {
+        self.refresh.lock().unwrap().get(target).map(|(peers, until)|
+            now < *until && peers.iter().any(|id| id == responder)
+        ).unwrap_or(false)
+    }
+
     /// Адрес нашёлся (или цель пропала) - из расписания убираем.
     pub fn forget(&self, target_id: &str) {
         self.asked.lock().unwrap().remove(target_id);
+        self.refresh.lock().unwrap().remove(target_id);
     }
 
     /// Сколько целей в расписании.
@@ -371,4 +389,16 @@ mod tests {
         }
         assert_eq!(lookup.queued_len(), MAX_QUEUED_REPLIES);
     }
+    #[test]
+    fn stale_route_replacement_requires_an_active_query_to_that_responder() {
+        let lookup = AddressLookup::new();
+        assert!(!lookup.may_refresh_from(&node(1), &node(2), 1000));
+        lookup.request_refresh_from(&node(1), vec![node(2)], 1000);
+        assert!(lookup.may_refresh_from(&node(1), &node(2), 1001));
+        assert!(!lookup.may_refresh_from(&node(1), &node(3), 1001));
+        assert!(!lookup.may_refresh_from(&node(1), &node(2), 1000 + LOOKUP_COOLDOWN_MS));
+        lookup.forget(&node(1));
+        assert!(!lookup.may_refresh_from(&node(1), &node(2), 1001));
+    }
+
 }

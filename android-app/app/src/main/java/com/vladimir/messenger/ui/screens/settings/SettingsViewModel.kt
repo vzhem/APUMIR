@@ -40,6 +40,8 @@ data class SettingsUiState(
     val proxyTunnelEnabled: Boolean = true,
     /** Сколько сердечек набрал мой профиль. */
     val heartCount: Int = 0,
+    /** Раунд 249: никнейм «Защиты личности» — от него зависит текст окна выхода. */
+    val protectedNick: String? = null,
 )
 
 @HiltViewModel
@@ -53,11 +55,67 @@ class SettingsViewModel @Inject constructor(
     private val addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup,
     private val addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup,
     private val botApi: com.vladimir.messenger.service.BotApi,
+    private val identityBackup: com.vladimir.messenger.data.security.IdentityBackup,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     private var lastGossipTrigger: Long = 0L
     val uiState = _uiState.asStateFlow()
+
+    /**
+     * Раунд 249: «Выйти из APU» - стереть локальные данные и вернуться на
+     * экран входа, чтобы войти под другим логином.
+     *
+     * Стирается ВСЁ (как «очистить данные» в системных настройках): чаты,
+     * контакты, ключи, настройки. Половинчатое состояние оставлять нельзя -
+     * ядро продолжило бы работать под старым адресом, и «другой логин»
+     * получил бы чужую переписку. Вернуться в СВОЙ профиль после выхода
+     * можно только по никнейму и паролю («Защита личности»), поэтому экран
+     * настроек предупреждает, если пароль не задан.
+     */
+    fun logout() {
+        viewModelScope.launch {
+            // Движок гасим первым: он держит открытыми базы, которые сейчас
+            // сотрёт система.
+            runCatching {
+                context.stopService(
+                    android.content.Intent(context, com.vladimir.messenger.service.CoreServerService::class.java),
+                )
+            }
+            // Автоперезапуск: будильник переживает смерть процесса, поэтому
+            // телефон сам откроет APU на экране входа - человек сразу может
+            // войти под другим логином, не ища иконку.
+            runCatching {
+                val launch = context.packageManager
+                    .getLaunchIntentForPackage(context.packageName)
+                if (launch != null) {
+                    launch.addFlags(
+                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                            android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK,
+                    )
+                    val pending = android.app.PendingIntent.getActivity(
+                        context,
+                        0,
+                        launch,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                            android.app.PendingIntent.FLAG_IMMUTABLE,
+                    )
+                    val alarm = context.getSystemService(Context.ALARM_SERVICE)
+                        as android.app.AlarmManager
+                    alarm.setExactAndAllowWhileIdle(
+                        android.app.AlarmManager.RTC_WAKEUP,
+                        System.currentTimeMillis() + 700L,
+                        pending,
+                    )
+                }
+            }
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE)
+                as android.app.ActivityManager
+            // Убивает процесс и стирает данные приложения; следующего кода
+            // система уже не исполнит.
+            am.clearApplicationUserData()
+        }
+    }
 
     /** Идёт ли ручная проверка обновлений (кнопка «Проверить»). */
     private val _updatesChecking = MutableStateFlow(false)
@@ -362,6 +420,11 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(displayName = instantName) }
         }
         _uiState.update { it.copy(proxyTunnelEnabled = proxyTunnelEnabled()) }
+        // Раунд 249: для окна «Выйти из APU» важно сразу знать, защищён ли
+        // профиль никнеймом и паролем - от этого зависит предупреждение.
+        _uiState.update {
+            it.copy(protectedNick = runCatching { identityBackup.protectedNickname(context) }.getOrNull())
+        }
         refreshServerSection()
     }
 
@@ -587,6 +650,10 @@ class SettingsViewModel @Inject constructor(
                 .edit()
                 .putString("display_name", clean)
                 .apply()
+            // р246: живой профиль - имя уезжает второму устройству личности.
+            com.vladimir.messenger.data.mirror.ProfileMirror.noteLocalChange(
+                context, com.vladimir.messenger.data.mirror.ProfileMirror.FIELD_NAME,
+            )
         }
         // Ссылка-приглашение несёт имя, поэтому пересобираем её сразу.
         loadSettings()

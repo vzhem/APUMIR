@@ -38,6 +38,8 @@ import kotlinx.coroutines.withContext
 data class ProfileSyncUiState(
     val busy: Boolean = false,
     val password: String = "",
+    /** Раунд 256: пароль подставлен из входа - человеку вводить нечего. */
+    val passwordAuto: Boolean = false,
     /** Режим источника: сервер раздачи поднят (Wi-Fi напрямую). */
     val sharing: Boolean = false,
     val shareAddress: ProfileSyncDirect.ShareAddress? = null,
@@ -73,13 +75,24 @@ class ProfileSyncViewModel @Inject constructor(
 
     private var server: ProfileSyncDirect.ShareServer? = null
     private var pollJob: Job? = null
+    // Раунд 257: релей на бесплатном плане KV имеет дневной лимит записи -
+    // авто-забор НЕ повторяем каждые 15 с, а после серверной ошибки берём
+    // паузу, чтобы не выжигать квоту.
+    private var lastAutoFetchMetaTimeMs = 0L
+    private var autoFetchCooldownUntilMs = 0L
 
     init {
+        // Раунд 256: пароль входа был заперт при входе - подставляем сам,
+        // чтобы «один флажок - и всё само» работало без повторного ввода.
+        val stored = ProfileSyncAuto.unwrap(context)
         _uiState.value = _uiState.value.copy(
             autoEnabled = ProfileSyncAuto.isEnabled(context),
             myDeviceId = ProfileSyncNet.deviceIdOf(context),
             myAccountNodeId = ProfileSyncNet.accountNodeIdOf(context),
+            password = stored?.let { String(it) }.orEmpty(),
+            passwordAuto = stored != null,
         )
+        stored?.fill(0.toChar())
         // «Сами синхронизировались»: пока окно открыто - сами ищем копию,
         // сами скачиваем и готовим. Применение - одним тапом человека.
         pollJob = viewModelScope.launch {
@@ -97,7 +110,10 @@ class ProfileSyncViewModel @Inject constructor(
     }
 
     fun onPasswordChange(value: String) {
-        _uiState.value = _uiState.value.copy(password = value.take(128))
+        // Новый пароль - прежние попытки авто-забора не в счёт.
+        lastAutoFetchMetaTimeMs = 0L
+        autoFetchCooldownUntilMs = 0L
+        _uiState.value = _uiState.value.copy(password = value.take(128), passwordAuto = false)
         // Пароль изменился - старый результат авто-поиска мог быть от другого пароля.
         if (_uiState.value.staged != null && value.length < BackupCipher.MIN_PASSWORD_LENGTH) {
             _uiState.value = _uiState.value.copy(staged = null)
@@ -130,7 +146,15 @@ class ProfileSyncViewModel @Inject constructor(
                 _uiState.value.myAccountNodeId,
             )
             if (foreign && hasPassword()) {
-                netFetchAndStage() // чужая копия: сами качаем и готовим
+                // Раунд 257: одну и ту же копию авто-забором не дёргаем
+                // (каждый успешный забор = записи в KV релея, там дневной
+                // лимит); после серверной ошибки - пауза 5 минут.
+                val metaTime = meta?.timeMs ?: 0L
+                val now = System.currentTimeMillis()
+                if (metaTime != lastAutoFetchMetaTimeMs && now >= autoFetchCooldownUntilMs) {
+                    lastAutoFetchMetaTimeMs = metaTime
+                    netFetchAndStage() // чужая копия: сами качаем и готовим
+                }
             }
         }
     }
@@ -143,6 +167,11 @@ class ProfileSyncViewModel @Inject constructor(
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 ProfileSyncNet.uploadBlocking(context, backup, chars)
+            }
+            // Раунд 256: пароль сработал - запираем для автоподстановки
+            // (до обнуления массива!).
+            if (result is ProfileSyncNet.UploadResult.Ok) {
+                ProfileSyncAuto.rememberPassword(context, chars)
             }
             chars.fill('\u0000')
             val (message, failed) = when (result) {
@@ -191,6 +220,10 @@ class ProfileSyncViewModel @Inject constructor(
                     )
                 }
                 is ProfileSyncNet.FetchResult.Failed -> {
+                    // Раунд 257: серверная ошибка (например, дневной лимит KV) -
+                    // авто-забор ставим на паузу, квоту не выжигаем.
+                    autoFetchCooldownUntilMs = System.currentTimeMillis() + 5 * 60 * 1000L
+                    lastAutoFetchMetaTimeMs = 0L
                     _uiState.value = _uiState.value.copy(
                         busy = false,
                         netMessage = "Не удалось забрать: ${fetched.reason}",
@@ -335,8 +368,12 @@ class ProfileSyncViewModel @Inject constructor(
         val staged = withContext(Dispatchers.IO) { backup.stage(source, chars) }
         when (staged) {
             is ProfileBackup.StageResult.Ready -> {
+                // Раунд 256: пароль подошёл к копии - запираем его для
+                // автоподстановки, чтобы дальше всё работало без ввода.
+                ProfileSyncAuto.rememberPassword(context, chars)
                 _uiState.value = _uiState.value.copy(
                     busy = false, staged = staged.manifest, message = null, failed = false,
+                    passwordAuto = true,
                 )
             }
             is ProfileBackup.StageResult.WrongPassword -> {

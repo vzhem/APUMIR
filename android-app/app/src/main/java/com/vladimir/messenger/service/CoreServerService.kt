@@ -37,6 +37,7 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -574,6 +575,9 @@ class CoreServerService : Service() {
         // р242: тот же цикл раз в минуту досылает PENDING - не полагаемся на
         // событие «увидели собеседника», которое может быть пропущено.
         serviceScope.launch {
+            // Раунд 261: первая итерация - не сразу: холодному старту важнее
+            // поднять движок, а не считать незавершённые отправки.
+            kotlinx.coroutines.delay(10_000L)
             var sincePump = 0
             while (true) {
                 runCatching { chatRepository.countPendingOutgoing() }
@@ -612,7 +616,10 @@ class CoreServerService : Service() {
         if (!gossipStarted) {
             gossipStarted = true
             serviceScope.launch {
-                kotlinx.coroutines.delay(3000)
+                // Раунд 261: сверки и роевые публикации не нужны в первую
+                // секунду - откладываем на 30 с, чтобы не конкурировать с
+                // подъёмом движка за диск и сеть.
+                kotlinx.coroutines.delay(30_000)
                 // Сверка «Контакты» = главная: у каждого контакта ровно один
                 // чат, дубли схлопнуты. Разово при старте, чтобы разошедшиеся
                 // за прошлые версии списки сошлись сами.
@@ -663,14 +670,38 @@ class CoreServerService : Service() {
         Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
 
         serviceScope.launch {
+            // Раунд 263: честный статус для сплэша - этап подготовки ключей.
+            CoreStatus.report("Готовим ключи безопасности…")
             // R0.5/S3: legacy routing ID остаётся неизменным; реальный Ed25519
             // signing sidecar устанавливается до engine start и пока используется
             // только diagnostics/future signed features.
             val legacyRoutingId = existingPubKey
                 ?: prefs.getString("node_id", null)
                 .orEmpty()
+            // Раунд 261: независимые пред-шаги идут ПАРАЛЛЕЛЬНО: движок ждёт
+            // самый медленный, а не сумму всех. Битый Keystore (KeyMint может
+            // виснуть надолго) не задерживает старт: у каждого шага потолок,
+            // по таймауту - честный деград в legacy/RAM-only.
+            val atRestDeferred = async {
+                (kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        RelayAtRestMasterKey.installIntoCore(applicationContext)
+                    }
+                }) ?: false
+            }
+            val bookDeferred = async {
+                runCatching {
+                    kotlinx.coroutines.withTimeoutOrNull(6_000) {
+                        addressBookBackup.restoreBeforeStart()
+                    }
+                }.onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
+            }
             val signing = if (prefs.getBoolean("identity_created", false)) {
-                IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                    }
+                }
             } else {
                 null
             }
@@ -680,8 +711,12 @@ class CoreServerService : Service() {
                     "keyId=${signing?.keyId?.take(12) ?: "none"}"
             )
             val fileExchange = if (signing != null) {
-                IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
-                    FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
+                            FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                        }
+                    }
                 }
             } else null
             Log.i(
@@ -711,24 +746,30 @@ class CoreServerService : Service() {
             // повышение (перезапуск уже с движком).
             if (prefs.getBoolean("mirror_defer_engine", false)) {
                 startAsMirrorShadow(legacyRoutingId)
+                // Раунд 263: зеркало живёт на событиях партнёра - для
+                // интерфейса это тоже «готово», заставка не нужна.
+                CoreStatus.report("Зеркальный режим: сеть ведёт партнёр")
+                CoreStatus.markReady()
                 return@launch
             }
 
-            val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
+            // Раунд 261: параллельные пред-шаги к этому моменту уже доделались
+            // (или доехали до своего потолка) - движок стартует без ожидания.
+            val atRestKeyOk = atRestDeferred.await()
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
-
-            // Азбука адресов: на свежей установке файла ещё нет — тянем
-            // облачную копию ДО создания движка (ядро читает файл один раз
-            // при старте). На обычном запуске это мгновенный no-op.
-            runCatching { addressBookBackup.restoreBeforeStart() }
-                .onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
+            // Азбука адресов: на свежей установке облачная копия тянулась
+            // параллельно; ядро читает файл один раз при старте.
+            bookDeferred.await()
 
             // Собственный SQLite-файл relay custody (app-private, WAL).
+            CoreStatus.report("Поднимаем ядро и сеть…")
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
             val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath)
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                // Раунд 263: ядро поднято - сплэш может отпустить человека.
+                CoreStatus.markReady()
 
                 // Азбука адресов (docs/ADDRESS_BOOK.md): засевать «свои»,
                 // чтобы в первую же минуту после старта личное presence
@@ -980,6 +1021,10 @@ class CoreServerService : Service() {
                 startEventPolling()
             } else {
                 updateNotification("Не удалось подключиться")
+                // Раунд 263: движок не поднялся - не держим человека на
+                // заставке: честный ограниченный режим, сплэш отпускаем.
+                CoreStatus.report("Ядро в ограниченном режиме")
+                CoreStatus.markReady()
                 stopServiceSafely()
             }
         }

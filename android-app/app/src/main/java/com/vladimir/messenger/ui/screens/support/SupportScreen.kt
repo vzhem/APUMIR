@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.support
 
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
 // =============================================================================
 // SUPPORTSCREEN.KT — «Поддержать разработчика» (Настройки)
 // =============================================================================
@@ -39,8 +42,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -111,7 +112,7 @@ fun SupportScreen(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("Поддержать разработчика") },
+                    title = { ApuSettingsHeader("Поддержать разработчика") },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -205,12 +206,7 @@ fun SupportScreen(
                         }
                     } else {
                         itemsIndexed(uiState.ways) { _, way ->
-                            Card(
-                                shape = RoundedCornerShape(18.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                                ),
-                            ) {
+                            ApuSettingsCard {
                                 Column(Modifier.padding(16.dp)) {
                                     Text(
                                         way.title,
@@ -251,12 +247,7 @@ fun SupportScreen(
                     item { SectionTitle("Поддерживать ежемесячно") }
                     item {
                         val reminder = uiState.reminder
-                        Card(
-                            shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                            ),
-                        ) {
+                        ApuSettingsCard {
                             Column(Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
