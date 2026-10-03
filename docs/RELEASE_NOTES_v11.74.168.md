@@ -7,6 +7,6 @@
 - Переключатель темы и действия профиля удобнее на узком экране и при крупном шрифте.
 - Общий стиль применён также к переносу профиля, резервным копиям, рейтингу, прокси и поддержке.
 
-[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.168/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.168/app-release.apk.sha256)
+[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.168/app-release.apk) · [SHA-256](https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.168/release-upload/app-release.apk.sha256)
 
 Устанавливайте поверх предыдущей версии — переписка сохранится.
