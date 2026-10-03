@@ -12,6 +12,7 @@ import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.local.dao.InboxPinDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
@@ -48,7 +49,7 @@ import com.vladimir.messenger.data.local.dao.PostSignerDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 20
+const val APP_DATABASE_VERSION = 22
 
 @Database(
     entities = [
@@ -87,6 +88,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun fileTransferDao(): FileTransferDao
     abstract fun fileExchangePeerDao(): FileExchangePeerDao
     abstract fun groupDao(): GroupDao
+    abstract fun inboxPinDao(): InboxPinDao
     abstract fun directoryDao(): DirectoryDao
     abstract fun nicknameDao(): NicknameDao
     abstract fun avatarDao(): AvatarDao
@@ -442,6 +444,26 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "ALTER TABLE `file_transfers` ADD COLUMN `custodianNodeId` TEXT NOT NULL DEFAULT ''"
                 )
+            }
+        }
+
+        /** Раунд 187: закрепы в «Избранном» - честная миграция, данные целы. */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `saved_items` ADD COLUMN `isPinned` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE `saved_items` ADD COLUMN `pinnedAtMs` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        /** Раунд 204: закрепления бесед главного списка (лички, группы, каналы). */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `chats` ADD COLUMN `pinnedAtMs` INTEGER")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `pinnedAtMs` INTEGER")
             }
         }
 

@@ -9,6 +9,12 @@ package com.vladimir.messenger.ui.screens.groups
 // выбранной группы идут вертикальным списком, каждая в своём пузыре,
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuBubbleCard
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -19,16 +25,19 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -37,6 +46,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Search
+import android.widget.Toast
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -52,8 +70,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,7 +81,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,12 +93,16 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,13 +111,24 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.TopicSummary
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
+import com.vladimir.messenger.ui.theme.LocalMessengerColors
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuSearchField
+import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuMenuDots
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
+import com.vladimir.messenger.ui.components.GifCatalogDialog
+import com.vladimir.messenger.ui.components.InputPanelDialog
 import com.vladimir.messenger.ui.components.GroupFileCard
+import com.vladimir.messenger.ui.components.GroupQrInviteDialog
 import com.vladimir.messenger.ui.components.fileIconFor
 import com.vladimir.messenger.ui.components.ImagePreview
+import com.vladimir.messenger.ui.components.TopicEmojiCatalog
+import com.vladimir.messenger.ui.components.TopicEmojiPicker
 import com.vladimir.messenger.ui.components.TopicIconCatalog
 import com.vladimir.messenger.ui.components.TopicIconView
 import com.vladimir.messenger.util.ImageLinkDetector
@@ -111,11 +145,32 @@ fun GroupChatScreen(
     onSwitchGroup: (groupId: String) -> Unit = {},
     /** Нажатие на значок канала в левой колонке. */
     onSwitchChannel: (channelId: String) -> Unit = {},
+    /** Раунд 203: тап по источнику пересылки - открыть чат друга. */
+    onOpenChat: (chatId: String, contactName: String, contactId: String) -> Unit = { _, _, _ -> },
+    /** Раунд 203: тап по источнику пересылки - открыть группу/канал (тему). */
+    onOpenGroup: (groupId: String, topicId: String?) -> Unit = { _, _ -> },
+    /** Раунд 203: источника нет на телефоне - карточка «Вступить»/«Подписаться». */
+    onJoinByLink: (link: String) -> Unit = {},
     viewModel: GroupChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var draft by remember { mutableStateOf("") }
+    // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
+    // второе устройство личности и возвращается, если чат открыть заново.
     var showNewTopic by remember { mutableStateOf(false) }
+    // Раунд 260: тап по значку темы в шапке открывает её редактирование.
+    var showEditTopic by remember { mutableStateOf(false) }
+    // Раунд 213: «три точки» шапки + приглашение по QR коду.
+    var showTopMenu by remember { mutableStateOf(false) }
+    var showQrInvite by remember { mutableStateOf(false) }
+    var qrLink by remember { mutableStateOf<String?>(null) }
+    var qrLoading by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(showQrInvite) {
+        if (showQrInvite) {
+            qrLoading = true
+            qrLink = viewModel.inviteQrLink()
+            qrLoading = false
+        }
+    }
     // Файл к сообщению (рой, этап 9): системный выбор → хэш и копия →
     // визитка в тексте; сам файл участники просят у автора и друг у друга.
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -131,6 +186,169 @@ fun GroupChatScreen(
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
+    // Раунд 143: заявки на вступление - пузырь над содержимым для админов.
+    val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
+    var showRequestsSheet by remember { mutableStateOf(false) }
+    var requestQuery by remember { mutableStateOf("") }
+    val canDecideRequests = uiState.me?.let {
+        com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(it.role)
+    } == true
+    // Раунд 267: тап по пузырю шапки группы/канала ведёт в настройки -
+    // но только админам/владельцу, у остальных тап ничего не делает.
+    val iAmGroupAdmin = canDecideRequests
+    // Каталог GIF (кнопка «GIF» у скрепки).
+    var showGifCatalog by remember { mutableStateOf(false) }
+    // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
+    var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
+    deleteForAllTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteForAllTarget = null },
+            title = { Text("Удалить у всех?") },
+            text = { Text("Сообщение исчезнет у всех участников группы. У кого старая версия приложения - там останется: обновите телефоны.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteForAllTarget = null
+                    viewModel.deleteMessageForAll(target.id)
+                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
+            },
+        )
+    }
+
+    // Раунд 203: «Поделиться в APU» в группах и каналах - та же пересылка
+    // с указанием источника, что и в личном чате.
+    var forwardPayload by remember {
+        mutableStateOf<com.vladimir.messenger.ui.components.ForwardPayload?>(null)
+    }
+    val fwdScope = rememberCoroutineScope()
+    val fwdCtx = androidx.compose.ui.platform.LocalContext.current
+    // Раунд 203: подтверждение пересылки - плашка по центру экрана.
+    var fwdSent by remember { mutableStateOf(false) }
+    if (fwdSent) {
+        com.vladimir.messenger.ui.components.ForwardSentOverlay(visible = true, onTimeout = { fwdSent = false })
+    }
+    forwardPayload?.let { payload ->
+        val fCtx = androidx.compose.ui.platform.LocalContext.current
+        var fLoading by remember { mutableStateOf(true) }
+        var fTargets by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTarget>>(emptyList())
+        }
+        var fPicked by remember { mutableStateOf<com.vladimir.messenger.ui.components.ForwardTarget?>(null) }
+        var fTopics by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTopic>>(emptyList())
+        }
+        var fTopicsLoading by remember { mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(payload) {
+            fTargets = viewModel.forwardTargets()
+            fLoading = false
+        }
+        androidx.compose.runtime.LaunchedEffect(fPicked?.id) {
+            val picked = fPicked ?: return@LaunchedEffect
+            fTopicsLoading = true
+            fTopics = viewModel.forwardTopics(picked.id)
+            fTopicsLoading = false
+        }
+        com.vladimir.messenger.ui.components.ForwardChooserDialog(
+            targets = fTargets,
+            loading = fLoading,
+            onDismiss = { forwardPayload = null },
+            onPick = { target ->
+                if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                    forwardPayload = null
+                    viewModel.forwardMessage(payload.text, payload.label, target) { ok ->
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else {
+                    fPicked = target
+                }
+            },
+        )
+        fPicked?.let { target ->
+            com.vladimir.messenger.ui.components.ForwardTopicPickerDialog(
+                targetTitle = target.title,
+                isChannel = target.isChannel,
+                topics = fTopics,
+                loading = fTopicsLoading,
+                onDismiss = { fPicked = null },
+                onPick = { topic ->
+                    fPicked = null
+                    forwardPayload = null
+                    viewModel.forwardMessage(
+                        payload.text,
+                        payload.label,
+                        target.copy(topicId = topic.id, topicTitle = topic.name),
+                    ) { ok ->
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    if (showGifCatalog) {
+        // Раунд 138: единая панель ввода - Эмодзи / Гиф / Стикеры в одном
+        // пузыре, сверху лента пузырей разделов, следящая за прокруткой.
+        val stickerEntries by viewModel.stickerEntries.collectAsStateWithLifecycle()
+        val stickerRecents by viewModel.stickerRecents.collectAsStateWithLifecycle()
+        val swarmStickers by viewModel.swarmStickers.collectAsStateWithLifecycle()
+        InputPanelDialog(
+            myGifs = uiState.myGifs,
+            swarmGifs = uiState.swarmGifs,
+            swarmStatus = uiState.swarmStatus,
+            items = uiState.gifItems,
+            next = uiState.gifNext,
+            loading = uiState.gifLoading,
+            error = uiState.gifError,
+            notice = uiState.gifNotice,
+            onSearch = { viewModel.searchGifs(it) },
+            onMore = { viewModel.searchGifs("", more = true) },
+            onAttach = { item ->
+                showGifCatalog = false
+                viewModel.attachGif(item) { }
+            },
+            onAttachLocal = { entry ->
+                showGifCatalog = false
+                viewModel.attachLocalGif(entry.sha256)
+            },
+            onRequestSwarm = { swarm ->
+                viewModel.requestSwarmGif(swarm) { showGifCatalog = false }
+            },
+            onRequestThumbs = { viewModel.requestPeerThumbs(it) },
+            onAddOwnGif = { uri -> viewModel.addOwnGif(uri) },
+            stickers = stickerEntries,
+            stickerRecents = stickerRecents,
+            swarmStickers = swarmStickers,
+            onSticker = {
+                // Раунд 170: выбрал стикер - окно закрывается, видно чат.
+                showGifCatalog = false
+                viewModel.sendSticker(it)
+            },
+            onRemoveSticker = { viewModel.removeSticker(it) },
+            onRemoveGif = { viewModel.removeOwnGif(it.sha256) },
+            onAddSticker = { uri -> viewModel.addSticker(uri) },
+            onAddStickerZip = { uri -> viewModel.addStickerZip(uri) },
+            onRequestSwarmSticker = { swarm -> viewModel.requestSwarmSticker(swarm) },
+            // Раунд 206: пустые плитки сами докачиваются; ↻ - всем держателям.
+            onAutoFetchSticker = { viewModel.autoFetchSticker(it) },
+            onRetryFetchSticker = { viewModel.retryFetchSticker(it) },
+            onEmoji = { emoji -> viewModel.onDraftChanged(uiState.draft + emoji) },
+            onOpened = { viewModel.refreshStickers() },
+            onDismiss = {
+                showGifCatalog = false
+                viewModel.closeGifCatalog()
+            },
+        )
+    }
     // В КАНАЛЕ список тем не показываем. Пост и комментарии к нему устроены
     // как тема внутри, но человеку это знать незачем: он открыл комментарии к
     // конкретному посту и должен видеть обычную переписку, а «Назад» обязано
@@ -138,10 +356,20 @@ fun GroupChatScreen(
     // одинаковые пузыри-оболочки постов, и выйти к ленте можно было только
     // вторым нажатием.
     val isChannel = uiState.group?.isChannel == true
+    val channelRootMessageId = if (isChannel) {
+        uiState.messages.firstOrNull {
+            !com.vladimir.messenger.util.InlineImage.isPart(it.content)
+        }?.id
+    } else {
+        null
+    }
     val hasTopics = !isChannel &&
         uiState.group?.topicsEnabled == true &&
         uiState.topics.isNotEmpty()
     val showTopicsList = hasTopics && !showFeed
+    val displayedError = MessagePinPolicy.visibleError(
+        uiState.error, uiState.pinned.size, inMessageFeed = !showTopicsList,
+    )
     val selectedTopic = uiState.topics.firstOrNull { it.id == uiState.selectedTopicId }
     val selectedTopicName = selectedTopic?.name
     // Внутри темы группы наверху крупно - сама тема (значок и имя), а
@@ -160,9 +388,42 @@ fun GroupChatScreen(
     }
 
     // Подложка на весь экран, в том числе под верхней панелью.
+            val feedListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val feedScope = rememberCoroutineScope()
+            LaunchedEffect(uiState.selectedTopicId, uiState.messages.size) {
+                val jump = viewModel.feedJump.value ?: return@LaunchedEffect
+                if (jump.topicId != uiState.selectedTopicId || uiState.messages.isEmpty()) {
+                    return@LaunchedEffect
+                }
+                val offset = if (uiState.moreComments > 0) 1 else 0
+                feedListState.scrollToItem(
+                    (offset + jump.index).coerceIn(0, offset + uiState.messages.size - 1),
+                )
+                viewModel.consumeFeedJump()
+            }
+            // Раунд 150: отправил сообщение - лента доехала до него
+            // (раньше оно оставалось за полем ввода, владелец, скрин).
+            LaunchedEffect(uiState.messages.size, uiState.messages.lastOrNull()?.id) {
+                val last = uiState.messages.lastOrNull() ?: return@LaunchedEffect
+                if (last.isFromMe) {
+                    val offset = if (uiState.moreComments > 0) 1 else 0
+                    feedListState.animateScrollToItem(offset + uiState.messages.size - 1)
+                }
+            }
+            val feedRemaining by remember(uiState.messages.size, uiState.moreComments) {
+                derivedStateOf {
+                    val last = feedListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    (uiState.messages.size + (if (uiState.moreComments > 0) 1 else 0) - 1 - last)
+                        .coerceAtLeast(0)
+                }
+            }
+
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
+        // Раунд 266: клавиатура не закрывает переписку - сообщения и лента
+        // сжимаются над клавиатурой, последнее видно сразу.
         Scaffold(
+        modifier = Modifier.imePadding(),
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
@@ -172,19 +433,14 @@ fun GroupChatScreen(
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = {
-                    // Название группы на белой полосочке со скруглениями и
-                    // золотой рамкой - читается на любой подложке.
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                RoundedCornerShape(18.dp),
-                            )
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    ) {
+                    // Права на действия не меняются: тема — только с правом
+                    // управления темами, группа/канал — для админов/владельца.
+                    val openHeader: (() -> Unit)? = when {
+                        topicHeader && selectedTopic != null && uiState.canManageTopics -> ({ showEditTopic = true })
+                        !topicHeader && iAmGroupAdmin -> ({ onOpenAdmin(uiState.groupId) })
+                        else -> null
+                    }
+                    ApuHeaderBubble(onClick = openHeader) {
                         // Аватар группы слева от названия, если задан.
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             val storeAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
@@ -268,6 +524,22 @@ fun GroupChatScreen(
                     IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Управление группой")
                     }
+                    // Раунд 213: «три точки» шапки группы/канала - сейчас тут
+                    // приглашение по QR, дальше дополним по просьбам владельца.
+                    Box {
+                        IconButton(onClick = { showTopMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
+                        }
+                        ApuActionsMenu(
+                            expanded = showTopMenu,
+                            onDismiss = { showTopMenu = false },
+                            actions = listOf(
+                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                    showQrInvite = true
+                                },
+                            ),
+                        )
+                    }
                 },
             )
         },
@@ -307,9 +579,19 @@ fun GroupChatScreen(
             // ── Правая часть: список тем пузырями либо лента выбранной темы.
             Column(modifier = Modifier.weight(1f).fillMaxSize()) {
 
-            if (uiState.error != null) {
+            // Раунд 143: пузырь заявок - на главной группы/канала, в темах
+            // и в комментариях; содержимое НЕ перекрывает (оно уезжает вниз).
+            if (canDecideRequests && joinRequests.isNotEmpty()) {
+                JoinRequestsBanner(
+                    count = joinRequests.size,
+                    expanded = showRequestsSheet,
+                    onClick = { showRequestsSheet = !showRequestsSheet },
+                )
+            }
+
+            if (displayedError != null) {
                 Text(
-                    uiState.error ?: "",
+                    displayedError,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
@@ -329,14 +611,11 @@ fun GroupChatScreen(
                     }
                     if (uiState.canManageTopics) {
                         item {
-                            Card(
+                            ApuBubbleCard(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { showNewTopic = true },
                                 shape = RoundedCornerShape(18.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = Color(0xFFF5F7FA).copy(alpha = 0.6f),
-                                ),
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
@@ -362,7 +641,7 @@ fun GroupChatScreen(
                 val pinnedTopicName = uiState.topics
                     .firstOrNull { it.id == uiState.selectedTopicId }
                     ?.name
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -370,11 +649,8 @@ fun GroupChatScreen(
                             Text(
                                 "Закреплённые" +
                                     (pinnedTopicName?.let { " · $it" }.orEmpty()) +
-                                    if (uiState.pinned.size > 1) {
-                                        " (" + uiState.pinned.size + ")"
-                                    } else {
-                                        ""
-                                    },
+                                    " (" + uiState.pinned.size + "/" +
+                                    com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
                                 fontWeight = FontWeight.Medium,
                             )
                         }
@@ -388,7 +664,22 @@ fun GroupChatScreen(
                                 .verticalScroll(rememberScrollState()),
                         ) {
                             uiState.pinned.forEach { m ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                // Раунд 172: тап по закрепу - лента прыгает к
+                                // самому сообщению (просьба владельца).
+                                val pinnedIndex = uiState.messages.indexOfFirst { it.id == m.id }
+                                val rowModifier = if (pinnedIndex >= 0) {
+                                    Modifier.fillMaxWidth().clickable {
+                                        feedScope.launch {
+                                            feedListState.animateScrollToItem(pinnedIndex)
+                                        }
+                                    }
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = rowModifier,
+                                ) {
                                     // Закреплённый файл (этап 9-10): значок по
                                     // типу и подпись «📎 имя (размер)» - она и
                                     // так в тексте, служебная строка визитки
@@ -403,9 +694,12 @@ fun GroupChatScreen(
                                         Spacer(Modifier.width(4.dp))
                                     }
                                     Text(
-                                        // Без служебных строк фото и длинного текста.
-                                        com.vladimir.messenger.util.InlineImage.stripImage(m.content)
-                                            .ifBlank { pinnedFile?.let { GroupFileMarker.caption(it) }.orEmpty() },
+                                        // Без служебных строк фото и длинного текста;
+                                        // р156: и без гифка-ссылок/стикер-конвертов.
+                                        com.vladimir.messenger.util.ChatPreviews.human(
+                                            com.vladimir.messenger.util.InlineImage.stripImage(m.content)
+                                                .ifBlank { pinnedFile?.let { GroupFileMarker.caption(it) }.orEmpty() }
+                                        ) ?: "",
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
@@ -430,9 +724,16 @@ fun GroupChatScreen(
             }
 
             // ── Лента темы
+            // Раунд 144: при входе в тема открывается на первом непрочитанном
+            // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(8.dp),
+                state = feedListState,
+                // Раунд 151: лента сжимается над клавиатурой (edge-to-edge:
+                // окно само не сжимается - переписка пряталась за пузырями
+                // ввода; запас 200dp снизу отводит место под пузыри).
+                modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
+                // Раунд 147: снизу запас под оверлей поля ввода.
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Большой канал: комментарии приходят от владельца по запросу,
@@ -463,20 +764,76 @@ fun GroupChatScreen(
                             onDownload = { viewModel.requestFile(message, card) },
                             onSave = { viewModel.requestSaveReceivedFile(it) },
                             onShare = { f -> viewModel.shareFile(f, card.displayName, card.mediaType) },
+                            onFavorite = { viewModel.saveFileToFavorites(it) },
                             servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.groupId, card.sha256)] ?: 0,
                         )
+                    }
+                    // Раунд 166: стикер маленький - получатель ТИХО просит
+                    // файл сам, и анимированная картинка появляется без
+                    // кнопки «Скачать».
+                    val st = cardState
+                    val stickerCard = card
+                    if (st != null && stickerCard != null && !message.isFromMe &&
+                        stickerCard.displayName.startsWith("Стикер") &&
+                        st.transfer == null && !st.pending
+                    ) {
+                        LaunchedEffect(stickerCard.sha256) {
+                            viewModel.requestFile(message, stickerCard)
+                        }
                     }
                     MessageBubble(
                         message = message,
                         senderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
                             ?: "Участник " + message.senderId.takeLast(4),
-                        canPin = uiState.canPin,
+                        // Публикацию закрепляют в ленте канала (лично); в
+                        // обсуждении разрешаем только снять старый общий pin.
+                        canPin = uiState.canPin &&
+                            (message.id != channelRootMessageId || message.isPinned),
                         onTogglePin = { viewModel.togglePin(message.id, !message.isPinned) },
-                        onSaveToFavorites = { viewModel.saveToFavorites(message.content) },
+                        onSaveToFavorites = {
+                            // Раунд 203: в избранное - без служебных строк пересылки.
+                            viewModel.saveToFavorites(com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content))
+                        },
+                        onShareToApu = {
+                            // Раунд 203: источник - группа; для чужих сообщений
+                            // добавляем автора после названия.
+                            val author = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
+                            val base = uiState.group?.title ?: "группа"
+                            val label = if (!message.isFromMe && !author.isNullOrBlank()) {
+                                base + " · автор: " + author
+                            } else {
+                                base
+                            }
+                            forwardPayload = com.vladimir.messenger.ui.components.ForwardPayload(
+                                message.content,
+                                label,
+                            )
+                        },
+                        onOpenForward = { ref ->
+                            fwdScope.launch {
+                                when (val open = viewModel.resolveForwardTap(ref)) {
+                                    is com.vladimir.messenger.util.ForwardMarker.Open.Chat ->
+                                        onOpenChat(open.chatId, open.contactName, open.contactId)
+                                    is com.vladimir.messenger.util.ForwardMarker.Open.Group ->
+                                        onOpenGroup(open.groupId, open.topicId)
+                                    is com.vladimir.messenger.util.ForwardMarker.Open.Join ->
+                                        onJoinByLink(open.link)
+                                    is com.vladimir.messenger.util.ForwardMarker.Open.Missing ->
+                                        android.widget.Toast.makeText(
+                                            fwdCtx,
+                                            open.message,
+                                            android.widget.Toast.LENGTH_SHORT,
+                                        ).show()
+                                }
+                            }
+                        },
                         reactions = uiState.reactions[message.id].orEmpty(),
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
                         fileCard = cardState,
+                        onEnsureGif = { sha -> viewModel.ensureGifRef(sha) },
+                        onDeleteForMe = { viewModel.deleteMessageForMe(message.id) },
+                        onDeleteForAll = { deleteForAllTarget = message },
                     )
                 }
             }
@@ -488,83 +845,21 @@ fun GroupChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                        .apuBubbleSurface()
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp))
+                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp), tint = ApuBubbleAccentColor)
                     Spacer(Modifier.width(8.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(staged.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall)
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = ApuBubbleTextColor)
+                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
                     }
                     IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
                     }
                 }
-            }
-
-            // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                    )
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(18.dp),
-                    )
-                    .padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Скрепка (этап 9): файл к сообщению. Закрытые вложения
-                // объясняются, а не молчат.
-                IconButton(
-                    onClick = {
-                        if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
-                    },
-                    enabled = !uiState.isPreparingFile && !uiState.sending,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    if (uiState.isPreparingFile) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            Icons.Filled.AttachFile,
-                            contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
-                            tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Сообщение") },
-                    maxLines = 4,
-                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFF1E2430),
-                        unfocusedTextColor = Color(0xFF1E2430),
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedPlaceholderColor = Color(0xFF5A6472),
-                        unfocusedPlaceholderColor = Color(0xFF5A6472),
-                    ),
-                )
-                Spacer(Modifier.width(8.dp))
-                TextButton(
-                    enabled = (draft.isNotBlank() || uiState.stagedFile != null) && !uiState.sending && !uiState.isPreparingFile,
-                    onClick = {
-                        viewModel.send(draft)
-                        draft = ""
-                    },
-                ) { Text("Отправить") }
             }
 
             } // else: лента темы
@@ -572,6 +867,183 @@ fun GroupChatScreen(
             } // Row: левая колонка + правая
         }
     }
+    // Показ - только ВНУТРИ темы (или в группе без тем): на списке
+    // тем поля ввода и «Отправить» нет (владелец, раунд 148).
+    if (!showTopicsList) {
+    // Раунд 147: поле ввода - оверлей НА ВЕСЬ экран, включая область
+    // пузырей тем слева (просьба владельца); imePadding поднимает всё
+    // над клавиатурой, «Отправить» всегда видна.
+    Column(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .imePadding(),
+    ) {
+            // Раунд 144: сколько сообщений осталось ниже - тап прокручивает вниз.
+            if (feedRemaining > 0) {
+                val lastIndex = (if (uiState.moreComments > 0) 1 else 0) + uiState.messages.size - 1
+                Text(
+                    "↓  Ещё " + messagesLabel(feedRemaining),
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFFF5F7FA).copy(alpha = 0.96f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                            RoundedCornerShape(16.dp),
+                        )
+                        .clickable {
+                            feedScope.launch {
+                                feedListState.animateScrollToItem(lastIndex.coerceAtLeast(0))
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                )
+            }
+
+            // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
+            // Раунд 146: пузырь поля - от края до края экрана; «Отправить» -
+            // своим пузырём той же ширины под полем (просьба владельца).
+            var inputFocused by remember { mutableStateOf(false) }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        // Раунд 266: фирменная светлая подложка вместо серой.
+                        .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(6.dp),
+                ) {
+                    if (inputFocused) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = {
+                                    if (uiState.canAttach) filePicker.launch(arrayOf("*/*")) else viewModel.onAttachLocked()
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                if (uiState.isPreparingFile) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        Icons.Filled.AttachFile,
+                                        contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
+                                        tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                                    )
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    if (uiState.canAttach) {
+                                        showGifCatalog = true
+                                        viewModel.onGifCatalogOpened()
+                                        if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                                            viewModel.searchGifs("")
+                                        }
+                                    } else {
+                                        viewModel.onAttachLocked()
+                                    }
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                            ) {
+                                Text(
+                                    "GIF",
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = uiState.draft,
+                        onValueChange = { viewModel.onDraftChanged(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { inputFocused = it.isFocused },
+                        placeholder = { Text("Сообщение") },
+                        shape = RoundedCornerShape(18.dp),
+                        minLines = 1,
+                        maxLines = 6,
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFF1E2430),
+                            unfocusedTextColor = Color(0xFF1E2430),
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.6f),
+                            unfocusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.35f),
+                            cursorColor = ApuBubbleAccentColor,
+                            focusedPlaceholderColor = Color(0xFF5A6472),
+                            unfocusedPlaceholderColor = Color(0xFF5A6472),
+                        ),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                // Раунд 152: активная «Отправить» - золотая заливка и белый
+                // текст: сразу видно, что сообщение можно отправить (раньше
+                // менялся только оттенок текста - владелец не замечал).
+                val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
+                    !uiState.sending && !uiState.isPreparingFile
+                TextButton(
+                    enabled = canSend,
+                    onClick = {
+                        // р237: черновик чистит сама модель после успешной отправки.
+                        viewModel.send(uiState.draft)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            if (canSend) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
+                        )
+                        .border(
+                            1.dp,
+                            if (canSend) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(vertical = 8.dp),
+                ) {
+                    Text(
+                        "Отправить",
+                        fontWeight = FontWeight.Bold,
+                        color = if (canSend) Color.White else Color(0xFF9AA3AF),
+                    )
+                }
+            }
+
+    }
+
+    }
+    }
+
+
+    // Раунд 143: список заявок поверх экрана (как в привычном мессенджере):
+    // поиск-пузырь, прокрутка, «Принять в группу» / «Отклонить».
+    if (showRequestsSheet && joinRequests.isNotEmpty()) {
+        JoinRequestsSheet(
+            requests = joinRequests,
+            query = requestQuery,
+            onQuery = { requestQuery = it },
+            onDecide = { nodeId, approve ->
+                viewModel.decideJoinRequest(nodeId, approve)
+                if (joinRequests.size <= 1) showRequestsSheet = false
+            },
+            onDismiss = { showRequestsSheet = false },
+        )
     }
 
     if (showNewTopic) {
@@ -581,6 +1053,33 @@ fun GroupChatScreen(
                 viewModel.createTopic(name, icon)
                 showNewTopic = false
             },
+        )
+    }
+
+    // Раунд 260: тап по значку темы в шапке - смена имени и значка темы.
+    if (showEditTopic && selectedTopic != null) {
+        val topic = selectedTopic
+        NewTopicDialog(
+            title = "Редактирование темы",
+            confirmLabel = "Сохранить",
+            initialName = topic.name,
+            initialIcon = topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
+            onDismiss = { showEditTopic = false },
+            onCreate = { name, icon ->
+                viewModel.updateTopic(topic.id, name, icon)
+                showEditTopic = false
+            },
+        )
+    }
+
+    // Раунд 213: QR с короткой ссылкой-приглашением; без APU страница
+    // сервиса предлагает установить приложение и вступить/подписаться.
+    if (showQrInvite) {
+        GroupQrInviteDialog(
+            isChannel = uiState.group?.isChannel ?: false,
+            link = qrLink,
+            loading = qrLoading,
+            onDismiss = { showQrInvite = false },
         )
     }
 }
@@ -761,16 +1260,180 @@ private fun UnreadBadge(count: Int) {
 // Тема в своём пузыре: иконка, название, превью, время и непрочитанные
 // =============================================================================
 
+/**
+ * Раунд 143: пузырь «N заявок на вступление» - виден только владельцу и
+ * админам, живёт над содержимым (не перекрывает его) на главной
+ * группы/канала, в темах и в комментариях. Нажатие раскрывает список.
+ */
+@Composable
+private fun JoinRequestsBanner(count: Int, expanded: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.94f))
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                RoundedCornerShape(18.dp),
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text("👥", fontSize = 18.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            requestsLabel(count) + " на вступление",
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            if (expanded) "▲" else "▼",
+            fontSize = 14.sp,
+            color = Color(0xFF5A6472),
+        )
+    }
+}
+
+/**
+ * Раунд 143: список заявок снизу поверх экрана: поиск-пузырь и
+ * прокручиваемые карточки с решениями.
+ */
+@Composable
+private fun JoinRequestsSheet(
+    requests: List<com.vladimir.messenger.data.group.JoinRequestSummary>,
+    query: String,
+    onQuery: (String) -> Unit,
+    onDecide: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Затемнение: нажатие вне списка закрывает его.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable { onDismiss() },
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(Color(0xFFF7F9FC))
+                .padding(12.dp),
+        ) {
+        ApuSearchField(
+            value = query,
+            onValueChange = onQuery,
+            placeholder = "Поиск заявок",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        val clean = query.trim()
+        val filtered = if (clean.isEmpty()) requests else requests.filter {
+            it.displayName.contains(clean, ignoreCase = true) ||
+                it.note.contains(clean, ignoreCase = true)
+        }
+        if (filtered.isEmpty()) {
+            Text(
+                if (requests.isEmpty()) "Заявок пока нет" else "Никого не нашли по «" + clean + "»",
+                color = Color(0xFF5A6472),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 460.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 8.dp),
+            ) {
+                items(filtered, key = { it.nodeId }) { request ->
+                    JoinRequestRow(request = request, onDecide = onDecide)
+                }
+            }
+        }
+        }
+    }
+}
+
+/** Карточка одной заявки: кто, когда и кнопки решения. */
+@Composable
+private fun JoinRequestRow(
+    request: com.vladimir.messenger.data.group.JoinRequestSummary,
+    onDecide: (String, Boolean) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE8EEF5)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    request.displayName.trim().take(1).uppercase().ifBlank { "?" },
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF5A6472),
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    request.displayName.ifBlank { request.nodeId.take(8) },
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1E2430),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "подал(а) заявку " + topicTimeLabel(request.requestedAtMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF5A6472),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(onClick = { onDecide(request.nodeId, true) }) {
+                Text("Принять в группу")
+            }
+            TextButton(onClick = { onDecide(request.nodeId, false) }) {
+                Text("Отклонить", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+/** «1 заявка / 2 заявки / 28 заявок». */
+private fun requestsLabel(count: Int): String = when {
+    count % 10 == 1 && count % 100 != 11 -> "$count заявка"
+    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count заявки"
+    else -> "$count заявок"
+}
+
+/** Раунд 143: «1 сообщение / 3 сообщения / 653 сообщения / 5 сообщений». */
+private fun messagesLabel(count: Int): String = when {
+    count <= 0 -> "Нет сообщений"
+    count % 10 == 1 && count % 100 != 11 -> "$count сообщение"
+    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count сообщения"
+    else -> "$count сообщений"
+}
+
 @Composable
 private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
-    Card(
+    ApuBubbleCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFF5F7FA).copy(alpha = 0.92f),
-        ),
     ) {
         Row(
             modifier = Modifier.padding(10.dp),
@@ -808,23 +1471,35 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                         )
                     }
                 }
+                // Раунд 143: счётчик сообщений под названием темы (как в
+                // привычном мессенджере: «653 сообщения»).
                 Text(
-                    topic.lastMessagePreview
-                        ?: if (topic.messageCount > 0) {
-                            topic.messageCount.toString() + " сообщ."
-                        } else {
-                            "Нет сообщений"
-                        },
+                    messagesLabel(topic.messageCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF5A6472),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (!topic.lastMessagePreview.isNullOrBlank()) {
+                    Text(
+                        // Раунд 155: без служебных строк (гифки/стикеры).
+                        com.vladimir.messenger.util.ChatPreviews.human(topic.lastMessagePreview)
+                            ?: "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF8A93A2),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    topicTimeLabel(topic.lastMessageAtMs),
+                    // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
+                    // на каждую перерисовку строки темы.
+                    remember(topic.lastMessageAtMs, System.currentTimeMillis() / 3_600_000L) {
+                        topicTimeLabel(topic.lastMessageAtMs)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFF5A6472),
                 )
@@ -864,16 +1539,37 @@ private fun MessageBubble(
     canPin: Boolean,
     onTogglePin: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
+    /** Раунд 203: «Поделиться в APU» - переслать сообщение с источником. */
+    onShareToApu: () -> Unit = {},
+    /** Раунд 203: тап по шапке-источнику пересылки. */
+    onOpenForward: ((com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit)? = null,
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к сообщению (этап 9), и ход его приёма/раздачи. */
     fileCard: FileCardState? = null,
+    /** Раунд 130: карточка-ссылка просит VM тихо подтянуть байты гифки. */
+    onEnsureGif: (String) -> Unit = {},
+    /** Раунд 135: удалить сообщение - у себя или у всех. */
+    onDeleteForMe: () -> Unit = {},
+    onDeleteForAll: () -> Unit = {},
 ) {
     // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
     var showMenu by remember { mutableStateOf(false) }
     var showReactions by remember { mutableStateOf(false) }
+    // Раунд 212: буфер обмена для «Копировать текст» в меню точек.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Раунд 211: «три точки» на самом пузыре (владелец: и на текстовых тоже).
+    // Не рисуем там, где точки уже есть у вложения: файл-карточка (р168)
+    // и гифка-ссылка (р210).
+    val bubbleHasOwnDots = fileCard != null || remember(message.content) {
+        com.vladimir.messenger.data.gif.GifLibrary.isGifRef(
+            com.vladimir.messenger.util.ForwardMarker.stripHeader(
+                com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+            )
+        )
+    }
     val time = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
@@ -881,12 +1577,27 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
     ) {
+        // Раунд 211: точки рядом с пузырём - у своего слева, у чужого справа.
+        if (!bubbleHasOwnDots && message.isFromMe) {
+            ApuMenuDots(
+                onClick = { showMenu = true },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+            Spacer(Modifier.width(2.dp))
+        }
         // Кнопке «Закрепить» справа нужно своё место: пузырь с карточкой
         // файла растягивается на все 300 dp, и на узком экране (лента рядом
         // с колонкой тем) кнопка выдавливалась за край - файл нельзя было
         // закрепить. Вес без заполнения: пузырь занимает не больше остатка.
         Box(modifier = if (canPin) Modifier.weight(1f, fill = false) else Modifier) {
-        Card(
+        // Раунд 169: стикер с копией на телефоне парит в чате - пузырь
+        // без фона и тени, только картинка, время и реакции.
+        val stickerFloat = fileCard != null && fileCard.previewFile != null &&
+            GroupFileMarker.isSticker(fileCard.info)
+        val messenger = LocalMessengerColors.current
+        val bubbleTextColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground
+            else if (message.isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+        ApuBubbleCard(
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .combinedClickable(
@@ -894,10 +1605,37 @@ private fun MessageBubble(
                     onClick = { showReactions = true },
                     onLongClick = { showMenu = true },
                 ),
+            backgroundColor = if (message.isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther,
+            contentColor = bubbleTextColor,
+            transparent = stickerFloat,
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {
                     Text(senderName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                }
+                // Раунд 203: шапка-источник пересылки - кликабельная; служебные
+                // строки (маркер + старая шапка) из тела убираем.
+                val fwdRef = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
+                val showFwdHeader = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
+                if (showFwdHeader) {
+                    val fwdLabel = fwdRef?.label ?: com.vladimir.messenger.util.ForwardMarker.plainHeaderLabel(message.content)
+                    Row(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = fwdRef != null && onOpenForward != null) {
+                                if (fwdRef != null && onOpenForward != null) onOpenForward(fwdRef)
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            "↩ Переслано из «" + fwdLabel + "»",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = TextDecoration.Underline,
+                            color = bubbleTextColor,
+                        )
+                    }
                 }
                 // Вложенная картинка едет отдельной служебной строкой внутри
                 // текста. Раньше её печатали как есть, и в комментариях под
@@ -907,9 +1645,11 @@ private fun MessageBubble(
                 }
                 val bodyText = remember(message.content, fileCard?.info) {
                     val words = com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+                    // Раунд 203: маркер и шапку пересылки рисуем отдельно.
+                    val clean = com.vladimir.messenger.util.ForwardMarker.stripHeader(words)
                     // Подпись «📎 имя (размер)» - для старых версий; здесь её
                     // заменяет карточка файла.
-                    if (fileCard != null) GroupFileMarker.stripCaption(words, fileCard.info) else words
+                    if (fileCard != null) GroupFileMarker.stripCaption(clean, fileCard.info) else clean
                 }
                 val attachedBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
                     .rememberAvatar(attachedB64)
@@ -925,6 +1665,19 @@ private fun MessageBubble(
                     )
                 }
                 when {
+                    // Раунд 130: ССЫЛКА на гифку - карточка с анимацией;
+                    // байты каждый телефон тихо тянет с хранителей сети.
+                    // Раунд 203: гифку узнаём в bodyText - он без маркера
+                    // и шапки пересылки.
+                    com.vladimir.messenger.data.gif.GifLibrary.isGifRef(bodyText) -> {
+                        com.vladimir.messenger.ui.components.GifRefCard(
+                            content = bodyText,
+                            onEnsure = onEnsureGif,
+                            // Раунд 210: точки на гифке - то же меню пузыря
+                            // (реакция/избранное/закрепить), что по удержанию.
+                            onMenu = { showMenu = true },
+                        )
+                    }
                     attachedBitmap != null -> {
                         androidx.compose.foundation.Image(
                             bitmap = attachedBitmap.asImageBitmap(),
@@ -950,16 +1703,52 @@ private fun MessageBubble(
                         com.vladimir.messenger.util.InlineImage.photoCount(message.content) > 0 ->
                         Text(
                             "Фото: " + com.vladimir.messenger.util.InlineImage.photoCount(message.content),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = bubbleTextColor.copy(alpha = 0.7f),
                         )
                     bodyText.isBlank() && fileCard != null -> Unit
                     else -> Text(bodyText)
                 }
                 if (fileCard != null) {
-                    GroupFileCard(state = fileCard, isFromMe = message.isFromMe)
+                    // Долгое нажатие на самой картинке = меню пузыря
+                    // (реакции/закрепить): раньше область карточки
+                    // «проглатывала» жест, и реакцию поставить не выходило.
+                    GroupFileCard(
+                        state = fileCard,
+                        isFromMe = message.isFromMe,
+                        onLongPress = { showMenu = true },
+                        // Раунд 211: в точках карточки - весь функционал
+                        // сообщения, как у текстовых пузырей.
+                        messageActions = buildList {
+                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                            // Раунд 212 (аудит: в личке «Копировать всё» есть,
+                            // тут не было) - текст сообщения в буфер обмена.
+                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(
+                                    android.content.ClipData.newPlainText("Сообщение", message.content)
+                                )
+                                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                            })
+                            if (canPin) {
+                                add(
+                                    ApuAction(
+                                        if (message.isPinned) "Открепить" else "Закрепить",
+                                        Icons.Filled.PushPin,
+                                    ) { onTogglePin() }
+                                )
+                            }
+                            if (message.isFromMe) {
+                                add(ApuAction("Удалить у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                                add(ApuAction("Удалить у всех", Icons.Filled.Delete, destructive = true) { onDeleteForAll() })
+                            }
+                        },
+                    )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(time, style = MaterialTheme.typography.labelSmall)
+                    Text(time, style = MaterialTheme.typography.labelSmall, color = bubbleTextColor.copy(alpha = 0.65f))
                     if (message.isPinned) {
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.Filled.PushPin, contentDescription = "Закреплено", modifier = Modifier.size(12.dp))
@@ -971,33 +1760,40 @@ private fun MessageBubble(
                 )
             }
         }
-        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-            DropdownMenuItem(
-                text = { Text("Поставить реакцию") },
-                onClick = {
-                    showMenu = false
-                    showReactions = true
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("В избранное") },
-                onClick = {
-                    showMenu = false
-                    onSaveToFavorites()
-                },
-            )
-            // Закреп и из меню долгого нажатия - на случай, если кнопка
-            // справа не поместилась или её не заметили.
-            if (canPin) {
-                DropdownMenuItem(
-                    text = { Text(if (message.isPinned) "Открепить" else "Закрепить") },
-                    onClick = {
-                        showMenu = false
-                        onTogglePin()
-                    },
-                )
-            }
-        }
+        // Раунд 211: меню пузыря - золотыми пузырями (общий стиль точек).
+        ApuActionsMenu(
+            expanded = showMenu,
+            onDismiss = { showMenu = false },
+            actions = buildList {
+                add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                // Раунд 212: копирование - как в личном чате («Копировать всё»).
+                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText("Сообщение", message.content)
+                    )
+                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                })
+                // Закреп и из меню - на случай, если кнопка
+                // справа не поместилась или её не заметили.
+                if (canPin) {
+                    add(
+                        ApuAction(
+                            if (message.isPinned) "Открепить" else "Закрепить",
+                            Icons.Filled.PushPin,
+                        ) { onTogglePin() }
+                    )
+                }
+                // Раунд 135: удаление своего сообщения - у себя и у всех.
+                if (message.isFromMe) {
+                    add(ApuAction("Удалить у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                    add(ApuAction("Удалить у всех", Icons.Filled.Delete, destructive = true) { onDeleteForAll() })
+                }
+            },
+        )
         if (showReactions) {
             val mine = reactions.firstOrNull { it.mine }?.emoji
             com.vladimir.messenger.ui.components.ReactionPickerDialog(
@@ -1014,6 +1810,13 @@ private fun MessageBubble(
             )
         }
         }
+        if (!bubbleHasOwnDots && !message.isFromMe) {
+            Spacer(Modifier.width(2.dp))
+            ApuMenuDots(
+                onClick = { showMenu = true },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+        }
         if (canPin) {
             IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
                 Icon(
@@ -1027,17 +1830,28 @@ private fun MessageBubble(
 }
 
 @Composable
-private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    var icon by remember { mutableStateOf(TopicIconCatalog.DEFAULT) }
+private fun NewTopicDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String, String) -> Unit,
+    // Раунд 260: тот же диалог работает и как «Редактирование темы».
+    title: String = "Новая тема",
+    confirmLabel: String = "Создать",
+    initialName: String = "",
+    initialIcon: String = TopicIconCatalog.DEFAULT,
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var icon by remember { mutableStateOf(initialIcon) }
+    // Значки тем: по умолчанию эмодзи - сетка с поиском; фирменные живые
+    // значки - второй таб.
+    var emojiMode by remember { mutableStateOf(true) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Новая тема") },
+        title = { Text(title) },
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 430.dp)
+                    .heightIn(max = 470.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -1048,8 +1862,27 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // Раунд 258: превью значка «подпрыгивает» при смене, как в Telegram.
+                val iconPop = remember { androidx.compose.animation.core.Animatable(1f) }
+                androidx.compose.runtime.LaunchedEffect(icon) {
+                    iconPop.snapTo(1.25f)
+                    iconPop.animateTo(
+                        1f,
+                        androidx.compose.animation.core.spring(
+                            dampingRatio = 0.5f,
+                            stiffness = 300f,
+                        ),
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TopicIconView(icon, 34.dp)
+                    Box(
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = iconPop.value
+                            scaleY = iconPop.value
+                        },
+                    ) {
+                        TopicIconView(icon, 34.dp)
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "Значок темы: " + TopicIconCatalog.describe(icon),
@@ -1057,39 +1890,71 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
                         color = Color(0xFF5A6472),
                     )
                 }
-                // Живые значки уже анимированы прямо в сетке выбора; сетка
-                // ленивая, чтобы 105 анимаций не тормозили телефон.
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 340.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(4.dp),
-                ) {
-                    gridItems(TopicIconCatalog.kinds, key = { it }) { kind ->
-                        val selected = kind == icon
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFE8EEF5))
-                                .then(
-                                    if (selected) {
-                                        Modifier.border(
-                                            2.dp,
-                                            MaterialTheme.colorScheme.primary,
-                                            RoundedCornerShape(12.dp),
-                                        )
-                                    } else {
-                                        Modifier
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Раунд 258: без упоминаний чужих мессенджеров в интерфейсе.
+                    listOf("Эмодзи" to true, "Живые" to false)
+                        .forEach { (label, mode) ->
+                            val sel = emojiMode == mode
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (sel) Color.White else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (sel) MaterialTheme.colorScheme.primary
+                                        else Color(0xFFE8EEF5),
+                                    )
+                                    .clickable {
+                                        if (emojiMode != mode) {
+                                            emojiMode = mode
+                                            // При переключении - дефолт своего каталога,
+                                            // чтобы сетка подсвечивала выбор.
+                                            icon = if (mode) TopicEmojiCatalog.EMOJIS.first()
+                                            else TopicIconCatalog.DEFAULT
+                                        }
                                     }
-                                )
-                                .clickable { icon = kind },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            AnimatedTopicIcon(kind, Modifier.size(36.dp))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                }
+                if (emojiMode) {
+                    TopicEmojiPicker(selected = icon, onPick = { icon = it })
+                } else {
+                    // Живые значки уже анимированы прямо в сетке выбора; сетка
+                    // ленивая, чтобы 105 анимаций не тормозили телефон.
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(5),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(4.dp),
+                    ) {
+                        gridItems(TopicIconCatalog.kinds, key = { it }) { kind ->
+                            val selected = kind == icon
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFE8EEF5))
+                                    .then(
+                                        if (selected) {
+                                            Modifier.border(
+                                                2.dp,
+                                                MaterialTheme.colorScheme.primary,
+                                                RoundedCornerShape(12.dp),
+                                            )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .clickable { icon = kind },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                AnimatedTopicIcon(kind, Modifier.size(36.dp))
+                            }
                         }
                     }
                 }
@@ -1099,8 +1964,9 @@ private fun NewTopicDialog(onDismiss: () -> Unit, onCreate: (String, String) -> 
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = { onCreate(name, icon) },
-            ) { Text("Создать") }
+            ) { Text(confirmLabel) }
         },
         dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
     )
 }
+

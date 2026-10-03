@@ -386,7 +386,15 @@ pub fn get_version() -> String {
 pub fn core_build_info() -> String {
     let tag = option_env!("GITHUB_REF_NAME").unwrap_or("local");
     let brokers = if cfg!(feature = "mqtt-dual-broker") { "2 брокера" } else { "1 брокер" };
-    format!("p2p_core {} · сборка {} · {}", APP_VERSION, tag, brokers)
+    // Хвост « · MQTT: …» - живая диагностика линка (режим, ConnAck, ошибка).
+    // Строку читает человек в настройках своего телефона: секретов нет.
+    format!(
+        "p2p_core {} · сборка {} · {}{}",
+        APP_VERSION,
+        tag,
+        brokers,
+        crate::network::mqtt_transport::mqtt_link_summary()
+    )
 }
 
 pub fn get_protocol_version() -> u8 {

@@ -110,7 +110,11 @@ class GroupsViewModel @Inject constructor(
     private fun matchDirectory(query: String, groups: List<GroupSummary>): List<DirectoryEntity> {
         val q = query.trim().lowercase()
         val mine = groups.map { it.id }.toSet()
-        val available = latestDirectory.filter { it.groupId !in mine }
+        // Раунд 154: раздел называется «Открытые группы сети» - закрытые
+        // (вход по заявке) в нём не показываем, в т.ч. записи, разошедшиеся
+        // до фикса публикации. По ссылке из приглашения вход работает как
+        // раньше - скрыта только строка в общем поиске.
+        val available = latestDirectory.filter { it.groupId !in mine && !it.needsApproval }
         if (q.isEmpty()) {
             return available
                 .sortedByDescending { it.updatedAtMs }

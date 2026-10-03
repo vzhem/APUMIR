@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import com.vladimir.messenger.data.mirror.MirrorHub
 
 /**
  * Просмотры постов канала.
@@ -70,6 +71,13 @@ class PostViewRepository @Inject constructor(
                 // посты и сообщения не ждут за просмотрами). На большом канале
                 // получатели - только владелец и администраторы: у них
                 // счётчик сходится, остальные спросят сводку.
+                // р228: действие с тени - конверт в сеть отправит активное
+                // устройство (у тени сессии нет), локальный просмотр уже записан.
+                if (MirrorHub.deliverAction(peerId = "", groupId = channelId, chatId = channelId, text = envelope)) {
+                    return@runCatching
+                }
+                // р229: свой просмотр - и партнёрскому устройству личности.
+                MirrorHub.publishOwnAction(peerId = "", groupId = channelId, chatId = channelId, text = envelope)
                 val recipients = counters.signalTargets(group, me)
                 var sent = 0
                 for (peer in recipients) {
@@ -90,6 +98,25 @@ class PostViewRepository @Inject constructor(
      * @return true, если это был пакет просмотра - тогда служба не сохраняет
      *         его как текст переписки.
      */
+    /**
+     * р228: просмотр сделан на ПАРТНЁРСКОМ устройстве - активный отмечает
+     * его у себя от СВОЕГО имени (счётчик у обоих должен сойтись).
+     */
+    suspend fun applyMirrorOutgoing(text: String): Boolean {
+        if (!PostViewWire.isViewPacket(text)) return false
+        val packet = PostViewWire.parse(text) ?: return true
+        val me = RustBridge.nodeId().orEmpty()
+        if (me.isBlank()) return true
+        withContext(Dispatchers.IO) {
+            runCatching {
+                postViewDao.put(
+                    PostViewEntity(topicId = packet.topicId, viewerId = me, atMs = packet.atMs)
+                )
+            }.onFailure { Log.w(TAG, "mirror view apply failed: ${it.message}") }
+        }
+        return true
+    }
+
     suspend fun routeIncoming(senderId: String, text: String): Boolean {
         if (!PostViewWire.isViewPacket(text)) return false
         val packet = PostViewWire.parse(text)

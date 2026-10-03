@@ -46,6 +46,8 @@ fun OnboardingScreen(
     onProfileCreated: () -> Unit,
     /** Восстановление из файла резервной копии (полный профиль, не только личность). */
     onRestoreFromFile: () -> Unit = {},
+    /** Раунд 204: «Вас пригласили?» - друг вставляет ссылку, контакт и ранг сами. */
+    onJoinByInvite: (String) -> Unit = {},
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -102,6 +104,7 @@ fun OnboardingScreen(
                             inviteLink  = uiState.createdInviteLink ?: "",
                             fingerprint = uiState.fingerprint ?: "",
                             onFinish    = onProfileCreated,
+                            onJoinByInvite = onJoinByInvite,
                         )
                 }
             }
@@ -437,6 +440,8 @@ private fun ShowInviteStep(
     inviteLink: String,
     fingerprint: String,
     onFinish: () -> Unit,
+    /** Раунд 204: вставить приглашение друга - контакт добавится сам. */
+    onJoinByInvite: (String) -> Unit = {},
 ) {
     val clipboardManager = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
@@ -546,6 +551,47 @@ private fun ShowInviteStep(
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+
+        // Раунд 204: «Вас пригласили?» - друг прислал сообщение со ссылкой
+        // (и APK). Вставка его сюда добавляет контакт сама, и приглашение
+        // засчитывается пригласившему в ранг (подписанный токен - tokq/tokr).
+        var joinText by remember { mutableStateOf("") }
+        val joinValid = com.vladimir.messenger.util.InviteLinkParser.parse(joinText) != null ||
+            com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(joinText) != null
+        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text  = "Вас пригласили в APU?",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text  = "Вставьте сообщение от друга целиком - контакт добавится сам, и приглашение другу засчитается.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = joinText,
+                    onValueChange = { joinText = it },
+                    label = { Text("Ссылка или сообщение от друга") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { onJoinByInvite(joinText) },
+                    enabled = joinValid,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Добавить пригласившего")
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         Button(
             onClick  = onFinish,

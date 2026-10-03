@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.share
 
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
 import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -52,7 +55,7 @@ fun ShareProfileScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
-                title = { Text("Поделиться профилем", fontWeight = FontWeight.Bold) },
+                title = { ApuSettingsHeader("Поделиться профилем") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
@@ -82,6 +85,12 @@ fun ShareProfileScreen(
         ) {
             Spacer(Modifier.height(8.dp))
 
+            ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
             // QR-код профиля сразу на экране: наводишь камеру друга — и контакт добавлен,
             // без передачи ссылок вручную.
             val qrBitmap = remember(uiState.shareLink) {
@@ -103,7 +112,7 @@ fun ShareProfileScreen(
             }
 
             // Свой аватар: картинка из галереи либо инициалы.
-            MyAvatar(displayName = uiState.displayName, modifier = Modifier.size(96.dp))
+            MyAvatar(displayName = uiState.displayName, modifier = Modifier.size(96.dp), size = 96)
 
             Text(
                 text = uiState.displayName,
@@ -117,13 +126,13 @@ fun ShareProfileScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
 
-            Card(
+            ApuSettingsCard(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -139,14 +148,14 @@ fun ShareProfileScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
-                    
+
                     Spacer(Modifier.height(8.dp))
-                    
+
                     Text(
                         if (uiState.alternativeLink.contains("/s/")) {
                             "Короткая ссылка для других мессенджеров:"
                         } else {
-                            "Альтернативная ссылка через Telegram:"
+                            "Дополнительная ссылка для профиля:"
                         },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

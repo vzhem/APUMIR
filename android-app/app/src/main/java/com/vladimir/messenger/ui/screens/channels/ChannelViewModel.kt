@@ -6,9 +6,12 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.GroupSummary
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.util.InlineImage
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +39,8 @@ data class ChannelPost(
     val topicId: String,
     /** id самого сообщения-поста: к нему привязываются реакции и правка. */
     val messageId: String,
+    /** Раунд 173: пост закреплён в канале. */
+    val isPinned: Boolean = false,
     val title: String,
     val text: String,
     /** Фотографии поста (jpeg в base64) по порядку; пусто, если фото нет. */
@@ -46,6 +51,8 @@ data class ChannelPost(
     val authorName: String,
     val timeMs: Long,
     val comments: Int,
+    /** Сколько комментариев поста ещё не прочитано (значок у «Комментарии»). */
+    val unreadComments: Int = 0,
     /** Сколько разных людей открыли пост. */
     val views: Int = 0,
     /** Файл, приложенный к посту (визитка `APUFILE1:`, рой этап 9-10); null - файла нет. */
@@ -56,6 +63,8 @@ data class ChannelUiState(
     val channelId: String = "",
     val channel: GroupSummary? = null,
     val posts: List<ChannelPost> = emptyList(),
+    /** Раунд 173: закреплённые посты канала (messageId, свежие вверху). */
+    val pinnedPostIds: List<String> = emptyList(),
     /** Писать посты может владелец и администраторы; комментарии - все. */
     val canPost: Boolean = false,
     /** Мой идентификатор узла: по нему решается, можно ли править пост. */
@@ -83,6 +92,7 @@ data class ChannelUiState(
 class ChannelViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val groupRepository: GroupRepository,
+    private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val messageDao: MessageDao,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
@@ -115,6 +125,34 @@ class ChannelViewModel @Inject constructor(
         // администраторам (рой, этап 3): сводные числа спрашиваем у них.
         viewModelScope.launch {
             runCatching { postCounters.requestCounters(channelId) }
+        }
+    }
+
+    /** Закрепить/открепить пост канала (личное закреп, до 10; зеркалится своим устройствам). */
+    fun togglePostPin(post: ChannelPost) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val pinned = !post.isPinned
+            val result = runCatching { chatRepository.setMessagePinned(post.messageId, pinned) }
+                .getOrElse { error ->
+                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }
+                    return@launch
+                }
+            when (result) {
+                MessagePinMutation.LIMIT_REACHED ->
+                    _uiState.update { it.copy(error = MessagePinPolicy.LIMIT_REACHED_MESSAGE) }
+                MessagePinMutation.SCOPE_CONFLICT ->
+                    _uiState.update { it.copy(error = MessagePinPolicy.SCOPE_CONFLICT_MESSAGE) }
+                MessagePinMutation.NOT_FOUND ->
+                    _uiState.update { it.copy(error = "Пост уже недоступен") }
+                MessagePinMutation.UPDATED,
+                MessagePinMutation.UNCHANGED -> {
+                    // Закреп личный, поэтому не рассылаем его подписчикам
+                    // канала; только переносим на другое своё устройство.
+                    runCatching {
+                        com.vladimir.messenger.data.mirror.MirrorHub.publishPin(post.messageId, pinned)
+                    }
+                }
+            }
         }
     }
 
@@ -307,6 +345,8 @@ class ChannelViewModel @Inject constructor(
                     ChannelPost(
                         topicId = topic.id,
                         messageId = first.id,
+                        // В ленте показываем только личный закреп, не GroupWire-пин темы.
+                        isPinned = first.isPinned && first.pinnedBy == null,
                         title = topic.name,
                         // Длинный текст едет кусками (рой, этап 3): склеиваем;
                         // пока куски в пути - текст с многоточием.
@@ -318,6 +358,10 @@ class ChannelViewModel @Inject constructor(
                             ?: "Участник " + first.senderId.takeLast(4),
                         timeMs = first.timestamp,
                         comments = (texts.size - 1).coerceAtLeast(0),
+                        // Непрочитанные комментарии: счётчик темы ведёт
+                        // GroupRepository (прибавляет на каждом чужом сообщении),
+                        // сбрасывает GroupChatViewModel.markRead при чтении.
+                        unreadComments = topic.unreadCount,
                         views = viewCounts[topic.id] ?: 0,
                         // Файл поста (этап 10): визитка в тексте, сам файл
                         // тянется у автора или у соседей по нажатию.
@@ -351,6 +395,9 @@ class ChannelViewModel @Inject constructor(
                     it.copy(
                         channel = snapshot.channel,
                         posts = snapshot.posts,
+                        // В ленте закрепляются именно публикации, а не комментарии.
+                        pinnedPostIds = snapshot.posts.filter { it.isPinned }.map { it.messageId },
+                        error = MessagePinPolicy.visibleError(it.error, snapshot.posts.count { post -> post.isPinned }),
                         canPost = snapshot.canPost,
                         myId = snapshot.myId,
                         isLoading = false,
@@ -455,6 +502,23 @@ class ChannelViewModel @Inject constructor(
         }
     }
 
+    /** Раунд 124: файл из карточки канала/комментариев - в избранное. */
+    fun saveFileToFavorites(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        viewModelScope.launch {
+            val source = _uiState.value.channel?.title.orEmpty()
+            val result = savedItems.saveFile(transfer, if (source.isBlank()) "Канал" else "Канал " + source)
+            _uiState.update {
+                it.copy(
+                    error = when (result) {
+                        com.vladimir.messenger.data.repository.SaveResult.Saved -> "Добавлено в избранное"
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> "Уже в избранном"
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> "Файл ещё не получен полностью"
+                    },
+                )
+            }
+        }
+    }
+
     /**
      * Репост поста в другое приложение одним нажатием: одно меню «Поделиться»,
      * одно сообщение у получателя - картинка (одно фото или сетка из всех
@@ -490,6 +554,82 @@ class ChannelViewModel @Inject constructor(
             if (!com.vladimir.messenger.util.PhotoShare.open(app, intent, "Поделиться постом")) {
                 _uiState.update { it.copy(error = "Не удалось поделиться") }
             }
+        }
+    }
+
+    // ===== Раунд 212: «Поделиться в APU» - пересылка поста внутрь APU =====
+
+    /** Цели пересылки: друзья и сообщества (тот же список, что в личных чатах). */
+    suspend fun forwardTargets(): List<com.vladimir.messenger.ui.components.ForwardTarget> {
+        val friends = chatRepository.forwardFriends().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.FRIEND,
+                it.id,
+                it.contactName,
+            )
+        }
+        val groups = groupRepository.forwardGroups().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.GROUP,
+                it.id,
+                it.title,
+                it.isChannel,
+            )
+        }
+        return friends + groups
+    }
+
+    /** Темы группы / посты канала для второго шага выбора цели. */
+    suspend fun forwardTopics(groupId: String): List<com.vladimir.messenger.ui.components.ForwardTopic> =
+        groupRepository.forwardTopics(groupId).map {
+            com.vladimir.messenger.ui.components.ForwardTopic(it.id, it.name, it.iconEmoji)
+        }
+
+    /**
+     * Раунд 213: короткая ссылка-приглашение для «Пригласить по QR коду»
+     * в шапке канала. Null - бессрочной ссылки ещё нет.
+     */
+    suspend fun inviteQrLink(): String? =
+        runCatching { groupRepository.inviteQrLink(channelId) }.getOrNull()
+
+    /**
+     * Раунд 212 (владелец: в меню канала не хватает «Поделиться в APU»):
+     * переслать пост другу или в группу/канал. Уходит текст поста
+     * (заголовок + текст) с шапкой-источником «↩ Переслано из «канал»» -
+     * по ней открывается сам канал. Фотографии не едут: они живут кусками
+     * своей темы (как при пересылке постов групп, раунд 203).
+     */
+    fun forwardPost(
+        post: ChannelPost,
+        sourceLabel: String,
+        target: com.vladimir.messenger.ui.components.ForwardTarget,
+        onResult: (Boolean) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val words = listOf(post.title, com.vladimir.messenger.util.InlineImage.stripImage(post.text))
+                .filter { it.isNotBlank() }
+                .joinToString("\n\n")
+            // Слаг и владелец - из бессрочной ссылки канала: попавший в шапку
+            // сможет вступиться, даже если он не участник.
+            val invite = runCatching { groupRepository.postLinkFor(channelId, post.topicId) }
+                .getOrNull()
+                ?.let { com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(it) }
+            val body = com.vladimir.messenger.util.ForwardMarker.buildBody(
+                true,
+                channelId,
+                post.topicId,
+                sourceLabel,
+                words,
+                slug = invite?.slug.orEmpty(),
+                ownerId = invite?.ownerId.orEmpty(),
+                isChannel = true,
+            )
+            val res = if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                chatRepository.sendMessage(target.id, "", body)
+            } else {
+                groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            onResult(res.isSuccess)
         }
     }
 

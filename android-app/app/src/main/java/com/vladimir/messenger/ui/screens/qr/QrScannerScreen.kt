@@ -38,6 +38,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.pager.HorizontalPager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.dp
@@ -240,13 +242,33 @@ private fun MyCodePane() {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
+    var showInviteShare by remember { mutableStateOf(false) }
 
     // Ссылка может быть ещё не готова на первом запуске (ключи создаются),
     // поэтому держим её отдельным nullable и разворачиваем один раз ниже.
     val maybeLink = remember { OwnInvite.link(context) }
     val displayName = remember { OwnInvite.displayName(context) }
     val username = remember { OwnInvite.username(context) }
-    val bitmap = remember(maybeLink) { maybeLink?.let { QrCodeGenerator.generateQrCode(it) } }
+    // Раунд 208: QR несёт УНИВЕРСАЛЬНУЮ https-ссылку (короткую с нашего
+    // сервиса). У кого APU уже стоит - Android откроет приложение сразу
+    // на добавлении контакта; у кого нет - откроется страница сервиса с
+    // кнопкой установки: скачает APU по этому же коду (владелец).
+    // Пока сервис не ответил (или ответил отказом) - прежний apu:// код.
+    var qrLink by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(maybeLink) {
+        val own = maybeLink ?: return@LaunchedEffect
+        qrLink = own
+        val short = withContext(Dispatchers.IO) {
+            runCatching {
+                dagger.hilt.android.EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    com.vladimir.messenger.data.link.LinkShortenerEntryPoint::class.java,
+                ).linkShortener().shorten(own)
+            }.getOrNull()
+        }
+        if (!short.isNullOrBlank()) qrLink = short
+    }
+    val bitmap = remember(qrLink) { qrLink?.let { QrCodeGenerator.generateQrCode(it) } }
 
     Column(
         modifier = Modifier
@@ -269,7 +291,7 @@ private fun MyCodePane() {
 
         // Код на белом поле и во всю ширину: чем крупнее модули, тем быстрее
         // его ловит камера другого телефона.
-        val link = maybeLink
+        val link = qrLink ?: maybeLink
 
         Image(
             bitmap = bitmap.asImageBitmap(),
@@ -297,7 +319,7 @@ private fun MyCodePane() {
                 )
             }
             Text(
-                "Покажите этот код собеседнику — он наведёт камеру и добавит вас в контакты.",
+                "Покажите этот код собеседнику: камера телефона добавит вас в контакты, а если у него ещё нет APU - по этому же коду он скачает приложение.",
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
@@ -319,7 +341,7 @@ private fun MyCodePane() {
                 Text(if (copied) "Скопировано" else "Копировать")
             }
             Button(
-                onClick = { ShortShare.shareInvite(context, displayName, link) },
+                onClick = { showInviteShare = true },
                 modifier = Modifier.weight(1f),
             ) {
                 Icon(Icons.Default.Share, contentDescription = null)
@@ -329,5 +351,25 @@ private fun MyCodePane() {
         }
 
         Spacer(Modifier.height(8.dp))
+    }
+
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        com.vladimir.messenger.ui.components.InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                val link = maybeLink
+                if (link.isNullOrBlank()) {
+                    android.widget.Toast.makeText(
+                        context, "Личность ещё не создана",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else {
+                    ShortShare.shareInvite(context, displayName, link, attach)
+                }
+            },
+        )
     }
 }

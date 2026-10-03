@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import com.vladimir.messenger.data.local.MessagePinPolicy
+
 // =============================================================================
 // CHANNELSCREEN.KT - лента канала
 // =============================================================================
@@ -8,11 +10,20 @@ package com.vladimir.messenger.ui.screens.channels
 // тема, первое сообщение темы это текст поста, остальные - комментарии.
 // =============================================================================
 
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.ButtonDefaults
+import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuBubbleCard
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +35,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -33,6 +47,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import android.widget.Toast
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -41,13 +56,21 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -79,7 +102,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.GroupFileCard
+import com.vladimir.messenger.ui.components.GroupQrInviteDialog
 import com.vladimir.messenger.util.GroupFileMarker
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
@@ -102,6 +128,26 @@ fun ChannelScreen(
     var showNewPost by remember { mutableStateOf(false) }
     // Пост, который сейчас правят (автор или владелец канала).
     var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
+    // Раунд 212: «Поделиться в APU» - выбрать, кому переслать пост.
+    var forwardPost by remember { mutableStateOf<ChannelPost?>(null) }
+    // Раунд 221 (владелец): после «Поделиться в APU» видно, что ушло -
+    // плашка «✓ Отправлено», как в личных чатах и группах.
+    var fwdSent by remember { mutableStateOf(false) }
+    if (fwdSent) {
+        com.vladimir.messenger.ui.components.ForwardSentOverlay(visible = true, onTimeout = { fwdSent = false })
+    }
+    // Раунд 213: «три точки» шапки + приглашение по QR коду.
+    var showTopMenu by remember { mutableStateOf(false) }
+    var showQrInvite by remember { mutableStateOf(false) }
+    var qrLink by remember { mutableStateOf<String?>(null) }
+    var qrLoading by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(showQrInvite) {
+        if (showQrInvite) {
+            qrLoading = true
+            qrLink = viewModel.inviteQrLink()
+            qrLoading = false
+        }
+    }
     val context = LocalContext.current
     // Файл поста (рой, этап 10): «Сохранить в папку» открывает системное окно.
     val savePicker = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -130,16 +176,40 @@ fun ChannelScreen(
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
                 title = {
-                    Column {
-                        Text(
-                            uiState.channel?.title ?: "Канал",
-                            maxLines = 1,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            "подписчиков: ${uiState.channel?.memberCount ?: 0}",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                    ApuHeaderBubble(
+                        onClick = if (uiState.canPost) ({ onOpenAdmin(uiState.channelId) }) else null,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val avatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                                .collectAsStateWithLifecycle()
+                            val avatar = com.vladimir.messenger.ui.components.AvatarBitmaps
+                                .rememberAvatar(avatars["g:${uiState.channelId}"])
+                            if (avatar != null) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = avatar.asImageBitmap(),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(34.dp).clip(CircleShape),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Column(Modifier.weight(1f, fill = false)) {
+                                Text(
+                                    uiState.channel?.title ?: "Канал",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = ApuBubbleTextColor,
+                                )
+                                Text(
+                                    "Подписчиков: ${uiState.channel?.memberCount ?: 0}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ApuBubbleMutedColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -154,6 +224,22 @@ fun ChannelScreen(
                         IconButton(onClick = { onOpenAdmin(uiState.channelId) }) {
                             Icon(Icons.Default.Settings, contentDescription = "Админ-кабинет")
                         }
+                    }
+                    // Раунд 213: «три точки» шапки канала - приглашение по QR
+                    // и будущие действия (пункты в золотых пузырях).
+                    Box {
+                        IconButton(onClick = { showTopMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Ещё")
+                        }
+                        ApuActionsMenu(
+                            expanded = showTopMenu,
+                            onDismiss = { showTopMenu = false },
+                            actions = listOf(
+                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                    showQrInvite = true
+                                },
+                            ),
+                        )
                     }
                 },
             )
@@ -219,8 +305,65 @@ fun ChannelScreen(
                         listState.scrollToItem(uiState.posts.lastIndex)
                     }
                 }
+                // Раунд 246: закреп и лента - в Column. Раньше лента в
+                // fillMaxSize-Box рисовалась поверх плашки закрепов
+                // (владелец: «закреп провалился под ленту»).
+                Column(modifier = Modifier.fillMaxSize()) {
+                // Раунд 173: закреплённые посты канала; тап - лента прыгает
+                // к самому посту.
+                if (uiState.pinnedPostIds.isNotEmpty()) {
+                    val feedScope = androidx.compose.runtime.rememberCoroutineScope()
+                    ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Filled.PushPin,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "Закреплённые (" + uiState.pinnedPostIds.size + "/" +
+                                        com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                            uiState.posts.filter { it.messageId in uiState.pinnedPostIds }
+                                .sortedByDescending { it.timeMs }
+                                .forEach { pinnedPost ->
+                                    val pinnedIndex = uiState.posts.indexOfFirst { it.topicId == pinnedPost.topicId }
+                                    Row(
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        modifier = if (pinnedIndex >= 0) {
+                                            Modifier.fillMaxWidth().clickable {
+                                                feedScope.launch { listState.animateScrollToItem(pinnedIndex) }
+                                            }
+                                        } else {
+                                            Modifier.fillMaxWidth()
+                                        },
+                                    ) {
+                                        Text(
+                                            (pinnedPost.title.ifBlank { "Пост" }) + " - " + pinnedPost.text.take(60),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 2,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        IconButton(onClick = { viewModel.togglePostPin(pinnedPost) }) {
+                                            Icon(
+                                                androidx.compose.material.icons.Icons.Filled.Close,
+                                                contentDescription = "Открепить",
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                }
                 // Бегунок справа: в длинном списке видно, где мы находимся.
-                Box(modifier = Modifier.fillMaxSize()) {
+                // Раунд 246: лента берёт остаток Column под закрепом.
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -251,11 +394,14 @@ fun ChannelScreen(
                                 post = post,
                                 canEdit = myId.isNotBlank() &&
                                     (post.authorId == myId || uiState.channel?.ownerId == myId),
+                                onTogglePin = { viewModel.togglePostPin(post) },
                                 onEdit = { editingPost = post },
                                 onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
                                 onSaveToFavorites = { viewModel.savePostToFavorites(post) },
                                 // Репост: текст, ссылка и фотографии файлами.
                                 onSharePost = { viewModel.sharePost(context, post) },
+                                // Раунд 212: переслать пост внутрь APU.
+                                onShareToApu = { forwardPost = post },
                                 reactions = uiState.reactions[post.messageId].orEmpty(),
                                 onToggleReaction = { emoji ->
                                     viewModel.toggleReaction(post.messageId, emoji)
@@ -276,6 +422,7 @@ fun ChannelScreen(
                                         onSave = { viewModel.requestSaveReceivedFile(it) },
                                         onShare = { f -> viewModel.shareFile(f, info.displayName, info.mediaType) },
                                         servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.channelId, info.sha256)] ?: 0,
+                                        onFavorite = { viewModel.saveFileToFavorites(it) },
                                     )
                                 },
                             )
@@ -283,10 +430,11 @@ fun ChannelScreen(
                     }
                     ApuScrollbar(state = listState)
                 }
+                } // Раунд 246: закрыли Column «закреп + лента».
                 }
             }
 
-            uiState.error?.let { message ->
+            MessagePinPolicy.visibleError(uiState.error, uiState.pinnedPostIds.size)?.let { message ->
                 Text(
                     message,
                     color = MaterialTheme.colorScheme.error,
@@ -347,6 +495,87 @@ fun ChannelScreen(
             onPickImages = { _, onReady -> onReady(emptyList()) },
         )
     }
+
+    // Раунд 213: QR с короткой ссылкой-приглашением; без APU страница
+    // сервиса предлагает установить приложение и подписаться на канал.
+    if (showQrInvite) {
+        GroupQrInviteDialog(
+            isChannel = true,
+            link = qrLink,
+            loading = qrLoading,
+            onDismiss = { showQrInvite = false },
+        )
+    }
+
+    // Раунд 212: пересылка поста внутрь APU - тот же выбор цели, что в
+    // личных чатах (друг или группа/канал с темой). Текст уходит с
+    // шапкой-источником «↩ Переслано из «канал»».
+    forwardPost?.let { post ->
+        val fCtx = androidx.compose.ui.platform.LocalContext.current
+        var fLoading by remember { mutableStateOf(true) }
+        var fTargets by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTarget>>(emptyList())
+        }
+        var fPicked by remember { mutableStateOf<com.vladimir.messenger.ui.components.ForwardTarget?>(null) }
+        var fTopics by remember {
+            mutableStateOf<List<com.vladimir.messenger.ui.components.ForwardTopic>>(emptyList())
+        }
+        var fTopicsLoading by remember { mutableStateOf(false) }
+        androidx.compose.runtime.LaunchedEffect(post.messageId) {
+            fTargets = viewModel.forwardTargets()
+            fLoading = false
+        }
+        androidx.compose.runtime.LaunchedEffect(fPicked?.id) {
+            val picked = fPicked ?: return@LaunchedEffect
+            fTopicsLoading = true
+            fTopics = viewModel.forwardTopics(picked.id)
+            fTopicsLoading = false
+        }
+        val sourceLabel = uiState.channel?.title?.takeIf { it.isNotBlank() } ?: "канал"
+        com.vladimir.messenger.ui.components.ForwardChooserDialog(
+            targets = fTargets,
+            loading = fLoading,
+            onDismiss = { forwardPost = null },
+            onPick = { target ->
+                if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                    forwardPost = null
+                    viewModel.forwardPost(post, sourceLabel, target) { ok ->
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } else {
+                    fPicked = target
+                }
+            },
+        )
+        fPicked?.let { target ->
+            com.vladimir.messenger.ui.components.ForwardTopicPickerDialog(
+                targetTitle = target.title,
+                isChannel = target.isChannel,
+                topics = fTopics,
+                loading = fTopicsLoading,
+                onDismiss = { fPicked = null },
+                onPick = { topic ->
+                    fPicked = null
+                    forwardPost = null
+                    viewModel.forwardPost(
+                        post,
+                        sourceLabel,
+                        target.copy(topicId = topic.id, topicTitle = topic.name),
+                    ) { ok ->
+                        if (ok) {
+                            fwdSent = true
+                        } else {
+                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            )
+        }
+    }
 }
 
 @Composable
@@ -359,13 +588,19 @@ private fun PostCard(
     onOpenComments: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
     onSharePost: () -> Unit = {},
+    /** Раунд 212: «Поделиться в APU» - переслать пост внутрь мессенджера. */
+    onShareToApu: () -> Unit = {},
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к посту (рой, этап 10); null - файла нет. */
     fileCard: FileCardState? = null,
+    /** Раунд 173: закрепить/открепить пост. */
+    onTogglePin: () -> Unit = {},
 ) {
     var showReactions by remember { mutableStateOf(false) }
+    // Раунд 210: «три точки» поста - меню действий, как у сообщений в чатах.
+    var showPostMenu by remember { mutableStateOf(false) }
     // Подпись «📎 имя (размер)» - для старых версий; здесь её заменяет карточка.
     val bodyText = remember(post.text, fileCard?.info) {
         if (fileCard != null) GroupFileMarker.stripCaption(post.text, fileCard.info) else post.text
@@ -388,7 +623,7 @@ private fun PostCard(
         )
     }
 
-    Card(
+    ApuBubbleCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
@@ -411,8 +646,21 @@ private fun PostCard(
                     Text(
                         "${post.authorName} - $time",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = ApuBubbleMutedColor,
                     )
+                    // Раунд 173: закрепить/открепить пост канала.
+                    IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.PushPin,
+                            contentDescription = if (post.isPinned) "Открепить" else "Закрепить",
+                            tint = if (post.isPinned) {
+                                ApuBubbleAccentColor
+                            } else {
+                                ApuBubbleMutedColor
+                            },
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
                 // Карандаш в углу поста: не теснит нижний ряд кнопок, который
                 // на узком экране и так заполнен.
@@ -421,10 +669,43 @@ private fun PostCard(
                         Icon(
                             Icons.Default.Edit,
                             contentDescription = "Изменить пост",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = ApuBubbleMutedColor,
                             modifier = Modifier.size(18.dp),
                         )
                     }
+                }
+                // Раунд 210: «три точки» поста - то же выпадающее меню действий,
+                // что у сообщений в личке и группе (владелец: меню должно быть
+                // и в каналах). Пункты - уже существующие действия поста.
+                Box {
+                    IconButton(onClick = { showPostMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "Действия с постом",
+                            tint = ApuBubbleMutedColor,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    // Раунд 211: пункты - золотыми пузырями (общий стиль).
+                    ApuActionsMenu(
+                        expanded = showPostMenu,
+                        onDismiss = { showPostMenu = false },
+                        actions = buildList {
+                            // Раунд 212: пересылка поста внутрь APU - раньше
+                            // был только системный «Поделиться» наружу.
+                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                            add(ApuAction("Поделиться…", Icons.Filled.Share) { onSharePost() })
+                            add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                            if (post.title.isNotBlank() || post.text.isNotBlank()) {
+                                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                            }
+                            if (canEdit) {
+                                add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                            }
+                        },
+                    )
                 }
             }
             if (post.images.isNotEmpty() || post.pendingPhotos > 0) {
@@ -454,7 +735,24 @@ private fun PostCard(
             }
             // Файл поста (рой, этап 10): та же карточка, что в группе.
             if (fileCard != null) {
-                GroupFileCard(state = fileCard, isFromMe = fileCard.isFromMe)
+                // Раунд 211: в точках карточки файла - и весь функционал поста.
+                GroupFileCard(
+                    state = fileCard,
+                    isFromMe = fileCard.isFromMe,
+                    messageActions = buildList {
+                        add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                        add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
+                        add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                        add(ApuAction("Поделиться", Icons.Filled.Send) { onSharePost() })
+                        add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                        if (post.title.isNotBlank() || post.text.isNotBlank()) {
+                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                        }
+                        if (canEdit) {
+                            add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                        }
+                    },
+                )
             }
             // Поставленные реакции - прямо под текстом поста, как в привычных
             // каналах: значок с числом, свой обведён золотом.
@@ -471,14 +769,14 @@ private fun PostCard(
                 Icon(
                     Icons.Default.Visibility,
                     contentDescription = "Просмотры",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = ApuBubbleMutedColor,
                     modifier = Modifier.size(15.dp),
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
                     post.views.toString(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ApuBubbleMutedColor,
                 )
                 val totalReactions = reactions.sumOf { it.count }
                 if (totalReactions > 0) {
@@ -486,24 +784,28 @@ private fun PostCard(
                     Icon(
                         Icons.Default.Favorite,
                         contentDescription = "Реакции",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = ApuBubbleMutedColor,
                         modifier = Modifier.size(15.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
                         totalReactions.toString(),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = ApuBubbleMutedColor,
                     )
                 }
             }
-            HorizontalDivider(modifier = Modifier.padding(top = 10.dp))
+            HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = ApuBubbleAccentColor.copy(alpha = 0.2f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { showReactions = true }) {
+                TextButton(
+                    onClick = { showReactions = true },
+                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
+                ) {
                     Text("Реакция")
                 }
                 TextButton(
                     onClick = onOpenComments,
+                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(
@@ -513,13 +815,19 @@ private fun PostCard(
                             "Оставить комментарий"
                         },
                     )
+                    // Непрочитанные комментарии поста: тот же золотой кружок,
+                    // что на канале и на темах группы.
+                    if (post.unreadComments > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        UnreadBadge(post.unreadComments)
+                    }
                 }
                 // Переслать пост: и внутрь APU, и в любой другой мессенджер.
                 IconButton(onClick = onSharePost) {
                     Icon(
                         Icons.Default.Share,
                         contentDescription = "Поделиться постом",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = ApuBubbleAccentColor,
                     )
                 }
                 // Пост сохраняется себе одним нажатием - так человек забирает
@@ -528,7 +836,7 @@ private fun PostCard(
                     Icon(
                         Icons.Default.BookmarkBorder,
                         contentDescription = "В избранное",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = ApuBubbleAccentColor,
                     )
                 }
             }
@@ -597,7 +905,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
         Text(
             if (pending == 1) "Фото ещё загружается…" else "Фото ещё загружаются…",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = ApuBubbleMutedColor,
             modifier = Modifier.padding(top = 8.dp),
         )
         return
@@ -608,8 +916,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
             .fillMaxWidth()
             .padding(top = 8.dp)
             .height(280.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant),
+            .apuBubbleSurface(shape = RoundedCornerShape(12.dp)),
     ) {
         HorizontalPager(
             state = pagerState,
@@ -839,4 +1146,23 @@ private fun PostEditorDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
+}
+
+/** Кружок непрочитанных комментариев поста: тёмная цифра на золоте (как в списках). */
+@Composable
+private fun UnreadBadge(count: Int) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (count > 99) "99+" else count.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFF1E2430),
+            fontWeight = FontWeight.Bold,
+        )
+    }
 }

@@ -6,17 +6,25 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ChatDao {
-    @Query("SELECT * FROM chats ORDER BY lastMessageTime DESC")
+    @Query(
+        "SELECT * FROM chats ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageTime DESC"
+    )
     fun observeAllChats(): Flow<List<ChatEntity>>
 
     /**
-     * Окно списка чатов: только свежие :limit строк.
+     * Окно списка чатов: сначала закреплённые беседы, затем самые свежие.
      *
-     * Главный экран не грузит переписку целиком - берёт верхушку по времени и
+     * Главный экран не грузит переписку целиком - берёт верхушку списка и
      * досыпает по мере прокрутки. Порядок тот же, поэтому верхние :limit строк
      * окна совпадают с верхними строками полного списка.
      */
-    @Query("SELECT * FROM chats ORDER BY lastMessageTime DESC LIMIT :limit")
+    @Query(
+        "SELECT * FROM chats ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageTime DESC LIMIT :limit"
+    )
     fun observeChatsWindow(limit: Int): Flow<List<ChatEntity>>
 
     /**
@@ -26,14 +34,19 @@ interface ChatDao {
     @Query(
         "SELECT * FROM chats WHERE contactName LIKE '%' || :query || '%' " +
             "OR lastMessage LIKE '%' || :query || '%' " +
-            "ORDER BY lastMessageTime DESC LIMIT :limit"
+            "ORDER BY CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageTime DESC LIMIT :limit"
     )
     fun searchChats(query: String, limit: Int): Flow<List<ChatEntity>>
 
     @Query("SELECT COUNT(*) FROM chats")
     fun observeChatCount(): Flow<Int>
 
-    @Query("SELECT * FROM chats ORDER BY lastMessageTime DESC")
+    @Query(
+        "SELECT * FROM chats ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageTime DESC"
+    )
     suspend fun getAllChats(): List<ChatEntity>
 
     @Query("SELECT * FROM chats WHERE id = :chatId")
@@ -58,8 +71,17 @@ interface ChatDao {
     @Query("UPDATE chats SET unreadCount = 0 WHERE id = :chatId")
     suspend fun markAsRead(chatId: String)
 
+    // Раунд 150: счётчик непрочитанных личных чатов (на списке чатов бейджа
+    // не было - saveIncomingMessage только обновлял lastMessage).
+    @Query("UPDATE chats SET unreadCount = unreadCount + 1 WHERE id = :chatId")
+    suspend fun incrementUnread(chatId: String)
+
     @Query("UPDATE chats SET lastMessage = :message, lastMessageTime = :time WHERE id = :chatId")
     suspend fun updateLastMessage(chatId: String, message: String, time: Long)
+
+    /** р239: снять с чата непрочитанные, накрученные мусорными пакетами. */
+    @Query("UPDATE chats SET unreadCount = MAX(0, unreadCount - :count) WHERE id = :chatId")
+    suspend fun decrementUnread(chatId: String, count: Int)
 
     @Query("UPDATE chats SET contactName = :name WHERE contactId = :contactId")
     suspend fun updateContactName(contactId: String, name: String)

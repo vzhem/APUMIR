@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -12,8 +13,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +33,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.data.group.GroupInviteLinks
@@ -54,9 +58,20 @@ fun MessageBubble(
     message: Message,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
-    linkColor: Color = Color(0xFF4A90E2),
+    linkColor: Color = ApuBubbleLinkColor,
     onTap: () -> Unit = {},
     onLongClick: (() -> Unit)? = null,
+    /** Раунд 176: тап по «Добавить контакт» в карточке-приглашении. */
+    onContactInvite: ((inviteLink: String) -> Unit)? = null,
+    /** Раунд 189: тап по «Вступить»/«Подписаться» в карточке группы/канала. */
+    onGroupInvite: ((link: String) -> Unit)? = null,
+    /** Раунд 203: тап по шапке-источнику пересылки. */
+    onOpenForward: ((com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit)? = null,
+    /**
+     * Раунд 211: «три точки» сообщения - то же меню, что по удержанию.
+     * Владелец: точки должны быть и на текстовых пузырях. null - не рисовать.
+     */
+    onMenu: (() -> Unit)? = null,
 ) {
     val isOwn = message.isFromMe
     val context = LocalContext.current
@@ -69,11 +84,22 @@ fun MessageBubble(
             .padding(horizontal = 8.dp, vertical = 2.dp),
         horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start,
     ) {
+        // Раунд 211: «три точки» рядом с пузырём (те же, что у картинок и
+        // гифок) - открывают то же меню действий, что и удержание пальца.
+        if (onMenu != null && isOwn) {
+            ApuMenuDots(
+                onClick = { onMenu?.invoke() },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+            Spacer(Modifier.width(3.dp))
+        }
         Box(
             modifier = Modifier
                 .widthIn(min = 80.dp, max = 280.dp)
-                .clip(if (isOwn) OwnBubbleShape else OtherBubbleShape)
-                .background(if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther)
+                .apuBubbleSurface(
+                    color = if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther,
+                    shape = if (isOwn) OwnBubbleShape else OtherBubbleShape,
+                )
                 .combinedClickable(
                     onClick = onTap,
                     onLongClick = { onLongClick?.invoke() }
@@ -81,17 +107,80 @@ fun MessageBubble(
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             Column {
-                val annotatedText = remember(message.content, linkColor) {
-                    buildAnnotatedMessageText(message.content, linkColor)
+                // Раунд 203: шапка-источник пересылки - кликабельная, служебные
+                // строки (маркер + старая шапка) из тела убираем.
+                val fwdRef = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
+                val showFwdHeader = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
+                val displayContent = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
+                if (showFwdHeader) {
+                    val fwdLabel = fwdRef?.label ?: com.vladimir.messenger.util.ForwardMarker.plainHeaderLabel(message.content)
+                    Row(
+                        modifier = Modifier
+                            .padding(bottom = 2.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = fwdRef != null && onOpenForward != null) {
+                                if (fwdRef != null && onOpenForward != null) onOpenForward(fwdRef)
+                            }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            "↩ Переслано из «" + fwdLabel + "»",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            textDecoration = TextDecoration.Underline,
+                            color = textColor,
+                        )
+                    }
+                }
+                val annotatedText = remember(displayContent, linkColor) {
+                    buildAnnotatedMessageText(displayContent, linkColor)
                 }
                 // Сообщение из одной ссылки на картинку или гифку показываем
                 // картинкой: клавиатура вставляет гифки именно ссылкой, и в чате
                 // вместо картинки висел текст.
-                val imageUrl = remember(message.content) {
-                    ImageLinkDetector.directImageUrl(message.content)
+                val imageUrl = remember(displayContent) {
+                    ImageLinkDetector.directImageUrl(displayContent)
+                }
+                // Раунд 176: приглашение «поделиться контактом» рисуем карточкой:
+                // имя и ник человека, ниже золотой пузырь «Добавить контакт» -
+                // apu://-ссылка в тексте раньше была некликабельна.
+                val inviteCard = remember(displayContent) {
+                    com.vladimir.messenger.util.ContactCardSender.parseCard(displayContent)
                 }
 
-                if (imageUrl != null) {
+                // Раунд 189: приглашение в группу/канал - тоже карточкой.
+                val groupCard = remember(displayContent) {
+                    com.vladimir.messenger.util.GroupInviteCardSender.parseCard(displayContent)
+                }
+
+                // Раунд 218: мульти-приглашение (несколько сообществ сразу
+                // плюс «Скачать APU») - карточкой со списком и кнопками.
+                // Сырые ссылки с адресом сервиса из пузыря больше не видны.
+                val multiCard = remember(displayContent) {
+                    com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(displayContent)
+                }
+
+                if (multiCard != null && onGroupInvite != null) {
+                    MultiInviteCardView(
+                        card = multiCard,
+                        textColor = textColor,
+                        onOpen = onGroupInvite,
+                        onDownload = { url -> openInstaller(context, url) },
+                    )
+                } else if (inviteCard != null && onContactInvite != null) {
+                    ContactInviteCardView(
+                        card = inviteCard,
+                        textColor = textColor,
+                        onAdd = { onContactInvite(inviteCard.inviteLink) },
+                    )
+                } else if (groupCard != null && onGroupInvite != null) {
+                    GroupInviteCardView(
+                        card = groupCard,
+                        textColor = textColor,
+                        onJoin = { onGroupInvite(groupCard.link) },
+                        onDownload = { url -> openInstaller(context, url) },
+                    )
+                } else if (imageUrl != null) {
                     ImagePreview(
                         model = imageUrl,
                         contentDescription = "Картинка из сообщения",
@@ -168,7 +257,12 @@ fun MessageBubble(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     Text(
-                        text = formatMessageTime(message.timestamp),
+                        // Раунд 184 (аудит-5): SimpleDateFormat+Calendar создавались
+                        // заново на каждую перерисовку каждого пузыря. remember
+                        // кэширует результат; часовой маркер - «Вчера» обновится.
+                        text = remember(message.timestamp, System.currentTimeMillis() / 3_600_000L) {
+                            formatMessageTime(message.timestamp)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isOwn) messenger.messageBubbleOwnText.copy(alpha = 0.7f)
                                 else messenger.messageBubbleOtherText.copy(alpha = 0.6f),
@@ -179,6 +273,13 @@ fun MessageBubble(
                     }
                 }
             }
+        }
+        if (onMenu != null && !isOwn) {
+            Spacer(Modifier.width(3.dp))
+            ApuMenuDots(
+                onClick = { onMenu?.invoke() },
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
         }
     }
 }
@@ -244,5 +345,180 @@ private fun formatMessageTime(timestamp: Long): String {
         timestamp > today.timeInMillis -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
         timestamp > yesterday.timeInMillis -> "Вчера"
         else -> SimpleDateFormat("d MMM", Locale("ru")).format(date)
+    }
+}
+
+
+/**
+ * Раунд 176: карточка контакта внутри сообщения-приглашения:
+ * имя, ник (если известен) и золотая кнопка «Добавить контакт».
+ */
+@Composable
+private fun ContactInviteCardView(
+    card: com.vladimir.messenger.util.ContactInviteCard,
+    textColor: Color,
+    onAdd: () -> Unit,
+) {
+    Column {
+        Text(
+            text = card.name,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+        )
+        if (!card.nickname.isNullOrBlank()) {
+            Text(
+                text = "@" + card.nickname,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor.copy(alpha = 0.7f),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onAdd,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Добавить контакт")
+        }
+    }
+}
+
+
+/**
+ * Раунд 189: карточка приглашения в группу/канал: название жирным,
+ * описание ниже, золотой пузырь «Вступить»/«Подписаться».
+ */
+@Composable
+private fun GroupInviteCardView(
+    card: com.vladimir.messenger.util.GroupInviteCard,
+    textColor: Color,
+    onJoin: () -> Unit,
+    /** Раунд 218: кнопка «Скачать APU», если в тексте есть установочная ссылка. */
+    onDownload: (String) -> Unit = {},
+) {
+    Column {
+        Text(
+            text = card.title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+        )
+        if (card.about.isNotBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = card.about,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor.copy(alpha = 0.75f),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onJoin,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (card.isChannel) "Подписаться" else "Вступить")
+        }
+        card.apkLink?.let { apk ->
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { onDownload(apk) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Скачать APU")
+            }
+        }
+    }
+}
+
+/**
+ * Раунд 218: карточка мульти-приглашения: заголовок, по блоку на каждое
+ * сообщество с кнопкой «Вступить»/«Подписаться», ниже кнопка «Скачать APU».
+ * Ссылки в сыром тексте спрятаны: владелец просил не показывать адрес
+ * сервиса (и GitHub) в видимой части сообщения.
+ */
+@Composable
+private fun MultiInviteCardView(
+    card: com.vladimir.messenger.util.MultiInviteCard,
+    textColor: Color,
+    onOpen: (String) -> Unit,
+    onDownload: (String) -> Unit,
+) {
+    Column {
+        Text(
+            text = "Приглашение в сообщества",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+        )
+        Spacer(Modifier.height(8.dp))
+        card.items.forEach { item ->
+            Text(
+                text = item.title.ifBlank { if (item.isChannel) "Канал" else "Группа" },
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = textColor,
+            )
+            Text(
+                text = if (item.isChannel) "Канал" else "Группа",
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(4.dp))
+            Button(
+                onClick = { onOpen(item.link) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (item.isChannel) "Подписаться" else "Вступить")
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        card.apkLink?.let { apk ->
+            Button(
+                onClick = { onDownload(apk) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Скачать APU")
+            }
+        }
+    }
+}
+
+/** Кнопка «Скачать APU»: это не приглашение (оно идёт в onOpen), а файл - в браузер. */
+private fun openInstaller(context: android.content.Context, url: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        android.util.Log.i("MessageBubble", "Opening installer URL: " + url)
+    } catch (e: Exception) {
+        android.util.Log.e("MessageBubble", "Failed to open installer URL: " + url, e)
     }
 }

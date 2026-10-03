@@ -1,11 +1,27 @@
 // =============================================================================
 // p2p-relay — worker целиком. Заменить содержимое редактора Cloudflare этим.
 // =============================================================================
+// Раунд 214 (разгрузка): /stats — счётчики вызовов по маршрутам (в памяти
+// изолята, приблизительно, обнуляются при перезапуске); посадочные страницы
+// /i и /s/<код> кэшируются на edge 5 минут (кэшированный ответ НЕ считается
+// вызовом воркера). Приложение больше не поллит релей (маршрутов /poll и
+// /send здесь нет и не было — поллинг давал 8 640 пустых 404 в сутки
+// с телефона и выжигал дневной лимит).
+// =============================================================================
 // Что делает:
 //   /register, /lookup   — реестр узлов (как было);
 //   /version             — сведения об обновлении (как было);
+//   /update/latest       — сведения о последнем релизе (worker сам ходит на GitHub);
+//   /update/apk          — поток APK последнего релиза (белый список мобильных сетей);
+//   /mqtt                — НАШ MQTT-брокер (Durable Object MQTT_BRIDGE, привязка
+//                          в дашборде): единый рой для всех телефонов, без
+//                          сторонних брокеров (v11.74.7);
 //   /health              — проверка живости;
 //   /vault/put, /vault/get — хранилище личности;
+//   /addrbook/put, /addrbook/get — резервные копии азбуки адресов (зашифрованы
+//                          на телефоне; v11.74.8);
+//   /gif/search            — каталог GIF через Tenor, ключ в TENOR_KEY
+//                          (v11.74.14); выбранная гифка едет через файловый рой;
 //   /i?slug=...          — страница пересланной ссылки старого (длинного) вида:
 //                          открыть в APU или установить его;
 //   /s/<код>             — КОРОТКАЯ ссылка: та же страница, но адрес не выдаёт
@@ -53,6 +69,228 @@
 // Существующая привязка REGISTRY используется как раньше.
 // =============================================================================
 
+// НАШ MQTT-БРОКЕР (задача владельца 2026-09-19, "полноценный
+// маленький сервер"): все телефоны WebSocket'ом сходятся в один
+// Durable Object (idFromName константа), поэтому он сам может
+// раздавать публикации подписчикам - это и есть брокер.
+// Реализован минимальный MQTT 3.1.1 для сигнального трафика
+// роя: CONNECT/CONNACK, SUBSCRIBE/SUBACK, PUBLISH (QoS0 вер; QoS1
+// входящие подтверждаем PUBACK), retain (нужен presence),
+// LastWill, PINGREQ/PINGRESP, дискретные вайлдкарды + #.
+// Старые сборки (v11.74.4/5) попадают сюда же - рой единый.
+
+const MQTT_MAX_CLIENTS = 400;
+const MQTT_MAX_PUBLISH_BYTES = 256 * 1024;
+
+function encLen(n) {
+  const out = [];
+  do { let b = n % 128; n = Math.floor(n / 128); if (n > 0) b += 128; out.push(b); } while (n > 0);
+  return out;
+}
+
+function buildPublish(topic, payload, retain) {
+  const t = new TextEncoder().encode(topic);
+  const body = new Uint8Array(2 + t.length + payload.length);
+  body[0] = t.length >> 8; body[1] = t.length & 255;
+  body.set(t, 2); body.set(payload, 2 + t.length);
+  const head = [0x30 | (retain ? 1 : 0), ...encLen(body.length)];
+  return new Uint8Array([...head, ...body]);
+}
+
+function topicMatch(filter, topic) {
+  if (filter === topic) return true;
+  if (filter === "#") return true;
+  if (filter.endsWith("/#")) {
+    const prefix = filter.slice(0, -2);
+    return topic === prefix || topic.startsWith(prefix + "/");
+  }
+  const f = filter.split("/"); const t = topic.split("/");
+  if (f.length !== t.length) return false;
+  for (let i = 0; i < f.length; i++) {
+    if (f[i] !== "+" && f[i] !== t[i]) return false;
+  }
+  return true;
+}
+
+class MqttClient {
+  constructor(ws) {
+    this.ws = ws;
+    this.subs = [];       // фильтры подписок
+    this.will = null;     // {topic, payload, retain}
+    this.buf = new Uint8Array(0);
+  }
+  send(bytes) { try { this.ws.send(bytes); } catch (_) {} }
+}
+
+export class MqttBridge {
+  constructor() {
+    this.clients = new Set();
+    this.retained = new Map(); // topic -> {topic, payload}
+    this.mirror = new Set(); // р226: участники комнаты зеркала (только в инстансах "mirror:*")
+  }
+
+  async fetch(request) {
+    // р226: комната зеркала - простой звёздный ретранслятор текстовых кадров
+    // между устройствами одной личности. Без логики, без хранения.
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/mirror/")) {
+      return this.mirrorJoin(request, url);
+    }
+    if (this.clients.size >= MQTT_MAX_CLIENTS) {
+      return json({ error: "broker busy" }, 503);
+    }
+    const pair = new WebSocketPair();
+    const server = pair[1];
+    server.accept();
+    server.binaryType = "arraybuffer";
+    const client = new MqttClient(server);
+    this.clients.add(client);
+    server.addEventListener("message", (event) => {
+      try {
+        const data = event.data;
+        const chunk = typeof data === "string"
+          ? new TextEncoder().encode(data)
+          : new Uint8Array(data);
+        this.feed(client, chunk);
+      } catch (_) { this.drop(client); }
+    });
+    server.addEventListener("close", () => this.drop(client));
+    server.addEventListener("error", () => this.drop(client));
+    // rumqttc требует эхо субпротокола mqtt.
+    return new Response(null, {
+      status: 101,
+      webSocket: pair[0],
+      headers: { "Sec-WebSocket-Protocol": "mqtt" },
+    });
+  }
+
+  drop(client) {
+    if (!this.clients.has(client)) return;
+    this.clients.delete(client);
+    if (client.will) {
+      this.publish(null, client.will.topic, client.will.payload, client.will.retain);
+      client.will = null;
+    }
+  }
+
+  // ---- р226: комната живого зеркала --------------------------------------
+  async mirrorJoin(request, url) {
+    const dev = (url.searchParams.get("dev") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
+    if (!dev) return json({ error: "dev required" }, 400);
+    if (this.mirror.size >= 4) return json({ error: "room full" }, 503);
+    const pair = new WebSocketPair();
+    const server = pair[1];
+    server.accept();
+    const member = { sock: server, dev };
+    this.mirror.add(member);
+    server.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return;
+      if (event.data.length > 512 * 1024) return;
+      for (const other of this.mirror) {
+        if (other !== member) {
+          try { other.sock.send(event.data); } catch (_) { /* кадр не критичен */ }
+        }
+      }
+    });
+    const bye = () => { this.mirror.delete(member); };
+    server.addEventListener("close", bye);
+    server.addEventListener("error", bye);
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  feed(client, chunk) {
+    const buf = new Uint8Array(client.buf.length + chunk.length);
+    buf.set(client.buf); buf.set(chunk, client.buf.length);
+    let pos = 0;
+    while (pos + 2 <= buf.length) {
+      let len = 0, mult = 1, i = pos + 1, byte = 0;
+      do {
+        if (i >= buf.length) { client.buf = buf.slice(pos); return; }
+        byte = buf[i++]; len += (byte & 127) * mult; mult *= 128;
+        if (mult > 128 * 128 * 128 * 2) { this.drop(client); return; }
+      } while (byte & 128);
+      if (pos + 1 + len > buf.length) { client.buf = buf.slice(pos); return; }
+      this.handle(client, buf[pos], buf.slice(i, pos + 1 + len));
+      pos += 1 + len;
+    }
+    client.buf = buf.slice(pos);
+  }
+
+  handle(client, first, body) {
+    const type = first >> 4;
+    const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+    if (type === 1) { // CONNECT
+      let p = 0;
+      const pnamelen = view.getUint16(p); p += 2 + pnamelen; // "MQTT"
+      p += 1; // level
+      const flags = body[p]; p += 1;
+      p += 2; // keepalive
+      const idlen = view.getUint16(p); p += 2 + idlen; // clientId
+      if (flags & 4) { // will
+        const wtopicLen = view.getUint16(p); const wtopic = new TextDecoder().decode(body.slice(p + 2, p + 2 + wtopicLen)); p += 2 + wtopicLen;
+        const wpayLen = view.getUint16(p); const wpay = body.slice(p + 2, p + 2 + wpayLen); p += 2 + wpayLen;
+        client.will = { topic: wtopic, payload: wpay, retain: (flags & 32) !== 0 };
+      }
+      client.send(new Uint8Array([0x20, 0x02, 0x00, 0x00])); // CONNACK ok
+    } else if (type === 3) { // PUBLISH
+      const qos = (first >> 1) & 3;
+      const retain = (first & 1) !== 0;
+      const tlen = view.getUint16(0);
+      const topic = new TextDecoder().decode(body.slice(2, 2 + tlen));
+      let p = 2 + tlen;
+      if (qos > 0) {
+        const pid = [body[p], body[p + 1]];
+        p += 2;
+        if (qos === 1) client.send(new Uint8Array([0x40, 0x02, pid[0], pid[1]]));
+      }
+      const payload = body.slice(p);
+      if (payload.length > MQTT_MAX_PUBLISH_BYTES) return;
+      this.publish(client, topic, payload, retain);
+    } else if (type === 8) { // SUBSCRIBE
+      const pid = [body[0], body[1]];
+      let p = 2;
+      const granted = [];
+      while (p < body.length) {
+        const flen = view.getUint16(p); p += 2;
+        const filter = new TextDecoder().decode(body.slice(p, p + flen)); p += flen;
+        p += 1; // requested qos
+        client.subs.push(filter);
+        granted.push(0);
+        // Retained: всё совпавшее - сразу (retain бит стоит).
+        for (const entry of this.retained.values()) {
+          if (topicMatch(filter, entry.topic)) {
+            client.send(buildPublish(entry.topic, entry.payload, true));
+          }
+        }
+      }
+      const out = [0x90, ...encLen(2 + granted.length), pid[0], pid[1], ...granted];
+      client.send(new Uint8Array(out));
+    } else if (type === 12) { // PINGREQ
+      client.send(new Uint8Array([0xd0, 0x00]));
+    } else if (type === 14) { // DISCONNECT
+      client.will = null;
+      try { client.ws.close(1000, "bye"); } catch (_) {}
+      this.clients.delete(client);
+    }
+  }
+
+  publish(from, topic, payload, retain) {
+    if (retain) {
+      if (payload.length === 0) this.retained.delete(topic);
+      else this.retained.set(topic, { topic, payload });
+    }
+    if (this.retained.size > 512) {
+      this.retained.delete(this.retained.keys().next().value);
+    }
+    for (const c of this.clients) {
+      if (c === from) continue; // себе эхо не шлем
+      for (const filter of c.subs) {
+        if (topicMatch(filter, topic)) { c.send(buildPublish(topic, payload, false)); break; }
+      }
+    }
+  }
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -77,8 +315,64 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,96}$/;
 const CONTACT_LINK_PATTERN = /^apu:\/\/a\/[A-Za-z0-9_-]{16,64}(\/[A-Za-z0-9_]{1,32})?$/;
 const GROUP_LINK_PREFIX = "p2pmessenger://group?";
 
+// ---- приборка расхода (раунд 214) ------------------------------------------
+
+/** Счётчики вызовов: в памяти изолята (приблизительно; переживают запросы, не переживают перезапуск). */
+const STATS = { since: new Date().toISOString(), total: 0, routes: {} };
+
+function noteRoute(name) {
+  try {
+    STATS.total++;
+    STATS.routes[name] = (STATS.routes[name] || 0) + 1;
+  } catch (_) {}
+}
+
+/** Схлопнуть персональные пути, чтобы в статистике не было тысячи ключей. */
+function routeName(path) {
+  if (path.startsWith("/s/")) return "/s/<код>";
+  if (path.startsWith("/short/")) return "/short/<код>";
+  if (path.startsWith("/vault/")) return "/vault/*";
+  if (path.startsWith("/addrbook/")) return "/addrbook/*";
+  return path === "" ? "/" : path;
+}
+
+/** Статистика расхода: кто и сколько ест (для владельца). */
+function handleStats() {
+  return json({
+    ok: true,
+    since: STATS.since,
+    total: STATS.total,
+    routes: STATS.routes,
+    note: "счётчики в памяти изолята - приблизительные, обнуляются при перезапуске воркера",
+  });
+}
+
+// Edge-кэш посадочных страниц: закэшированный ответ НЕ считается вызовом
+// воркера. Кэшируем только 200; 404 («ссылки нет») не кэшируем - приглашение
+// могло появиться только что.
+const LANDINGS = caches.default;
+
+async function cachedLanding(request, ctx, build) {
+  const hit = await LANDINGS.match(request);
+  if (hit) {
+    noteRoute("кэш edge: из кэша");
+    return hit;
+  }
+  const res = await build();
+  if (res && res.status === 200) {
+    const headers = new Headers(res.headers);
+    headers.set("Cache-Control", "public, max-age=0, s-maxage=300");
+    const put = new Response(res.body, { status: 200, headers });
+    const serve = put.clone();
+    ctx.waitUntil(LANDINGS.put(request, put));
+    noteRoute("кэш edge: положено");
+    return serve;
+  }
+  return res;
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     // Предполётный запрос отвечаем первым: он приходит методом OPTIONS на
     // любой путь, включая /vault/*, и до разбора маршрутов доходить не должен.
     if (request.method === "OPTIONS") {
@@ -88,11 +382,33 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // MQTT-мост: важен только заголовок Upgrade (rumqttc сам выбирает путь).
+    // Обычные запросы (приглашения, ссылки, обновление) не задеваем.
+    if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
+      if (!env.MQTT_BRIDGE) {
+        return json({ error: "MQTT_BRIDGE binding is not configured" }, 501);
+      }
+      // р226: /mirror/<полка> - комнаты живого зеркала устройств одной
+      // личности. Отдельные инстансы того же DO (имя "mirror:<полка>"),
+      // MQTT-брокер ("mqtt-bridge") не задет. Полка - секретный путь,
+      // содержимое кадров вдобавок запечатано на устройстве.
+      if (path.startsWith("/mirror/")) {
+        const shelf = path.slice(8).toLowerCase().replace(/[^a-f0-9]/g, "");
+        if (shelf.length < 16 || shelf.length > 32) return json({ error: "bad shelf" }, 400);
+        const mirrorStub = env.MQTT_BRIDGE.idFromName("mirror:" + shelf);
+        return env.MQTT_BRIDGE.get(mirrorStub).fetch(request);
+      }
+      const stub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
+      return env.MQTT_BRIDGE.get(stub).fetch(request);
+    }
+
+    noteRoute(routeName(path) + (request.method === "GET" ? "" : " POST"));
+
     try {
       if (path === "/i" && request.method === "GET") {
-        return handleInviteLanding(url);
+        return cachedLanding(request, ctx, () => handleInviteLanding(url));
       } else if (path.startsWith("/s/") && request.method === "GET") {
-        return await handleShortLanding(path.slice(3), env);
+        return cachedLanding(request, ctx, () => handleShortLanding(path.slice(3), env));
       } else if (path === "/short" && request.method === "POST") {
         return await handleShortCreate(request, env);
       } else if (path.startsWith("/short/") && request.method === "GET") {
@@ -101,6 +417,12 @@ export default {
         return handleAssetLinks();
       } else if (path === "/vault/put" && request.method === "POST") {
         return await handleVaultPut(request, env);
+      } else if (path === "/gif/search" && request.method === "GET") {
+        return await handleGifSearch(url, env);
+      } else if (path === "/addrbook/put" && request.method === "POST") {
+        return await handleAddrBookPut(request, env);
+      } else if (path === "/addrbook/get" && request.method === "GET") {
+        return await handleAddrBookGet(url, env);
       } else if (path === "/vault/get" && request.method === "GET") {
         return await handleVaultGet(url, env);
       } else if (path === "/register" && request.method === "POST") {
@@ -109,9 +431,22 @@ export default {
         return await handleLookup(url, env);
       } else if (path === "/version" && request.method === "GET") {
         return await handleVersion(env);
+      } else if (path === "/update/latest" && request.method === "GET") {
+        return await handleUpdateLatest(request, env);
+      } else if (path === "/update/apk" && request.method === "GET") {
+        return await handleUpdateApk();
+      } else if (path === "/support" && request.method === "GET") {
+        return await handleSupport(env);
+      } else if (path.startsWith("/psync/") && request.method === "PUT") {
+        return await handlePsyncPut(path.slice(7), request, env);
+      } else if (path.startsWith("/psync/") && request.method === "GET") {
+        return await handlePsyncGet(path.slice(7), url, request, env);
       } else if (path === "/health") {
         return json({ status: "ok" });
+      } else if (path === "/stats" && request.method === "GET") {
+        return handleStats();
       } else {
+        noteRoute("404 " + routeName(path));
         return json({ error: "not found", path }, 404);
       }
     } catch (e) {
@@ -120,7 +455,292 @@ export default {
   },
 };
 
+// ---- раунд 219: способы поддержки разработчика ------------------------------
+// Личные реквизиты НЕ в коде и НЕ в репозитории: владелец сам кладёт их в KV
+// (ключ SUPPORT_WAYS, JSON {"ways":[{"title","details","copy"}]}) через
+// dashboard/wrangler, когда решит их опубликовать. Ключа нет - черновой
+// ответ: приложение показывает «список ещё настраивается».
+async function handleSupport(env) {
+  try {
+    if (env.APU_VAULT) {
+      const raw = await env.APU_VAULT.get("support_ways");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.ways)) {
+          return json({ ok: true, ways: parsed.ways });
+        }
+      }
+    }
+  } catch (e) {
+    // битый JSON в KV - не 500: это публичный маршрут, отдаём черновик
+  }
+  return json({ ok: true, draft: true, ways: [] });
+}
+
+// ---- раунд 225: одноразовая релейная передача копии профиля -----------------
+// «Профили находят себя сами»: полка адресуется отпечатком НИКА (оба
+// устройства знают ник), код забора выводится из ПАРОЛЯ копии на телефоне -
+// в релей вводится только шифробайты. Копия стерётся сразу после забора
+// (fetch-once) и в любом случае через сутки (KV TTL) - не хранилище, а
+// передача. Тело - base64 шифрованного .apubak, идёт насквозь сырым текстом.
+const MAX_PSYNC_B64 = 24_000_000;
+
+function psyncKey(slot) {
+  const clean = String(slot || "").toLowerCase().replace(/[^a-f0-9]/g, "");
+  return clean.length >= 16 && clean.length <= 64 ? "ps2:" + clean : null;
+}
+
+// Раунд 257: копия хранится ОДНИМ ключом (конверт JSON) вместо четырёх -
+// каждая выкладка и каждый забор = одна запись KV, а не четыре. Дневной
+// лимит записей бесплатного плана KV теперь почти невозможно исчерпать.
+// Старые клиенты не меняются: их протокол (тело + заголовки) тот же, а
+// чтение ниже понимает и старый четырёхключевой макет.
+async function handlePsyncPut(slot, request, env) {
+  const key = psyncKey(slot);
+  if (!key) return json({ error: "bad slot" }, 400);
+  if (!env.APU_VAULT) return json({ error: "KV binding is not configured" }, 501);
+  const blob = await request.text();
+  if (!blob || blob.length < 64) return json({ error: "empty blob" }, 400);
+  if (blob.length > MAX_PSYNC_B64) return json({ error: "too large" }, 413);
+  const check = (request.headers.get("X-Apu-Check") || "").toLowerCase().replace(/[^a-f0-9]/g, "");
+  if (check.length !== 64) return json({ error: "bad check" }, 400);
+  const dev = (request.headers.get("X-Apu-Device") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+  const envelope = JSON.stringify({
+    v: 2,
+    blob: blob,
+    check: check,
+    dev: dev,
+    time: Date.now(),
+    size: blob.length,
+  });
+  await env.APU_VAULT.put(key, envelope, { expirationTtl: 86400 });
+  // Страховка от старого макета: прежние 4 ключа больше не пишем, а старые
+  // хвосты того же слота стираем (одна запись вместо четырёх новых).
+  await env.APU_VAULT.delete(key + ":c").catch(() => {});
+  return json({ success: true, size: blob.length });
+}
+
+// Читает конверт v2 либо старый четырёхключевой макет. Возвращает
+// { blob, check, dev, time, size } или null, если полка пуста.
+async function psyncRead(key, env) {
+  const raw = await env.APU_VAULT.get(key);
+  if (raw) {
+    const trimmed = raw.trimStart();
+    if (trimmed.startsWith("{")) {
+      try {
+        const e = JSON.parse(raw);
+        if (e && e.blob && e.check) {
+          return { blob: e.blob, check: e.check, dev: e.dev || "", time: e.time || 0, size: e.size || e.blob.length };
+        }
+      } catch (e) { /* ниже - старый макет */ }
+    } else {
+      // Старый макет: в основном ключе лежал сам blob.
+      const check = (await env.APU_VAULT.get(key + ":c")) || "";
+      const dev = (await env.APU_VAULT.get(key + ":d")) || "";
+      let time = 0;
+      let size = raw.length;
+      try {
+        const m = JSON.parse((await env.APU_VAULT.get(key + ":m")) || "{}");
+        time = m.time || 0;
+        size = m.size || raw.length;
+      } catch (e) { /* метка не обязательна */ }
+      return { blob: raw, check: check, dev: dev, time: time, size: size };
+    }
+  }
+  // Совсем старый макет без основного blob-ключа невозможен (blob писался
+  // всегда), но на всякий случай пробуем метку.
+  const meta = await env.APU_VAULT.get(key + ":m");
+  if (!meta) return null;
+  const blob = await env.APU_VAULT.get(key);
+  if (!blob) return null;
+  const check = (await env.APU_VAULT.get(key + ":c")) || "";
+  const dev = (await env.APU_VAULT.get(key + ":d")) || "";
+  let time = 0;
+  let size = blob.length;
+  try {
+    const m = JSON.parse(meta);
+    time = m.time || 0;
+    size = m.size || blob.length;
+  } catch (e) { /* метка битая - не важна */ }
+  return { blob: blob, check: check, dev: dev, time: time, size: size };
+}
+
+async function psyncDelete(key, env) {
+  await env.APU_VAULT.delete(key);
+  await env.APU_VAULT.delete(key + ":c").catch(() => {});
+  await env.APU_VAULT.delete(key + ":d").catch(() => {});
+  await env.APU_VAULT.delete(key + ":m").catch(() => {});
+}
+
+async function handlePsyncGet(slot, url, request, env) {
+  const key = psyncKey(slot);
+  if (!key) return json({ error: "bad slot" }, 400);
+  if (!env.APU_VAULT) return json({ error: "KV binding is not configured" }, 501);
+  const entry = await psyncRead(key, env);
+  if (url.searchParams.get("meta") === "1") {
+    if (!entry) return json({ error: "not found" }, 404);
+    return new Response(
+      JSON.stringify({ exists: true, time: entry.time, size: entry.size, dev: entry.dev }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  }
+  const code = (request.headers.get("X-Apu-Code") || "").trim();
+  if (!code) return json({ error: "code required" }, 401);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
+  const check = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (!entry || !entry.check || entry.check !== check) return json({ error: "wrong code" }, 403);
+  // Одноразовость: стереть сразу после забора.
+  await psyncDelete(key, env);
+  return new Response(entry.blob, {
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
 // ---- хранилище личности -----------------------------------------------------
+
+// ── Каталог GIF (v11.74.14): поиск через Tenor, ключ СПРЯТАН на сервере ──
+// Телефон спрашивает наш /gif/search, сервер ходит к Tenor со своим ключом
+// (binding TENOR_KEY; не задан - честно отвечаем «не настроен»). Выбранная
+// гифка скачивается телефоном с CDN Tenor и дальше едёт через НАШ файловый
+// рой, зашифрованная: каталог - единственная внешняя точка.
+async function handleGifSearch(url, env) {
+  try {
+    // Каталог умеет двух поставщиков: GIPHY_KEY (проще получить) и
+    // TENOR_KEY (если уж заведён). Нет ни одного - честно говорим.
+    const giphyKey = (env && env.GIPHY_KEY) || "";
+    const tenorKey = (env && env.TENOR_KEY) || "";
+    if (!giphyKey && !tenorKey) {
+      return json({ error: "Каталог GIF не настроен на сервере (нет ключа Giphy/Tenor)" }, 503);
+    }
+    if (giphyKey) return await gifSearchGiphy(url, giphyKey);
+    return await gifSearchTenor(url, tenorKey);
+  } catch (e) {
+    return json({ error: "gif: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+// Giphy v1: search?api_key&q&limit&offset; «ещё» = offset (число).
+async function gifSearchGiphy(url, key) {
+  try {
+    const q = (url.searchParams.get("q") || "").trim().slice(0, 64);
+    const pos = parseInt((url.searchParams.get("pos") || "0"), 10) || 0;
+    const params = new URLSearchParams({
+      api_key: key,
+      limit: "24",
+      offset: String(pos),
+      rating: "pg-13",
+    });
+    let endpoint = "trending";
+    if (q) {
+      endpoint = "search";
+      params.set("q", q);
+    }
+    const resp = await fetch(
+      "https://api.giphy.com/v1/gifs/" + endpoint + "?" + params.toString()
+    );
+    if (!resp.ok) {
+      return json({ error: "Каталог GIF ответил ошибкой (" + resp.status + ")" }, 502);
+    }
+    const data = await resp.json();
+    const results = (data.data || [])
+      .map((r) => {
+        const im = r.images || {};
+        const preview = (im.preview_gif && im.preview_gif.url) ||
+          (im.fixed_width_small && im.fixed_width_small.url) || "";
+        const gif = (im.downsized_medium && im.downsized_medium.url) ||
+          (im.downsized && im.downsized.url) ||
+          (im.original && im.original.url) || "";
+        return { id: String(r.id || ""), preview: preview, gif: gif };
+      })
+      .filter((x) => x.id && x.preview && x.gif);
+    const next = ((data.pagination && data.pagination.offset) || 0) + results.length;
+    return json({ results: results, next: String(next) }, 200);
+  } catch (e) {
+    return json({ error: "gif: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+// Tenor v2: featured/search + pos-курсор.
+async function gifSearchTenor(url, key) {
+  try {
+    const q = (url.searchParams.get("q") || "").trim().slice(0, 64);
+    const pos = (url.searchParams.get("pos") || "").slice(0, 64);
+    const params = new URLSearchParams({
+      key: key,
+      limit: "24",
+      client_key: "apu_app",
+      media_filter: "tinygif,gif",
+    });
+    let endpoint = "featured";
+    if (q) {
+      endpoint = "search";
+      params.set("q", q);
+    } else {
+      params.set("random", "false");
+    }
+    if (pos) params.set("pos", pos);
+    const resp = await fetch(
+      "https://tenor.googleapis.com/v2/" + endpoint + "?" + params.toString()
+    );
+    if (!resp.ok) {
+      return json({ error: "Каталог GIF ответил ошибкой (" + resp.status + ")" }, 502);
+    }
+    const data = await resp.json();
+    const results = (data.results || [])
+      .map((r) => {
+        const f = r.media_formats || {};
+        return {
+          id: String(r.id || ""),
+          preview: String(f.tinygif && f.tinygif.url ? f.tinygif.url : ""),
+          gif: String(
+            f.gif && f.gif.url ? f.gif.url : (f.tinygif && f.tinygif.url) || ""
+          ),
+        };
+      })
+      .filter((x) => x.id && x.preview && x.gif);
+    return json({ results: results, next: String(data.next || "") }, 200);
+  } catch (e) {
+    return json({ error: "gif: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+// ── Резервные копии азбуки адресов (v11.74.8) ────────────────────────────
+// Телефон сам (раз в сутки и по кнопке) кладёт ЗАШИФРОВАННУЮ азбуку:
+// ключ шифрования выведен из приватного ключа узла, сервер видит только
+// непрозрачные байты. Полка = "addrbook|<node_id>".
+const MAX_ADDRBOOK_CHARS = 200000;
+
+async function handleAddrBookPut(request, env) {
+  try {
+    const body = await request.json();
+    const shelf = String(body.shelf || "");
+    const book = String(body.book || "");
+    if (!shelf.startsWith("addrbook|") || shelf.length > 160) {
+      return json({ error: "bad shelf" }, 400);
+    }
+    if (!book || book.length > MAX_ADDRBOOK_CHARS) {
+      return json({ error: "bad book" }, 400);
+    }
+    await env.APU_VAULT.put(shelf, book);
+    return json({ success: true }, 200);
+  } catch (e) {
+    return json({ error: "addrbook put: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
+
+async function handleAddrBookGet(url, env) {
+  try {
+    const shelf = url.searchParams.get("shelf") || "";
+    if (!shelf.startsWith("addrbook|") || shelf.length > 160) {
+      return json({ error: "bad shelf" }, 400);
+    }
+    const book = await env.APU_VAULT.get(shelf);
+    if (!book) return json({ error: "not found" }, 404);
+    return json({ book }, 200);
+  } catch (e) {
+    return json({ error: "addrbook get: " + (e && e.message ? e.message : String(e)) }, 502);
+  }
+}
 
 async function handleVaultPut(request, env) {
   let body;
@@ -469,6 +1089,91 @@ async function handleVersion(env) {
     update_url:
       "https://github.com/vzhem/APUMIR/releases/download/" + version + "/app-release.apk",
   });
+}
+
+// ---- обновление приложения (белый список мобильных сетей) -------------------
+//
+// На «жёстком» мобильном интернете сеть пускает только хосты из белого
+// списка: наш домен там есть (приглашения и короткие ссылки живут здесь),
+// а GitHub - нет. Телефон спрашивает обновление здесь, а worker сам ходит
+// на GitHub (у Cloudflare своих ограничений нет) и отдаёт сведения и APK
+// потоком СО СВОЕГО домена. Открытого прокси нет: репозиторий и имя файла
+// зашиты намертво, через worker нельзя скачать ничего постороннего.
+
+const RELEASE_REPO = "vzhem/APUMIR";
+const RELEASE_ASSET = "app-release.apk";
+
+async function handleUpdateLatest(request, env) {
+  let upstream;
+  try {
+    upstream = await fetch("https://api.github.com/repos/" + RELEASE_REPO + "/releases/latest", {
+      headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "APU-Relay-Worker" },
+    });
+  } catch (e) {
+    return await serveLatestCache(env, "github unreachable: " + e.message);
+  }
+  if (!upstream.ok) {
+    return await serveLatestCache(env, "github " + upstream.status);
+  }
+  const data = await upstream.json();
+  const payload = {
+    tag_name: typeof data.tag_name === "string" ? data.tag_name : "",
+    notes: typeof data.body === "string" ? data.body.slice(0, 4096) : "",
+    published_at: typeof data.published_at === "string" ? data.published_at : "",
+    // APK телефон тоже берёт здесь же: /update/apk отдаёт файл последнего
+    // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
+    apk_url: new URL("/update/apk", request.url).toString(),
+  };
+  // р225: успешный ответ складываем в KV без срока - когда GitHub начнёт
+  // лимитить запросы с адресов Cloudflare (403), телефоны всё равно увидят
+  // последний известный релиз, а не ошибку.
+  try {
+    if (env && env.APU_VAULT && payload.tag_name) {
+      await env.APU_VAULT.put("upd:latest", JSON.stringify(payload));
+    }
+  } catch (e) { /* кэш не критичен */ }
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=300" },
+  });
+}
+
+/** GitHub лимитит/недоступен: отдать последний известный релиз из KV. */
+async function serveLatestCache(env, reason) {
+  try {
+    if (env && env.APU_VAULT) {
+      const cached = await env.APU_VAULT.get("upd:latest");
+      if (cached) {
+        return new Response(cached, {
+          status: 200,
+          headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=60", "X-Apu-Cache": "stale" },
+        });
+      }
+    }
+  } catch (e) { /* нет кэша - честная ошибка */ }
+  return json({ error: reason }, 502);
+}
+
+async function handleUpdateApk() {
+  let upstream;
+  try {
+    upstream = await fetch(
+      "https://github.com/" + RELEASE_REPO + "/releases/latest/download/" + RELEASE_ASSET,
+      { redirect: "follow", headers: { "User-Agent": "APU-Relay-Worker" } }
+    );
+  } catch (e) {
+    return json({ error: "github unreachable: " + e.message }, 502);
+  }
+  if (!upstream.ok || !upstream.body) {
+    return json({ error: "github " + upstream.status }, 502);
+  }
+  const headers = new Headers();
+  headers.set("Content-Type", "application/vnd.android.package-archive");
+  headers.set("Content-Disposition", 'attachment; filename="' + RELEASE_ASSET + '"');
+  const length = upstream.headers.get("content-length");
+  if (length) headers.set("Content-Length", length);
+  headers.set("Cache-Control", "no-store");
+  return new Response(upstream.body, { status: 200, headers: headers });
 }
 
 // ---- общее ------------------------------------------------------------------

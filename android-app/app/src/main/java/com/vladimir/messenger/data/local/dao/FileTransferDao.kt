@@ -62,6 +62,7 @@ interface FileTransferDao {
           AND :completedChunks <= chunkCount
           AND :transferredBytes >= transferredBytes
           AND :transferredBytes <= totalBytes
+          AND state NOT IN ('COMPLETE', 'CANCELLED')
         """
     )
     suspend fun advanceProgress(
@@ -196,6 +197,60 @@ interface FileTransferDao {
      */
     @Query("SELECT * FROM file_transfers WHERE chatId = :chatId AND fileSha256 = :fileSha256 ORDER BY createdAtMs ASC")
     suspend fun getForFile(chatId: String, fileSha256: String): List<FileTransferEntity>
+
+    /**
+     * Раунд 120: уже принятый (COMPLETE) тот же файл от того же собеседника
+     * в том же чате, с неистёкшим сроком. По нему повторное предложение
+     * того же файла завершается локальной копией - без качания байтов.
+     */
+    @Query(
+        "SELECT * FROM file_transfers " +
+            "WHERE direction = 'INCOMING' AND state = 'COMPLETE' " +
+            "AND chatId = :chatId AND peerNodeId = :peerNodeId " +
+            "AND fileSha256 = :fileSha256 AND expiresAtMs > :nowMs " +
+            "ORDER BY createdAtMs DESC LIMIT 1"
+    )
+    suspend fun getCompletedIncomingSameFile(
+        chatId: String,
+        peerNodeId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): FileTransferEntity?
+
+    /**
+     * Раунд 122: тот же файл УЖЕ ЕДЕТ от любого отправителя (просили у
+     * нескольких хранителей роя). Новое предложение того же файла
+     * отклоняется, пока первый источник активен (живость - по updatedAtMs).
+     */
+    @Query(
+        "SELECT * FROM file_transfers " +
+            "WHERE direction = 'INCOMING' AND state NOT IN ('COMPLETE', 'FAILED', 'CANCELLED') " +
+            "AND chatId = :chatId AND fileSha256 = :fileSha256 AND expiresAtMs > :nowMs " +
+            "ORDER BY createdAtMs DESC LIMIT 1"
+    )
+    suspend fun getActiveIncomingSameFile(
+        chatId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): FileTransferEntity?
+
+    /**
+     * Раунд 123: другие АКТИВНЫЕ источники того же файла (кроме указанной
+     * передачи). Зеркалирование кусков и уборка после победителя.
+     */
+    @Query(
+        "SELECT * FROM file_transfers " +
+            "WHERE direction = 'INCOMING' AND state NOT IN ('COMPLETE', 'FAILED', 'CANCELLED') " +
+            "AND chatId = :chatId AND fileSha256 = :fileSha256 AND transferId != :transferId " +
+            "AND expiresAtMs > :nowMs " +
+            "ORDER BY createdAtMs ASC"
+    )
+    suspend fun getActiveIncomingSameFileExcept(
+        chatId: String,
+        transferId: String,
+        fileSha256: String,
+        nowMs: Long,
+    ): List<FileTransferEntity>
 
     /**
      * Мои групповые копии (K2, v11.70.25): строка `OUTGOING`/`SEEDING` -

@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.backup
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -21,6 +22,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -55,7 +57,7 @@ class ProfileBackup @Inject constructor(
     private val database: AppDatabase,
 ) {
     sealed interface CreateResult {
-        data class Success(val bytes: Long, val receivedFiles: Int) : CreateResult
+        data class Success(val bytes: Long, val receivedFiles: Int, val dataFp: String = "") : CreateResult
         data object NoIdentity : CreateResult
         data object BadPassword : CreateResult
         data class Failed(val reason: String) : CreateResult
@@ -165,6 +167,13 @@ class ProfileBackup @Inject constructor(
             Log.w(TAG, "database snapshot failed: ${e.javaClass.simpleName}: ${e.message}")
             return CreateResult.Failed("database snapshot: ${e.message ?: e.javaClass.simpleName}")
         }
+        // Отпечаток данных: одинаковые копии не дёргают авто-уведомлениями (р225).
+        val dataFp = try {
+            dataFingerprintOf(snapshot)
+        } catch (e: Exception) {
+            Log.w(TAG, "data fingerprint failed: ${e.message}")
+            ""
+        }
         try {
             val received = if (includeReceived) listReceived() else emptyList()
             val manifest = BackupManifest(
@@ -178,6 +187,7 @@ class ProfileBackup @Inject constructor(
                 includesReceived = includeReceived,
                 receivedFiles = received.size,
                 receivedBytes = received.sumOf { it.second.length() },
+                dataFp = dataFp,
             )
             val raw = open() ?: return CreateResult.Failed("cannot open destination")
             val counting = CountingOutputStream(BufferedOutputStream(raw, 1 shl 16))
@@ -206,13 +216,28 @@ class ProfileBackup @Inject constructor(
                 }
             }
             Log.i(TAG, "backup written: ${counting.count} bytes, received=${received.size}, db=${snapshot.length()}")
-            return CreateResult.Success(counting.count, received.size)
+            return CreateResult.Success(counting.count, received.size, dataFp)
         } catch (e: Exception) {
             Log.w(TAG, "backup failed: ${e.javaClass.simpleName}: ${e.message}")
             return CreateResult.Failed(e.message ?: e.javaClass.simpleName)
         } finally {
             listOf("", "-wal", "-shm", "-journal").forEach { File(snapshot.path + it).delete() }
         }
+    }
+
+    /** Отпечаток содержимого: числа записей ключевых таблиц (детерминированно, без nodeId). */
+    private fun dataFingerprintOf(snapshot: File): String {
+        val sb = StringBuilder("apu-data-fp-v1|")
+        SQLiteDatabase.openDatabase(snapshot.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            for (table in listOf("chats", "contacts", "groups", "messages", "nicknames")) {
+                db.rawQuery("SELECT COUNT(*) FROM $table", null).use { cursor ->
+                    cursor.moveToFirst()
+                    sb.append(table).append('=').append(cursor.getLong(0)).append(';')
+                }
+            }
+        }
+        val digest = MessageDigest.getInstance("SHA-256").digest(sb.toString().toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { String.format("%02x", it) }.take(32)
     }
 
     /**

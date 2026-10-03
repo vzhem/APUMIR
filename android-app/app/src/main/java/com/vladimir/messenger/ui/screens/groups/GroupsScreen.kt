@@ -4,6 +4,7 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Сообщества»: группы и каналы, создание новых
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.ui.components.BubbleOverflowMenu
 import com.vladimir.messenger.ui.components.BubbleMenuAction
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.filled.Refresh
@@ -25,6 +27,9 @@ import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +53,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -243,13 +249,11 @@ fun GroupsScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            OutlinedTextField(
+            ApuSearchField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::onSearchQueryChanged,
+                placeholder = "Поиск групп и каналов",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("Поиск групп и каналов") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                singleLine = true,
             )
 
             when {
@@ -323,7 +327,6 @@ fun GroupsScreen(
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
                                 )
-                                HorizontalDivider()
                             }
                         }
                         if (myChannels.isNotEmpty()) {
@@ -342,7 +345,6 @@ fun GroupsScreen(
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
                                 )
-                                HorizontalDivider()
                             }
                         }
                         // Поиск по сетевому каталогу. Группы и каналы разнесены по
@@ -463,14 +465,33 @@ fun GroupsScreen(
     // Как приглашать: показываем QR или отправляем ссылку.
     inviteChoice?.let { group ->
         val what = if (group.isChannel) "канал" else "группу"
+        // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
+        // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
+        var attachApk by remember { mutableStateOf(true) }
         AlertDialog(
             onDismissRequest = { inviteChoice = null },
             title = { Text("Пригласить в $what") },
             text = {
-                Text(
-                    "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
-                        "Ссылку можно отправить кому угодно - по ней вход как обычно."
-                )
+                Column {
+                    Text(
+                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
+                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { attachApk = !attachApk }
+                            .padding(horizontal = 4.dp),
+                    ) {
+                        Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                        Text(
+                            "Приложить установочный файл (APK)",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -486,7 +507,8 @@ fun GroupsScreen(
                     val chosen = group
                     inviteChoice = null
                     viewModel.shareInvite(chosen.id) { title, link ->
-                        AppShare.shareGroupInvite(context, title, link)
+                        // Раунд 162: каналу - «канал».
+                        AppShare.shareGroupInvite(context, title, link, chosen.isChannel, attachApk)
                     }
                 }) { Text("Отправить ссылку") }
             },
@@ -586,13 +608,23 @@ private fun GroupRow(
     /** Пункты меню «⋮» справа. Пустой список - кнопки нет (каталог сети). */
     menuActions: List<BubbleMenuAction> = emptyList(),
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    // Раунд 264: фирменный пузырь главного экрана - светлая полупрозрачная
+    // подложка с золотой рамкой поверх обоев. Списки выглядят одинаково.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
             com.vladimir.messenger.ui.components.GroupAvatar(
                 groupId = group.id,
                 title = group.title,
@@ -600,7 +632,13 @@ private fun GroupRow(
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(group.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    group.title,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1E2430),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
                 // Что это - канал или группа - должно быть видно СРАЗУ, иначе
                 // в общем списке они неразличимы.
                 Text(
@@ -617,9 +655,15 @@ private fun GroupRow(
                         append(group.memberCount)
                         append(" участн.")
                         if (group.topicsEnabled) append(" • темы")
-                        group.lastMessagePreview?.let { append(" • ").append(it) }
+                        // Раунд 156: без служебных строк (гифки/стикеры).
+                        group.lastMessagePreview?.let {
+                            append(" • ").append(
+                                com.vladimir.messenger.util.ChatPreviews.human(it).orEmpty()
+                            )
+                        }
                     },
                     style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF1E2430).copy(alpha = 0.7f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -634,7 +678,6 @@ private fun GroupRow(
             // Меню «⋮» - как в пузырях главного экрана: списки должны
             // выглядеть и вести себя одинаково.
             BubbleOverflowMenu(actions = menuActions)
-        }
     }
 }
 
@@ -798,8 +841,20 @@ private fun DirectoryHeader(title: String) {
 /** Строка найденного в сетевом каталоге: чужая публичная группа или канал. */
 @Composable
 private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
+    // Раунд 264: открытые группы и каналы сети - тоже в фирменных пузырях,
+    // как и «мои» сообщества: списки выглядят едино.
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         com.vladimir.messenger.ui.components.GroupAvatar(
@@ -813,11 +868,8 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 entry.title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
-                // Цвет задан явно: строка каталога лежит НЕ в карточке, а прямо
-                // на тёмных обоях, поэтому цвет по умолчанию брался тёмный и
-                // название сливалось с фоном. У «Моих групп» такой беды нет -
-                // там Card сам подбирает цвет текста под свою подложку.
-                color = MaterialTheme.colorScheme.onSurface,
+                // Раунд 264: строка теперь в светлом пузыре - тёмный текст.
+                color = Color(0xFF1E2430),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -829,7 +881,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             Text(
                 if (entry.needsApproval) "Вход по заявке" else "Вход сразу",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color(0xFF1E2430).copy(alpha = 0.7f),
             )
         }
         TextButton(onClick = {
@@ -844,7 +896,6 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             )
         }) { Text(if (entry.isChannel) "Подписаться" else "Вступить") }
     }
-    HorizontalDivider()
 }
 
 /**
@@ -870,7 +921,7 @@ private fun groupMenuActions(
     )
     add(
         BubbleMenuAction(
-            title = if (group.isChannel) "Пригласить в канал" else "Пригласить в группу",
+            title = if (group.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
             icon = Icons.Filled.PersonAdd,
             onClick = onInvite,
         )

@@ -19,7 +19,23 @@ import android.os.Build
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
-class MessengerApplication : Application() {
+class MessengerApplication : Application(), coil.ImageLoaderFactory {
+    /**
+     * Общий ImageLoader Coil С декодером GIF: без него AsyncImage рисует
+     * только первый кадр. Гифки в темах групп (v11.74.14) оживают сами.
+     */
+    override fun newImageLoader(): coil.ImageLoader =
+        coil.ImageLoader.Builder(this)
+            .components {
+                // API 28+: системный декодер (GIF и анимированный WebP);
+                // младше: встроенный декодер GIF (minSdk 26-27).
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                }
+                add(coil.decode.GifDecoder.Factory())
+            }
+            .build()
+
 
     override fun onCreate() {
         super.onCreate()
@@ -30,8 +46,22 @@ class MessengerApplication : Application() {
         }
         // Must run before Room/services/workers can observe restored stale state.
         DeviceIdentityMarker.discardIfRestored(applicationContext)
+        // р236: черновики сообщений (недописанный текст поля ввода).
+        com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()
         scheduleBoundedRelayWake()
+        // Раунд 260: ядро стартует как можно раньше - ещё до отрисовки
+        // первого экрана, чтобы к открытию чатов движок уже поднимался.
+        // На фоновых пробуждениях система может запретить - там сервис
+        // поднимут будильник и приёмник сети, как и раньше.
+        runCatching {
+            val coreIntent = android.content.Intent(this, com.vladimir.messenger.service.CoreServerService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(coreIntent)
+            } else {
+                startService(coreIntent)
+            }
+        }.onFailure { android.util.Log.w("MessengerApp", "early core start skipped: ${it.message}") }
 
         // Automatic collection is an Organizer (20 qualified referrals) entitlement.
         try {
@@ -93,21 +123,39 @@ class MessengerApplication : Application() {
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            // Сообщения: высокий приоритет - всплывают и звучат.
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Служба APU",
+                "Сообщения",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Держит связь APU включённой"
+                description = "Уведомления о новых сообщениях"
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(channel)
+            // Раунд 142: служебная плашка «на связи» - МИНИМАЛЬНАЯ важность:
+            // без иконки в статус-баре, без звука, в самом низу шторки
+            // (владелец: «это уведомление нужно спрятать от абонента, нужны
+            // только уведомления о сообщениях»). Важность существующего
+            // канала менять нельзя, поэтому службе - отдельный канал.
+            val service = NotificationChannel(
+                CHANNEL_SERVICE_ID,
+                "Фоновая связь (служебное)",
+                NotificationManager.IMPORTANCE_MIN
+            ).apply {
+                description = "Признак работающей фоновой связи APU"
                 setShowBadge(false)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(service)
         }
     }
 
     companion object {
         const val CHANNEL_ID = "p2p_messenger_service"
+
+        /** Раунд 142: отдельный тихий канал для плашки фоновой службы. */
+        const val CHANNEL_SERVICE_ID = "apu_service_status"
     }
 
 

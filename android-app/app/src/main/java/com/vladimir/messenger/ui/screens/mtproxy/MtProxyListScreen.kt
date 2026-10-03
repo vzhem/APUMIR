@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.screens.mtproxy
 
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -61,7 +65,7 @@ fun MtProxyListScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                 ),
-                title = { Text("MTProto прокси", fontWeight = FontWeight.Bold) },
+                title = { ApuSettingsHeader("MTProto прокси") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.Default.ArrowBack, "Назад")
@@ -134,6 +138,17 @@ fun MtProxyListScreen(
                 contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Раунд 196: список ограничен 500 лучшими - сообщаем, сколько всего.
+                if (uiState.totalInPool > uiState.proxies.size) {
+                    item(key = "pool-count") {
+                        Text(
+                            "Показаны ${uiState.proxies.size} лучших из ${uiState.totalInPool} в пуле",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                }
                 items(uiState.proxies, key = { it.id }) { proxy ->
                     MtProxyCard(
                         proxy = proxy,
@@ -249,9 +264,9 @@ private fun AddProxyDialog(
 ) {
     var input by remember { mutableStateOf("") }
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Добавить прокси") },
+        title = { ApuSettingsHeader("Добавить прокси") },
         text = {
             Column {
                 Text(
@@ -304,9 +319,9 @@ private fun ImportProxyDialog(
 ) {
     var input by remember { mutableStateOf("") }
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Импорт прокси") },
+        title = { ApuSettingsHeader("Импорт прокси") },
         text = {
             Column {
                 Text(

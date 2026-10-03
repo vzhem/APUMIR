@@ -12,4 +12,6 @@ data class ChatEntity(
     val lastMessageTime: Long? = null,
     val unreadCount: Int = 0,
     val isContactOnline: Boolean = false,
+    /** Pin timestamp in the mixed home inbox; null means unpinned. */
+    val pinnedAtMs: Long? = null,
 )

@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.swipeBack
@@ -21,8 +24,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TopAppBarDefaults
@@ -59,6 +60,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
     // Счётчик обновляется после промокода: увеличиваем метку - и ранг с
     // числом друзей перечитываются из хранилища.
     var refresh by remember { mutableIntStateOf(0) }
+    var showInviteShare by remember { mutableStateOf(false) }
     val qualified = remember(refresh) { ReferralRankStore.qualifiedDirectCount(context) }
     val earned = remember(refresh) { ReferralRankStore.earnedDirectCount(context) }
     val promoBonus = remember(refresh) { PromoCodes.bonus(context) }
@@ -82,7 +84,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                 ),
-                title = { Text("Ранги и возможности") },
+                title = { ApuSettingsHeader("Ранги и возможности") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
@@ -103,7 +105,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                 item {
                     // Ранг растёт только от приглашённых, поэтому кнопка «позвать друга»
                     // стоит прямо здесь, а не спрятана в настройках.
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Ранг растёт от приглашённых друзей", fontWeight = FontWeight.Medium)
                             Text(
@@ -112,11 +114,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Button(
-                                onClick = {
-                                    OwnInvite.link(context)?.let { link ->
-                                        ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
-                                    }
-                                },
+                                onClick = { showInviteShare = true },
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
@@ -126,7 +124,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     }
                 }
                 item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             // Та же медаль, что и на главной: значок ранга должен
                             // узнаваться в обоих местах.
@@ -189,7 +187,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     }
                 }
                 items(FileTransferRankPolicy.tiers, key = { it.minimumQualifiedReferrals }) { tier ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             val isCurrent = tier == current
                             val reached = qualified >= tier.minimumQualifiedReferrals
@@ -228,6 +226,22 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
         }
     }
     }
+
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        com.vladimir.messenger.ui.components.InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                OwnInvite.link(context)?.let { link ->
+                    ShortShare.shareInvite(
+                        context, OwnInvite.displayName(context), link, attach,
+                    )
+                }
+            },
+        )
+    }
 }
 
 /**
@@ -244,11 +258,8 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
 
-    Card(
+    ApuSettingsCard(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-        ),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

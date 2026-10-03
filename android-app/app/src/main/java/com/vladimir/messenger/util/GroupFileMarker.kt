@@ -58,6 +58,25 @@ object GroupFileMarker {
     /** Есть ли в тексте визитка файла. */
     fun has(text: String): Boolean = parse(text) != null
 
+    /** GIF (анимация): по MIME или по имени - не все проводники ставят image/gif. */
+    fun isGif(info: Info): Boolean =
+        info.mediaType.equals("image/gif", ignoreCase = true) ||
+            info.displayName.trimEnd().endsWith(".gif", ignoreCase = true)
+
+    /** Раунд 166: анимированная картинка (гифка или анимированный webp). */
+    fun isAnimatedImage(info: Info): Boolean =
+        isGif(info) ||
+            info.mediaType.equals("image/webp", ignoreCase = true) ||
+            info.displayName.trimEnd().endsWith(".webp", ignoreCase = true)
+
+    /**
+     * Раунд 169: это стикер («Стикер.webp» от наших отправителей или любая
+     * webp-картинка) - рисуется без пузыря и рамок, анимированной картинкой.
+     */
+    fun isSticker(info: Info): Boolean =
+        info.displayName.trimStart().startsWith("Стикер", ignoreCase = true) ||
+            info.displayName.trimEnd().lowercase().endsWith(".webp")
+
     /** Сама строка визитки из текста (как есть) или null, если её нет или она испорчена. */
     fun line(text: String): String? =
         text.lineSequence().firstOrNull { it.startsWith(PREFIX) }?.takeIf { parse(it) != null }

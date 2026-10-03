@@ -189,7 +189,7 @@ data class MessengerColors(
 
 private val DayMessengerColors = MessengerColors(
     messageBubbleOwn       = Color(0xFFEFC975),  // золотистый пузырь своих
-    messageBubbleOther     = Color(0xFFFFFFFF),  // белые пузыри чужих
+    messageBubbleOther     = Color(0xFFF5F7FA).copy(alpha = 0.92f),  // фирменный светлый пузырь
     messageBubbleOwnText   = Color(0xFF3A2A05),
     messageBubbleOtherText = Color(0xFF1E2430),
     statusOnline           = StatusOnline,
@@ -202,7 +202,7 @@ private val NightMessengerColors = MessengerColors(
     messageBubbleOwn       = Gold80,
     // Раунд 41: ночью чужие пузыри тоже светлые с тёмным текстом - текст
     // читается на любой подложке (просьба владельца).
-    messageBubbleOther     = Color(0xFFF2F4F7),
+    messageBubbleOther     = Color(0xFFF5F7FA).copy(alpha = 0.92f),
     messageBubbleOwnText   = GoldOnDark,
     messageBubbleOtherText = Color(0xFF1E2430),
     statusOnline           = StatusOnline,

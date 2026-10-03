@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -31,10 +32,12 @@ import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ApuMainTabBar
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import com.vladimir.messenger.ui.components.SearchOrb
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.CoreWarmBar
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
@@ -78,6 +81,8 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.util.OwnInvite
+import com.vladimir.messenger.data.link.ShortShare
+import com.vladimir.messenger.ui.components.InviteAttachDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,6 +123,11 @@ fun ChatListScreen(
     var confirmGroup by remember { mutableStateOf<InboxGroup?>(null) }
     // Как приглашать: QR при личной встрече или обычная ссылка.
     var inviteChoice by remember { mutableStateOf<InboxGroup?>(null) }
+    // Раунд 200: галочка «приложить APK» перед отправкой приглашения.
+    var showInviteShare by remember { mutableStateOf(false) }
+    var groupLinkShare by remember { mutableStateOf<InboxGroup?>(null) }
+    // Раунд 175: «Поделиться контактом» из списка чатов - выбор адресата в APU.
+    var shareCardFor by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     // Листалка разделов. Страницы едут за пальцем, поэтому выбранный раздел и
@@ -170,6 +180,9 @@ fun ChatListScreen(
             Column {
                 // Полоска статуса сети (появляется только при проблемах)
                 NetworkStatusBar(status = uiState.networkStatus)
+                // Раунд 263: пока ядро доподнимается в фоне - тонкая честная
+                // полоска, чтобы пустой список не выглядел поломкой.
+                CoreWarmBar()
 
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -261,6 +274,17 @@ fun ChatListScreen(
                                         onClick = {
                                             menuOpen = false
                                             showConnectDialog = true
+                                        },
+                                    )
+                                    // Раунд 199 (владелец): приглашение - на
+                                    // главной, под рукой. Тот же путь, что и
+                                    // из «Контактов»: текст + установочный APK.
+                                    DropdownMenuItem(
+                                        text = { Text("Пригласить в APU") },
+                                        leadingIcon = { ShimmerIcon(Icons.Default.PersonAdd) },
+                                        onClick = {
+                                            menuOpen = false
+                                            showInviteShare = true
                                         },
                                     )
                                 }
@@ -376,9 +400,12 @@ fun ChatListScreen(
                         onMarkChatRead = viewModel::markChatRead,
                         onMarkGroupRead = viewModel::markGroupRead,
                         onClearChat = { confirmClearChat = it },
+                        onShareCard = { shareCardFor = it },
                         onDeleteChat = { confirmDeleteChat = it },
                         onGroupLeaveOrDelete = { confirmGroup = it },
                         onInviteToGroup = { group -> inviteChoice = group },
+                        onTogglePersonalPin = viewModel::togglePersonalPin,
+                        onToggleGroupPin = viewModel::toggleGroupPin,
                         onLoadMore = viewModel::loadMore,
                     )
                 }
@@ -387,36 +414,220 @@ fun ChatListScreen(
     }
     }
 
+    // Раунд 158: группа/канал для рассылки приглашения контактам APU.
+    var inviteApu by remember { mutableStateOf<InboxGroup?>(null) }
+
     // Как приглашать: QR при встрече или ссылка кому угодно.
+    // Раунд 175: «Поделиться контактом» - выбор адресата внутри APU.
+    shareCardFor?.let { shared ->
+        ShareContactChooserDialog(
+            sharedName = shared.contactName,
+            contacts = viewModel.contacts.collectAsStateWithLifecycle(initialValue = emptyList())
+                .value.filter { it.id != shared.contactId },
+            onDismiss = { shareCardFor = null },
+            onPick = { to ->
+                shareCardFor = null
+                viewModel.sendContactCard(to.id, to.displayName, shared.contactId, shared.contactName)
+            },
+        )
+    }
+
     inviteChoice?.let { group ->
         val what = if (group.isChannel) "канал" else "группу"
         AlertDialog(
             onDismissRequest = { inviteChoice = null },
             title = { Text("Пригласить в $what") },
             text = {
-                Text(
-                    "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
-                        "Ссылку можно отправить кому угодно - по ней вход как обычно."
-                )
+                // Раунд 160: действия - тремя пузырями друг под другом
+                // (владелец: «три горизонтальных пузыря ... с нашей
+                // цветовой гаммой») вместо сжатых текстовых кнопок.
+                Column {
+                    Text(
+                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
+                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    InviteActionBubble("Показать QR-код", filled = true) {
+                        val chosen = group
+                        inviteChoice = null
+                        viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
+                            qrInvite = title to link
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    InviteActionBubble("Отправить ссылку", filled = true) {
+                        val chosen = group
+                        inviteChoice = null
+                        groupLinkShare = chosen
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    InviteActionBubble("Отправить в APU", filled = true) {
+                        val chosen = group
+                        inviteChoice = null
+                        inviteApu = chosen
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {},
+        )
+    }
+
+    // Раунд 158: «Отправить в APU» - выбираем адресатов галочками (до
+    // ChatListViewModel.MAX_INVITE_RECIPIENTS), каждому приглашение
+    // уходит в личный чат.
+    inviteApu?.let { grp ->
+        val what = if (grp.isChannel) "канал" else "группу"
+        var contacts by remember { mutableStateOf<List<com.vladimir.messenger.domain.model.Chat>?>(null) }
+        var selected by remember { mutableStateOf(setOf<String>()) }
+        var sending by remember { mutableStateOf(false) }
+        // Раунд 159: уже в группе - серым и не выбираются.
+        var memberIds by remember { mutableStateOf(setOf<String>()) }
+        val maxPick = ChatListViewModel.MAX_INVITE_RECIPIENTS
+        LaunchedEffect(grp.id) {
+            viewModel.personalChatsOnce { contacts = it }
+            viewModel.groupMemberIdsOnce(grp.id) { memberIds = it }
+        }
+        AlertDialog(
+            onDismissRequest = { if (!sending) inviteApu = null },
+            title = { Text("Кому отправить") },
+            text = {
+                Column {
+                    val list = contacts
+                    when {
+                        list == null -> Text("Загрузка…")
+                        list.isEmpty() -> Text("Пока нет личных чатов - сначала добавьте контакты.")
+                        else -> {
+                            Text(
+                                "Выбрано: ${selected.size} из $maxPick",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF8A93A2),
+                            )
+                            androidx.compose.foundation.lazy.LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 360.dp),
+                                // Раунд 161: пузыри-абоненты с зазором.
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                items(list, key = { it.id }) { c ->
+                                    val inGroup = c.contactId.isNotBlank() && c.contactId in memberIds
+                                    val isSelected = c.id in selected
+                                    // Раунд 161: каждый абонент - свой пузырь;
+                                    // выбрали - пузырь золотой (наш стиль).
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else Color.White.copy(alpha = 0.85f)
+                                            )
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                                                RoundedCornerShape(18.dp),
+                                            )
+                                            .clickable(enabled = !inGroup) {
+                                                selected = if (isSelected) {
+                                                    selected - c.id
+                                                } else if (selected.size < maxPick) {
+                                                    selected + c.id
+                                                } else {
+                                                    selected
+                                                }
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        // Круглый чек: рамка -> золотая заливка с галочкой.
+                                        val checkTint = when {
+                                            inGroup -> Color(0xFFE7EAF0)
+                                            isSelected -> Color.White
+                                            else -> Color.Transparent
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    when {
+                                                        inGroup -> Color(0xFF9AA3AF)
+                                                        isSelected -> MaterialTheme.colorScheme.primary
+                                                        else -> Color.Transparent
+                                                    }
+                                                )
+                                                .border(
+                                                    1.5.dp,
+                                                    when {
+                                                        inGroup -> Color(0xFF9AA3AF)
+                                                        else -> MaterialTheme.colorScheme.primary
+                                                    },
+                                                    CircleShape,
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (isSelected || inGroup) {
+                                                Icon(
+                                                    Icons.Filled.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = checkTint,
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            c.contactName.ifBlank { "Без имени" },
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = when {
+                                                isSelected -> Color.White
+                                                inGroup -> Color(0xFF9AA3AF)
+                                                else -> Color.Unspecified
+                                            },
+                                        )
+                                        if (inGroup) {
+                                            Text(
+                                                // Раунд 163: каналу - честное «уже в канале».
+                                                if (grp.isChannel) "уже в канале" else "уже в группе",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color(0xFF9AA3AF),
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    val chosen = group
-                    inviteChoice = null
-                    viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
-                        qrInvite = title to link
-                    }
-                }) { Text("Показать QR-код") }
+                if (selected.isNotEmpty()) {
+                    TextButton(
+                        enabled = !sending,
+                        onClick = {
+                            sending = true
+                            val ids = selected.toList()
+                            viewModel.sendGroupInviteToChats(grp.id, what, ids) { sent, failed ->
+                                sending = false
+                                inviteApu = null
+                                android.widget.Toast.makeText(
+                                    context,
+                                    if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
+                    ) { Text(if (sending) "Отправляем…" else "Отправить") }
+                }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    val chosen = group
-                    inviteChoice = null
-                    viewModel.shareGroupInvite(chosen.id) { title, link ->
-                        com.vladimir.messenger.util.AppShare
-                            .shareGroupInvite(context, title, link)
-                    }
-                }) { Text("Отправить ссылку") }
+                TextButton(enabled = !sending, onClick = { inviteApu = null }) { Text("Отмена") }
             },
         )
     }
@@ -530,16 +741,57 @@ fun ChatListScreen(
     // раздел QR (значок в шапке) показывает свой код, копирует ссылку и
     // делится ею — одно место вместо трёх.
 
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                val link = runCatching { OwnInvite.link(context) }.getOrNull()
+                if (link.isNullOrBlank()) {
+                    android.widget.Toast.makeText(
+                        context, "Личность ещё не создана",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                } else {
+                    ShortShare.shareInvite(
+                        context,
+                        OwnInvite.displayName(context),
+                        link,
+                        attach,
+                    )
+                }
+            },
+        )
+    }
+    if (groupLinkShare != null) {
+        val chosenGroup = groupLinkShare!!
+        InviteAttachDialog(
+            title = if (chosenGroup.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
+            onDismiss = { groupLinkShare = null },
+            onShare = { attach ->
+                groupLinkShare = null
+                viewModel.shareGroupInvite(chosenGroup.id) { title, link ->
+                    // Раунд 162: каналу - «канал», группе - «группа».
+                    com.vladimir.messenger.util.AppShare.shareGroupInvite(
+                        context, title, link, chosenGroup.isChannel, attach,
+                    )
+                }
+            },
+        )
+    }
+
     // Connect dialog
     if (showConnectDialog) {
         AlertDialog(
             onDismissRequest = { showConnectDialog = false },
-            title = { Text("одключиться по ссылке") },
+            title = { Text("Подключиться по ссылке") },
             text = {
                 OutlinedTextField(
                     value = connectLink,
                     onValueChange = { connectLink = it },
-                    label = { Text("ставьте ссылку p2pm://...") },
+                    label = { Text("Вставьте ссылку p2pm://...") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
@@ -556,7 +808,7 @@ fun ChatListScreen(
                         connectLink = ""
                         showConnectDialog = false
                     }
-                }) { Text("одключиться") }
+                }) { Text("Подключиться") }
             },
             dismissButton = {
                 TextButton(onClick = { showConnectDialog = false }) { Text("тмена") }
@@ -564,6 +816,42 @@ fun ChatListScreen(
         )
     }
 }
+
+/**
+ * Раунд 160: пузырь-кнопка диалога приглашения в гамме APU: золотая
+ * заливка (главное действие) либо светлый пузырь с золотой рамкой.
+ */
+@Composable
+private fun InviteActionBubble(
+    label: String,
+    filled: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                if (filled) MaterialTheme.colorScheme.primary
+                else Color.White.copy(alpha = 0.85f)
+            )
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.primary.copy(alpha = if (filled) 1f else 0.4f),
+                RoundedCornerShape(18.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontWeight = FontWeight.Bold,
+            color = if (filled) Color.White else MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
 
 /**
  * Одна страница листалки: список выбранного раздела либо объяснение пустоты.
@@ -586,9 +874,14 @@ private fun SectionPage(
     onMarkGroupRead: (String) -> Unit,
     onClearChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
     onDeleteChat: (com.vladimir.messenger.domain.model.Chat) -> Unit,
+    /** Раунд 175: «Поделиться контактом» - отдать чат наверх для выбора адресата. */
+    onShareCard: (com.vladimir.messenger.domain.model.Chat) -> Unit = {},
     onGroupLeaveOrDelete: (InboxGroup) -> Unit,
     /** Позвать людей в группу или канал. */
     onInviteToGroup: (InboxGroup) -> Unit = {},
+    /** Pin/unpin conversation rows on the home inbox. */
+    onTogglePersonalPin: (com.vladimir.messenger.domain.model.Chat) -> Unit = {},
+    onToggleGroupPin: (InboxGroup) -> Unit = {},
     /** Прокрутка подошла к концу загруженного - пора досыпать страницу. */
     onLoadMore: () -> Unit = {},
 ) {
@@ -696,6 +989,7 @@ private fun SectionPage(
                             is InboxItem.Personal -> ContactCard(
                                 chat    = item.chat,
                                 kind    = BubbleKind.Personal,
+                                showPinnedIndicator = true,
                                 onClick = {
                                     onChatClick(
                                         item.chat.id,
@@ -704,6 +998,11 @@ private fun SectionPage(
                                     )
                                 },
                                 menuActions = listOf(
+                                    BubbleMenuAction(
+                                        title = if (item.chat.isPinned) "Открепить" else "Закрепить",
+                                        icon = Icons.Filled.PushPin,
+                                        onClick = { onTogglePersonalPin(item.chat) },
+                                    ),
                                     BubbleMenuAction(
                                         title = "Открыть чат",
                                         icon = Icons.Default.Forum,
@@ -724,6 +1023,11 @@ private fun SectionPage(
                                                 item.chat.contactName,
                                             )
                                         },
+                                    ),
+                                    BubbleMenuAction(
+                                        title = "Поделиться контактом",
+                                        icon = Icons.Default.Share,
+                                        onClick = { onShareCard(item.chat) },
                                     ),
                                     BubbleMenuAction(
                                         title = "Отметить прочитанным",
@@ -750,6 +1054,13 @@ private fun SectionPage(
                                 menuActions = buildList {
                                     add(
                                         BubbleMenuAction(
+                                            title = if (item.group.isPinned) "Открепить" else "Закрепить",
+                                            icon = Icons.Filled.PushPin,
+                                            onClick = { onToggleGroupPin(item.group) },
+                                        )
+                                    )
+                                    add(
+                                        BubbleMenuAction(
                                             title = if (item.group.isChannel) "Открыть канал" else "Открыть группу",
                                             icon = Icons.Default.Forum,
                                             onClick = {
@@ -766,7 +1077,7 @@ private fun SectionPage(
                                             title = if (item.group.isChannel) {
                                                 "Пригласить в канал"
                                             } else {
-                                                "Пригласить в группу"
+                                                "Пригласить в сообщество"
                                             },
                                             icon = Icons.Default.PersonAdd,
                                             onClick = { onInviteToGroup(item.group) },
@@ -835,23 +1146,39 @@ private fun SearchTextField(
     onQueryChanged: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    // Раунд 265: поиск главного экрана - в фирменном пузыре, как и везде.
     TextField(
         value       = query,
         onValueChange = onQueryChanged,
-        placeholder = { Text("Поиск: чаты, группы, каналы") },
+        placeholder = {
+            Text(
+                "Поиск: чаты, группы, каналы",
+                color = androidx.compose.ui.graphics.Color(0xFF1E2430).copy(alpha = 0.45f),
+            )
+        },
         singleLine  = true,
         colors = TextFieldDefaults.colors(
-            focusedContainerColor   = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedContainerColor   = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
+            unfocusedContainerColor = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
             focusedIndicatorColor   = androidx.compose.ui.graphics.Color.Transparent,
             unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            focusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+            unfocusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
+            cursorColor = MaterialTheme.colorScheme.primary,
         ),
         trailingIcon = {
             IconButton(onClick = onClose) {
                 Icon(Icons.Default.Close, "Закрыть поиск")
             }
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            ),
     )
 }
 
@@ -931,6 +1258,11 @@ private fun GroupCard(
     // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
     val groupAvatarBitmap = com.vladimir.messenger.ui.components.AvatarBitmaps
         .rememberAvatar(storeAvatars["g:" + group.id])
+    // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
+    val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
+    val draftText = drafts[
+        com.vladimir.messenger.data.draft.DraftStore.groupKey(group.id)
+    ].orEmpty()
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -988,28 +1320,55 @@ private fun GroupCard(
                 color = Color(0xFF8A93A2),
                 maxLines = 1,
             )
-            Text(
-                text = group.preview ?: if (group.isPublic) {
-                    "Публичная группа - ${group.memberCount} уч."
-                } else {
-                    "Частная группа - ${group.memberCount} уч."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF5A6472),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (draftText.isNotEmpty()) {
+                Text(
+                    text = "Черновик: $draftText",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFFC62828),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    // Раунд 155: без служебных строк (гифки/стикеры).
+                    text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
+                        ?: if (group.isPublic) {
+                        "Публичная группа - ${group.memberCount} уч."
+                    } else {
+                        "Частная группа - ${group.memberCount} уч."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF5A6472),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))
 
         Column(horizontalAlignment = Alignment.End) {
-            if (group.timeMs != null) {
-                Text(
-                        text = formatGroupTime(group.timeMs),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (group.timeMs != null) {
+                    Text(
+                        // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
+                        // на каждую перерисовку строки группы.
+                        text = remember(group.timeMs, System.currentTimeMillis() / 3_600_000L) {
+                            formatGroupTime(group.timeMs)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF5A6472),
-                )
+                    )
+                }
+                if (group.isPinned) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Filled.PushPin,
+                        contentDescription = "Закреплено в главном списке",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
             }
             if (group.unreadCount > 0) {
                 Box(

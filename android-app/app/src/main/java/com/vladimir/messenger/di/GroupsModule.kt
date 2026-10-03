@@ -99,6 +99,9 @@ object GroupsModule {
         // Рой APK (обновление роем, docs/UPDATE_SEEDING.md): те же кольца,
         // что у файлов группы, — через Provider.
         apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
+        // Раунд 137: очередь «удалить у всех» - команда хранится и досылается,
+        // пока не дойдёт до всех (через тех, кто в сети).
+        deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -138,6 +141,8 @@ object GroupsModule {
             com.vladimir.messenger.data.peer.PeerRatingStore
                 .statsFor(context.applicationContext, nodeId)?.lastSeenMs?.takeIf { it > 0L }
         },
+        // Раунд 137: очередь «удалить у всех» - команда хранится и досылается.
+        deletionOutbox = deletionOutbox,
         // Файлы группы роем (этап 9). Через Provider: рой сам шлёт пакеты
         // через GroupDelivery и качает через FileTransferRouter, а репозиторий
         // лишь передаёт ему просьбы - кольца зависимостей так нет.
@@ -153,6 +158,9 @@ object GroupsModule {
         onUpdateWant = { senderId, packet -> apkSeeder.get().onUpdateWant(senderId, packet) },
         onUpdateNone = { senderId, packet -> apkSeeder.get().onUpdateNone(senderId, packet) },
         onUpdateAsk = { senderId, packet -> apkSeeder.get().onUpdateAsk(senderId, packet) },
+        // Раунд 133: дифф-патч обновления — тот же сидер.
+        onUpdatePatchPack = { senderId, packet -> apkSeeder.get().onUpdatePatchPack(senderId, packet) },
+        onUpdatePatchWant = { senderId, packet -> apkSeeder.get().onUpdatePatchWant(senderId, packet) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {
@@ -174,11 +182,28 @@ object GroupsModule {
         },
         avatarDao = avatarDao,
         myAvatarB64 = {
+            // Раунд 180 (аудит-2): сжатие аватара - только когда он сменился
+            // (uri другой). Раньше каждый ответ «представься» и каждая
+            // рассылка сжимали картинку заново.
             val uri = context.applicationContext
                 .getSharedPreferences(IDENTITY_PREFS, Context.MODE_PRIVATE)
                 .getString("my_avatar_uri", null)
-            uri?.takeIf { it.isNotBlank() }?.let {
-                com.vladimir.messenger.util.AvatarCompress.compressUri(context.applicationContext, it)
+                ?.takeIf { it.isNotBlank() }
+            if (uri == null) {
+                MyAvatarMemo.uri = null
+                MyAvatarMemo.b64 = null
+                null
+            } else if (uri == MyAvatarMemo.uri && MyAvatarMemo.b64 != null) {
+                MyAvatarMemo.b64
+            } else {
+                val b64 = com.vladimir.messenger.util.AvatarCompress.compressUri(
+                    context.applicationContext, uri,
+                )
+                if (b64 != null) {
+                    MyAvatarMemo.uri = uri
+                    MyAvatarMemo.b64 = b64
+                }
+                b64
             }
         },
         // Узнали настоящее @имя узла: подменяем им заглушку в контакте и
@@ -209,4 +234,10 @@ object GroupsModule {
     @Provides
     @Singleton
     fun provideGroupRouter(repository: GroupRepository): GroupRouter = GroupRouter(repository)
+}
+
+/** Раунд 180: последний сжатый аватар - чтобы не жечь ЦП на каждый whois. */
+private object MyAvatarMemo {
+    @Volatile var uri: String? = null
+    @Volatile var b64: String? = null
 }

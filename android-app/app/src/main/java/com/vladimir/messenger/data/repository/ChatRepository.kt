@@ -5,14 +5,21 @@ import com.vladimir.messenger.domain.model.MessageChannel
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ChatDao
+import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.mirror.MirrorHub
+import com.vladimir.messenger.data.mirror.MirrorRow
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
 import com.vladimir.messenger.util.NodeIds
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.util.UUID
 import javax.inject.Inject
@@ -22,6 +29,7 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
+    private val groupDao: GroupDao,
     private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
@@ -62,23 +70,118 @@ class ChatRepository @Inject constructor(
         chatDao.getAllChats().map { it.contactId }.filter { it.isNotBlank() }.distinct()
 
     fun observeMessages(chatId: String): Flow<List<Message>> =
-        messageDao.observeMessages(chatId).map { it.map { e -> e.toDomain() } }
+        messageDao.observeMessages(chatId)
+            .map { rows -> rows.map { it.toDomain() } }
+            .flowOn(Dispatchers.Default)
 
-    suspend fun sendMessage(chatId: String, recipientId: String, content: String): Result<Message> {
+    /** Раунд 173: закрепы личного чата (без тем). */
+    fun observePinnedChatMessages(chatId: String): Flow<List<Message>> =
+        messageDao.observePinnedChatMessages(chatId)
+            .map { rows -> rows.map { it.toDomain() } }
+            .flowOn(Dispatchers.Default)
+
+    /**
+     * Закрепить/открепить личное сообщение или публикацию канала.
+     * В личке лимит общий для чата; у канала — для публикаций всей ленты.
+     */
+    suspend fun setMessagePinned(messageId: String, pinned: Boolean): MessagePinMutation {
+        val message = messageDao.getMessageById(messageId) ?: return MessagePinMutation.NOT_FOUND
+        val group = groupDao.getGroupById(message.chatId)
+        val atMs = if (pinned) System.currentTimeMillis() else null
+        return when {
+            group?.isChannel == true -> messageDao.updatePinnedChannelPostWithinLimit(
+                channelId = message.chatId,
+                messageId = messageId,
+                pinned = pinned,
+                atMs = atMs,
+                by = null,
+            )
+            group != null || !message.topicId.isNullOrBlank() -> {
+                // Group pins must pass through GroupRepository/GroupWire so
+                // local and remote permission checks cannot be bypassed.
+                MessagePinMutation.NOT_FOUND
+            }
+            else -> messageDao.updatePinnedWithinChatLimit(
+                messageId = messageId,
+                pinned = pinned,
+                atMs = atMs,
+                by = null,
+            )
+        }
+    }
+
+    /** Раунд 203: адресаты «Поделиться в APU» - друзья из списка чатов. */
+    suspend fun forwardFriends(): List<com.vladimir.messenger.data.local.entity.ChatEntity> =
+        chatDao.getAllChats()
+
+    /** Раунд 203: чат по id - узел источника для маркера пересылки. */
+    suspend fun forwardChatById(chatId: String): com.vladimir.messenger.data.local.entity.ChatEntity? =
+        chatDao.getChatById(chatId)
+
+    /** Раунд 203: чат друга по его узлу - тап по источнику пересылки. */
+    suspend fun forwardChatByContact(contactId: String): com.vladimir.messenger.data.local.entity.ChatEntity? {
+        if (contactId.isBlank()) return null
+        chatDao.getChatByContactId(contactId)?.let { return it }
+        return chatDao.getAllChats().firstOrNull { it.contactId.contains(contactId) }
+    }
+
+    suspend fun sendMessage(
+        chatId: String,
+        recipientId: String,
+        content: String,
+        /** р226: чужая строка идёт с СОБСТВЕННЫМ id - одинаковые id на обоих устройствах. */
+        fixedMessageId: String? = null,
+        /** р226: true - строка пришла от зеркала-партнёра, эхо назад не слать. */
+        fromMirror: Boolean = false,
+    ): Result<Message> {
         return try {
-            val messageId = UUID.randomUUID().toString()
+            val messageId = fixedMessageId ?: UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
+
+            // р226: это устройство - зеркало и активный партнёр в сети.
+            // Шифросессия у узла одна, поэтому отправляет партнёр, а строка
+            // остаётся здесь как PENDING до его эха «отправлено».
+            if (!fromMirror) {
+                val mirrorChannel = MirrorHub.routeOutgoing()
+                if (mirrorChannel != null) {
+                    val mirrorChat = chatDao.getChatById(chatId)
+                    val mirrorRecipient = if (recipientId.isNotBlank()) recipientId else mirrorChat?.contactId ?: ""
+                    if (mirrorRecipient.isNotBlank()) {
+                        val mirrorEntity = MessageEntity(
+                            id = messageId,
+                            chatId = chatId,
+                            senderId = "self",
+                            content = content,
+                            timestamp = timestamp,
+                            isFromMe = true,
+                            status = MessageStatus.PENDING.name,
+                            channel = MessageChannel.UNKNOWN.name,
+                            recipientId = mirrorRecipient,
+                        )
+                        messageDao.insertMessage(mirrorEntity)
+                        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+                        val offered = mirrorChannel.publishOutgoing(
+                            MirrorRow(
+                                id = messageId, chatId = chatId, contactName = mirrorChat?.contactName ?: "",
+                                senderId = "self", content = content, timestamp = timestamp,
+                                mine = true, recipientId = mirrorRecipient, status = MessageStatus.PENDING.name,
+                            )
+                        )
+                        if (offered) {
+                            Log.i(TAG, "🪞 sent via mirror partner: $messageId")
+                            return Result.success(mirrorEntity.toDomain())
+                        }
+                        // Партнёр мигнул в момент отправки: строка останется
+                        // PENDING и уйдёт обычным путём, когда это устройство
+                        // само станет активным (насос р179).
+                    }
+                }
+            }
 
             // ШАГ 1: Определить recipientId
             val chat = chatDao.getChatById(chatId)
             val rawId = if (recipientId.isBlank()) chat?.contactId ?: "" else recipientId
             
-            Log.i(TAG, "📨 ROUTING DEBUG:")
-            Log.i(TAG, "  chatId=$chatId")
-            Log.i(TAG, "  input recipientId='$recipientId'")
-            Log.i(TAG, "  chat.contactId='${chat?.contactId}'")
-            Log.i(TAG, "  chat.contactName='${chat?.contactName}'")
-            Log.i(TAG, "  rawId='$rawId'")
             
             val actualRecipientId = when {
                 rawId.startsWith("pk_") -> rawId
@@ -86,7 +189,12 @@ class ChatRepository @Inject constructor(
                 else -> rawId
             }
             
-            Log.i(TAG, "  actualRecipientId='$actualRecipientId'")
+            // Раунд 183 (аудит-4): отладочная роспись на КАЖДОЕ отправленное
+            // сообщение - только в debug-сборке (в release строковые склейки
+            // и logcat на каждое сообщение были лишними).
+            if (com.vladimir.messenger.BuildConfig.DEBUG) {
+                Log.i(TAG, "📨 ROUTING: chatId=$chatId '$recipientId' -> '$actualRecipientId'")
+            }
 
             // ШАГ 2: Создать entity с recipientId
             val entity = MessageEntity(
@@ -101,7 +209,7 @@ class ChatRepository @Inject constructor(
                 recipientId = actualRecipientId,
             )
             messageDao.insertMessage(entity)
-            chatDao.updateLastMessage(chatId, content, timestamp)
+            chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
 
             // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
             val sentDirectly = if (actualRecipientId.isNotBlank()) {
@@ -118,6 +226,8 @@ class ChatRepository @Inject constructor(
 
             Log.i(TAG, "sendMessage direct=$sentDirectly messageId=$messageId recipient=$actualRecipientId")
 
+            // р242: отметка для диагностики - когда последний раз отправляли.
+            com.vladimir.messenger.data.mirror.MirrorHub.noteOutgoing()
             if (sentDirectly) {
                 messageDao.updateMessageStatus(messageId, MessageStatus.SENT.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.LOCAL.name)
@@ -128,6 +238,18 @@ class ChatRepository @Inject constructor(
                 messageDao.updateMessageStatus(messageId, MessageStatus.QUEUED_OFFLINE.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.STORE_FORWARD.name)
                 Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
+            }
+
+            // р226: отразить отправленное на зеркале второго устройства.
+            if (!fromMirror) {
+                MirrorHub.publishSentEcho(
+                    id = messageId,
+                    chatId = chatId,
+                    content = content,
+                    ts = timestamp,
+                    recipientId = actualRecipientId,
+                    status = if (sentDirectly) MessageStatus.SENT.name else MessageStatus.QUEUED_OFFLINE.name,
+                )
             }
 
             // Реферальная атрибуция: если контакт добавлен по пригласительной
@@ -149,6 +271,47 @@ class ChatRepository @Inject constructor(
             Log.e(TAG, "sendMessage error", e)
             Result.failure(e)
         }
+    }
+
+    /**
+     * Раунд 179: мягкий слив офлайн-очереди БЕЗ привязки к presence.
+     * Раньше досыл запускался только «тяжёлым» пульсом обнаружения, а при
+     * живой связи пульсы чаще 30 с считались лёгкими и пропусками - очередь
+     * могла висеть, пока связь не мигнёт. Теперь служебный насос раз в
+     * минуту пробует отправить до [limit] хвостов; пустая очередь - один
+     * дешёвый индексный запрос, нагрузки почти нет. Дубли у получателя
+     * сняты дедупликацией по id сообщения.
+     */
+    suspend fun pumpQueuedOffline(limit: Int = 20): Int {
+        var sent = 0
+        try {
+            val queued = messageDao.getQueuedOfflineMessages(limit)
+            for (msg in queued) {
+                val chat = chatDao.getChatById(msg.chatId) ?: continue
+                val peer = chat.contactId
+                if (peer.isBlank()) continue
+                val ok = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        RustBridge.sendMessage(msg.id, msg.chatId, peer, msg.content)
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+                if (ok) {
+                    messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
+                    sent++
+                } else {
+                    // Раунд 182 (аудит-3): первая же неудача - скорее всего
+                    // адресат ещё недоступен, а попытка стоит до ~10 с.
+                    // Остаток очереди - следующая минута, вместо десятков
+                    // попыток подряд.
+                    break
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "pumpQueuedOffline failed: " + e.message)
+        }
+        return sent
     }
 
     suspend fun retryPendingMessagesForPeer(peerId: String): Int {
@@ -244,6 +407,115 @@ class ChatRepository @Inject constructor(
         return retried
     }
 
+    // ── р226: живое зеркало устройств одной личности ────────────────────────
+
+    /** Свежесть переписки - обмен «кто отстал» между устройствами. */
+    suspend fun maxMessageTimestamp(): Long = messageDao.maxTimestamp() ?: 0L
+
+    /** Хвост переписки для догана отставшего устройства. */
+    suspend fun mirrorRowsSince(since: Long, limit: Int): List<MirrorRow> =
+        messageDao.messagesSince(since, limit)
+            // Do not replay ACK rows left by an older install to a mirror peer.
+            .filterNot { DeliveryAckWire.isPacket(it.content) }
+            .map { e ->
+                MirrorRow(
+                    id = e.id,
+                    chatId = e.chatId,
+                    contactName = chatDao.getChatById(e.chatId)?.contactName ?: "",
+                    senderId = e.senderId,
+                    content = e.content,
+                    timestamp = e.timestamp,
+                    mine = e.isFromMe,
+                    recipientId = e.recipientId,
+                    status = e.status,
+                )
+            }
+
+    /** Неотправленные исходящие тени - перевыслать активному партнёру. */
+    suspend fun mirrorPendingOutgoing(limit: Int): List<MirrorRow> =
+        messageDao.pendingMirrorOutgoing(limit).map { e ->
+            MirrorRow(
+                id = e.id,
+                chatId = e.chatId,
+                contactName = chatDao.getChatById(e.chatId)?.contactName ?: "",
+                senderId = "self",
+                content = e.content,
+                timestamp = e.timestamp,
+                mine = true,
+                recipientId = e.recipientId,
+                status = e.status,
+            )
+        }
+
+    /**
+     * Входящее с зеркала. @return (chatId, имя чата) - для уведомления.
+     * Чат ищется по узлу отправителя: id чатов на устройствах разные.
+     */
+    suspend fun applyMirrorIncoming(row: MirrorRow): Pair<String, String> {
+        // р239: служебный пакет с партнёра тоже не сообщение.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
+            DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
+            return Pair("", "")
+        }
+        val chat = getOrCreateChat(
+            row.senderId,
+            row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.senderId) },
+        )
+        saveIncomingMessage(
+            chatId = chat.id,
+            senderId = row.senderId,
+            messageId = row.id,
+            content = row.content,
+            timestamp = row.timestamp,
+            channel = MessageChannel.UNKNOWN,
+            recipientId = row.recipientId,
+        )
+        return Pair(chat.id, chat.contactName)
+    }
+
+    /** Отправленное с зеркала (эхо или доган): своя строка «отправлено». */
+    suspend fun applyMirrorSent(row: MirrorRow) {
+        // Служебный пакет не показываем и как своё сообщение. Если он всё же
+        // попал в журнал зеркала, ACK по-прежнему обновляет исходящую строку.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
+            DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
+            return
+        }
+        // id чатов на устройствах разные - чат ищем по узлу получателя.
+        val chat: Chat = if (row.recipientId.isNotBlank()) {
+            getChatByContactId(row.recipientId)
+                ?: getOrCreateChat(row.recipientId, row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.recipientId) })
+        } else {
+            val entity = chatDao.getChatById(row.chatId) ?: return
+            Chat(id = entity.id, contactId = entity.contactId, contactName = entity.contactName)
+        }
+        // Статус уважаем чужой: эхо может принести и QUEUED_OFFLINE.
+        val mirrorStatus = when (row.status) {
+            MessageStatus.SENT.name, MessageStatus.QUEUED_OFFLINE.name, MessageStatus.PENDING.name -> row.status
+            else -> MessageStatus.SENT.name
+        }
+        if (messageDao.messageExists(row.id)) {
+            if (getMessageById(row.id)?.isFromMe == true) {
+                messageDao.updateMessageStatus(row.id, mirrorStatus)
+            }
+            return
+        }
+        messageDao.insertMessageIgnore(
+            MessageEntity(
+                id = row.id,
+                chatId = chat.id,
+                senderId = "self",
+                content = row.content,
+                timestamp = row.timestamp,
+                isFromMe = true,
+                status = mirrorStatus,
+                channel = MessageChannel.LOCAL.name,
+                recipientId = row.recipientId,
+            )
+        )
+        chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
+    }
+
     suspend fun saveIncomingMessage(
         chatId: String,
         senderId: String,
@@ -253,6 +525,23 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
     ) {
+        // р239/р247: страховка на самом сохранении. Служебный пакет приложения
+        // (например, «печатает…» или delivery ACK) в переписку не попадает ни
+        // при каком пути приёма: даже если транспортный разборщик его не узнал,
+        // мусорной строки не будет.
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(content)) {
+            // Последний общий страж: даже если входящий ACK обошёл разборщик
+            // конкретного транспорта, он подтверждает строку, но не сохраняется.
+            DeliveryAckWire.messageId(content)?.let { markOutgoingMessageDelivered(it) }
+            val typing = com.vladimir.messenger.data.typing.TypingWire.parse(content)
+            if (typing == true) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+            } else if (typing == false) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+            }
+            Log.i(TAG, "service packet not saved to chat: " + content.take(16))
+            return
+        }
         // Защита от дубликатов (FULL SYNC может прислать то же сообщение повторно)
         val exists = messageDao.messageExists(messageId)
         if (exists) {
@@ -261,6 +550,9 @@ class ChatRepository @Inject constructor(
         }
         
         Log.i(TAG, "💾 saveIncomingMessage: chatId=$chatId msgId=$messageId ts=$timestamp")
+        // р235: собеседник прислал сообщение - «печатает…» гаснет сразу, не
+        // дожидаясь, пока индикатор протухнет сам (до 6 с).
+        runCatching { com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId) }
         val entity = MessageEntity(
             id = messageId,
             chatId = chatId,
@@ -272,12 +564,114 @@ class ChatRepository @Inject constructor(
             recipientId = recipientId,
         )
         messageDao.insertMessageIgnore(entity)
-        chatDao.updateLastMessage(chatId, content, timestamp)
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+        // Раунд 150: бейдж непрочитанных на пузыре личного чата.
+        // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
+        // сообщения, непрочитанные не считают (владелец).
+        if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
+            runCatching { chatDao.incrementUnread(chatId) }
+        }
     }
+
+    /**
+     * р242: досылка НЕДООТПРАВЛЕННОГО (PENDING) без опоры на события сети.
+     *
+     * Раньше досылка шла только по событию «увидели собеседника». Если событие
+     * пропущено (перезапуск движка, смена роли зеркала, тихий реконнект), строка
+     * так и висела «в ожидании» — со стороны это выглядит как «сообщение не
+     * дошло». Теперь раз в минуту проходим по всем PENDING и пробуем снова.
+     * Ошибки глушим: движка нет - просто попробуем в следующий раз.
+     */
+    suspend fun pumpPendingOutgoing(): Int {
+        val pending = runCatching { messageDao.getPendingOutgoingMessages() }.getOrDefault(emptyList())
+        if (pending.isEmpty()) return 0
+        var sent = 0
+        for (msg in pending) {
+            val chat = runCatching { chatDao.getChatById(msg.chatId) }.getOrNull() ?: continue
+            val peer = chat.contactId.ifBlank { msg.recipientId }
+            if (peer.isBlank() || !peer.startsWith("pk_")) continue
+            val ok = runCatching { RustBridge.sendMessage(msg.id, msg.chatId, peer, msg.content) }
+                .getOrDefault(false)
+            if (ok) {
+                runCatching { messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name) }
+                sent++
+            }
+        }
+        if (sent > 0) Log.i(TAG, "pending pump: отправлено $sent из ${pending.size}")
+        return sent
+    }
+
+    /**
+     * р239: убрать из переписки служебные пакеты «печатает…», которые успели
+     * сохраниться как сообщения (r235-r238). Заодно чинятся превью списка
+     * чатов и счётчик непрочитанных.
+     */
+    suspend fun cleanupTypingJunk(): Int {
+        val chats = runCatching { messageDao.chatsWithTypingJunk() }.getOrDefault(emptyList())
+        val deleted = runCatching { messageDao.deleteTypingJunk() }.getOrDefault(0)
+        if (deleted > 0) {
+            Log.i(TAG, "typing junk removed: $deleted message(s) in ${chats.size} chat(s)")
+            for (row in chats) {
+                runCatching {
+                    chatDao.decrementUnread(row.chatId, row.count)
+                    val last = messageDao.getLatest(row.chatId)
+                    chatDao.updateLastMessage(
+                        row.chatId,
+                        last?.let { com.vladimir.messenger.util.ChatPreviews.human(it.content) ?: it.content }.orEmpty(),
+                        last?.timestamp ?: 0L,
+                    )
+                }
+            }
+        }
+        return deleted
+    }
+
+    /**
+     * Remove UUID-shaped delivery ACKs written as chat rows by receivers that
+     * predate the direct-ACK handler. Repair the unread count and chat preview
+     * so an update also cleans up the visible residue from that protocol bug.
+     */
+    suspend fun cleanupDeliveryAckJunk(): Int {
+        val pattern = DeliveryAckWire.persistedUuidAckGlobPattern
+        val chats = runCatching { messageDao.chatsWithDeliveryAckJunk(pattern) }
+            .getOrDefault(emptyList())
+        val oldAcks = runCatching { messageDao.deliveryAckJunkContents(pattern) }
+            .getOrDefault(emptyList())
+        // Preserve the receipt's meaning while removing its accidental chat row.
+        oldAcks.forEach { content ->
+            if (DeliveryAckWire.isPersistedUuidAck(content)) {
+                DeliveryAckWire.messageId(content)?.let { markOutgoingMessageDelivered(it) }
+            }
+        }
+        val deleted = runCatching { messageDao.deleteDeliveryAckJunk(pattern) }.getOrDefault(0)
+        if (deleted > 0) {
+            Log.i(TAG, "delivery ACK junk removed: $deleted message(s) in ${chats.size} chat(s)")
+            for (row in chats) {
+                runCatching {
+                    chatDao.decrementUnread(row.chatId, row.count)
+                    val last = messageDao.getLatest(row.chatId)
+                    chatDao.updateLastMessage(
+                        row.chatId,
+                        last?.let { com.vladimir.messenger.util.ChatPreviews.human(it.content) ?: it.content }.orEmpty(),
+                        last?.timestamp ?: 0L,
+                    )
+                }
+            }
+        }
+        return deleted
+    }
+
+    /** р240: сколько своих сообщений ещё не ушло (диагностика синхронизации). */
+    suspend fun countPendingOutgoing(): Int =
+        runCatching { messageDao.countPendingOutgoing() }.getOrDefault(-1)
 
     suspend fun getChatById(chatId: String): Chat? {
         return chatDao.getChatById(chatId)?.toDomain()
     }
+
+    /** Раунд 158: все личные чаты - выбор адресатов «Отправить в APU». */
+    suspend fun getAllChats(): List<com.vladimir.messenger.domain.model.Chat> =
+        chatDao.getAllChats().map { it.toDomain() }
 
     /**
      * Local-only outgoing file placeholder: it never rides the text transport (the file packets
@@ -306,7 +700,132 @@ class ChatRepository @Inject constructor(
         )
         val inserted = messageDao.insertMessageIgnore(entity)
         if (inserted != -1L) {
-            chatDao.updateLastMessage(chatId, content, timestamp)
+            chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+        }
+        return inserted != -1L
+    }
+
+    /**
+     * Раунд 128: моя ССЫЛКА на гифку в чате (от моего лица). В чате карточка
+     * одна; байты каждый телефон тихо подтягивает с хранителей. Превью в
+     * списке чатов - аккуратное, без служебной строки.
+     */
+    /**
+     * р245: содержимое свежих строк переписки - для насоса медиа в сервисе. Сам
+     * разбор (какие это гифки и есть ли уже байты) живёт в сервисе: ему
+     * доступен контекст, а библиотеке гифок он нужен.
+     */
+    suspend fun recentMessageContents(limit: Int = 24): List<String> =
+        runCatching { messageDao.recentContents(limit) }.getOrDefault(emptyList())
+
+    /**
+     * р245: отправить ССЫЛКУ на гифку, когда сети у этого устройства нет.
+     *
+     * Раньше гифка с телефона-зеркала уходила вызовом ядра напрямую: движка
+     * здесь нет, отправка возвращала false, строка вставала в очередь
+     * «в ожидании» - и так и висела, потому что своей сети у тени не будет
+     * никогда. Теперь кадр уходит партнёру-активному, он и отправляет.
+     *
+     * @return true - кадр принят партнёром (строка остаётся здесь как PENDING
+     *         до его эха «отправлено»).
+     */
+    suspend fun sendGifRefViaMirror(
+        chatId: String,
+        recipientId: String,
+        sha256: String,
+        messageId: String,
+    ): Boolean =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val channel = com.vladimir.messenger.data.mirror.MirrorHub.routeOutgoing() ?: return@withContext false
+            val chat = chatDao.getChatById(chatId) ?: return@withContext false
+            val peer = recipientId.ifBlank { chat.contactId }
+            if (peer.isBlank()) return@withContext false
+            val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+            val timestamp = System.currentTimeMillis()
+            val inserted = insertGifRefMessage(
+                chatId = chatId,
+                recipientId = peer,
+                messageId = messageId,
+                sha256 = sha256,
+                timestamp = timestamp,
+                status = MessageStatus.PENDING.name,
+            )
+            if (!inserted) return@withContext false
+            val offered = channel.publishOutgoing(
+                com.vladimir.messenger.data.mirror.MirrorRow(
+                    id = messageId,
+                    chatId = chatId,
+                    contactName = chat.contactName,
+                    senderId = "self",
+                    content = content,
+                    timestamp = timestamp,
+                    mine = true,
+                    recipientId = peer,
+                    status = MessageStatus.PENDING.name,
+                ),
+            )
+            if (offered) {
+                Log.i(TAG, "🪞 gif ref sent via mirror partner: $messageId")
+                // р245: и сразу байты - активный положит их в свою библиотеку и
+                // объявит рой, иначе и у него, и у собеседника карточка пустая.
+                com.vladimir.messenger.data.mirror.MirrorHub.pushGifBytes(sha256)
+            }
+            offered
+        }
+
+    suspend fun insertGifRefMessage(
+        chatId: String,
+        recipientId: String,
+        messageId: String,
+        sha256: String,
+        timestamp: Long,
+        /** Раунд 178: QUEUED_OFFLINE - собеседник офлайн, досылаем сами. */
+        status: String = "LOCAL_FILE",
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = "self",
+            content = content,
+            timestamp = timestamp,
+            isFromMe = true,
+            status = status,
+            channel = MessageChannel.STORE_FORWARD.name,
+            recipientId = recipientId,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, "\ud83d\uddbc Гифка", timestamp)
+        }
+        return inserted != -1L
+    }
+
+    /** Раунд 128: пришла ссылка на гифку от собеседника - карточка в чате. */
+    suspend fun insertReceivedGifRefMessage(
+        chatId: String,
+        senderId: String,
+        messageId: String,
+        sha256: String,
+        timestamp: Long,
+    ): Boolean {
+        if (messageDao.messageExists(messageId)) return false
+        val content = com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256)
+        val entity = MessageEntity(
+            id = messageId,
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            timestamp = timestamp,
+            isFromMe = false,
+            status = "RECEIVED",
+            channel = MessageChannel.STORE_FORWARD.name,
+        )
+        val inserted = messageDao.insertMessageIgnore(entity)
+        if (inserted != -1L) {
+            chatDao.updateLastMessage(chatId, "\ud83d\uddbc Гифка", timestamp)
+            runCatching { chatDao.incrementUnread(chatId) }
         }
         return inserted != -1L
     }
@@ -349,6 +868,7 @@ class ChatRepository @Inject constructor(
         if (chats.size < 2) return chats.firstOrNull()?.toDomain()
 
         val keep = chats.maxByOrNull { it.lastMessageTime ?: 0L } ?: return null
+        val pinnedAtMs = chats.mapNotNull { it.pinnedAtMs }.maxOrNull()
         var unread = 0
         for (chat in chats) {
             unread += chat.unreadCount
@@ -357,7 +877,7 @@ class ChatRepository @Inject constructor(
             chatDao.deleteChatById(chat.id)
             Log.i(TAG, "mergeDuplicateChats: ${chat.id} слит в ${keep.id} для $contactId")
         }
-        val merged = keep.copy(unreadCount = unread)
+        val merged = keep.copy(unreadCount = unread, pinnedAtMs = pinnedAtMs)
         chatDao.updateChat(merged)
         return merged.toDomain()
     }
@@ -426,8 +946,17 @@ class ChatRepository @Inject constructor(
         chatDao.markAsRead(chatId)
     }
 
+    /** р230: есть ли уже строка с таким идентификатором (для зеркала файлов). */
+    suspend fun messageExists(messageId: String): Boolean = messageDao.messageExists(messageId)
+
     suspend fun updateMessageStatus(messageId: String, status: MessageStatus) {
         messageDao.updateMessageStatus(messageId, status.name)
+    }
+
+    /** ACKs only acknowledge our outgoing rows; an old ACK cannot downgrade READ. */
+    suspend fun markOutgoingMessageDelivered(messageId: String): Boolean {
+        if (messageId.isBlank()) return false
+        return messageDao.markOutgoingMessageDelivered(messageId) > 0
     }
 
     private fun ChatEntity.toDomain() = Chat(
@@ -438,6 +967,8 @@ class ChatRepository @Inject constructor(
         lastMessageTime = lastMessageTime,
         unreadCount = unreadCount,
         isContactOnline = isContactOnline,
+        isPinned = pinnedAtMs != null,
+        pinnedAtMs = pinnedAtMs,
     )
 
     private fun MessageEntity.toDomain() = Message(
@@ -448,6 +979,11 @@ class ChatRepository @Inject constructor(
         timestamp = timestamp,
         isFromMe = isFromMe,
         status = try { MessageStatus.valueOf(status) } catch (_: Exception) { MessageStatus.PENDING },
+        // Self-chat detection uses the LOCAL recipient; no JNI lookup on opening.
+        recipientId = recipientId,
+        // Тема нужна уведомлениям: тап ведёт в место сообщения.
+        topicId = topicId,
+        isPinned = isPinned,
     )
 
     suspend fun getMessageById(messageId: String): Message? {

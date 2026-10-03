@@ -2,9 +2,11 @@ package com.vladimir.messenger.data.group
 
 import android.util.Log
 import com.vladimir.messenger.ui.theme.AvatarStore
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
@@ -27,6 +29,8 @@ import com.vladimir.messenger.data.swarm.PostManifest
 import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.link.ShortLinks
+import com.vladimir.messenger.util.ChatPreviews
+import com.vladimir.messenger.util.GroupInviteRef
 import com.vladimir.messenger.util.InlineImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -151,6 +155,13 @@ class GroupRepository(
     private val onUpdateNone: suspend (senderId: String, packet: GroupWire.Packet.UpdateNone) -> Unit = { _, _ -> },
     private val onUpdateAsk: suspend (senderId: String, packet: GroupWire.Packet.UpdateAsk) -> Unit = { _, _ -> },
     /**
+     * Раунд 133: дифф-патч обновления в рое — объявление «я раздаю патч»
+     * `uppk` и просьба «пришли патч» `uppwant`. По умолчанию ничего не
+     * делают — так живут JVM-тесты.
+     */
+    private val onUpdatePatchPack: suspend (senderId: String, packet: GroupWire.Packet.UpdatePatchPack) -> Unit = { _, _ -> },
+    private val onUpdatePatchWant: suspend (senderId: String, packet: GroupWire.Packet.UpdatePatchWant) -> Unit = { _, _ -> },
+    /**
      * Когда узел последний раз выходил на связь по наблюдениям ЭТОГО телефона
      * (`PeerRatingStore`), миллисекунды эпохи; null - этот телефон его ни
      * разу не видел. Нужно наследованию владения: «владелец удалился» здесь
@@ -158,7 +169,16 @@ class GroupRepository(
      * так живут JVM-тесты, и захват прав в них недоступен.
      */
     private val peerLastSeenMs: suspend (nodeId: String) -> Long? = { null },
+    /**
+     * Раунд 137: очередь «удалить у всех» - команда хранится на телефоне и
+     * досылается через помпу, пока не дойдёт до всех (эпидемией - через тех,
+     * кто в сети).
+     */
+    private val deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox? = null,
 ) {
+
+    /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
+    private val deletionRelayedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
      * Мой идентификатор, спрошенный у ядра ОДИН раз.
@@ -451,11 +471,18 @@ class GroupRepository(
         Log.i(TAG, "whois asked peer=$peerId")
     }
 
-    /** Адресный ответ на «представься»: моё @имя и мой аватар. */
+    /** Адресный ответ на «представься»: моё имя и мой аватар. */
     private suspend fun sendMyIdentityTo(peerId: String) {
         if (peerId.isBlank()) return
         val me = myId() ?: return
-        myUsername()?.let { name ->
+        // Раунд 175: узел без @никнейма раньше молчал на «представься» - ему
+        // нечего было ответить, и собеседник навсегда оставался с набором
+        // букв и цифр. Отвечаем видимым именем, если оно настоящее (заглушка
+        // «Contact a1b2c3d4» не едет). registeredAtMs = 0: такая заявка
+        // никогда не отберёт настоящий @ник у его владельца.
+        val fallbackName = myDisplayName().trim()
+            .takeIf { it.isNotEmpty() && !it.startsWith("Contact ") }
+        (myUsername() ?: fallbackName)?.let { name ->
             val envelope = GroupWire.buildNick(
                 ownerId = me,
                 name = name,
@@ -715,6 +742,28 @@ class GroupRepository(
         Result.success(Unit)
     }
 
+    /**
+     * Раунд 260: правка темы из шапки (имя + значок) одним действием и
+     * рассылкой TopicUpdated, чтобы остальные устройства обновились сразу.
+     */
+    suspend fun updateTopic(topicId: String, name: String, iconEmoji: String): Result<Unit> =
+        withTopicAdminRight(topicId) {
+            val clean = name.trim()
+            if (clean.isEmpty()) {
+                return@withTopicAdminRight Result.failure(IllegalArgumentException("Пустое название"))
+            }
+            val topic = groupDao.getTopicById(topicId)
+                ?: return@withTopicAdminRight Result.failure(IllegalStateException("Тема не найдена"))
+            groupDao.renameTopic(topicId, clean.take(MAX_TOPIC_CHARS))
+            groupDao.updateTopicIcon(topicId, iconEmoji.take(16))
+            broadcast(
+                topic.groupId,
+                GroupWire.buildTopicUpdated(topic.groupId, topicId, clean, iconEmoji),
+                excludeSelf = true,
+            )
+            Result.success(Unit)
+        }
+
     suspend fun setTopicClosed(topicId: String, closed: Boolean): Result<Unit> =
         withTopicAdminRight(topicId) {
             groupDao.updateTopicClosed(topicId, closed)
@@ -738,6 +787,21 @@ class GroupRepository(
     }
 
     // ── Отправка сообщения ────────────────────────────────────────────────────
+
+    /** Раунд 203: адресаты «Поделиться в APU» - группы и каналы, где я остался. */
+    suspend fun forwardGroups(): List<com.vladimir.messenger.data.local.entity.GroupEntity> =
+        groupDao.getGroups().filter { !it.isLeft }
+
+    /** Раунд 203: группа/канал по id - тап по источнику пересылки. */
+    suspend fun forwardGroupById(groupId: String): com.vladimir.messenger.data.local.entity.GroupEntity? =
+        groupDao.getGroupById(groupId)
+
+    /** Раунд 203: темы группы (посты канала); пустой список - если тем нет. */
+    suspend fun forwardTopics(groupId: String): List<com.vladimir.messenger.data.local.entity.GroupTopicEntity> {
+        val topics = groupDao.getTopics(groupId)
+        if (topics.isNotEmpty()) return topics
+        return groupDao.getGeneralTopic(groupId)?.let { listOf(it) } ?: emptyList()
+    }
 
     /**
      * Сообщение в тему. [photos] - фотографии поста (jpeg base64), каждая
@@ -1413,6 +1477,150 @@ class GroupRepository(
         val legacy = all.filter { it !in capable }
         val wave = orderPeers(swarmers).take(FIRST_WAVE)
         return SwarmWave(full = legacy + wave, wave = wave, rest = swarmers.size - wave.size)
+    }
+
+    // ── Удаление сообщения (раунд 135) ────────────────────────────────────────
+
+    /**
+     * Удалить сообщение ТОЛЬКО У СЕБЯ: у остальных остаётся. Куски длинного
+     * текста (InlineImage-хвосты) стираются вместе с головой.
+     */
+    suspend fun deleteMessageForMe(groupId: String, messageId: String) {
+        val message = messageDao.getMessageById(messageId) ?: return
+        if (message.chatId != groupId) return
+        val stale = messageDao.getByContentPattern(groupId, InlineImage.textPartPattern(messageId))
+            .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
+        for (row in stale) messageDao.deleteById(row.id)
+        messageDao.deleteById(messageId)
+    }
+
+    /**
+     * Удалить своё сообщение У ВСЕХ. Права как у правки: автор или владелец
+     * группы. У себя стираем сразу; остальным уходит короткий пакет `msdel` -
+     * каждый получатель стирает то же самое у себя (автора проверяет по
+     * отправителю пакета, подделать чужое удаление нельзя). Телефоны прошлых
+     * версий пакет не знают: у них сообщение останется - лечится обновлением.
+     */
+    suspend fun deleteMessageForAll(groupId: String, messageId: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        val message = messageDao.getMessageById(messageId)
+            ?: return Result.failure(IllegalStateException("Сообщение не найдено"))
+        if (message.chatId != groupId) {
+            return Result.failure(IllegalArgumentException("Сообщение из другой группы"))
+        }
+        if (message.senderId != me && group.ownerId != me) {
+            return Result.failure(SecurityException("Удалять у всех может автор или владелец"))
+        }
+        val stale = messageDao.getByContentPattern(groupId, InlineImage.textPartPattern(messageId))
+            .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
+        for (row in stale) messageDao.deleteById(row.id)
+        messageDao.deleteById(messageId)
+        // Раунд 137: конверт несёт «кто удалял» - получатели ретрансляции
+        // проверяют права по нему, а не по отправителю пакета. Команда
+        // остаётся в очереди: помпа будет досылать её тем, до кого веер
+        // пока не добрался (никого нет в сети - команда просто ждёт).
+        val envelope = GroupWire.buildMessageDelete(groupId, messageId, me)
+        broadcast(groupId, envelope, excludeSelf = true)
+        deletionOutbox?.add(
+            com.vladimir.messenger.data.repository.DeletionOutbox.Entry(
+                targetId = messageId,
+                kind = com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP,
+                chatId = groupId,
+                peerId = "",
+                deleterId = me,
+                atMs = clock(),
+                lastTryMs = clock(),
+                attempts = 1,
+                tried = emptyList(),
+            ),
+        )
+        return Result.success(Unit)
+    }
+
+    /**
+     * Раунд 137: досылка сохранённых «удалить у всех» из помпы сервиса.
+     * Каждый круг - не больше двух адресатам, которых ещё не пробовали;
+     * получатель, применив удаление, тоже ретранслирует, так что команда
+     * добирается до всех через тех, кто в сети, а при полном офлайне -
+     * просто ждёт в очереди (неделю, потом сгорает).
+     */
+    suspend fun pumpDeletions() {
+        val outbox = deletionOutbox ?: return
+        val now = clock()
+        val due = outbox.due(now, DELETION_RETRY_MS, DELETION_TTL_MS)
+            .filter { it.kind == com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP }
+        for (entry in due) {
+            val group = groupDao.getGroupById(entry.chatId)
+            if (group == null) {
+                outbox.remove(entry.kind, entry.chatId, entry.targetId)
+                continue
+            }
+            if (groupDao.getMember(entry.chatId, myId().orEmpty()) == null) {
+                // Нас выгнали/вышли - дальше эту команду везём не мы.
+                outbox.remove(entry.kind, entry.chatId, entry.targetId)
+                continue
+            }
+            val me = myId().orEmpty()
+            val candidates = groupDao.getMembers(entry.chatId)
+                .filter { !it.isBanned && it.nodeId != me && it.nodeId !in entry.tried }
+                .map { it.nodeId }
+            if (candidates.isEmpty()) {
+                outbox.remove(entry.kind, entry.chatId, entry.targetId)
+                continue
+            }
+            val targets = runCatching { orderPeers(candidates) }.getOrDefault(candidates).take(2)
+            val envelope = GroupWire.buildMessageDelete(entry.chatId, entry.targetId, entry.deleterId)
+            runCatching { delivery.deliver(entry.chatId, envelope, targets) }
+            for (target in targets) outbox.markTried(entry, now, target)
+        }
+    }
+
+    /**
+     * Ретрансляция «удалить у всех» (раунд 137): применить - мало, надо ещё
+     * ПОНЕСТИ дальше, через тех, кто в сети. Каждый телефон ретранслирует
+     * одно удаление один раз за час (память [deletionRelayedAt]) и только
+     * трём соседям - эпидемия без шторма. Команда одновременно кладётся в
+     * свою очередь: если соседи сейчас офлайн, помпа донесёт позже.
+     */
+    private suspend fun relayMessageDelete(groupId: String, messageId: String, deleterId: String, fromId: String) {
+        val outbox = deletionOutbox ?: return
+        val now = clock()
+        val key = "$groupId|$messageId"
+        val last = deletionRelayedAt[key] ?: 0L
+        if (now - last < DELETION_RELAY_INTERVAL_MS) return
+        deletionRelayedAt[key] = now
+        if (deletionRelayedAt.size > 256) {
+            val oldest = deletionRelayedAt.entries.minByOrNull { it.value } ?: return
+            deletionRelayedAt.remove(oldest.key)
+        }
+        val me = myId().orEmpty()
+        val candidates = groupDao.getMembers(groupId)
+            .filter { !it.isBanned && it.nodeId != me && it.nodeId != fromId }
+            .map { it.nodeId }
+        val targets = runCatching { orderPeers(candidates) }.getOrDefault(candidates)
+            .shuffled().take(DELETION_RELAY_FANOUT)
+        if (targets.isEmpty()) return
+        val envelope = GroupWire.buildMessageDelete(groupId, messageId, deleterId)
+        runCatching { delivery.deliver(groupId, envelope, targets) }
+        outbox.add(
+            com.vladimir.messenger.data.repository.DeletionOutbox.Entry(
+                targetId = messageId,
+                kind = com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP,
+                chatId = groupId,
+                peerId = "",
+                deleterId = deleterId,
+                atMs = now,
+                lastTryMs = now,
+                attempts = 1,
+                tried = targets,
+            ),
+        )
+        Log.i(TAG, "message delete relayed id=$messageId group=$groupId to ${targets.size} node(s)")
     }
 
     // ── Правка сообщения ──────────────────────────────────────────────────────
@@ -2673,6 +2881,22 @@ class GroupRepository(
                 Log.i(TAG, "message edit applied id=${packet.messageId} group=${group.id} from=$senderId")
             }
 
+            // Раунд 135: автор (или владелец) стёр сообщение у всех.
+            is GroupWire.Packet.MessageDelete -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val message = messageDao.getMessageById(packet.messageId) ?: return
+                if (message.chatId != packet.groupId) return
+                // Права проверяются по ТОМУ, КТО удалял (раунд 137): пакет
+                // мог привезти любой участник - ретрансляция через тех, кто
+                // в сети. В пакете старого образца удалявший - отправитель.
+                val deleter = packet.deleterId.ifBlank { senderId }
+                if (deleter != message.senderId && deleter != group.ownerId) return
+                deleteMessageForMe(packet.groupId, packet.messageId)
+                relayMessageDelete(group.id, packet.messageId, deleter, senderId)
+                Log.i(TAG, "message delete applied id=${packet.messageId} group=${group.id} via=$senderId deleter=$deleter")
+            }
+
             is GroupWire.Packet.PostsRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 if (!group.isChannel) return
@@ -2741,6 +2965,18 @@ class GroupRepository(
             is GroupWire.Packet.UpdateAsk -> backgroundScope.launch {
                 runCatching { onUpdateAsk(senderId, packet) }
                     .onFailure { Log.w(TAG, "update ask failed: ${it.message}") }
+            }
+
+            // Раунд 133: дифф-патч обновления — объявление и просьба, в фоне;
+            // сам патч идёт файловой машиной (кусочки в `apkseed`), не здесь.
+            is GroupWire.Packet.UpdatePatchPack -> backgroundScope.launch {
+                runCatching { onUpdatePatchPack(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update patch pack failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.UpdatePatchWant -> backgroundScope.launch {
+                runCatching { onUpdatePatchWant(senderId, packet) }
+                    .onFailure { Log.w(TAG, "update patch want failed: ${it.message}") }
             }
 
             // Счётчики через владельца (этап 3): сводку считает и применяет
@@ -2846,6 +3082,17 @@ class GroupRepository(
                 )
             }
 
+            // Раунд 260: правка темы принимается только от участника с
+            // правом управлять темами и только для уже известных тем.
+            is GroupWire.Packet.TopicUpdated -> {
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (!GroupPermissions.canManageTopics(sender.role, sender.permissions)) return
+                if (groupDao.getTopicById(packet.topicId) == null) return
+                groupDao.renameTopic(packet.topicId, packet.name.take(MAX_TOPIC_CHARS))
+                groupDao.updateTopicIcon(packet.topicId, packet.iconEmoji.take(16))
+            }
+
             is GroupWire.Packet.JoinRequest -> {
                 val mine = groupDao.getMember(packet.groupId, me) ?: return
                 if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
@@ -2913,13 +3160,40 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.Pin -> {
-                if (groupDao.getMember(packet.groupId, me) == null) return
-                messageDao.updatePinned(
-                    packet.messageId,
-                    packet.pinned,
-                    if (packet.pinned) clock() else null,
-                    if (packet.pinned) senderId else null,
+                val localMember = groupDao.getMember(packet.groupId, me) ?: return
+                if (localMember.isBanned) return
+                val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (sender.isBanned || !GroupPermissions.canPinMessages(sender.role, sender.permissions)) {
+                    Log.w(TAG, "unauthorized group pin ignored group=${packet.groupId} sender=$senderId")
+                    return
+                }
+                val message = messageDao.getMessageById(packet.messageId) ?: return
+                if (message.chatId != packet.groupId || message.topicId.orEmpty() != packet.topicId) {
+                    Log.w(TAG, "group pin target mismatch ignored group=${packet.groupId}")
+                    return
+                }
+                val group = groupDao.getGroupById(packet.groupId)
+                if (packet.pinned && group?.isChannel == true &&
+                    messageDao.firstTextMessageIdInTopic(packet.groupId, packet.topicId) == packet.messageId
+                ) {
+                    Log.w(TAG, "channel post pin ignored in discussion group=${packet.groupId}")
+                    return
+                }
+                val result = messageDao.updatePinnedWithinTopicLimit(
+                    chatId = packet.groupId,
+                    topicId = packet.topicId,
+                    messageId = packet.messageId,
+                    pinned = packet.pinned,
+                    atMs = if (packet.pinned) clock() else null,
+                    by = if (packet.pinned) senderId else null,
                 )
+                when (result) {
+                    MessagePinMutation.LIMIT_REACHED ->
+                        Log.w(TAG, "group pin limit exceeded group=${packet.groupId} topic=${packet.topicId}")
+                    MessagePinMutation.SCOPE_CONFLICT ->
+                        Log.w(TAG, "group pin scope conflict ignored group=${packet.groupId} message=${packet.messageId}")
+                    else -> Unit
+                }
             }
 
             is GroupWire.Packet.RosterRequest -> {
@@ -3101,6 +3375,9 @@ class GroupRepository(
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) {
+            return Result.failure(SecurityException("Вы заблокированы в этой группе"))
+        }
         if (!GroupPermissions.canPinMessages(member.role, member.permissions)) {
             return Result.failure(SecurityException("Закреплять сообщения могут только администраторы с таким правом"))
         }
@@ -3109,10 +3386,42 @@ class GroupRepository(
         if (message.chatId != groupId) {
             return Result.failure(IllegalArgumentException("Сообщение из другой группы"))
         }
-        messageDao.updatePinned(messageId, pinned, if (pinned) clock() else null, if (pinned) me else null)
-        broadcast(groupId, GroupWire.buildPin(groupId, message.topicId.orEmpty(), messageId, pinned), excludeSelf = true)
+        val topicId = message.topicId.orEmpty()
+        if (pinned && groupDao.getGroupById(groupId)?.isChannel == true &&
+            messageDao.firstTextMessageIdInTopic(groupId, topicId) == messageId
+        ) {
+            return Result.failure(
+                IllegalStateException("Закрепите публикацию в ленте канала; в обсуждении закрепляются комментарии"),
+            )
+        }
+        val result = messageDao.updatePinnedWithinTopicLimit(
+            chatId = groupId,
+            topicId = topicId,
+            messageId = messageId,
+            pinned = pinned,
+            atMs = if (pinned) clock() else null,
+            by = if (pinned) me else null,
+        )
+        when (result) {
+            MessagePinMutation.LIMIT_REACHED ->
+                return Result.failure(IllegalStateException(MessagePinPolicy.LIMIT_REACHED_MESSAGE))
+            MessagePinMutation.SCOPE_CONFLICT ->
+                return Result.failure(IllegalStateException(MessagePinPolicy.SCOPE_CONFLICT_MESSAGE))
+            MessagePinMutation.NOT_FOUND ->
+                return Result.failure(IllegalStateException("Сообщение уже недоступно в этой теме"))
+            MessagePinMutation.UNCHANGED -> return Result.success(Unit)
+            MessagePinMutation.UPDATED -> Unit
+        }
+        broadcast(groupId, GroupWire.buildPin(groupId, topicId, messageId, pinned), excludeSelf = true)
         return Result.success(Unit)
     }
+
+    /**
+     * Раунд 144: непрочитанные темы ДО сброса - лента прыгает на первое
+     * непрочитанное сообщение при входе (вызывается из VM до markRead).
+     */
+    suspend fun peekTopicUnread(topicId: String): Int =
+        groupDao.getTopicById(topicId)?.unreadCount ?: 0
 
     /**
      * Тема прочитана.
@@ -3131,16 +3440,28 @@ class GroupRepository(
         // проверки получался замкнутый круг: сброс непрочитанных писал в
         // таблицу, поток тем перезапускал ленту, лента снова звала сброс - и
         // так без конца, пока приложение не зависало.
+        var hadTopicUnread = false
         if (!topicId.isNullOrBlank()) {
             val topic = groupDao.getTopicById(topicId)
             if (topic != null && topic.unreadCount > 0) {
                 groupDao.markTopicRead(topicId)
+                hadTopicUnread = true
             }
         }
         val group = groupDao.getGroupById(groupId) ?: return
         val unread = groupDao.sumTopicUnread(groupId)
-        if (group.unreadCount != unread) {
+        val hadGroupUnread = group.unreadCount != unread
+        if (hadGroupUnread) {
             groupDao.setGroupUnread(groupId, unread)
+        }
+        // р228: второе устройство той же личности снимает непрочитанное
+        // вместе с нами - бейджи не расходятся. Кадр шлём ТОЛЬКО когда было
+        // что снимать: экран темы зовёт этот метод на каждом обновлении
+        // ленты, и безусловная отправка превратилась бы в поток кадров.
+        if (hadTopicUnread || hadGroupUnread) {
+            com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(
+                peerId = "", groupId = groupId, topicId = topicId.orEmpty(),
+            )
         }
     }
 
@@ -3789,6 +4110,49 @@ class GroupRepository(
         return Result.success(Unit)
     }
 
+    /**
+     * Раунд 153: перевести группу «без тем» в группу с темами (владелец:
+     * «нужно в настройках переводить»). Включаем флаг; если тем ещё нет -
+     * создаём General и объявляем участникам, как обычное создание темы.
+     * Если General уже материализован (плоский режим, см. ensureFlatTopic) -
+     * он и становится общей темой, старые сообщения остаются на месте.
+     */
+    suspend fun enableTopics(groupId: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Нет права менять настройки группы"))
+        }
+        if (group.topicsEnabled) return Result.success(Unit)
+        groupDao.setTopicsEnabled(groupId)
+        val existing = groupDao.getGeneralTopic(groupId) ?: groupDao.getTopics(groupId).firstOrNull()
+        if (existing == null) {
+            val topicId = idFactory()
+            groupDao.insertTopic(
+                GroupTopicEntity(
+                    id = topicId,
+                    groupId = groupId,
+                    name = GENERAL_TOPIC_NAME,
+                    ownerId = me,
+                    ownerName = member.displayName,
+                    createdAtMs = clock(),
+                    isGeneral = true,
+                )
+            )
+            broadcast(
+                groupId,
+                GroupWire.buildTopicCreated(groupId, topicId, GENERAL_TOPIC_NAME, ""),
+                excludeSelf = true,
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    
+
     suspend fun updateProfile(groupId: String, title: String, about: String): Result<Unit> {
         val clean = title.trim()
         if (clean.isEmpty()) return Result.failure(IllegalArgumentException("Пустое название"))
@@ -3807,6 +4171,8 @@ class GroupRepository(
     /** Снять счётчик непрочитанного - пункт меню в пузыре группы. */
     suspend fun markGroupRead(groupId: String) {
         groupDao.markGroupRead(groupId)
+        // р228: снять непрочитанное и на партнёрском устройстве личности.
+        com.vladimir.messenger.data.mirror.MirrorHub.publishReadSync(peerId = "", groupId = groupId)
     }
 
     /**
@@ -3838,6 +4204,19 @@ class GroupRepository(
      */
     suspend fun inviteLinksFor(groupIds: Collection<String>): List<Pair<String, String>> =
         groupIds.mapNotNull { id -> runCatching { inviteLinkFor(id) }.getOrNull() }
+
+    /**
+     * Раунд 218: то же, что [inviteLinksFor], но с признаком «канал» - от
+     * него зависит кнопка карточки в чате: «Вступить» или «Подписаться».
+     */
+    suspend fun inviteRefsFor(groupIds: Collection<String>): List<GroupInviteRef> =
+        groupIds.mapNotNull { id ->
+            runCatching {
+                val pair = inviteLinkFor(id)
+                val isChannel = pair?.let { groupDao.getGroupById(id)?.isChannel } ?: false
+                pair?.let { GroupInviteRef(title = it.first, link = it.second, isChannel = isChannel) }
+            }.getOrNull()
+        }
 
     /**
      * Ссылка для QR при личной встрече: вход БЕЗ одобрения.
@@ -3885,6 +4264,27 @@ class GroupRepository(
      * Действующее бессрочное приглашение без одобрения и без лимита - для
      * ссылок на посты. Если такого ещё нет, создаётся одно и переиспользуется.
      */
+    /**
+     * Раунд 213: короткая ссылка-приглашение для «Пригласить по QR коду»
+     * в шапке группы/канала. Берём бессрочное открытое приглашение (то же,
+     * что у «поделиться постом») и прячем его за кодом /s/<код>: такой QR
+     * открывается любым сканером, а без APU показывает страницу сервиса
+     * «Группа/Канал в APU» с кнопкой установки. Null - пригласить нельзя
+     * (нет группы или нет бессрочной ссылки).
+     */
+    suspend fun inviteQrLink(groupId: String): String? {
+        val group = groupDao.getGroupById(groupId) ?: return null
+        val invite = openInviteFor(groupId) ?: return null
+        return shareLinkFor(
+            GroupInviteLinks.build(
+                slug = invite.slug,
+                groupId = groupId,
+                ownerId = group.ownerId,
+                isChannel = group.isChannel,
+            )
+        )
+    }
+
     private suspend fun openInviteFor(groupId: String): InviteSummary? {
         val group = groupDao.getGroupById(groupId) ?: return null
         val existing = groupDao.getInvites(groupId).firstOrNull {
@@ -3929,6 +4329,14 @@ class GroupRepository(
         if (member.role == GroupRole.OWNER) {
             return Result.failure(IllegalArgumentException("Владелец не может выйти из группы без передачи прав"))
         }
+        // Выход убирает строку из главного списка, поэтому освобождаем и
+        // закреплённое место на всех зеркалах этой личности.
+        com.vladimir.messenger.data.mirror.MirrorHub.publishInboxPin(
+            kind = "group",
+            itemId = groupId,
+            pinned = false,
+            pinnedAtMs = 0L,
+        )
         groupDao.deleteMember(groupId, me)
         groupDao.markLeft(groupId)
         backgroundScope.launch {
@@ -3971,25 +4379,42 @@ class GroupRepository(
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupRole.isAdminOrOwner(member.role)) {
+        if (member.isBanned || !GroupRole.isAdminOrOwner(member.role)) {
             return Result.failure(SecurityException("Статистика доступна только администраторам"))
         }
-        val fromKey = dayKey(clock() - (days - 1).toLong() * DAY_MS)
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val keys = GroupStatsCalculator.dayKeys(clock(), days.coerceIn(1, 366))
+        val dailyRows = groupDao.getGroupStatsInRange(groupId, keys.first(), keys.last())
         val members = groupDao.getMembers(groupId)
         val topics = groupDao.getTopics(groupId)
+        val posts = if (group.isChannel) {
+            groupDao.getChannelPostStats(groupId).map { row ->
+                ChannelPostStat(row.topicId, row.publishedAtMs, row.authorId, row.commentCount, row.viewCount)
+            }
+        } else {
+            emptyList()
+        }
         return Result.success(
             GroupStats(
                 groupId = groupId,
                 memberCount = members.count { !it.isBanned },
-                adminCount = members.count { GroupRole.isAdminOrOwner(it.role) },
+                adminCount = members.count { !it.isBanned && GroupRole.isAdminOrOwner(it.role) },
                 topicCount = topics.size,
                 pendingRequests = groupDao.countPendingRequests(groupId),
                 totalMessages = groupDao.totalTopicMessages(groupId),
-                last7Days = groupDao.getGroupStats(groupId, days)
-                    .filter { it.dayKey >= fromKey }
-                    .sortedBy { it.dayKey }
-                    .map { GroupStatDay(it.dayKey, it.messageCount, it.senderCount) },
+                last7Days = GroupStatsCalculator.completeDays(
+                    keys,
+                    dailyRows.map { GroupStatDay(it.dayKey, it.messageCount, it.senderCount) },
+                ),
                 perTopic = topics.associate { it.id to it.messageCount },
+                activeSenders7Days = GroupStatsCalculator.uniqueSenders(dailyRows.map { it.sendersCsv }),
+                channelPosts = posts,
+                publicationsLast7Days = if (group.isChannel) {
+                    GroupStatsCalculator.publicationDays(keys, posts)
+                } else {
+                    emptyList()
+                },
             )
         )
     }
@@ -4227,12 +4652,42 @@ class GroupRepository(
 
     private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
         val me = myId().orEmpty()
+        // р229: пока применяется зеркальный кадр, тень не рассылает ничего -
+        // иначе ответ на принятое событие уходил бы обратно активному и
+        // возвращался: получилась бы петля. Сети у тени всё равно нет.
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isApplyingFrame() &&
+            !com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()
+        ) {
+            return DeliveryReport(attempted = 0, delivered = 0, failed = emptyList())
+        }
+        // р229: устройство-зеркало своей сессии не имеет - конверт несёт
+        // активное. Возвращаем успех: дальше им занимается партнёр, а своя
+        // база уже обновлена вызывающим кодом.
+        if (com.vladimir.messenger.data.mirror.MirrorHub.deliverGroupEnvelope(groupId, envelope)) {
+            Log.i(TAG, "group envelope via mirror (тень): " + envelope.take(16))
+            return DeliveryReport(attempted = 1, delivered = 1, failed = emptyList())
+        }
+        // р229: и наоборот - конверт, сделанный ЗДЕСЬ, должен доехать до
+        // второго устройства личности (получатели в сети его не видят).
+        com.vladimir.messenger.data.mirror.MirrorHub.publishEnvelope(
+            senderId = me,
+            chatId = groupId,
+            messageId = "",
+            text = envelope,
+        )
         val recipients = groupDao.getMembers(groupId)
             .filter { !it.isBanned }
             .map { it.nodeId }
             .filter { !excludeSelf || it != me }
         return delivery.deliver(groupId, envelope, recipients)
     }
+
+    /**
+     * р229: разослать групповой конверт участникам (для конверта, пришедшего
+     * с партнёрского устройства личности - сеть ведёт активный).
+     */
+    suspend fun fanoutEnvelope(groupId: String, envelope: String): DeliveryReport =
+        broadcast(groupId, envelope, excludeSelf = true)
 
     /**
      * Запоминает автора сообщения, чтобы в ленте было имя, а не обрывок
@@ -4343,6 +4798,8 @@ class GroupRepository(
 
     /** Превью для списков: без служебных строк фотографий и визитки файла. */
     private fun preview(text: String): String {
+        // Раунд 155: служебные строки - человеческими подписями ещё на записи.
+        val text = ChatPreviews.human(text) ?: return ""
         val clean = InlineImage.stripImage(text)
         val shown = if (clean.isBlank() && (InlineImage.hasImage(text) || InlineImage.photoCount(text) > 0)) {
             "Фото"
@@ -4355,7 +4812,50 @@ class GroupRepository(
     private fun dayKey(epochMs: Long): String =
         Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
-    companion object {
+        /**
+     * Раунд 153: у группы «без тем» строк тем в базе нет - писать некуда
+     * (resolveTopic возвращал null -> «Тема не найдена»), и лента не
+     * запускалась. Материализуем General с ДЕТЕРМИНИРОВАННЫМ id: каждый
+     * участник одинаково создаёт строку у себя, рассылка не нужна и
+     * расхождений между телефонами не бывает.
+     */
+    fun flatGeneralTopicId(groupId: String): String = groupId + ":general"
+
+    /** Id общей темы группы без тем, создав её при необходимости. */
+    suspend fun ensureFlatTopic(groupId: String): String? {
+        val group = groupDao.getGroupById(groupId) ?: return null
+        if (group.topicsEnabled) return null
+        groupDao.getGeneralTopic(groupId)?.let { return it.id }
+        groupDao.getTopics(groupId).firstOrNull()?.let { return it.id }
+        val me = myId() ?: return null
+        val member = groupDao.getMember(groupId, me)
+        groupDao.insertTopic(
+            GroupTopicEntity(
+                id = flatGeneralTopicId(groupId),
+                groupId = groupId,
+                name = GENERAL_TOPIC_NAME,
+                ownerId = me,
+                ownerName = member?.displayName.orEmpty(),
+                createdAtMs = clock(),
+                isGeneral = true,
+            )
+        )
+        return flatGeneralTopicId(groupId)
+    }
+
+companion object {
+        /** Раунд 137: как часто очередь пытается донести «удалить у всех». */
+        const val DELETION_RETRY_MS = 10L * 60 * 1000
+
+        /** Раунд 137: сколько хранить недоставленную команду (потом сгорает). */
+        const val DELETION_TTL_MS = 7L * 24 * 60 * 60 * 1000
+
+        /** Раунд 137: один телефон ретранслирует удаление не чаще раза в час. */
+        const val DELETION_RELAY_INTERVAL_MS = 60L * 60 * 1000
+
+        /** Раунд 137: скольким соседям ретранслируем (эпидемия без шторма). */
+        const val DELETION_RELAY_FANOUT = 3
+
         /** Ключ группового аватара в роевом реестре avatars. */
         const val GROUP_AVATAR_PREFIX = "g:"
         const val GENERAL_TOPIC_NAME = "General"

@@ -6,7 +6,11 @@ import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.usecase.ObserveNetworkStatusUseCase
 import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.local.dao.InboxPinDao
+import com.vladimir.messenger.data.local.dao.InboxPinKind
+import com.vladimir.messenger.data.local.dao.InboxPinMutation
 import com.vladimir.messenger.data.repository.NetworkStatus
+import com.vladimir.messenger.data.mirror.MirrorHub
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,15 +57,27 @@ data class InboxGroup(
     val myRole: String,
     /** Канал открывается лентой постов, группа - общим чатом. */
     val isChannel: Boolean = false,
+    /** Whether this conversation is pinned on the home inbox. */
+    val isPinned: Boolean = false,
+    val pinnedAtMs: Long? = null,
 )
 
 /** Строка общего списка: личный чат или группа. */
 sealed interface InboxItem {
+    /** Last activity time, used to order unpinned rows and break pin-time ties. */
     val sortKey: Long
+    val isPinned: Boolean
+    val pinnedAtMs: Long?
 
-    data class Personal(val chat: Chat, override val sortKey: Long) : InboxItem
+    data class Personal(val chat: Chat, override val sortKey: Long) : InboxItem {
+        override val isPinned: Boolean get() = chat.isPinned
+        override val pinnedAtMs: Long? get() = chat.pinnedAtMs
+    }
 
-    data class Group(val group: InboxGroup, override val sortKey: Long) : InboxItem
+    data class Group(val group: InboxGroup, override val sortKey: Long) : InboxItem {
+        override val isPinned: Boolean get() = group.isPinned
+        override val pinnedAtMs: Long? get() = group.pinnedAtMs
+    }
 }
 
 data class ChatListUiState(
@@ -106,7 +122,9 @@ data class ChatListUiState(
 class ChatListViewModel @Inject constructor(
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
     private val groupDao: GroupDao,
+    private val inboxPinDao: InboxPinDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
@@ -137,10 +155,16 @@ class ChatListViewModel @Inject constructor(
      */
     private val myNodeId = CompletableDeferred<String>()
 
+    // Раунд 201 (владелец: «долго этот экран при включении»): конвейер
+    // списка НЕ ждёт готовности узла. myNodeId.await() в пути данных
+    // держал первый кадр, пока ядро поднимается (без сети - особенно
+    // долго). Список собирается сразу из базы; роли владельца/админа
+    // подтянутся отдельным кадром, когда идентификатор прилетит.
+    private val myIdFlow = MutableStateFlow("")
+
     init {
         viewModelScope.launch {
-            myNodeId.complete(
-                withContext(Dispatchers.IO) {
+            val resolved = withContext(Dispatchers.IO) {
                     // Сначала спрашиваем сохранённый идентификатор, и только
                     // если его нет - ядро. Раньше список чатов ЖДАЛ ответа
                     // ядра: пока движок поднимается (а он ждёт сеть), главный
@@ -153,7 +177,8 @@ class ChatListViewModel @Inject constructor(
                     saved?.takeIf { it.isNotBlank() }
                         ?: com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
                 }
-            )
+            myIdFlow.value = resolved
+            myNodeId.complete(resolved)
         }
         observeInbox()
         observeNetworkStatus()
@@ -208,7 +233,8 @@ class ChatListViewModel @Inject constructor(
             combine(
                 sourcesFlow,
                 section,
-            ) { src, current ->
+                myIdFlow,
+            ) { src, current, _ ->
                 Snapshot(src.chats, toInboxGroups(src.groups), src.query, current, src.window, src.total)
             }
                 // Сборка разделов, поиск и сортировка - на рабочем потоке.
@@ -274,7 +300,7 @@ class ChatListViewModel @Inject constructor(
 
     /** Роли считаем один раз на пересчёт, а не на каждую строку списка. */
     private suspend fun toInboxGroups(entities: List<com.vladimir.messenger.data.local.entity.GroupEntity>): List<InboxGroup> {
-        val me = myNodeId.await()
+        val me = myIdFlow.value
         val roles = if (me.isBlank()) {
             emptyMap()
         } else {
@@ -293,6 +319,8 @@ class ChatListViewModel @Inject constructor(
                 isPublic = g.isPublic,
                 myRole = if (g.ownerId == me) GroupRole.OWNER else roles[g.id] ?: GroupRole.MEMBER,
                 isChannel = g.isChannel,
+                isPinned = g.pinnedAtMs != null,
+                pinnedAtMs = g.pinnedAtMs,
             )
         }
     }
@@ -325,10 +353,10 @@ class ChatListViewModel @Inject constructor(
 
         val personal = filteredChats
             .map { InboxItem.Personal(it, it.lastMessageTime ?: 0L) }
-            .sortedByDescending { it.sortKey }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
         val groupItems = filteredGroups
             .map { InboxItem.Group(it, it.timeMs ?: 0L) }
-            .sortedByDescending { it.sortKey }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
 
         val manages = { row: InboxGroup ->
             row.myRole == GroupRole.OWNER || row.myRole == GroupRole.ADMIN
@@ -368,11 +396,28 @@ class ChatListViewModel @Inject constructor(
         )
     }
 
+    /** Main-inbox order: pinned conversations first, then activity time. */
+    private fun compareInboxItems(left: InboxItem, right: InboxItem): Int {
+        if (left.isPinned != right.isPinned) return if (left.isPinned) -1 else 1
+
+        val leftPrimary = if (left.isPinned) left.pinnedAtMs ?: 0L else left.sortKey
+        val rightPrimary = if (right.isPinned) right.pinnedAtMs ?: 0L else right.sortKey
+        val primaryOrder = rightPrimary.compareTo(leftPrimary)
+        if (primaryOrder != 0) return primaryOrder
+
+        val activityOrder = right.sortKey.compareTo(left.sortKey)
+        if (activityOrder != 0) return activityOrder
+        return stableInboxKey(left).compareTo(stableInboxKey(right))
+    }
+
+    private fun stableInboxKey(item: InboxItem): String = when (item) {
+        is InboxItem.Personal -> "chat:" + item.chat.id
+        is InboxItem.Group -> "group:" + item.group.id
+    }
+
     /**
-     * Слияние двух уже упорядоченных списков.
-     *
-     * Общая сортировка склеенного списка - лишняя работа: обе половины уже
-     * стоят по времени. Идём по ним разом и берём тот, что свежее.
+     * Merge two already ordered lists with the same pinned/activity comparator.
+     * This avoids sorting the combined list a second time.
      */
     private fun merge(a: List<InboxItem>, b: List<InboxItem>): List<InboxItem> {
         if (a.isEmpty()) return b
@@ -381,7 +426,7 @@ class ChatListViewModel @Inject constructor(
         var i = 0
         var j = 0
         while (i < a.size && j < b.size) {
-            if (a[i].sortKey >= b[j].sortKey) out.add(a[i++]) else out.add(b[j++])
+            if (compareInboxItems(a[i], b[j]) <= 0) out.add(a[i++]) else out.add(b[j++])
         }
         while (i < a.size) out.add(a[i++])
         while (j < b.size) out.add(b[j++])
@@ -469,6 +514,45 @@ class ChatListViewModel @Inject constructor(
         searchQuery.value = query
     }
 
+    /** Pins a personal chat by stable contact id (chat row ids differ per device). */
+    fun togglePersonalPin(chat: Chat) {
+        setConversationPinned(InboxPinKind.PERSONAL, chat.contactId, !chat.isPinned)
+    }
+
+    /** Groups and channels share the same ten-slot home-inbox limit. */
+    fun toggleGroupPin(group: InboxGroup) {
+        setConversationPinned(InboxPinKind.GROUP, group.id, !group.isPinned)
+    }
+
+    private fun setConversationPinned(kind: InboxPinKind, itemId: String, pinned: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val atMs = if (pinned) System.currentTimeMillis() else 0L
+            val result = when (kind) {
+                InboxPinKind.PERSONAL -> inboxPinDao.setPersonalPinned(itemId, pinned, atMs)
+                InboxPinKind.GROUP -> inboxPinDao.setGroupPinned(itemId, pinned, atMs)
+            }
+            when (result) {
+                InboxPinMutation.UPDATED ->
+                    MirrorHub.publishInboxPin(kind.wireValue, itemId, pinned, atMs)
+                InboxPinMutation.LIMIT_REACHED -> withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        com.vladimir.messenger.data.local.InboxPinPolicy.LIMIT_REACHED_MESSAGE,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                InboxPinMutation.NOT_FOUND -> withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        "Эта беседа больше недоступна",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                InboxPinMutation.UNCHANGED -> Unit
+            }
+        }
+    }
+
     // ── Действия меню «⋮» в пузырях ───────────────────────────────────────
 
     /** Удалить личный чат вместе с историей (только на этом телефоне). */
@@ -528,6 +612,113 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Раунд 159: nodeId участников группы - уже состоящие в «Кому
+     * отправить» показываются серыми с пометкой и не выбираются.
+     */
+    fun groupMemberIdsOnce(groupId: String, onLoaded: (Set<String>) -> Unit) {
+        viewModelScope.launch {
+            val ids = withContext(Dispatchers.IO) {
+                runCatching { groupDao.getMembers(groupId).map { it.nodeId } }
+                    .getOrDefault(emptyList())
+            }
+            onLoaded(ids.toSet())
+        }
+    }
+
+    /** Раунд 158: личные чаты для выбора адресатов приглашения. */
+    fun personalChatsOnce(onLoaded: (List<com.vladimir.messenger.domain.model.Chat>) -> Unit) {
+        viewModelScope.launch {
+            val chats = withContext(Dispatchers.IO) {
+                runCatching { chatRepository.getAllChats() }.getOrDefault(emptyList())
+            }
+            onLoaded(chats.sortedBy { it.contactName.lowercase() })
+        }
+    }
+
+    /**
+     * Раунд 158: разослать приглашение выбранным адресатам в ЛИЧНЫЕ чаты
+     * (владелец: «отправить ссылку в APU»). Ограничение выбора - 100
+     * человек (владелец: «ограждение выбрать абонентов сделай 100»).
+     */
+    /** Раунд 175: адресная книга для «Поделиться контактом» из списка чатов. */
+    val contacts: kotlinx.coroutines.flow.Flow<List<com.vladimir.messenger.domain.model.Contact>> =
+        contactRepository.observeContacts()
+
+    /**
+     * Раунд 175: отправить ссылку контакта выбранному абоненту APU -
+     * тот добавит человека одним тапом по apu://-ссылке.
+     */
+    fun sendContactCard(toId: String, toName: String, sharedNodeId: String, sharedName: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                com.vladimir.messenger.util.ContactCardSender.send(
+                    chatRepository = chatRepository,
+                    toContactId = toId,
+                    toName = toName,
+                    sharedNodeId = sharedNodeId,
+                    sharedName = sharedName,
+                    sharedUsername = "",
+                )
+            }.getOrDefault(false)
+            // Раунд 181: Toast только с главного потока - из фонового
+            // приложение падало сразу после отправки (в «Контактах»
+            // подтверждение идёт через StateFlow и потому не падало).
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                android.widget.Toast.makeText(
+                    appContext,
+                    if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+
+    fun sendGroupInviteToChats(
+        groupId: String,
+        what: String,
+        chatIds: List<String>,
+        onDone: (sent: Int, failed: Int) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val prepared = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.inviteLinkFor(groupId) }.getOrNull()
+            }
+            if (prepared == null) {
+                onDone(0, chatIds.size)
+                return@launch
+            }
+            val (title, link) = prepared
+            var sent = 0
+            var failed = 0
+            for (chatId in chatIds.take(MAX_INVITE_RECIPIENTS)) {
+                val chat = withContext(Dispatchers.IO) {
+                    runCatching { chatRepository.getChatById(chatId) }.getOrNull()
+                }
+                if (chat == null) {
+                    failed++
+                    continue
+                }
+                // Раунд 189: приглашение КАРТОЧКОЙ - заголовок, описание,
+                // ссылка; получатель увидит пузырь «Вступить»/«Подписаться».
+                val group = runCatching { groupDao.getGroupById(groupId) }.getOrNull()
+                val body = if (group != null) {
+                    com.vladimir.messenger.util.GroupInviteCardSender.build(
+                        isChannel = group.isChannel,
+                        title = title,
+                        about = group.about,
+                        link = link,
+                    )
+                } else {
+                    "Приглашение в $what «$title»:\n$link"
+                }
+                val result = chatRepository.sendMessage(chatId, chat.contactId, body)
+                if (result.isSuccess) sent++ else failed++
+            }
+            onDone(sent, failed)
+        }
+    }
+
     /** Удалить свою группу или канал у всех участников (только владельцу). */
     fun deleteGroup(groupId: String) {
         viewModelScope.launch(Dispatchers.IO) { groupRepository.deleteGroup(groupId) }
@@ -556,6 +747,9 @@ class ChatListViewModel @Inject constructor(
     }
 
     companion object {
+        /** Раунд 158: максимум адресатов за одну рассылку приглашения. */
+        const val MAX_INVITE_RECIPIENTS = 100
+
         /** Пауза в наборе, после которой пересчитывается поиск. */
         private const val SEARCH_DEBOUNCE_MS = 200L
 

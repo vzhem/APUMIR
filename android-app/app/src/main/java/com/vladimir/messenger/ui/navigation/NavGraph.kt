@@ -39,6 +39,8 @@ import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
 import com.vladimir.messenger.ui.components.ApuMainTabBar
+import com.vladimir.messenger.ui.components.ChatWallpaper
+import androidx.compose.foundation.layout.fillMaxSize
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
@@ -48,6 +50,7 @@ import com.vladimir.messenger.ui.screens.settings.IdentityBackupScreen
 import com.vladimir.messenger.ui.screens.settings.ProfileBackupScreen
 import com.vladimir.messenger.ui.screens.settings.PeerRatingScreen
 import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
+import com.vladimir.messenger.ui.screens.support.SupportScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
 import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
@@ -125,6 +128,9 @@ sealed class Screen(val route: String) {
     data object IdentityBackup : Screen("identity_backup")
     /** Полная резервная копия профиля в файл и восстановление из него. */
     data object ProfileBackup : Screen("profile_backup")
+
+    /** Раунд 219: «Поддержать разработчика» (черновик; реквизиты - из сервиса). */
+    data object Support : Screen("support")
 
     // Избранное - личное хранилище абонента
     data object Saved : Screen("saved")
@@ -207,6 +213,15 @@ interface NavCallEntryPoint {
     fun callManager(): CallManager
 }
 
+/** Базы и уведомления для тапа по уведомлению о сообщении. */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface ChatLinkEntryPoint {
+    fun groupDao(): com.vladimir.messenger.data.local.dao.GroupDao
+    fun chatDao(): com.vladimir.messenger.data.local.dao.ChatDao
+    fun notificationHelper(): com.vladimir.messenger.service.NotificationHelper
+}
+
 // =============================================================================
 // Р“Р›РђР’РќР«Р™ NAV HOST
 // =============================================================================
@@ -221,6 +236,15 @@ fun MessengerNavGraph(
      * QR, Telegram). Не null — сразу ведём в раздел «Группы» и пробуем войти.
      */
     initialGroupInvite: String? = null,
+    /**
+     * Тап по уведомлению о сообщении: (chatId, topicId) - ведём ТОЧНО туда,
+     * где написано сообщение: личный чат, тема группы или пост канала.
+     */
+    pendingChatLink: Pair<String, String?>? = null,
+    onChatLinkConsumed: () -> Unit = {},
+    /** Тап по напоминанию «Поддержать APU»: открыть экран поддержки. */
+    pendingOpenSupport: Boolean = false,
+    onSupportLinkConsumed: () -> Unit = {},
 ) {
     // Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ Р°РЅРёРјР°С†РёРё РїРµСЂРµС…РѕРґРѕРІ (РјСЃ)
     val transitionDuration = 300
@@ -231,6 +255,59 @@ fun MessengerNavGraph(
         if (!link.isNullOrBlank()) {
             navController.navigate(Screen.Groups.createJoinRoute(link))
         }
+    }
+
+    // Раунд 219: тап по напоминанию «Поддержать APU» - открываем экран
+    // поддержки и гасим флаг, чтобы поворот экрана не открывал снова.
+    LaunchedEffect(pendingOpenSupport) {
+        if (pendingOpenSupport) {
+            navController.navigate(Screen.Support.route)
+            onSupportLinkConsumed()
+        }
+    }
+
+    // Тап по уведомлению: по базам решаем, что это (личный чат или группа/
+    // канал), ведём в место сообщения и снимаем уведомление.
+    val navLinkContext = LocalContext.current.applicationContext
+    LaunchedEffect(pendingChatLink) {
+        val link = pendingChatLink ?: return@LaunchedEffect
+        val (chatId, topicId) = link
+        if (chatId.isBlank()) {
+            onChatLinkConsumed()
+            return@LaunchedEffect
+        }
+        val entry = EntryPointAccessors.fromApplication(
+            navLinkContext, ChatLinkEntryPoint::class.java
+        )
+        val group = runCatching { entry.groupDao().getGroupById(chatId) }.getOrNull()
+        val route = if (group != null) {
+            // Группа или канал: открываем тему/пост, где написано сообщение.
+            if (!topicId.isNullOrBlank()) {
+                Screen.GroupChat.createTopicRoute(chatId, topicId)
+            } else {
+                Screen.GroupChat.createRoute(chatId)
+            }
+        } else {
+            val chat = runCatching { entry.chatDao().getChatById(chatId) }.getOrNull()
+            if (chat == null) {
+                onChatLinkConsumed()
+                return@LaunchedEffect
+            }
+            Screen.ChatDetail.createRoute(
+                chatId = chat.id,
+                contactName = chat.contactName.ifBlank { chat.contactId.take(8) },
+                contactId = chat.contactId,
+            )
+        }
+        // Снять уведомление ДО consume: после него эффект отменяется.
+        runCatching { entry.notificationHelper().cancelChatNotifications(chatId) }
+        navController.navigate(route) { launchSingleTop = true }
+        // Раунд 140: сброс был ПЕРВОЙ строкой - он обнулял ключ этого
+        // LaunchedEffect, корутина отменялась на первом же запросе к базе,
+        // и навигация не успевала случиться: тап по уведомлению вёл на
+        // главный экран (владелец, 2026-09-23). Теперь сброс - последним:
+        // после него в эффекте нет suspend-вызовов, отменять нечего.
+        onChatLinkConsumed()
     }
 
     // Входящий звонок: экран звонка показывается сам, где бы ни был пользователь.
@@ -251,6 +328,14 @@ fun MessengerNavGraph(
         }
     }
 
+    // Раунд 202 (владелец: «при переходе мелькает белая полоса»): под
+    // переходами экранов просвечивал ДЕФОЛТНЫЙ белый фон окна. Обои APU
+    // под NavHost - постоянная подложка: на каком бы кадре слайда ни
+    // остановилась анимация, снизу всегда свой фон, а не белый.
+    androidx.compose.foundation.layout.Box(
+        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+    ) {
+    ChatWallpaper()
     NavHost(
         navController    = navController,
         startDestination = startDestination,
@@ -287,6 +372,16 @@ fun MessengerNavGraph(
         composable(route = Screen.Onboarding.route) {
             OnboardingScreen(
                 onRestoreFromFile = { navController.navigate(Screen.ProfileBackup.route) },
+                onJoinByInvite = { pasted ->
+                    // Раунд 204: приглашение друга из онбординга - личная ссылка
+                    // ведёт в добавление контакта (атрибуция и ранг - сами),
+                    // ссылка на группу - в карточку «Вступить».
+                    if (com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(pasted) != null) {
+                        navController.navigate(Screen.Groups.createJoinRoute(pasted))
+                    } else {
+                        navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(pasted)))
+                    }
+                },
                 onProfileCreated = {
                     // РџРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ РїСЂРѕС„РёР»СЏ в†’ РіР»Р°РІРЅС‹Р№ СЌРєСЂР°РЅ
                     // clearBackStack: РЅРµР»СЊР·СЏ РІРµСЂРЅСѓС‚СЊСЃСЏ РЅР°Р·Р°Рґ Рє РѕРЅР±РѕСЂРґРёРЅРіСѓ
@@ -397,7 +492,23 @@ fun MessengerNavGraph(
                 },
                 onCallClick = { cId, cName ->
                     navController.navigate(Screen.Call.createOutgoing(cId, cName))
-                }
+                },
+                onAddContactInvite = { link ->
+                    navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(link)))
+                },
+                onOpenChat = { cId, cName, cContact ->
+                    navController.navigate(Screen.ChatDetail.createRoute(cId, cName, cContact))
+                },
+                onOpenGroup = { gId, tId ->
+                    if (tId != null) {
+                        navController.navigate(Screen.GroupChat.createTopicRoute(gId, tId))
+                    } else {
+                        navController.navigate(Screen.GroupChat.createRoute(gId))
+                    }
+                },
+                onJoinByLink = { link ->
+                    navController.navigate(Screen.Groups.createJoinRoute(link))
+                },
             )
         }
 
@@ -473,6 +584,7 @@ fun MessengerNavGraph(
                 onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
                 onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
                 onProfileBackupClick = { navController.navigate(Screen.ProfileBackup.route) },
+                onSupportClick = { navController.navigate(Screen.Support.route) },
             )
         }
 
@@ -484,6 +596,7 @@ fun MessengerNavGraph(
                 },
                 showProfile = true,
                 onBackClick = { navController.popBackStack() },
+                onSupportClick = { navController.navigate(Screen.Support.route) },
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
@@ -505,6 +618,11 @@ fun MessengerNavGraph(
 
         composable(route = Screen.RankBenefits.route) {
             RankBenefitsScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // Раунд 219: «Поддержать разработчика» (черновик).
+        composable(route = Screen.Support.route) {
+            SupportScreen(onBackClick = { navController.popBackStack() })
         }
 
         // ------------------------------------------------------------------
@@ -674,6 +792,19 @@ fun MessengerNavGraph(
                         popUpTo(Screen.GroupChat.route) { inclusive = true }
                     }
                 },
+                onOpenChat = { cId, cName, cContact ->
+                    navController.navigate(Screen.ChatDetail.createRoute(cId, cName, cContact))
+                },
+                onOpenGroup = { gId, tId ->
+                    if (tId != null) {
+                        navController.navigate(Screen.GroupChat.createTopicRoute(gId, tId))
+                    } else {
+                        navController.navigate(Screen.GroupChat.createRoute(gId))
+                    }
+                },
+                onJoinByLink = { link ->
+                    navController.navigate(Screen.Groups.createJoinRoute(link))
+                },
             )
         }
 
@@ -774,6 +905,7 @@ fun MessengerNavGraph(
                 }
             )
         }
+    }
     }
 }
 

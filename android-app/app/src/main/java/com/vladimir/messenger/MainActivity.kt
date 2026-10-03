@@ -76,20 +76,91 @@ class MainActivity : ComponentActivity() {
 
     /** Ссылка-приглашение в группу: сначала спрашиваем разрешение, потом ведём в «Группы». */
     private var pendingGroupInviteLink by mutableStateOf<String?>(null)
+
+    /**
+     * Тап по уведомлению: (chatId, topicId) - куда вести. topicId null -
+     * личный чат. Разбирается в NavGraph (там доступ к базам), здесь только
+     * читаем extras и забываем их - повторный onCreate не ведёт снова.
+     */
+    private var pendingChatLink by mutableStateOf<Pair<String, String?>?>(null)
+
+    /** Раунд 219: тап по напоминанию «Поддержать APU» - открыть этот экран. */
+    private var pendingOpenSupport by mutableStateOf(false)
     private var pendingGroupInvite by mutableStateOf<String?>(null)
     private var updateRelease by mutableStateOf<UpdateChecker.ReleaseInfo?>(null)
+
+    /** Версия, закрытая «Позже»: в этой сессии не показываем, более новую — покажем. */
+    private var dismissedUpdateVersion: String? = null
+
+    /** Момент последней проверки обновления (повтор при возврате — не чаще 5 минут). */
+    private var lastUpdateCheckAtMs = 0L
+
+    /** Интервал повторных проверок обновления при возврате в приложение. */
+    private val resumeUpdateCheckIntervalMs = 5L * 60 * 1000
+
     private var lastHandledInviteUri: String? = null
     private val viewModel: MainViewModel by viewModels()
 
     override fun onResume() {
         super.onResume()
         handleDeepLinkIntent(intent)
+        maybeCheckForUpdates()
+    }
+
+    /**
+     * Повторная проверка обновления при возврате в приложение. Стартовая
+     * проверка (onCreate) одна и молчаливая: если в тот момент сеть ещё не
+     * поднялась или GitHub ответил ошибкой (лимит запросов, таймаут),
+     * объявление пропадало до перезапуска — телефоны «не видели обновление».
+     * Теперь догоняем здесь: не чаще раза в 5 минут (лимит GitHub API —
+     * 60 запросов/час), закрытая «Позже» версия в этой сессии не надоедает.
+     */
+    private fun maybeCheckForUpdates() {
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateCheckAtMs < resumeUpdateCheckIntervalMs) return
+        lastUpdateCheckAtMs = now
+        checkForUpdates()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleNotificationTap(intent)
         handleDeepLinkIntent(intent)
+    }
+
+    /**
+     * Тап по уведомлению о сообщении: запоминаем, куда вести. Экран разберёт
+     * (личный чат / тема группы / пост канала) и сбросит [pendingChatLink].
+     */
+    private fun handleNotificationTap(intent: Intent?) {
+        // Раунд 219: напоминание «Поддержать APU» (без chatId - смотрим свой
+        // extra первым и НЕ выходим раньше времени).
+        if (intent?.getBooleanExtra(
+                com.vladimir.messenger.data.support.SupportReminderNotifier.EXTRA_OPEN_SUPPORT,
+                false,
+            ) == true
+        ) {
+            pendingOpenSupport = true
+            runCatching {
+                intent.removeExtra(
+                    com.vladimir.messenger.data.support.SupportReminderNotifier.EXTRA_OPEN_SUPPORT
+                )
+            }
+        }
+        val chatId = intent?.getStringExtra(
+            com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID
+        ) ?: return
+        if (chatId.isBlank()) return
+        val topicId = intent.getStringExtra(
+            com.vladimir.messenger.service.NotificationHelper.EXTRA_TOPIC_ID
+        )?.takeIf { it.isNotBlank() }
+        pendingChatLink = chatId to topicId
+        // Extras забираем себе: иначе поворот экрана снова вёл бы по старому тапу.
+        runCatching {
+            intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID)
+            intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_TOPIC_ID)
+        }
     }
 
     private fun handleDeepLinkIntent(intent: Intent?) {
@@ -259,17 +330,32 @@ class MainActivity : ComponentActivity() {
         requestIgnoreBatteryOptimizations()
         startCoreService()
         checkForUpdates()
+        // Раунд 251: убираем из «Скачанных» наш мусор `.trashed-*APU*` -
+        // остатки старых APK обновлений, которые DownloadManager не стирает,
+        // а переименовывает. В фоне, на загрузку экрана не влияет.
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.update.DownloadTrashCleanup.clean(applicationContext)
+            // Раунд 265: держим в «Скачанных» максимум один свежий APK -
+            // установленные и старые версии удаляются сами при старте.
+            com.vladimir.messenger.data.update.DownloadTrashCleanup.cleanOldApks(applicationContext)
+        }
+        handleNotificationTap(intent)
 
         ThemeModeHolder.init(this)
         WallpaperHolder.init(this)
         com.vladimir.messenger.data.swarm.SwarmSettings.init(this)
         com.vladimir.messenger.data.swarm.StorageSettings.init(this)
+        com.vladimir.messenger.data.swarm.ServerMode.init(this)
         UsernameHolder.init(this)
         AvatarHolder.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Сплэш показывается при запуске приложения (нажатии на иконку).
-            var showSplash by remember { mutableStateOf(true) }
+            // Раунд 263: при тёплом старте (ядро уже поднято) заставка не
+            // нужна вовсе - человек сразу в готовом приложении.
+            var showSplash by remember {
+                mutableStateOf(!com.vladimir.messenger.service.CoreStatus.ready.value)
+            }
             // Роевой спор за @имя: система сняла наше имя - просим новое.
             val usernameConflict by UsernameHolder.conflict.collectAsStateWithLifecycle()
             P2PMessengerTheme(themeMode = themeMode) {
@@ -367,14 +453,19 @@ class MainActivity : ComponentActivity() {
                             checker.downloadApk(currentUpdate)
                             updateRelease = null
                             
-                            // Показать подсказку "откройте Downloads"
+                            // Показать подсказку: файл сам встанет в настройки
                             android.widget.Toast.makeText(
                                 applicationContext,
-                                "Скачивание началось. После завершения откройте Downloads для установки.",
+                                "Скачивание началось. Когда файл скачается, он сам появится в «Настройки → Обновления».",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         },
-                        onDismissClick = { updateRelease = null }
+                        onDismissClick = {
+                            // Отложили «Позже»: эту версию в этой сессии
+                            // больше не показываем (более новую — покажем).
+                            dismissedUpdateVersion = currentUpdate.version
+                            updateRelease = null
+                        }
                     )
                 }
 
@@ -393,6 +484,10 @@ class MainActivity : ComponentActivity() {
                         else
                             Screen.Onboarding.route,
                         initialGroupInvite = pendingGroupInvite,
+                        pendingChatLink = pendingChatLink,
+                        onChatLinkConsumed = { pendingChatLink = null },
+                        pendingOpenSupport = pendingOpenSupport,
+                        onSupportLinkConsumed = { pendingOpenSupport = false },
                     )
                 }
                 }
@@ -433,6 +528,7 @@ class MainActivity : ComponentActivity() {
 
 
     private fun checkForUpdates() {
+        lastUpdateCheckAtMs = System.currentTimeMillis()
         lifecycleScope.launch {
             try {
                 val entryPoint = EntryPointAccessors.fromApplication(
@@ -445,10 +541,16 @@ class MainActivity : ComponentActivity() {
                     } catch (_: Exception) { "v0.0.0" }
                     val release = updateChecker.checkForUpdate(appVersion)
                 if (release != null) {
+                    if (release.version == dismissedUpdateVersion) {
+                        // Эту версию уже отложили «Позже» в этой сессии —
+                        // не показываем окно снова; более новую покажем.
+                        Log.d("MainActivity", "Update ${release.version} dismissed earlier this session")
+                        return@launch
+                    }
                     Log.i("MainActivity", "New version available: ${release.version}")
                     updateRelease = release
                 } else {
-                    Log.d("MainActivity", "App is up to date")
+                    Log.d("MainActivity", "App is up to date (or check skipped: no network/limit)")
                 }
             } catch (e: Exception) {
                 Log.w("MainActivity", "Update check failed: ${e.message}")

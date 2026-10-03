@@ -4,6 +4,8 @@ import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ApuSearchField
+import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -67,6 +69,9 @@ fun ContactsScreen(
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
     // Контакт, которого приглашаем в группы: не null - открыт выбор групп.
     var inviteFor by remember { mutableStateOf<Contact?>(null) }
+    var showInviteShare by remember { mutableStateOf(false) }
+    // Раунд 175: «Поделиться контактом» - сначала выбор пути (в APU / наружу).
+    var shareTarget by remember { mutableStateOf<Contact?>(null) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -96,9 +101,7 @@ fun ContactsScreen(
                     // Пригласить друга — в один тап, прямо из списка контактов.
                     IconButton(
                         onClick = {
-                            OwnInvite.link(context)?.let { link ->
-                                ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
-                            }
+                            showInviteShare = true
                         },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = "Пригласить друга")
@@ -112,13 +115,11 @@ fun ContactsScreen(
     ) { paddingValues ->
         Column(Modifier.fillMaxSize().padding(paddingValues)) {
             var query by remember { mutableStateOf("") }
-            OutlinedTextField(
+            ApuSearchField(
                 value = query,
                 onValueChange = { query = it },
+                placeholder = "Поиск: имя или @никнейм",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("Поиск: имя или @никнейм") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
             )
             val shown = remember(contacts, query) {
                 val q = query.trim().lowercase()
@@ -169,9 +170,7 @@ fun ContactsScreen(
                     // Пустой список - самое место, чтобы позвать первого друга.
                     OutlinedButton(
                         onClick = {
-                            OwnInvite.link(context)?.let { link ->
-                                ShortShare.shareInvite(context, OwnInvite.displayName(context), link)
-                            }
+                            showInviteShare = true
                         },
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null)
@@ -195,25 +194,6 @@ fun ContactsScreen(
                         key = { it.id }
                     ) { contact ->
                         // ContactCard expects Chat, create a minimal Chat from Contact
-                        val ctx = LocalContext.current
-                        val shareContact = {
-                            try {
-                                    val link = ContactShareLink.build(contact.id, contact.displayName, contact.username)
-                                    // Наружу - короткой https-ссылкой: apu:// в чужих
-                                    // мессенджерах не кликабельна. Сервис молчит -
-                                    // уйдёт прежняя ссылка.
-                                    ShortShare.shareText(ctx, link, "Поделиться контактом") { shared ->
-                                        // Доллар НЕ экранируем: с ${'$'} в
-                                        // сообщение уходил сам текст
-                                        // "${contact.displayName}" вместо имени,
-                                        // а вместо ссылки - "${link}".
-                                        "Мой контакт ${contact.displayName} в APU. " +
-                                            "Открой ссылку для добавления:\n$shared"
-                                    }
-                                } catch (_: Exception) {
-                                }
-                            Unit
-                        }
                         // Пузырь контакта — тот же ContactCard, что на главной:
                         // владелец просил, чтобы списки выглядели одинаково.
                         ContactCard(
@@ -229,7 +209,6 @@ fun ContactsScreen(
                             onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                             username = contact.username,
                             kind = BubbleKind.Personal,
-                            onShareClick = shareContact,
                             menuActions = listOf(
                                 BubbleMenuAction(
                                     title = "Написать",
@@ -251,14 +230,14 @@ fun ContactsScreen(
                                     },
                                 ),
                                 BubbleMenuAction(
-                                    title = "Пригласить в группу",
+                                    title = "Пригласить в сообщество",
                                     icon = Icons.Default.GroupAdd,
                                     onClick = { inviteFor = contact },
                                 ),
                                 BubbleMenuAction(
                                     title = "Поделиться контактом",
                                     icon = Icons.Default.Share,
-                                    onClick = { shareContact() },
+                                    onClick = { shareTarget = contact },
                                 ),
                                 BubbleMenuAction(
                                     title = "Удалить контакт",
@@ -295,6 +274,22 @@ fun ContactsScreen(
         )
     }
 
+    // Раунд 200: перед отправкой приглашения спрашиваем про APK.
+    if (showInviteShare) {
+        com.vladimir.messenger.ui.components.InviteAttachDialog(
+            title = "Пригласить в APU",
+            onDismiss = { showInviteShare = false },
+            onShare = { attach ->
+                showInviteShare = false
+                OwnInvite.link(context)?.let { link ->
+                    ShortShare.shareInvite(
+                        context, OwnInvite.displayName(context), link, attach,
+                    )
+                }
+            },
+        )
+    }
+
     // Выбор групп для приглашения: список с поиском, можно отметить несколько.
     inviteFor?.let { contact ->
         InviteToGroupsDialog(
@@ -307,11 +302,24 @@ fun ContactsScreen(
                 viewModel.sendGroupInvites(contact.id, contact.displayName, ids)
             },
             // Через другие приложения: тем, у кого APU ещё не стоит.
-            onShare = { ids ->
+            onShare = { ids, attachApk ->
                 inviteFor = null
                 viewModel.buildGroupInvites(ids) { invites ->
-                    AppShare.shareGroupInvites(context, invites)
+                    AppShare.shareGroupInvites(context, invites, attachApk)
                 }
+            },
+        )
+    }
+
+    // Раунд 175: выбор адресата внутри APU - выбранному уходит ссылка контакта.
+    shareTarget?.let { shared ->
+        ShareContactChooserDialog(
+            sharedName = shared.displayName,
+            contacts = viewModel.contacts.collectAsState().value.filter { it.id != shared.id },
+            onDismiss = { shareTarget = null },
+            onPick = { to ->
+                shareTarget = null
+                viewModel.sendContactCard(to.id, to.displayName, shared)
             },
         )
     }
@@ -332,7 +340,7 @@ fun ContactsScreen(
 }
 
 /**
- * Диалог «Пригласить в группу»: свои группы и каналы, поиск по названию,
+ * Диалог «Пригласить в сообщество»: свои группы и каналы, поиск по названию,
  * отметки на нескольких сразу. Одна ссылка годится и тем, у кого APU уже
  * стоит, и тем, кому его ещё ставить - в тексте есть ссылка на установку.
  */
@@ -342,10 +350,14 @@ private fun InviteToGroupsDialog(
     groups: List<InvitableGroup>,
     onDismiss: () -> Unit,
     onSendInApp: (List<String>) -> Unit,
-    onShare: (List<String>) -> Unit,
+    /** Раунд 198: вторым аргументом - «приложить установочный APK». */
+    onShare: (List<String>, Boolean) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     val selected = remember { mutableStateListOf<String>() }
+    // Раунд 198: получатель извне может быть без APU - по умолчанию
+    // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
+    var attachApk by remember { mutableStateOf(true) }
     val shown = remember(groups, query) {
         val q = query.trim().lowercase()
         if (q.isEmpty()) groups else groups.filter { it.title.lowercase().contains(q) }
@@ -357,15 +369,27 @@ private fun InviteToGroupsDialog(
         title = { Text("Пригласить $contactName") },
         text = {
             Column(Modifier.fillMaxWidth()) {
-                OutlinedTextField(
+                ApuSearchField(
                     value = query,
                     onValueChange = { query = it },
+                    placeholder = "Поиск группы или канала",
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Поиск группы или канала") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    singleLine = true,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { attachApk = !attachApk }
+                        .padding(horizontal = 4.dp),
+                ) {
+                    Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                    Text(
+                        "Приложить установочный файл (APK)",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
                 if (groups.isEmpty()) {
                     Text(
                         "Пока нет групп со ссылкой-приглашением",
@@ -429,7 +453,7 @@ private fun InviteToGroupsDialog(
                     Text("Отправить в APU")
                 }
                 TextButton(
-                    onClick = { onShare(selected.toList()) },
+                    onClick = { onShare(selected.toList(), attachApk) },
                     enabled = selected.isNotEmpty(),
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null)

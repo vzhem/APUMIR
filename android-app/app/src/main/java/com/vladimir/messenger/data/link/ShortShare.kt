@@ -39,8 +39,15 @@ object ShortShare {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /** Приглашение в APU от своего имени (текст AppShare.inviteText). */
-    fun shareInvite(context: Context, displayName: String, link: String) {
-        withShortLink(context, link) { shared -> AppShare.shareInvite(context, displayName, shared) }
+    fun shareInvite(
+        context: Context,
+        displayName: String,
+        link: String,
+        attachApk: Boolean = true,
+    ) {
+        withShortLink(context, link) { shared ->
+            AppShare.shareInvite(context, displayName, shared, attachApk)
+        }
     }
 
     /** Произвольный текст, в который ссылка подставляется уже короткой. */

@@ -24,6 +24,7 @@ import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.SealedWire
 import com.vladimir.messenger.data.referral.ReferralRankStore
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import com.vladimir.messenger.service.NotificationHelper
@@ -32,9 +33,11 @@ import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.util.NodeIds
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -57,7 +60,10 @@ class CoreServerService : Service() {
     @Inject lateinit var botApi: BotApi
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
+    @Inject lateinit var addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup
+    @Inject lateinit var addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
+    @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
@@ -68,6 +74,12 @@ class CoreServerService : Service() {
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
+    @Inject lateinit var inboxPinDao: com.vladimir.messenger.data.local.dao.InboxPinDao
+    @Inject lateinit var counters: com.vladimir.messenger.data.channel.PostCounterRepository
+    @Inject lateinit var swarmBudget: com.vladimir.messenger.data.swarm.SwarmBudget
+    @Inject lateinit var gifPreparation: com.vladimir.messenger.data.file.OutgoingFilePreparationService
+    @Inject lateinit var stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary
     private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
@@ -95,6 +107,378 @@ class CoreServerService : Service() {
     private val PRESENCE_SWEEP_MS = 60_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
+
+    // Раунд 121: свой каталог гифок роя (APUGIF1).
+    private val gifCatalogSentAt = mutableMapOf<String, Long>()
+    private val gifAskHandledAt = mutableMapOf<String, Long>()
+    private val gifWantServedAt = mutableMapOf<String, Long>()
+
+    // Раунд 139: свой каталог стикеров роя (APUSTK1) - как у гифок.
+    private val stickerCatalogSentAt = mutableMapOf<String, Long>()
+    private val stickerAskHandledAt = mutableMapOf<String, Long>()
+    private val stickerWantServedAt = mutableMapOf<String, Long>()
+
+    // Раунд 141: уведомления без хрупкого окна «2 секунды» - базой служит
+    // момент старта сервиса, повторы гасятся множеством оглашённых id.
+    private val serviceStartedAtMs = System.currentTimeMillis()
+    private val notifiedMessageIds = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /**
+     * Служебные конверты каталога гифок: ask/have/want. Разбираются до
+     * сохранения в чат (как реакции), поэтому «мусорных» строк в переписке
+     * не появляется.
+     */
+    private fun handleGifEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
+        val packet = com.vladimir.messenger.data.gif.GifLibrary.parseGifPacket(text) ?: return
+        val now = System.currentTimeMillis()
+        when (packet.kind) {
+            "ask" -> {
+                if (now - (gifAskHandledAt[senderId] ?: 0L) < 10 * 60_000L) return
+                gifAskHandledAt[senderId] = now
+                serviceScope.launch {
+                    runCatching { announceMyGifCatalogTo(senderId) }
+                        .onFailure { Log.w(TAG, "gif catalog announce failed: ${it.message}") }
+                }
+            }
+            "have" -> {
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.gif.GifLibrary.receivePeerBatch(
+                            applicationContext, senderId, packet.index, packet.total, packet.items,
+                        )
+                    }.onFailure { Log.w(TAG, "gif catalog batch failed: ${it.message}") }
+                }
+            }
+            "want" -> {
+                val key = "$senderId|${packet.sha256}"
+                if (now - (gifWantServedAt[key] ?: 0L) < 10 * 60_000L) return
+                gifWantServedAt[key] = now
+                serviceScope.launch {
+                    runCatching { serveGifFromLibrary(senderId, chatId, packet.sha256) }
+                        .onFailure { Log.w(TAG, "gif serve failed: ${it.message}") }
+                }
+            }
+            "ref" -> {
+                // Раунд 130: ссылка от телефона v11.74.25 - та же карточка.
+                serviceScope.launch {
+                    runCatching {
+                        chatRepository.insertReceivedGifRefMessage(
+                            chatId = chatId,
+                            senderId = senderId,
+                            messageId = messageId,
+                            sha256 = packet.sha256,
+                            timestamp = System.currentTimeMillis(),
+                        )
+                    }.onFailure { Log.w(TAG, "gif ref (legacy) insert failed: ${it.message}") }
+                }
+            }
+            "thumb" -> {
+                // Раунд 129: просят миниатюру - отдаём крошечный jpeg (тихо).
+                val key = "T$senderId|${packet.sha256}"
+                if (now - (gifWantServedAt[key] ?: 0L) < 5 * 60_000L) return
+                gifWantServedAt[key] = now
+                serviceScope.launch {
+                    runCatching {
+                        val b64 = com.vladimir.messenger.data.gif.GifLibrary
+                            .tinyThumbPayload(applicationContext, packet.sha256)
+                            ?: return@runCatching
+                        val chat = chatRepository.getChatByContactId(senderId)
+                            ?: return@runCatching
+                        RustBridge.sendMessage(
+                            UUID.randomUUID().toString(), chat.id, senderId,
+                            com.vladimir.messenger.data.gif.GifLibrary.WIRE_PREFIX +
+                                "|thmb|" + packet.sha256 + "|" + b64,
+                        )
+                    }.onFailure { Log.w(TAG, "gif thumb serve failed: ${it.message}") }
+                }
+            }
+            "thmb" -> {
+                // Раунд 129: приехала миниатюра - в кэш, сетка обновится сама.
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.gif.GifLibrary.receiveThumb(
+                            applicationContext, packet.sha256, packet.payload,
+                        )
+                    }.onFailure { Log.w(TAG, "gif thumb receive failed: ${it.message}") }
+                }
+            }
+        }
+    }
+
+    /**
+     * Раунд 131: убедиться, что гифка из ссылки есть в моей библиотеке.
+     * Нет - тихо попросить у хранителей из каталога сети.
+     */
+    private suspend fun ensureGifBytesForRef(sha256: String) {
+        val have = com.vladimir.messenger.data.gif.GifLibrary
+            .gifFile(applicationContext, sha256)?.isFile == true
+        if (have) return
+        val holders = com.vladimir.messenger.data.gif.GifLibrary
+            .swarmCatalog(applicationContext)
+            .firstOrNull { it.entry.sha256 == sha256 }?.holders.orEmpty()
+        if (holders.isEmpty()) return
+        com.vladimir.messenger.data.gif.GifLibrary.rememberWant(sha256)
+        com.vladimir.messenger.data.gif.GifLibrary.requestGif(
+            applicationContext, chatRepository, sha256, holders,
+        )
+    }
+
+    private suspend fun announceMyGifCatalogTo(peerId: String) {
+        val now = System.currentTimeMillis()
+        if (now - (gifCatalogSentAt[peerId] ?: 0L) < 10 * 60_000L) return
+        gifCatalogSentAt[peerId] = now
+        val chat = chatRepository.getChatByContactId(peerId) ?: return
+        val batches = com.vladimir.messenger.data.gif.GifLibrary.buildHaveBatches(applicationContext)
+        for (batch in batches) {
+            RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, peerId, batch)
+        }
+        Log.i(TAG, "GIF catalog sent to ${peerId.takeLast(8)}: ${batches.size} batch(es)")
+    }
+
+    /**
+     * Собеседник попросил гифку из моего каталога (раунд 128): передаю БАЙТЫ
+     * защищённой передачей файлов ТИХО - без сообщения в наш чат. Телефон
+     * просителя сам положит гифку в тот чат, откуда пришла ссылка.
+     */
+    private suspend fun serveGifFromLibrary(peerId: String, chatId: String, sha256: String) {
+        val app = applicationContext
+        val entry = com.vladimir.messenger.data.gif.GifLibrary.bySha(app, sha256) ?: return
+        val file = com.vladimir.messenger.data.gif.GifLibrary.gifFile(app, sha256) ?: return
+        val messageId = UUID.randomUUID().toString()
+        try {
+            gifPreparation.prepareFromFile(
+                source = file,
+                displayName = entry.displayName.ifBlank { "gif_${sha256.take(8)}.gif" },
+                mediaType = "image/gif",
+                messageId = messageId,
+                chatId = chatId,
+                recipientNodeId = peerId,
+            )
+            fileTransferRouter.pumpOutgoing()
+            Log.i(TAG, "GIF ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
+        } catch (e: Exception) {
+            if (e.message.orEmpty().contains("binding is not pinned")) {
+                fileTransferRouter.requestExchangeBinding(peerId)
+            }
+            throw e
+        }
+    }
+
+    /**
+     * Раунд 140: служебные конверты ЗАПАСНОГО пути (Cloudflare relay).
+     * Цепочка - та же фильтрация, что в handleEvent / «message_received»:
+     * стикеры, гифки, группы, реакции, удаления и прочее разбираются ДО
+     * сохранения. Раньше запасной путь сохранял всё как есть, и конверт
+     * «APUSTK1|ask» падал в переписку мусорным текстом (владелец, скрин
+     * 2026-09-23, оба телефона на последней версии). Если добавляете новый
+     * конверт - добавьте его и здесь, и в основной цепочке.
+     * Возвращает true, если текст служебный и в чат ему дороги нет.
+     */
+    private suspend fun routeIncomingEnvelope(
+        senderId: String,
+        chatId: String,
+        messageId: String,
+        text: String,
+    ): Boolean {
+        // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
+        // путь приёма обязан разбирать его так же, как основной: иначе строка
+        // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
+        // префиксом съедаем, но статус меняем только для разобранного id.
+        if (DeliveryAckWire.isPacket(text)) {
+            val ackedId = DeliveryAckWire.messageId(text)
+            if (ackedId != null) {
+                // ACK-кадр нужен и партнёру той же личности, но не сохраняется.
+                mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                    .onSuccess { changed ->
+                        Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId changed=$changed")
+                    }
+            } else {
+                Log.w(TAG, "malformed delivery ACK on relay path; dropped")
+            }
+            return true
+        }
+
+        // р227: этот путь (запасной, через облачный релей) - второй вход
+        // служебных конвертов; зеркалу их отдаём так же, как основной путь.
+        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+
+        // Раунд 141: каждый страж в защитной обёртке - если какой-то
+        // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
+        // и уведомления, а не исчезнуть молча.
+        if (runCatching { fileTransferRouter.routeIncoming(senderId, chatId, messageId, text) }
+            .getOrDefault(false)
+        ) {
+            return true
+        }
+        if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
+            val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
+            if (refSha != null && chatId.isNotBlank()) {
+                runCatching {
+                    chatRepository.insertReceivedGifRefMessage(
+                        chatId = chatId,
+                        senderId = senderId,
+                        messageId = messageId,
+                        sha256 = refSha,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                }.onFailure { Log.w(TAG, "CF gif ref insert failed: " + it.message) }
+                runCatching { ensureGifBytesForRef(refSha) }
+                    .onFailure { Log.w(TAG, "CF gif ref fetch failed: " + it.message) }
+            }
+            return true
+        }
+        if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
+            runCatching { handleGifEnvelope(senderId, chatId, messageId, text) }
+            return true
+        }
+        if (com.vladimir.messenger.data.sticker.StickerLibrary.isStickerPacket(text)) {
+            runCatching { handleStickerEnvelope(senderId, chatId, messageId, text) }
+            return true
+        }
+        if (runCatching { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
+            .getOrDefault(false)
+        ) {
+            return true
+        }
+        if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
+            .getOrDefault(false)
+        ) {
+            return true
+        }
+        // р235: «печатает…» - самый лёгкий служебный пакет; разбирается
+        // последним, чтобы не мешать остальным.
+        if (runCatching {
+                com.vladimir.messenger.data.typing.TypingRouter.routeIncoming(senderId, text)
+            }.getOrDefault(false)
+        ) {
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Раунд 139: служебные конверты каталога СТИКЕРОВ (APUSTK1). Разбираются
+     * до сохранения в чат (как гифковые), поэтому в переписке мусора нет.
+     */
+    private fun handleStickerEnvelope(senderId: String, chatId: String, messageId: String, text: String) {
+        val packet = com.vladimir.messenger.data.sticker.StickerLibrary.parseStickerPacket(text) ?: return
+        val now = System.currentTimeMillis()
+        when (packet.kind) {
+            "ask" -> {
+                if (now - (stickerAskHandledAt[senderId] ?: 0L) < 10 * 60_000L) return
+                stickerAskHandledAt[senderId] = now
+                serviceScope.launch {
+                    runCatching { announceMyStickerCatalogTo(senderId) }
+                        .onFailure { Log.w(TAG, "sticker catalog announce failed: ${it.message}") }
+                }
+            }
+            "have" -> {
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary.receivePeerBatch(
+                            applicationContext, senderId, packet.index, packet.total, packet.items,
+                        )
+                    }.onFailure { Log.w(TAG, "sticker catalog batch failed: ${it.message}") }
+                }
+            }
+            "want" -> {
+                val key = "$senderId|${packet.sha256}"
+                if (now - (stickerWantServedAt[key] ?: 0L) < 10 * 60_000L) return
+                stickerWantServedAt[key] = now
+                serviceScope.launch {
+                    runCatching { serveStickerFromLibrary(senderId, chatId, packet.sha256) }
+                        .onFailure { Log.w(TAG, "sticker serve failed: ${it.message}") }
+                }
+            }
+            "thumb" -> {
+                // Просят миниатюру - отдаём крошечный jpeg (тихо).
+                val key = "T$senderId|${packet.sha256}"
+                if (now - (stickerWantServedAt[key] ?: 0L) < 5 * 60_000L) return
+                stickerWantServedAt[key] = now
+                serviceScope.launch {
+                    runCatching {
+                        val b64 = com.vladimir.messenger.data.sticker.StickerLibrary
+                            .tinyThumbPayload(applicationContext, packet.sha256)
+                            ?: return@runCatching
+                        val chat = chatRepository.getChatByContactId(senderId)
+                            ?: return@runCatching
+                        RustBridge.sendMessage(
+                            UUID.randomUUID().toString(), chat.id, senderId,
+                            com.vladimir.messenger.data.sticker.StickerLibrary.WIRE_PREFIX +
+                                "|thmb|" + packet.sha256 + "|" + b64,
+                        )
+                    }.onFailure { Log.w(TAG, "sticker thumb serve failed: ${it.message}") }
+                }
+            }
+            "thmb" -> {
+                // Приехала миниатюра - в кэш, сетка панели обновится сама.
+                serviceScope.launch {
+                    runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary.receiveThumb(
+                            applicationContext, packet.sha256, packet.payload,
+                        )
+                    }.onFailure { Log.w(TAG, "sticker thumb receive failed: ${it.message}") }
+                }
+            }
+        }
+    }
+
+    /** Рассказать свой каталог стикеров одному собеседнику (раунд 139). */
+    private suspend fun announceMyStickerCatalogTo(peerId: String) {
+        val now = System.currentTimeMillis()
+        if (now - (stickerCatalogSentAt[peerId] ?: 0L) < 10 * 60_000L) return
+        stickerCatalogSentAt[peerId] = now
+        val chat = chatRepository.getChatByContactId(peerId) ?: return
+        val batches = stickerLibrary.buildHaveBatches()
+        for (batch in batches) {
+            RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, peerId, batch)
+        }
+        Log.i(TAG, "Sticker catalog sent to ${peerId.takeLast(8)}: ${batches.size} batch(es)")
+    }
+
+    /**
+     * Собеседник попросил стикер из моего каталога: передаю БАЙТЫ защищённой
+     * передачей файлов ТИХО - без сообщения в наш чат. Телефон просителя сам
+     * положит стикер в библиотеку и отправит его в тот чат, откуда просьба.
+     */
+    private suspend fun serveStickerFromLibrary(peerId: String, chatId: String, sha256: String) {
+        val app = applicationContext
+        val entry = stickerLibrary.entryOf(sha256) ?: return
+        val file = entry.file.takeIf { it.isFile } ?: return
+        val messageId = UUID.randomUUID().toString()
+        try {
+            gifPreparation.prepareFromFile(
+                source = file,
+                displayName = entry.name.ifBlank { "sticker_${sha256.take(8)}.png" },
+                mediaType = com.vladimir.messenger.data.sticker.StickerLibrary.mimeFor(file),
+                messageId = messageId,
+                chatId = chatId,
+                recipientNodeId = peerId,
+            )
+            fileTransferRouter.pumpOutgoing()
+            Log.i(TAG, "Sticker ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
+        } catch (e: Exception) {
+            if (e.message.orEmpty().contains("binding is not pinned")) {
+                fileTransferRouter.requestExchangeBinding(peerId)
+            }
+            throw e
+        }
+    }
+
+    private suspend fun gifLibraryBootstrap() {
+        // Рассказать свой каталог и попросить чужие (тротлимб в GifLibrary).
+        com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+            applicationContext, chatRepository, force = false,
+        )
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -177,14 +561,65 @@ class CoreServerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.i(TAG, "CoreServerService started")
+        Log.i(TAG, "CoreServerService started (action=" + (intent?.action ?: "null") + ")")
         startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
+
+        // Раунд 141: аварийный каркас - каждый старт перевзводит системный
+        // будильник «+5 минут». Если процесс убьют или усыпят, будильник
+        // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
+        EmergencyKeepAliveReceiver.scheduleNext(applicationContext)
+
+        // р240: счётчик недоотправленных - для экрана «Диагностика
+        // синхронизации» в настройках. Обновляем редко: это подсказка, а не
+        // боевой счётчик.
+        // р242: тот же цикл раз в минуту досылает PENDING - не полагаемся на
+        // событие «увидели собеседника», которое может быть пропущено.
+        serviceScope.launch {
+            // Раунд 261: первая итерация - не сразу: холодному старту важнее
+            // поднять движок, а не считать незавершённые отправки.
+            kotlinx.coroutines.delay(10_000L)
+            var sincePump = 0
+            while (true) {
+                runCatching { chatRepository.countPendingOutgoing() }
+                    .onSuccess { com.vladimir.messenger.data.mirror.MirrorHub.setPendingOutgoing(it) }
+                // р243: держим свежим кэш своего адреса - он нужен и без
+                // зеркала (страж «печатает», отсев сообщений от себя).
+                runCatching {
+                    com.vladimir.messenger.data.mirror.MirrorHub
+                        .noteSelfNodeId(RustBridge.nodeId().orEmpty())
+                }
+                if (sincePump >= 2) {
+                    sincePump = 0
+                    runCatching { chatRepository.pumpPendingOutgoing() }
+                        .onFailure { Log.w(TAG, "pending pump failed: ${it.message}") }
+                    // р245: медиа. У тени нет сети, поэтому байты гифок ей
+                    // взять неоткуда - просим у активного партнёра. Карточка в
+                    // чате к этому моменту уже есть, оживёт по приходу байтов.
+                    runCatching { pumpMirrorMedia() }
+                        .onFailure { Log.w(TAG, "media pump failed: ${it.message}") }
+                }
+                sincePump++
+                kotlinx.coroutines.delay(30_000L)
+            }
+        }
+
+        // Убрать из базы мусор прошлых версий: «печатает…» из r235-r238 и
+        // UUID-shaped ACKs, которые клиенты до r247 могли сохранить как текст.
+        serviceScope.launch {
+            runCatching { chatRepository.cleanupTypingJunk() }
+                .onFailure { Log.w(TAG, "Typing junk cleanup failed: ${it.message}") }
+            runCatching { chatRepository.cleanupDeliveryAckJunk() }
+                .onFailure { Log.w(TAG, "Delivery ACK junk cleanup failed: ${it.message}") }
+        }
 
         // Роевые публикации: моё @имя и каталог групп - при старте и при смене имени.
         if (!gossipStarted) {
             gossipStarted = true
             serviceScope.launch {
-                kotlinx.coroutines.delay(3000)
+                // Раунд 261: сверки и роевые публикации не нужны в первую
+                // секунду - откладываем на 30 с, чтобы не конкурировать с
+                // подъёмом движка за диск и сеть.
+                kotlinx.coroutines.delay(30_000)
                 // Сверка «Контакты» = главная: у каждого контакта ровно один
                 // чат, дубли схлопнуты. Разово при старте, чтобы разошедшиеся
                 // за прошлые версии списки сошлись сами.
@@ -235,14 +670,38 @@ class CoreServerService : Service() {
         Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
 
         serviceScope.launch {
+            // Раунд 263: честный статус для сплэша - этап подготовки ключей.
+            CoreStatus.report("Готовим ключи безопасности…")
             // R0.5/S3: legacy routing ID остаётся неизменным; реальный Ed25519
             // signing sidecar устанавливается до engine start и пока используется
             // только diagnostics/future signed features.
             val legacyRoutingId = existingPubKey
                 ?: prefs.getString("node_id", null)
                 .orEmpty()
+            // Раунд 261: независимые пред-шаги идут ПАРАЛЛЕЛЬНО: движок ждёт
+            // самый медленный, а не сумму всех. Битый Keystore (KeyMint может
+            // виснуть надолго) не задерживает старт: у каждого шага потолок,
+            // по таймауту - честный деград в legacy/RAM-only.
+            val atRestDeferred = async {
+                (kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        RelayAtRestMasterKey.installIntoCore(applicationContext)
+                    }
+                }) ?: false
+            }
+            val bookDeferred = async {
+                runCatching {
+                    kotlinx.coroutines.withTimeoutOrNull(6_000) {
+                        addressBookBackup.restoreBeforeStart()
+                    }
+                }.onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
+            }
             val signing = if (prefs.getBoolean("identity_created", false)) {
-                IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                    }
+                }
             } else {
                 null
             }
@@ -252,8 +711,12 @@ class CoreServerService : Service() {
                     "keyId=${signing?.keyId?.take(12) ?: "none"}"
             )
             val fileExchange = if (signing != null) {
-                IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
-                    FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
+                            FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                        }
+                    }
                 }
             } else null
             Log.i(
@@ -277,15 +740,36 @@ class CoreServerService : Service() {
                     .onFailure { Log.w(TAG, "Досылка сундука не удалась: ${it.message}") }
             }
 
-            val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(applicationContext)
+            // р226: живое зеркало. Устройство-зеркало НЕ стартует ядро и
+            // релеи: сеть ведёт партнёр той же личности, этот экран живёт
+            // на зеркальных событиях. Партнёр пропал - канал сам попросит
+            // повышение (перезапуск уже с движком).
+            if (prefs.getBoolean("mirror_defer_engine", false)) {
+                startAsMirrorShadow(legacyRoutingId)
+                // Раунд 263: зеркало живёт на событиях партнёра - для
+                // интерфейса это тоже «готово», заставка не нужна.
+                CoreStatus.report("Зеркальный режим: сеть ведёт партнёр")
+                CoreStatus.markReady()
+                return@launch
+            }
+
+            // Раунд 261: параллельные пред-шаги к этому моменту уже доделались
+            // (или доехали до своего потолка) - движок стартует без ожидания.
+            val atRestKeyOk = atRestDeferred.await()
             Log.i(TAG, "Relay at-rest key installed: $atRestKeyOk")
+            // Азбука адресов: на свежей установке облачная копия тянулась
+            // параллельно; ядро читает файл один раз при старте.
+            bookDeferred.await()
 
             // Собственный SQLite-файл relay custody (app-private, WAL).
+            CoreStatus.report("Поднимаем ядро и сеть…")
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
             val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath)
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                // Раунд 263: ядро поднято - сплэш может отпустить человека.
+                CoreStatus.markReady()
 
                 // Азбука адресов (docs/ADDRESS_BOOK.md): засевать «свои»,
                 // чтобы в первую же минуту после старта личное presence
@@ -301,6 +785,20 @@ class CoreServerService : Service() {
                     }
                 }
 
+                // Раунд 121: свой каталог гифок - разослать и спросить чужие
+                // (тротлимб внутри; при старте уходит после подключения).
+                serviceScope.launch {
+                    runCatching { gifLibraryBootstrap() }
+                        .onFailure { Log.w(TAG, "gif catalog bootstrap failed: ${it.message}") }
+                }
+
+                // Раунд 139: свой каталог стикеров - так же разослать и спросить.
+                serviceScope.launch {
+                    runCatching {
+                        stickerLibrary.syncWithSwarm(chatRepository, force = false)
+                    }.onFailure { Log.w(TAG, "sticker catalog bootstrap failed: ${it.message}") }
+                }
+
                 // Прокси-автопилот: первичный цикл при старте — проверить пул, убрать мёртвых,
                 // выбрать и подключить лучшего (без принудительного сбора).
                 serviceScope.launch {
@@ -308,6 +806,21 @@ class CoreServerService : Service() {
                         proxyAutopilot.cycle()
                     } catch (e: Exception) {
                         Log.w(TAG, "Proxy autopilot startup cycle: ${e.message}")
+                    }
+                }
+
+                // Облачная копия азбуки: первая через 3 минуты (адреса уже
+                // насобирались), дальше каждый час; шлём только если файл
+                // менялся (см. AddressBookBackup.backupIfDue).
+                serviceScope.launch {
+                    kotlinx.coroutines.delay(3 * 60 * 1000L)
+                    while (true) {
+                        runCatching { addressBookBackup.backupIfDue() }
+                            .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
+                        runCatching { addressBookBackup.swarmHourlyTick() }
+                        runCatching { addressBookBackup.autoRestoreIfEmpty() }
+                            .onFailure { Log.w(TAG, "AddressBook swarm tick: ${it.message}") }
+                        kotlinx.coroutines.delay(60 * 60 * 1000L)
                     }
                 }
 
@@ -355,12 +868,7 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
                                 val messageId = parsed.messageId
-                                val existing = chatRepository.getMessageById(messageId)
-                                if (existing != null && existing.isFromMe &&
-                                    existing.status != MessageStatus.DELIVERED &&
-                                    existing.status != MessageStatus.READ
-                                ) {
-                                    chatRepository.updateMessageStatus(messageId, MessageStatus.DELIVERED)
+                                if (chatRepository.markOutgoingMessageDelivered(messageId)) {
                                     Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
                                 } else {
                                     Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
@@ -373,10 +881,21 @@ class CoreServerService : Service() {
                                 val existingMsg = chatRepository.getMessageById(messageId)
                                 if (existingMsg != null) {
                                     Log.i(TAG, "CF duplicate skipped (already in DB): messageId=$messageId")
+                                    if (DeliveryAckWire.isPacket(existingMsg.content)) {
+                                        // Старый ACK мог быть уже записан до обновления.
+                                        // Он всё равно подтверждает исходящую строку, но
+                                        // ACK самому ACK отправлять нельзя.
+                                        DeliveryAckWire.messageId(existingMsg.content)?.let {
+                                            chatRepository.markOutgoingMessageDelivered(it)
+                                        }
+                                    } else {
+                                        // р243: дубликат - это повтор от отправителя,
+                                        // который нашей галочки не увидел. Молчание
+                                        // здесь и было причиной «висит одна галочка»:
+                                        // подтверждение отправляем ЗАНОВО.
+                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                                    }
                                 } else {
-                                    val contact = contactRepository.getContactById(senderId)
-                                    val contactName = contact?.displayName ?: senderId.take(16)
-                                    val chat = chatRepository.getOrCreateChat(senderId, contactName)
                                     // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
                                     // расшифровки здесь в чат попал бы конверт как текст.
                                     val cfContent = if (SealedWire.isSealed(parsed.content)) {
@@ -387,16 +906,46 @@ class CoreServerService : Service() {
                                     if (cfContent == null) {
                                         Log.w(TAG, "CF sealed envelope not opened msgId=$messageId; skipped")
                                     } else {
-                                        chatRepository.saveIncomingMessage(
-                                            chatId = chat.id,
-                                            senderId = senderId,
-                                            messageId = messageId,
-                                            content = cfContent,
-                                            timestamp = parsed.timestamp,
-                                            channel = MessageChannel.CF,
-                                        )
+                                        // Раунд 140: служебные конверты разбираются ДО
+                                        // сохранения - тем же стражем, что и основной
+                                        // путь. У неизвестного отправителя чат ради
+                                        // конверта не создаётся.
+                                        val knownChat = chatRepository.getChatByContactId(senderId)
+                                        val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
+                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent)) {
+                                            Log.i(TAG, "CF service envelope handled msgId=$messageId")
+                                            // Never generate an ACK-of-ACK. RelayEnvelope's own
+                                            // custody receipt below remains a separate protocol.
+                                            if (!isDeliveryAck) {
+                                                try {
+                                                    RustBridge.sendDeliveryAck(messageId, senderId)
+                                                } catch (e: Exception) {
+                                                    Log.w(TAG, "CF envelope ACK failed: " + e.message)
+                                                }
+                                            }
+                                        } else {
+                                            val contact = contactRepository.getContactById(senderId)
+                                            val contactName = contact?.displayName ?: senderId.take(16)
+                                            val chat = chatRepository.getOrCreateChat(senderId, contactName)
+                                            chatRepository.saveIncomingMessage(
+                                                chatId = chat.id,
+                                                senderId = senderId,
+                                                messageId = messageId,
+                                                content = cfContent,
+                                                timestamp = parsed.timestamp,
+                                                channel = MessageChannel.CF,
+                                            )
+                                            Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
+                                            // Раунд 175: как и в основном пути -
+                                            // техническое имя -> адресный whois.
+                                            runCatching {
+                                                val shown = contactRepository.getContactById(senderId)?.displayName
+                                                if (shown != null && contactRepository.isPlaceholderName(shown)) {
+                                                    groupRepository.requestIdentity(senderId)
+                                                }
+                                            }
+                                        }
                                     }
-                                    Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
                                 }
                                 // G1 fix: отправить ACK обратно отправителю через relay
                                 // (отправитель узнаёт о доставке, даже если был офлайн в момент приёма).
@@ -411,19 +960,26 @@ class CoreServerService : Service() {
 
                             is RelayEnvelope.Parsed.Other -> {
                                 // Legacy plain-text payload (не envelope) — сохраняем как раньше.
-                                val messageId = java.util.UUID.randomUUID().toString()
-                                val contact = contactRepository.getContactById(senderId)
-                                val contactName = contact?.displayName ?: senderId.take(16)
-                                val chat = chatRepository.getOrCreateChat(senderId, contactName)
-                                chatRepository.saveIncomingMessage(
-                                    chatId = chat.id,
-                                    senderId = senderId,
-                                    messageId = messageId,
-                                    content = parsed.raw,
-                                    timestamp = System.currentTimeMillis(),
-                                    channel = MessageChannel.CF,
-                                )
-                                Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                // Раунд 140: но только не служебный конверт - он
+                                // разбирается стражем, в чат ему дороги нет.
+                                val legacyMessageId = java.util.UUID.randomUUID().toString()
+                                val knownChat = chatRepository.getChatByContactId(senderId)
+                                if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", legacyMessageId, parsed.raw)) {
+                                    Log.i(TAG, "CF legacy service envelope handled")
+                                } else {
+                                    val contact = contactRepository.getContactById(senderId)
+                                    val contactName = contact?.displayName ?: senderId.take(16)
+                                    val chat = chatRepository.getOrCreateChat(senderId, contactName)
+                                    chatRepository.saveIncomingMessage(
+                                        chatId = chat.id,
+                                        senderId = senderId,
+                                        messageId = legacyMessageId,
+                                        content = parsed.raw,
+                                        timestamp = System.currentTimeMillis(),
+                                        channel = MessageChannel.CF,
+                                    )
+                                    Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -431,8 +987,19 @@ class CoreServerService : Service() {
                     }
                 }
             }
-            cloudflareRelay?.start()
-            Log.i(TAG, "Cloudflare relay enabled: $cfUrl")
+            // Раунд 214 (разгрузка воркера): релей-поллинг ВЫКЛЮЧЕН. В воркере
+            // нет маршрутов /poll и /send - каждый телефон поллил каждые 10
+            // секунд и всегда получал 404: ~8 640 ПУСТЫХ запросов в сутки с
+            // телефона, именно это выжигало дневной лимит Cloudflare
+            // (утренний 1027 «plan limits»). Запасной канал сообщений -
+            // Telegram relay выше. Класс сохранён: если маршруты когда-нибудь
+            // вернутся, включается префом cf_relay_enabled (default false).
+            if (prefs.getBoolean("cf_relay_enabled", false)) {
+                cloudflareRelay?.start()
+                Log.i(TAG, "Cloudflare relay enabled by pref: $cfUrl")
+            } else {
+                Log.i(TAG, "Cloudflare relay polling off (no /poll on worker; saves quota)")
+            }
 
                 if (nodeId != null) {
                     prefs.edit()
@@ -443,14 +1010,509 @@ class CoreServerService : Service() {
                         .apply()
                 }
 
+                // р226: это устройство ведёт сеть - держать зеркало-партнёра
+                // в курсе и отдавать ему хвосты, если он отстал.
+                startMirrorChannel(
+                    nodeId = nodeId ?: legacyRoutingId,
+                    engineUp = true,
+                )
+
                 updateNotification("Сеть APU работает")
                 startEventPolling()
             } else {
                 updateNotification("Не удалось подключиться")
+                // Раунд 263: движок не поднялся - не держим человека на
+                // заставке: честный ограниченный режим, сплэш отпускаем.
+                CoreStatus.report("Ядро в ограниченном режиме")
+                CoreStatus.markReady()
                 stopServiceSafely()
             }
         }
         return START_STICKY
+    }
+
+    // ── р226: живое зеркало устройств одной личности ────────────────────────
+
+    private var mirror: com.vladimir.messenger.data.mirror.MirrorChannel? = null
+    private val mirrorRestarting = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Тень: движок и релеи не трогаем, живём на событиях партнёра. */
+    private fun startAsMirrorShadow(nodeId: String) {
+        Log.i(TAG, "Mirror shadow: движок не стартуем, живём на событиях партнёра")
+        runCatching { RustBridge.attachContext(applicationContext) }
+        runCatching { RustBridge.ensureCoreOnly() }
+        // Личность у тени та же, а движка нет: без этого адреса групповые
+        // конверты не применялись бы (проверка «я участник»).
+        runCatching { RustBridge.setShadowNodeId(nodeId) }
+        updateNotification("APU: сеть ведёт другое устройство (зеркало)")
+        startMirrorChannel(nodeId = nodeId, engineUp = false)
+    }
+
+    private fun startMirrorChannel(nodeId: String, engineUp: Boolean) {
+        if (nodeId.isBlank()) return
+        // Без личности зеркалить нечего (полка выводится из узла).
+        val mirrorPrefs = getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        if (!mirrorPrefs.getBoolean("identity_created", false)) return
+        val channel = com.vladimir.messenger.data.mirror.MirrorChannel(
+            context = applicationContext,
+            scope = serviceScope,
+            nodeId = nodeId,
+            deviceTag = com.vladimir.messenger.data.mirror.MirrorSync.deviceTag(applicationContext),
+            engineUp = engineUp,
+            engineSince = if (engineUp) System.currentTimeMillis() else Long.MAX_VALUE,
+            bridge = mirrorBridge(),
+        )
+        mirror = channel
+        com.vladimir.messenger.data.mirror.MirrorHub.channel = channel
+        channel.start()
+    }
+
+    private fun mirrorBridge() = object : com.vladimir.messenger.data.mirror.MirrorChannel.Bridge {
+        override suspend fun maxMessageTimestamp(): Long = chatRepository.maxMessageTimestamp()
+
+        override suspend fun rowsSince(since: Long, limit: Int) =
+            chatRepository.mirrorRowsSince(since, limit)
+
+        override suspend fun pendingOutgoing(limit: Int) =
+            chatRepository.mirrorPendingOutgoing(limit)
+
+        override suspend fun applyIncoming(
+            row: com.vladimir.messenger.data.mirror.MirrorRow,
+            notify: Boolean,
+        ) {
+            val (chatId, name) = chatRepository.applyMirrorIncoming(row)
+            if (notify) {
+                runCatching {
+                    notificationHelper.showMessageNotification(
+                        chatId,
+                        row.senderId,
+                        com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: "Сообщение",
+                        true,
+                        null,
+                    )
+                }
+            }
+        }
+
+        override suspend fun applySent(row: com.vladimir.messenger.data.mirror.MirrorRow) {
+            chatRepository.applyMirrorSent(row)
+        }
+
+        override suspend fun applyEnvelope(
+            senderId: String,
+            chatId: String,
+            messageId: String,
+            text: String,
+        ) {
+            applyMirrorEnvelope(senderId, chatId, messageId, text)
+        }
+
+        override suspend fun onActionFromPartner(
+            peerId: String,
+            groupId: String,
+            chatId: String,
+            text: String,
+        ) {
+            mirrorApplyActionLocally(peerId, groupId, text)
+        }
+
+        override suspend fun onActionToPeers(peerId: String, groupId: String, text: String) {
+            mirrorSendActionToPeers(peerId, groupId, text)
+        }
+
+        override suspend fun onReadFromPartner(peerId: String, groupId: String, topicId: String) {
+            mirrorApplyRead(peerId, groupId, topicId)
+        }
+
+        override suspend fun onFileMeta(meta: org.json.JSONObject): Boolean =
+            runCatching { fileTransferRouter.applyMirrorFileMeta(meta) }
+                .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
+                .getOrDefault(false)
+
+        override suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) {
+            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, seq, last, bytes) }
+                .onFailure { Log.w(TAG, "Mirror file chunk failed: ${it.message}") }
+        }
+
+        override suspend fun fileBytesFor(
+            transferId: String,
+            displayName: String,
+            offset: Long,
+            size: Int,
+        ): ByteArray? = fileTransferRouter.readMirrorFileChunk(transferId, displayName, offset, size)
+
+        override suspend fun onFilePullStart(transferId: String) {
+            runCatching { fileTransferRouter.resetMirrorWriter(transferId) }
+                .onFailure { Log.w(TAG, "Mirror LAN pull reset failed: ${it.message}") }
+        }
+
+        override suspend fun onCallFromPartner(signal: org.json.JSONObject) {
+            runCatching { callManager.onMirrorCall(signal) }
+                .onFailure { Log.w(TAG, "Mirror call signal failed: ${it.message}") }
+        }
+
+        override suspend fun onContactFromPartner(signal: org.json.JSONObject) {
+            runCatching { contactRepository.applyMirrorContact(signal) }
+                .onFailure { Log.w(TAG, "Mirror contact failed: ${it.message}") }
+        }
+
+        override suspend fun onTypingFromPartner(peerId: String, typing: Boolean) {
+            // р235: индикатор «печатает…» - мимолётное состояние в памяти.
+            if (typing) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(peerId)
+            } else {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(peerId)
+            }
+        }
+
+        override suspend fun onDraftFromPartner(key: String, text: String) {
+            // р236: черновик с партнёрского устройства - под тот же ключ.
+            runCatching { com.vladimir.messenger.data.draft.DraftStore.save(key, text) }
+                .onFailure { Log.w(TAG, "Mirror draft failed: ${it.message}") }
+        }
+
+        override suspend fun onPinFromPartner(messageId: String, pinned: Boolean) {
+            // Личные закрепы сообщений и публикаций канала должны совпадать
+            // на обоих устройствах человека; групповые закрепы идут GroupWire.
+            runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+                .onFailure { Log.w(TAG, "Mirror pin failed: ${it.message}") }
+                .onSuccess { result ->
+                    when (result) {
+                        com.vladimir.messenger.data.local.dao.MessagePinMutation.LIMIT_REACHED ->
+                            Log.w(TAG, "Mirror pin ignored: local pin limit reached")
+                        com.vladimir.messenger.data.local.dao.MessagePinMutation.SCOPE_CONFLICT ->
+                            Log.w(TAG, "Mirror pin ignored: target belongs to another pin scope")
+                        else -> Unit
+                    }
+                }
+        }
+
+        override suspend fun onInboxPinFromPartner(
+            kind: String,
+            itemId: String,
+            pinned: Boolean,
+            pinnedAtMs: Long,
+        ) {
+            val pinKind = com.vladimir.messenger.data.local.dao.InboxPinKind.fromWireValue(kind)
+                ?: return
+            val result = when (pinKind) {
+                com.vladimir.messenger.data.local.dao.InboxPinKind.PERSONAL ->
+                    inboxPinDao.setPersonalPinned(itemId, pinned, pinnedAtMs)
+                com.vladimir.messenger.data.local.dao.InboxPinKind.GROUP ->
+                    inboxPinDao.setGroupPinned(itemId, pinned, pinnedAtMs)
+            }
+            when (result) {
+                com.vladimir.messenger.data.local.dao.InboxPinMutation.LIMIT_REACHED ->
+                    Log.w(TAG, "Mirror inbox pin ignored: local ten-pin limit reached")
+                com.vladimir.messenger.data.local.dao.InboxPinMutation.NOT_FOUND ->
+                    Log.w(TAG, "Mirror inbox pin ignored: local conversation not found")
+                else -> Unit
+            }
+        }
+
+        override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
+            // id чатов на устройствах разные - ищем чат по узлу получателя.
+            val chat = chatRepository.getChatByContactId(row.recipientId)
+                ?: chatRepository.getOrCreateChat(
+                    row.recipientId,
+                    NodeIds.autoName(row.recipientId),
+                )
+            chatRepository.sendMessage(
+                chatId = chat.id,
+                recipientId = row.recipientId,
+                content = row.content,
+                fixedMessageId = row.id,
+                fromMirror = true,
+            )
+        }
+
+        override fun onPromote() {
+            val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("mirror_defer_engine", false)
+                .putLong("mirror_role_switch_at", System.currentTimeMillis())
+                .apply()
+            Log.i(TAG, "Mirror: повышение - перезапуск с движком")
+            restartForMirrorRole()
+        }
+
+        override fun onDeferToShadow() {
+            val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("mirror_defer_engine", true)
+                .putLong("mirror_role_switch_at", System.currentTimeMillis())
+                .apply()
+            Log.i(TAG, "Mirror: партнёр старше - ухожу в зеркало")
+            restartForMirrorRole()
+        }
+
+        /**
+         * р231: партнёр-тень просит движок, чтобы отправить свой файл (у тени
+         * своей сетевой сессии нет). Уступаем, если сами сейчас ничего не
+         * отдаём; иначе отказ - тень повторит просьбу позже.
+         */
+        override fun onEngineClaimed(): Boolean {
+            if (fileTransferRouter.hasRecentTransferActivity(System.currentTimeMillis())) {
+                Log.i(TAG, "Mirror claim: отказ, передача (отдача или приём) ещё идёт")
+                return false
+            }
+            if (callManager.isBusy()) {
+                Log.i(TAG, "Mirror claim: отказ, идёт звонок")
+                return false
+            }
+            val prefs = applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putBoolean("mirror_defer_engine", true)
+                .putLong("mirror_role_switch_at", System.currentTimeMillis())
+                .apply()
+            Log.i(TAG, "Mirror claim: уступаю движок партнёру (его исходящий файл)")
+            restartForMirrorRole()
+            return true
+        }
+    }
+
+    /**
+     * р227: применить служебный конверт, пришедший от партнёра-зеркала.
+     *
+     * Разбор - теми же репозиториями, что и на активном устройстве; сети у
+     * тени нет, поэтому ответные отправки (подтверждения) она не делает - их
+     * сделает активный. Идентификаторы чатов у устройств СВОИ, поэтому личный
+     * чат находим по отправителю, а не по числу из конверта.
+     */
+    /**
+     * р245: насос медиа. Только для устройства-зеркала: у него нет сети, и
+     * байты гифок взять ему неоткуда, кроме активного партнёра. Ищем ссылки в
+     * свежей переписке, которых нет в библиотеке, и просим по одной за заход
+     * (канал зеркала общий с сообщениями - не забиваем его).
+     */
+    private suspend fun pumpMirrorMedia() {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) {
+            // Активный: байты гифок могли прийти от тени (push) - объявляем
+            // каталог рою, чтобы собеседник знал, у кого их забрать.
+            runCatching { gifLibraryBootstrap() }
+                .onFailure { Log.w(TAG, "gif catalog announce failed: ${it.message}") }
+            return
+        }
+        val app = applicationContext
+        val contents = chatRepository.recentMessageContents(24)
+        var asked = 0
+        for (content in contents) {
+            if (asked >= 2) break
+            if (!com.vladimir.messenger.data.gif.GifLibrary.isGifRef(content)) continue
+            val sha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(content) ?: continue
+            if (com.vladimir.messenger.data.gif.GifLibrary.gifFile(app, sha) != null) continue
+            com.vladimir.messenger.data.mirror.MirrorHub.requestGifBytes(sha)
+            asked++
+        }
+        if (asked > 0) Log.i(TAG, "media pump: запрошено $asked гифк(а) у активного")
+    }
+
+    private suspend fun applyMirrorEnvelope(
+        senderId: String,
+        chatId: String,
+        messageId: String,
+        text: String,
+    ): Boolean {
+        // р244: подтверждение доставки пришло с партнёрского устройства -
+        // помечаем им же и здешнюю строку (переписка общая на обеих).
+        if (DeliveryAckWire.isPacket(text)) {
+            val ackedId = DeliveryAckWire.messageId(text)
+            if (ackedId != null) {
+                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                    .onSuccess { changed ->
+                        Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId changed=$changed")
+                    }
+            } else {
+                Log.w(TAG, "malformed delivery ACK from mirror; dropped")
+            }
+            return true
+        }
+        if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
+        // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
+        val mirrorTyping = com.vladimir.messenger.data.typing.TypingWire.parse(text)
+        if (mirrorTyping != null) {
+            if (mirrorTyping) {
+                com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+            } else {
+                com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+            }
+            return true
+        }
+        // Групповой конверт: у группы один и тот же id на всех устройствах,
+        // поэтому разбираем его тем же путём, что и обычное входящее.
+        if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
+            val applied = runCatching { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
+                .getOrDefault(false)
+            if (applied) Log.i(TAG, "Mirror envelope: групповой конверт применён")
+            return applied
+        }
+        val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }
+            .getOrNull() ?: chatId
+        if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: reaction from ${senderId.takeLast(8)} applied")
+            return true
+        }
+        if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
+            return true
+        }
+        if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            return true
+        }
+        if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
+            val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
+            if (refSha != null && localChatId.isNotBlank()) {
+                runCatching {
+                    chatRepository.insertReceivedGifRefMessage(
+                        chatId = localChatId,
+                        senderId = senderId,
+                        messageId = messageId.ifBlank { java.util.UUID.randomUUID().toString() },
+                        sha256 = refSha,
+                        timestamp = System.currentTimeMillis(),
+                    )
+                }.onFailure { Log.w(TAG, "Mirror gif ref insert failed: ${it.message}") }
+                // Байты гифки дотянет следующий этап (прямой канал устройств);
+                // пока карточка живёт в переписке и докачается с хранителей,
+                // когда это устройство снова станет активным.
+            }
+            return true
+        }
+        return false
+    }
+
+    /**
+     * р228: на партнёрском устройстве прочитали переписку - снять
+     * непрочитанное здесь. Пишем прямо в базу (не через репозиторий):
+     * применение кадра не должно повторно его рассылать.
+     */
+    private suspend fun mirrorApplyRead(peerId: String, groupId: String, topicId: String) {
+        runCatching {
+            if (groupId.isNotBlank()) {
+                if (topicId.isNotBlank()) groupDao.markTopicRead(topicId)
+                groupDao.markGroupRead(groupId)
+                Log.i(TAG, "Mirror read: непрочитанное группы снято по партнёру")
+                return@runCatching
+            }
+            if (peerId.isBlank()) return@runCatching
+            val chat = chatRepository.getChatByContactId(peerId) ?: return@runCatching
+            chatRepository.markAsRead(chat.id)
+            Log.i(TAG, "Mirror read: непрочитанное чата снято по партнёру")
+        }.onFailure { Log.w(TAG, "Mirror read apply failed: ${it.message}") }
+    }
+
+    /**
+     * р228: действие сделано на теневом устройстве - привести СВОЮ базу в то
+     * же состояние, чтобы устройства не разошлись. Ни сети, ни ответных
+     * отправок здесь нет: конверт в сеть уйдёт отдельно.
+     */
+    private suspend fun mirrorApplyActionLocally(peerId: String, groupId: String, text: String) {
+        // р235: «печатает…» с тени - локально показывать нечего (это наше
+        // собственное состояние), пакет просто уходит собеседнику.
+        if (com.vladimir.messenger.data.typing.TypingWire.isTypingPacket(text)) return
+        // Групповой конверт (сообщение, пост, комментарий, тема, закреп,
+        // состав): применяем тем же разбором, что и входящий, но от своего
+        // имени - на партнёрском устройстве это «моё» сообщение.
+        if (groupId.isNotBlank() &&
+            com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)
+        ) {
+            val me = RustBridge.nodeId().orEmpty()
+            runCatching { groupRouter.routeIncoming(me, groupId, "", text) }
+                .onFailure { Log.w(TAG, "Mirror group packet apply failed: ${it.message}") }
+            Log.i(TAG, "Mirror action: групповой конверт применён локально")
+            return
+        }
+        if (runCatching { reactionRepository.applyMirrorOutgoing(peerId, groupId, text) }
+                .getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: реакция с тени применена локально")
+            return
+        }
+        if (peerId.isNotBlank() &&
+            runCatching { messageDeletion.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: удаление с тени применено локально")
+            return
+        }
+        if (runCatching { postViews.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        if (runCatching { hearts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        if (runCatching { readReceipts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        Log.w(TAG, "Mirror action: конверт с тени не распознан, только пересылка")
+    }
+
+    /**
+     * р228: отправить конверт, сделанный на тени, в сеть - единственной
+     * сессией активного устройства. Личный чат: собеседнику; групповое
+     * действие: участникам группы по бюджету служебного канала, как это
+     * делает сам репозиторий на активном устройстве.
+     */
+    private suspend fun mirrorSendActionToPeers(peerId: String, groupId: String, text: String) {
+        if (groupId.isNotBlank()) {
+            // Групповое сообщение/пост: рассылка участникам - штатной доставкой
+            // группы (она же выбирает получателей и ведёт учёт манифестов).
+            if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
+                val report = runCatching { groupRepository.fanoutEnvelope(groupId, text) }
+                    .getOrNull()
+                Log.i(
+                    TAG,
+                    "Mirror action: групповой конверт разослан " +
+                        "${report?.delivered ?: 0}/${report?.attempted ?: 0}",
+                )
+                return
+            }
+            val group = groupDao.getGroupById(groupId)
+            if (group == null) {
+                Log.w(TAG, "Mirror action: группы $groupId нет на этом устройстве")
+                return
+            }
+            val me = RustBridge.nodeId().orEmpty()
+            val recipients = runCatching { counters.signalTargets(group, me) }.getOrDefault(emptyList())
+            var sent = 0
+            for (peer in recipients) {
+                if (!swarmBudget.tryAcquire(com.vladimir.messenger.data.swarm.SwarmLane.SIGNAL)) break
+                RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), groupId, peer, text)
+                sent++
+            }
+            Log.i(TAG, "Mirror action: групповой конверт ушёл $sent/${recipients.size}")
+            return
+        }
+        if (peerId.isBlank()) return
+        val chat = chatRepository.getChatByContactId(peerId)
+            ?: chatRepository.getOrCreateChat(peerId, NodeIds.autoName(peerId))
+        val sent = RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), chat.id, peerId, text)
+        Log.i(TAG, "Mirror action: конверт ушёл собеседнику ${peerId.takeLast(8)} sent=$sent")
+    }
+
+    /**
+     * Смена роли = штатный перезапуск сервиса (как reconnect): тень поднимет
+     * движок, активный - уйдёт в тень. Защита от частых переключений.
+     */
+    private fun restartForMirrorRole() {
+        if (mirrorRestarting.getAndSet(true)) return
+        // Отдельный scope: serviceScope кан cancell'ится при stopSelf раньше,
+        // чем успеет выполниться перезапуск.
+        val restartScope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.SupervisorJob()
+        )
+        restartScope.launch {
+            // Короткая пауза: партнёр должен увидеть смену нашего состояния.
+            kotlinx.coroutines.delay(1500)
+            try {
+                stopServiceSafely()
+                val intent = android.content.Intent(applicationContext, CoreServerService::class.java)
+                applicationContext.startForegroundService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Mirror role restart failed", e)
+            } finally {
+                mirrorRestarting.set(false)
+                restartScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            }
+        }
     }
 
     /**
@@ -503,6 +1565,8 @@ class CoreServerService : Service() {
         }
         telegramRelay?.stop()
         cloudflareRelay?.stop()
+        com.vladimir.messenger.data.mirror.MirrorHub.close()
+        mirror = null
         Log.i(TAG, "CoreServerService destroyed")
         eventPollingJob?.cancel()
         filePumpJob?.cancel()
@@ -526,24 +1590,51 @@ class CoreServerService : Service() {
             chatRepository.observeAllMessages()
                 .collect { messages ->
                     Log.d(TAG, "Message observer received ${messages.size} messages")
-                    // Фильтруем только новые входящие (lastSeen = 0 или не прочитаны)
-                    // Простая логика: если сообщение появилось в последние 2 секунды и входящее
-                    val now = System.currentTimeMillis()
-                    val recentIncoming = messages.filter { 
-                        !it.isFromMe && (now - it.timestamp) < 2000 &&
-                            // Куски фотографий поста - служебные строки, а не
-                            // сообщения: без этого фильтра один пост с шестью
-                            // фото давал полтора десятка уведомлений с «буквами».
-                            !com.vladimir.messenger.util.InlineImage.isPart(it.content)
+                    // Раунд 141: прежнее окно «письмо младше 2 секунд от
+                    // отметки времени» молчало, когда часы телефонов
+                    // расходились или письмо ехало через запасной канал
+                    // дольше двух секунд - уведомления «переставали
+                    // приходить» (владелец, 2026-09-23). Теперь: оглашаем
+                    // всё, что появилось с момента старта сервиса (минус
+                    // две минуты - доложить написанное, пока процесс был
+                    // мёртв), и ещё не оглашённое: дубль core+CF гасится
+                    // по id, старые записи при восстановлении бэкапа -
+                    // базой старта.
+                    if (notifiedMessageIds.size > 4096) notifiedMessageIds.clear()
+                    val recentIncoming = messages.filter {
+                        !it.isFromMe &&
+                            it.timestamp >= serviceStartedAtMs - 120_000L &&
+                            notifiedMessageIds.add(it.id) &&
+                            !com.vladimir.messenger.util.InlineImage.isPart(it.content) &&
+                            // Раунд 156: конверты роя (стикеры/миниатюры) -
+                            // служебные, не звоним (владелец).
+                            !com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(it.content)
                     }
                     for (msg in recentIncoming) {
                         try {
+                            // Тема/пост, где написано сообщение: тап открывает
+                            // именно его. Вызов позиционный: именованные
+                            // аргументы + значение по умолчанию ловили
+                            // фантомную «Argument type mismatch» в K2.
+                            val topicId = msg.topicId?.takeIf { it.isNotBlank() }
+                            // Раунд 131: ссылка на гифку - в уведомлении
+                            // аккуратное «🖼 Гифка», а не служебная строка.
+                            val text = if (
+                                com.vladimir.messenger.data.gif.GifLibrary.isGifRef(msg.content)
+                            ) {
+                                "🖼 Гифка"
+                            } else {
+                                // Раунд 156: стикер-конверты и прочие служебные
+                                // строки - человеческими подписями.
+                                com.vladimir.messenger.util.ChatPreviews
+                                    .human(
+                                        com.vladimir.messenger.util.InlineImage
+                                            .stripImage(msg.content).ifBlank { "Фото" }
+                                    )
+                                    ?.take(200) ?: "Фото"
+                            }
                             notificationHelper.showMessageNotification(
-                                chatId = msg.chatId,
-                                senderId = msg.senderId,
-                                messageText = com.vladimir.messenger.util.InlineImage
-                                    .stripImage(msg.content).ifBlank { "Фото" }.take(200),
-                                isIncoming = true
+                                msg.chatId, msg.senderId, text, true, topicId
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")
@@ -584,6 +1675,9 @@ class CoreServerService : Service() {
         // immediately; this cadence must not throttle an active transfer.
         filePumpJob = serviceScope.launch {
             kotlinx.coroutines.delay(INITIAL_FILE_PUMP_DELAY_MS)
+            // Раунд 179: счётчик циклов - очередь сообщений сливаем раз в
+            // минуту (3 цикла по 20 с), независимо от presence-пульсов.
+            var chatQueueCycle = 0
             while (isActive) {
                 try {
                     fileTransferRouter.pumpOutgoing()
@@ -604,6 +1698,29 @@ class CoreServerService : Service() {
                     apkSeeder.pump()
                 } catch (ex: Exception) {
                     Log.w(TAG, "Apk seeder pump error: ${ex.message}")
+                }
+                // Раунд 137: недоставленные «удалить у всех» - личные (до ack)
+                // и групповые (эпидемией через помпу репозитория).
+                try {
+                    messageDeletion.pump()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Deletion pump error: ${ex.message}")
+                }
+                try {
+                    groupRepository.pumpDeletions()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Group deletion pump error: ${ex.message}")
+                }
+                // Раунд 179: недоставленные сообщения (гифки-ссылки и текст
+                // QUEUED_OFFLINE) - сами доехут, когда адресат появится;
+                // пустая очередь стоит один дешёвый запрос.
+                chatQueueCycle++
+                if (chatQueueCycle % 3 == 0) {
+                    try {
+                        chatRepository.pumpQueuedOffline()
+                    } catch (ex: Exception) {
+                        Log.w(TAG, "Chat queue pump error: ${ex.message}")
+                    }
                 }
                 delay(FILE_PUMP_INTERVAL_MS)
             }
@@ -670,6 +1787,25 @@ class CoreServerService : Service() {
                     return
                 }
 
+                // р239: сообщение «от себя». Такое бывает, когда в контактах
+                // оказался собственный узел (в профиле есть «Мой QR» - его
+                // можно отсканировать самому). Показывать эхо входящим и
+                // звонить о нём в уведомлении нельзя: владелец, скрин 30.09
+                // 16:40 - «начинаешь печатать - приходит уведомление от меня
+                // же». Своя строка уже лежит в переписке как отправленная,
+                // терять нечего.
+                // р243: адрес из кэша зеркала (обновляется в цикле) - вызов в
+                // ядро на каждом входящем тормозил разбор очереди.
+                val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
+                if (myNodeId.isNotBlank() && senderId == myNodeId) {
+                    Log.w(TAG, "self-addressed packet ignored msgId=$messageId text=" + rawText.take(24))
+                    // р242: считаем такие пакеты для диагностики - по счётчику
+                    // видно, что «собеседник» это собственный узел.
+                    com.vladimir.messenger.data.mirror.MirrorHub.noteSelfPacket()
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    return
+                }
+
                 // ШИФРОВАНИЕ: конверт вскрывается ДО любых разборщиков, иначе
                 // групповые, файловые и служебные пакеты не будут узнаны.
                 //
@@ -698,7 +1834,74 @@ class CoreServerService : Service() {
                 }
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
+
+                // р243/р247: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
+                // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
+                // до v140 не распознавали его, поэтому свежая версия фильтрует
+                // префикс также на последнем общем страже сохранения.
+                //
+                // Подтверждения ходили только через брокера (MQTT): если он
+                // недоступен, сообщение доходило, а вторая галочка не
+                // появлялась никогда - жалоба владельца 30.09. Теперь оно
+                // может прийти и напрямую (RustBridge.sendDeliveryAck), здесь
+                // его узнаём и помечаем своё сообщение доставленным. Строка
+                // служебная - в переписку не попадает.
+                //
+                // Место важно: разбор идёт ПОСЛЕ расшифровки - конверт до неё
+                // выглядит как «APUSL1|…», и префикс не угадать.
+                if (DeliveryAckWire.isPacket(text)) {
+                    val ackedId = DeliveryAckWire.messageId(text)
+                    if (ackedId != null) {
+                        // р244: сначала партнёрскому устройству той же личности -
+                        // иначе на нём галочка останется одна, хотя сообщение ушло
+                        // именно с него.
+                        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                        serviceScope.launch {
+                            runCatching {
+                                chatRepository.markOutgoingMessageDelivered(ackedId)
+                            }.onSuccess { changed ->
+                                Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId changed=$changed")
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "malformed direct delivery ACK; dropped")
+                    }
+                    // ACKs are control packets: no chat row, notification, or ACK-of-ACK.
+                    return
+                }
+
+                // р239 (ВАЖНО): «печатает…» - мимолётный служебный сигнал, в
+                // переписке ему места нет. Разбирается ЗДЕСЬ, до зеркала,
+                // авто-создания контакта и сохранения.
+                //
+                // Ловушка, из-за которой это правило появилось: r235 поставил
+                // разбор только в routeIncomingEnvelope (резервный путь CF), а
+                // основной приём P2P живёт здесь - и пакет APUTYP1|1 лёг в чат
+                // сообщением с уведомлением (владелец, скрины 30.09). Поэтому
+                // рядом добавлен и страж в ChatRepository.saveIncomingMessage.
+                val typingSignal = com.vladimir.messenger.data.typing.TypingWire.parse(text)
+                if (typingSignal != null) {
+                    if (typingSignal) {
+                        com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
+                    } else {
+                        com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+                    }
+                    // Второму устройству личности - тем же кадром (индикатор
+                    // должен быть на обоих телефонах).
+                    com.vladimir.messenger.data.mirror.MirrorHub.publishTyping(senderId, typingSignal)
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    Log.d(TAG, "Typing packet handled (typing=$typingSignal), not saved")
+                    return
+                }
+
                 try {
+                    // р227: служебный конверт (реакция, удаление, просмотр,
+                    // сердечко, прочтение, ссылка на гифку) уходит и
+                    // партнёру-зеркалу: тот применит его у себя теми же
+                    // разборщиками. Тексты сюда не попадают - у них свой путь
+                    // (publishIncoming), двойников не будет.
+                    mirror?.publishEnvelope(senderId, chatId, messageId, text)
+
                     // F3: file packets ride the same durable transport but must never be stored
                     // as chat text. Relay cleanup still happens through the per-message ACK below.
                     if (fileTransferRouter.routeIncoming(senderId, chatId, messageId, text)) {
@@ -714,6 +1917,59 @@ class CoreServerService : Service() {
                     // Группы: APUGRP1-конверт разбирается здесь же, ДО авто-создания
                     // контакта. Иначе каждое групповое событие превратилось бы в личный
                     // чат с отправителем.
+                    // Раунд 129: ССЫЛКА на гифку - сам контент сообщения
+                    // («APUGIFREF1|<sha>»). Перехватывается здесь: в чат
+                    // ложится карточка от лица отправителя, байты каждый
+                    // телефон тихо тянет с хранителей. Даже если конверт
+                    // утечёт через запасной путь доставки и сохранится как
+                    // обычное сообщение - экран чата рисует по нему карточку.
+                    if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
+                        val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
+                        if (refSha != null) {
+                            serviceScope.launch {
+                                runCatching {
+                                    chatRepository.insertReceivedGifRefMessage(
+                                        chatId = chatId,
+                                        senderId = senderId,
+                                        messageId = messageId,
+                                        sha256 = refSha,
+                                        timestamp = System.currentTimeMillis(),
+                                    )
+                                }.onFailure { Log.w(TAG, "gif ref insert failed: " + it.message) }
+                                // Раунд 131: байты тянем СРАЗУ, не дожидаясь,
+                                // пока человек откроет чат - карточка оживает сама.
+                                runCatching { ensureGifBytesForRef(refSha) }
+                                    .onFailure { Log.w(TAG, "gif ref fetch failed: " + it.message) }
+                            }
+                        }
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "GIF ref ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
+                        handleGifEnvelope(senderId, chatId, messageId, text)
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "GIF packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    if (com.vladimir.messenger.data.sticker.StickerLibrary.isStickerPacket(text)) {
+                        handleStickerEnvelope(senderId, chatId, messageId, text)
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Sticker packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
                     if (groupRouter.routeIncoming(senderId, chatId, messageId, text)) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
@@ -736,6 +1992,18 @@ class CoreServerService : Service() {
                         return
                     }
 
+                    // Раунд 135: «удали у всех» в личном чате - конверт
+                    // APUDEL1 разбирается до сохранения, в переписку ему
+                    // дороги нет (как у реакций).
+                    if (messageDeletion.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Delete packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
                     // Просмотр поста канала: счётчик под записью.
                     if (postViews.routeIncoming(senderId, text)) {
                         try {
@@ -753,6 +2021,18 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Heart packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Рой-копии азбуки: store/ack/ask/give. Конверт может нести
+                    // до 120 КБ шифрованных байтов — в чат и автоконтакты ему
+                    // дороги нет.
+                    if (addressBookSwarm.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Swarm backup ACK failed: " + e.message)
                         }
                         return
                     }
@@ -832,6 +2112,22 @@ class CoreServerService : Service() {
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                     Log.i(TAG, "Saved incoming message to chat ${chat.id}")
+                    // р242: для диагностики - когда последний раз что-то приходило.
+                    com.vladimir.messenger.data.mirror.MirrorHub.noteIncoming()
+                    // р226: мгновенно отразить входящее на зеркале-партнёре.
+                    mirror?.publishIncoming(
+                        com.vladimir.messenger.data.mirror.MirrorRow(
+                            id = messageId,
+                            chatId = chat.id,
+                            contactName = chat.contactName,
+                            senderId = senderId,
+                            content = text,
+                            timestamp = timestamp,
+                            mine = false,
+                            recipientId = RustBridge.nodeId() ?: "",
+                            status = "DELIVERED",
+                        )
+                    )
                     
                     // Отправить ACK отправителю
                     try {
@@ -867,8 +2163,14 @@ class CoreServerService : Service() {
                 // файлов ведёт свой список «кто в сети» - по нему выбирается
                 // хранитель и отдаётся хранимое появившемуся получателю.
                 serviceScope.launch {
-                    runCatching { fileTransferRouter.markOnline(peerId) }
-                        .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
+                    // Раунд 180 (аудит-2): регистр «кто онлайн» для файлов -
+                    // только на «тяжёлом» пульсе (раз в 30 с), а не на каждый
+                    // пульс: при живой сети это были десятки лишних записей
+                    // в минуту без какой-нибудь пользы.
+                    if (!lightTouch) {
+                        runCatching { fileTransferRouter.markOnline(peerId) }
+                            .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
+                    }
                     // Файл группы, который я жду, а его сид только что появился:
                     // спросить сразу, не дожидаясь очередного круга (этап 9).
                     if (!lightTouch) {
@@ -893,7 +2195,11 @@ class CoreServerService : Service() {
                             Log.i(TAG, "🟢 ONLINE: $peerName")
                         }
                         if (lightTouch) return  // пульс учли, тяжёлую синхру не дёргаем
-                        Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
+                        // Раунд 186 (аудит-6): повторяется на каждый «тяжёлый»
+                        // пульс (раз в 30 с на узел) - в релизе не пишем.
+                        if (com.vladimir.messenger.BuildConfig.DEBUG) {
+                            Log.i(TAG, "👋 PEER DISCOVERED: $peerId ($peerName) — запуск full sync")
+                        }
                         // Настоящее имя из presence подменяет заглушку. Раньше
                         // условие требовало, чтобы старое имя начиналось с
                         // «Contact » ИЛИ было ровно «Anonymous», а имя из QR
@@ -923,7 +2229,10 @@ class CoreServerService : Service() {
                             // копия имени. Дёшево и только при полном пульсе.
                             chatRepository.updateContactName(peerId, existing.displayName)
                         }
-                        Log.i(TAG, "✅ Обновлён существующий контакт: $peerName")
+                        // Раунд 186 (аудит-6): то же - только для отладки.
+                        if (com.vladimir.messenger.BuildConfig.DEBUG) {
+                            Log.i(TAG, "✅ Обновлён существующий контакт: $peerName")
+                        }
                         
                         // FULL SYNC только для существующих контактов
                         serviceScope.launch {
@@ -1026,7 +2335,7 @@ class CoreServerService : Service() {
                 Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
                 serviceScope.launch {
                     try {
-                        chatRepository.updateMessageStatus(messageId, com.vladimir.messenger.domain.model.MessageStatus.DELIVERED)
+                        chatRepository.markOutgoingMessageDelivered(messageId)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to mark DELIVERED", e)
                     }
@@ -1045,13 +2354,15 @@ class CoreServerService : Service() {
             this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        return NotificationCompat.Builder(this, MessengerApplication.CHANNEL_ID)
+        return NotificationCompat.Builder(this, MessengerApplication.CHANNEL_SERVICE_ID)
             .setContentTitle("APU")
             .setContentText(status)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setShowWhen(false)
             .build()
     }
 

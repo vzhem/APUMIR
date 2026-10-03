@@ -34,6 +34,9 @@ object GroupWire {
 
     const val KIND_MESSAGE = "msg"
     const val KIND_TOPIC = "topic"
+    // Раунд 260: переименование/смена значка темы. Старые версии молча
+    // пропускают неизвестный вид - обновление дойдёт после автоапдейта.
+    const val KIND_TOPIC_UPDATED = "topicup"
     const val KIND_JOIN_REQUEST = "req"
     const val KIND_JOIN_DECISION = "reqd"
     const val KIND_PIN = "pin"
@@ -76,6 +79,12 @@ object GroupWire {
      * владельца группы; остальные пакеты правки отбрасываются.
      */
     const val KIND_EDIT = "edit"
+    /**
+     * «Удалить сообщение у всех» (раунд 135): `msdel|groupId|msgId`. Права
+     * те же, что у правки: автор или владелец. Телефоны прошлых версий вид
+     * не знают и молча отбрасывают - у них сообщение останется.
+     */
+    const val KIND_MESSAGE_DELETE = "msdel"
     /**
      * «Пришлите последние посты»: вступивший позже просит владельца канала
      * прислать тексты и фотографии последних постов, а не только список тем.
@@ -182,6 +191,23 @@ object GroupWire {
      * отбрасывают — ответ им просто не придёт.
      */
     const val KIND_UPDATE_ASK = "upask"
+    /**
+     * «Я раздаю ПАТЧ обновления» (рой APK, раунд 133):
+     * `uppk|от_версии|до_версии|sha256_патча|байт|sha256_apk|atMs`.
+     * Патч — та же разница, что качается с официального сайта (формат
+     * APUBSP1): телефон с версией «от_версии» берёт только его (в разы
+     * меньше целого APK) и собирает новый APK у себя; собранный обязан
+     * сойтись с [sha256_apk]. Старые телефоны вид не знают и молча
+     * отбрасывают.
+     */
+    const val KIND_UPDATE_PATCH_PACK = "uppk"
+    /**
+     * «Пришли мне патч обновления» (рой APK):
+     * `uppwant|от_версии|до_версии|sha256_патча|b64(привязка)`. Привязка —
+     * как у `upwant`: подписанный ключ обмена просителя для конверта сида.
+     * Отказ — тем же `upnone` (версия = «до_версии», sha = патча).
+     */
+    const val KIND_UPDATE_PATCH_WANT = "uppwant"
 
     /** Ключ обмена в `fwant`: как у HELLO файловой передачи. */
     const val MAX_FILE_WANT_BINDING_BYTES = 512
@@ -342,6 +368,17 @@ object GroupWire {
         ) : Packet()
 
         /**
+         * Автор (или владелец) стёр сообщение [messageId] у всех. [deleterId] -
+         * кто удалял; пусто в пакете старого образца (раунд 135), там
+         * удалявший - отправитель пакета.
+         */
+        data class MessageDelete(
+            val groupId: String,
+            val messageId: String,
+            val deleterId: String = "",
+        ) : Packet()
+
+        /**
          * Просьба прислать последние [limit] постов канала целиком.
          *
          * [have] - темы, чьи посты у просящего уже есть: владелец их не шлёт,
@@ -451,6 +488,14 @@ object GroupWire {
             val name: String,
             /** Значок темы (эмодзи). Старые конверты приходили без него. */
             val iconEmoji: String = "",
+        ) : Packet()
+
+        /** Раунд 260: переименование/смена значка существующей темы. */
+        data class TopicUpdated(
+            val groupId: String,
+            val topicId: String,
+            val name: String,
+            val iconEmoji: String,
         ) : Packet()
 
         data class JoinRequest(
@@ -622,6 +667,33 @@ object GroupWire {
         ) : Packet()
 
         /**
+         * Отправитель раздаёт ДИФФ-ПАТЧ обновления (рой APK, раунд 133):
+         * от версии [fromVersion] до [toVersion], файл патча [patchSha256]
+         * размером [sizeBytes]; собранный из патча APK обязан сойтись с
+         * [apkSha256] (это sha256 релиза). Сам патч идёт файловой машиной
+         * (кусочки в `apkseed`), как и целый APK.
+         */
+        data class UpdatePatchPack(
+            val fromVersion: String,
+            val toVersion: String,
+            val patchSha256: String,
+            val sizeBytes: Long,
+            val apkSha256: String,
+            val atMs: Long,
+        ) : Packet()
+
+        /**
+         * Просьба о патче от [fromVersion] до [toVersion] ([patchSha256]).
+         * [binding] — подписанный ключ обмена просителя (как у [UpdateWant]).
+         */
+        data class UpdatePatchWant(
+            val fromVersion: String,
+            val toVersion: String,
+            val patchSha256: String,
+            val binding: ByteArray = ByteArray(0),
+        ) : Packet()
+
+        /**
          * Возможности узла: сколько места под пересылку он отдаёт (байт).
          * Принимается только от [nodeId] = отправитель (проверка в приёмнике).
          */
@@ -718,6 +790,20 @@ object GroupWire {
     /** Правка сообщения: тот же id, новый текст. */
     fun buildEdit(groupId: String, topicId: String, messageId: String, text: String): String =
         "$PREFIX|$KIND_EDIT|$groupId|$topicId|${encode(messageId)}|${encode(text)}"
+
+    /**
+     * «Удалить сообщение у всех»: группа, идентификатор и КТО удалял
+     * (раунд 137). Удалял нужен для проверки прав у получателей ретрансляции:
+     * пакет может привезти любой участник, а стереть вправе автор или
+     * владелец. Четырёхпольная форма (раунд 135) по-прежнему принимается -
+     * там удалявший считается по отправителю пакета.
+     */
+    fun buildMessageDelete(groupId: String, messageId: String, deleterId: String): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        require(messageId.isNotBlank()) { "bad message id" }
+        require(deleterId.isNotBlank()) { "bad deleter id" }
+        return "$PREFIX|$KIND_MESSAGE_DELETE|$groupId|${encode(messageId)}|${encode(deleterId)}"
+    }
 
     /** «Пришлите последние limit постов, кроме этих» - владельцу канала. */
     fun buildPostsRequest(groupId: String, limit: Int, have: List<String> = emptyList()): String {
@@ -864,6 +950,39 @@ object GroupWire {
         return "$PREFIX|$KIND_UPDATE_ASK|$myVersion"
     }
 
+    /** «Я раздаю патч обновления» (рой APK): от/до версии, патч, итоговый APK. */
+    fun buildUpdatePatchPack(
+        fromVersion: String,
+        toVersion: String,
+        patchSha256: String,
+        sizeBytes: Long,
+        apkSha256: String,
+        atMs: Long,
+    ): String {
+        require(isUpdateVersion(fromVersion)) { "bad update from-version" }
+        require(isUpdateVersion(toVersion)) { "bad update to-version" }
+        require(isSha256(patchSha256)) { "bad patch sha256" }
+        require(isSha256(apkSha256)) { "bad apk sha256" }
+        require(sizeBytes in 0L..MAX_UPDATE_SIZE_BYTES) { "bad patch size" }
+        return "$PREFIX|$KIND_UPDATE_PATCH_PACK|$fromVersion|$toVersion|$patchSha256|" +
+            "${sizeBytes.coerceAtLeast(0L)}|$apkSha256|${atMs.coerceAtLeast(0L)}"
+    }
+
+    /** «Пришли мне патч обновления» (рой APK): от/до версии, патч, привязка. */
+    fun buildUpdatePatchWant(
+        fromVersion: String,
+        toVersion: String,
+        patchSha256: String,
+        binding: ByteArray,
+    ): String {
+        require(isUpdateVersion(fromVersion)) { "bad update from-version" }
+        require(isUpdateVersion(toVersion)) { "bad update to-version" }
+        require(isSha256(patchSha256)) { "bad patch sha256" }
+        require(binding.size <= MAX_FILE_WANT_BINDING_BYTES) { "binding too long" }
+        val bindingCell = if (binding.isEmpty()) "" else Base64.getUrlEncoder().withoutPadding().encodeToString(binding)
+        return "$PREFIX|$KIND_UPDATE_PATCH_WANT|$fromVersion|$toVersion|$patchSha256|$bindingCell"
+    }
+
     /** Хэш файла в визитке и просьбах: ровно 64 шестнадцатеричных знака в нижнем регистре. */
     fun isSha256(value: String): Boolean =
         value.length == 64 && value.all { it in '0'..'9' || it in 'a'..'f' }
@@ -1005,6 +1124,15 @@ object GroupWire {
         "$PREFIX|$KIND_TOPIC|$groupId|$topicId|${encode(name)}" +
             if (iconEmoji.isNotEmpty()) "|${encode(iconEmoji)}" else ""
 
+    /** Раунд 260: тема переименована и/или сменила значок. */
+    fun buildTopicUpdated(
+        groupId: String,
+        topicId: String,
+        name: String,
+        iconEmoji: String,
+    ): String =
+        "$PREFIX|$KIND_TOPIC_UPDATED|$groupId|$topicId|${encode(name)}|${encode(iconEmoji)}"
+
     fun buildJoinRequest(
         groupId: String,
         displayName: String,
@@ -1103,6 +1231,18 @@ object GroupWire {
                 val authorId = if (parts.size >= 8) decode(parts[7]).orEmpty() else ""
                 val sentAtMs = if (parts.size >= 9) parts[8].toLongOrNull() ?: 0L else 0L
                 Packet.Message(groupId, parts[3], body, senderMessageId, senderName, authorId, sentAtMs)
+            } else {
+                null
+            }
+
+            KIND_MESSAGE_DELETE -> if (parts.size == 4 || parts.size == 5) {
+                val deletedId = decode(parts[3]) ?: return null
+                val deleter = if (parts.size == 5) decode(parts[4]).orEmpty() else ""
+                if (deletedId.isBlank() || parts[2].isBlank()) {
+                    null
+                } else {
+                    Packet.MessageDelete(parts[2], deletedId, deleter)
+                }
             } else {
                 null
             }
@@ -1318,6 +1458,15 @@ object GroupWire {
                 } else {
                     Packet.TopicCreated(groupId, parts[3], name, icon)
                 }
+            } else {
+                null
+            }
+
+            // Раунд 260: правка темы (имя + значок).
+            KIND_TOPIC_UPDATED -> if (parts.size == 6) {
+                val name = decode(parts[4]) ?: return null
+                val icon = decode(parts[5]).orEmpty()
+                if (name.isBlank()) null else Packet.TopicUpdated(groupId, parts[3], name, icon)
             } else {
                 null
             }
@@ -1548,6 +1697,43 @@ object GroupWire {
 
             KIND_UPDATE_ASK -> if (parts.size == 3 && isUpdateVersion(parts[2])) {
                 Packet.UpdateAsk(parts[2])
+            } else {
+                null
+            }
+
+            // Раунд 133: дифф-патч обновления в рое. Отказ — прежний
+            // KIND_UPDATE_NONE с версией «до» и sha патча.
+            KIND_UPDATE_PATCH_PACK -> if (parts.size == 8) {
+                val from = parts[2]
+                val to = parts[3]
+                val size = parts[5].toLongOrNull() ?: return null
+                val at = parts[7].toLongOrNull() ?: return null
+                if (!isUpdateVersion(from) || !isUpdateVersion(to) ||
+                    !isSha256(parts[4]) || !isSha256(parts[6]) ||
+                    size !in 0L..MAX_UPDATE_SIZE_BYTES || at < 0
+                ) {
+                    return null
+                }
+                Packet.UpdatePatchPack(from, to, parts[4], size, parts[6], at)
+            } else {
+                null
+            }
+
+            KIND_UPDATE_PATCH_WANT -> if (parts.size == 6) {
+                if (!isUpdateVersion(parts[2]) || !isUpdateVersion(parts[3]) || !isSha256(parts[4])) {
+                    return null
+                }
+                val binding = if (parts[5].isEmpty()) {
+                    ByteArray(0)
+                } else {
+                    try {
+                        Base64.getUrlDecoder().decode(parts[5])
+                    } catch (_: IllegalArgumentException) {
+                        return null
+                    }
+                }
+                if (binding.size > MAX_FILE_WANT_BINDING_BYTES) return null
+                Packet.UpdatePatchWant(parts[2], parts[3], parts[4], binding)
             } else {
                 null
             }

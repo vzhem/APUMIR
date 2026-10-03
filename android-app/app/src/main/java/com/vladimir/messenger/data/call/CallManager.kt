@@ -18,6 +18,7 @@ import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.mirror.MirrorHub
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.service.CallService
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -119,6 +120,20 @@ class CallManager @Inject constructor(
     private var tickJob: Job? = null
     private var endedResetJob: Job? = null
     private var endTextOverride: String? = null
+
+    /** р233: входящий, который сейчас звонит только на партнёрском устройстве. */
+    @Volatile private var mirrorRingCallId: String? = null
+
+    /** р233: после передачи роли надо автоматически принять этот звонок. */
+    @Volatile private var handoverAcceptCallId: String? = null
+
+    /** р233: исходящий, который ждёт передачи роли (своей сессии у тени нет). */
+    private var handoverJob: Job? = null
+    @Volatile private var handoverPeerId: String = ""
+    @Volatile private var handoverPeerName: String = ""
+
+    /** р233: что о звонке уже рассказали партнёру (callId:фаза). */
+    @Volatile private var mirrorStateKey: String? = null
 
     /** Недавно завершённые звонки: поздний offer-дубль не должен воскрешать их на экране. */
     private val recentlyEnded = LinkedHashMap<String, Long>()
@@ -262,7 +277,16 @@ class CallManager @Inject constructor(
             startTicker()
             executeEffects(sm, listOf(CallStateMachine.Effect.SendRing))
         }
+        // р233: входящий звонит и на партнёрском устройстве.
+        publishMirrorRing(offer.callId, senderId, offer.callerName)
+        val autoAccept = handoverAcceptCallId == offer.callId
+        if (autoAccept) handoverAcceptCallId = null
         executeEffects(machine!!, listOf(CallStateMachine.Effect.NotifyIncoming))
+        if (autoAccept) {
+            Log.i(TAG, "mirror: звонок пришёл после передачи роли - принимаю")
+            accept()
+            return
+        }
         // Имя лучше из контактов, чем самоназвание звонящего.
         scope.launch {
             val known = runCatching { contactRepository.getContactById(senderId)?.displayName }
@@ -584,6 +608,12 @@ class CallManager @Inject constructor(
             }
             val myId = RustBridge.nodeId()
             if (myId == null || !RustBridge.isRunning()) {
+                // р233: тень - своей сессии нет. Просим движок и начинаем
+                // звонок сами, как только он поднимется.
+                if (MirrorHub.canClaimEngine()) {
+                    claimEngineForOutgoing(peerId, peerName)
+                    return
+                }
                 _uiState.value = CallUiState(
                     phase = CallStateMachine.Phase.ENDED,
                     peerId = peerId,
@@ -622,9 +652,27 @@ class CallManager @Inject constructor(
         }
     }
 
+    /** р233: идёт ли звонок у этого устройства (передача роли во время звонка запрещена). */
+    fun isBusy(): Boolean = synchronized(this) {
+        val sm = machine ?: return@synchronized false
+        sm.phase != CallStateMachine.Phase.IDLE && sm.phase != CallStateMachine.Phase.ENDED
+    }
+
     /** Принять входящий (кнопка в UI после предоставления RECORD_AUDIO). */
     fun accept() {
-        val sm = synchronized(this) { machine } ?: return
+        val sm = synchronized(this) { machine }
+        if (sm == null) {
+            // р233: звонок звонит только на партнёрском устройстве. Своей
+            // сессии у нас нет - просим движок; когда он поднимется и
+            // звонящий повторит offer, примем автоматически.
+            val ringId = mirrorRingCallId
+            if (ringId != null) {
+                handoverAcceptCallId = ringId
+                Log.i(TAG, "mirror: прошу движок, чтобы ответить (${ringId.take(8)})")
+                MirrorHub.claimEngine()
+            }
+            return
+        }
         val effects = synchronized(this) { sm.userAccept(nowMs()) }
         executeEffects(sm, effects)
         syncUi(sm)
@@ -632,7 +680,27 @@ class CallManager @Inject constructor(
 
     /** «Отклонить» на входящем / «Отменить» на исходящем / «Завершить» в разговоре. */
     fun hangupOrReject() {
-        val sm = synchronized(this) { machine } ?: return
+        val sm = synchronized(this) { machine }
+        if (sm == null) {
+            val ringId = mirrorRingCallId
+            if (ringId != null) {
+                // р233: отклоняем на обоих - отказ звонящему отправит партнёр.
+                runCatching {
+                    MirrorHub.publishCallSignal(
+                        org.json.JSONObject().put("a", "reject").put("id", ringId),
+                    )
+                }
+                dropMirrorRing("отклонён на этом устройстве")
+                return
+            }
+            if (handoverPeerId.isNotBlank()) {
+                handoverJob?.cancel()
+                handoverPeerId = ""
+                _uiState.value = CallUiState()
+                return
+            }
+            return
+        }
         val now = nowMs()
         val effects = synchronized(this) {
             when {
@@ -1130,10 +1198,15 @@ class CallManager @Inject constructor(
     // ═════════════════════════════════════════════════════════════════════
 
     private fun notifyIncoming(sm: CallStateMachine) {
+        showIncomingAlert(sm.callId, _uiState.value.peerName.ifBlank { sm.peerId.takeLast(8) })
+    }
+
+    /** р233: звонок ringing-экраном и уведомлением (свой или зеркальный). */
+    private fun showIncomingAlert(callId: String, peerName: String) {
         ensureCallChannel()
         val intent = Intent(appContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(EXTRA_OPEN_CALL, sm.callId)
+            putExtra(EXTRA_OPEN_CALL, callId)
         }
         val pending = PendingIntent.getActivity(
             appContext, CALL_REQUEST_CODE, intent,
@@ -1142,7 +1215,7 @@ class CallManager @Inject constructor(
         val notification = NotificationCompat.Builder(appContext, CALL_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Входящий звонок")
-            .setContentText(_uiState.value.peerName.ifBlank { sm.peerId.takeLast(8) })
+            .setContentText(peerName.ifBlank { callId.takeLast(8) })
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
@@ -1168,7 +1241,7 @@ class CallManager @Inject constructor(
                 vibrator?.vibrate(longArrayOf(0, 700, 900), 0)
             }
         }
-        Log.i(TAG, "incoming call notification shown: ${sm.callId.take(8)}")
+        Log.i(TAG, "incoming call notification shown: ${callId.take(8)}")
     }
 
     private fun cancelIncoming() {
@@ -1176,6 +1249,136 @@ class CallManager @Inject constructor(
         runCatching { ringtone?.stop() }
         ringtone = null
         runCatching { vibrator?.cancel() }
+    }
+
+    // ── р233: звонок на обоих устройствах одной личности ────────────────────
+
+    /** Звонковый сигнал от партнёрского устройства. */
+    fun onMirrorCall(signal: org.json.JSONObject) {
+        when (signal.optString("a")) {
+            "ring" -> onMirrorRing(
+                callId = signal.optString("id"),
+                peerId = signal.optString("peer"),
+                name = signal.optString("name"),
+            )
+            "active" -> dropMirrorRing("принят на другом устройстве")
+            "ended" -> dropMirrorRing("звонок завершён")
+            "reject" -> {
+                // Отклонили на партнёрском устройстве - отклоняем и у себя.
+                val wanted = signal.optString("id")
+                val sm = synchronized(this) { machine } ?: return
+                if (sm.callId != wanted || sm.outgoing) return
+                if (sm.phase != CallStateMachine.Phase.INCOMING) return
+                val now = nowMs()
+                val effects = synchronized(this) { sm.userReject(now) }
+                executeEffects(sm, effects)
+                syncUi(sm)
+            }
+        }
+    }
+
+    /** Входящий звонит на партнёрском устройстве: показываем тот же экран. */
+    private fun onMirrorRing(callId: String, peerId: String, name: String) {
+        if (callId.isBlank()) return
+        synchronized(this) {
+            if (machine != null) return        // у нас свой звонок
+        }
+        if (mirrorRingCallId == callId) return
+        mirrorRingCallId = callId
+        val display = name.ifBlank { peerId.takeLast(8) }
+        _uiState.value = CallUiState(
+            phase = CallStateMachine.Phase.INCOMING,
+            peerId = peerId,
+            peerName = display,
+            callId = callId,
+            outgoing = false,
+        )
+        showIncomingAlert(callId, display)
+        Log.i(TAG, "mirror: входящий на экране (${callId.take(8)})")
+    }
+
+    /** Звонок на партнёре ответили/завершили/отклонили - снять у себя. */
+    private fun dropMirrorRing(why: String) {
+        if (mirrorRingCallId == null) return
+        mirrorRingCallId = null
+        handoverAcceptCallId = null
+        cancelIncoming()
+        _uiState.value = CallUiState()
+        Log.i(TAG, "mirror: чужой звонок снят ($why)")
+    }
+
+    /** Рассказать партнёру, что входящий звонит и здесь. */
+    private fun publishMirrorRing(callId: String, peerId: String, name: String) {
+        runCatching {
+            MirrorHub.publishCallSignal(
+                org.json.JSONObject()
+                    .put("a", "ring")
+                    .put("id", callId)
+                    .put("peer", peerId)
+                    .put("name", name),
+            )
+        }
+    }
+
+    /** Рассказать партнёру, что звонок принят/завершён (один раз на фазу). */
+    private fun publishMirrorState(sm: CallStateMachine) {
+        val phase = when (sm.phase) {
+            CallStateMachine.Phase.ACTIVE -> "active"
+            CallStateMachine.Phase.ENDED -> "ended"
+            else -> return
+        }
+        val key = sm.callId + ":" + phase
+        if (mirrorStateKey == key) return
+        mirrorStateKey = key
+        runCatching {
+            MirrorHub.publishCallSignal(
+                org.json.JSONObject()
+                    .put("a", phase)
+                    .put("id", sm.callId)
+                    .put("peer", sm.peerId),
+            )
+        }
+    }
+
+    /**
+     * Исходящий со второго устройства: своей сессии у тени нет, поэтому просим
+     * движок у активного и, когда он поднимется, начинаем звонок сами.
+     */
+    private fun claimEngineForOutgoing(peerId: String, peerName: String) {
+        if (handoverPeerId == peerId) return
+        if (!MirrorHub.claimEngine()) return
+        handoverPeerId = peerId
+        handoverPeerName = peerName
+        _uiState.value = CallUiState(
+            phase = CallStateMachine.Phase.CONNECTING,
+            peerId = peerId,
+            peerName = peerName,
+            outgoing = true,
+        )
+        Log.i(TAG, "mirror: исходящий с тени - движок запрошен, ждём подъём")
+        handoverJob?.cancel()
+        handoverJob = scope.launch {
+            val deadline = nowMs() + 30_000
+            while (nowMs() < deadline) {
+                delay(700)
+                if (RustBridge.isRunning() && RustBridge.nodeId() != null) {
+                    handoverPeerId = ""
+                    _uiState.value = CallUiState()
+                    startOutgoing(peerId, peerName)
+                    return@launch
+                }
+            }
+            handoverPeerId = ""
+            endTextOverride = "Не удалось передать звонок на это устройство"
+            _uiState.value = CallUiState(
+                phase = CallStateMachine.Phase.ENDED,
+                peerId = peerId,
+                peerName = peerName,
+                outgoing = true,
+                endText = "Не удалось передать звонок на это устройство",
+            )
+            scheduleIdleReset()
+        }
     }
 
     private fun ensureCallChannel() {
@@ -1247,6 +1450,7 @@ class CallManager @Inject constructor(
                 if (finished?.phase == CallStateMachine.Phase.ENDED) {
                     machine = null
                     closeBrokerLink() // звонок мог кончиться до медиа (отклонён, не ответили)
+                    mirrorStateKey = null
                     _uiState.value = CallUiState()
                     recentlyEnded[finished.callId] = nowMs()
                     while (recentlyEnded.size > 32) {
@@ -1274,6 +1478,7 @@ class CallManager @Inject constructor(
             viaBroker = current.slowTransport && !audioViaUdp && peerLinkAlive,
             endText = endText,
         )
+        publishMirrorState(sm)
         if (sm.phase == CallStateMachine.Phase.ENDED) scheduleIdleReset()
     }
 

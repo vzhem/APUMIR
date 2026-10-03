@@ -13,19 +13,40 @@ import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Агрегат публикации: никакого тела сообщения/фотографий в статистику не загружаем. */
+data class ChannelPostStatRow(
+    val topicId: String,
+    val publishedAtMs: Long,
+    val authorId: String,
+    val commentCount: Int,
+    val viewCount: Int,
+)
+
 @Dao
 interface GroupDao {
 
     // ── Группы ────────────────────────────────────────────────────────────────
     // Каналы лежат в той же таблице, поэтому в выборках групп они отсекаются:
     // иначе канал показывался бы и в списке групп, и в списке каналов.
-    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY lastMessageAtMs DESC")
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC"
+    )
     fun observeGroups(): Flow<List<GroupEntity>>
 
-    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY lastMessageAtMs DESC")
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC"
+    )
     suspend fun getGroups(): List<GroupEntity>
 
-    @Query("SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 ORDER BY lastMessageAtMs DESC")
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC"
+    )
     fun observeChannels(): Flow<List<GroupEntity>>
 
     // ── Окна для главного экрана ──────────────────────────────────────────
@@ -34,13 +55,15 @@ interface GroupDao {
 
     @Query(
         "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 0 " +
-            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+            "ORDER BY CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC LIMIT :limit"
     )
     fun observeGroupsWindow(limit: Int): Flow<List<GroupEntity>>
 
     @Query(
         "SELECT * FROM groups WHERE isLeft = 0 AND isChannel = 1 " +
-            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+            "ORDER BY CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC LIMIT :limit"
     )
     fun observeChannelsWindow(limit: Int): Flow<List<GroupEntity>>
 
@@ -48,12 +71,15 @@ interface GroupDao {
     @Query(
         "SELECT * FROM groups WHERE isLeft = 0 AND (" +
             "title LIKE '%' || :query || '%' OR lastMessagePreview LIKE '%' || :query || '%') " +
-            "ORDER BY lastMessageAtMs DESC LIMIT :limit"
+            "ORDER BY CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC LIMIT :limit"
     )
     fun searchGroups(query: String, limit: Int): Flow<List<GroupEntity>>
 
-    /** Мои группы и каналы со ссылкой - их каталог рассылает контактам. */
-    @Query("SELECT * FROM groups WHERE ownerId = :ownerId AND isLeft = 0 AND inviteSlug != ''")
+    /** Мои ПУБЛИЧНЫЕ группы и каналы со ссылкой - их каталог рассылает
+     *  контактам (раунд 154: закрытые в каталог не попадают - владелец
+     *  увидел закрытую группу в поиске у участников). */
+    @Query("SELECT * FROM groups WHERE ownerId = :ownerId AND isLeft = 0 AND inviteSlug != '' AND isPublic = 1")
     suspend fun getOwnPublishable(ownerId: String): List<GroupEntity>
 
     /**
@@ -116,6 +142,10 @@ interface GroupDao {
     @Query("UPDATE groups SET isPublic = :isPublic WHERE id = :groupId")
     suspend fun updateGroupVisibility(groupId: String, isPublic: Boolean)
 
+    // Раунд 153: перевод группы «без тем» в обычную группу с темами.
+    @Query("UPDATE groups SET topicsEnabled = 1 WHERE id = :groupId")
+    suspend fun setTopicsEnabled(groupId: String)
+
     @Query("UPDATE groups SET topicsEnabled = :enabled WHERE id = :groupId")
     suspend fun updateTopicsEnabled(groupId: String, enabled: Boolean)
 
@@ -126,7 +156,7 @@ interface GroupDao {
     @Query("UPDATE groups SET ownerId = :ownerId WHERE id = :groupId")
     suspend fun updateGroupOwner(groupId: String, ownerId: String)
 
-    @Query("UPDATE groups SET isLeft = 1 WHERE id = :groupId")
+    @Query("UPDATE groups SET isLeft = 1, pinnedAtMs = NULL WHERE id = :groupId")
     suspend fun markLeft(groupId: String)
 
     /** Возврат в группу после одобрения заявки: снимает признак выхода. */
@@ -266,6 +296,10 @@ interface GroupDao {
     @Query("UPDATE group_topics SET name = :name WHERE id = :topicId")
     suspend fun renameTopic(topicId: String, name: String)
 
+    // Раунд 260: смена значка темы (эмодзи/живой значок).
+    @Query("UPDATE group_topics SET iconEmoji = :emoji WHERE id = :topicId")
+    suspend fun updateTopicIcon(topicId: String, emoji: String)
+
     @Query("UPDATE group_topics SET isClosed = :closed WHERE id = :topicId")
     suspend fun updateTopicClosed(topicId: String, closed: Boolean)
 
@@ -347,6 +381,37 @@ interface GroupDao {
 
     @Query("SELECT * FROM group_message_stats WHERE groupId = :groupId AND topicId = '' ORDER BY dayKey DESC LIMIT :limit")
     suspend fun getGroupStats(groupId: String, limit: Int): List<GroupMessageStatEntity>
+
+    /** Ограничение с обеих сторон: будущие/старые записи не вытесняют дни графика. */
+    @Query(
+        "SELECT * FROM group_message_stats WHERE groupId = :groupId AND topicId = '' " +
+            "AND dayKey BETWEEN :fromDayKey AND :toDayKey ORDER BY dayKey ASC"
+    )
+    suspend fun getGroupStatsInRange(groupId: String, fromDayKey: String, toDayKey: String): List<GroupMessageStatEntity>
+
+    /**
+     * Как в ленте: первый обычный текст темы — пост, остальные — комментарии.
+     * Пустая тема и APUIMGP1 (части фото/текста) не становятся публикациями.
+     * Просмотры уже дедуплицированы парой topicId/viewerId; их сумма НЕ есть
+     * число уникальных читателей канала. Агрегируем до JOIN, чтобы комментарии
+     * и просмотры не умножали друг друга.
+     */
+    @Query(
+        "SELECT t.id AS topicId, head.timestamp AS publishedAtMs, head.senderId AS authorId, " +
+            "texts.textCount - 1 AS commentCount, COALESCE(views.viewCount, 0) AS viewCount " +
+            "FROM group_topics AS t " +
+            "JOIN (SELECT topicId, COUNT(*) AS textCount FROM messages " +
+                "WHERE chatId = :groupId AND content NOT LIKE 'APUIMGP1:%' GROUP BY topicId) AS texts " +
+                "ON texts.topicId = t.id " +
+            "JOIN messages AS head ON head.id = (SELECT first.id FROM messages AS first " +
+                "WHERE first.chatId = :groupId AND first.topicId = t.id " +
+                "AND first.content NOT LIKE 'APUIMGP1:%' ORDER BY first.timestamp ASC, first.id ASC LIMIT 1) " +
+            "LEFT JOIN (SELECT v.topicId, COUNT(*) AS viewCount FROM post_views AS v " +
+                "JOIN group_topics AS vt ON vt.id = v.topicId WHERE vt.groupId = :groupId " +
+                "GROUP BY v.topicId) AS views ON views.topicId = t.id " +
+            "WHERE t.groupId = :groupId ORDER BY head.timestamp DESC, head.id DESC"
+    )
+    suspend fun getChannelPostStats(groupId: String): List<ChannelPostStatRow>
 
     @Query("SELECT * FROM group_message_stats WHERE groupId = :groupId AND topicId != '' ORDER BY dayKey DESC LIMIT :limit")
     suspend fun getTopicStats(groupId: String, limit: Int): List<GroupMessageStatEntity>

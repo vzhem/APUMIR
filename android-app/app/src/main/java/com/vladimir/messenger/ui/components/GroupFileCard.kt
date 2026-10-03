@@ -10,10 +10,14 @@ package com.vladimir.messenger.ui.components
 // (FileCardState.of), здесь только рисование.
 // =============================================================================
 
+import coil.compose.AsyncImage
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,14 +27,20 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -72,6 +82,8 @@ data class FileCardState(
     val onDownload: () -> Unit,
     val onSave: (() -> Unit)?,
     val onShare: (() -> Unit)?,
+    /** Раунд 124: файл (гифка) уже принят - можно в избранное. */
+    val onFavorite: (() -> Unit)? = null,
     /** Файл мой (я автор): карточка без «Скачать», со счётчиком получивших. */
     val isFromMe: Boolean = false,
 ) {
@@ -93,6 +105,8 @@ data class FileCardState(
             onDownload: () -> Unit,
             onSave: (FileTransferEntity) -> Unit,
             onShare: (file: java.io.File) -> Unit,
+            /** Раунд 124: добавить файл в избранное (когда он принят). */
+            onFavorite: ((FileTransferEntity) -> Unit)? = null,
             nowMs: Long = System.currentTimeMillis(),
             /** Скольким участникам отдана общая копия (K2): у автора строки COMPLETE на каждого больше нет. */
             servedCount: Int = 0,
@@ -116,7 +130,12 @@ data class FileCardState(
                 pending = GroupFileMarker.key(chatId, info.sha256) in pendingKeys,
                 stalled = stalled,
                 seeded = if (isFromMe) mine.count { it.direction == "OUTGOING" && it.state == "COMPLETE" } + servedCount else 0,
-                previewFile = localFile?.takeIf { info.mediaType.startsWith("image/") },
+                // Раунд 170: у стикеров (в т.ч. webm) картинка есть всегда.
+                previewFile = localFile?.takeIf {
+                    info.mediaType.startsWith("image/") ||
+                        GroupFileMarker.isGif(info) ||
+                        GroupFileMarker.isSticker(info)
+                },
                 onDownload = onDownload,
                 onSave = if (complete) {
                     { onSave(transfer!!) }
@@ -124,6 +143,11 @@ data class FileCardState(
                     null
                 },
                 onShare = localFile?.let { f -> { onShare(f) } },
+                onFavorite = if (complete && onFavorite != null) {
+                    { onFavorite(transfer!!) }
+                } else {
+                    null
+                },
                 isFromMe = isFromMe,
             )
         }
@@ -136,7 +160,20 @@ data class FileCardState(
  * участников уже получили файл.
  */
 @Composable
-fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = Modifier) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+fun GroupFileCard(
+    state: FileCardState,
+    isFromMe: Boolean,
+    modifier: Modifier = Modifier,
+    /** Долгое нажатие на картинку: реакции/меню пузыря (групповой чат). */
+    onLongPress: (() -> Unit)? = null,
+    /**
+     * Раунд 211: действия СООБЩЕНИЯ для меню точек («Поделиться в APU»,
+     * реакция, закрепить, удалить). Рисуются после файловых - владелец:
+     * в точках должен быть весь функционал, как у текстовых пузырей.
+     */
+    messageActions: List<ApuAction> = emptyList(),
+) {
     val info = state.info
     val transfer = state.transfer
     val complete = transfer != null && transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
@@ -150,22 +187,66 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
         }
     }
     var showFull by remember(previewPath) { mutableStateOf(false) }
+    // Раунд 172: стикер увеличивается с продолжающейся анимацией.
     if (showFull && previewPath != null) {
-        PhotoViewer(
-            photos = listOf(PhotoSource.File(previewPath)),
-            onDismiss = { showFull = false },
-        )
+        if (GroupFileMarker.isSticker(info)) {
+            StickerViewer(
+                file = java.io.File(previewPath),
+                onDismiss = { showFull = false },
+            )
+        } else if (!com.vladimir.messenger.data.sticker.StickerLibrary
+            .isWebmFile(java.io.File(previewPath))
+        ) {
+            PhotoViewer(
+                photos = listOf(PhotoSource.File(previewPath)),
+                onDismiss = { showFull = false },
+            )
+        }
     }
-    Column(
-        modifier = modifier
+    // Раунд 168: Box-обёртка - в правом верхнем углу карточки живут
+    // «три точки» действий (владелец: прежние кнопки под стикером
+    // не помещались и рвались посреди слова).
+    var showActions by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
             .padding(top = 6.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-            .padding(8.dp),
+            .fillMaxWidth(),
+    ) {
+    // Раунд 169: стикер парит в чате - без подложки, скруглений и полей
+    // карточки (владелец: «без лишних рамок и фонов»).
+    // Раунд 170: webm-стикеры тоже парят (StickerAnimated рисует покадрово).
+    val stickerFloating = GroupFileMarker.isSticker(info) && previewPath != null
+    val messenger = com.vladimir.messenger.ui.theme.LocalMessengerColors.current
+    val fileTextColor = if (stickerFloating) MaterialTheme.colorScheme.onBackground
+        else if (isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+    Column(
+        modifier = Modifier
+            .then(
+                if (stickerFloating) Modifier
+                else Modifier.apuBubbleSurface(color = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther)
+            )
+            .padding(if (stickerFloating) 0.dp else 8.dp),
     ) {
         val bitmap = previewBitmap
-        if (bitmap != null) {
+        if ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
+            previewPath != null
+        ) {
+            // Раунд 170: гифки/webp крутит Coil, webm-стикеры - покадрово.
+            StickerAnimated(
+                file = java.io.File(previewPath),
+                contentDescription = info.displayName,
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .then(if (stickerFloating) Modifier else Modifier.clip(RoundedCornerShape(8.dp)))
+                    .combinedClickable(
+                        onClick = { showFull = true },
+                        onLongClick = onLongPress,
+                    ),
+            )
+            Spacer(Modifier.height(6.dp))
+        } else if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = info.displayName,
@@ -174,27 +255,36 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
                     .fillMaxWidth()
                     .heightIn(max = 240.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { showFull = true },
+                    .combinedClickable(
+                        onClick = { showFull = true },
+                        onLongClick = onLongPress,
+                    ),
             )
             Spacer(Modifier.height(6.dp))
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp))
+        // Имя и размер нужны, только пока картинки ещё нет (идёт приём).
+        // Картинка на месте - она и есть сообщение (решение владельца).
+        val hasPreview = bitmap != null ||
+            ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
+                previewPath != null)
+        if (!hasPreview) Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(fileIconFor(info.mediaType), contentDescription = null, modifier = Modifier.size(28.dp), tint = fileTextColor)
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     info.displayName,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
+                    color = fileTextColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(GroupFileMarker.formatSize(info.sizeBytes), style = MaterialTheme.typography.labelSmall)
+                Text(GroupFileMarker.formatSize(info.sizeBytes), style = MaterialTheme.typography.labelSmall, color = fileTextColor.copy(alpha = 0.7f))
             }
             // Кнопка «Скачать»: пока файл не просили и он не идёт.
             if (!isFromMe && transfer == null && !state.pending) {
                 IconButton(onClick = state.onDownload, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.Download, contentDescription = "Скачать")
+                    Icon(Icons.Filled.Download, contentDescription = "Скачать", tint = ApuBubbleAccentColor)
                 }
             }
         }
@@ -211,8 +301,15 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
             state.pending -> "Запрошено, ждём раздающего…"
             else -> ""
         }
-        if (status.isNotEmpty()) {
-            Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+        // С картинкой на месте служебные строки не нужны: «Получено ✓»
+        // очевидно, остальное покажем, только пока что-то идёт не так.
+        val statusVisible = when {
+            !hasPreview -> status.isNotEmpty()
+            isFromMe -> status.startsWith("Получили") || status.startsWith("Раздающ")
+            else -> status.contains("…") || status.startsWith("Ошибка") || status.startsWith("Раздающ")
+        }
+        if (statusVisible) {
+            Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp), color = fileTextColor.copy(alpha = 0.75f))
         }
         if (transfer != null && !complete && transfer.chunkCount > 0 && transfer.state != "FAILED") {
             LinearProgressIndicator(
@@ -222,19 +319,77 @@ fun GroupFileCard(state: FileCardState, isFromMe: Boolean, modifier: Modifier = 
         }
         if (transfer != null && (transfer.state == "FAILED" || state.stalled) && !isFromMe) {
             TextButton(onClick = state.onDownload, contentPadding = PaddingValues(0.dp)) {
-                Text(if (state.stalled) "Спросить у другого" else "Скачать снова", style = MaterialTheme.typography.labelMedium)
+                Text(if (state.stalled) "Спросить у другого" else "Скачать снова", style = MaterialTheme.typography.labelMedium, color = ApuBubbleAccentColor)
             }
         }
-        if (complete || (isFromMe && state.onShare != null)) {
-            Row {
-                if (state.onSave != null) {
-                    TextButton(onClick = state.onSave, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                        Text("Сохранить в папку", style = MaterialTheme.typography.labelMedium)
+    }
+        // Раунд 168: «три точки» в правом верхнем углу карточки; тап -
+        // три горизонтальных пузыря в гамме APU (как в «Избранном»).
+        val cardHasPreview = previewBitmap != null ||
+            ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
+                previewPath != null)
+        val hasActions = state.onSave != null || state.onShare != null ||
+            state.onFavorite != null || messageActions.isNotEmpty()
+        if (cardHasPreview && hasActions) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(32.dp)
+                    .apuBubbleSurface(shape = CircleShape)
+                    .clickable { showActions = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.MoreVert,
+                    contentDescription = "Действия",
+                    tint = ApuBubbleAccentColor,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            DropdownMenu(
+                expanded = showActions,
+                onDismissRequest = { showActions = false },
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .widthIn(min = 210.dp),
+                ) {
+                    val save = state.onSave
+                    if (save != null) {
+                        ApuActionBubble("Сохранить в папку", Icons.Filled.Save) {
+                            showActions = false
+                            save()
+                        }
                     }
-                }
-                if (state.onShare != null) {
-                    TextButton(onClick = state.onShare, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                        Text("Поделиться", style = MaterialTheme.typography.labelMedium)
+                    val share = state.onShare
+                    if (share != null) {
+                        ApuActionBubble("Поделиться", Icons.Filled.Share) {
+                            showActions = false
+                            share()
+                        }
+                    }
+                    val favorite = state.onFavorite
+                    if (favorite != null) {
+                        // Раунд 211: у карточки в сообществе теперь и действия
+                        // сообщения; файловое различаем подписью, как в личке.
+                        ApuActionBubble("Файл в избранное", Icons.Filled.Star) {
+                            showActions = false
+                            favorite()
+                        }
+                    }
+                    // Раунд 211: за файловыми - весь функционал сообщения
+                    // (владелец: меню точек должно быть полным).
+                    messageActions.forEach { action ->
+                        ApuActionBubble(
+                            label = action.title,
+                            icon = action.icon,
+                            destructive = action.destructive,
+                        ) {
+                            showActions = false
+                            action.onClick()
+                        }
                     }
                 }
             }

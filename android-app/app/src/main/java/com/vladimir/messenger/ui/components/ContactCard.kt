@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.PushPin
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.ui.theme.StatusOnline
 import com.vladimir.messenger.ui.theme.StatusOffline
@@ -59,11 +60,18 @@ fun ContactCard(
     kind: BubbleKind = BubbleKind.Personal,
     /** Пункты меню «⋮» справа в пузыре. Пусто - кнопки нет. */
     menuActions: List<BubbleMenuAction> = emptyList(),
+    /** Main-inbox marker; ContactsScreen reuses this card without the marker. */
+    showPinnedIndicator: Boolean = false,
 ) {
     // Присланный аватар из роевого реестра (если есть) - иначе инициалы.
     val avatars by AvatarStore.avatars.collectAsState()
     // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
     val avatarBitmap = AvatarBitmaps.rememberAvatar(avatars[chat.contactId])
+    // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
+    val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
+    val draftText = drafts[
+        com.vladimir.messenger.data.draft.DraftStore.dmKey(chat.contactId)
+    ].orEmpty()
 
     Row(
         modifier = modifier
@@ -150,14 +158,28 @@ fun ContactCard(
 
             Spacer(modifier = Modifier.height(2.dp))
 
-            // Превью последнего сообщения
-            Text(
-                text      = chat.lastMessage ?: "Нет сообщений",
-                style     = MaterialTheme.typography.bodySmall,
-                color     = Color(0xFF5A6472),
-                maxLines  = 1,
-                overflow  = TextOverflow.Ellipsis,
-            )
+            // Превью последнего сообщения; черновик (раунд 255) - красным,
+            // как в больших мессенджерах: сразу видно, что текст не отправлен.
+            if (draftText.isNotEmpty()) {
+                Text(
+                    text     = "Черновик: $draftText",
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = Color(0xFFC62828),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    // Раунд 155: служебные строки (гифки/стикеры) -
+                    // человеческими подписями.
+                    text      = com.vladimir.messenger.util.ChatPreviews.human(chat.lastMessage)
+                        ?: "Нет сообщений",
+                    style     = MaterialTheme.typography.bodySmall,
+                    color     = Color(0xFF5A6472),
+                    maxLines  = 1,
+                    overflow  = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))
@@ -182,16 +204,31 @@ fun ContactCard(
         Column(
             horizontalAlignment = Alignment.End,
         ) {
-            // Время последнего сообщения
-            if (chat.lastMessageTime != null) {
-                Text(
-                    text  = formatChatTime(chat.lastMessageTime),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (chat.unreadCount > 0)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        Color(0xFF5A6472),
-                )
+            // Время и значок закрепа находятся вместе в правом верхнем углу.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (chat.lastMessageTime != null) {
+                    Text(
+                        // Раунд 184 (аудит-5): кэш вместо нового SimpleDateFormat
+                        // на каждую перерисовку строки списка.
+                        text = remember(chat.lastMessageTime, System.currentTimeMillis() / 3_600_000L) {
+                            formatChatTime(chat.lastMessageTime)
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (chat.unreadCount > 0)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            Color(0xFF5A6472),
+                    )
+                }
+                if (showPinnedIndicator && chat.isPinned) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Filled.PushPin,
+                        contentDescription = "Закреплено в главном списке",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(4.dp))

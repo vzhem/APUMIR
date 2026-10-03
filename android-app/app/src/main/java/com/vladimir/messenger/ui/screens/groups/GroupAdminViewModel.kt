@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 data class GroupAdminUiState(
@@ -29,6 +31,7 @@ data class GroupAdminUiState(
     val requests: List<JoinRequestSummary> = emptyList(),
     val invites: List<InviteSummary> = emptyList(),
     val stats: GroupStats? = null,
+    val isStatsRefreshing: Boolean = false,
     /** Темы нужны, чтобы в статистике показывать имена тем, а не их идентификаторы. */
     val topics: List<TopicSummary> = emptyList(),
     val memberPermissions: Long = GroupPermissions.Member.DEFAULT,
@@ -55,6 +58,8 @@ class GroupAdminViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(GroupAdminUiState(groupId = groupId))
     val uiState: StateFlow<GroupAdminUiState> = _uiState.asStateFlow()
+
+    private var statsJob: Job? = null
 
     init {
         observeGroup()
@@ -132,10 +137,27 @@ class GroupAdminViewModel @Inject constructor(
     }
 
     fun refreshStats() {
-        viewModelScope.launch {
-            groupRepository.stats(groupId)
-                .onSuccess { s -> _uiState.update { it.copy(stats = s) } }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        // Не выдаём обычному участнику ошибку лишь из-за открытия настроек.
+        if (!_uiState.value.isAdmin) {
+            _uiState.update { it.copy(stats = null) }
+            return
+        }
+        if (statsJob?.isActive == true) return
+        statsJob = viewModelScope.launch {
+            _uiState.update { it.copy(isStatsRefreshing = true) }
+            try {
+                val snapshot = groupRepository.stats(groupId).getOrThrow()
+                _uiState.update { state -> state.copy(stats = snapshot.takeIf { state.isAdmin }) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { state ->
+                    if (state.isAdmin) state.copy(error = e.message ?: "Не удалось обновить статистику")
+                    else state.copy(stats = null)
+                }
+            } finally {
+                _uiState.update { it.copy(isStatsRefreshing = false) }
+            }
         }
     }
 
@@ -222,6 +244,15 @@ class GroupAdminViewModel @Inject constructor(
             groupRepository.setPublic(groupId, isPublic)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 .onSuccess { _uiState.update { it.copy(notice = if (isPublic) "Группа публичная" else "Группа частная") } }
+        }
+    }
+
+    /** Раунд 153: перевести группу «без тем» в группу с темами. */
+    fun enableTopics() {
+        viewModelScope.launch {
+            groupRepository.enableTopics(groupId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess { _uiState.update { it.copy(notice = "Темы включены") } }
         }
     }
 

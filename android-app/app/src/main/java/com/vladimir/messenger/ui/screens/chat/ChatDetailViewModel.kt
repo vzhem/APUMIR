@@ -5,10 +5,13 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileTransferRouter
 import com.vladimir.messenger.data.file.OutgoingFilePreparationService
+import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -18,6 +21,9 @@ import com.vladimir.messenger.domain.usecase.SendMessageUseCase
 import com.vladimir.messenger.domain.usecase.MarkAsReadUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,9 +34,22 @@ import javax.inject.Inject
 
 data class ChatDetailUiState(
     val messages: List<Message> = emptyList(),
+    /** Раунд 173: закреплённые сообщения чата (свежие вверху). */
+    val pinned: List<Message> = emptyList(),
+    /** р235: собеседник сейчас печатает («печатает…» в шапке чата). */
+    val isPeerTyping: Boolean = false,
+    /**
+     * р241: переписка с СОБСТВЕННЫМ узлом (в контакты попал свой адрес -
+     * например, отсканировали собственный QR из профиля). Такая переписка
+     * никуда не ведёт: собеседника в ней нет. Показываем честную плашку,
+     * вместо того чтобы молча копить строки «в ожидании».
+     */
+    val isSelfChat: Boolean = false,
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
+    /** Local database error, distinct from sending/network errors. */
+    val historyError: String?   = null,
     val isSending: Boolean      = false,
     val isPreparingFile: Boolean = false,
     val error: String?          = null,
@@ -45,6 +64,18 @@ data class ChatDetailUiState(
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
     val canSendAttachments: Boolean = true,
     val attachmentsLockedHint: String = "",
+    /** Каталог GIF (наш сервер): гифки, курсор «ещё», состояние. */
+    val gifItems: List<com.vladimir.messenger.data.gif.GifItem> = emptyList(),
+    val gifNext: String = "",
+    val gifLoading: Boolean = false,
+    val gifError: String? = null,
+    /** Раунд 192: мягкая плашка, когда показываем сохранённые результаты. */
+    val gifNotice: String? = null,
+    /** Раунд 121: свой каталог роя. tab: "swarm" | "external". */
+    val gifTab: String = "swarm",
+    val myGifs: List<com.vladimir.messenger.data.gif.GifLibEntry> = emptyList(),
+    val swarmGifs: List<com.vladimir.messenger.data.gif.SwarmGif> = emptyList(),
+    val swarmStatus: String? = null,
     /** Реакции по сообщениям: ключ - id сообщения. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
 )
@@ -59,27 +90,164 @@ class ChatDetailViewModel @Inject constructor(
     private val filePreparation: OutgoingFilePreparationService,
     private val fileTransferDao: FileTransferDao,
     private val fileTransferRouter: FileTransferRouter,
+    private val botApi: com.vladimir.messenger.service.BotApi,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
+    private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
+    private val messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository,
+    private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     // chatId передаётся через навигацию (SavedStateHandle)
     private val chatId: String = checkNotNull(savedStateHandle["chatId"])
 
+    /** р235: собеседник личного чата - ему уходит «печатает…». */
+    @Volatile private var peerId: String = ""
+
+    /** р235: когда последний раз отправляли «печатает» (не чаще раза в 2.5 с). */
+    @Volatile private var lastTypingSentAt = 0L
+
+    /** р235: сказали ли собеседнику, что мы печатаем (чтобы послать «перестал»). */
+    @Volatile private var typingAnnounced = false
+
+    /** р236: черновик этого чата (ключ - адрес собеседника, он общий у устройств). */
+    @Volatile private var draftKey: String = ""
+
+    /** р236: когда последний раз отправляли черновик партнёрскому устройству. */
+    @Volatile private var lastDraftSentAt = 0L
+
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
+    private val historyObserver = ChatHistoryObserver(
+        scope = viewModelScope,
+        messages = { getMessagesUseCase(chatId) },
+        onMessages = ::showLocalMessages,
+        reportRead = {
+            withContext(Dispatchers.IO) {
+                markAsReadUseCase(chatId)
+                readReceipts.reportRead(chatId)
+            }
+        },
+        onLoadError = { error ->
+            android.util.Log.w("ChatDetailVM", "Local history read failed", error)
+            _uiState.update { it.copy(isLoading = false, historyError = "Не удалось прочитать историю чата") }
+        },
+        onReadError = { error -> android.util.Log.w("ChatDetailVM", "Read receipt failed", error) },
+    )
+
     init {
         refreshAttachmentRights()
+        observePeerTyping()
+        observeDrafts()
         loadMessages()
+        observePinned()
         observeContactPresence()
         observeTransfers()
         observeReactions()
         markAsRead()
+        observeGifArrivals()
+        observeStickerArrivals()
+    }
+
+    /**
+     * р235: «печатает…». Состояние живёт в памяти (TypingPeer) и само гаснет
+     * через несколько секунд после последнего пакета; здесь только показываем
+     * его в шапке чата.
+     */
+    private fun observePeerTyping() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.typing.TypingPeer.typing.collect { typing ->
+                val peer = peerId
+                _uiState.update { it.copy(isPeerTyping = peer.isNotBlank() && typing.contains(peer)) }
+            }
+        }
+    }
+
+    /**
+     * р235: рассказать собеседнику, что мы печатаем. Пакет уходит не чаще раза
+     * в [TYPING_REFRESH_MS] (на каждую букву - нельзя: это лишний трафик), а
+     * когда поле очистили или сообщение ушло - «перестал».
+     */
+    private fun publishTyping(active: Boolean) {
+        val peer = peerId
+        if (peer.isBlank()) return
+        // р243: в переписке с собственным узлом сигнал не нужен - он вернулся бы
+        // уведомлением «от себя». Признак берём из состояния (р241): вызова в
+        // ядро здесь нет, набор текста не должен ждать JNI.
+        if (_uiState.value.isSelfChat) return
+        if (!active) {
+            if (!typingAnnounced) return
+            typingAnnounced = false
+            lastTypingSentAt = 0L
+            // «Перестал» - тоже с запасным путём: иначе индикатор остался бы
+            // висеть, если прямой канал не работает.
+            com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, false, queueFallback = true)
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastTypingSentAt < TYPING_REFRESH_MS) return
+        lastTypingSentAt = now
+        // В надёжную очередь попадает только ПЕРВЫЙ пакет сессии: так
+        // индикатор появится даже без прямого канала, а поток обновлений
+        // очередь сообщений не забивает.
+        val first = !typingAnnounced
+        typingAnnounced = true
+        com.vladimir.messenger.data.typing.TypingRouter.publishLocal(peer, chatId, true, queueFallback = first)
+    }
+
+    // ── р236: черновики сообщений ───────────────────────────────────────────
+
+    /**
+     * Черновик чата: текст хранится под ключом собеседника, поэтому второй
+     * телефон той же личности видит тот же недописанный текст. Здесь только
+     * сохранение у себя (при каждом изменении) и редкая отправка партнёру
+     * (не чаще раза в 1.5 с - набор текста не должен забивать канал).
+     */
+    private fun saveDraft(text: String) {
+        val key = draftKey
+        if (key.isBlank()) return
+        com.vladimir.messenger.data.draft.DraftStore.save(key, text)
+        // р243: партнёрскому устройству черновик в свой же чат не шлём (см. выше).
+        if (_uiState.value.isSelfChat) return
+        val now = System.currentTimeMillis()
+        if (now - lastDraftSentAt < DRAFT_REFRESH_MS && text.isNotEmpty()) return
+        lastDraftSentAt = now
+        com.vladimir.messenger.data.mirror.MirrorHub.publishDraft(key, text)
+    }
+
+    /**
+     * Черновик, приехавший с партнёрского устройства. Подставляем его в поле
+     * только если поле пустое: то, что человек набирает прямо сейчас, чужой
+     * текст затирать не должен.
+     */
+    private fun observeDrafts() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.draft.DraftStore.drafts.collect { drafts ->
+                val key = draftKey
+                if (key.isBlank()) return@collect
+                val text = drafts[key].orEmpty()
+                if (text.isEmpty()) return@collect
+                if (_uiState.value.inputText.isNotBlank()) return@collect
+                _uiState.update { it.copy(inputText = text) }
+            }
+        }
+    }
+
+    /** Раунд 121: гифка, которую ждали из роя, пришла - сразу отправить. */
+    private fun observeGifArrivals() {
+        viewModelScope.launch {
+            // Раунд 128: гифка приезжает ТИХО (с хранителей) - карточки-ссылки
+            // в чате оживают сами (GifRefCard слушает arrivals). Здесь только
+            // гасим статус в окне каталога.
+            com.vladimir.messenger.data.gif.GifLibrary.arrivalsFlow().collect { _ ->
+                _uiState.update { it.copy(swarmStatus = null) }
+            }
+        }
     }
 
     /** Реакции чата: поток уже уведён на IO внутри репозитория. */
@@ -108,6 +276,9 @@ class ChatDetailViewModel @Inject constructor(
      */
     private fun observeContactPresence() {
         viewModelScope.launch {
+            // р243: пока чат не опознан, считаем его обычным: плашка «это ваш
+            // узел» появляется после загрузки переписки (р241), а не после
+            // вызова в ядро. Набор текста от этого не зависит.
             chatRepository.observeChat(chatId).collect { chat ->
                 if (chat != null) {
                     // Заодно подтягиваем @никнейм: он живёт в таблице контактов
@@ -116,8 +287,30 @@ class ChatDetailViewModel @Inject constructor(
                     val nick = runCatching {
                         contactDao.getContactById(chat.contactId)?.username.orEmpty()
                     }.getOrDefault("")
+                    // р235: адрес собеседника нужен для «печатает…».
+                    if (chat.contactId.isNotBlank()) peerId = chat.contactId
+                    // р241/р243: свой ли это узел, решает загрузка переписки:
+                    // она сравнивает адрес собеседника со «своим» адресом из
+                    // уже полученных сообщений (recipientId). Ядро здесь не
+                    // опрашиваем - этот код идёт при каждом обновлении чата.
+                    // р236: черновик этого чата (ключ - адрес собеседника)
+                    // подставляем в пустое поле: недописанное с другого
+                    // устройства должно ждать здесь.
+                    if (chat.contactId.isNotBlank() && draftKey.isBlank()) {
+                        draftKey = com.vladimir.messenger.data.draft.DraftStore.dmKey(chat.contactId)
+                        val draft = com.vladimir.messenger.data.draft.DraftStore.load(draftKey)
+                        if (draft.isNotEmpty() && _uiState.value.inputText.isBlank()) {
+                            _uiState.update { it.copy(inputText = draft) }
+                        }
+                    }
                     _uiState.update {
-                        it.copy(isContactOnline = chat.isContactOnline, contactUsername = nick)
+                        it.copy(
+                            isContactOnline = chat.isContactOnline,
+                            isSelfChat = isSelfChat(it.messages, chat.contactId),
+                            contactUsername = nick,
+                            isPeerTyping = com.vladimir.messenger.data.typing.TypingPeer
+                                .isTyping(chat.contactId),
+                        )
                     }
                     // Сердечки заводим здесь: только тут точно известен адрес
                     // собеседника (в личном чате это contactId).
@@ -156,27 +349,114 @@ class ChatDetailViewModel @Inject constructor(
         _uiState.update { it.copy(error = it.attachmentsLockedHint) }
     }
 
-    private fun loadMessages() {
-        android.util.Log.i("ChatDetailVM", "🔍 loadMessages for chatId=$chatId")
+    /** Раунд 173: закреплённые сообщения - живой поток в шапку чата. */
+    private fun observePinned() {
         viewModelScope.launch {
-            getMessagesUseCase(chatId)
-                .collect { messages ->
-                    android.util.Log.i("ChatDetailVM", "📥 Received ${messages.size} messages for chatId=$chatId")
-                    // Показать последние 5 сообщений
-                    messages.takeLast(5).forEach { msg ->
-                        android.util.Log.i("ChatDetailVM", "  🔹 msg: id=${msg.id.take(8)} isFromMe=${msg.isFromMe} status=${msg.status} content=${msg.content.take(20)}")
-                    }
-                    val wasEmpty = _uiState.value.messages.isEmpty()
-                    _uiState.update { state ->
-                        state.copy(
-                            messages      = messages,
-                            isLoading     = false,
-                            // Автопрокрутка при первой загрузке или новом сообщении
-                            scrollToBottom = wasEmpty || messages.lastOrNull()?.isFromMe == true
-                        )
+            chatRepository.observePinnedChatMessages(chatId).collect { pinned ->
+                _uiState.update {
+                    it.copy(pinned = pinned, error = MessagePinPolicy.visibleError(it.error, pinned.size))
+                }
+            }
+        }
+    }
+
+    /** Статус вступления по карточке приглашения (для всплывающей подсказки). */
+    private val _inviteStatus = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val inviteStatus: kotlinx.coroutines.flow.StateFlow<String?> = _inviteStatus.asStateFlow()
+    fun consumeInviteStatus() { _inviteStatus.value = null }
+
+    /**
+     * Раунд 189: тап «Вступить»/«Подписаться» на карточке приглашения -
+     * та же механика, что у ссылок сообществ: короткая https-ссылка
+     * раскрывается сервисом, дальше заявка или вход.
+     */
+    fun joinByInviteLink(link: String) {
+        if (link.isBlank()) return
+        viewModelScope.launch {
+            val expanded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { groupRepository.expandLink(link) }.getOrNull()
+            }
+            if (expanded == null) {
+                _inviteStatus.value = "Нет связи с сервисом APU - попробуйте позже"
+                return@launch
+            }
+            val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { groupRepository.joinByLink(expanded) }.getOrNull()
+            }
+            _inviteStatus.value = when (outcome) {
+                is com.vladimir.messenger.data.group.JoinOutcome.Joined ->
+                    if (outcome.isChannel) "Вы подписались: " + outcome.title
+                    else "Вы вступили: " + outcome.title
+                is com.vladimir.messenger.data.group.JoinOutcome.RequestSent ->
+                    "Заявка отправлена: " + outcome.title
+                is com.vladimir.messenger.data.group.JoinOutcome.Failed ->
+                    "Не удалось войти: " + outcome.reason
+                null -> "Не удалось войти - попробуйте позже"
+            }
+        }
+    }
+
+    fun togglePin(messageId: String, pinned: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching { chatRepository.setMessagePinned(messageId, pinned) }
+                .getOrElse { error ->
+                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }
+                    return@launch
+                }
+            when (result) {
+                MessagePinMutation.LIMIT_REACHED -> {
+                    _uiState.update { it.copy(error = MessagePinPolicy.LIMIT_REACHED_MESSAGE) }
+                }
+                MessagePinMutation.SCOPE_CONFLICT -> {
+                    _uiState.update { it.copy(error = MessagePinPolicy.SCOPE_CONFLICT_MESSAGE) }
+                }
+                MessagePinMutation.NOT_FOUND -> {
+                    _uiState.update { it.copy(error = "Сообщение не найдено") }
+                }
+                MessagePinMutation.UPDATED,
+                MessagePinMutation.UNCHANGED -> {
+                    // Закреп личный: собеседнику не уходит, но совпадает на
+                    // втором устройстве этого же человека.
+                    runCatching {
+                        com.vladimir.messenger.data.mirror.MirrorHub.publishPin(messageId, pinned)
                     }
                 }
+            }
         }
+    }
+
+    private fun loadMessages() {
+        _uiState.update { it.copy(isLoading = it.messages.isEmpty(), historyError = null) }
+        historyObserver.start()
+    }
+
+    fun retryMessages() = loadMessages()
+
+    /** No suspend, JNI, database lookup or network send before publishing local rows. */
+    private fun showLocalMessages(messages: List<Message>) {
+        if (com.vladimir.messenger.BuildConfig.DEBUG) {
+            android.util.Log.d("ChatDetailVM", "Local history: ${messages.size} messages")
+        }
+        val isSelf = isSelfChat(messages, peerId)
+        _uiState.update { state ->
+            state.copy(
+                messages = messages,
+                isLoading = false,
+                historyError = null,
+                isSelfChat = isSelf,
+                scrollToBottom = state.messages.isEmpty() || messages.lastOrNull()?.isFromMe == true,
+            )
+        }
+    }
+
+    /** Peer metadata arrives independently; history must not wait for a second DB query. */
+    private fun isSelfChat(messages: List<Message>, peer: String): Boolean {
+        val selfNode = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached().ifBlank {
+            messages.firstNotNullOfOrNull { message ->
+                if (message.isFromMe) null else message.recipientId.takeIf { it.startsWith("pk_") }
+            }.orEmpty()
+        }
+        return selfNode.isNotBlank() && peer == selfNode
     }
 
     private fun observeTransfers() {
@@ -222,16 +502,24 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     private fun markAsRead() {
-        viewModelScope.launch {
-            markAsReadUseCase(chatId)
-            // И сообщаем собеседнику: у него галочки станут синими. Сбой не
-            // должен мешать открытию чата, поэтому ошибка только в журнал.
-            runCatching { readReceipts.reportRead(chatId) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Local badge only. The history observer owns the ONE receipt worker.
+                markAsReadUseCase(chatId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                android.util.Log.w("ChatDetailVM", "Local unread badge update failed", error)
+            }
         }
     }
 
     fun onInputTextChanged(text: String) {
         _uiState.update { it.copy(inputText = text) }
+        // р235: «печатает…» у собеседника, пока в поле есть текст.
+        publishTyping(text.isNotBlank())
+        // р236: черновик - и у себя, и на партнёрском устройстве.
+        saveDraft(text)
     }
 
     fun onSendMessage() {
@@ -243,6 +531,10 @@ class ChatDetailViewModel @Inject constructor(
 
             sendMessageUseCase(chatId, text)
                 .onSuccess {
+                    // р235: сообщение ушло - «печатает…» у собеседника гаснет.
+                    publishTyping(false)
+                    // р236: текст ушёл - черновик больше не нужен ни здесь, ни там.
+                    saveDraft("")
                     _uiState.update { it.copy(
                         isSending      = false,
                         scrollToBottom = true
@@ -264,8 +556,20 @@ class ChatDetailViewModel @Inject constructor(
      * durable transport, not by this UI path.
      */
     /** Раунд 43: превью картинки для пузыря передачи файла. */
-    fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? =
-        fileTransferRouter.previewFileFor(transfer)
+    fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
+        // Раунд 172: стикеру нужен ПОЛНЫЙ файл (webm/webp анимация). Прежний
+        // порядок сначала отдавал jpg-снимок роутера - чёрный квадрат вместо
+        // анимации; теперь библиотечный стикер - первый источник.
+        if (transfer.displayName.startsWith("Стикер")) {
+            stickerLibrary.fileOf(transfer.fileSha256)?.let { return it }
+        }
+        val routerFile = fileTransferRouter.previewFileFor(transfer)
+        if (routerFile != null) return routerFile
+        if (transfer.direction == "OUTGOING" && transfer.displayName.startsWith("Стикер")) {
+            return stickerLibrary.fileOf(transfer.fileSha256)
+        }
+        return null
+    }
 
     /**
      * Раунд 44: «Поделиться» картинкой из пузыря: копирую файл в cache и
@@ -294,6 +598,30 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * р245: медиа с телефона-зеркала.
+     *
+     * Отправка файла требует СВОЕЙ сетевой сессии: у тени её нет, и подготовка
+     * передачи падала на незакреплённом ключе получателя («файл не отправлен»).
+     * Поэтому сначала просим движок у активного партнёра (передача роли, р231)
+     * и ждём, пока он поднимется здесь. Если партнёра нет - просто продолжаем:
+     * дальше всё как обычно, с понятной ошибкой, если ключа действительно нет.
+     */
+    private suspend fun claimEngineForMediaIfNeeded() {
+        if (RustBridge.isRunning()) return
+        if (!com.vladimir.messenger.data.mirror.MirrorHub.canClaimEngine()) return
+        com.vladimir.messenger.data.mirror.MirrorHub.claimEngine()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val deadline = System.currentTimeMillis() + 15_000L
+            while (!RustBridge.isRunning() && System.currentTimeMillis() < deadline) {
+                kotlinx.coroutines.delay(400L)
+            }
+        }
+        if (!RustBridge.isRunning()) {
+            android.util.Log.i("ChatDetailVM", "р245: движок не поднялся, пробуем как есть")
+        }
+    }
+
     fun onFileSelected(uri: Uri) {
         if (_uiState.value.isPreparingFile) return
         // Второй рубеж: даже если кнопку обошли, подготовка файла не пройдёт.
@@ -305,6 +633,8 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update { it.copy(isPreparingFile = true) }
             var targetRecipientId: String? = null
             try {
+                // р245: с телефона-зеркала сначала забираем движок у активного.
+                claimEngineForMediaIfNeeded()
                 val chat = chatRepository.getChatById(chatId)
                     ?: error("Чат недоступен")
                 val recipientId = chat.contactId
@@ -347,6 +677,641 @@ class ChatDetailViewModel @Inject constructor(
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }
+        }
+    }
+
+    // ── Каталог GIF (наш сервер -> Tenor/Giphy; отправка как файл) ──
+
+    fun searchGifs(query: String, more: Boolean = false) {
+        if (_uiState.value.gifLoading) return
+        if (!more) lastGifQuery = query
+        val pos = if (more) _uiState.value.gifNext else ""
+        _uiState.update {
+            it.copy(
+                gifLoading = true,
+                gifError = null,
+                gifItems = if (more) it.gifItems else emptyList(),
+            )
+        }
+        viewModelScope.launch {
+            val result = runCatching { botApi.gifSearch(query, pos) }.getOrNull()
+            // Раунд 192: успех первой страницы - в кэш (файл), чтобы при
+            // недоступном сервере каталог продолжал работать сохранённым.
+            if (result != null && !more) {
+                com.vladimir.messenger.data.gif.GifSearchCache.save(
+                    appContext, query, result.first, result.second,
+                )
+            }
+            _uiState.update { state ->
+                if (result == null) {
+                    // Сервер недоступен (лимит/сеть): показываем сохранённое.
+                    val cached = if (more) null
+                    else runCatching {
+                        com.vladimir.messenger.data.gif.GifSearchCache.load(appContext, query)
+                    }.getOrNull()
+                    when {
+                        cached != null -> state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
+                                "Скачать и отправить можно как обычно",
+                            gifItems = cached.first,
+                            gifNext = "",
+                        )
+                        more -> state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNext = "",
+                        )
+                        else -> state.copy(
+                            gifLoading = false,
+                            gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
+                        )
+                    }
+                } else {
+                    val (items, next) = result
+                    if (items.isEmpty() && state.gifItems.isEmpty()) {
+                        state.copy(gifLoading = false, gifError = "Ничего не нашлось")
+                    } else {
+                        state.copy(
+                            gifLoading = false,
+                            gifError = null,
+                            gifNotice = null,
+                            gifItems = (state.gifItems + items).distinctBy { it.id },
+                            gifNext = next,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun closeGifCatalog() {
+        _uiState.update { it.copy(gifItems = emptyList(), gifNext = "", gifError = null, gifNotice = null) }
+    }
+
+    // ── Свой каталог роя (раунд 121) ────────────────────────────────────
+
+    private var lastGifQuery: String = ""
+
+    /** Открыли окно гифок: подтянуть мою библиотеку и каталог роя. */
+    // ── Стикеры (раунд 138): единая панель ввода ────────────────────────────
+
+    /** Мои стикеры для панели. */
+    private val _stickerEntries = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerEntries: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerEntries.asStateFlow()
+
+    /** Недавние стикеры для панели. */
+    private val _stickerRecents = MutableStateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>>(emptyList())
+    val stickerRecents: StateFlow<List<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry>> = _stickerRecents.asStateFlow()
+
+    /** Стикеры других телефонов роя для панели («Из сети»). */
+    private val _swarmStickers = MutableStateFlow<List<com.vladimir.messenger.data.sticker.SwarmSticker>>(emptyList())
+    val swarmStickers: StateFlow<List<com.vladimir.messenger.data.sticker.SwarmSticker>> = _swarmStickers.asStateFlow()
+
+    /** sha стикера из сети, который ждём, чтобы сразу отправить (раунд 139). */
+    private var pendingSwarmStickerSha: String? = null
+
+    /** Перечитать библиотеку стикеров (панель открылась / добавили). */
+    fun refreshStickers() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _stickerEntries.value = stickerLibrary.all()
+            _stickerRecents.value = stickerLibrary.recents()
+            // Раунд 139: каталог роя - рассказать о себе и спросить чужие,
+            // слить каталоги хранителей, подтянуть миниатюры для сетки.
+            runCatching {
+                stickerLibrary.syncWithSwarm(chatRepository, force = false)
+            }
+            val mine = _stickerEntries.value.map { it.sha256 }.toSet()
+            val swarm = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.swarmCatalog(appContext, mine)
+            }.getOrDefault(emptyList())
+            _swarmStickers.value = swarm
+            for (s in swarm.take(40)) {
+                if (com.vladimir.messenger.data.sticker.StickerLibrary
+                    .tinyThumbFile(appContext, s.sha256) == null
+                ) {
+                    runCatching {
+                        com.vladimir.messenger.data.sticker.StickerLibrary.requestThumb(
+                            appContext, chatRepository, s.sha256, s.holders,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** Добавить свой стикер из хранилища телефона. */
+    fun addSticker(uri: Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { stickerLibrary.add(uri) }
+            announceAdded()
+            refreshStickers()
+        }
+    }
+
+    /** Раунд 165: альбом стикеров .zip - в библиотеку, сетка обновится. */
+    fun addStickerZip(uri: Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { stickerLibrary.addZip(uri) }
+            announceAdded()
+            refreshStickers()
+        }
+    }
+
+    /**
+     * Раунд 167: добавили стикеры (.zip или по одному) - объявить свой
+     * каталог рою СРАЗУ: абоненты увидят их в «Из сети» без ожидания.
+     */
+    private suspend fun announceAdded() {
+        runCatching { stickerLibrary.syncWithSwarm(chatRepository, force = true) }
+    }
+
+    /**
+     * Раунд 174: удалить свой стикер случайно закинули). Из библиотеки,
+     * каталог роя переобъявляется сразу - у абонентов исчезнет из
+     * «Из сети». Кто уже скачал - у того остаётся (E2E).
+     */
+    fun removeSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { stickerLibrary.deleteBySha(entry.sha256) }
+            announceAdded()
+            refreshStickers()
+        }
+    }
+
+    /**
+     * Раунд 174: удалить свою гифку из библиотеки и роевого каталога.
+     */
+    fun removeOwnGif(sha256: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.deleteOwn(appContext, sha256)
+            }
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = true,
+                )
+            }
+            onGifCatalogOpened()
+        }
+    }
+
+    /**
+     * Отправить стикер в личный чат: картинкой (та же файловая машина, что у
+     * скрепки), но сразу - без диалога выбора. Стикер встаёт в «Недавние».
+     */
+    fun sendSticker(entry: com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
+        // Раунд 206: непрорисованный стикер не отправляем «пустышкой» -
+        // сначала тихо докачиваем у роя, приедет - уйдёт сам.
+        if (!entry.file.isFile) {
+            val swarm = _swarmStickers.value.firstOrNull { it.sha256 == entry.sha256 }
+            if (swarm != null) {
+                autoFetchSticker(swarm)
+                pendingSwarmStickerSha = entry.sha256
+                _uiState.update { it.copy(swarmStatus = "Стикер подгружается из сети - сразу отправим") }
+            } else {
+                _uiState.update { it.copy(error = "Файл стикера пропал с телефона - докачать его неоткуда") }
+            }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            var targetRecipientId: String? = null
+            try {
+                // р245: с телефона-зеркала сначала забираем движок (как и файл).
+                claimEngineForMediaIfNeeded()
+                val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+                val recipientId = chat.contactId
+                targetRecipientId = recipientId
+                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                val messageId = UUID.randomUUID().toString()
+                // Раунд 166/170: честный тип и имя - на карточке и в
+                // уведомлениях «Стикер.webp»/«Стикер.webm», не sha-строка.
+                val webm = com.vladimir.messenger.data.sticker.StickerLibrary.isWebmFile(entry.file)
+                val prepared = filePreparation.prepareFromFile(
+                    source = entry.file,
+                    displayName = if (webm) "Стикер.webm" else "Стикер.webp",
+                    mediaType = if (webm) "video/webm" else "image/webp",
+                    messageId = messageId,
+                    chatId = chatId,
+                    recipientNodeId = recipientId,
+                )
+                chatRepository.insertLocalFileMessage(
+                    chatId = chatId,
+                    recipientId = recipientId,
+                    messageId = messageId,
+                    content = FileTransferRouter.formatPlaceholder(
+                        prepared.displayName,
+                        prepared.mediaType,
+                        prepared.totalBytes,
+                    ),
+                    timestamp = System.currentTimeMillis(),
+                )
+                _uiState.update { it.copy(scrollToBottom = true) }
+                fileTransferRouter.pumpOutgoing()
+                // Раунд 171: запись recents - файловый ввод-вывод, в IO.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    stickerLibrary.touch(entry.sha256)
+                }
+                refreshStickers()
+            } catch (e: Exception) {
+                android.util.Log.w("ChatDetailVM", "sticker send failed", e)
+                targetRecipientId?.takeIf { _uiState.value.error == null }?.let {
+                    fileTransferRouter.requestExchangeBinding(it)
+                }
+                _uiState.update {
+                    it.copy(error = "Стикер не отправлен: ${e.message.orEmpty()}")
+                }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /**
+     * Раунд 139: выбрал стикер в «Из сети». Есть локально - сразу в чат;
+     * нет - тихая просьба трём хранителям, байты приедут - отправим сами.
+     */
+    fun requestSwarmSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
+        viewModelScope.launch {
+            val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                stickerLibrary.entryOf(swarm.sha256)
+            }
+            if (local != null) {
+                sendSticker(local)
+                return@launch
+            }
+            com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
+            pendingSwarmStickerSha = swarm.sha256
+            val holder = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
+                    appContext, chatRepository, swarm.sha256, swarm.holders,
+                )
+            }.getOrNull()
+            _uiState.update {
+                it.copy(
+                    swarmStatus = when (holder) {
+                        null -> "Сеть пока не отвечает - попробуйте позже"
+                        "" -> "Уже качаем этот стикер"
+                        else -> "Качается с $holder - сейчас отправим"
+                    },
+                )
+            }
+        }
+    }
+
+    /**
+     * Раунд 206: тихая докачка плитки без файла (панель сама, при открытии).
+     * Без плашек и без «отправить по приезде» - просто вернуть файл домой.
+     */
+    fun autoFetchSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
+        viewModelScope.launch {
+            val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                stickerLibrary.entryOf(swarm.sha256)
+            }
+            if (local != null) return@launch
+            com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
+            runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
+                    appContext, chatRepository, swarm.sha256, swarm.holders,
+                )
+            }
+        }
+    }
+
+    /** Раунд 206: «обновить» - сброс паузы, просьба ВСЕМ держателям (до 12). */
+    fun retryFetchSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
+            _uiState.update { it.copy(swarmStatus = "Просим у всех держателей сети…") }
+            val holder = runCatching {
+                com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
+                    appContext, chatRepository, swarm.sha256, swarm.holders,
+                    force = true,
+                    maxTargets = 12,
+                )
+            }.getOrNull()
+            _uiState.update {
+                it.copy(
+                    swarmStatus = when (holder) {
+                        null -> "Сеть пока не отвечает - попробуйте позже"
+                        "" -> "Уже качаем этот стикер"
+                        else -> "Просили: $holder"
+                    },
+                )
+            }
+        }
+    }
+
+    /** Раунд 139: стикер, которого ждали из роя, приехал - сразу отправить. */
+    private fun observeStickerArrivals() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.sticker.StickerLibrary.arrivalsFlow().collect { sha ->
+                _uiState.update { it.copy(swarmStatus = null) }
+                refreshStickers()
+                val wanted = pendingSwarmStickerSha
+                if (wanted != null && wanted == sha) {
+                    pendingSwarmStickerSha = null
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        stickerLibrary.entryOf(sha)
+                    }?.let { sendSticker(it) }
+                }
+            }
+        }
+    }
+
+    fun onGifCatalogOpened() {
+        viewModelScope.launch {
+            runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = false,
+                )
+            }
+            val my = runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.entries(appContext)
+            }.getOrDefault(emptyList())
+            val swarm = runCatching {
+                com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
+            }.getOrDefault(emptyList())
+            _uiState.update {
+                it.copy(
+                    gifTab = if (my.isNotEmpty() || swarm.isNotEmpty()) "swarm" else "external",
+                    myGifs = my,
+                    swarmGifs = swarm,
+                )
+            }
+        }
+    }
+
+    fun setGifTab(tab: String) {
+        _uiState.update { it.copy(gifTab = tab) }
+    }
+    /**
+     * Раунд 124: СВОЯ гифка из хранилища телефона. Ложится в библиотеку
+     * (превью + индекс), объявляется в каталоге нашей сети - теперь она
+     * есть у всех телефонов, без внешнего ресурса.
+     */
+    fun addOwnGif(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val bytes = appContext.contentResolver.openInputStream(uri)
+                        ?.use { input -> input.readBytes() }
+                        ?: return@withContext null
+                    if (bytes.isEmpty() || bytes.size > 30 * 1024 * 1024) return@withContext null
+                    val name = runCatching {
+                        appContext.contentResolver.query(
+                            uri, null, null, null, null,
+                        )?.use { cursor ->
+                            val idx = cursor.getColumnIndex(
+                                android.provider.OpenableColumns.DISPLAY_NAME,
+                            )
+                            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+                        }
+                    }.getOrNull()
+                    com.vladimir.messenger.data.gif.GifLibrary.add(
+                        appContext,
+                        bytes,
+                        null,
+                        "своя",
+                        name?.takeIf { it.isNotBlank() }
+                            ?: "своя_${System.currentTimeMillis() / 1000}.gif",
+                    )
+                }.getOrNull()
+            }
+            if (added == null) {
+                _uiState.update { it.copy(swarmStatus = "Не вышло: нужен файл GIF до 30 МБ") }
+            } else {
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                        appContext, chatRepository, force = false,
+                    )
+                }
+                onGifCatalogOpened()
+                _uiState.update { it.copy(swarmStatus = "Своя гифка добавлена - уже в нашей сети") }
+            }
+        }
+    }
+
+
+    /**
+     * Раунд 128: гифка из моей библиотеки уходит ССЫЛКОЙ. В чате появляется
+     * ОДНА карточка от моего лица; байты собеседник тихо подтянет с
+     * хранителей (у меня они уже есть - я и хранитель).
+     */
+    fun attachLocalGif(sha256: String) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            try {
+                sendGifRefInternal(sha256)
+            } catch (e: Exception) {
+                val message = e.message.orEmpty()
+                _uiState.update {
+                    it.copy(error = if (message.contains("недоступен")) "Собеседник недоступен - попробуйте позже" else "Гифка не отправлена: $message")
+                }
+            }
+        }
+    }
+
+    /**
+     * Раунд 128: отправить ССЫЛКУ на гифку (от моего лица). Никаких файлов
+     * по переписке: карточка одна, байты каждый телефон подтягивает тихо с
+     * хранителей из каталога сети.
+     */
+    private suspend fun sendGifRefInternal(sha256: String) {
+        val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+        val recipientId = chat.contactId
+        val messageId = UUID.randomUUID().toString()
+        // р245: это устройство без сети (зеркало)? Тогда ссылку отправляет
+        // партнёр-активный. Раньше вызов шёл в ядро напрямую: движка здесь нет,
+        // отправка возвращала false, и строка висела «в ожидании» вечно -
+        // гифка с телефона-зеркала до собеседника не доходила вовсе.
+        val viaMirror = chatRepository.sendGifRefViaMirror(
+            chatId = chatId,
+            recipientId = recipientId,
+            sha256 = sha256,
+            messageId = messageId,
+        )
+        if (viaMirror) {
+            _uiState.update { it.copy(scrollToBottom = true) }
+            return
+        }
+        val sent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                RustBridge.sendMessage(
+                    messageId, chatId, recipientId,
+                    com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256),
+                )
+            }.getOrDefault(false)
+        }
+        // Раунд 178: гифка больше НЕ ждёт собеседника. Отправилось - хорошо;
+        // нет - карточка всё равно появляется в чате и встаёт в телефонную
+        // очередь QUEUED_OFFLINE: доставим сами при его появлении в сети
+        // (retryPendingMessagesForPeer/FULL SYNC по presence), а байты он
+        // доберёт из роя у хранителей - я среди них.
+        chatRepository.insertGifRefMessage(
+            chatId = chatId,
+            recipientId = recipientId,
+            messageId = messageId,
+            sha256 = sha256,
+            timestamp = System.currentTimeMillis(),
+            status = if (sent) "LOCAL_FILE"
+            else com.vladimir.messenger.domain.model.MessageStatus.QUEUED_OFFLINE.name,
+        )
+        _uiState.update {
+            it.copy(
+                scrollToBottom = true,
+                swarmStatus = if (sent) null
+                else "Гифка будет доставлена, когда собеседник появится в сети",
+            )
+        }
+        // Раунд 131: я мог только что скачать эту гифку - объявить каталог,
+        // чтобы все узнали хранителя и смогли тихо забрать байты.
+        runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                    appContext, chatRepository, force = false,
+                )
+            }
+        }
+        // Своя карточка тоже должна ожить: если гифки у меня нет - тихо
+        // попросим у сети (тротлимб внутри GifLibrary).
+        ensureGifRefInternal(sha256)
+    }
+
+    private val thumbRequestedAt = HashMap<String, Long>()
+
+    /**
+     * Раунд 129: подтянуть миниатюры чужих гифок для сетки каталога
+     * (по одной просьбе - лучшему хранителю; тротлимб 5 минут/sha).
+     */
+    fun requestPeerThumbs(entries: List<com.vladimir.messenger.data.gif.SwarmGif>) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch {
+            for (sg in entries) {
+                val sha = sg.entry.sha256
+                if (com.vladimir.messenger.data.gif.GifLibrary.tinyThumbFile(appContext, sha) != null) continue
+                val now = System.currentTimeMillis()
+                if (now - (thumbRequestedAt[sha] ?: 0L) < 5 * 60_000L) continue
+                thumbRequestedAt[sha] = now
+                runCatching {
+                    com.vladimir.messenger.data.gif.GifLibrary.requestThumb(
+                        appContext, chatRepository, sha, sg.holders,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Раунд 128: убедиться, что гифка есть в моей библиотеке (для карточки-
+     * ссылки). Нет - тихо попросить у хранителей сети.
+     */
+    fun ensureGifRef(sha256: String) {
+        viewModelScope.launch { ensureGifRefInternal(sha256) }
+    }
+
+    private suspend fun ensureGifRefInternal(sha256: String) {
+        val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha256)?.isFile == true
+        }
+        if (have) return
+        val holders = runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
+        }.getOrDefault(emptyList())
+            .firstOrNull { it.entry.sha256 == sha256 }?.holders.orEmpty()
+        if (holders.isEmpty()) return
+        com.vladimir.messenger.data.gif.GifLibrary.rememberWant(sha256)
+        runCatching {
+            com.vladimir.messenger.data.gif.GifLibrary.requestGif(
+                appContext, chatRepository, sha256, holders,
+            )
+        }
+    }
+
+    /**
+     * Раунд 128: выбрал гифку из сети (синяя точка) - в чат уходит моя
+     * ССЫЛКА. У меня гифка подтянется тихо, у собеседника - тоже.
+     */
+    fun requestSwarmGif(swarm: com.vladimir.messenger.data.gif.SwarmGif) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            try {
+                sendGifRefInternal(swarm.entry.sha256)
+                _uiState.update { it.copy(swarmStatus = "Ссылка отправлена - гифка подтянется из сети") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(swarmStatus = "Собеседник недоступен - попробуйте позже") }
+            }
+        }
+    }
+
+    /** Выбрал гифку: скачать и отправить как файл (тот же путь, что скрепка). */
+    /**
+     * Раунд 128: выбрал гифку во внешнем каталоге - скачиваем ОДИН раз,
+     * селим в библиотеку (телефон становится хранителем) и отправляем в чат
+     * ССЫЛКОЙ. Байты собеседник подтянет тихо - с меня как с хранителя.
+     */
+    fun attachGif(item: com.vladimir.messenger.data.gif.GifItem) {
+        if (_uiState.value.isPreparingFile) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                // Раунд 121: если гифка уже живёт в моей библиотеке (качали
+                // раньше или получили из сети) - наружный ресурс не трогаем.
+                var sha = com.vladimir.messenger.data.gif.GifLibrary
+                    .shaForGiphyId(appContext, item.id)
+                if (sha == null) {
+                    val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        botApi.downloadGif(item.gif)
+                    } ?: error("Гифка не скачалась")
+                    val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.vladimir.messenger.data.gif.GifLibrary.add(
+                            appContext, bytes, item.id, lastGifQuery, "gif_" + item.id + ".gif",
+                        )
+                    } ?: error("Гифка не сохранилась")
+                    sha = added.sha256
+                }
+                sendGifRefInternal(sha)
+            } catch (e: Exception) {
+                android.util.Log.w("ChatDetailVM", "gif attach failed", e)
+                _uiState.update { it.copy(error = "Гифка не отправлена: " + e.message.orEmpty()) }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
+        }
+    }
+
+    /**
+     * Раунд 135: удалить своё сообщение только у себя.
+     */
+    fun deleteMessageForMe(messageId: String) {
+        viewModelScope.launch {
+            messageDeletion.deleteForMe(chatId, messageId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
+        }
+    }
+
+    /**
+     * Раунд 135: удалить своё сообщение у всех: конверт собеседнику и
+     * стирание у себя. Ошибка (собеседник недоступен) - тостом, ничего
+     * не стираем: половинное удаление хуже честного отказа.
+     */
+    fun deleteMessageForAll(messageId: String) {
+        viewModelScope.launch {
+            messageDeletion.deleteForAllDirect(chatId, messageId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
         }
     }
 
@@ -422,7 +1387,105 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    // Раунд 203: «Поделиться в APU» - друзья, группы+темы, каналы+посты.
+    suspend fun forwardTargets(): List<com.vladimir.messenger.ui.components.ForwardTarget> {
+        val friends = chatRepository.forwardFriends().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.FRIEND,
+                it.id,
+                it.contactName,
+            )
+        }
+        val groups = groupRepository.forwardGroups().map {
+            com.vladimir.messenger.ui.components.ForwardTarget(
+                com.vladimir.messenger.ui.components.ForwardKind.GROUP,
+                it.id,
+                it.title,
+                it.isChannel,
+            )
+        }
+        return friends + groups
+    }
+
+    /** Темы группы / посты канала для второго шага выбора цели. */
+    suspend fun forwardTopics(groupId: String): List<com.vladimir.messenger.ui.components.ForwardTopic> =
+        groupRepository.forwardTopics(groupId).map {
+            com.vladimir.messenger.ui.components.ForwardTopic(it.id, it.name, it.iconEmoji)
+        }
+
+    /**
+     * Раунд 203: переслать текст в выбранную цель. Над пересылаемым
+     * пишется ссылка на источник: «↩ Переслано из «…»».
+     */
+    fun forwardMessage(
+        text: String,
+        sourceLabel: String,
+        target: com.vladimir.messenger.ui.components.ForwardTarget,
+        onResult: (Boolean) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val peer = runCatching { chatRepository.forwardChatById(chatId) }.getOrNull()
+            val body = com.vladimir.messenger.util.ForwardMarker.buildBody(
+                false,
+                peer?.contactId.orEmpty(),
+                "",
+                sourceLabel,
+                text,
+            )
+            val res = if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
+                chatRepository.sendMessage(target.id, "", body)
+            } else {
+                groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            onResult(res.isSuccess)
+        }
+    }
+
+    /** Раунд 203: тап по источнику пересылки - куда открывать. */
+    suspend fun resolveForwardTap(ref: com.vladimir.messenger.util.ForwardMarker.Ref): com.vladimir.messenger.util.ForwardMarker.Open {
+        return if (!ref.isGroup) {
+            val chat = chatRepository.forwardChatByContact(ref.id)
+            if (chat == null) {
+                com.vladimir.messenger.util.ForwardMarker.Open.Missing("Этого человека нет в контактах на этом телефоне")
+            } else {
+                com.vladimir.messenger.util.ForwardMarker.Open.Chat(chat.id, chat.contactName, chat.contactId)
+            }
+        } else {
+            val group = groupRepository.forwardGroupById(ref.id)
+            if (group == null || group.isLeft) {
+                // Раунд 203 (владелец): вместо «недоступно» - вступить/подписаться.
+                if (ref.slug.isNotBlank()) {
+                    com.vladimir.messenger.util.ForwardMarker.Open.Join(
+                        com.vladimir.messenger.data.group.GroupInviteLinks.build(
+                            ref.slug,
+                            ref.id,
+                            ref.ownerId.takeIf { it.isNotBlank() },
+                            ref.isChannel,
+                            false,
+                            ref.topicId.takeIf { it.isNotBlank() },
+                        )
+                    )
+                } else {
+                    com.vladimir.messenger.util.ForwardMarker.Open.Missing("Нет ссылки-приглашения для этой группы")
+                }
+            } else {
+                com.vladimir.messenger.util.ForwardMarker.Open.Group(group.id, ref.topicId.takeIf { it.isNotBlank() })
+            }
+        }
+    }
+
+    /** Раунд 203: локальный файл стикера/роя по sha - для пересланных визиток. */
+    fun localSwarmFile(sha256: String): java.io.File? = stickerLibrary.fileOf(sha256)
+
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private companion object {
+        /** р235: не чаще раза в 2.5 с - иначе «печатает…» стал бы потоком пакетов. */
+        const val TYPING_REFRESH_MS = 2_500L
+
+        /** р236: черновик уходит партнёру не чаще раза в 1.5 с. */
+        const val DRAFT_REFRESH_MS = 1_500L
     }
 }

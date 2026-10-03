@@ -17,9 +17,14 @@ param(
 # source of truth, so later changes to the release pipeline are ordinary
 # commits plus one run of this script - no retyping YAML by hand.
 #
-# What is new in this copy (2026-09-17): the K6 step "Core tests (K6)" calls
-# scripts/ci/release-tests.sh before the native build. Rule of the stage: if
-# the core tests fail, there is no release.
+# What this copy carries (2026-09-30):
+#   * the K6 step "Core tests (K6)" calls scripts/ci/release-tests.sh before the
+#     native build - rule of the stage: if the core tests fail, there is no
+#     release (2026-09-17);
+#   * the step "Fast-forward main to the release (bindings + rebuilt core)"
+#     moves main up to the release commit after the release is published, so a
+#     lagging main can no longer swallow releases silently (2026-09-18..30 main
+#     sat 292 commits behind while 122 releases went by).
 #
 # The script never touches the checkout: it opens a temporary git worktree,
 # copies the file there, commits, pushes and removes the worktree.
@@ -128,15 +133,16 @@ try {
         & git add $WorkflowPath
         if ($LASTEXITCODE -ne 0) { Stop-With 'git add failed' }
 
-        & git commit -m 'ci: core tests before the release build (K6)'
+        & git commit -m 'ci: release workflow from the repository copy (K6 gate + main fast-forward)'
         if ($LASTEXITCODE -ne 0) { Stop-With 'git commit failed' }
 
         & git push origin "HEAD:refs/heads/$Branch"
         if ($LASTEXITCODE -ne 0) { Stop-With 'git push failed - push the commit manually' }
 
         Write-Output ''
-        Write-Output 'RESULT: the release workflow now runs the core tests before building the APK.'
-        Write-Output 'If the tests fail, the release build stops and no release is published.'
+        Write-Output 'RESULT: the release workflow now runs the core tests before building the APK'
+        Write-Output 'and moves main up to the release commit after the release is published.'
+        Write-Output 'If the core tests fail, the release build stops and no release is published.'
         exit 0
     }
     finally {

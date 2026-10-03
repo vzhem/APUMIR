@@ -7,8 +7,10 @@ import com.vladimir.messenger.data.local.dao.MessageDao
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.vladimir.messenger.data.mirror.MirrorHub
 
 /**
  * Отчёты «прочитано»: синие галочки у отправителя.
@@ -52,9 +54,22 @@ class ReadReceiptRepository @Inject constructor(
                     atMs = System.currentTimeMillis(),
                 ) ?: return@runCatching
 
-                RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
-                Log.i(TAG, "read receipt sent for ${incoming.size} message(s)")
-            }.onFailure { Log.w(TAG, "read receipt failed: ${it.message}") }
+                // р228: тень отдаёт отчёт активному; подтверждений она не шлёт.
+                if (MirrorHub.deliverAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)) {
+                    Log.i(TAG, "read receipt via mirror for ${incoming.size} message(s)")
+                } else {
+                    RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+                    Log.i(TAG, "read receipt sent for ${incoming.size} message(s)")
+                    // р229: свой отчёт - и партнёрскому устройству личности.
+                    MirrorHub.publishOwnAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)
+                }
+                // р228: второе устройство той же личности тоже снимает
+                // непрочитанное - иначе бейджи на телефонах разойдутся.
+                MirrorHub.publishReadSync(peerId = peer, groupId = "")
+            }.onFailure {
+                if (it is CancellationException) throw it
+                Log.w(TAG, "read receipt failed: ${it.message}")
+            }
         }
     }
 
@@ -63,6 +78,21 @@ class ReadReceiptRepository @Inject constructor(
      *
      * @return true, если это был отчёт - тогда служба не сохраняет его текстом.
      */
+    /**
+     * р228: переписку прочитали на ПАРТНЁРСКОМ устройстве - активный помечает
+     * те же сообщения прочитанными у себя. В сеть ничего не уходит: отчёт
+     * собеседнику отправит вызывающий.
+     */
+    suspend fun applyMirrorOutgoing(text: String): Boolean {
+        if (!ReadReceiptWire.isReadReceipt(text)) return false
+        val packet = ReadReceiptWire.parse(text) ?: return true
+        withContext(Dispatchers.IO) {
+            runCatching { messageDao.markReadByIds(packet.messageIds) }
+                .onFailure { Log.w(TAG, "mirror read apply failed: ${it.message}") }
+        }
+        return true
+    }
+
     suspend fun routeIncoming(senderId: String, text: String): Boolean {
         if (!ReadReceiptWire.isReadReceipt(text)) return false
         val packet = ReadReceiptWire.parse(text)
