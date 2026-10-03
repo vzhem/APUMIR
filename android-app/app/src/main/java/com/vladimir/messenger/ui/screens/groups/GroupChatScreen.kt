@@ -10,6 +10,7 @@ package com.vladimir.messenger.ui.screens.groups
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
@@ -201,7 +202,7 @@ fun GroupChatScreen(
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
     var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
     deleteForAllTarget?.let { target ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { deleteForAllTarget = null },
             title = { Text("Удалить у всех?") },
             text = { Text("Сообщение исчезнет у всех участников группы. У кого старая версия приложения - там останется: обновите телефоны.") },
@@ -1844,7 +1845,7 @@ private fun NewTopicDialog(
     // Значки тем: по умолчанию эмодзи - сетка с поиском; фирменные живые
     // значки - второй таб.
     var emojiMode by remember { mutableStateOf(true) }
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
@@ -1860,6 +1861,7 @@ private fun NewTopicDialog(
                     onValueChange = { name = it },
                     label = { Text("Название темы") },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 // Раунд 258: превью значка «подпрыгивает» при смене, как в Telegram.

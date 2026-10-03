@@ -113,6 +113,17 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("size = 88", source("screens/settings/SettingsScreen.kt"))
         self.assertIn("size = 96", source("screens/share/ShareProfileScreen.kt"))
 
+    def test_groups_screen_and_create_dialog_use_house_style(self):
+        groups = source("screens/groups/GroupsScreen.kt")
+        self.assertNotRegex(groups, r"\bAlertDialog\(")
+        self.assertIn("ApuSettingsHeader(\"Сообщества\")", groups)
+        self.assertIn("ApuSettingsSectionTitle(title)", groups)
+        self.assertIn("ApuSettingsDialog(", groups)
+        self.assertIn("CommunityTypeChoices(", groups)
+        self.assertIn("ApuSettingsLayout.horizontalCommunityTypeChoices(maxWidth.value, fontScale)", groups)
+        self.assertIn("Role.RadioButton", groups)
+        self.assertIn("Role.Switch", groups)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

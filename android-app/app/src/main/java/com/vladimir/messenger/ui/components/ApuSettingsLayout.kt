@@ -13,4 +13,7 @@ internal object ApuSettingsLayout {
 
     fun horizontalThemeChoices(widthDp: Float, fontScale: Float): Boolean =
         widthDp >= 3 * 80f * fontScale.coerceAtLeast(1f) + 16f
+
+    fun horizontalCommunityTypeChoices(widthDp: Float, fontScale: Float): Boolean =
+        widthDp >= 2 * 108f * fontScale.coerceAtLeast(1f) + 8f
 }

@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ApuMainTabBar
@@ -320,15 +322,38 @@ fun ChatListScreen(
             )
         },
         floatingActionButton = {
-            // FAB-карандаш: открывает меню создания чата, группы и канала.
-            FloatingActionButton(
-                onClick = { fabMenuExpanded = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Icon(
-                    Icons.Default.Edit,
-                    contentDescription = "Создать",
-                    tint = MaterialTheme.colorScheme.onPrimary,
+            // FAB-карандаш: открывает фирменное меню создания чата, группы и канала.
+            Box {
+                FloatingActionButton(
+                    onClick = { fabMenuExpanded = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Создать",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+                ApuActionsMenu(
+                    expanded = fabMenuExpanded,
+                    onDismiss = { fabMenuExpanded = false },
+                    actions = listOf(
+                        ApuAction(
+                            title = "Новый чат",
+                            icon = Icons.Default.Person,
+                            onClick = onAddContactClick,
+                        ),
+                        ApuAction(
+                            title = "Новая группа",
+                            icon = Icons.Default.Group,
+                            onClick = onCreateGroupClick,
+                        ),
+                        ApuAction(
+                            title = "Новый канал",
+                            icon = Icons.Default.Campaign,
+                            onClick = onCreateChannelClick,
+                        ),
+                    ),
                 )
             }
         },
@@ -338,38 +363,6 @@ fun ChatListScreen(
                 .fillMaxSize()
                 .padding(paddingValues),
         ) {
-            DropdownMenu(
-                expanded = fabMenuExpanded,
-                onDismissRequest = { fabMenuExpanded = false },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 96.dp),
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Новый чат") },
-                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                    onClick = {
-                        fabMenuExpanded = false
-                        onAddContactClick()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Новая группа") },
-                    leadingIcon = { Icon(Icons.Default.Group, contentDescription = null) },
-                    onClick = {
-                        fabMenuExpanded = false
-                        onCreateGroupClick()
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Новый канал") },
-                    leadingIcon = { Icon(Icons.Default.Campaign, contentDescription = null) },
-                    onClick = {
-                        fabMenuExpanded = false
-                        onCreateChannelClick()
-                    },
-                )
-            }
             // Плавная листалка: страницы едут за пальцем, в движении видно
             // сразу две вкладки, и чем быстрее движение, тем дальше долистает.
             if (uiState.isLoading) {
