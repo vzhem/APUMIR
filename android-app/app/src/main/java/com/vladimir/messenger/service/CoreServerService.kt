@@ -86,7 +86,9 @@ class CoreServerService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var networkMonitor: NetworkMonitor? = null
-    private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
+    private val serviceJob = kotlinx.coroutines.SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val startupInitialized = java.util.concurrent.atomic.AtomicBoolean(false)
     private var eventPollingJob: Job? = null
     private var filePumpJob: Job? = null
     private var lastNotificationText: String = ""
@@ -118,10 +120,9 @@ class CoreServerService : Service() {
     private val stickerAskHandledAt = mutableMapOf<String, Long>()
     private val stickerWantServedAt = mutableMapOf<String, Long>()
 
-    // Раунд 141: уведомления без хрупкого окна «2 секунды» - базой служит
-    // момент старта сервиса, повторы гасятся множеством оглашённых id.
-    private val serviceStartedAtMs = System.currentTimeMillis()
-    private val notifiedMessageIds = java.util.Collections.synchronizedSet(HashSet<String>())
+    // Keep only ids in the rolling notification look-back window; Room's query is likewise
+    // bounded to two minutes and indexed by (isFromMe, timestamp).
+    private val notifiedMessageIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
      * Служебные конверты каталога гифок: ask/have/want. Разбираются до
@@ -568,6 +569,14 @@ class CoreServerService : Service() {
         // будильник «+5 минут». Если процесс убьют или усыпят, будильник
         // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
         EmergencyKeepAliveReceiver.scheduleNext(applicationContext)
+
+        // The keep-alive alarm (and network restarts) can deliver another start intent to the
+        // same Service instance. Foreground notification/alarm maintenance above is safe to repeat;
+        // the long-lived startup pumps and collectors below must only be created once.
+        if (!startupInitialized.compareAndSet(false, true)) {
+            Log.i(TAG, "Duplicate start intent; existing service workers remain active")
+            return START_STICKY
+        }
 
         // р240: счётчик недоотправленных - для экрана «Диагностика
         // синхронизации» в настройках. Обновляем редко: это подсказка, а не
@@ -1563,6 +1572,9 @@ class CoreServerService : Service() {
         } catch (e: Exception) {
             Log.w(TAG, "stopForeground in onDestroy failed", e)
         }
+        // Cancel every service-owned polling loop/collector. Repeated start intents are
+        // idempotent, but a real service destruction must release this entire coroutine tree.
+        serviceJob.cancel()
         telegramRelay?.stop()
         cloudflareRelay?.stop()
         com.vladimir.messenger.data.mirror.MirrorHub.close()
@@ -1571,7 +1583,7 @@ class CoreServerService : Service() {
         eventPollingJob?.cancel()
         filePumpJob?.cancel()
         networkMonitor?.stop()
-        RustBridge.shutdown()
+        RustBridge.shutdownAsync()
         try {
             multicastLock?.release()
             Log.i(TAG, "MulticastLock released")
@@ -1587,24 +1599,19 @@ class CoreServerService : Service() {
         // Observer for incoming messages → show notifications
         serviceScope.launch {
             Log.i(TAG, "Starting message observer for notifications")
-            chatRepository.observeAllMessages()
+            chatRepository.observeRecentIncomingMessages()
                 .collect { messages ->
-                    Log.d(TAG, "Message observer received ${messages.size} messages")
-                    // Раунд 141: прежнее окно «письмо младше 2 секунд от
-                    // отметки времени» молчало, когда часы телефонов
-                    // расходились или письмо ехало через запасной канал
-                    // дольше двух секунд - уведомления «переставали
-                    // приходить» (владелец, 2026-09-23). Теперь: оглашаем
-                    // всё, что появилось с момента старта сервиса (минус
-                    // две минуты - доложить написанное, пока процесс был
-                    // мёртв), и ещё не оглашённое: дубль core+CF гасится
-                    // по id, старые записи при восстановлении бэкапа -
-                    // базой старта.
-                    if (notifiedMessageIds.size > 4096) notifiedMessageIds.clear()
+                    Log.d(TAG, "Message observer received ${messages.size} recent incoming messages")
+                    // A rolling two-minute window catches delayed messages after process restart
+                    // without accumulating every message seen since this foreground service began.
+                    val cutoff = System.currentTimeMillis() - 120_000L
+                    notifiedMessageIds.entries.forEach { (id, timestamp) ->
+                        if (timestamp < cutoff) notifiedMessageIds.remove(id, timestamp)
+                    }
                     val recentIncoming = messages.filter {
                         !it.isFromMe &&
-                            it.timestamp >= serviceStartedAtMs - 120_000L &&
-                            notifiedMessageIds.add(it.id) &&
+                            it.timestamp >= cutoff &&
+                            notifiedMessageIds.putIfAbsent(it.id, it.timestamp) == null &&
                             !com.vladimir.messenger.util.InlineImage.isPart(it.content) &&
                             // Раунд 156: конверты роя (стикеры/миниатюры) -
                             // служебные, не звоним (владелец).
@@ -1645,6 +1652,7 @@ class CoreServerService : Service() {
 
         eventPollingJob = serviceScope.launch {
             Log.i(TAG, "Event polling started")
+            var lastStatusRefreshAtMs = 0L
             while (isActive) {
                 // K3: события файловых кусков приходят пучками (пока файл
                 // льётся стримами). Пока очередь не пуста - работаем
@@ -1659,12 +1667,16 @@ class CoreServerService : Service() {
                     Log.e(TAG, "Event polling error", ex)
                     false
                 }
-                try {
-                    val status = RustBridge.networkStatus()
-                    val peers = RustBridge.connectedPeers()
-                    updateNotification(notificationText(status, peers))
-                } catch (ex: Exception) {
-                    Log.e(TAG, "Status polling error", ex)
+                val statusNowMs = android.os.SystemClock.elapsedRealtime()
+                if (statusNowMs - lastStatusRefreshAtMs >= POLL_INTERVAL_MS) {
+                    lastStatusRefreshAtMs = statusNowMs
+                    try {
+                        val status = RustBridge.networkStatus()
+                        val peers = RustBridge.connectedPeers()
+                        updateNotification(notificationText(status, peers))
+                    } catch (ex: Exception) {
+                        Log.e(TAG, "Status polling error", ex)
+                    }
                 }
                 delay(if (busy) BUSY_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
             }

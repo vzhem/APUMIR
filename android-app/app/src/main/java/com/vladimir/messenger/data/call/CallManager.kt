@@ -840,7 +840,7 @@ class CallManager @Inject constructor(
 
     /** Сигналы едут двумя путями: durable relay (messageId детерминирован) + прямой QUIC. */
     private fun sendSignal(peerId: String, messageId: String, text: String) {
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             sendQuic(peerId, text)
             runCatching { RustBridge.sendMessage(messageId, "direct", peerId, text) }
         }

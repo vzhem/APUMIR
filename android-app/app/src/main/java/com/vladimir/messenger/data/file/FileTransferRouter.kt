@@ -11,6 +11,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
@@ -54,6 +55,7 @@ class FileTransferRouter @Inject constructor(
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
 ) {
     private val appContext: Context
+    private val routerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val custodySender: FileCustodySender
@@ -171,7 +173,7 @@ class FileTransferRouter @Inject constructor(
                 }.getOrDefault(false)
             },
             onDataPacket = { peerId, packetText ->
-                CoroutineScope(Dispatchers.IO).launch {
+                routerScope.launch {
                     routeIncoming(
                         senderId = peerId,
                         chatId = FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
@@ -523,9 +525,13 @@ class FileTransferRouter @Inject constructor(
             runCatching { groupFiles.get().onServed(transferIdHex, requester) }
         }
         // LAN server starts only after sender/receiver exist: an early incoming
-        // frame must never hit a half-constructed router.
-        lan.startServer()
-        Log.i(TAG, "router init complete: lan build=2026-08-25-B, lan port=${lan.listenPort}, node=${lan.myNodeId}")
+        // frame must never hit a half-constructed router. Binding and interface
+        // enumeration are blocking operations, so never do this in the Hilt/UI constructor.
+        routerScope.launch {
+            runCatching { lan.startServer() }
+                .onFailure { Log.e(TAG, "LAN server start failed", it) }
+            Log.i(TAG, "router init complete: lan build=2026-08-25-B, lan port=${lan.listenPort}, node=${lan.myNodeId}")
+        }
     }
 
     /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */

@@ -108,6 +108,14 @@ interface MessageDao {
     @Query("SELECT * FROM messages ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<MessageEntity>>
 
+    /** A rolling two-minute window; Room re-evaluates SQLite's clock on message-table invalidation. */
+    @Query(
+        "SELECT * FROM messages WHERE isFromMe = 0 AND " +
+            "timestamp >= (CAST(strftime('%s', 'now') AS INTEGER) * 1000 - 120000) " +
+            "ORDER BY timestamp DESC, id DESC LIMIT 512"
+    )
+    fun observeRecentIncomingWindow(): Flow<List<MessageEntity>>
+
     // ── Группы и темы (v8) ──────────────────────────────────────────────────
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC, id ASC")
     fun observeTopicMessages(chatId: String, topicId: String): Flow<List<MessageEntity>>

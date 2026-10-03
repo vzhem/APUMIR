@@ -7,6 +7,11 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * NetworkMonitor — слушает изменения сети и уведомляет Rust-ядро.
@@ -14,6 +19,7 @@ import com.vladimir.messenger.data.RustBridge
 class NetworkMonitor(private val context: Context) {
 
     private val TAG = "NetworkMonitor"
+    private val callbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -22,12 +28,12 @@ class NetworkMonitor(private val context: Context) {
 
         override fun onAvailable(network: Network) {
             Log.i(TAG, "Network available: $network")
-            RustBridge.onNetworkAvailable()
+            callbackScope.launch { RustBridge.onNetworkAvailable() }
         }
 
         override fun onLost(network: Network) {
             Log.i(TAG, "Network lost: $network")
-            RustBridge.onNetworkLost()
+            callbackScope.launch { RustBridge.onNetworkLost() }
         }
 
         override fun onCapabilitiesChanged(
@@ -54,6 +60,7 @@ class NetworkMonitor(private val context: Context) {
     }
 
     fun stop() {
+        callbackScope.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
             Log.i(TAG, "NetworkMonitor stopped")

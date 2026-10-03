@@ -6,8 +6,10 @@ import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.domain.model.Contact
 import com.vladimir.messenger.util.NodeIds
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,7 +37,7 @@ class ContactRepository @Inject constructor(
             // so chat.contactId can be used as real recipient peer id
             val contactId = fingerprint
 
-            RustBridge.addContact(contactId, displayName)
+            withContext(Dispatchers.IO) { RustBridge.addContact(contactId, displayName) }
 
             val entity = ContactEntity(
                 id = contactId,
@@ -310,7 +312,11 @@ class ContactRepository @Inject constructor(
         val fingerprint = signal.optString("fp").ifBlank { id }
         val existing = contactDao.getContactById(id)
         if (existing == null) {
-            runCatching { RustBridge.addContact(id, name.ifBlank { fingerprint }) }
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    RustBridge.addContact(id, name.ifBlank { fingerprint })
+                }
+            }
             contactDao.insertContact(
                 ContactEntity(
                     id = id,

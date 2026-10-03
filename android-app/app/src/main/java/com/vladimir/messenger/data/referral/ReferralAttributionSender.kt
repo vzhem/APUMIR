@@ -8,6 +8,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Отправка подписанной реферальной атрибуции на стороне приглашённого.
@@ -56,7 +58,10 @@ class ReferralAttributionSender @Inject constructor(
      * @return true, если пакет ушёл транспортом. Ложный результат не ошибка:
      *   попытка повторится на следующем сообщении.
      */
-    fun sendPending(chatId: String, contactId: String): Boolean {
+    suspend fun sendPending(chatId: String, contactId: String): Boolean =
+        withContext(Dispatchers.IO) { sendPendingOnIo(chatId, contactId) }
+
+    private fun sendPendingOnIo(chatId: String, contactId: String): Boolean {
         val app = context.applicationContext
         return try {
             val pending = ReferralAttributionStore.pendingAttribution(app, contactId) ?: return false

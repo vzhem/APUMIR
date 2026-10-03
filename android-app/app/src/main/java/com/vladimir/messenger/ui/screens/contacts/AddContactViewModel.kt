@@ -123,7 +123,7 @@ class AddContactViewModel @Inject constructor(
         // Короткая ссылка https://<хост>/s/<код>: что за ней - знает сервис.
         // Разворачиваем и продолжаем с полной ссылкой.
         if (ShortLinks.isShortLink(pasted)) {
-            viewModelScope.launch {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 _uiState.update { it.copy(isLoading = true, error = null) }
                 val full = runCatching { linkShortener.expandIfShort(pasted) }.getOrNull()
                 _uiState.update { it.copy(isLoading = false) }
@@ -158,7 +158,7 @@ class AddContactViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null) }
 
             val displayName = _uiState.value.displayName.trim().takeIf { it.isNotBlank() }
@@ -236,7 +236,7 @@ class AddContactViewModel @Inject constructor(
      * ничего не делает: начисление ранга возможно только по подписанному
      * приглашению.
      */
-    private fun rememberReferral(
+    private suspend fun rememberReferral(
         parsedInvite: InviteLinkParser.Invite?,
         fingerprint: String,
         chatId: String,
