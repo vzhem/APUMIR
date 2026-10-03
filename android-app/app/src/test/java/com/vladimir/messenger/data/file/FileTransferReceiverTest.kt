@@ -78,9 +78,10 @@ class FileTransferReceiverTest {
         receiver: FileTransferReceiver,
         chunkIndex: Long,
         offset: Int,
-        cipher: ByteArray,
+        fullCiphertext: ByteArray,
+        ciphertextRange: ByteArray = fullCiphertext,
     ) {
-        receiver.onBinaryChunk(transferIdHex, chunkIndex, offset, cipher.size, cipher)
+        receiver.onBinaryChunk(transferIdHex, chunkIndex, offset, fullCiphertext.size, ciphertextRange)
     }
 
     private fun sentFcaps(): List<FileTransferPacketCodec.Packet> = transportSends.mapNotNull { text ->
@@ -451,10 +452,10 @@ class FileTransferReceiverTest {
 
         val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
         val mid = cipher.size / 2
-        binaryChunk(receiver, 0, mid, cipher.copyOfRange(mid, cipher.size))
+        binaryChunk(receiver, 0, mid, cipher, cipher.copyOfRange(mid, cipher.size))
         // Второй диапазон ещё нет — окна не сдвинулось (первое ACK - от оффера).
         assertEquals(0L, sentAckContiguous().last())
-        binaryChunk(receiver, 0, 0, cipher.copyOfRange(0, mid))
+        binaryChunk(receiver, 0, 0, cipher, cipher.copyOfRange(0, mid))
         assertEquals(1L, sentAckContiguous().last())
 
         for (index in 1L until 3L) {
@@ -469,10 +470,13 @@ class FileTransferReceiverTest {
         deliver(receiver, offerTexts())
 
         val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
-        binaryChunk(receiver, 0, 0, cipher)
-        assertEquals(1L, sentAckContiguous().last())
-        // «Дубль» с пересечением уже принятого: игнорируется, кусок не ломается.
-        binaryChunk(receiver, 0, 100, cipher.copyOfRange(100, 300))
+        val firstRangeEnd = 200
+        binaryChunk(receiver, 0, 0, cipher, cipher.copyOfRange(0, firstRangeEnd))
+        assertEquals(0L, sentAckContiguous().last())
+        // Пересечение с уже принятым диапазоном игнорируется, сборка остаётся целой.
+        binaryChunk(receiver, 0, 100, cipher, cipher.copyOfRange(100, 300))
+        assertEquals(0L, sentAckContiguous().last())
+        binaryChunk(receiver, 0, firstRangeEnd, cipher, cipher.copyOfRange(firstRangeEnd, cipher.size))
         assertEquals(1L, sentAckContiguous().last())
         assertEquals("TRANSFERRING", dao.getTransfer(transferIdHex)!!.state)
 
@@ -505,7 +509,7 @@ class FileTransferReceiverTest {
 
         val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
         // Диапазон «вылезает» за конец куска — брак.
-        binaryChunk(receiver, 0, cipher.size - 10, cipher.copyOfRange(0, 64))
+        binaryChunk(receiver, 0, cipher.size - 10, cipher, cipher.copyOfRange(0, 64))
         assertEquals(0L, sentAckContiguous().last())
     }
 
