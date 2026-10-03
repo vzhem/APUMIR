@@ -654,18 +654,8 @@ private fun SettingsTabContent(
                         subtitle = if (customWallpaper != null) "Своя картинка из галереи" else "Стандартные, в тон теме",
                         onClick = { wallpaperPicker.launch("image/*") },
                     )
-                    if (customWallpaper != null) {
-                                    "Своя картинка из галереи"
-                                } else {
-                                    "Стандартные, в тон теме"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
-                            Text("Из галереи")
-                        }
+                    TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
+                        Text("Из галереи")
                     }
                     if (customWallpaper != null) {
                         Row(
