@@ -19,10 +19,10 @@
 | `docs/BACKUP_AND_NEW_PC.md` | резервная копия, флешка, восстановление | действующий |
 | `docs/NEW_DEVELOPMENT_PC.md` | выбор железа и установка программ | действующий |
 | `docs/AI_COLLABORATION_NOTES.md` | журнал всех раундов, читать с конца | действующий |
-| `docs/MASTER_PLAN_v2.md` | архитектура и план | действующий |
-| `docs/VERSION_STATISTICS.md` | статистика версий (обрывается на v11.17.1) | требует обновления |
+| `docs/MASTER_PLAN_v2.md` | архитектура и долгосрочный план; статусные снимки исторические | справочник; текущий статус — в `START_HERE.md` |
+| `docs/VERSION_STATISTICS.md` | статистика версий; текущая запись v11.74.168, исторический backfill неполон | действующий с оговоркой |
 | `docs/PC_TRANSFER.md` | — | заглушка |
 | `docs/RESTORE_ON_NEW_PC.md` | — | заглушка |
 | `docs/FLASH_BACKUP_RUNBOOK.md` | — | заглушка |
 | `docs/BACKUP_AND_CLEAN_PC_RECOVERY.md` | — | заглушка |
-| `docs/NEXT_AI_CHAT_BOOTSTRAP.md` | — | заглушка (этот файл) |
+| `docs/NEXT_AI_CHAT_BOOTSTRAP.md` | перенаправление к единственной точке входа `START_HERE.md` | не вставлять как prompt |
