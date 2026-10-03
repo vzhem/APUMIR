@@ -4,22 +4,39 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Сообщества»: группы и каналы, создание новых
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSearchField
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuSettingsHeader
+import com.vladimir.messenger.ui.components.ApuSettingsLayout
+import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
+import com.vladimir.messenger.ui.components.GroupAvatar
 import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.ui.components.BubbleOverflowMenu
 import com.vladimir.messenger.ui.components.BubbleMenuAction
 import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.data.group.GroupRole
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.MoreVert
@@ -32,6 +49,7 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -39,6 +57,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -52,10 +71,9 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Badge
-import androidx.compose.material3.Card
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -177,64 +195,55 @@ fun GroupsScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
-                title = { Text("Сообщества") },
+                title = { ApuSettingsHeader("Сообщества") },
                 navigationIcon = {
-                    TextButton(onClick = onBackClick) { Text("Назад") }
+                    IconButton(onClick = onBackClick) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
                 },
                 actions = {
                     // Кроме QR: вставить скопированную ссылку и войти.
                     IconButton(onClick = { showJoin = true }) {
                         Icon(Icons.Filled.Link, contentDescription = "Войти по ссылке")
                     }
-                    // Меню «⋮» - как на главном экране: редкие действия не
-                    // занимают панель, но и не спрятаны.
+                    // Меню «⋮» - в фирменных золотых пузырях, как в каналах и группах.
                     Box {
                         var menuOpen by remember { mutableStateOf(false) }
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
                         }
-                        DropdownMenu(
+                        ApuActionsMenu(
                             expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
-                            shape = RoundedCornerShape(20.dp),
-                            tonalElevation = 3.dp,
-                            shadowElevation = 8.dp,
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Новая группа") },
-                                leadingIcon = { Icon(Icons.Filled.Groups, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    createAsChannel = false
-                                    if (uiState.canCreate) showCreate = true else showRankHint = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Новый канал") },
-                                leadingIcon = { Icon(Icons.Filled.Campaign, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    createAsChannel = true
-                                    if (uiState.canCreate) showCreate = true else showRankHint = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Войти по ссылке") },
-                                leadingIcon = { Icon(Icons.Filled.Link, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    showJoin = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Обновить список") },
-                                leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    viewModel.refreshDirectory()
-                                },
-                            )
-                        }
+                            onDismiss = { menuOpen = false },
+                            actions = listOf(
+                                ApuAction(
+                                    title = "Новая группа",
+                                    icon = Icons.Filled.Groups,
+                                    onClick = {
+                                        createAsChannel = false
+                                        if (uiState.canCreate) showCreate = true else showRankHint = true
+                                    },
+                                ),
+                                ApuAction(
+                                    title = "Новый канал",
+                                    icon = Icons.Filled.Campaign,
+                                    onClick = {
+                                        createAsChannel = true
+                                        if (uiState.canCreate) showCreate = true else showRankHint = true
+                                    },
+                                ),
+                                ApuAction(
+                                    title = "Войти по ссылке",
+                                    icon = Icons.Filled.Link,
+                                    onClick = { showJoin = true },
+                                ),
+                                ApuAction(
+                                    title = "Обновить список",
+                                    icon = Icons.Filled.Refresh,
+                                    onClick = { viewModel.refreshDirectory() },
+                                ),
+                            ),
+                        )
                     }
                 },
             )
@@ -383,7 +392,7 @@ fun GroupsScreen(
 
     val joinMessage = uiState.joinMessage
     if (uiState.joining || joinMessage != null) {
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { viewModel.consumeJoinResult() },
             title = { Text("Вход по ссылке") },
             text = {
@@ -468,7 +477,7 @@ fun GroupsScreen(
         // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
         // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
         var attachApk by remember { mutableStateOf(true) }
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { inviteChoice = null },
             title = { Text("Пригласить в $what") },
             text = {
@@ -517,7 +526,7 @@ fun GroupsScreen(
 
     // Сам QR-код для встречи лицом к лицу.
     qrInvite?.let { (title, link) ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { qrInvite = null },
             title = { Text(title) },
             text = {
@@ -541,7 +550,7 @@ fun GroupsScreen(
     confirmLeave?.let { group ->
         val owner = group.myRole == GroupRole.OWNER
         val what = if (group.isChannel) "канал" else "группу"
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { confirmLeave = null },
             title = {
                 Text(
@@ -576,7 +585,8 @@ fun GroupsScreen(
                             owner -> "Удалить"
                             group.isChannel -> "Отписаться"
                             else -> "Выйти"
-                        }
+                        },
+                        color = if (owner) MaterialTheme.colorScheme.error else ApuBubbleAccentColor,
                     )
                 }
             },
@@ -587,7 +597,7 @@ fun GroupsScreen(
     }
 
     if (showRankHint) {
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showRankHint = false },
             title = { Text("Создание групп недоступно") },
             text = {
@@ -615,7 +625,7 @@ private fun GroupRow(
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .background(ApuBubbleSurfaceColor)
             .border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
@@ -625,7 +635,7 @@ private fun GroupRow(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-            com.vladimir.messenger.ui.components.GroupAvatar(
+            GroupAvatar(
                 groupId = group.id,
                 title = group.title,
                 size = 44.dp,
@@ -635,7 +645,7 @@ private fun GroupRow(
                 Text(
                     group.title,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF1E2430),
+                    color = ApuBubbleTextColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -647,7 +657,7 @@ private fun GroupRow(
                         append(if (group.isPublic) " · публичная" else " · частная")
                     },
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = ApuBubbleAccentColor,
                     maxLines = 1,
                 )
                 Text(
@@ -663,7 +673,7 @@ private fun GroupRow(
                         }
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF1E2430).copy(alpha = 0.7f),
+                    color = ApuBubbleMutedColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -695,76 +705,324 @@ private fun CreateGroupDialog(
     var topics by remember { mutableStateOf(true) }
     var isChannel by remember { mutableStateOf(initialIsChannel) }
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isChannel) "Новый канал" else "Новая группа") },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .border(1.5.dp, ApuBubbleAccentColor.copy(alpha = 0.38f), CircleShape)
+                        .padding(4.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (title.isNotBlank()) {
+                        GroupAvatar(
+                            groupId = title.trim(),
+                            title = title,
+                            size = 44.dp,
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(ApuBubbleAccentColor.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = if (isChannel) Icons.Filled.Campaign else Icons.Filled.Groups,
+                                contentDescription = null,
+                                tint = ApuBubbleAccentColor,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isChannel) "Новый канал" else "Новая группа",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = ApuBubbleTextColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = if (isChannel) {
+                            "Лента публикаций с комментариями"
+                        } else {
+                            "Общение участников и темы"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Выбор вида сообщества сверху — как в современных мессенджерах:
+                // сразу видно «Группа» или «Канал», без лишнего переключателя внизу.
+                CommunityTypeChoices(
+                    isChannel = isChannel,
+                    onSelectChannel = { isChannel = it },
+                )
+
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text(if (isChannel) "Название канала" else "Название") },
+                    placeholder = {
+                        Text(if (isChannel) "Например, Новости APU" else "Например, Рабочий чат")
+                    },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = about,
                     onValueChange = { about = it },
                     label = { Text(if (isChannel) "Описание канала" else "Описание") },
+                    placeholder = { Text("О чём сообщество (необязательно)") },
+                    minLines = 2,
+                    maxLines = 4,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            if (isChannel) "Публичный канал" else "Публичная группа",
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            if (isChannel) {
-                                "Подписка по ссылке без одобрения"
-                            } else {
-                                "Вход по ссылке без одобрения"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Switch(checked = isPublic, onCheckedChange = { isPublic = it })
-                }
-                // Канал - это лента постов с комментариями: посты пишут
-                // администраторы, обсуждение живёт под постом.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Это канал", fontWeight = FontWeight.Medium)
-                        Text(
-                            "Посты пишут администраторы, под ними комментарии",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Switch(checked = isChannel, onCheckedChange = { isChannel = it })
-                }
-                if (!isChannel) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Темы", fontWeight = FontWeight.Medium)
-                            Text("Обсуждения внутри группы", style = MaterialTheme.typography.bodySmall)
+
+                // Настройки доступа и тем — в единой карточке с иконками в стиле APU.
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(ApuBubbleAccentColor.copy(alpha = 0.05f))
+                        .border(
+                            width = 1.dp,
+                            color = ApuBubbleAccentColor.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(16.dp),
+                        ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 68.dp)
+                            .clickable(role = Role.Switch) { isPublic = !isPublic }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .background(
+                                    ApuBubbleAccentColor.copy(alpha = 0.10f),
+                                    RoundedCornerShape(12.dp),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = if (isPublic) Icons.Filled.Public else Icons.Filled.Lock,
+                                contentDescription = null,
+                                tint = ApuBubbleAccentColor,
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
-                        Switch(checked = topics, onCheckedChange = { topics = it })
+                        Spacer(Modifier.width(12.dp))
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = if (isChannel) "Публичный канал" else "Публичная группа",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = ApuBubbleTextColor,
+                            )
+                            Text(
+                                text = if (isChannel) {
+                                    "Подписка по ссылке без одобрения"
+                                } else {
+                                    "Вход по ссылке без одобрения"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Switch(checked = isPublic, onCheckedChange = { isPublic = it })
+                    }
+
+                    if (!isChannel) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 62.dp, end = 12.dp),
+                            thickness = 0.5.dp,
+                            color = ApuBubbleAccentColor.copy(alpha = 0.15f),
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 68.dp)
+                                .clickable(role = Role.Switch) { topics = !topics }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(
+                                        ApuBubbleAccentColor.copy(alpha = 0.10f),
+                                        RoundedCornerShape(12.dp),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Forum,
+                                    contentDescription = null,
+                                    tint = ApuBubbleAccentColor,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = "Темы",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = ApuBubbleTextColor,
+                                )
+                                Text(
+                                    text = "Обсуждения внутри группы",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ApuBubbleMutedColor,
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Switch(checked = topics, onCheckedChange = { topics = it })
+                        }
                     }
                 }
+
                 if (error != null) {
-                    Text(error, color = MaterialTheme.colorScheme.error)
-                }
-                if (creating) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         },
         confirmButton = {
-            TextButton(
+            Button(
                 enabled = title.isNotBlank() && !creating,
                 onClick = { onCreate(title, about, isPublic, topics, isChannel) },
-            ) { Text("Создать") }
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                if (creating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = Color(0xFFFFF8E6),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (creating) "Создаём…" else "Создать")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
+}
+
+@Composable
+private fun CommunityTypeChoices(
+    isChannel: Boolean,
+    onSelectChannel: (Boolean) -> Unit,
+) {
+    val fontScale = LocalDensity.current.fontScale
+    val options = listOf(
+        Triple(false, "Группа", "Чаты и темы"),
+        Triple(true, "Канал", "Посты и комментарии"),
+    )
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val horizontal = ApuSettingsLayout.horizontalCommunityTypeChoices(maxWidth.value, fontScale)
+        val rows = if (horizontal) listOf(options) else options.map { listOf(it) }
+        Column(
+            modifier = Modifier.fillMaxWidth().selectableGroup(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            rows.forEach { rowOptions ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    rowOptions.forEach { (channelOption, label, subtitle) ->
+                        val selected = isChannel == channelOption
+                        val shape = RoundedCornerShape(14.dp)
+                        val ink = if (selected) Color(0xFFFFF8E6) else ApuBubbleAccentColor
+                        val subInk = if (selected) Color(0xFFFFF8E6).copy(alpha = 0.85f) else ApuBubbleMutedColor
+                        val icon = if (channelOption) Icons.Filled.Campaign else Icons.Filled.Groups
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(shape)
+                                .background(
+                                    if (selected) ApuBubbleAccentColor else ApuBubbleAccentColor.copy(alpha = 0.06f),
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = ApuBubbleAccentColor.copy(alpha = if (selected) 0.75f else 0.18f),
+                                    shape = shape,
+                                )
+                                .selectable(
+                                    selected = selected,
+                                    role = Role.RadioButton,
+                                    onClick = { onSelectChannel(channelOption) },
+                                )
+                                .heightIn(min = 58.dp)
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = ink,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = ink,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = subInk,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -779,11 +1037,16 @@ private fun JoinByLinkDialog(
     var link by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Войти по ссылке") },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Вставьте ссылку-приглашение или пересланное сообщение со ссылкой.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
                 OutlinedTextField(
                     value = link,
                     onValueChange = {
@@ -794,6 +1057,7 @@ private fun JoinByLinkDialog(
                     placeholder = { Text("Ссылка") },
                     // Ссылка длинная (в ней адрес владельца) — даём ей переноситься.
                     maxLines = 4,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 error?.let {
@@ -806,7 +1070,7 @@ private fun JoinByLinkDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            Button(
                 onClick = {
                     // Проверяем, что это приглашение в группу, но отдаём ВСЮ
                     // ссылку: в ней id группы и адрес владельца, без них войти
@@ -819,6 +1083,7 @@ private fun JoinByLinkDialog(
                         onSubmit(link.trim())
                     }
                 },
+                shape = RoundedCornerShape(14.dp),
             ) { Text("Войти") }
         },
         dismissButton = {
@@ -827,15 +1092,10 @@ private fun JoinByLinkDialog(
     )
 }
 
-/** Заголовок раздела найденного в сети. */
+/** Заголовок раздела сообществ и сетевого каталога в фирменной капсуле. */
 @Composable
 private fun DirectoryHeader(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-    )
+    ApuSettingsSectionTitle(title)
 }
 
 /** Строка найденного в сетевом каталоге: чужая публичная группа или канал. */
@@ -848,7 +1108,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .background(ApuBubbleSurfaceColor)
             .border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
@@ -857,7 +1117,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        com.vladimir.messenger.ui.components.GroupAvatar(
+        GroupAvatar(
             groupId = entry.groupId,
             title = entry.title,
             size = 40.dp,
@@ -869,19 +1129,19 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
                 // Раунд 264: строка теперь в светлом пузыре - тёмный текст.
-                color = Color(0xFF1E2430),
+                color = ApuBubbleTextColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 if (entry.isChannel) "Канал" else "Группа",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color = ApuBubbleAccentColor,
             )
             Text(
                 if (entry.needsApproval) "Вход по заявке" else "Вход сразу",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF1E2430).copy(alpha = 0.7f),
+                color = ApuBubbleMutedColor,
             )
         }
         TextButton(onClick = {
@@ -894,7 +1154,13 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                     requestApproval = entry.needsApproval,
                 )
             )
-        }) { Text(if (entry.isChannel) "Подписаться" else "Вступить") }
+        }) {
+            Text(
+                if (entry.isChannel) "Подписаться" else "Вступить",
+                color = ApuBubbleAccentColor,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 

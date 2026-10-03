@@ -48,7 +48,7 @@ fun GroupQrInviteDialog(
     loading: Boolean,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Пригласить по QR коду") },
         text = {

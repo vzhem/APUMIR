@@ -43,5 +43,14 @@ class ApuSettingsLayoutTest {
     fun tinyOrUnknownWidthAlwaysHasAUsableFallback() {
         assertEquals(1, ApuSettingsLayout.profileActionColumns(0f, 1f))
         assertFalse(ApuSettingsLayout.horizontalThemeChoices(0f, 1f))
+        assertFalse(ApuSettingsLayout.horizontalCommunityTypeChoices(0f, 1f))
+    }
+
+    @Test
+    fun communityTypeChoicesFitSideBySideOnPhoneAndStackAtLargeType() {
+        assertTrue(ApuSettingsLayout.horizontalCommunityTypeChoices(280f, 1f))
+        assertFalse(ApuSettingsLayout.horizontalCommunityTypeChoices(280f, 1.5f))
+        assertTrue(ApuSettingsLayout.horizontalCommunityTypeChoices(224f, 1f))
+        assertFalse(ApuSettingsLayout.horizontalCommunityTypeChoices(223f, 1f))
     }
 }

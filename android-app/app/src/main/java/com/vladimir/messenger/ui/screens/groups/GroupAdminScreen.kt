@@ -8,6 +8,7 @@ package com.vladimir.messenger.ui.screens.groups
 // =============================================================================
 
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -495,7 +496,7 @@ private fun OverviewTab(
     }
 
     if (showLeaveConfirm) {
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showLeaveConfirm = false },
             title = { Text(if (isChannel) "Отписаться от канала?" else "Покинуть группу?") },
             text = {
@@ -591,7 +592,7 @@ private fun DeleteGroupDialog(
     val expected = expectedTitle.trim().ifBlank { "УДАЛИТЬ" }
     var typed by remember { mutableStateOf("") }
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isChannel) "Удалить канал?" else "Удалить группу?") },
         text = {
@@ -611,6 +612,8 @@ private fun DeleteGroupDialog(
                     onValueChange = { typed = it },
                     label = { Text("Введите: $expected") },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
@@ -750,7 +753,7 @@ private fun AdminsTab(
     }
 
     transferTarget?.let { target ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { transferTarget = null },
             title = { Text("Передать владение?") },
             text = {

@@ -13,6 +13,7 @@ import com.vladimir.messenger.data.local.MessagePinPolicy
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.ButtonDefaults
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
@@ -1008,7 +1009,7 @@ private fun PostEditorDialog(
         }
     }
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
@@ -1017,7 +1018,8 @@ private fun PostEditorDialog(
                     value = text,
                     onValueChange = { text = it },
                     label = { Text("Текст поста") },
-                    modifier = Modifier.heightIn(min = 120.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
                 )
                 Spacer(Modifier.height(8.dp))
                 if (images.isNotEmpty()) {
