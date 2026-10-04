@@ -104,4 +104,12 @@ interface ChatDao {
     /** Холодный старт: гасим все точки онлайна, peer_discovered включит живых. */
     @Query("UPDATE chats SET isContactOnline = 0")
     suspend fun setAllOffline()
+
+    /** Непрочитанные личные чаты — для вкладки «Не прочитано». */
+    @Query(
+        "SELECT * FROM chats WHERE unreadCount > 0 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageTime DESC"
+    )
+    fun observeUnreadChats(): Flow<List<ChatEntity>>
 }

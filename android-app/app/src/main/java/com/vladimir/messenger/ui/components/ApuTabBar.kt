@@ -3,7 +3,7 @@ package com.vladimir.messenger.ui.components
 // =============================================================================
 // APUTABBAR.KT — полоска вкладок APU: один общий пузырь и едущая метка
 // =============================================================================
-// Используется на главном экране (разделы «Все / Чаты / Группы / Каналы») и в
+// Используется на главном экране (разделы «Все / Не прочитано / Чаты / Группы / Каналы») и в
 // админ-кабинете группы и канала. Смысл один и тот же, поэтому и код один.
 //
 // Метка не перещёлкивается: её положение задаётся непрерывным числом
@@ -23,12 +23,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -46,8 +48,10 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Полоска вкладок в общем пузыре.
@@ -56,6 +60,7 @@ import androidx.compose.ui.unit.dp
  * @param selectedIndex текущая страница листалки.
  * @param offsetFraction смещение листалки от текущей страницы (-1..1).
  * @param onSelect тап по вкладке.
+ * @param badges счётчики для вкладок (0 = не показывать). Размер = titles.size.
  */
 @Composable
 fun ApuTabBar(
@@ -64,6 +69,7 @@ fun ApuTabBar(
     offsetFraction: Float,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    badges: List<Int> = emptyList(),
 ) {
     if (titles.isEmpty()) return
 
@@ -72,7 +78,7 @@ fun ApuTabBar(
 
     // Замеры надписей: X и ширина в пикселях. Пересобираются, если состав
     // вкладок поменялся (например, телефон перестал быть администратором).
-    var bounds by remember(titles) { mutableStateOf(List(titles.size) { 0 to 0 }) }
+    var bounds by remember(titles, badges) { mutableStateOf(List(titles.size) { 0 to 0 }) }
 
     val position = (selectedIndex + offsetFraction)
         .coerceIn(0f, (titles.size - 1).toFloat())
@@ -128,6 +134,7 @@ fun ApuTabBar(
                     // Чем ближе метка, тем светлее текст: в середине жеста обе
                     // надписи выглядят наполовину выбранными.
                     val nearness = (1f - kotlin.math.abs(position - index)).coerceIn(0f, 1f)
+                    val badge = badges.getOrNull(index) ?: 0
                     Box(
                         modifier = Modifier
                             .onGloballyPositioned { coords ->
@@ -147,16 +154,37 @@ fun ApuTabBar(
                             .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = title,
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = lerp(
-                                ApuBubbleTextColor,
-                                MaterialTheme.colorScheme.onPrimary,
-                                nearness,
-                            ),
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = title,
+                                maxLines = 1,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = lerp(
+                                    ApuBubbleTextColor,
+                                    MaterialTheme.colorScheme.onPrimary,
+                                    nearness,
+                                ),
+                            )
+                            if (badge > 0) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                val badgeBg = if (nearness > 0.5f) Color.White else MaterialTheme.colorScheme.primary
+                                val badgeTextColor = if (nearness > 0.5f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimary
+                                Box(
+                                    modifier = Modifier
+                                        .background(badgeBg, CircleShape)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = if (badge > 99) "99+" else badge.toString(),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        fontWeight = FontWeight.Bold,
+                                        color = badgeTextColor,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

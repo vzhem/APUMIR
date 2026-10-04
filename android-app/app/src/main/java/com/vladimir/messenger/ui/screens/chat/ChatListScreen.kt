@@ -298,12 +298,16 @@ fun ChatListScreen(
 
                 // Полоска разделов: во всю ширину экрана и пролистывается
                 // пальцем вбок - разделов может стать больше, чем влезает.
+                // Вкладка «Не прочитано» показывает бейдж с числом чатов с непрочитано >0.
                 ApuTabBar(
                     titles = uiState.sections.map { it.title },
                     selectedIndex = pagerState.currentPage,
                     offsetFraction = pagerState.currentPageOffsetFraction,
                     onSelect = { index ->
                         pagerScope.launch { pagerState.animateScrollToPage(index) }
+                    },
+                    badges = uiState.sections.map { sec ->
+                        if (sec == InboxSection.Unread) uiState.unreadCount else 0
                     },
                 )
             }
@@ -897,6 +901,39 @@ private fun SectionPage(
                         style     = MaterialTheme.typography.bodyMedium,
                         color     = HintBubbleTextColor,
                     )
+                }
+            }
+
+            // Вкладка «Не прочитано» пустая — всё прочитано.
+            items.isEmpty() && section == InboxSection.Unread && !isSearchActive -> {
+                HintBubble(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.DoneAll,
+                            contentDescription = null,
+                            modifier = Modifier.size(72.dp),
+                            tint = HintBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "Нет непрочитанных",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = HintBubbleTextColor,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Здесь появятся чаты, группы и каналы с новыми сообщениями. Когда всё прочитаете — они исчезнут отсюда.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = HintBubbleMutedColor,
+                        )
+                    }
                 }
             }
 
