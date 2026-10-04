@@ -85,15 +85,15 @@ class HeartRepository @Inject constructor(
         runCatching { heartDao.hasVote(HeartWire.antiStorageKey(ownerId), me) > 0 }.getOrDefault(false)
     }
 
-    /** Карта анти-рейтинга по всем профилям (`ownerId -> count`) для ленты групп и каналов. */
+    /**
+     * Карта анти-рейтинга по всем профилям (`ownerId -> count`) для ленты групп и каналов.
+     *
+     * Считаем в Kotlin по сущностям: проекции `COUNT(*)` в этом проекте не
+     * используются (см. грабли Room в `docs/AI_HANDOFF.md`).
+     */
     fun observeAntiCountsMap(): Flow<Map<String, Int>> =
-        heartDao.observeAllAntiCounts()
-            .map { rows ->
-                rows.mapNotNull { row ->
-                    val peerId = HeartWire.ownerFromAntiStorageKey(row.ownerId) ?: return@mapNotNull null
-                    if (row.count > 0) peerId to row.count else null
-                }.toMap()
-            }
+        heartDao.observeAllAntiVotes()
+            .map { votes -> antiCountsByPeer(votes) }
             .flowOn(Dispatchers.IO)
 
     /** Кому этот телефон поставил анти-рейтинг (`Set<ownerId>`). */
@@ -110,8 +110,8 @@ class HeartRepository @Inject constructor(
      */
     fun observeAntiState(ownerId: String): Flow<AntiRatingState> {
         val key = HeartWire.antiStorageKey(ownerId)
-        return combine(heartDao.observeVoteTimes(key), minuteTicker()) { times, _ ->
-            antiStateOf(times, System.currentTimeMillis())
+        return combine(heartDao.observeVotesOf(key), minuteTicker()) { votes, _ ->
+            antiStateOf(votes.map { it.atMs }, System.currentTimeMillis())
         }.flowOn(Dispatchers.IO)
     }
 
@@ -126,8 +126,9 @@ class HeartRepository @Inject constructor(
 
     /** Разовая проверка состояния: нужна при открытии карточки профиля. */
     suspend fun antiStateOf(ownerId: String): AntiRatingState = withContext(Dispatchers.IO) {
-        val times = runCatching { heartDao.voteTimesOf(HeartWire.antiStorageKey(ownerId)) }
+        val times = runCatching { heartDao.votesOf(HeartWire.antiStorageKey(ownerId)) }
             .getOrDefault(emptyList())
+            .map { it.atMs }
         antiStateOf(times, System.currentTimeMillis())
     }
 
@@ -146,6 +147,16 @@ class HeartRepository @Inject constructor(
             recent = HeartWire.antiVotesInWindow(times, nowMs),
             warningUntilMs = if (until > nowMs) until else 0L,
         )
+    }
+
+    /** Счётчики по узлам: `ownerId -> сколько отметок` (считаем в Kotlin). */
+    private fun antiCountsByPeer(votes: List<ProfileHeartEntity>): Map<String, Int> {
+        val counts = LinkedHashMap<String, Int>()
+        for (vote in votes) {
+            val peerId = HeartWire.ownerFromAntiStorageKey(vote.ownerId) ?: continue
+            counts[peerId] = (counts[peerId] ?: 0) + 1
+        }
+        return counts
     }
 
     private fun antiWarningsOf(
@@ -167,7 +178,9 @@ class HeartRepository @Inject constructor(
 
     /** Пересчитать хранимый штраф роя по всем жалобам профиля. */
     private suspend fun rememberAntiRating(ownerId: String, storageKey: String) {
-        val times = runCatching { heartDao.voteTimesOf(storageKey) }.getOrDefault(emptyList())
+        val times = runCatching { heartDao.votesOf(storageKey) }
+            .getOrDefault(emptyList())
+            .map { it.atMs }
         PeerRatingStore.recordAntiRating(appContext, ownerId, times)
     }
 
