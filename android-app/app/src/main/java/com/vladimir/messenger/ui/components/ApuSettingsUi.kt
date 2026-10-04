@@ -35,6 +35,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 
+/**
+ * Красный акцент для опасных действий и предупреждений (удаление, блокировка,
+ * жалоба): тот же тон, что у `error` в фирменной палитре ниже.
+ */
+val ApuSettingsDangerColor: Color = Color(0xFFA12D3A)
+
 /** Fixed, readable controls inside the light house bubble, including in night mode. */
 @Composable
 private fun ApuSettingsPalette(content: @Composable () -> Unit) {
