@@ -36,6 +36,28 @@ data class GroupChatUiState(
     val me: MemberSummary? = null,
     val canPin: Boolean = false,
     val canManageTopics: Boolean = false,
+    /** Может ли этот пользователь модерировать чужие сообщения и участников (владелец или админ). */
+    val canModerate: Boolean = false,
+    /** Счётчики анти-рейтинга по узлам (`nodeId -> count`). */
+    val antiRatings: Map<String, Int> = emptyMap(),
+    /**
+     * Узлы с активным временным предупреждением о всплеске жалоб
+     * (`nodeId -> до какого времени`). Одиночные отметки 👎 сюда не попадают.
+     */
+    val antiWarnings: Map<String, Long> = emptyMap(),
+    /** Узлы, которым этот телефон поставил анти-рейтинг. */
+    val myAntiRatings: Set<String> = emptySet(),
+    /** Выбранные сообщения в режиме множественного выбора. */
+    val selectedMessageIds: Set<String> = emptySet(),
+    /** Открытая карточка профиля участника в группе/канале. */
+    val inspectedPeerId: String? = null,
+    val inspectedPeerName: String = "",
+    val inspectedPeerHearts: Int = 0,
+    val inspectedPeerHeartMine: Boolean = false,
+    val inspectedPeerAntiCount: Int = 0,
+    val inspectedPeerAntiMine: Boolean = false,
+    val inspectedPeerAntiWarning: Boolean = false,
+    val inspectedPeerAntiUntilMs: Long = 0,
     val error: String? = null,
     val sending: Boolean = false,
     /** Открыты с темой из канала (комментарии): сразу лента, не список тем. */
@@ -91,6 +113,7 @@ class GroupChatViewModel @Inject constructor(
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
+    private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -158,6 +181,7 @@ class GroupChatViewModel @Inject constructor(
         observeGifArrivals()
         observeStickerArrivals()
         observeJoinRequests()
+        observeAntiRatings()
     }
 
     /** Раунд 121: гифка из роя пришла файлом - сразу приложить к сообщению. */
@@ -834,13 +858,15 @@ class GroupChatViewModel @Inject constructor(
             groupRepository.observeMembers(groupId).collect { members ->
                 val me = members.firstOrNull { it.isMe }
                 _uiState.update { state ->
+                    val role = me?.role ?: GroupRole.MEMBER
+                    val perms = me?.permissions ?: 0L
+                    val isOwner = state.group?.ownerId != null && state.group.ownerId == me?.nodeId
                     state.copy(
                         members = members,
                         me = me,
-                        canPin = GroupPermissions
-                            .canPinMessages(me?.role ?: GroupRole.MEMBER, me?.permissions ?: 0L),
-                        canManageTopics = GroupPermissions
-                            .canManageTopics(me?.role ?: GroupRole.MEMBER, me?.permissions ?: 0L),
+                        canPin = GroupPermissions.canPinMessages(role, perms),
+                        canManageTopics = GroupPermissions.canManageTopics(role, perms),
+                        canModerate = isOwner || GroupPermissions.canModerateMessages(role, perms),
                     )
                 }
                 refreshAttachRights(me, _uiState.value.group)
@@ -1176,6 +1202,182 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.deleteMessageForAll(groupId, messageId)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Множественный выбор сообщений в ленте группы/канала. */
+    fun toggleSelectMessage(messageId: String) {
+        _uiState.update { state ->
+            val next = state.selectedMessageIds.toMutableSet()
+            if (!next.add(messageId)) next.remove(messageId)
+            state.copy(selectedMessageIds = next)
+        }
+    }
+
+    fun clearMessageSelection() {
+        _uiState.update { it.copy(selectedMessageIds = emptySet()) }
+    }
+
+    /** Сколько сообщений у автора в этой группе или канале. */
+    suspend fun countAuthorMessages(authorId: String): Int =
+        groupRepository.countMessagesByAuthor(groupId, authorId)
+
+    /**
+     * Выполнить выбранные действия из модального окна удаления и модерации:
+     * удаление выбранных сообщений, удаление всех сообщений автора, очистка всей
+     * истории группы/канала, выставление анти-рейтинга профилю, ограничение прав
+     * и блокировка автора.
+     */
+    fun applyModeration(
+        messageIds: List<String>,
+        authorId: String,
+        result: com.vladimir.messenger.ui.components.ApuModerationResult,
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(selectedMessageIds = emptySet()) }
+            when {
+                result.deleteAllInGroup -> {
+                    groupRepository.deleteAllMessagesInGroup(groupId)
+                        .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                }
+                result.deleteAllFromAuthor && authorId.isNotBlank() -> {
+                    groupRepository.deleteAllMessagesFromAuthor(groupId, authorId)
+                        .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                }
+                else -> {
+                    for (msgId in messageIds) {
+                        if (result.deleteForAll) {
+                            groupRepository.deleteMessageForAll(groupId, msgId)
+                                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                        } else {
+                            runCatching { groupRepository.deleteMessageForMe(groupId, msgId) }
+                                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                        }
+                    }
+                }
+            }
+            if (result.giveAntiRating && authorId.isNotBlank()) {
+                val peers = _uiState.value.members.map { it.nodeId }
+                hearts.addAntiRating(authorId, peers)
+            }
+            if (result.restrictAuthorPermissions && authorId.isNotBlank()) {
+                groupRepository.restrictMemberPermissions(groupId, authorId, result.allowedMemberMask)
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            }
+            if (result.blockAuthor && authorId.isNotBlank()) {
+                groupRepository.setMemberBlocked(groupId, authorId, true)
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            }
+        }
+    }
+
+    /** Подписка на счётчики анти-рейтинга участников. */
+    private fun observeAntiRatings() {
+        viewModelScope.launch {
+            hearts.observeAntiCountsMap().collect { map ->
+                _uiState.update { state ->
+                    val peer = state.inspectedPeerId
+                    state.copy(
+                        antiRatings = map,
+                        inspectedPeerAntiCount = if (peer != null) (map[peer] ?: 0) else state.inspectedPeerAntiCount,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            hearts.observeAntiWarnings().collect { warnings ->
+                _uiState.update { state ->
+                    val peer = state.inspectedPeerId
+                    val until = if (peer != null) (warnings[peer] ?: 0L) else state.inspectedPeerAntiUntilMs
+                    state.copy(
+                        antiWarnings = warnings,
+                        inspectedPeerAntiWarning = peer != null && until > 0L,
+                        inspectedPeerAntiUntilMs = until,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            val me = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                appContext.getSharedPreferences("p2p_prefs", android.content.Context.MODE_PRIVATE)
+                    .getString("node_id", null)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+            }
+            if (me.isBlank()) return@launch
+            hearts.observeMyAntiTargets(me).collect { targets ->
+                _uiState.update { state ->
+                    val peer = state.inspectedPeerId
+                    state.copy(
+                        myAntiRatings = targets,
+                        inspectedPeerAntiMine = if (peer != null) (peer in targets) else state.inspectedPeerAntiMine,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Открыть карточку профиля участника группы/канала. */
+    fun openPeerProfile(peerId: String, peerName: String) {
+        if (peerId.isBlank()) return
+        _uiState.update {
+            it.copy(
+                inspectedPeerId = peerId,
+                inspectedPeerName = peerName,
+                inspectedPeerAntiCount = it.antiRatings[peerId] ?: 0,
+                inspectedPeerAntiMine = peerId in it.myAntiRatings,
+            )
+        }
+        viewModelScope.launch {
+            val hCount = hearts.countOf(peerId)
+            val hMine = hearts.isMine(peerId)
+            val anti = hearts.antiStateOf(peerId)
+            val aMine = hearts.isMyAntiRating(peerId)
+            _uiState.update { state ->
+                if (state.inspectedPeerId != peerId) state else state.copy(
+                    inspectedPeerHearts = hCount,
+                    inspectedPeerHeartMine = hMine,
+                    inspectedPeerAntiCount = anti.total,
+                    inspectedPeerAntiMine = aMine,
+                    inspectedPeerAntiWarning = anti.warning,
+                    inspectedPeerAntiUntilMs = anti.warningUntilMs,
+                )
+            }
+        }
+    }
+
+    fun closePeerProfile() {
+        _uiState.update { it.copy(inspectedPeerId = null) }
+    }
+
+    fun togglePeerHeart(peerId: String) {
+        if (peerId.isBlank()) return
+        viewModelScope.launch {
+            val mine = hearts.toggle(peerId)
+            val count = hearts.countOf(peerId)
+            _uiState.update { state ->
+                if (state.inspectedPeerId != peerId) state else state.copy(
+                    inspectedPeerHeartMine = mine,
+                    inspectedPeerHearts = count,
+                )
+            }
+        }
+    }
+
+    fun togglePeerAntiRating(peerId: String) {
+        if (peerId.isBlank()) return
+        viewModelScope.launch {
+            val peers = _uiState.value.members.map { it.nodeId }
+            val mine = hearts.toggleAntiRating(peerId, peers)
+            val anti = hearts.antiStateOf(peerId)
+            _uiState.update { state ->
+                if (state.inspectedPeerId != peerId) state else state.copy(
+                    inspectedPeerAntiMine = mine,
+                    inspectedPeerAntiCount = anti.total,
+                    inspectedPeerAntiWarning = anti.warning,
+                    inspectedPeerAntiUntilMs = anti.warningUntilMs,
+                )
+            }
         }
     }
 

@@ -859,7 +859,8 @@ class GroupRepository(
         if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
 
         val isAdmin = GroupRole.isAdminOrOwner(member.role)
-        if (!isAdmin && !GroupPermissions.has(effectiveMemberMask(group), GroupPermissions.Member.SEND_MESSAGES)) {
+        val memberMask = GroupPermissions.effectiveMemberPermissions(member.permissions, effectiveMemberMask(group))
+        if (!isAdmin && !GroupPermissions.has(memberMask, GroupPermissions.Member.SEND_MESSAGES)) {
             return Result.failure(SecurityException("Отправка сообщений в этой группе запрещена"))
         }
 
@@ -1479,27 +1480,54 @@ class GroupRepository(
         return SwarmWave(full = legacy + wave, wave = wave, rest = swarmers.size - wave.size)
     }
 
-    // ── Удаление сообщения (раунд 135) ────────────────────────────────────────
+    // ── Удаление сообщения и модерация (раунд 135+) ──────────────────────────
+
+    private suspend fun canMemberModerate(group: GroupEntity, nodeId: String): Boolean {
+        if (group.ownerId == nodeId) return true
+        val member = groupDao.getMember(group.id, nodeId) ?: return false
+        if (member.isBanned) return false
+        return GroupPermissions.canModerateMessages(member.role, member.permissions)
+    }
+
+    private suspend fun refreshGroupLastPreview(groupId: String) {
+        val latest = messageDao.getLatest(groupId)
+        if (latest != null) {
+            groupDao.updateGroupLastMessage(groupId, preview(latest.content), latest.timestamp)
+        } else {
+            groupDao.updateGroupLastMessage(groupId, "", 0L)
+        }
+    }
 
     /**
      * Удалить сообщение ТОЛЬКО У СЕБЯ: у остальных остаётся. Куски длинного
-     * текста (InlineImage-хвосты) стираются вместе с головой.
+     * текста (InlineImage-хвосты) стираются вместе с головой. Если в канале
+     * удаляется головное сообщение поста, стирается и тема поста вместе со
+     * своими частями.
      */
     suspend fun deleteMessageForMe(groupId: String, messageId: String) {
         val message = messageDao.getMessageById(messageId) ?: return
         if (message.chatId != groupId) return
+        val group = groupDao.getGroupById(groupId)
+        val topicId = message.topicId.orEmpty()
+        if (group?.isChannel == true && topicId.isNotBlank() &&
+            messageDao.firstTextMessageIdInTopic(groupId, topicId) == messageId
+        ) {
+            messageDao.deleteTopicMessages(groupId, topicId)
+            groupDao.deleteTopic(topicId)
+            refreshGroupLastPreview(groupId)
+            return
+        }
         val stale = messageDao.getByContentPattern(groupId, InlineImage.textPartPattern(messageId))
             .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
         for (row in stale) messageDao.deleteById(row.id)
         messageDao.deleteById(messageId)
+        refreshGroupLastPreview(groupId)
     }
 
     /**
-     * Удалить своё сообщение У ВСЕХ. Права как у правки: автор или владелец
-     * группы. У себя стираем сразу; остальным уходит короткий пакет `msdel` -
-     * каждый получатель стирает то же самое у себя (автора проверяет по
-     * отправителю пакета, подделать чужое удаление нельзя). Телефоны прошлых
-     * версий пакет не знают: у них сообщение останется - лечится обновлением.
+     * Удалить сообщение У ВСЕХ. Права: автор сообщения, владелец или
+     * администратор группы/канала. У себя стираем сразу; остальным уходит
+     * короткий пакет `msdel`.
      */
     suspend fun deleteMessageForAll(groupId: String, messageId: String): Result<Unit> {
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
@@ -1513,13 +1541,10 @@ class GroupRepository(
         if (message.chatId != groupId) {
             return Result.failure(IllegalArgumentException("Сообщение из другой группы"))
         }
-        if (message.senderId != me && group.ownerId != me) {
-            return Result.failure(SecurityException("Удалять у всех может автор или владелец"))
+        if (message.senderId != me && !canMemberModerate(group, me)) {
+            return Result.failure(SecurityException("Удалять у всех может автор, владелец или администратор"))
         }
-        val stale = messageDao.getByContentPattern(groupId, InlineImage.textPartPattern(messageId))
-            .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
-        for (row in stale) messageDao.deleteById(row.id)
-        messageDao.deleteById(messageId)
+        deleteMessageForMe(groupId, messageId)
         // Раунд 137: конверт несёт «кто удалял» - получатели ретрансляции
         // проверяют права по нему, а не по отправителю пакета. Команда
         // остаётся в очереди: помпа будет досылать её тем, до кого веер
@@ -1529,6 +1554,113 @@ class GroupRepository(
         deletionOutbox?.add(
             com.vladimir.messenger.data.repository.DeletionOutbox.Entry(
                 targetId = messageId,
+                kind = com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP,
+                chatId = groupId,
+                peerId = "",
+                deleterId = me,
+                atMs = clock(),
+                lastTryMs = clock(),
+                attempts = 1,
+                tried = emptyList(),
+            ),
+        )
+        return Result.success(Unit)
+    }
+
+    /** Сколько обычных сообщений этого автора в группе или канале. */
+    suspend fun countMessagesByAuthor(groupId: String, authorId: String): Int =
+        runCatching { messageDao.countMessagesBySenderInChat(groupId, authorId) }.getOrDefault(0)
+
+    /**
+     * Удалить ВСЕ сообщения конкретного автора в группе или канале у всех.
+     * Доступно владельцу, администраторам и самому автору.
+     */
+    suspend fun deleteAllMessagesFromAuthor(groupId: String, authorId: String): Result<Int> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        if (authorId.isBlank()) return Result.failure(IllegalArgumentException("Не указан автор"))
+        if (authorId != me && !canMemberModerate(group, me)) {
+            return Result.failure(SecurityException("Удалять все сообщения автора может владелец или администратор"))
+        }
+        val ids = messageDao.getMessageIdsBySenderInChat(groupId, authorId)
+        if (group.isChannel) {
+            for (topic in groupDao.getTopics(groupId)) {
+                val headId = messageDao.firstTextMessageIdInTopic(groupId, topic.id) ?: continue
+                val head = messageDao.getMessageById(headId) ?: continue
+                if (head.senderId == authorId) {
+                    messageDao.deleteTopicMessages(groupId, topic.id)
+                    groupDao.deleteTopic(topic.id)
+                }
+            }
+        }
+        messageDao.deleteMessagesBySenderInChat(groupId, authorId)
+        refreshGroupLastPreview(groupId)
+
+        val bulkTarget = GroupWire.DELETE_BY_AUTHOR_PREFIX + authorId
+        val bulkEnvelope = GroupWire.buildMessageDelete(groupId, bulkTarget, me)
+        broadcast(groupId, bulkEnvelope, excludeSelf = true)
+        deletionOutbox?.add(
+            com.vladimir.messenger.data.repository.DeletionOutbox.Entry(
+                targetId = bulkTarget,
+                kind = com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP,
+                chatId = groupId,
+                peerId = "",
+                deleterId = me,
+                atMs = clock(),
+                lastTryMs = clock(),
+                attempts = 1,
+                tried = emptyList(),
+            ),
+        )
+        // Для обратной совместимости с прошлыми версиями досылаем и точечные удаления.
+        if (ids.isNotEmpty()) {
+            backgroundScope.launch {
+                for (id in ids.take(40)) {
+                    runCatching {
+                        broadcast(groupId, GroupWire.buildMessageDelete(groupId, id, me), excludeSelf = true)
+                    }
+                }
+            }
+        }
+        return Result.success(ids.size)
+    }
+
+    /**
+     * Удалить ВСЕ сообщения в группе или канале у всех участников.
+     * Доступно владельцу и администраторам.
+     */
+    suspend fun deleteAllMessagesInGroup(groupId: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        if (!canMemberModerate(group, me)) {
+            return Result.failure(SecurityException("Очистить все сообщения может только владелец или администратор"))
+        }
+        messageDao.deleteGroupMessages(groupId)
+        if (group.isChannel) {
+            for (topic in groupDao.getTopics(groupId)) {
+                groupDao.deleteTopic(topic.id)
+            }
+        } else {
+            for (topic in groupDao.getTopics(groupId)) {
+                groupDao.markTopicRead(topic.id)
+            }
+        }
+        groupDao.markGroupRead(groupId)
+        groupDao.updateGroupLastMessage(groupId, "", 0L)
+
+        val envelope = GroupWire.buildMessageDelete(groupId, GroupWire.DELETE_ALL_MARKER, me)
+        broadcast(groupId, envelope, excludeSelf = true)
+        deletionOutbox?.add(
+            com.vladimir.messenger.data.repository.DeletionOutbox.Entry(
+                targetId = GroupWire.DELETE_ALL_MARKER,
                 kind = com.vladimir.messenger.data.repository.DeletionOutbox.KIND_GROUP,
                 chatId = groupId,
                 peerId = "",
@@ -2761,6 +2893,18 @@ class GroupRepository(
                     }
                 }
                 val authorId = if (relayed) packet.authorId else senderId
+                val authorMember = groupDao.getMember(packet.groupId, authorId)
+                if (authorMember != null) {
+                    if (authorMember.isBanned) return
+                    val authorIsAdmin = GroupRole.isAdminOrOwner(authorMember.role)
+                    val authorMask = GroupPermissions.effectiveMemberPermissions(
+                        authorMember.permissions,
+                        effectiveMemberMask(group),
+                    )
+                    if (!authorIsAdmin && !GroupPermissions.has(authorMask, GroupPermissions.Member.SEND_MESSAGES)) {
+                        return
+                    }
+                }
                 val isMine = authorId == me
                 // Время поста: из подписанного манифеста, если он есть, - сид мог
                 // получить пост «вживую» и хранить его под своим временем приёма.
@@ -2881,20 +3025,60 @@ class GroupRepository(
                 Log.i(TAG, "message edit applied id=${packet.messageId} group=${group.id} from=$senderId")
             }
 
-            // Раунд 135: автор (или владелец) стёр сообщение у всех.
+            // Раунд 135+: автор, владелец или администратор стёр сообщение (или все сообщения автора/группы) у всех.
             is GroupWire.Packet.MessageDelete -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 if (groupDao.getMember(packet.groupId, me) == null) return
-                val message = messageDao.getMessageById(packet.messageId) ?: return
-                if (message.chatId != packet.groupId) return
                 // Права проверяются по ТОМУ, КТО удалял (раунд 137): пакет
                 // мог привезти любой участник - ретрансляция через тех, кто
                 // в сети. В пакете старого образца удалявший - отправитель.
                 val deleter = packet.deleterId.ifBlank { senderId }
-                if (deleter != message.senderId && deleter != group.ownerId) return
-                deleteMessageForMe(packet.groupId, packet.messageId)
-                relayMessageDelete(group.id, packet.messageId, deleter, senderId)
-                Log.i(TAG, "message delete applied id=${packet.messageId} group=${group.id} via=$senderId deleter=$deleter")
+                when {
+                    packet.messageId == GroupWire.DELETE_ALL_MARKER -> {
+                        if (!canMemberModerate(group, deleter)) return
+                        messageDao.deleteGroupMessages(packet.groupId)
+                        if (group.isChannel) {
+                            for (topic in groupDao.getTopics(packet.groupId)) {
+                                groupDao.deleteTopic(topic.id)
+                            }
+                        } else {
+                            for (topic in groupDao.getTopics(packet.groupId)) {
+                                groupDao.markTopicRead(topic.id)
+                            }
+                        }
+                        groupDao.markGroupRead(packet.groupId)
+                        groupDao.updateGroupLastMessage(packet.groupId, "", 0L)
+                        relayMessageDelete(group.id, packet.messageId, deleter, senderId)
+                        Log.i(TAG, "delete all messages applied group=${group.id} via=$senderId deleter=$deleter")
+                    }
+                    packet.messageId.startsWith(GroupWire.DELETE_BY_AUTHOR_PREFIX) -> {
+                        val authorId = packet.messageId.removePrefix(GroupWire.DELETE_BY_AUTHOR_PREFIX)
+                        if (authorId.isBlank()) return
+                        if (deleter != authorId && !canMemberModerate(group, deleter)) return
+                        if (group.isChannel) {
+                            for (topic in groupDao.getTopics(packet.groupId)) {
+                                val headId = messageDao.firstTextMessageIdInTopic(packet.groupId, topic.id) ?: continue
+                                val head = messageDao.getMessageById(headId) ?: continue
+                                if (head.senderId == authorId) {
+                                    messageDao.deleteTopicMessages(packet.groupId, topic.id)
+                                    groupDao.deleteTopic(topic.id)
+                                }
+                            }
+                        }
+                        messageDao.deleteMessagesBySenderInChat(packet.groupId, authorId)
+                        refreshGroupLastPreview(packet.groupId)
+                        relayMessageDelete(group.id, packet.messageId, deleter, senderId)
+                        Log.i(TAG, "delete author messages applied author=$authorId group=${group.id} deleter=$deleter")
+                    }
+                    else -> {
+                        val message = messageDao.getMessageById(packet.messageId) ?: return
+                        if (message.chatId != packet.groupId) return
+                        if (deleter != message.senderId && !canMemberModerate(group, deleter)) return
+                        deleteMessageForMe(packet.groupId, packet.messageId)
+                        relayMessageDelete(group.id, packet.messageId, deleter, senderId)
+                        Log.i(TAG, "message delete applied id=${packet.messageId} group=${group.id} via=$senderId deleter=$deleter")
+                    }
+                }
             }
 
             is GroupWire.Packet.PostsRequest -> {
@@ -3263,12 +3447,40 @@ class GroupRepository(
 
             is GroupWire.Packet.Kick -> {
                 if (packet.nodeId != me) return
-                // Исключить мог только владелец или администратор с правом бана.
-                val sender = groupDao.getMember(packet.groupId, senderId)
-                if (sender == null || !GroupPermissions.canBan(sender.role, sender.permissions)) return
+                // Исключить мог только владелец или администратор.
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (!canMemberModerate(group, senderId)) return
                 groupDao.deleteMember(packet.groupId, me)
                 groupDao.markLeft(packet.groupId)
                 Log.i(TAG, "kicked from group=${packet.groupId} by=$senderId")
+            }
+
+            is GroupWire.Packet.MemberRestrict -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                if (!canMemberModerate(group, senderId)) return
+                if (packet.nodeId == group.ownerId) return
+                val current = groupDao.getMember(packet.groupId, packet.nodeId)
+                if (current == null) {
+                    groupDao.insertMember(
+                        GroupMemberEntity(
+                            groupId = packet.groupId,
+                            nodeId = packet.nodeId,
+                            displayName = "Участник " + packet.nodeId.takeLast(4),
+                            role = GroupRole.MEMBER,
+                            permissions = packet.permissionsMask,
+                            joinedAtMs = clock(),
+                        )
+                    )
+                } else {
+                    groupDao.updateMemberRole(
+                        packet.groupId,
+                        packet.nodeId,
+                        GroupRole.MEMBER,
+                        packet.permissionsMask,
+                    )
+                }
+                Log.i(TAG, "member restrict applied group=${packet.groupId} node=${packet.nodeId} by=$senderId")
             }
 
             is GroupWire.Packet.OwnerClaim -> handleOwnerClaim(senderId, packet)
@@ -3827,20 +4039,39 @@ class GroupRepository(
 
     suspend fun setMemberBlocked(groupId: String, nodeId: String, banned: Boolean): Result<Unit> {
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
         val actor = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupPermissions.canBan(actor.role, actor.permissions)) {
+        if (!GroupPermissions.canBan(actor.role, actor.permissions) && !canMemberModerate(group, me)) {
             return Result.failure(SecurityException("Нет права ограничивать участников"))
         }
+        if (nodeId == group.ownerId) {
+            return Result.failure(IllegalArgumentException("Владельца нельзя ограничить"))
+        }
         val target = groupDao.getMember(groupId, nodeId)
-            ?: return Result.failure(IllegalStateException("Участник не найден"))
-        if (target.role == GroupRole.OWNER) {
+        if (target?.role == GroupRole.OWNER) {
             return Result.failure(IllegalArgumentException("Владельца нельзя ограничить"))
         }
         if (banned) {
-            groupDao.updateMemberBanned(groupId, nodeId, true)
+            if (target == null) {
+                groupDao.insertMember(
+                    GroupMemberEntity(
+                        groupId = groupId,
+                        nodeId = nodeId,
+                        displayName = "Участник " + nodeId.takeLast(4),
+                        role = GroupRole.MEMBER,
+                        joinedAtMs = clock(),
+                        isBanned = true,
+                    )
+                )
+            } else {
+                groupDao.updateMemberBanned(groupId, nodeId, true)
+            }
         } else {
-            groupDao.deleteMember(groupId, nodeId)
+            if (target != null) {
+                groupDao.deleteMember(groupId, nodeId)
+            }
         }
         groupDao.refreshMemberCount(groupId)
         publishRoster(groupId)
@@ -3851,6 +4082,50 @@ class GroupRepository(
             delivery.deliver(groupId, GroupWire.buildKick(groupId, nodeId), listOf(nodeId))
         }.onFailure { e ->
             Log.w(TAG, "kick notice not delivered to $nodeId: ${e.message}")
+        }
+        return Result.success(Unit)
+    }
+
+    /**
+     * Индивидуально ограничить права конкретного участника в группе/канале
+     * (раздел «Ограничить права пользователя» в окне модерации).
+     */
+    suspend fun restrictMemberPermissions(
+        groupId: String,
+        nodeId: String,
+        allowedMask: Long,
+    ): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (!canMemberModerate(group, me)) {
+            return Result.failure(SecurityException("Нет права ограничивать участников"))
+        }
+        if (nodeId.isBlank() || nodeId == group.ownerId) {
+            return Result.failure(IllegalArgumentException("Права владельца не ограничиваются"))
+        }
+        val packed = GroupPermissions.packIndividualMemberMask(allowedMask)
+        val target = groupDao.getMember(groupId, nodeId)
+        if (target == null) {
+            groupDao.insertMember(
+                GroupMemberEntity(
+                    groupId = groupId,
+                    nodeId = nodeId,
+                    displayName = "Участник " + nodeId.takeLast(4),
+                    role = GroupRole.MEMBER,
+                    permissions = packed,
+                    joinedAtMs = clock(),
+                )
+            )
+        } else {
+            groupDao.updateMemberRole(groupId, nodeId, GroupRole.MEMBER, packed)
+        }
+        val envelope = GroupWire.buildMemberRestrict(groupId, nodeId, packed)
+        runCatching {
+            broadcast(groupId, envelope, excludeSelf = true)
+            delivery.deliver(groupId, envelope, listOf(nodeId))
+        }.onFailure { e ->
+            Log.w(TAG, "restrict notice not delivered to $nodeId: ${e.message}")
         }
         return Result.success(Unit)
     }

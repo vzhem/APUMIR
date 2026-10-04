@@ -240,6 +240,15 @@ fun ChatDetailScreen(
             } else {
                 null
             },
+            antiRatingCount = uiState.antiRatingCount,
+            antiRatingWarning = uiState.antiRatingWarning,
+            antiRatingUntilMs = uiState.antiRatingUntilMs,
+            antiRatingMine = uiState.antiRatingMine,
+            onAntiRatingClick = if (contactId.startsWith("pk_") && !uiState.isSelfChat) {
+                { viewModel.onAntiRatingClick(contactId) }
+            } else {
+                null
+            },
             onDismiss = { showPeerProfile = false },
             onRename = if (contactId.isNotBlank()) {
                 {

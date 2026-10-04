@@ -18,9 +18,16 @@ import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
+import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
+import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
+import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
+import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -309,7 +316,184 @@ fun ChannelScreen(
                 // Раунд 246: закреп и лента - в Column. Раньше лента в
                 // fillMaxSize-Box рисовалась поверх плашки закрепов
                 // (владелец: «закреп провалился под ленту»).
+                var deletePostTarget by remember { mutableStateOf<ChannelPost?>(null) }
+                var showBulkPostModeration by remember { mutableStateOf(false) }
+
+                val moderationPosts = remember(deletePostTarget, showBulkPostModeration, uiState.selectedPostIds, uiState.posts) {
+                    when {
+                        deletePostTarget != null -> listOfNotNull(deletePostTarget)
+                        showBulkPostModeration && uiState.selectedPostIds.isNotEmpty() ->
+                            uiState.posts.filter { it.messageId in uiState.selectedPostIds }
+                        else -> emptyList()
+                    }
+                }
+                if (moderationPosts.isNotEmpty()) {
+                    val primaryPost = moderationPosts.first()
+                    val distinctAuthors = moderationPosts.map { it.authorId }.distinct()
+                    val targetAuthorId = if (distinctAuthors.size == 1) distinctAuthors.first() else primaryPost.authorId
+                    val targetMember = uiState.members.firstOrNull { it.nodeId == targetAuthorId }
+                    val targetAuthorName = primaryPost.authorName.ifBlank {
+                        targetMember?.displayName?.ifBlank { "Участник " + targetAuthorId.takeLast(4) }
+                            ?: ("Участник " + targetAuthorId.takeLast(4))
+                    }
+                    val isAuthorMe = uiState.myId.isNotBlank() && uiState.myId == targetAuthorId
+                    val isAuthorOwner = (uiState.channel?.ownerId != null && uiState.channel?.ownerId == targetAuthorId) ||
+                        targetMember?.role == com.vladimir.messenger.data.group.GroupRole.OWNER
+                    var authorMsgCount by remember(targetAuthorId, uiState.posts.size) {
+                        mutableStateOf(uiState.posts.count { it.authorId == targetAuthorId }.coerceAtLeast(1))
+                    }
+                    LaunchedEffect(targetAuthorId) {
+                        if (targetAuthorId.isNotBlank()) {
+                            val total = viewModel.countAuthorMessages(targetAuthorId)
+                            if (total > 0) authorMsgCount = total
+                        }
+                    }
+                    val baseChannelMask = uiState.channel?.memberPermissions?.takeIf { it != 0L }
+                        ?: com.vladimir.messenger.data.group.GroupPermissions.Member.DEFAULT
+                    val initialAuthorMask = if (targetMember != null) {
+                        com.vladimir.messenger.data.group.GroupPermissions.effectiveMemberPermissions(
+                            targetMember.permissions,
+                            baseChannelMask,
+                        )
+                    } else {
+                        baseChannelMask
+                    }
+                    ApuMessageModerationDialog(
+                        selectedMessageCount = moderationPosts.size,
+                        isChannel = true,
+                        isChannelPost = true,
+                        authorId = targetAuthorId,
+                        authorName = targetAuthorName,
+                        isAuthorMe = isAuthorMe,
+                        isAuthorOwner = isAuthorOwner,
+                        canModerate = uiState.canModerate,
+                        canDeleteForAll = uiState.canModerate || isAuthorMe,
+                        authorMessageCount = authorMsgCount,
+                        authorAntiCount = uiState.antiRatings[targetAuthorId] ?: 0,
+                        authorAntiWarning = uiState.antiWarnings.containsKey(targetAuthorId),
+                        alreadyHasMyAnti = targetAuthorId in uiState.myAntiRatings,
+                        initialMemberPermissionsMask = initialAuthorMask,
+                        onOpenAuthorProfile = if (targetAuthorId.isNotBlank()) {
+                            {
+                                deletePostTarget = null
+                                showBulkPostModeration = false
+                                viewModel.openPeerProfile(targetAuthorId, targetAuthorName)
+                            }
+                        } else {
+                            null
+                        },
+                        onDismiss = {
+                            deletePostTarget = null
+                            showBulkPostModeration = false
+                        },
+                        onConfirm = { result ->
+                            val ids = moderationPosts.map { it.messageId }
+                            deletePostTarget = null
+                            showBulkPostModeration = false
+                            viewModel.applyPostModeration(ids, targetAuthorId, result)
+                        },
+                    )
+                }
+
+                val inspectedPeerId = uiState.inspectedPeerId
+                if (!inspectedPeerId.isNullOrBlank()) {
+                    val isSelfPeer = uiState.myId.isNotBlank() && uiState.myId == inspectedPeerId
+                    PeerProfileSheet(
+                        name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
+                        contactId = inspectedPeerId,
+                        isOnline = true,
+                        heartCount = uiState.inspectedPeerHearts,
+                        heartMine = uiState.inspectedPeerHeartMine,
+                        onHeartClick = if (!isSelfPeer) {
+                            { viewModel.togglePeerHeart(inspectedPeerId) }
+                        } else {
+                            null
+                        },
+                        antiRatingCount = uiState.inspectedPeerAntiCount,
+                        antiRatingWarning = uiState.inspectedPeerAntiWarning,
+                        antiRatingUntilMs = uiState.inspectedPeerAntiUntilMs,
+                        antiRatingMine = uiState.inspectedPeerAntiMine,
+                        onAntiRatingClick = if (!isSelfPeer) {
+                            { viewModel.togglePeerAntiRating(inspectedPeerId) }
+                        } else {
+                            null
+                        },
+                        onDismiss = { viewModel.closePeerProfile() },
+                        onCopyId = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
+                            Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                }
+
                 Column(modifier = Modifier.fillMaxSize()) {
+                if (uiState.selectedPostIds.isNotEmpty()) {
+                    val selCount = uiState.selectedPostIds.size
+                    ApuBubbleCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(
+                                onClick = { viewModel.clearPostSelection() },
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Снять выделение",
+                                    tint = ApuBubbleTextColor,
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Выбрано $selCount",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = ApuBubbleTextColor,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick = {
+                                    val combined = uiState.posts
+                                        .filter { it.messageId in uiState.selectedPostIds }
+                                        .joinToString("\n\n") { listOf(it.title, it.text).filter { s -> s.isNotBlank() }.joinToString("\n") }
+                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                        as android.content.ClipboardManager
+                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Посты", combined))
+                                    Toast.makeText(context, "Скопировано ($selCount)", Toast.LENGTH_SHORT).show()
+                                    viewModel.clearPostSelection()
+                                },
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.ContentCopy,
+                                    contentDescription = "Скопировать выбранные",
+                                    tint = ApuBubbleAccentColor,
+                                )
+                            }
+                            if (uiState.canModerate) {
+                                IconButton(
+                                    onClick = { showBulkPostModeration = true },
+                                    modifier = Modifier.size(36.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Delete,
+                                        contentDescription = "Удалить выбранные",
+                                        tint = ApuSettingsDangerColor,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 // Раунд 173: закреплённые посты канала; тап - лента прыгает
                 // к самому посту.
                 if (uiState.pinnedPostIds.isNotEmpty()) {
@@ -391,10 +575,22 @@ fun ChannelScreen(
                             // так карандаш появится сразу, как только станет
                             // известен мой идентификатор.
                             val myId = uiState.myId
+                            val canEditPost = myId.isNotBlank() &&
+                                (post.authorId == myId || uiState.channel?.ownerId == myId)
                             PostCard(
                                 post = post,
-                                canEdit = myId.isNotBlank() &&
-                                    (post.authorId == myId || uiState.channel?.ownerId == myId),
+                                authorAntiCount = uiState.antiRatings[post.authorId] ?: 0,
+                                authorAntiWarning = uiState.antiWarnings.containsKey(post.authorId),
+                                canEdit = canEditPost,
+                                canModerate = uiState.canModerate,
+                                isAuthorMe = myId.isNotBlank() && post.authorId == myId,
+                                selectionMode = uiState.selectedPostIds.isNotEmpty(),
+                                isSelected = post.messageId in uiState.selectedPostIds,
+                                onToggleSelect = { viewModel.toggleSelectPost(post.messageId) },
+                                onOpenAuthorProfile = {
+                                    viewModel.openPeerProfile(post.authorId, post.authorName)
+                                },
+                                onDeletePost = { deletePostTarget = post },
                                 onTogglePin = { viewModel.togglePostPin(post) },
                                 onEdit = { editingPost = post },
                                 onOpenComments = { onOpenComments(uiState.channelId, post.topicId) },
@@ -583,8 +779,17 @@ fun ChannelScreen(
 @OptIn(ExperimentalFoundationApi::class)
 private fun PostCard(
     post: ChannelPost,
+    authorAntiCount: Int = 0,
+    authorAntiWarning: Boolean = false,
     /** Правка доступна автору поста и владельцу канала. */
     canEdit: Boolean = false,
+    canModerate: Boolean = false,
+    isAuthorMe: Boolean = false,
+    selectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelect: () -> Unit = {},
+    onOpenAuthorProfile: () -> Unit = {},
+    onDeletePost: () -> Unit = {},
     onEdit: () -> Unit = {},
     onOpenComments: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
@@ -606,8 +811,8 @@ private fun PostCard(
     val bodyText = remember(post.text, fileCard?.info) {
         if (fileCard != null) GroupFileMarker.stripCaption(post.text, fileCard.info) else post.text
     }
-    // Копирование текста поста: удержание открывает окно с выделением, как в
-    // переписке. Раньше текст поста нельзя было скопировать вообще.
+    // Копирование текста поста: удержание открывает меню действий (с пунктами
+    // «Копировать текст», «Удалить и модерация…» и др.).
     var selectPostText by remember { mutableStateOf(false) }
     val time = remember(post.timeMs) {
         SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date(post.timeMs))
@@ -628,27 +833,42 @@ private fun PostCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = {},
-                onLongClick = {
-                    if (post.title.isNotBlank() || post.text.isNotBlank()) {
-                        selectPostText = true
-                    }
-                },
+                onClick = { if (selectionMode) onToggleSelect() },
+                onLongClick = { showPostMenu = true },
             ),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.Top) {
+                if (selectionMode) {
+                    ApuCircleCheckIndicator(
+                        checked = isSelected,
+                        modifier = Modifier
+                            .padding(end = 8.dp, top = 2.dp)
+                            .clickable { onToggleSelect() },
+                    )
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         post.title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Text(
-                        "${post.authorName} - $time",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = ApuBubbleMutedColor,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.clickable { onOpenAuthorProfile() },
+                    ) {
+                        Text(
+                            "${post.authorName} - $time",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        ApuAntiRatingInlineBadge(
+                            antiCount = authorAntiCount,
+                            isWarning = authorAntiWarning,
+                            onClick = onOpenAuthorProfile,
+                        )
+                    }
                     // Раунд 173: закрепить/открепить пост канала.
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
                         Icon(
@@ -702,8 +922,26 @@ private fun PostCard(
                             if (post.title.isNotBlank() || post.text.isNotBlank()) {
                                 add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
                             }
+                            if (!isAuthorMe && post.authorId.isNotBlank()) {
+                                add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                            }
+                            add(
+                                ApuAction(
+                                    if (isSelected) "Снять выбор" else "Выбрать несколько",
+                                    Icons.Filled.CheckCircle,
+                                ) { onToggleSelect() }
+                            )
                             if (canEdit) {
                                 add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                            }
+                            if (canModerate || canEdit) {
+                                add(
+                                    ApuAction(
+                                        if (canModerate && !isAuthorMe) "Удалить и модерация…" else "Удалить…",
+                                        Icons.Filled.Delete,
+                                        destructive = true,
+                                    ) { onDeletePost() }
+                                )
                             }
                         },
                     )

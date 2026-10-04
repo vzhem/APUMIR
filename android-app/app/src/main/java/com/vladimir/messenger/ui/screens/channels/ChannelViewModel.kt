@@ -67,6 +67,22 @@ data class ChannelUiState(
     val pinnedPostIds: List<String> = emptyList(),
     /** Писать посты может владелец и администраторы; комментарии - все. */
     val canPost: Boolean = false,
+    /** Может ли этот пользователь модерировать публикации и участников канала. */
+    val canModerate: Boolean = false,
+    val members: List<com.vladimir.messenger.data.group.MemberSummary> = emptyList(),
+    val antiRatings: Map<String, Int> = emptyMap(),
+    /** Узлы с активным временным предупреждением о всплеске жалоб (`nodeId -> до когда`). */
+    val antiWarnings: Map<String, Long> = emptyMap(),
+    val myAntiRatings: Set<String> = emptySet(),
+    val selectedPostIds: Set<String> = emptySet(),
+    val inspectedPeerId: String? = null,
+    val inspectedPeerName: String = "",
+    val inspectedPeerHearts: Int = 0,
+    val inspectedPeerHeartMine: Boolean = false,
+    val inspectedPeerAntiCount: Int = 0,
+    val inspectedPeerAntiMine: Boolean = false,
+    val inspectedPeerAntiWarning: Boolean = false,
+    val inspectedPeerAntiUntilMs: Long = 0,
     /** Мой идентификатор узла: по нему решается, можно ли править пост. */
     val myId: String = "",
     val isLoading: Boolean = true,
@@ -101,6 +117,7 @@ class ChannelViewModel @Inject constructor(
     private val groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm,
     private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
+    private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -116,6 +133,7 @@ class ChannelViewModel @Inject constructor(
         observe()
         observeReactions()
         observeTransfers()
+        observeAntiRatings()
         // Вступивший позже не застал посты - просим у владельца последние
         // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
         viewModelScope.launch {
@@ -369,10 +387,15 @@ class ChannelViewModel @Inject constructor(
                     )
                 }.sortedBy { it.timeMs }
 
+                val role = me?.role ?: GroupRole.MEMBER
+                val perms = me?.permissions ?: 0L
+                val isOwner = channel?.ownerId != null && channel.ownerId == me?.nodeId
                 ChannelSnapshot(
                     channel = channel,
                     posts = posts,
-                    canPost = GroupRole.isAdminOrOwner(me?.role ?: GroupRole.MEMBER),
+                    members = members,
+                    canPost = GroupRole.isAdminOrOwner(role),
+                    canModerate = isOwner || com.vladimir.messenger.data.group.GroupPermissions.canModerateMessages(role, perms),
                     myId = me?.nodeId.orEmpty(),
                 )
             }
@@ -395,10 +418,12 @@ class ChannelViewModel @Inject constructor(
                     it.copy(
                         channel = snapshot.channel,
                         posts = snapshot.posts,
+                        members = snapshot.members,
                         // В ленте закрепляются именно публикации, а не комментарии.
-                        pinnedPostIds = snapshot.posts.filter { it.isPinned }.map { it.messageId },
+                        pinnedPostIds = snapshot.posts.filter { it.isPinned }.map { post -> post.messageId },
                         error = MessagePinPolicy.visibleError(it.error, snapshot.posts.count { post -> post.isPinned }),
                         canPost = snapshot.canPost,
+                        canModerate = snapshot.canModerate,
                         myId = snapshot.myId,
                         isLoading = false,
                     )
@@ -419,7 +444,9 @@ class ChannelViewModel @Inject constructor(
     private data class ChannelSnapshot(
         val channel: GroupSummary?,
         val posts: List<ChannelPost>,
+        val members: List<com.vladimir.messenger.data.group.MemberSummary>,
         val canPost: Boolean,
+        val canModerate: Boolean,
         val myId: String,
     )
 
@@ -635,5 +662,171 @@ class ChannelViewModel @Inject constructor(
 
     fun dismissError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun toggleSelectPost(messageId: String) {
+        _uiState.update { state ->
+            val next = state.selectedPostIds.toMutableSet()
+            if (!next.add(messageId)) next.remove(messageId)
+            state.copy(selectedPostIds = next)
+        }
+    }
+
+    fun clearPostSelection() {
+        _uiState.update { it.copy(selectedPostIds = emptySet()) }
+    }
+
+    suspend fun countAuthorMessages(authorId: String): Int =
+        groupRepository.countMessagesByAuthor(channelId, authorId)
+
+    fun applyPostModeration(
+        messageIds: List<String>,
+        authorId: String,
+        result: com.vladimir.messenger.ui.components.ApuModerationResult,
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(selectedPostIds = emptySet()) }
+            when {
+                result.deleteAllInGroup -> {
+                    groupRepository.deleteAllMessagesInGroup(channelId)
+                        .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                }
+                result.deleteAllFromAuthor && authorId.isNotBlank() -> {
+                    groupRepository.deleteAllMessagesFromAuthor(channelId, authorId)
+                        .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                }
+                else -> {
+                    for (msgId in messageIds) {
+                        if (result.deleteForAll) {
+                            groupRepository.deleteMessageForAll(channelId, msgId)
+                                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                        } else {
+                            runCatching { groupRepository.deleteMessageForMe(channelId, msgId) }
+                                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                        }
+                    }
+                }
+            }
+            if (result.giveAntiRating && authorId.isNotBlank()) {
+                val peers = _uiState.value.members.map { it.nodeId }
+                hearts.addAntiRating(authorId, peers)
+            }
+            if (result.restrictAuthorPermissions && authorId.isNotBlank()) {
+                groupRepository.restrictMemberPermissions(channelId, authorId, result.allowedMemberMask)
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            }
+            if (result.blockAuthor && authorId.isNotBlank()) {
+                groupRepository.setMemberBlocked(channelId, authorId, true)
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            }
+        }
+    }
+
+    private fun observeAntiRatings() {
+        viewModelScope.launch {
+            hearts.observeAntiCountsMap().collect { map ->
+                _uiState.update { state ->
+                    val peer = state.inspectedPeerId
+                    state.copy(
+                        antiRatings = map,
+                        inspectedPeerAntiCount = if (peer != null) (map[peer] ?: 0) else state.inspectedPeerAntiCount,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            hearts.observeAntiWarnings().collect { warnings ->
+                _uiState.update { state ->
+                    val peer = state.inspectedPeerId
+                    val until = if (peer != null) (warnings[peer] ?: 0L) else state.inspectedPeerAntiUntilMs
+                    state.copy(
+                        antiWarnings = warnings,
+                        inspectedPeerAntiWarning = peer != null && until > 0L,
+                        inspectedPeerAntiUntilMs = until,
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            val me = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                appContext.getSharedPreferences("p2p_prefs", android.content.Context.MODE_PRIVATE)
+                    .getString("node_id", null)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+            }
+            if (me.isBlank()) return@launch
+            hearts.observeMyAntiTargets(me).collect { targets ->
+                _uiState.update { state ->
+                    val peer = state.inspectedPeerId
+                    state.copy(
+                        myAntiRatings = targets,
+                        inspectedPeerAntiMine = if (peer != null) (peer in targets) else state.inspectedPeerAntiMine,
+                    )
+                }
+            }
+        }
+    }
+
+    fun openPeerProfile(peerId: String, peerName: String) {
+        if (peerId.isBlank()) return
+        _uiState.update {
+            it.copy(
+                inspectedPeerId = peerId,
+                inspectedPeerName = peerName,
+                inspectedPeerAntiCount = it.antiRatings[peerId] ?: 0,
+                inspectedPeerAntiMine = peerId in it.myAntiRatings,
+            )
+        }
+        viewModelScope.launch {
+            val hCount = hearts.countOf(peerId)
+            val hMine = hearts.isMine(peerId)
+            val anti = hearts.antiStateOf(peerId)
+            val aMine = hearts.isMyAntiRating(peerId)
+            _uiState.update { state ->
+                if (state.inspectedPeerId != peerId) state else state.copy(
+                    inspectedPeerHearts = hCount,
+                    inspectedPeerHeartMine = hMine,
+                    inspectedPeerAntiCount = anti.total,
+                    inspectedPeerAntiMine = aMine,
+                    inspectedPeerAntiWarning = anti.warning,
+                    inspectedPeerAntiUntilMs = anti.warningUntilMs,
+                )
+            }
+        }
+    }
+
+    fun closePeerProfile() {
+        _uiState.update { it.copy(inspectedPeerId = null) }
+    }
+
+    fun togglePeerHeart(peerId: String) {
+        if (peerId.isBlank()) return
+        viewModelScope.launch {
+            val mine = hearts.toggle(peerId)
+            val count = hearts.countOf(peerId)
+            _uiState.update { state ->
+                if (state.inspectedPeerId != peerId) state else state.copy(
+                    inspectedPeerHeartMine = mine,
+                    inspectedPeerHearts = count,
+                )
+            }
+        }
+    }
+
+    fun togglePeerAntiRating(peerId: String) {
+        if (peerId.isBlank()) return
+        viewModelScope.launch {
+            val peers = _uiState.value.members.map { it.nodeId }
+            val mine = hearts.toggleAntiRating(peerId, peers)
+            val anti = hearts.antiStateOf(peerId)
+            _uiState.update { state ->
+                if (state.inspectedPeerId != peerId) state else state.copy(
+                    inspectedPeerAntiMine = mine,
+                    inspectedPeerAntiCount = anti.total,
+                    inspectedPeerAntiWarning = anti.warning,
+                    inspectedPeerAntiUntilMs = anti.warningUntilMs,
+                )
+            }
+        }
     }
 }

@@ -43,17 +43,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+
 import com.vladimir.messenger.ui.theme.AvatarStore
 
 /** Тёплый красный: сердечко должно быть заметно и на светлой карточке. */
 private val HeartColor = Color(0xFFE0245E)
+/** Цвет анти-рейтинга (жалобы на профиль). */
+private val AntiRatingColor = ApuSettingsDangerColor
 
 /**
  * Карточка профиля собеседника — открывается тапом по его имени в переписке.
  *
  * Показывает то, что телефон уже знает о человеке: аватар, имя, @никнейм,
- * в сети он или нет, и его узел в сети. Ничего не запрашивает по сети — только
- * то, что уже лежит рядом с чатом, поэтому карточка открывается мгновенно.
+ * в сети он или нет, сердечки и анти-рейтинг, и его узел в сети. Ничего не
+ * запрашивает по сети — только то, что уже лежит рядом с чатом, поэтому
+ * карточка открывается мгновенно.
  *
  * Идентификатор узла можно скопировать: он нужен, чтобы позвать человека в
  * группу или разобраться, почему сообщения не идут.
@@ -72,6 +76,19 @@ fun PeerProfileSheet(
     heartMine: Boolean = false,
     /** Нажатие на сердечко; null - показываем только счётчик. */
     onHeartClick: (() -> Unit)? = null,
+    /** Сколько человек поставили профилю анти-рейтинг (жалобу). */
+    antiRatingCount: Int = 0,
+    /**
+     * Действует ли временное предупреждение: жалоб пришло много и сразу за
+     * короткое время. Одиночные отметки 👎 его не включают.
+     */
+    antiRatingWarning: Boolean = false,
+    /** До какого времени идёт предупреждение (0 - не показываем срок). */
+    antiRatingUntilMs: Long = 0,
+    /** Стоит ли МОЙ анти-рейтинг этому профилю. */
+    antiRatingMine: Boolean = false,
+    /** Нажатие на кнопку анти-рейтинга; null - показываем только счётчик. */
+    onAntiRatingClick: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
     onCall: (() -> Unit)? = null,
     onCopyId: (() -> Unit)? = null,
@@ -79,10 +96,10 @@ fun PeerProfileSheet(
     val avatars by AvatarStore.avatars.collectAsState()
     val bitmap = AvatarBitmaps.rememberAvatar(avatars[contactId])
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть") }
+            TextButton(onClick = onDismiss) { Text("Закрыть", color = ApuBubbleMutedColor) }
         },
         title = null,
         text = {
@@ -115,6 +132,7 @@ fun PeerProfileSheet(
                     name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
+                    color = ApuBubbleTextColor,
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -132,43 +150,153 @@ fun PeerProfileSheet(
                     color = if (isOnline) {
                         MaterialTheme.colorScheme.primary
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        ApuBubbleMutedColor
                     },
                 )
 
                 Spacer(Modifier.height(12.dp))
 
-                // Сердечки: сколько людям понравился профиль. Нажатие ставит
-                // или снимает своё - один человек считается один раз.
+                // Сердечки (❤️) и анти-рейтинг (👎): один человек = один голос.
                 Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .then(
-                            if (onHeartClick != null) {
-                                Modifier.clickable(onClick = onHeartClick)
-                            } else {
-                                Modifier
-                            }
-                        )
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
                 ) {
-                    Icon(
-                        imageVector = if (heartMine) {
-                            Icons.Filled.Favorite
-                        } else {
-                            Icons.Filled.FavoriteBorder
-                        },
-                        contentDescription = if (heartMine) "Убрать сердечко" else "Поставить сердечко",
-                        tint = HeartColor,
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        heartCount.toString(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                if (heartMine) HeartColor.copy(alpha = 0.14f) else Color(0xFFF0EFEA),
+                                RoundedCornerShape(20.dp),
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (heartMine) HeartColor.copy(alpha = 0.45f) else ApuBubbleAccentColor.copy(alpha = 0.25f),
+                                shape = RoundedCornerShape(20.dp),
+                            )
+                            .then(
+                                if (onHeartClick != null) {
+                                    Modifier.clickable(onClick = onHeartClick)
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (heartMine) {
+                                Icons.Filled.Favorite
+                            } else {
+                                Icons.Filled.FavoriteBorder
+                            },
+                            contentDescription = if (heartMine) "Убрать сердечко" else "Поставить сердечко",
+                            tint = HeartColor,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            heartCount.toString(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ApuBubbleTextColor,
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                if (antiRatingMine || antiRatingWarning) {
+                                    AntiRatingColor.copy(alpha = 0.14f)
+                                } else {
+                                    Color(0xFFF0EFEA)
+                                },
+                                RoundedCornerShape(20.dp),
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (antiRatingMine || antiRatingCount > 0) {
+                                    AntiRatingColor.copy(alpha = 0.45f)
+                                } else {
+                                    ApuBubbleAccentColor.copy(alpha = 0.25f)
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                            )
+                            .then(
+                                if (onAntiRatingClick != null) {
+                                    Modifier.clickable(onClick = onAntiRatingClick)
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            text = "\uD83D\uDC4E",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = antiRatingCount.toString(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (antiRatingMine || antiRatingCount > 0) {
+                                AntiRatingColor
+                            } else {
+                                ApuBubbleTextColor
+                            },
+                        )
+                    }
+                }
+
+                if (antiRatingCount > 0) {
+                    Spacer(Modifier.height(10.dp))
+                    val isWarning = antiRatingWarning
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isWarning) {
+                                    AntiRatingColor.copy(alpha = 0.12f)
+                                } else {
+                                    Color(0xFF9A5B13).copy(alpha = 0.10f)
+                                },
+                                RoundedCornerShape(12.dp),
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isWarning) {
+                                    AntiRatingColor.copy(alpha = 0.38f)
+                                } else {
+                                    Color(0xFF9A5B13).copy(alpha = 0.30f)
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                            )
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            text = if (isWarning) {
+                                val clock = if (antiRatingUntilMs > 0) {
+                                    " Предупреждение временное — примерно до " +
+                                        warningClockTime(antiRatingUntilMs) + "."
+                                } else {
+                                    " Предупреждение временное."
+                                }
+                                "⚠️ За короткое время пришло много жалоб (всего: $antiRatingCount)." +
+                                    " Репутация и приоритет узла в рое временно понижены." + clock
+                            } else {
+                                "Отметок анти-рейтинга у профиля: $antiRatingCount. " +
+                                    "Одиночные жалобы рейтинг не понижают — значение имеет только резкий рост."
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isWarning) AntiRatingColor else Color(0xFF9A5B13),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(14.dp))
@@ -263,3 +391,8 @@ fun PeerProfileSheet(
         },
     )
 }
+
+/** Время окончания предупреждения по-человечески: «14:35». */
+private fun warningClockTime(untilMs: Long): String =
+    java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(untilMs))

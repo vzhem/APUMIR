@@ -40,6 +40,11 @@ data class SettingsUiState(
     val proxyTunnelEnabled: Boolean = true,
     /** Сколько сердечек набрал мой профиль. */
     val heartCount: Int = 0,
+    /** Сколько отметок анти-рейтинга получил мой профиль. */
+    val antiRatingCount: Int = 0,
+    /** Действует ли временное предупреждение о всплеске жалоб на мой профиль. */
+    val antiRatingWarning: Boolean = false,
+    val antiRatingUntilMs: Long = 0,
     /** Раунд 249: никнейм «Защиты личности» — от него зависит текст окна выхода. */
     val protectedNick: String? = null,
 )
@@ -394,8 +399,21 @@ class SettingsViewModel @Inject constructor(
                     ?: com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
             }
             if (me.isBlank()) return@launch
-            hearts.observeCount(me).collect { count ->
-                _uiState.update { it.copy(heartCount = count) }
+            launch {
+                hearts.observeCount(me).collect { count ->
+                    _uiState.update { it.copy(heartCount = count) }
+                }
+            }
+            launch {
+                hearts.observeAntiState(me).collect { anti ->
+                    _uiState.update {
+                        it.copy(
+                            antiRatingCount = anti.total,
+                            antiRatingWarning = anti.warning,
+                            antiRatingUntilMs = anti.warningUntilMs,
+                        )
+                    }
+                }
             }
         }
     }

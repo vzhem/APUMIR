@@ -124,6 +124,24 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("Role.RadioButton", groups)
         self.assertIn("Role.Switch", groups)
 
+    def test_moderation_dialog_and_profile_anti_rating_use_house_style(self):
+        mod_dialog = source("components/ApuModerationDialog.kt")
+        self.assertNotRegex(mod_dialog, r"\bAlertDialog\(")
+        self.assertIn("ApuSettingsDialog(", mod_dialog)
+        self.assertIn("ApuSettingsCard", mod_dialog)
+        self.assertIn("Ещё действия", mod_dialog)
+        self.assertIn("Ограничить права пользователя", mod_dialog)
+        peer_sheet = source("components/PeerProfileSheet.kt")
+        self.assertIn("ApuSettingsDialog(", peer_sheet)
+        self.assertIn("antiRatingCount", peer_sheet)
+        self.assertIn("onAntiRatingClick", peer_sheet)
+        group_chat = source("screens/groups/GroupChatScreen.kt")
+        self.assertIn("ApuMessageModerationDialog(", group_chat)
+        self.assertIn("PeerProfileSheet(", group_chat)
+        channel_screen = source("screens/channels/ChannelScreen.kt")
+        self.assertIn("ApuMessageModerationDialog(", channel_screen)
+        self.assertIn("PeerProfileSheet(", channel_screen)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

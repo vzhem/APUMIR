@@ -186,4 +186,24 @@ class GroupPermissionsTest {
             memberFlags.fold(0L) { acc, f -> acc or f },
         )
     }
+
+    @Test
+    fun ownerAndAdminsCanModerateMessagesAndIndividualRestrictionsApply() {
+        assertTrue(GroupPermissions.canModerateMessages(GroupRole.OWNER, 0L))
+        assertTrue(GroupPermissions.canModerateMessages(GroupRole.ADMIN, 0L))
+        assertTrue(GroupPermissions.canModerateMessages(GroupRole.ADMIN, GroupPermissions.Admin.DEFAULT))
+        assertFalse(GroupPermissions.canModerateMessages(GroupRole.MEMBER, GroupPermissions.Member.ALL))
+
+        val groupDefault = GroupPermissions.Member.DEFAULT
+        assertEquals(groupDefault, GroupPermissions.effectiveMemberPermissions(0L, groupDefault))
+
+        val readOnly = GroupPermissions.packIndividualMemberMask(0L)
+        assertEquals(0L, GroupPermissions.effectiveMemberPermissions(readOnly, groupDefault))
+
+        val textOnly = GroupPermissions.packIndividualMemberMask(GroupPermissions.Member.SEND_MESSAGES)
+        assertEquals(
+            GroupPermissions.Member.SEND_MESSAGES,
+            GroupPermissions.effectiveMemberPermissions(textOnly, groupDefault),
+        )
+    }
 }

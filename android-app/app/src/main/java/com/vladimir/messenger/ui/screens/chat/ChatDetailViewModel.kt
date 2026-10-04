@@ -56,9 +56,14 @@ data class ChatDetailUiState(
     val isContactOnline: Boolean = false,
     /** @никнейм собеседника: показывает карточка профиля. */
     val contactUsername: String = "",
-    /** Сердечки профиля собеседника: рейтинг популярности. */
+    /** Сердечки и анти-рейтинг профиля собеседника. */
     val heartCount: Int = 0,
     val heartMine: Boolean = false,
+    val antiRatingCount: Int = 0,
+    val antiRatingMine: Boolean = false,
+    /** Временное предупреждение о всплеске жалоб (не одиночные отметки). */
+    val antiRatingWarning: Boolean = false,
+    val antiRatingUntilMs: Long = 0,
     val scrollToBottom: Boolean = false,
     val pendingSave: FileTransferEntity? = null,
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
@@ -483,11 +488,27 @@ class ChatDetailViewModel @Inject constructor(
     private fun observeHearts(peerId: String) {
         if (peerId.isBlank()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(heartMine = hearts.isMine(peerId)) }
+            _uiState.update {
+                it.copy(
+                    heartMine = hearts.isMine(peerId),
+                    antiRatingMine = hearts.isMyAntiRating(peerId),
+                )
+            }
         }
         viewModelScope.launch {
             hearts.observeCount(peerId).collect { count ->
                 _uiState.update { it.copy(heartCount = count) }
+            }
+        }
+        viewModelScope.launch {
+            hearts.observeAntiState(peerId).collect { state ->
+                _uiState.update {
+                    it.copy(
+                        antiRatingCount = state.total,
+                        antiRatingWarning = state.warning,
+                        antiRatingUntilMs = state.warningUntilMs,
+                    )
+                }
             }
         }
     }
@@ -498,6 +519,15 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             val mine = hearts.toggle(peerId)
             _uiState.update { it.copy(heartMine = mine) }
+        }
+    }
+
+    /** Поставить или снять анти-рейтинг профилю собеседника. */
+    fun onAntiRatingClick(peerId: String) {
+        if (peerId.isBlank()) return
+        viewModelScope.launch {
+            val mine = hearts.toggleAntiRating(peerId)
+            _uiState.update { it.copy(antiRatingMine = mine) }
         }
     }
 
