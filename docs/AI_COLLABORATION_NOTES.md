@@ -11354,6 +11354,23 @@ LazyColumn ещё и прокручивается. Решение — `ui/compon
   только на время срока) обновлены; `scripts/ci/check-chat-history.sh` теперь
   компилирует и гоняет `HeartWireTest` и `GroupPermissionsTest` на JVM.
 
+### Итог выпуска v11.74.171
+
+- Тег `v11.74.171` собран GitHub Actions `37184475524` — SUCCESS: APK
+  `43 209 004` байта, SHA-256
+  `da34cd3fe77d7278525cf84fcccbd8adcc4ed405ff14768dc4a17e0bb2b5779b`.
+  Первые две сборки упали на `:app:compileReleaseKotlin`; ошибки найдены только
+  по логу прогона — его удалось прочитать через подписанную ссылку `job logs`
+  (CDN из песочницы закрыт, обычный `gh run view --log` падает с EOF).
+  Исправления: `ApuAvatar`/`ApuSettingsSectionHeader` → `Avatar`/
+  `ApuSettingsSectionTitle`; `senderNames`/`isChannel`/`channelRootMessageId`
+  объявлены до окна модерации; добавлен общий `ApuSettingsDangerColor` и
+  импорты цветов в `SettingsScreen`; из DAO убраны проекция `COUNT(*)` в свой
+  data class и выборки `List<Long>` (грабли Room из `AI_HANDOFF.md`).
+- Проверки в песочнице: source-контракты CI — OK, `struct_check.py` — 0 ошибок,
+  `git diff --check` — PASS. Java/Android SDK в песочнице нет, `check-chat-history.sh`
+  локально не запускался; на телефонах ничего не проверялось.
+
 ### Что НЕ доказано
 
 - Компилятор в песочнице отсутствует: Kotlin не собирался, `check-chat-history.sh`

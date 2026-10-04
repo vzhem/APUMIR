@@ -36,14 +36,27 @@
 
 ### Выпущено и что означает
 
-- **Stable Latest — v11.74.168**, опубликован 2026-10-03; release: <https://github.com/vzhem/APUMIR/releases/tag/v11.74.168>. APK workflow `37103048304` SUCCESS; application source `720b8b3…`, финальный тег `bba5dcb7…`; `/releases/latest` проверен.
+- **Stable Latest — v11.74.171** (2026-10-04): модерация сообщений владельцем и
+  администраторами в группах, каналах и обсуждениях + временный анти-рейтинг
+  профилей. Сборка тега — GitHub Actions `37184475524` SUCCESS; APK
+  `43 209 004` байта; SHA-256 в GitHub API
+  `da34cd3fe77d7278525cf84fcccbd8adcc4ed405ff14768dc4a17e0bb2b5779b` (совпадает
+  с `release-upload/app-release.apk.sha256` в теге). Поведение на телефонах НЕ
+  проверено: это следующий шаг владельца.
+- Первые две сборки тега v11.74.171 упали на `:app:compileReleaseKotlin`:
+  (1) `ApuAvatar`/`ApuSettingsSectionHeader` не существуют, (2) локальные
+  переменные использовались до объявления, (3) `ApuSettingsDangerColor` не был
+  объявлен нигде. Исправлено; впредь перед тегом проверять такие ссылки
+  (в песочнице нет компилятора). Логи упавших прогонов достаются не из
+  песочницы, а через подписанную ссылку `job logs` — см. запись журнала.
+- **Stable v11.74.168**, опубликован 2026-10-03; release: <https://github.com/vzhem/APUMIR/releases/tag/v11.74.168>. APK workflow `37103048304` SUCCESS; application source `720b8b3…`, финальный тег `bba5dcb7…`; `/releases/latest` проверен.
 - v168 приводит экран профиля и настройки к единому адаптивному фирменному стилю. Размер APK — 43 077 363 байта; GitHub API SHA-256 — `6497205c2911a1a8be16626d770da6ebc62391fa2563040878a7a479dc1f1b42`. Checksum — отдельный raw-файл в release tag, **не** прикреплённый asset.
 - Прежняя запись «r248 не выпущено / Latest v144» устарела: r248 pin caps и `pinnedBy` logic есть в source tag v11.74.167 и v11.74.168; v167 — stable, build run `37047097395` SUCCESS. Код/сборка подтверждены, поведение закрепов на реальных телефонах — нет.
 - Это обновление передаётся в `main` только PR-ом из текущей Arena-ветки; не запускать `scripts/sync-main.sh` и не двигать `main` напрямую. После merge проверить `git ls-remote`, и только затем открывать новый чат с `main`.
 
 ### Проверки и границы доказательств
 
-- В этой сессии: `python3 scripts/ci/check-settings-style.py` — 8/8; `git diff --check` — PASS; v168 release assembly — PASS.
+- В этой сессии (выпуск v171): source-контракты CI — OK; `tools/sandbox/struct_check.py` — 0 ошибок; `git diff --check` — PASS; PR #27 прошёл проверку ядра и JVM-тестов на runner; сборка тега v171 — SUCCESS (Kotlin + APK). Раньше в этой же сессии `check-settings-style.py` по v168 — 8/8.
 - `bash scripts/ci/check-chat-history.sh` не удалось запустить из-за отсутствия Java 17+ в песочнице. Android SDK/ADB и телефонных запусков не было. Не называть v168, r248 или зеркало проверенными на устройствах.
 - Asset CDN не дал скачать APK для независимого локального хэширования; использованы GitHub API digest и совпавший с ним опубликованный `.sha256`.
 
