@@ -56,6 +56,10 @@ class ChatRepository @Inject constructor(
     /** Сколько всего чатов - чтобы знать, есть ли что досыпать. */
     fun observeChatCount(): Flow<Int> = chatDao.observeChatCount()
 
+    /** Непрочитанные чаты — для вкладки «Не прочитано». */
+    fun observeUnreadChats(): Flow<List<Chat>> =
+        chatDao.observeUnreadChats().map { it.map { e -> e.toDomain() } }
+
     /** Живой поток ОДНОГО чата: шапка переписки подписывается на онлайн. */
     fun observeChat(chatId: String): Flow<ChatEntity?> = chatDao.observeChat(chatId)
 

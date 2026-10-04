@@ -34,9 +34,12 @@ import javax.inject.Inject
  * Полоска разделов под рангом пролистывается вбок. Разделы «Админ ...»
  * появляются только у того, кто группу или канал создал (или назначен
  * администратором): остальным они не показываются вовсе.
+ * Вкладка «Не прочитано» — как в Viber: только чаты/группы/каналы с
+ * unreadCount>0, с бейджем количества чатов.
  */
 enum class InboxSection(val title: String) {
     All("Все"),
+    Unread("Не прочитано"),
     Chats("Чаты"),
     Groups("Группы"),
     Channels("Каналы"),
@@ -95,6 +98,7 @@ data class ChatListUiState(
     /** Разделы, которые этому телефону показывать: админские - по факту наличия групп. */
     val sections: List<InboxSection> = listOf(
         InboxSection.All,
+        InboxSection.Unread,
         InboxSection.Chats,
         InboxSection.Groups,
         InboxSection.Channels,
@@ -114,6 +118,8 @@ data class ChatListUiState(
     val loadedWindow: Int = 50,
     /** Есть ли ещё строки за пределами окна - список досыпается на прокрутке. */
     val canLoadMore: Boolean = false,
+    /** Количество чатов/групп/каналов с непрочитано >0 — бейдж вкладки «Не прочитано». */
+    val unreadCount: Int = 0,
 )
 
 @kotlinx.coroutines.FlowPreview
@@ -229,13 +235,33 @@ class ChatListViewModel @Inject constructor(
             }
             .flowOn(Dispatchers.IO)
 
+        // Непрочитанные — отдельный поток без ограничения окном: вкладка
+        // «Не прочитано» должна показывать ВСЕ непрочитанные, а не только
+        // верхушку окна. Бейдж тоже считается отсюда.
+        val unreadChatsFlow = chatRepository.observeUnreadChats()
+        val unreadGroupsFlow = groupDao.observeUnreadGroups()
+        val unreadCombined = combine(unreadChatsFlow, unreadGroupsFlow) { uc, ug -> Pair(uc, ug) }
+            .flowOn(Dispatchers.IO)
+
         viewModelScope.launch {
             combine(
                 sourcesFlow,
+                unreadCombined,
                 section,
                 myIdFlow,
-            ) { src, current, _ ->
-                Snapshot(src.chats, toInboxGroups(src.groups), src.query, current, src.window, src.total)
+            ) { src, unreadPair, current, _ ->
+                val groups = toInboxGroups(src.groups)
+                val unreadGroups = toInboxGroups(unreadPair.second)
+                Snapshot(
+                    chats = src.chats,
+                    groups = groups,
+                    query = src.query,
+                    section = current,
+                    window = src.window,
+                    totalChats = src.total,
+                    unreadChats = unreadPair.first,
+                    unreadGroups = unreadGroups,
+                )
             }
                 // Сборка разделов, поиск и сортировка - на рабочем потоке.
                 // Главный поток получает готовые списки и только рисует их.
@@ -257,6 +283,7 @@ class ChatListViewModel @Inject constructor(
                             itemsBySection = built.itemsBySection,
                             loadedWindow = built.window,
                             canLoadMore = built.canLoadMore,
+                            unreadCount = built.unreadCount,
                             isLoading = false,
                             error = null,
                         )
@@ -273,6 +300,8 @@ class ChatListViewModel @Inject constructor(
         val section: InboxSection,
         val window: Int,
         val totalChats: Int,
+        val unreadChats: List<Chat>,
+        val unreadGroups: List<InboxGroup>,
     )
 
     /** То, что пришло из базы за один заход. */
@@ -296,6 +325,7 @@ class ChatListViewModel @Inject constructor(
         val itemsBySection: Map<InboxSection, List<InboxItem>>,
         val window: Int,
         val canLoadMore: Boolean,
+        val unreadCount: Int,
     )
 
     /** Роли считаем один раз на пересчёт, а не на каждую строку списка. */
@@ -324,6 +354,18 @@ class ChatListViewModel @Inject constructor(
             )
         }
     }
+
+    private fun com.vladimir.messenger.data.local.entity.ChatEntity.toDomain() = Chat(
+        id = id,
+        contactId = contactId,
+        contactName = contactName,
+        lastMessage = lastMessage,
+        lastMessageTime = lastMessageTime,
+        unreadCount = unreadCount,
+        isContactOnline = isContactOnline,
+        isPinned = pinnedAtMs != null,
+        pinnedAtMs = pinnedAtMs,
+    )
 
     /**
      * Один проход по данным вместо прохода на каждый раздел.
@@ -364,10 +406,28 @@ class ChatListViewModel @Inject constructor(
         val plainGroups = groupItems.filter { !it.group.isChannel }
         val channels = groupItems.filter { it.group.isChannel }
 
+        // «Не прочитано» — отдельный список из ПОЛНЫХ непрочитанных (вне окна),
+        // отфильтрованных поиском так же как остальные.
+        val filteredUnreadChats = filterChats(snap.unreadChats, query)
+        val filteredUnreadGroups = snap.unreadGroups.filter { row ->
+            query.isBlank() ||
+                row.title.contains(query, ignoreCase = true) ||
+                row.preview?.contains(query, ignoreCase = true) == true
+        }
+        val unreadPersonal = filteredUnreadChats
+            .map { InboxItem.Personal(it, it.lastMessageTime ?: 0L) }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
+        val unreadGroupsRaw = filteredUnreadGroups
+            .map { InboxItem.Group(it, it.timeMs ?: 0L) }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
+        val unreadMerged = merge(unreadPersonal, unreadGroupsRaw)
+        val unreadCount = snap.unreadChats.size + snap.unreadGroups.size
+
         val bySection = mutableMapOf<InboxSection, List<InboxItem>>()
         for (target in sections) {
             bySection[target] = when (target) {
                 InboxSection.All -> merge(personal, groupItems)
+                InboxSection.Unread -> unreadMerged
                 InboxSection.Chats -> personal
                 InboxSection.Groups -> plainGroups
                 InboxSection.Channels -> channels
@@ -393,6 +453,7 @@ class ChatListViewModel @Inject constructor(
             itemsBySection = bySection,
             window = snap.window,
             canLoadMore = canLoadMore,
+            unreadCount = unreadCount,
         )
     }
 
@@ -437,6 +498,7 @@ class ChatListViewModel @Inject constructor(
     private fun sectionsFor(groups: List<InboxGroup>): List<InboxSection> {
         val sections = mutableListOf(
             InboxSection.All,
+            InboxSection.Unread,
             InboxSection.Chats,
             InboxSection.Groups,
             InboxSection.Channels,

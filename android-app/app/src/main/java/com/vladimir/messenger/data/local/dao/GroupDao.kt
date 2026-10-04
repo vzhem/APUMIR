@@ -423,6 +423,14 @@ interface GroupDao {
     )
     suspend fun sumMessagesSince(groupId: String, fromDayKey: String): Int
 
+    /** Непрочитанные группы и каналы — для вкладки «Не прочитано». */
+    @Query(
+        "SELECT * FROM groups WHERE isLeft = 0 AND unreadCount > 0 ORDER BY " +
+            "CASE WHEN pinnedAtMs IS NULL THEN 1 ELSE 0 END, " +
+            "pinnedAtMs DESC, lastMessageAtMs DESC"
+    )
+    fun observeUnreadGroups(): Flow<List<GroupEntity>>
+
     // ── Удаление группы ───────────────────────────────────────────────────────
     /**
      * Удалить группу. Дочерние строки (участники, темы, заявки, ссылки,
