@@ -210,6 +210,22 @@ fun GroupChatScreen(
     var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
     var showBulkModeration by remember { mutableStateOf(false) }
 
+    // Канал это или группа и корневой пост канала: нужно и окну модерации,
+    // и ленте, поэтому считаем до обоих.
+    val isChannel = uiState.group?.isChannel == true
+    val channelRootMessageId = if (isChannel) {
+        uiState.messages.firstOrNull {
+            !com.vladimir.messenger.util.InlineImage.isPart(it.content)
+        }?.id
+    } else {
+        null
+    }
+
+    // Имена авторов нужны и окну модерации, и ленте: держим их до обоих.
+    val senderNames = remember(uiState.members) {
+        uiState.members.associate { it.nodeId to it.displayName }
+    }
+
     val moderationMessages = remember(deleteForAllTarget, showBulkModeration, uiState.selectedMessageIds, uiState.messages) {
         when {
             deleteForAllTarget != null -> listOfNotNull(deleteForAllTarget)
@@ -458,14 +474,6 @@ fun GroupChatScreen(
     // вернуть его к ленте постов. Раньше здесь всплывал список «тем» -
     // одинаковые пузыри-оболочки постов, и выйти к ленте можно было только
     // вторым нажатием.
-    val isChannel = uiState.group?.isChannel == true
-    val channelRootMessageId = if (isChannel) {
-        uiState.messages.firstOrNull {
-            !com.vladimir.messenger.util.InlineImage.isPart(it.content)
-        }?.id
-    } else {
-        null
-    }
     val hasTopics = !isChannel &&
         uiState.group?.topicsEnabled == true &&
         uiState.topics.isNotEmpty()
@@ -486,9 +494,6 @@ fun GroupChatScreen(
     // тем; в списке тем и в группе без тем перехватчик выключен, и жест, как
     // и прежде, закрывает экран.
     BackHandler(enabled = hasTopics && showFeed) { showFeed = false }
-    val senderNames = remember(uiState.members) {
-        uiState.members.associate { it.nodeId to it.displayName }
-    }
 
     // Подложка на весь экран, в том числе под верхней панелью.
             val feedListState = androidx.compose.foundation.lazy.rememberLazyListState()

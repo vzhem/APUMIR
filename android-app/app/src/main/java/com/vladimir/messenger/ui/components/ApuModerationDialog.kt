@@ -281,7 +281,7 @@ fun ApuMessageModerationDialog(
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ApuAvatar(id = authorId, title = displayAuthor, size = 30.dp)
+                        Avatar(name = displayAuthor, size = 30)
                         Spacer(Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(
@@ -345,7 +345,7 @@ fun ApuMessageModerationDialog(
                 }
 
                 if (showMoreActions) {
-                    ApuSettingsSectionHeader("Ещё действия")
+                    ApuSettingsSectionTitle("Ещё действия")
                     ApuSettingsCard {
                         var hasPreviousRow = false
 
