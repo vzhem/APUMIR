@@ -19,6 +19,7 @@ package com.vladimir.messenger.data.peer
 // =============================================================================
 
 import android.content.Context
+import com.vladimir.messenger.data.heart.HeartWire
 import org.json.JSONObject
 
 /**
@@ -57,6 +58,22 @@ data class PeerStats(
      * Обещание, а не наблюдение - см. [score].
      */
     val offeredBytes: Long = 0,
+    /**
+     * Сколько всего анти-рейтингов (жалоб) получил профиль этого узла.
+     * Само по себе число приоритет НЕ понижает: одиночные отметки 👎 могут
+     * быть шуткой. Смотрим на всплеск - см. [antiBurstCount].
+     */
+    val antiRatings: Int = 0,
+    /**
+     * Сколько жалоб пришло за короткое окно (всплеск). Понижает приоритет
+     * узла в рое только пока живёт временный штраф ([antiPenaltyUntilMs]).
+     */
+    val antiBurstCount: Int = 0,
+    /**
+     * До какого времени действует временный штраф за всплеск жалоб.
+     * После этой отметки узел снова оценивается по своему поведению.
+     */
+    val antiPenaltyUntilMs: Long = 0,
 ) {
 
     /** Средняя скорость обмена, байт в секунду. Ноль - обмена не было. */
@@ -112,8 +129,22 @@ data class PeerStats(
             ageMs >= STALE_MS -> 0.0
             else -> 5.0 * (1.0 - (ageMs - FRESH_MS).toDouble() / (STALE_MS - FRESH_MS))
         }
-        val total = availabilityPart + publicPart + speedPart + reliabilityPart + freshPart + storageBonus
+        val total = availabilityPart + publicPart + speedPart + reliabilityPart + freshPart +
+            storageBonus - antiPenalty(nowMs)
         return total.coerceIn(0.0, 100.0).toInt()
+    }
+
+    /**
+     * Штраф за всплеск жалоб: до -75 баллов и только пока идёт временный срок.
+     *
+     * Одиночные жалобы штрафа не дают: пока «залпа» нет, узел работает как
+     * обычно. Когда срок вышел, штраф пропадает сам, даже если жалобы никто
+     * не снимал.
+     */
+    fun antiPenalty(nowMs: Long): Double {
+        if (nowMs >= antiPenaltyUntilMs || antiPenaltyUntilMs <= 0L) return 0.0
+        return (antiBurstCount.coerceAtLeast(0) * ANTI_RATING_PENALTY)
+            .coerceAtMost(ANTI_RATING_PENALTY_MAX)
     }
 
     /**
@@ -139,6 +170,9 @@ data class PeerStats(
         const val STALE_MS = 24L * 60 * 60 * 1000
         /** Потолок надбавки за объявленное место под пересылку. */
         const val STORAGE_BONUS_MAX = 10.0
+        /** Штраф за каждый голос анти-рейтинга профиля. */
+        const val ANTI_RATING_PENALTY = 15.0
+        const val ANTI_RATING_PENALTY_MAX = 75.0
     }
 }
 
@@ -268,6 +302,32 @@ object PeerRatingStore {
     }
 
     /**
+     * Пересчитать анти-рейтинг профиля по временам жалоб.
+     *
+     * Число жалоб сохраняем для показа, но штраф даёт только всплеск: несколько
+     * жалоб за короткое окно. Срок штрафа не укорачивается повторным вызовом,
+     * поэтому снятие одной жалобы не отменяет уже начатое предупреждение, а по
+     * времени оно заканчивается само.
+     */
+    fun recordAntiRating(
+        context: Context,
+        peerId: String,
+        voteTimesMs: List<Long>,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        val recent = HeartWire.antiVotesInWindow(voteTimesMs, nowMs)
+        val burstUntil = HeartWire.antiWarningUntilMs(voteTimesMs, nowMs)
+        update(context, peerId) { old ->
+            val merged = maxOf(old.antiPenaltyUntilMs, burstUntil)
+            old.copy(
+                antiRatings = voteTimesMs.size.coerceAtLeast(0),
+                antiBurstCount = recent.coerceAtLeast(0),
+                antiPenaltyUntilMs = if (merged > nowMs) merged else 0L,
+            )
+        }
+    }
+
+    /**
      * Похож ли адрес на доступный извне.
      *
      * Домашние и служебные диапазоны исключаем: узел за домашним роутером
@@ -353,6 +413,9 @@ object PeerRatingStore {
                 hasPublicAddress = o.optBoolean("pub"),
                 lastAddress = o.optString("addr", ""),
                 offeredBytes = o.optLong("off"),
+                antiRatings = o.optInt("anti", 0),
+                antiBurstCount = o.optInt("ab", 0),
+                antiPenaltyUntilMs = o.optLong("ap", 0),
             )
         }
         return result
@@ -374,7 +437,10 @@ object PeerRatingStore {
                     .put("no", v.failed)
                     .put("pub", v.hasPublicAddress)
                     .put("addr", v.lastAddress)
-                    .put("off", v.offeredBytes),
+                    .put("off", v.offeredBytes)
+                    .put("anti", v.antiRatings)
+                    .put("ab", v.antiBurstCount)
+                    .put("ap", v.antiPenaltyUntilMs),
             )
         }
         return root.toString()

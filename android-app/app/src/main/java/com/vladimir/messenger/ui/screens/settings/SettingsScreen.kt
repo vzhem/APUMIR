@@ -438,20 +438,59 @@ private fun ProfileTabContent(
                         )
                         Spacer(Modifier.height(8.dp))
                         Row(
-                            modifier = Modifier.clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFE0245E).copy(alpha = 0.07f))
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE0245E), modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(uiState.heartCount.toString(), fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                if (uiState.heartCount == 0) "пока нет сердечек" else "рейтинг профиля",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = ApuBubbleMutedColor,
-                            )
+                            Row(
+                                modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xFFE0245E).copy(alpha = 0.07f))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE0245E), modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(uiState.heartCount.toString(), fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    if (uiState.heartCount == 0) "сердечки" else "рейтинг",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = ApuBubbleMutedColor,
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (uiState.antiRatingCount > 0) {
+                                            ApuSettingsDangerColor.copy(alpha = 0.10f)
+                                        } else {
+                                            ApuBubbleAccentColor.copy(alpha = 0.07f)
+                                        }
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("\uD83D\uDC4E", style = MaterialTheme.typography.bodySmall)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    uiState.antiRatingCount.toString(),
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (uiState.antiRatingCount > 0) ApuSettingsDangerColor else ApuBubbleTextColor,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    "жалобы",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (uiState.antiRatingCount > 0) ApuSettingsDangerColor else ApuBubbleMutedColor,
+                                )
+                            }
+                            if (uiState.antiRatingWarning) {
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "⚠️ Всплеск жалоб: репутация и приоритет узла временно понижены.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ApuSettingsDangerColor,
+                                )
+                            }
                         }
                         Spacer(Modifier.height(14.dp))
                         Box(

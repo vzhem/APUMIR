@@ -15,7 +15,14 @@ import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
+import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
+import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
+import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
+import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -199,21 +206,116 @@ fun GroupChatScreen(
     val iAmGroupAdmin = canDecideRequests
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
-    // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
+    // Модальное окно удаления и модерации сообщений (одиночное или пакетное).
     var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
-    deleteForAllTarget?.let { target ->
-        ApuSettingsDialog(
-            onDismissRequest = { deleteForAllTarget = null },
-            title = { Text("Удалить у всех?") },
-            text = { Text("Сообщение исчезнет у всех участников группы. У кого старая версия приложения - там останется: обновите телефоны.") },
-            confirmButton = {
-                TextButton(onClick = {
+    var showBulkModeration by remember { mutableStateOf(false) }
+
+    val moderationMessages = remember(deleteForAllTarget, showBulkModeration, uiState.selectedMessageIds, uiState.messages) {
+        when {
+            deleteForAllTarget != null -> listOfNotNull(deleteForAllTarget)
+            showBulkModeration && uiState.selectedMessageIds.isNotEmpty() ->
+                uiState.messages.filter { it.id in uiState.selectedMessageIds }
+            else -> emptyList()
+        }
+    }
+    if (moderationMessages.isNotEmpty()) {
+        val primaryMsg = moderationMessages.first()
+        val distinctAuthors = moderationMessages.map { it.senderId }.distinct()
+        val targetAuthorId = if (distinctAuthors.size == 1) distinctAuthors.first() else primaryMsg.senderId
+        val targetMember = uiState.members.firstOrNull { it.nodeId == targetAuthorId }
+        val targetAuthorName = senderNames[targetAuthorId]?.takeIf { it.isNotBlank() }
+            ?: targetMember?.displayName?.takeIf { it.isNotBlank() }
+            ?: ("Участник " + targetAuthorId.takeLast(4))
+        val isAuthorMe = primaryMsg.isFromMe || (uiState.me?.nodeId != null && uiState.me?.nodeId == targetAuthorId)
+        val isAuthorOwner = (uiState.group?.ownerId != null && uiState.group?.ownerId == targetAuthorId) ||
+            targetMember?.role == com.vladimir.messenger.data.group.GroupRole.OWNER
+        var authorMsgCount by remember(targetAuthorId, uiState.messages.size) {
+            mutableStateOf(uiState.messages.count { it.senderId == targetAuthorId }.coerceAtLeast(1))
+        }
+        LaunchedEffect(targetAuthorId) {
+            if (targetAuthorId.isNotBlank()) {
+                val total = viewModel.countAuthorMessages(targetAuthorId)
+                if (total > 0) authorMsgCount = total
+            }
+        }
+        val baseGroupMask = uiState.group?.memberPermissions?.takeIf { it != 0L }
+            ?: com.vladimir.messenger.data.group.GroupPermissions.Member.DEFAULT
+        val initialAuthorMask = if (targetMember != null) {
+            com.vladimir.messenger.data.group.GroupPermissions.effectiveMemberPermissions(
+                targetMember.permissions,
+                baseGroupMask,
+            )
+        } else {
+            baseGroupMask
+        }
+        ApuMessageModerationDialog(
+            selectedMessageCount = moderationMessages.size,
+            isChannel = isChannel,
+            isChannelPost = isChannel && primaryMsg.id == channelRootMessageId,
+            authorId = targetAuthorId,
+            authorName = targetAuthorName,
+            isAuthorMe = isAuthorMe,
+            isAuthorOwner = isAuthorOwner,
+            canModerate = uiState.canModerate,
+            canDeleteForAll = uiState.canModerate || isAuthorMe,
+            authorMessageCount = authorMsgCount,
+            authorAntiCount = uiState.antiRatings[targetAuthorId] ?: 0,
+            authorAntiWarning = uiState.antiWarnings.containsKey(targetAuthorId),
+            alreadyHasMyAnti = targetAuthorId in uiState.myAntiRatings,
+            initialMemberPermissionsMask = initialAuthorMask,
+            onOpenAuthorProfile = if (targetAuthorId.isNotBlank()) {
+                {
                     deleteForAllTarget = null
-                    viewModel.deleteMessageForAll(target.id)
-                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                    showBulkModeration = false
+                    viewModel.openPeerProfile(targetAuthorId, targetAuthorName)
+                }
+            } else {
+                null
             },
-            dismissButton = {
-                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
+            onDismiss = {
+                deleteForAllTarget = null
+                showBulkModeration = false
+            },
+            onConfirm = { result ->
+                val ids = moderationMessages.map { it.id }
+                deleteForAllTarget = null
+                showBulkModeration = false
+                viewModel.applyModeration(ids, targetAuthorId, result)
+            },
+        )
+    }
+
+    // Карточка профиля участника (сердечки ❤️ и анти-рейтинг 👎).
+    val inspectedPeerId = uiState.inspectedPeerId
+    if (!inspectedPeerId.isNullOrBlank()) {
+        val isSelfPeer = uiState.me?.nodeId == inspectedPeerId
+        val peerClipboardCtx = androidx.compose.ui.platform.LocalContext.current
+        PeerProfileSheet(
+            name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
+            contactId = inspectedPeerId,
+            isOnline = true,
+            heartCount = uiState.inspectedPeerHearts,
+            heartMine = uiState.inspectedPeerHeartMine,
+            onHeartClick = if (!isSelfPeer) {
+                { viewModel.togglePeerHeart(inspectedPeerId) }
+            } else {
+                null
+            },
+            antiRatingCount = uiState.inspectedPeerAntiCount,
+            antiRatingWarning = uiState.inspectedPeerAntiWarning,
+            antiRatingUntilMs = uiState.inspectedPeerAntiUntilMs,
+            antiRatingMine = uiState.inspectedPeerAntiMine,
+            onAntiRatingClick = if (!isSelfPeer) {
+                { viewModel.togglePeerAntiRating(inspectedPeerId) }
+            } else {
+                null
+            },
+            onDismiss = { viewModel.closePeerProfile() },
+            onCopyId = {
+                val clipboard = peerClipboardCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
+                Toast.makeText(peerClipboardCtx, "Скопировано", Toast.LENGTH_SHORT).show()
             },
         )
     }
@@ -724,6 +826,72 @@ fun GroupChatScreen(
                 }
             }
 
+            // ── Панель множественного выбора сообщений (как в современных мессенджерах)
+            if (uiState.selectedMessageIds.isNotEmpty()) {
+                val selCount = uiState.selectedMessageIds.size
+                val selCtx = androidx.compose.ui.platform.LocalContext.current
+                ApuBubbleCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            onClick = { viewModel.clearMessageSelection() },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Снять выделение",
+                                tint = ApuBubbleTextColor,
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Выбрано $selCount",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = ApuBubbleTextColor,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            onClick = {
+                                val combined = uiState.messages
+                                    .filter { it.id in uiState.selectedMessageIds }
+                                    .joinToString("\n\n") { it.content }
+                                val clipboard = selCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                    as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Сообщения", combined))
+                                Toast.makeText(selCtx, "Скопировано ($selCount)", Toast.LENGTH_SHORT).show()
+                                viewModel.clearMessageSelection()
+                            },
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.ContentCopy,
+                                contentDescription = "Скопировать выбранные",
+                                tint = ApuBubbleAccentColor,
+                            )
+                        }
+                        IconButton(
+                            onClick = { showBulkModeration = true },
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = "Удалить выбранные",
+                                tint = ApuSettingsDangerColor,
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── Лента темы
             // Раунд 144: при входе в тема открывается на первом непрочитанном
             // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
@@ -782,10 +950,20 @@ fun GroupChatScreen(
                             viewModel.requestFile(message, stickerCard)
                         }
                     }
+                    val resolvedSenderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
+                        ?: "Участник " + message.senderId.takeLast(4)
                     MessageBubble(
                         message = message,
-                        senderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
-                            ?: "Участник " + message.senderId.takeLast(4),
+                        senderName = resolvedSenderName,
+                        senderAntiCount = uiState.antiRatings[message.senderId] ?: 0,
+                        senderAntiWarning = uiState.antiWarnings.containsKey(message.senderId),
+                        canModerate = uiState.canModerate,
+                        selectionMode = uiState.selectedMessageIds.isNotEmpty(),
+                        isSelected = message.id in uiState.selectedMessageIds,
+                        onToggleSelect = { viewModel.toggleSelectMessage(message.id) },
+                        onOpenAuthorProfile = {
+                            viewModel.openPeerProfile(message.senderId, resolvedSenderName)
+                        },
                         // Публикацию закрепляют в ленте канала (лично); в
                         // обсуждении разрешаем только снять старый общий pin.
                         canPin = uiState.canPin &&
@@ -1537,6 +1715,13 @@ private fun MessageBubble(
     // Картинки и гифки в темах показываем так же, как в личном чате.
     message: MessageEntity,
     senderName: String,
+    senderAntiCount: Int = 0,
+    senderAntiWarning: Boolean = false,
+    canModerate: Boolean = false,
+    selectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelect: () -> Unit = {},
+    onOpenAuthorProfile: () -> Unit = {},
     canPin: Boolean,
     onTogglePin: () -> Unit,
     onSaveToFavorites: () -> Unit = {},
@@ -1578,6 +1763,15 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
     ) {
+        if (selectionMode) {
+            ApuCircleCheckIndicator(
+                checked = isSelected,
+                modifier = Modifier
+                    .align(Alignment.CenterVertically)
+                    .padding(end = 6.dp)
+                    .clickable { onToggleSelect() },
+            )
+        }
         // Раунд 211: точки рядом с пузырём - у своего слева, у чужого справа.
         if (!bubbleHasOwnDots && message.isFromMe) {
             ApuMenuDots(
@@ -1602,8 +1796,8 @@ private fun MessageBubble(
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .combinedClickable(
-                    // Одно нажатие - пузырь с реакциями, долгое - меню действий.
-                    onClick = { showReactions = true },
+                    // В режиме выбора клик отмечает сообщение; иначе - реакции / меню действий.
+                    onClick = { if (selectionMode) onToggleSelect() else showReactions = true },
                     onLongClick = { showMenu = true },
                 ),
             backgroundColor = if (message.isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther,
@@ -1612,7 +1806,22 @@ private fun MessageBubble(
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {
-                    Text(senderName, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.clickable { onOpenAuthorProfile() },
+                    ) {
+                        Text(
+                            senderName,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        ApuAntiRatingInlineBadge(
+                            antiCount = senderAntiCount,
+                            isWarning = senderAntiWarning,
+                            onClick = onOpenAuthorProfile,
+                        )
+                    }
                 }
                 // Раунд 203: шапка-источник пересылки - кликабельная; служебные
                 // строки (маркер + старая шапка) из тела убираем.
@@ -1733,6 +1942,15 @@ private fun MessageBubble(
                                 )
                                 Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
                             })
+                            if (!message.isFromMe) {
+                                add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                            }
+                            add(
+                                ApuAction(
+                                    if (isSelected) "Снять выбор" else "Выбрать несколько",
+                                    Icons.Filled.CheckCircle,
+                                ) { onToggleSelect() }
+                            )
                             if (canPin) {
                                 add(
                                     ApuAction(
@@ -1741,10 +1959,16 @@ private fun MessageBubble(
                                     ) { onTogglePin() }
                                 )
                             }
-                            if (message.isFromMe) {
-                                add(ApuAction("Удалить у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
-                                add(ApuAction("Удалить у всех", Icons.Filled.Delete, destructive = true) { onDeleteForAll() })
+                            if (canModerate || message.isFromMe) {
+                                add(
+                                    ApuAction(
+                                        if (canModerate && !message.isFromMe) "Удалить и модерация…" else "Удалить…",
+                                        Icons.Filled.Delete,
+                                        destructive = true,
+                                    ) { onDeleteForAll() }
+                                )
                             }
+                            add(ApuAction("Удалить только у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
                         },
                     )
                 }
@@ -1778,6 +2002,15 @@ private fun MessageBubble(
                     )
                     Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
                 })
+                if (!message.isFromMe) {
+                    add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                }
+                add(
+                    ApuAction(
+                        if (isSelected) "Снять выбор" else "Выбрать несколько",
+                        Icons.Filled.CheckCircle,
+                    ) { onToggleSelect() }
+                )
                 // Закреп и из меню - на случай, если кнопка
                 // справа не поместилась или её не заметили.
                 if (canPin) {
@@ -1788,11 +2021,17 @@ private fun MessageBubble(
                         ) { onTogglePin() }
                     )
                 }
-                // Раунд 135: удаление своего сообщения - у себя и у всех.
-                if (message.isFromMe) {
-                    add(ApuAction("Удалить у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
-                    add(ApuAction("Удалить у всех", Icons.Filled.Delete, destructive = true) { onDeleteForAll() })
+                // Удаление и модерация: доступно автору, администраторам и владельцу.
+                if (canModerate || message.isFromMe) {
+                    add(
+                        ApuAction(
+                            if (canModerate && !message.isFromMe) "Удалить и модерация…" else "Удалить…",
+                            Icons.Filled.Delete,
+                            destructive = true,
+                        ) { onDeleteForAll() }
+                    )
                 }
+                add(ApuAction("Удалить только у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
             },
         )
         if (showReactions) {

@@ -387,4 +387,22 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun deleteGroupMessages(chatId: String)
 
+    /** Сколько обычных сообщений этого отправителя в группе или канале. */
+    @Query(
+        "SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND senderId = :senderId " +
+            "AND content NOT LIKE 'APUIMGP1:%'"
+    )
+    suspend fun countMessagesBySenderInChat(chatId: String, senderId: String): Int
+
+    /** Идентификаторы всех сообщений отправителя в группе/канале (для рассылки удаления). */
+    @Query("SELECT id FROM messages WHERE chatId = :chatId AND senderId = :senderId")
+    suspend fun getMessageIdsBySenderInChat(chatId: String, senderId: String): List<String>
+
+    /** Стереть все сообщения конкретного отправителя в группе или канале. */
+    @Query("DELETE FROM messages WHERE chatId = :chatId AND senderId = :senderId")
+    suspend fun deleteMessagesBySenderInChat(chatId: String, senderId: String): Int
+
+    /** Стереть все сообщения конкретной темы (например, при удалении поста канала). */
+    @Query("DELETE FROM messages WHERE chatId = :chatId AND topicId = :topicId")
+    suspend fun deleteTopicMessages(chatId: String, topicId: String): Int
 }

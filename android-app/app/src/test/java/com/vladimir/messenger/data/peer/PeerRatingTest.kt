@@ -158,4 +158,28 @@ class PeerRatingTest {
         // ненадёжным: иначе новые собеседники навсегда оставались бы в конце.
         assertEquals(0.5, peer(sightings = 1).reliability, 0.0001)
     }
+
+    @Test
+    fun singleAntiRatingsDoNotLowerTheScoreInSwarm() {
+        // Одиночные жалобы могут быть шуткой: сами по себе они приоритет не роняют.
+        val clean = peer(sightings = 100, misses = 0, public = true)
+        val flaggedOne = clean.copy(antiRatings = 1)
+        val flaggedThree = clean.copy(antiRatings = 3)
+        assertEquals(clean.score(now), flaggedOne.score(now))
+        assertEquals(clean.score(now), flaggedThree.score(now))
+    }
+
+    @Test
+    fun burstOfAntiRatingsLowersTheScoreOnlyWhileTheTermLasts() {
+        val clean = peer(sightings = 100, misses = 0, public = true)
+        val burst = clean.copy(
+            antiRatings = 3,
+            antiBurstCount = 3,
+            antiPenaltyUntilMs = now + 60_000L,
+        )
+        assertTrue(burst.score(now) < clean.score(now))
+        assertTrue(burst.score(now) >= 0)
+        // Временная мера: срок вышел - узел снова оценивается как обычно.
+        assertEquals(clean.score(now + 120_000L), burst.score(now + 120_000L))
+    }
 }

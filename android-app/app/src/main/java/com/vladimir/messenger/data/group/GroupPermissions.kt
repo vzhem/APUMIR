@@ -155,6 +155,32 @@ object GroupPermissions {
     fun canSendMessages(role: String, memberMask: Long, isBanned: Boolean): Boolean =
         !isBanned && has(memberMask, Member.SEND_MESSAGES)
 
+    /**
+     * Модерация сообщений и участников в группе/канале (удаление сообщения,
+     * удаление всех сообщений автора, жалоба в анти-рейтинг, блокировка и ограничение прав).
+     * Доступно владельцу и администраторам (в том числе синхронизированным по составу
+     * с маской по умолчанию).
+     */
+    fun canModerateMessages(role: String, adminMask: Long): Boolean = when (role) {
+        GroupRole.OWNER -> true
+        GroupRole.ADMIN -> adminMask == 0L || adminMask == Admin.DEFAULT ||
+            has(adminMask, Admin.DELETE_MESSAGES) || has(adminMask, Admin.BAN_USERS)
+        else -> false
+    }
+
+    /** Признак того, что у участника задана индивидуальная маска ограничений в группе/канале. */
+    const val INDIVIDUAL_MEMBER_MASK_FLAG = 1L shl 30
+
+    fun packIndividualMemberMask(allowedMask: Long): Long =
+        INDIVIDUAL_MEMBER_MASK_FLAG or (allowedMask and Member.ALL)
+
+    fun effectiveMemberPermissions(memberPermissions: Long, groupDefaultMask: Long): Long =
+        if ((memberPermissions and INDIVIDUAL_MEMBER_MASK_FLAG) != 0L) {
+            (memberPermissions and Member.ALL) and groupDefaultMask
+        } else {
+            groupDefaultMask
+        }
+
     fun titles(mask: Long, entries: List<Entry>): List<String> =
         entries.filter { has(mask, it.flag) }.map { it.title }
 }

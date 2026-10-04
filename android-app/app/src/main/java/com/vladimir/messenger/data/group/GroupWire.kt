@@ -81,10 +81,14 @@ object GroupWire {
     const val KIND_EDIT = "edit"
     /**
      * «Удалить сообщение у всех» (раунд 135): `msdel|groupId|msgId`. Права
-     * те же, что у правки: автор или владелец. Телефоны прошлых версий вид
-     * не знают и молча отбрасывают - у них сообщение останется.
+     * те же, что у правки: автор, владелец или администратор.
      */
     const val KIND_MESSAGE_DELETE = "msdel"
+    const val DELETE_ALL_MARKER = "all:*"
+    const val DELETE_BY_AUTHOR_PREFIX = "author:"
+    const val DELETE_TOPIC_PREFIX = "topic:"
+    /** Индивидуальные ограничения прав участника: `mrest|groupId|nodeId|mask`. */
+    const val KIND_MEMBER_RESTRICT = "mrest"
     /**
      * «Пришлите последние посты»: вступивший позже просит владельца канала
      * прислать тексты и фотографии последних постов, а не только список тем.
@@ -368,7 +372,7 @@ object GroupWire {
         ) : Packet()
 
         /**
-         * Автор (или владелец) стёр сообщение [messageId] у всех. [deleterId] -
+         * Автор (или владелец/администратор) стёр сообщение [messageId] у всех. [deleterId] -
          * кто удалял; пусто в пакете старого образца (раунд 135), там
          * удалявший - отправитель пакета.
          */
@@ -376,6 +380,13 @@ object GroupWire {
             val groupId: String,
             val messageId: String,
             val deleterId: String = "",
+        ) : Packet()
+
+        /** Индивидуальное ограничение прав участника [nodeId] в группе [groupId]. */
+        data class MemberRestrict(
+            val groupId: String,
+            val nodeId: String,
+            val permissionsMask: Long,
         ) : Packet()
 
         /**
@@ -1193,6 +1204,9 @@ object GroupWire {
 
     fun buildKick(groupId: String, nodeId: String): String = "$PREFIX|$KIND_KICK|$groupId|$nodeId"
 
+    fun buildMemberRestrict(groupId: String, nodeId: String, permissionsMask: Long): String =
+        "$PREFIX|$KIND_MEMBER_RESTRICT|$groupId|${encode(nodeId)}|$permissionsMask"
+
     /** Карточка группы для нового участника. Все текстовые поля — base64url. */
     fun buildGroupInfo(
         groupId: String,
@@ -1527,6 +1541,14 @@ object GroupWire {
             KIND_KICK -> if (parts.size == 4) {
                 val nodeId = parts[3]
                 if (nodeId.isBlank()) null else Packet.Kick(groupId, nodeId)
+            } else {
+                null
+            }
+
+            KIND_MEMBER_RESTRICT -> if (parts.size == 5) {
+                val nodeId = decode(parts[3]).orEmpty()
+                val mask = parts[4].toLongOrNull()
+                if (nodeId.isBlank() || mask == null) null else Packet.MemberRestrict(groupId, nodeId, mask)
             } else {
                 null
             }

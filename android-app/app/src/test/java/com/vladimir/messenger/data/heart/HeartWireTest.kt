@@ -54,5 +54,72 @@ class HeartWireTest {
     fun `owner with separator is refused`() {
         assertNull(HeartWire.build("pk_a|bc", true, 1))
         assertNull(HeartWire.build("", true, 1))
+        assertNull(HeartWire.buildAntiRating("pk_a|bc", true, 1))
+        assertNull(HeartWire.buildAntiRating("", true, 1))
+    }
+
+    @Test
+    fun `anti rating round trip and storage key`() {
+        val raw = HeartWire.buildAntiRating("pk_spammer", true, 1800)!!
+        assertTrue(HeartWire.isHeartPacket(raw))
+        assertTrue(HeartWire.isAntiRatingPacket(raw))
+
+        val parsed = HeartWire.parse(raw)!!
+        assertEquals("pk_spammer", parsed.ownerId)
+        assertTrue(parsed.added)
+        assertTrue(parsed.isAnti)
+        assertEquals(1800L, parsed.atMs)
+
+        val storageKey = HeartWire.antiStorageKey("pk_spammer")
+        assertEquals("anti|pk_spammer", storageKey)
+        assertEquals("pk_spammer", HeartWire.ownerFromAntiStorageKey(storageKey))
+        assertNull(HeartWire.ownerFromAntiStorageKey("pk_spammer"))
+    }
+
+    @Test
+    fun `warning needs a burst of complaints not a slow accumulation`() {
+        val now = 1_700_000_000_000L
+        val hour = 60 * 60 * 1000L
+
+        // Три жалобы за пару часов - резкое падение рейтинга: предупреждаем.
+        val burst = listOf(now - hour, now - 2 * hour, now - 3 * hour)
+        assertTrue(HeartWire.isAntiWarningActive(burst, now))
+        assertEquals(
+            (now - hour) + HeartWire.ANTI_BURST_TTL_MS,
+            HeartWire.antiWarningUntilMs(burst, now),
+        )
+
+        // Те же три жалобы по одной в разные дни - это не залп: не предупреждаем.
+        val slow = listOf(now - 3 * 24 * hour, now - 10 * 24 * hour, now - 30 * 24 * hour)
+        assertFalse(HeartWire.isAntiWarningActive(slow, now))
+        assertEquals(0L, HeartWire.antiWarningUntilMs(slow, now))
+
+        // Две жалобы подряд - ещё не залп: порог тот же, что был у «3».
+        val two = listOf(now - hour, now - 2 * hour)
+        assertFalse(HeartWire.isAntiWarningActive(two, now))
+    }
+
+    @Test
+    fun `warning fades by itself after its term`() {
+        val now = 2_000_000_000_000L
+        val hour = 60 * 60 * 1000L
+        val burst = listOf(now - hour, now - 2 * hour, now - 3 * hour)
+        val until = HeartWire.antiWarningUntilMs(burst, now)
+        assertTrue(until > now)
+        assertTrue(HeartWire.isAntiWarningActive(burst, now))
+        // Временная мера: после срока предупреждение снимается само,
+        // даже если жалобы никто не отменял.
+        assertFalse(HeartWire.isAntiWarningActive(burst, until + 1))
+        assertEquals(0L, HeartWire.antiWarningUntilMs(burst, until + 1))
+    }
+
+    @Test
+    fun `burst window counts only recent complaints`() {
+        val now = 3_000_000_000_000L
+        val hour = 60 * 60 * 1000L
+        val old = listOf(now - 10 * hour, now - 20 * hour)
+        val fresh = listOf(now - hour, now - 2 * hour)
+        assertEquals(2, HeartWire.antiVotesInWindow(old + fresh, now))
+        assertEquals(0, HeartWire.antiVotesInWindow(old, now))
     }
 }
