@@ -14,7 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -51,7 +50,6 @@ fun ShinyEmoji(
             modifier = Modifier
                 .size((fontSize.value * 1.18f).dp)
                 .graphicsLayer { scaleX = pulse; scaleY = pulse }
-                .blur(8.dp)
                 .background(
                     Brush.radialGradient(
                         listOf(Color.White.copy(alpha = 0.34f), Color.Transparent),
