@@ -3570,10 +3570,87 @@ class GroupRepository(
                 val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
                 for ((from, manifest) in ready) handleManifest(from, manifest)
             }
+
+            is GroupWire.Packet.Typing -> {
+                // р249: «печатает…» в группе. Состояние мимолётное: в базу не
+                // идёт, живёт в памяти и гаснет само. Чужой пакет от узла,
+                // которого нет в составе, не показываем - иначе любой, кто
+                // знает идентификатор группы, засветил бы индикатором.
+                if (senderId == me) return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                if (groupDao.getMember(packet.groupId, senderId) == null) return
+                com.vladimir.messenger.data.typing.TypingPeer.groupTyping(
+                    packet.groupId,
+                    packet.topicId,
+                    senderId,
+                    packet.typing,
+                )
+            }
         }
     }
 
     // ── Закрепы ───────────────────────────────────────────────────────────────
+
+    // ── р249: архив и «без звука» ──────────────────────────────────────────
+
+    /**
+     * Убрать группу или канал в архив (или вернуть). История и состав целы:
+     * архив - это только про место разговора в списке. Решение личное, поэтому
+     * участникам оно не рассылается, а уезжает только на второе устройство
+     * этой же личности.
+     */
+    suspend fun setGroupArchived(groupId: String, archived: Boolean) {
+        if (groupDao.getGroupById(groupId) == null) return
+        groupDao.setArchived(groupId, archived)
+        com.vladimir.messenger.data.mirror.MirrorHub.publishChatFlags(
+            kind = com.vladimir.messenger.data.repository.ChatRepository.CHAT_FLAG_GROUP,
+            itemId = groupId,
+            archived = archived,
+            mutedUntilMs = mutedUntilMsOf(groupId),
+        )
+    }
+
+    /** Выключить (или включить обратно) звук группы или канала. */
+    suspend fun setGroupMuted(groupId: String, muted: Boolean) {
+        if (groupDao.getGroupById(groupId) == null) return
+        val until = if (muted) {
+            com.vladimir.messenger.data.repository.ChatRepository.MUTED_FOREVER_MS
+        } else {
+            0L
+        }
+        groupDao.setMutedUntil(groupId, until)
+        val archived = groupDao.getGroupById(groupId)?.archived == true
+        com.vladimir.messenger.data.mirror.MirrorHub.publishChatFlags(
+            kind = com.vladimir.messenger.data.repository.ChatRepository.CHAT_FLAG_GROUP,
+            itemId = groupId,
+            archived = archived,
+            mutedUntilMs = until,
+        )
+    }
+
+    /** Звук группы выключен прямо сейчас (срок в базе ещё не истёк). */
+    suspend fun isGroupMuted(groupId: String): Boolean =
+        runCatching { groupDao.countMuted(groupId, System.currentTimeMillis()) > 0 }
+            .getOrDefault(false)
+
+    /** Текущий срок «без звука» (для кадра зеркала). */
+    private suspend fun mutedUntilMsOf(groupId: String): Long =
+        runCatching {
+            val group = groupDao.getGroupById(groupId)
+            if (group != null && group.mutedUntilMs > System.currentTimeMillis()) group.mutedUntilMs else 0L
+        }.getOrDefault(0L)
+
+    /**
+     * р249: архив/звук изменились на партнёрском устройстве - привести свою
+     * базу к тому же виду. Идентификатор группы один на всех устройствах,
+     * поэтому ключ кадра - сам этот идентификатор.
+     */
+    suspend fun applyMirrorChatFlags(groupId: String, archived: Boolean, mutedUntilMs: Long) {
+        if (groupDao.getGroupById(groupId) == null) return
+        groupDao.setArchived(groupId, archived)
+        groupDao.setMutedUntil(groupId, mutedUntilMs)
+        Log.i(TAG, "mirror group flags: $groupId архив=$archived звук до $mutedUntilMs")
+    }
 
     /**
      * Закрепить или открепить сообщение. Право есть только у владельца и у

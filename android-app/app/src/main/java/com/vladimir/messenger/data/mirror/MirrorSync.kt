@@ -261,9 +261,23 @@ object MirrorHub {
         runCatching { channel?.publishFileMeta(meta) }
     }
 
-    /** р230: попросить байты файла у партнёра (тень просит активного). */
-    fun requestFileBytes(transferId: String, displayName: String, totalBytes: Long) {
-        runCatching { channel?.requestFileBytes(transferId, displayName, totalBytes) }
+    /**
+     * р230: попросить байты файла у партнёра (тень просит активного).
+     *
+     * @param offset с какого места просить: после обрыва канал продолжает
+     *        с недоскачанного места, а не сначала.
+     * @param big файл больше обычного зеркального потолка: его согласен отдать
+     *        только явный запрос (человек открыл файл на втором устройстве
+     *        или прямой локальный канал не вышел).
+     */
+    fun requestFileBytes(
+        transferId: String,
+        displayName: String,
+        totalBytes: Long,
+        offset: Long = 0L,
+        big: Boolean = false,
+    ) {
+        runCatching { channel?.requestFileBytes(transferId, displayName, totalBytes, offset, big) }
     }
 
     /**
@@ -352,6 +366,36 @@ object MirrorHub {
         if (messageId.isBlank()) return
         if (isApplyingFrame()) return
         runCatching { channel?.publishPin(messageId, pinned) }
+    }
+
+    /**
+     * р249: архив и «без звука» - партнёрскому устройству.
+     *
+     * Флаги живут в базе каждого устройства, поэтому без кадра телефоны
+     * расходились: убрал чат в архив здесь - на втором он остался в списке.
+     * Ключ переписки устойчивый (узел собеседника или идентификатор группы),
+     * поэтому кадр одинаково понимают оба устройства.
+     */
+    fun publishChatFlags(kind: String, itemId: String, archived: Boolean, mutedUntilMs: Long) {
+        if (kind.isBlank() || itemId.isBlank()) return
+        if (isApplyingFrame()) return
+        runCatching { channel?.publishChatFlags(kind, itemId, archived, mutedUntilMs) }
+    }
+
+    /**
+     * р249: удаление сообщения «у меня» - партнёрскому устройству.
+     *
+     * Раньше «удалить у себя» жило только на том телефоне, где его сделали:
+     * строка исчезала здесь и оставалась на втором - устройства расходились
+     * именно в этом месте. Собеседнику такое удаление не уходит (это личное
+     * дело владельца переписки), поэтому кадра с устойчивым ключом чата и
+     * идентификатором сообщения достаточно.
+     */
+    fun publishDeleteForMe(peerId: String, groupId: String, messageId: String) {
+        if (messageId.isBlank()) return
+        if (peerId.isBlank() && groupId.isBlank()) return
+        if (isApplyingFrame()) return
+        runCatching { channel?.publishDeleteForMe(peerId, groupId, messageId) }
     }
 
     /**
@@ -483,6 +527,12 @@ class MirrorChannel(
         suspend fun fileBytesFor(transferId: String, displayName: String, offset: Long, size: Int): ByteArray?
         /** р232: начинается прямой (LAN) приём файла - забыть недокачанное. */
         suspend fun onFilePullStart(transferId: String)
+        /**
+         * р249: прямой (LAN) приём не удался - устройства в разных сетях.
+         * Мост просит тот же файл по зеркальному каналу и запоминает, что
+         * человек его ждёт (большой файл автоматом не качаем).
+         */
+        suspend fun onLanPullFailed(transferId: String)
         /** р233: звонковый сигнал партнёрского устройства (звонит на обоих). */
         suspend fun onCallFromPartner(signal: JSONObject)
         /** р234: контакт изменился на партнёрском устройстве. */
@@ -493,6 +543,23 @@ class MirrorChannel(
         suspend fun onDraftFromPartner(key: String, text: String)
         /** р238: сообщение закреплено/откреплено на партнёрском устройстве. */
         suspend fun onPinFromPartner(messageId: String, pinned: Boolean)
+        /**
+         * р249: на партнёрском устройстве удалили сообщение «у меня» - стереть
+         * ту же строку и здесь (собеседнику удаление не уходит).
+         */
+        suspend fun onDeleteForMeFromPartner(peerId: String, groupId: String, messageId: String)
+        /**
+         * р249: на партнёрском устройстве изменили архив или звук переписки.
+         *
+         * @param kind «p» - личный чат (ключ - узел собеседника), «g» - группа
+         *             или канал (ключ - идентификатор группы).
+         */
+        suspend fun onChatFlagsFromPartner(
+            kind: String,
+            itemId: String,
+            archived: Boolean,
+            mutedUntilMs: Long,
+        )
         /** Home-inbox conversation pin changed on the partner device. */
         suspend fun onInboxPinFromPartner(
             kind: String,
@@ -510,7 +577,44 @@ class MirrorChannel(
     }
 
     private val TAG = "MirrorChannel"
-    private val shelf = MirrorSync.shelf(nodeId)
+
+    /**
+     * р249: общая (старая) полка - по открытому адресу личности. В ней живут
+     * устройства без маркера, и в неё же мы заходим на разведку, если потеряли
+     * партнёра (см. [maybeProbeLegacy]).
+     */
+    private val legacyShelf = MirrorSync.shelf(nodeId)
+
+    /** р249: маркер комнаты. Есть - сидим в защищённой полке, нет - в общей. */
+    @Volatile private var token: MirrorRoomToken.RoomToken? = MirrorRoomToken.load(context)
+
+    /** р249: до этого времени сидим в ОБЩЕЙ комнате, даже имея маркер. */
+    @Volatile private var holdLegacyUntil = 0L
+
+    /** р249: полка, в которой открыто текущее соединение. */
+    @Volatile private var currentShelf = ""
+
+    /** р249: когда последняя разведка в общей комнате закончилась. */
+    @Volatile private var lastProbeEndAt = 0L
+
+    /** р249: когда в последний раз видели партнёра (в любой комнате). */
+    @Volatile private var lastPartnerAt = 0L
+
+    /** р249: печать полки партнёра из его hello/hb. */
+    @Volatile private var partnerStamp = ""
+
+    /**
+     * р249: умеет ли партнёр договариваться о комнате (0 - старая сборка).
+     * Пока партнёр старый, маркер ему не отдаём и в защищённую комнату не
+     * уходим: иначе он останется в одиночестве, а зеркало встанет.
+     */
+    @Volatile private var partnerRoomV = 0
+
+    /** р249: свои запросы-числа, на которые ждём ответа партнёра. */
+    private val authNonces = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** р249: как часто повторять обмен маркером. */
+    @Volatile private var lastAuthAt = 0L
 
     private val wsRef = AtomicReference<WebSocket?>(null)
     private val client = OkHttpClient.Builder()
@@ -536,6 +640,9 @@ class MirrorChannel(
     private var catchupInFlight = false
     /** р231: когда в последний раз просили движок (передача роли). */
     @Volatile private var lastClaimAt = 0L
+
+    /** р249: когда в последний раз досылали накопленные исходящие тени. */
+    @Volatile private var lastPendingFlushAt = 0L
 
     /** Ведёт ли ЭТО устройство сеть (активное) или живёт зеркалом. */
     fun isEngineUp(): Boolean = engineUp
@@ -563,6 +670,13 @@ class MirrorChannel(
             append("\nканал зеркала: ")
                 .append(if (wsRef.get() != null) "подключён" else "нет связи")
             append("\nметка устройства: ").append(deviceTag)
+            // р249: чем живёт комната - защищённая она или общая. Сам маркер
+            // не показываем: по нему входят в комнату.
+            append("\nкомната зеркала: ")
+                .append(if (inSecureRoom()) "защищённая (по маркеру)" else "общая (старая)")
+            if (partnerStamp.isNotBlank()) {
+                append(", печать партнёра: ").append(partnerStamp)
+            }
             // р246: совпадает ли профиль с партнёрским устройством; если нет -
             // какие поля расходятся (владелец просил видеть расхождения онлайн).
             append("\n").append(ProfileMirror.diagLine(context))
@@ -649,6 +763,44 @@ class MirrorChannel(
                 JSONObject().put("id", messageId).put("on", if (pinned) 1 else 0),
             ) ?: return@launch
             sendJson(JSONObject().put("t", "ev").put("k", "pin").put("d", sealed))
+        }
+    }
+
+    /**
+     * р249: архив и «без звука» - партнёрскому устройству. Кадр крошечный и
+     * идемпотентный: повторная отправка того же состояния ничего не ломает.
+     */
+    fun publishChatFlags(kind: String, itemId: String, archived: Boolean, mutedUntilMs: Long) {
+        if (wsRef.get() == null) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(
+                JSONObject()
+                    .put("k", kind)
+                    .put("id", itemId)
+                    .put("a", if (archived) 1 else 0)
+                    .put("m", mutedUntilMs),
+            ) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "chatflag").put("d", sealed))
+        }
+    }
+
+    /**
+     * р249: удаление сообщения «у меня» - партнёрскому устройству.
+     *
+     * Ключ переписки устойчивый (узел собеседника или идентификатор группы),
+     * поэтому партнёр найдёт у себя ту же строку по идентификатору сообщения,
+     * даже если номер его чата другой.
+     */
+    fun publishDeleteForMe(peerId: String, groupId: String, messageId: String) {
+        if (wsRef.get() == null) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(
+                JSONObject()
+                    .put("p", peerId)
+                    .put("g", groupId)
+                    .put("id", messageId),
+            ) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "delf").put("d", sealed))
         }
     }
 
@@ -814,17 +966,33 @@ class MirrorChannel(
         }
     }
 
-    /** р230: тень просит у активного байты принятого файла. */
-    fun requestFileBytes(transferId: String, displayName: String, totalBytes: Long): Boolean {
+    /**
+     * р230: тень просит у активного байты принятого файла.
+     *
+     * р249: просьба уходит в фоне - запечатывание кадра это вызов в ядро и
+     * AES, а зовут отсюда и по нажатию «открыть файл» на втором устройстве.
+     */
+    fun requestFileBytes(
+        transferId: String,
+        displayName: String,
+        totalBytes: Long,
+        offset: Long = 0L,
+        big: Boolean = false,
+    ): Boolean {
         if (engineUp) return false
         if (!canCarryOutgoing()) return false
         if (transferId.isBlank()) return false
-        val body = JSONObject()
-            .put("id", transferId)
-            .put("name", displayName)
-            .put("size", totalBytes)
-        val sealed = sealPayload(body) ?: return false
-        return sendJson(JSONObject().put("t", "ev").put("k", "reqfile").put("d", sealed))
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val body = JSONObject()
+                .put("id", transferId)
+                .put("name", displayName)
+                .put("size", totalBytes)
+                .put("off", offset)
+                .put("big", if (big) 1 else 0)
+            val sealed = sealPayload(body) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "reqfile").put("d", sealed))
+        }
+        return true
     }
 
     /** р230: отдать партнёру кусок файла (шлёт тот, у кого байты есть). */
@@ -961,38 +1129,53 @@ class MirrorChannel(
      * [FILE_MIRROR_MAX_BYTES]: канал зеркала идёт через воркер, и гигабайты
      * по нему гнать нельзя - такие файлы остаются на принявшем устройстве.
      */
-    private fun serveFile(transferId: String, displayName: String, totalBytes: Long) {
+    private fun serveFile(
+        transferId: String,
+        displayName: String,
+        totalBytes: Long,
+        offset: Long = 0L,
+        big: Boolean = false,
+    ) {
         if (!engineUp) return
         if (totalBytes <= 0 || totalBytes > MirrorLan.MAX_BYTES) {
             Log.i(TAG, "file mirror skipped: $totalBytes B (> ${MirrorLan.MAX_BYTES})")
             return
         }
-        if (totalBytes > FILE_MIRROR_MAX_BYTES) {
+        if (!big && totalBytes > FILE_MIRROR_MAX_BYTES) {
             // р232: большой файл через зеркальный канал не гоняем - отдаём
             // напрямую по локальной сети (если партнёр рядом, он заберёт сам).
             startLanServe(transferId, displayName, totalBytes)
             return
         }
+        if (big && totalBytes > FILE_MIRROR_BIG_MAX_BYTES) {
+            // р249: предел есть и у явной просьбы: гигабайт гнать через воркер
+            // нельзя - это часы трафика и место на приёмнике. Такой файл живёт
+            // там, где его приняли, и переносится копией аккаунта.
+            Log.i(TAG, "file mirror skipped: $totalBytes B (> $FILE_MIRROR_BIG_MAX_BYTES, явная просьба)")
+            return
+        }
+        val chunkBytes = if (big) BIG_CHUNK_BYTES else FILE_CHUNK_BYTES
+        val pause = if (big) BIG_CHUNK_PAUSE_MS else FILE_CHUNK_PAUSE_MS
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            var offset = 0L
+            var pos = offset.coerceAtLeast(0L)
             var seq = 0
-            while (offset < totalBytes) {
-                val want = minOf(FILE_CHUNK_BYTES.toLong(), totalBytes - offset).toInt()
+            while (pos < totalBytes) {
+                val want = minOf(chunkBytes.toLong(), totalBytes - pos).toInt()
                 val chunk = runCatching {
-                    bridge.fileBytesFor(transferId, displayName, offset, want)
+                    bridge.fileBytesFor(transferId, displayName, pos, want)
                 }.getOrNull()
                 if (chunk == null || chunk.isEmpty()) {
-                    Log.w(TAG, "file mirror: чтение не удалось на $offset")
+                    Log.w(TAG, "file mirror: чтение не удалось на $pos")
                     return@launch
                 }
-                val isLast = offset + chunk.size >= totalBytes
+                val isLast = pos + chunk.size >= totalBytes
                 sendFileChunk(transferId, seq, isLast, chunk)
                 seq++
-                offset += chunk.size
+                pos += chunk.size
                 // Небольшая пауза: канал общий с сообщениями, не забиваем его.
-                kotlinx.coroutines.delay(FILE_CHUNK_PAUSE_MS)
+                if (pause > 0L) kotlinx.coroutines.delay(pause)
             }
-            Log.i(TAG, "file mirror: отдано $offset Б ($seq порций) id=$transferId")
+            Log.i(TAG, "file mirror: отдано ${pos - offset} Б ($seq порций) id=$transferId big=$big")
         }
     }
 
@@ -1049,16 +1232,202 @@ class MirrorChannel(
         }
     }
 
+    // ── р249: комната зеркала (маркер, разведка, согласование) ────────────────
+
+    /** Полка, в которой нам сейчас место. */
+    private fun shelfNow(now: Long = System.currentTimeMillis()): String {
+        val tok = token ?: return legacyShelf
+        return if (now < holdLegacyUntil) legacyShelf else MirrorRoomToken.shelf(tok.value)
+    }
+
+    /** Сидим ли мы сейчас в защищённой (маркерной) комнате. */
+    private fun inSecureRoom(now: Long = System.currentTimeMillis()): Boolean =
+        token != null && shelfNow(now) != legacyShelf
+
+    /** Закрыть соединение и открыть его уже в нужной комнате. */
+    private fun reconnect(reason: String) {
+        Log.i(TAG, "комната зеркала: $reason")
+        // Ссылку обнуляем ДО закрытия: тогда отложенный onClosed старого
+        // сокета не погасит новое соединение (сравнение по ссылке в onClosed).
+        val stale = wsRef.getAndSet(null)
+        runCatching { stale?.close(1000, "room") }
+        connect()
+    }
+
+    /**
+     * р249: разведка в общей комнате.
+     *
+     * Партнёр мог остаться без маркера (например, телефон восстановили из
+     * старой копии) либо получить другой маркер - тогда мы с ним в РАЗНЫХ
+     * комнатах и не увидим друг друга никогда. Поэтому изредка заходим в
+     * старую общую полку и смотрим, не стоит ли там наш партнёр.
+     *
+     * Ходим туда только если второе устройство вообще есть (партнёра видели
+     * на этой неделе) и только когда его давно не видно. У одного устройства
+     * в сети разведка не включается вовсе.
+     */
+    private fun maybeProbeLegacy(now: Long) {
+        if (!inSecureRoom(now)) return
+        if (partnerDev != null) return
+        if (now - lastProbeEndAt < PROBE_COOLDOWN_MS) return
+        if (now - lastPartnerAt > PARTNER_MEMORY_MS) return
+        holdLegacyUntil = now + PROBE_MS
+        reconnect("партнёра давно не видно - разведка в общей комнате")
+    }
+
+    /** р249: полка изменилась (вышла разведка или появился маркер) - перейти. */
+    private fun maybeSwitchRoom(now: Long) {
+        val want = shelfNow(now)
+        if (want == currentShelf) return
+        reconnect(if (want == legacyShelf) "ухожу в общую комнату" else "возвращаюсь в защищённую комнату")
+        if (want != legacyShelf) lastProbeEndAt = now
+    }
+
+    /**
+     * р249: старый партнёр не умеет договариваться о комнате - остаёмся с ним
+     * в общей полке, иначе он оглохнет, а зеркало встанет.
+     *
+     * Держим общую комнату, пока такой партнёр рядом: кадры он понимает,
+     * просто не знает про маркеры. Обновится - сам скажет версию, и тогда
+     * маркеры согласуем.
+     */
+    private fun keepLegacyForOldPartner() {
+        if (partnerRoomV >= ROOM_PROTOCOL_V) return
+        if (token == null) return
+        val now = System.currentTimeMillis()
+        val hold = now + OLD_PARTNER_HOLD_MS
+        if (hold > holdLegacyUntil) holdLegacyUntil = hold
+    }
+
+    /**
+     * р249: согласовать маркер комнаты с партнёром.
+     *
+     * В защищённой комнате согласовывать нечего: попасть в неё можно, только
+     * зная маркер, а значит, он у обоих один. Вся работа идёт в общей комнате:
+     * там мы либо создаём маркер (его сделает ведущий), либо отдаём свой,
+     * либо принимаем более старый маркер партнёра.
+     */
+    private fun maybeRoomHandshake(now: Long) {
+        if (inSecureRoom(now)) return
+        if (partnerDev == null) return
+        if (!partnerFresh()) return
+        // Старая сборка: маркер она не поймёт, а мы без неё не уходим.
+        if (partnerRoomV < ROOM_PROTOCOL_V) return
+        val mine = MirrorRoomToken.stamp(token?.value)
+        // Пустая печать у обоих - это не «договорились», а «маркера нет ни у
+        // кого»: как раз тот случай, когда его надо завести.
+        if (mine.isNotBlank() && mine == partnerStamp) {
+            // Маркеры совпали: партнёр уже знает наш, можно уходить в защищённую.
+            if (holdLegacyUntil > now) holdLegacyUntil = 0L
+            return
+        }
+        if (now - lastAuthAt < AUTH_COOLDOWN_MS) return
+        lastAuthAt = now
+        // Ни у кого маркера нет - заводит его ведущий: правило обязано дать
+        // ровно одного создателя, иначе устройства разойдутся по комнатам.
+        if (token == null && partnerStamp.isBlank() && iAmDesignated()) {
+            val created = MirrorRoomToken.create(context)
+            if (created != null) {
+                token = created
+                holdLegacyUntil = now + HOLD_AFTER_CREATE_MS
+                Log.i(TAG, "маркер комнаты создан - отдам партнёру")
+            }
+        }
+        val nonce = freshNonce()
+        authNonces[nonce] = now
+        if (authNonces.size > 32) {
+            val oldest = authNonces.entries.sortedBy { it.value }.take(8).map { it.key }
+            oldest.forEach { authNonces.remove(it) }
+        }
+        sendEvent("authq", JSONObject().put("n", nonce))
+    }
+
+    /** р249: кто, если что, заводит маркер: ведущий, а при равенстве - меньший тег. */
+    private fun iAmDesignated(): Boolean {
+        val dev = partnerDev ?: return false
+        if (engineUp && !partnerEng) return true
+        if (!engineUp && partnerEng) return false
+        return deviceTag < dev
+    }
+
+    /**
+     * р249: партнёр спрашивает число - отвечаем и отдаём свой маркер.
+     *
+     * Ответ внутри запечатанного кадра: прочитать число мог только тот, у кого
+     * есть закрытый ключ этой личности, то есть своё устройство. Поэтому
+     * маркер безопасно класть в тот же ответ - посторонний его не увидит.
+     */
+    private fun onAuthQuery(body: JSONObject) {
+        val nonce = body.optString("n")
+        if (nonce.isBlank()) return
+        val mine = token
+        val ok = sendEvent(
+            "authp",
+            JSONObject()
+                .put("n", nonce)
+                .put("r", sha256Hex("apu-mirror-auth-v1|" + nonce))
+                .put("rt", mine?.value ?: "")
+                .put("rta", mine?.createdAtMs ?: 0L),
+        )
+        // Отдали маркер - даём партнёру время перейти в защищённую комнату.
+        if (ok && mine != null) {
+            holdLegacyUntil = System.currentTimeMillis() + HOLD_AFTER_OFFER_MS
+        }
+    }
+
+    /** р249: ответ партнёра на наше число - проверить и, может, принять его маркер. */
+    private fun onAuthProof(body: JSONObject) {
+        val nonce = body.optString("n")
+        val issuedAt = authNonces.remove(nonce) ?: return
+        if (System.currentTimeMillis() - issuedAt > AUTH_TTL_MS) return
+        if (body.optString("r") != sha256Hex("apu-mirror-auth-v1|" + nonce)) {
+            Log.w(TAG, "комната зеркала: ответ не на моё число - игнорирую")
+            return
+        }
+        val value = body.optString("rt", "")
+        if (value.isBlank()) return
+        val at = body.optLong("rta", 0L)
+        val theirs = MirrorRoomToken.RoomToken(value, if (at > 0L) at else System.currentTimeMillis())
+        if (!MirrorRoomToken.wins(theirs, token)) return
+        if (MirrorRoomToken.save(context, theirs)) {
+            token = theirs
+            holdLegacyUntil = 0L
+            Log.i(TAG, "комната зеркала: принял маркер партнёра")
+        }
+    }
+
+    /** р249: случайное число для проверки партнёра (SecureRandom потокобезопасен). */
+    private val random = java.security.SecureRandom()
+
+    private fun freshNonce(): String {
+        val bytes = ByteArray(16)
+        random.nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    private fun sha256Hex(text: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(text.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
     // ── Транспорт ────────────────────────────────────────────────────────────
 
     private fun connect() {
         if (closedByUs) return
         try {
+            val room = shelfNow()
+            val previous = currentShelf
             val request = Request.Builder()
-                .url("wss://" + GroupInviteLinks.WEB_HOST + "/mirror/" + shelf + "?dev=" + deviceTag)
+                .url("wss://" + GroupInviteLinks.WEB_HOST + "/mirror/" + room + "?dev=" + deviceTag)
                 .build()
             val ws = client.newWebSocket(request, this)
             wsRef.set(ws)
+            // Полку запоминаем только когда соединение реально открылось:
+            // иначе неудачная попытка перехода осталась бы незамеченной.
+            currentShelf = room
+            if (previous.isNotBlank() && previous != room) {
+                Log.i(TAG, "комната зеркала: " + if (room == legacyShelf) "общая" else "защищённая")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "connect failed: ${e.message}")
             scheduleReconnect()
@@ -1085,20 +1454,21 @@ class MirrorChannel(
 
     // р246: в hello/hb идёт отпечаток профиля - устройства сами видят, что
     // профиль разъехался, и запрашивают полный снимок (maybeRequestProfile).
-    private fun hello(): JSONObject = JSONObject()
-        .put("t", "hello")
-        .put("dev", deviceTag)
-        .put("eng", if (engineUp) 1 else 0)
-        .put("since", if (engineUp) engineSince else 0L)
-        .put("max", myMaxTs)
-        .put("pd", ProfileMirror.cachedDigest(context))
+    private fun hello(): JSONObject = baseFrame("hello")
 
-    private fun heartbeat(): JSONObject = JSONObject()
-        .put("t", "hb")
+    private fun heartbeat(): JSONObject = baseFrame("hb")
+
+    // р249: печать полки едет в каждом hello/hb - по ней партнёр видит, что
+    // маркеры разъехались и комнату надо согласовывать.
+    private fun baseFrame(kind: String): JSONObject = JSONObject()
+        .put("t", kind)
         .put("dev", deviceTag)
         .put("eng", if (engineUp) 1 else 0)
         .put("since", if (engineUp) engineSince else 0L)
         .put("max", myMaxTs)
+        .put("sk", MirrorRoomToken.stamp(token?.value))
+        .put("mkv", ROOM_PROTOCOL_V)
+        .put("pd", ProfileMirror.cachedDigest(context))
         .put("pd", ProfileMirror.cachedDigest(context))
 
     private fun sendEvent(kind: String, payload: JSONObject): Boolean {
@@ -1121,11 +1491,30 @@ class MirrorChannel(
 
     private fun sealPayload(payload: JSONObject): String? {
         ensureSelfBinding()
+        // р249: метка комнаты внутри кадра. Запечатанный кадр может вскрыть
+        // только устройство этой личности, но ЗАПЕЧАТАТЬ на наш открытый ключ
+        // умеет кто угодно - метка и отличает своих от чужих.
+        val mark = MirrorRoomToken.frameMark(token?.value)
+        if (mark.isNotBlank()) runCatching { payload.put("mk", mark) }
         return MessageSealer.seal(context, nodeId, payload.toString())
     }
 
-    private fun openPayload(wire: String): JSONObject? =
-        MessageSealer.open(context, wire)?.let { JSONObject(it) }
+    /**
+     * р249: вскрыть кадр партнёра и проверить метку комнаты.
+     *
+     * Метку требуем только в защищённой комнате: там маркер по построению
+     * знают оба. В общей комнате метки нет ни у кого (это старый порядок), и
+     * требовать её - значит оглохнуть к партнёру, который ещё не обновился.
+     */
+    private fun openPayload(wire: String): JSONObject? {
+        val payload = MessageSealer.open(context, wire)?.let { JSONObject(it) } ?: return null
+        val mark = MirrorRoomToken.frameMark(token?.value)
+        if (mark.isNotBlank() && inSecureRoom() && payload.optString("mk") != mark) {
+            Log.w(TAG, "кадр без метки комнаты - чужой, отбрасываю")
+            return null
+        }
+        return payload
+    }
 
     // ── Цикл обслуживания: сердцебиение, роли, догон ─────────────────────────
 
@@ -1144,6 +1533,9 @@ class MirrorChannel(
                 partnerSince = Long.MAX_VALUE
                 partnerMaxTs = 0L
                 catchupInFlight = false
+                // р249: партнёр пропал - про его комнату тоже забываем.
+                partnerStamp = ""
+                partnerRoomV = 0
             }
             val partnerAlive = partnerFresh()
             // Роли: активный уступает более старому ядру; зеркало повышается,
@@ -1175,6 +1567,10 @@ class MirrorChannel(
                 lastHb = now
                 sendJson(heartbeat())
             }
+            // р249: комната зеркала - защищённая по маркеру или общая.
+            maybeProbeLegacy(now)
+            maybeSwitchRoom(now)
+            maybeRoomHandshake(now)
             delay(2_500L)
         }
     }
@@ -1182,14 +1578,26 @@ class MirrorChannel(
     private fun onPartnerFrame(obj: JSONObject) {
         val dev = obj.optString("dev")
         if (dev.isBlank() || dev == deviceTag) return
+        // р249: партнёра только что не было видно - запоминаем, чтобы тень
+        // дослала накопленные исходящие (см. flushPendingOutgoing).
+        val partnerAppeared = !partnerFresh()
         partnerDev = dev
         partnerEng = obj.optInt("eng") == 1
+        // р249: печать полки партнёра и сам факт встречи (по нему решаем, есть
+        // ли вообще второе устройство - без него разведка не нужна).
+        partnerStamp = obj.optString("sk", "")
+        partnerRoomV = obj.optInt("mkv", 0)
+        lastPartnerAt = System.currentTimeMillis()
+        keepLegacyForOldPartner()
         partnerSince = obj.optLong("since", 0L).takeIf { it > 0 } ?: Long.MAX_VALUE
         val max = obj.optLong("max", 0L)
         val becameFreshMax = max > partnerMaxTs
         partnerMaxTs = max
         partnerLastSeen = System.currentTimeMillis()
         maybeCatchup(force = becameFreshMax)
+        // р249: партнёр объявился - у тени могли копиться исходящие, которым
+        // некому было уйти (писали при отсутствующем активном).
+        if (partnerAppeared) flushPendingOutgoing()
         // р246: отпечаток профиля партнёра отличается от нашего - запросить
         // полный снимок и слиться (онлайн-поиск расхождений профиля).
         ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
@@ -1278,6 +1686,9 @@ class MirrorChannel(
 
     private fun handleEvent(kind: String, wire: String) {
         when (kind) {
+            // р249: согласование комнаты - до всяких сообщений.
+            "authq" -> onAuthQuery(openPayload(wire) ?: return)
+            "authp" -> onAuthProof(openPayload(wire) ?: return)
             "in" -> {
                 val row = openPayload(wire)?.let { MirrorRow.fromJson(it) } ?: return
                 scope.launch { bridge.applyIncoming(row, notify = true) }
@@ -1310,11 +1721,19 @@ class MirrorChannel(
             }
             "reqfile" -> {
                 // р230: тень просит байты - отдаём порциями (канал общий).
+                // р249: со смещением (продолжение после обрыва) и с явным
+                // согласием на большой файл.
                 if (!engineUp) return
                 val body = openPayload(wire) ?: return
                 val transferId = body.optString("id")
                 if (transferId.isBlank()) return
-                serveFile(transferId, body.optString("name"), body.optLong("size", 0L))
+                serveFile(
+                    transferId,
+                    body.optString("name"),
+                    body.optLong("size", 0L),
+                    offset = body.optLong("off", 0L),
+                    big = body.optInt("big", 0) == 1,
+                )
             }
             "filechunk" -> {
                 // р230: порция файла от партнёра - в приёмник.
@@ -1374,6 +1793,16 @@ class MirrorChannel(
                         }
                     }
                     Log.i(TAG, "lan pull id=${transferId.take(8)} ok=$pulled")
+                    if (!pulled) {
+                        // р249: устройства в РАЗНЫХ сетях - прямой канал не
+                        // вышел, и файл остался только на активном. Раньше на
+                        // этом всё и кончалось: на втором устройстве навсегда
+                        // оставалась пустая карточка. Теперь просим тот же
+                        // файл по зеркальному каналу, порциями; просьбу и
+                        // учёт ведёт мост (там же счётчик для возобновления).
+                        runCatching { bridge.onLanPullFailed(transferId) }
+                        Log.i(TAG, "lan pull failed -> прошу файл зеркалом id=${transferId.take(8)}")
+                    }
                 }
             }
             "call" -> {
@@ -1421,6 +1850,41 @@ class MirrorChannel(
                             itemId = id,
                             pinned = body.optInt("on", 0) == 1,
                             pinnedAtMs = body.optLong("at", 0L),
+                        )
+                    }
+                }
+            }
+            "chatflag" -> {
+                // р249: архив/звук изменились на партнёре - привести свою базу
+                // к тому же виду. Кадр про личное состояние владельца, в сеть
+                // не уходит; повторной рассылки нет.
+                val body = openPayload(wire) ?: return
+                val id = body.optString("id")
+                if (id.isBlank()) return
+                scope.launch {
+                    MirrorHub.duringApply {
+                        bridge.onChatFlagsFromPartner(
+                            kind = body.optString("k"),
+                            itemId = id,
+                            archived = body.optInt("a", 0) == 1,
+                            mutedUntilMs = body.optLong("m", 0L),
+                        )
+                    }
+                }
+            }
+            "delf" -> {
+                // р249: на партнёре удалили сообщение «у меня» - стереть ту же
+                // строку и здесь. Собственное удаление партнёра, поэтому
+                // повторной рассылки нет (кадр не проходит через сеть).
+                val body = openPayload(wire) ?: return
+                val messageId = body.optString("id")
+                if (messageId.isBlank()) return
+                scope.launch {
+                    MirrorHub.duringApply {
+                        bridge.onDeleteForMeFromPartner(
+                            peerId = body.optString("p"),
+                            groupId = body.optString("g"),
+                            messageId = messageId,
                         )
                     }
                 }
@@ -1611,12 +2075,32 @@ class MirrorChannel(
             ProfileMirror.publishNow(context)
         }
         // Тень: невостребованные исходящие (ушли, пока партнёра не было).
-        if (!engineUp) {
-            scope.launch {
-                bridge.pendingOutgoing(50).forEach { row ->
+        flushPendingOutgoing()
+    }
+
+    /**
+     * р249: дослать исходящие, которые тень накопила без партнёра.
+     *
+     * Раньше это делалось только в момент открытия соединения: если WS уже
+     * был жив, а активный появился позже (или перезапустился), строки так и
+     * висели `PENDING` до следующего переподключения - владелец видел
+     * «висит одна галочка» без всякой причины. Теперь догон зовётся и отсюда,
+     * и из появления партнёра; повторы режет пауза (иначе одна и та же строка
+     * ушла бы собеседнику дважды: она остаётся PENDING до подтверждения).
+     */
+    private fun flushPendingOutgoing() {
+        if (engineUp) return
+        if (!partnerEng) return
+        if (wsRef.get() == null) return
+        val now = System.currentTimeMillis()
+        if (now - lastPendingFlushAt < PENDING_FLUSH_COOLDOWN_MS) return
+        lastPendingFlushAt = now
+        scope.launch {
+            runCatching {
+                bridge.pendingOutgoing(PENDING_FLUSH_ROWS).forEach { row ->
                     publishOutgoing(row)
                 }
-            }
+            }.onFailure { Log.w(TAG, "pending flush failed: ${it.message}") }
         }
     }
 
@@ -1636,14 +2120,14 @@ class MirrorChannel(
         }
     }
 
+    // р249: закрываем ТОЛЬКО своё соединение. Если мы уже ушли в другую
+    // комнату, старый сокет не должен обнулять ссылку на новый.
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-        wsRef.set(null)
-        scheduleReconnect()
+        if (wsRef.compareAndSet(webSocket, null)) scheduleReconnect()
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-        wsRef.set(null)
-        scheduleReconnect()
+        if (wsRef.compareAndSet(webSocket, null)) scheduleReconnect()
     }
 
     companion object {
@@ -1667,6 +2151,24 @@ class MirrorChannel(
         /** р230: пауза между порциями - канал зеркала общий с сообщениями. */
         private const val FILE_CHUNK_PAUSE_MS = 60L
 
+        /**
+         * р249: порция большого файла (64 КиБ -> ~88 КиБ base64 - влезает в
+         * кадр воркера 512 КиБ с запасом). Обычные 16 КиБ на гигабайтных
+         * объёмах дают десятки тысяч кадров.
+         */
+        private const val BIG_CHUNK_BYTES = 64 * 1024
+
+        /** р249: большому файлу пауза не нужна - он и так идёт не первым. */
+        private const val BIG_CHUNK_PAUSE_MS = 10L
+
+        /**
+         * р249: предел файла, который уедет на второе устройство ПО ТРЕБОВАНИЮ
+         * (человек открыл файл или прямой локальный канал не вышел). Автоматом
+         * гоним только до [FILE_MIRROR_MAX_BYTES], чтобы не жечь трафик без
+         * спроса.
+         */
+        const val FILE_MIRROR_BIG_MAX_BYTES = 256L * 1024 * 1024
+
         /** р230: больше этого файл через зеркало не гоняем (он остаётся на принявшем устройстве). */
         const val FILE_MIRROR_MAX_BYTES = 24L * 1024 * 1024
 
@@ -1675,5 +2177,47 @@ class MirrorChannel(
 
         /** р236: черновик длиннее этого в кадр зеркала не кладём (кадр - 512 КиБ). */
         private const val DRAFT_MAX_CHARS = 8_000
+
+        /** р249: сколько накопленных строк тень досылает за один заход. */
+        private const val PENDING_FLUSH_ROWS = 50
+
+        /** р249: как часто повторять досылку накопленных исходящих. */
+        private const val PENDING_FLUSH_COOLDOWN_MS = 20_000L
+
+        /** р249: сколько сидим в общей комнате, разыскивая потерянного партнёра. */
+        private const val PROBE_MS = 90_000L
+
+        /** р249: как часто повторять разведку (комната не резиновая). */
+        private const val PROBE_COOLDOWN_MS = 15 * 60_000L
+
+        /**
+         * р249: пока партнёра не видели дольше этого, разведка не нужна -
+         * значит, второго устройства у человека просто нет.
+         */
+        private const val PARTNER_MEMORY_MS = 7L * 24 * 60 * 60_000L
+
+        /** р249: как часто повторять согласование маркера. */
+        private const val AUTH_COOLDOWN_MS = 30_000L
+
+        /** р249: сколько живёт число-запрос, на которое ждём ответ. */
+        private const val AUTH_TTL_MS = 60_000L
+
+        /** р249: столько держим общую комнату, отдавая партнёру свой маркер. */
+        private const val HOLD_AFTER_OFFER_MS = 20_000L
+
+        /** р249: столько держим общую комнату после создания маркера. */
+        private const val HOLD_AFTER_CREATE_MS = 120_000L
+
+        /**
+         * р249: столько ещё сидим в общей комнате, если партнёр - старая
+         * сборка без маркеров (пока он рядом, от него не уходим).
+         */
+        private const val OLD_PARTNER_HOLD_MS = 5 * 60_000L
+
+        /**
+         * р249: версия договора о комнате. Её же шлём в hello/hb: сборка без
+         * этого поля договор не понимает, и мы остаёмся с ней в общей комнате.
+         */
+        const val ROOM_PROTOCOL_V = 1
     }
 }

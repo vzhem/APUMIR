@@ -408,6 +408,18 @@ fun ChatListScreen(
                         onInviteToGroup = { group -> inviteChoice = group },
                         onTogglePersonalPin = viewModel::togglePersonalPin,
                         onToggleGroupPin = viewModel::toggleGroupPin,
+                        onTogglePersonalArchive = { chat ->
+                            viewModel.setChatArchived(chat.id, !chat.isArchived)
+                        },
+                        onTogglePersonalMute = { chat ->
+                            viewModel.setChatMuted(chat.id, !chat.isMuted())
+                        },
+                        onToggleGroupArchive = { group ->
+                            viewModel.setGroupArchived(group.id, !group.isArchived)
+                        },
+                        onToggleGroupMute = { group ->
+                            viewModel.setGroupMuted(group.id, !group.isMuted())
+                        },
                         onLoadMore = viewModel::loadMore,
                     )
                 }
@@ -884,6 +896,12 @@ private fun SectionPage(
     /** Pin/unpin conversation rows on the home inbox. */
     onTogglePersonalPin: (com.vladimir.messenger.domain.model.Chat) -> Unit = {},
     onToggleGroupPin: (InboxGroup) -> Unit = {},
+    /** р249: архив и «без звука» - личный чат. */
+    onTogglePersonalArchive: (com.vladimir.messenger.domain.model.Chat) -> Unit = {},
+    onTogglePersonalMute: (com.vladimir.messenger.domain.model.Chat) -> Unit = {},
+    /** р249: архив и «без звука» - группа или канал. */
+    onToggleGroupArchive: (InboxGroup) -> Unit = {},
+    onToggleGroupMute: (InboxGroup) -> Unit = {},
     /** Прокрутка подошла к концу загруженного - пора досыпать страницу. */
     onLoadMore: () -> Unit = {},
 ) {
@@ -1064,6 +1082,24 @@ private fun SectionPage(
                                         icon = Icons.Default.Share,
                                         onClick = { onShareCard(item.chat) },
                                     ),
+                                    // р249: архив и «без звука». Оба состояния
+                                    // уезжают на второе устройство кадром
+                                    // зеркала, поэтому пункт показывает то,
+                                    // что будет после нажатия.
+                                    BubbleMenuAction(
+                                        title = if (item.chat.isArchived) "Вернуть из архива" else "В архив",
+                                        icon = Icons.Default.Archive,
+                                        onClick = { onTogglePersonalArchive(item.chat) },
+                                    ),
+                                    BubbleMenuAction(
+                                        title = if (item.chat.isMuted()) "Включить звук" else "Без звука",
+                                        icon = if (item.chat.isMuted()) {
+                                            Icons.Default.NotificationsActive
+                                        } else {
+                                            Icons.Default.NotificationsOff
+                                        },
+                                        onClick = { onTogglePersonalMute(item.chat) },
+                                    ),
                                     BubbleMenuAction(
                                         title = "Отметить прочитанным",
                                         icon = Icons.Default.DoneAll,
@@ -1092,6 +1128,26 @@ private fun SectionPage(
                                             title = if (item.group.isPinned) "Открепить" else "Закрепить",
                                             icon = Icons.Filled.PushPin,
                                             onClick = { onToggleGroupPin(item.group) },
+                                        )
+                                    )
+                                    // р249: архив и «без звука» - решение
+                                    // личное, участникам не рассылается.
+                                    add(
+                                        BubbleMenuAction(
+                                            title = if (item.group.isArchived) "Вернуть из архива" else "В архив",
+                                            icon = Icons.Default.Archive,
+                                            onClick = { onToggleGroupArchive(item.group) },
+                                        )
+                                    )
+                                    add(
+                                        BubbleMenuAction(
+                                            title = if (item.group.isMuted()) "Включить звук" else "Без звука",
+                                            icon = if (item.group.isMuted()) {
+                                                Icons.Default.NotificationsActive
+                                            } else {
+                                                Icons.Default.NotificationsOff
+                                            },
+                                            onClick = { onToggleGroupMute(item.group) },
                                         )
                                     )
                                     add(

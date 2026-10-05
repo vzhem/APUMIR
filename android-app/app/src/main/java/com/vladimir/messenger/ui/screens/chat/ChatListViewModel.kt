@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.domain.model.Chat
@@ -45,6 +46,8 @@ enum class InboxSection(val title: String) {
     Channels("Каналы"),
     AdminGroups("Админ группы"),
     AdminChannels("Админ каналы"),
+    /** р249: убранное из общего списка - чаты, группы и каналы в архиве. */
+    Archive("Архив"),
 }
 
 /** Группа в общем списке главного экрана. */
@@ -63,7 +66,14 @@ data class InboxGroup(
     /** Whether this conversation is pinned on the home inbox. */
     val isPinned: Boolean = false,
     val pinnedAtMs: Long? = null,
-)
+    /** р249: группа или канал убраны в архив. */
+    val isArchived: Boolean = false,
+    /** р249: звук выключен до этого времени (0 - звук включён). */
+    val mutedUntilMs: Long = 0L,
+) {
+    /** р249: звук выключен прямо сейчас. */
+    fun isMuted(nowMs: Long = System.currentTimeMillis()): Boolean = mutedUntilMs > nowMs
+}
 
 /** Строка общего списка: личный чат или группа. */
 sealed interface InboxItem {
@@ -350,6 +360,8 @@ class ChatListViewModel @Inject constructor(
                 isChannel = g.isChannel,
                 isPinned = g.pinnedAtMs != null,
                 pinnedAtMs = g.pinnedAtMs,
+                isArchived = g.archived,
+                mutedUntilMs = g.mutedUntilMs,
             )
         }
     }
@@ -364,6 +376,8 @@ class ChatListViewModel @Inject constructor(
         isContactOnline = isContactOnline,
         isPinned = pinnedAtMs != null,
         pinnedAtMs = pinnedAtMs,
+        isArchived = archived,
+        mutedUntilMs = mutedUntilMs,
     )
 
     /**
@@ -376,7 +390,7 @@ class ChatListViewModel @Inject constructor(
     private fun buildState(snap: Snapshot): Built {
         val query = snap.query.trim()
         val unreadCount = snap.unreadChats.size + snap.unreadGroups.size
-        val sections = sectionsFor(snap.groups, unreadCount)
+        val sections = sectionsFor(snap.chats, snap.groups, unreadCount)
         // Во время поиска показываем «Все»: человек ищет собеседника, а не
         // раздел, и находка в группах не должна прятаться только потому, что
         // открыта вкладка «Чаты».
@@ -386,11 +400,23 @@ class ChatListViewModel @Inject constructor(
             else -> InboxSection.All
         }
 
+        // р249: архив из общих разделов убран - он живёт в своей вкладке.
+        // Поиск при этом ищет и там: иначе убранный чат нельзя было бы найти.
+        val showArchived = query.isNotBlank()
         val filteredChats = filterChats(snap.chats, query)
+            .filter { showArchived || !it.isArchived }
         val filteredGroups = snap.groups.filter { row ->
-            query.isBlank() ||
+            (query.isBlank() ||
                 row.title.contains(query, ignoreCase = true) ||
-                row.preview?.contains(query, ignoreCase = true) == true
+                row.preview?.contains(query, ignoreCase = true) == true) &&
+                (showArchived || !row.isArchived)
+        }
+        val archivedChats = filterChats(snap.chats, query).filter { it.isArchived }
+        val archivedGroups = snap.groups.filter { row ->
+            row.isArchived &&
+                (query.isBlank() ||
+                    row.title.contains(query, ignoreCase = true) ||
+                    row.preview?.contains(query, ignoreCase = true) == true)
         }
 
         val personal = filteredChats
@@ -422,6 +448,15 @@ class ChatListViewModel @Inject constructor(
             .sortedWith { left, right -> compareInboxItems(left, right) }
         val unreadMerged = merge(unreadPersonal, unreadGroupsRaw)
 
+        // р249: архив - те же строки, что и в обычных разделах, только
+        // отфильтрованные по флагу: отдельного хранилища у него нет.
+        val archivedPersonal = archivedChats
+            .map { InboxItem.Personal(it, it.lastMessageTime ?: 0L) }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
+        val archivedGroupItems = archivedGroups
+            .map { InboxItem.Group(it, it.timeMs ?: 0L) }
+            .sortedWith { left, right -> compareInboxItems(left, right) }
+
         val bySection = mutableMapOf<InboxSection, List<InboxItem>>()
         for (target in sections) {
             bySection[target] = when (target) {
@@ -432,6 +467,7 @@ class ChatListViewModel @Inject constructor(
                 InboxSection.Channels -> channels
                 InboxSection.AdminGroups -> plainGroups.filter { manages(it.group) }
                 InboxSection.AdminChannels -> channels.filter { manages(it.group) }
+                InboxSection.Archive -> merge(archivedPersonal, archivedGroupItems)
             }
         }
 
@@ -494,7 +530,11 @@ class ChatListViewModel @Inject constructor(
     }
 
     /** Админские разделы - только тому, у кого есть своя группа или канал. */
-    private fun sectionsFor(groups: List<InboxGroup>, unreadCount: Int): List<InboxSection> {
+    private fun sectionsFor(
+        chats: List<Chat>,
+        groups: List<InboxGroup>,
+        unreadCount: Int,
+    ): List<InboxSection> {
         val sections = mutableListOf(InboxSection.All)
         if (unreadCount > 0) sections += InboxSection.Unread
         sections += listOf(
@@ -509,6 +549,11 @@ class ChatListViewModel @Inject constructor(
         // Раздел появляется только у того, кто канал создал или ведёт:
         // пустым он показываться не должен.
         if (groups.any { it.isChannel && manages(it) }) sections += InboxSection.AdminChannels
+        // р249: «Архив» виден только когда в нём что-то есть - так же, как
+        // «Не прочитано». Пустая вкладка только занимала бы место в полосе.
+        if (chats.any { it.isArchived } || groups.any { it.isArchived }) {
+            sections += InboxSection.Archive
+        }
         return sections
     }
 
@@ -624,6 +669,40 @@ class ChatListViewModel @Inject constructor(
     /** Очистить переписку, сам чат остаётся. */
     fun clearChatHistory(chatId: String) {
         viewModelScope.launch(Dispatchers.IO) { chatRepository.clearHistory(chatId) }
+    }
+
+    // ── р249: архив и «без звука» ──────────────────────────────────────────
+
+    /** Убрать личный чат в архив или вернуть его в общий список. */
+    fun setChatArchived(chatId: String, archived: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { chatRepository.setChatArchived(chatId, archived) }
+                .onFailure { Log.w(TAG, "архив чата не переключился: ${it.message}") }
+        }
+    }
+
+    /** Выключить или включить звук личного чата. */
+    fun setChatMuted(chatId: String, muted: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { chatRepository.setChatMuted(chatId, muted) }
+                .onFailure { Log.w(TAG, "звук чата не переключился: ${it.message}") }
+        }
+    }
+
+    /** Убрать группу или канал в архив или вернуть. */
+    fun setGroupArchived(groupId: String, archived: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.setGroupArchived(groupId, archived) }
+                .onFailure { Log.w(TAG, "архив группы не переключился: ${it.message}") }
+        }
+    }
+
+    /** Выключить или включить звук группы или канала. */
+    fun setGroupMuted(groupId: String, muted: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.setGroupMuted(groupId, muted) }
+                .onFailure { Log.w(TAG, "звук группы не переключился: ${it.message}") }
+        }
     }
 
     /** Сбросить счётчик непрочитанных личного чата. */
@@ -808,6 +887,8 @@ class ChatListViewModel @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "ChatList"
+
         /** Раунд 158: максимум адресатов за одну рассылку приглашения. */
         const val MAX_INVITE_RECIPIENTS = 100
 

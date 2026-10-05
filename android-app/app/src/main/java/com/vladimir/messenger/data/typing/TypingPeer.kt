@@ -58,4 +58,59 @@ object TypingPeer {
 
     /** Печатает ли этот собеседник прямо сейчас. */
     fun isTyping(peerId: String): Boolean = _typing.value.contains(peerId)
+
+    // ── р249: «печатает…» в группах и темах канала ───────────────────────────
+
+    /**
+     * Ключ группового индикатора: «группа|тема|узел».
+     *
+     * Тема в ключе обязательна: в канале с обсуждениями человек может печатать
+     * в комментариях одного поста, и в ленте это показывать не нужно.
+     */
+    private val _groupTyping = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Кто сейчас печатает в группах (ключи [groupKey]). */
+    val groupTyping: StateFlow<Set<String>> = _groupTyping.asStateFlow()
+
+    /** Когда от этого узла в последний раз приходил групповой пакет. */
+    private val groupLastSeen = ConcurrentHashMap<String, Long>()
+
+    fun groupKey(groupId: String, topicId: String, senderId: String): String =
+        "$groupId|$topicId|$senderId"
+
+    /** Участник печатает в группе: показать индикатор и продлить его жизнь. */
+    fun groupTyping(groupId: String, topicId: String, senderId: String, typing: Boolean) {
+        if (groupId.isBlank() || senderId.isBlank()) return
+        val key = groupKey(groupId, topicId, senderId)
+        if (!typing) {
+            groupLastSeen.remove(key)
+            _groupTyping.value = _groupTyping.value - key
+            return
+        }
+        groupLastSeen[key] = System.currentTimeMillis()
+        _groupTyping.value = _groupTyping.value + key
+        scope.launch {
+            delay(TTL_MS + 200)
+            val at = groupLastSeen[key] ?: return@launch
+            if (System.currentTimeMillis() - at >= TTL_MS) {
+                groupLastSeen.remove(key)
+                _groupTyping.value = _groupTyping.value - key
+            }
+        }
+    }
+
+    /** Участник перестал печатать (или отправил сообщение). */
+    fun groupStopped(groupId: String, topicId: String, senderId: String) {
+        groupTyping(groupId, topicId, senderId, false)
+    }
+
+    /** Узлы, печатающие прямо сейчас в этой группе (или в этой теме группы). */
+    fun typingMembers(groupId: String, topicId: String): Set<String> {
+        if (groupId.isBlank()) return emptySet()
+        val prefix = "$groupId|$topicId|"
+        return _groupTyping.value
+            .filter { it.startsWith(prefix) }
+            .map { it.substring(prefix.length) }
+            .toSet()
+    }
 }

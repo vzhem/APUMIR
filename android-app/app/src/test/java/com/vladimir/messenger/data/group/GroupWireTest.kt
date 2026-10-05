@@ -252,6 +252,34 @@ class GroupWireTest {
         assertEquals(GroupRole.MEMBER, parsed.entries[0].role)
     }
 
+    /**
+     * р249: «печатает…» в группе едет групповым конвертом.
+     *
+     * Не личным `APUTYP1`: тот старые версии приложения показали бы текстом в
+     * чате, а неизвестный вид группового конверта они молча пропускают.
+     */
+    @Test
+    fun typingRoundTrip() {
+        val typing = GroupWire.parse(GroupWire.buildTyping("g1", "t1", true)) as GroupWire.Packet.Typing
+        assertEquals("g1", typing.groupId)
+        assertEquals("t1", typing.topicId)
+        assertTrue(typing.typing)
+
+        val stopped = GroupWire.parse(GroupWire.buildTyping("g1", "", false)) as GroupWire.Packet.Typing
+        assertEquals("g1", stopped.groupId)
+        assertEquals("", stopped.topicId)
+        assertFalse(stopped.typing)
+    }
+
+    /** р249: индикатор с неверным флагом или числом полей отбрасывается. */
+    @Test
+    fun malformedTypingIsRejected() {
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_TYPING}|g|t"))
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_TYPING}|g|t|2"))
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_TYPING}|g|t|1|лишнее"))
+        assertNull(GroupWire.parse("${GroupWire.PREFIX}|${GroupWire.KIND_TYPING}||t|1"))
+    }
+
     @Test
     fun malformedEnvelopesAreRejected() {
         assertNull(GroupWire.parse(null))

@@ -606,6 +606,10 @@ class CoreServerService : Service() {
                     // чате к этому моменту уже есть, оживёт по приходу байтов.
                     runCatching { pumpMirrorMedia() }
                         .onFailure { Log.w(TAG, "media pump failed: ${it.message}") }
+                    // р249: байты файлов, которые тень не смогла попросить в
+                    // момент приёма (была офлайн или без активного партнёра).
+                    runCatching { pumpMirrorFiles() }
+                        .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
                 }
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
@@ -1091,6 +1095,13 @@ class CoreServerService : Service() {
         ) {
             val (chatId, name) = chatRepository.applyMirrorIncoming(row)
             if (notify) {
+                // р249: у заглушённого чата уведомления не показываем - иначе
+                // «без звука» значило бы только «без звука», но не «без
+                // уведомления», и человек всё равно видел бы строку в шторке.
+                if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
+                    Log.i(TAG, "notification suppressed: чат без звука (зеркало)")
+                    return
+                }
                 runCatching {
                     notificationHelper.showMessageNotification(
                         chatId,
@@ -1155,6 +1166,11 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror LAN pull reset failed: ${it.message}") }
         }
 
+        override suspend fun onLanPullFailed(transferId: String) {
+            runCatching { fileTransferRouter.noteLanPullFailed(transferId) }
+                .onFailure { Log.w(TAG, "Mirror LAN fallback failed: ${it.message}") }
+        }
+
         override suspend fun onCallFromPartner(signal: org.json.JSONObject) {
             runCatching { callManager.onMirrorCall(signal) }
                 .onFailure { Log.w(TAG, "Mirror call signal failed: ${it.message}") }
@@ -1194,6 +1210,30 @@ class CoreServerService : Service() {
                         else -> Unit
                     }
                 }
+        }
+
+        override suspend fun onChatFlagsFromPartner(
+            kind: String,
+            itemId: String,
+            archived: Boolean,
+            mutedUntilMs: Long,
+        ) {
+            runCatching {
+                if (kind == com.vladimir.messenger.data.repository.ChatRepository.CHAT_FLAG_GROUP) {
+                    groupRepository.applyMirrorChatFlags(itemId, archived, mutedUntilMs)
+                } else {
+                    chatRepository.applyMirrorChatFlags(itemId, archived, mutedUntilMs)
+                }
+            }.onFailure { Log.w(TAG, "Mirror chat flags failed: ${it.message}") }
+        }
+
+        override suspend fun onDeleteForMeFromPartner(
+            peerId: String,
+            groupId: String,
+            messageId: String,
+        ) {
+            runCatching { messageDeletion.applyMirrorDeleteForMe(peerId, groupId, messageId) }
+                .onFailure { Log.w(TAG, "Mirror delete-for-me failed: ${it.message}") }
         }
 
         override suspend fun onInboxPinFromPartner(
@@ -1314,6 +1354,50 @@ class CoreServerService : Service() {
             asked++
         }
         if (asked > 0) Log.i(TAG, "media pump: запрошено $asked гифк(а) у активного")
+    }
+
+    /** р249: когда в последний раз просили у партнёра байты этой передачи. */
+    private val mirrorFileAskedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * р249: насос байтов файлов. Только для устройства-зеркала: своей сети у
+     * него нет, поэтому докачать принятый (или подготовленный) файл можно
+     * только у активного партнёра.
+     *
+     * Закрывает разрыв «карточка приехала, а байты попросить было некого»:
+     * раньше просьба уходила единственный раз - в ответ на кадр «файл принят».
+     * Если второе устройство было офлайн или канал поднялся позже, карточка
+     * оставалась пустой навсегда. Теперь насос добирает такие файлы сам, по
+     * одной передаче за заход: канал зеркала общий с сообщениями.
+     */
+    private suspend fun pumpMirrorFiles() {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) return
+        val now = System.currentTimeMillis()
+        val auto = runCatching { fileTransferRouter.transfersMissingBytes(3) }.getOrDefault(emptyList())
+        // р249: большой файл - только тот, который человек уже открывал здесь
+        // или который не удалось забрать по локальной сети. Автоматом сотни
+        // мегабайт в фоне не качаем.
+        val wanted = if (auto.isEmpty()) {
+            runCatching { fileTransferRouter.transfersMissingBigBytes(1) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        for (row in auto + wanted) {
+            val last = mirrorFileAskedAt[row.transferId] ?: 0L
+            if (now - last < MIRROR_FILE_RETRY_MS) continue
+            mirrorFileAskedAt[row.transferId] = now
+            val offset = fileTransferRouter.mirrorReceivedBytesOf(row.transferId)
+            val big = row.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
+            com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
+                row.transferId,
+                row.displayName,
+                row.totalBytes,
+                offset = offset,
+                big = big,
+            )
+            Log.i(TAG, "file bytes pump: прошу ${row.displayName} (${row.totalBytes} Б, с $offset)")
+            break
+        }
     }
 
     private suspend fun applyMirrorEnvelope(
@@ -1594,6 +1678,19 @@ class CoreServerService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * р249: звук этой переписки выключен - личный чат это или группа.
+     *
+     * Уведомление молчит целиком: «без звука» в телефоне означает «не тревожь»,
+     * а не «не звони, но строку в шторке покажи». Срок живёт в базе, поэтому
+     * «без звука» снимается само - гасить его таймером не нужно.
+     */
+    private suspend fun isMutedForNotifications(chatId: String): Boolean {
+        if (chatId.isBlank()) return false
+        if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) return true
+        return runCatching { groupRepository.isGroupMuted(chatId) }.getOrDefault(false)
+    }
+
     private fun startEventPolling() {
         
         // Observer for incoming messages → show notifications
@@ -1619,6 +1716,14 @@ class CoreServerService : Service() {
                     }
                     for (msg in recentIncoming) {
                         try {
+                            // р249: «без звука» - ни уведомления, ни звука.
+                            // Проверяем и личный чат, и группу: у сообщения
+                            // один chatId, а чем он окажется - решаем по базе
+                            // (два дешёвых запроса по первичному ключу).
+                            if (isMutedForNotifications(msg.chatId)) {
+                                Log.i(TAG, "notification suppressed: без звука ${msg.chatId.take(12)}")
+                                continue
+                            }
                             // Тема/пост, где написано сообщение: тап открывает
                             // именно его. Вызов позиционный: именованные
                             // аргументы + значение по умолчанию ловили
@@ -2448,6 +2553,9 @@ class CoreServerService : Service() {
     }
 
     companion object {
+        /** р249: как часто тень повторяет просьбу о байтах одного файла. */
+        private const val MIRROR_FILE_RETRY_MS = 5L * 60 * 1000
+
         const val EXTRA_DISPLAY_NAME = "display_name"
         const val POLL_INTERVAL_MS = 5000L
         // K3: шаг опроса, пока события приходят пучком (идёт файл): кусок

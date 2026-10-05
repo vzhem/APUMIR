@@ -89,6 +89,25 @@ interface ChatDao {
     @Query("UPDATE chats SET isContactOnline = :isOnline WHERE contactId = :contactId")
     suspend fun updateContactOnline(contactId: String, isOnline: Boolean)
 
+    /** р249: убрать чат в архив или вернуть из него (строка и переписка целы). */
+    @Query("UPDATE chats SET archived = :archived WHERE id = :chatId")
+    suspend fun setArchived(chatId: String, archived: Boolean)
+
+    /** р249: выключить звук до :untilMs (0 - включить обратно). */
+    @Query("UPDATE chats SET mutedUntilMs = :untilMs WHERE id = :chatId")
+    suspend fun setMutedUntil(chatId: String, untilMs: Long)
+
+    /**
+     * р249: звук выключен прямо сейчас (срок ещё не истёк).
+     *
+     * Считаем строкой, а не логическим выражением: Room не умеет класть
+     * результат сравнения в Boolean, а `COUNT(*)` в Int - умеет (грабли из
+     * `docs/AI_HANDOFF.md`: COUNT(*) нельзя проецировать в свой data class,
+     * а в скаляр - можно).
+     */
+    @Query("SELECT COUNT(*) FROM chats WHERE id = :chatId AND mutedUntilMs > :nowMs")
+    suspend fun countMuted(chatId: String, nowMs: Long): Int
+
     /** Удалить чат по идентификатору (меню «⋮» в пузыре чата). */
     @Query("DELETE FROM chats WHERE id = :chatId")
     suspend fun deleteChatById(chatId: String)

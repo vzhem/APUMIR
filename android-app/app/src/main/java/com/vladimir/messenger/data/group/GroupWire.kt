@@ -57,6 +57,15 @@ object GroupWire {
     const val KIND_DIRECTORY = "dir"
     const val KIND_NICK = "nick"
     /**
+     * р249: «печатает…» в группе и в теме канала.
+     *
+     * Мимолётный сигнал, как и в личке: в базу не идёт, живёт в памяти и сам
+     * гаснет. Конверт групповой (APUGRP1), поэтому старые версии приложения
+     * молча пропустят неизвестный вид, а не покажут его текстом в чате - это
+     * и есть причина не расширять личный `APUTYP1`.
+     */
+    const val KIND_TYPING = "typ"
+    /**
      * «Представься»: адресный запрос имени и аватара.
      *
      * Нужен, когда собеседник показан набором букв и цифр. Ждать роевую
@@ -753,6 +762,17 @@ object GroupWire {
             val atMs: Long,
             val voluntary: Boolean,
         ) : Packet()
+
+        /**
+         * р249: участник набирает текст в группе (или в теме канала).
+         *
+         * @param topicId тема, в которой печатают; пусто - общий чат группы.
+         */
+        data class Typing(
+            val groupId: String,
+            val topicId: String,
+            val typing: Boolean,
+        ) : Packet()
     }
 
     data class RosterEntry(val nodeId: String, val displayName: String, val role: String)
@@ -1163,6 +1183,10 @@ object GroupWire {
     fun buildGroupDeleted(groupId: String): String =
         "$PREFIX|$KIND_GROUP_DELETED|$groupId"
 
+    /** р249: «печатаю / перестал» в группе или в теме канала. */
+    fun buildTyping(groupId: String, topicId: String, typing: Boolean): String =
+        "$PREFIX|$KIND_TYPING|$groupId|$topicId|${if (typing) 1 else 0}"
+
     /**
      * Смена владельца. Ровно 7 частей, чтобы все поля были обязательными:
      * без прежнего владельца получатель не смог бы отличить свежую передачу
@@ -1521,6 +1545,13 @@ object GroupWire {
 
             KIND_GROUP_DELETED -> if (parts.size == 3) {
                 Packet.GroupDeleted(groupId)
+            } else {
+                null
+            }
+
+            // р249: «печатает…» - ровно 5 частей, флаг только 0 или 1.
+            KIND_TYPING -> if (parts.size == 5 && (parts[4] == "0" || parts[4] == "1")) {
+                Packet.Typing(groupId, parts[3], parts[4] == "1")
             } else {
                 null
             }

@@ -49,6 +49,8 @@ data class GroupChatUiState(
     val myAntiRatings: Set<String> = emptySet(),
     /** Выбранные сообщения в режиме множественного выбора. */
     val selectedMessageIds: Set<String> = emptySet(),
+    /** р249: имена участников, которые сейчас печатают в этой теме. */
+    val typingMembers: List<String> = emptyList(),
     /** Открытая карточка профиля участника в группе/канале. */
     val inspectedPeerId: String? = null,
     val inspectedPeerName: String = "",
@@ -114,6 +116,7 @@ class GroupChatViewModel @Inject constructor(
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
+    private val groupTyping: com.vladimir.messenger.data.typing.GroupTypingRouter,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -127,6 +130,14 @@ class GroupChatViewModel @Inject constructor(
 
     /** р237: восстановленный черновик отдан в uiState один раз. */
     @Volatile private var draftLoaded = false
+
+    // ── р249: «печатает…» в группе ──────────────────────────────────────────
+
+    /** Когда в последний раз говорили группе «я печатаю». */
+    @Volatile private var lastTypingSentAt = 0L
+
+    /** Группа уже знает, что я печатаю (значит, «перестал» отправлять надо). */
+    @Volatile private var typingAnnounced = false
 
     /**
      * Тема, которую надо открыть сразу. Так канал открывает комментарии
@@ -182,6 +193,57 @@ class GroupChatViewModel @Inject constructor(
         observeStickerArrivals()
         observeJoinRequests()
         observeAntiRatings()
+        observeGroupTyping()
+    }
+
+    /**
+     * р249: «печатает…» в группе. Состояние живёт в памяти (TypingPeer) и само
+     * гаснет; здесь только показываем имена тех, кто печатает в открытой теме.
+     */
+    private fun observeGroupTyping() {
+        viewModelScope.launch {
+            com.vladimir.messenger.data.typing.TypingPeer.groupTyping.collect { _ ->
+                refreshTypingMembers()
+            }
+        }
+    }
+
+    /** р249: имена печатающих - по составу группы и открытой теме. */
+    private fun refreshTypingMembers() {
+        val topicId = _uiState.value.selectedTopicId.orEmpty()
+        val ids = com.vladimir.messenger.data.typing.TypingPeer.typingMembers(groupId, topicId)
+        if (ids.isEmpty()) {
+            if (_uiState.value.typingMembers.isNotEmpty()) {
+                _uiState.update { it.copy(typingMembers = emptyList()) }
+            }
+            return
+        }
+        val names = ids.mapNotNull { id ->
+            _uiState.value.members.firstOrNull { it.nodeId == id }?.displayName
+                ?.takeIf { it.isNotBlank() }
+        }.sorted()
+        _uiState.update { it.copy(typingMembers = names) }
+    }
+
+    /**
+     * р249: сказать группе, что я набираю текст. Пакет уходит не чаще раза в
+     * [TYPING_REFRESH_MS] - на каждую букву нельзя, это лишний трафик; когда
+     * поле очистили или сообщение ушло - «перестал».
+     */
+    private fun publishTyping(active: Boolean) {
+        val topicId = _uiState.value.selectedTopicId ?: return
+        if (!active) {
+            if (!typingAnnounced) return
+            typingAnnounced = false
+            lastTypingSentAt = 0L
+            viewModelScope.launch { runCatching { groupTyping.publish(groupId, topicId, false) } }
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (now - lastTypingSentAt < TYPING_REFRESH_MS) return
+        lastTypingSentAt = now
+        typingAnnounced = true
+        viewModelScope.launch { runCatching { groupTyping.publish(groupId, topicId, true) } }
     }
 
     /** Раунд 121: гифка из роя пришла файлом - сразу приложить к сообщению. */
@@ -870,6 +932,8 @@ class GroupChatViewModel @Inject constructor(
                     )
                 }
                 refreshAttachRights(me, _uiState.value.group)
+                // р249: состав обновился - имена печатающих могли появиться.
+                refreshTypingMembers()
             }
         }
     }
@@ -1044,6 +1108,8 @@ class GroupChatViewModel @Inject constructor(
         }
         observeMessages(topicId)
         observePinned(topicId)
+        // р249: индикатор «печатает…» считается по открытой теме.
+        refreshTypingMembers()
     }
 
     /**
@@ -1077,6 +1143,8 @@ class GroupChatViewModel @Inject constructor(
      */
     fun onDraftChanged(text: String) {
         _uiState.update { it.copy(draft = text) }
+        // р249: группа должна видеть «печатает…» так же, как собеседник в личке.
+        publishTyping(text.isNotBlank())
         val key = draftKey
         if (key.isBlank()) return
         com.vladimir.messenger.data.draft.DraftStore.save(key, text)
@@ -1522,5 +1590,8 @@ class GroupChatViewModel @Inject constructor(
 
         /** Пока ветка открыта, просьба о комментариях повторяется с таким шагом. */
         const val COMMENTS_REFRESH_MS = 60_000L
+
+        /** р249: «печатаю» группе повторяем не чаще раза в 2.5 с. */
+        const val TYPING_REFRESH_MS = 2_500L
     }
 }
