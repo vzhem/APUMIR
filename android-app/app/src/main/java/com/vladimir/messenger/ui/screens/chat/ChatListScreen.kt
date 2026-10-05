@@ -147,10 +147,15 @@ fun ChatListScreen(
     val pagerScope = rememberCoroutineScope()
     // Раздел выбирает только ОСТАНОВИВШАЯСЯ страница (settledPage): пока палец
     // ведёт, промежуточные значения не должны трогать состояние экрана.
-    LaunchedEffect(pagerState, uiState.sections) {
+    // Список разделов может меняться вместе с непрочитанными; не перезапускаем
+    // эффект на его изменение, иначе тот же page index будет принят за новый
+    // выбор раздела. При этом эффект читает актуальные значения через state.
+    val pagerSections by rememberUpdatedState(uiState.sections)
+    val selectedSection by rememberUpdatedState(uiState.section)
+    LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
-            uiState.sections.getOrNull(page)?.let { section ->
-                if (section != uiState.section) viewModel.onSectionSelected(section)
+            pagerSections.getOrNull(page)?.let { section ->
+                if (section != selectedSection) viewModel.onSectionSelected(section)
             }
         }
     }
