@@ -18,6 +18,8 @@ import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
+import com.vladimir.messenger.ui.components.ApuPollCard
+import com.vladimir.messenger.ui.components.CreatePollDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
@@ -165,6 +167,8 @@ fun GroupChatScreen(
     // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
     // второе устройство личности и возвращается, если чат открыть заново.
     var showNewTopic by remember { mutableStateOf(false) }
+    // р250: окно создания опроса (кнопка «Опрос» у поля ввода).
+    var showCreatePoll by remember { mutableStateOf(false) }
     // Раунд 260: тап по значку темы в шапке открывает её редактирование.
     var showEditTopic by remember { mutableStateOf(false) }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
@@ -524,6 +528,24 @@ fun GroupChatScreen(
                     (uiState.messages.size + (if (uiState.moreComments > 0) 1 else 0) - 1 - last)
                         .coerceAtLeast(0)
                 }
+            }
+            // р250: тап по цитате - лента прыгает к исходному сообщению.
+            // Исходного может не быть в загруженной части ветки (большой канал
+            // отдаёт комментариями по запросу): тогда честно говорим об этом,
+            // а не молча ничего не делаем.
+            val quoteCtx = androidx.compose.ui.platform.LocalContext.current
+            fun scrollToMessage(messageId: String) {
+                val index = uiState.messages.indexOfFirst { it.id == messageId }
+                if (index < 0) {
+                    android.widget.Toast.makeText(
+                        quoteCtx,
+                        "Сообщения нет в загруженной части ветки",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                    return
+                }
+                val offset = if (uiState.moreComments > 0) 1 else 0
+                feedScope.launch { feedListState.animateScrollToItem(offset + index) }
             }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1018,6 +1040,14 @@ fun GroupChatScreen(
                         onEnsureGif = { sha -> viewModel.ensureGifRef(sha) },
                         onDeleteForMe = { viewModel.deleteMessageForMe(message.id) },
                         onDeleteForAll = { deleteForAllTarget = message },
+                        // ── р250: ответы и опросы ──
+                        onReply = { viewModel.startReply(message) },
+                        poll = uiState.polls[message.id],
+                        onTogglePollChoice = { index ->
+                            uiState.polls[message.id]?.let { viewModel.togglePollChoice(it, index) }
+                        },
+                        onClosePoll = { uiState.polls[message.id]?.let { viewModel.closePoll(it.pollId) } },
+                        onQuoteClick = { targetId -> scrollToMessage(targetId) },
                     )
                 }
             }
@@ -1122,6 +1152,23 @@ fun GroupChatScreen(
                             modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
                         )
                     }
+                    // р250: ответ на сообщение - цитата над полем ввода, чтобы
+                    // человек видел, кому и на что отвечает (крестик отменяет).
+                    val replyTarget = uiState.replyTo
+                    if (replyTarget != null) {
+                        val replyAuthor = if (replyTarget.isFromMe) {
+                            uiState.me?.displayName?.takeIf { it.isNotBlank() } ?: "Вы"
+                        } else {
+                            senderNames[replyTarget.senderId]?.takeIf { it.isNotBlank() }
+                                ?: ("Участник " + replyTarget.senderId.takeLast(4))
+                        }
+                        ReplyStrip(
+                            author = replyAuthor,
+                            text = viewModel.quoteText(replyTarget),
+                            onClear = { viewModel.clearReply() },
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
                     if (inputFocused) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(
@@ -1190,8 +1237,12 @@ fun GroupChatScreen(
                 // Раунд 152: активная «Отправить» - золотая заливка и белый
                 // текст: сразу видно, что сообщение можно отправить (раньше
                 // менялся только оттенок текста - владелец не замечал).
+                // р250: пока идёт пауза медленного режима, кнопка показывает
+                // остаток и не отправляет - репозиторий бы всё равно отказал,
+                // но человеку понятнее видеть счётчик, а не сообщение об ошибке.
+                val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
-                    !uiState.sending && !uiState.isPreparingFile
+                    !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
                 TextButton(
                     enabled = canSend,
                     onClick = {
@@ -1214,9 +1265,20 @@ fun GroupChatScreen(
                         .padding(vertical = 8.dp),
                 ) {
                     Text(
-                        "Отправить",
+                        // р250: вместо «Отправить» - обратный отсчёт паузы.
+                        if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else "Отправить",
                         fontWeight = FontWeight.Bold,
                         color = if (canSend) Color.White else Color(0xFF9AA3AF),
+                    )
+                }
+                // р250: включённый режим объясняем словами - иначе кажется,
+                // что приложение «не пускает» без причины.
+                if (uiState.slowModeSeconds > 0) {
+                    Text(
+                        slowModeHint(uiState.slowModeSeconds, uiState.me?.role),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ApuBubbleMutedColor,
+                        modifier = Modifier.padding(start = 6.dp, top = 2.dp),
                     )
                 }
             }
@@ -1756,6 +1818,14 @@ private fun MessageBubble(
     /** Раунд 135: удалить сообщение - у себя или у всех. */
     onDeleteForMe: () -> Unit = {},
     onDeleteForAll: () -> Unit = {},
+    /** р250: «Ответить» - цитата этого сообщения встанет над полем ввода. */
+    onReply: () -> Unit = {},
+    /** р250: опрос, приклеенный к сообщению (посту); null - опроса нет. */
+    poll: com.vladimir.messenger.data.group.PollSummary? = null,
+    onTogglePollChoice: (Int) -> Unit = {},
+    onClosePoll: () -> Unit = {},
+    /** р250: тап по цитате - лента прыгает к исходному сообщению. */
+    onQuoteClick: (String) -> Unit = {},
 ) {
     // Долгое нажатие - «В избранное» и «Реакция»: у сообщения темы нет своего
     // меню, а отдельная кнопка у каждого пузыря засорила бы ленту.
@@ -1864,6 +1934,18 @@ private fun MessageBubble(
                         )
                     }
                 }
+                // р250: цитата ответа - над текстом, как в привычном
+                // мессенджере: тап по ней прокручивает ленту к исходному
+                // сообщению (если оно в загруженной части ветки).
+                val quoteId = message.replyToId
+                if (!quoteId.isNullOrBlank()) {
+                    QuoteBlock(
+                        author = message.replyAuthor,
+                        text = message.replyText,
+                        color = bubbleTextColor,
+                        onClick = { onQuoteClick(quoteId) },
+                    )
+                }
                 // Вложенная картинка едет отдельной служебной строкой внутри
                 // текста. Раньше её печатали как есть, и в комментариях под
                 // постом вместо снимка тянулись экраны «букв».
@@ -1947,6 +2029,9 @@ private fun MessageBubble(
                         // сообщения, как у текстовых пузырей.
                         messageActions = buildList {
                             add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                            // р250: ответ - и в меню карточки файла (точки
+                            // на вложении ведут в то же меню, что и пузырь).
+                            add(ApuAction("Ответить", Icons.AutoMirrored.Filled.Reply) { onReply() })
                             add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
                             add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
                             // Раунд 212 (аудит: в личке «Копировать всё» есть,
@@ -1989,6 +2074,16 @@ private fun MessageBubble(
                         },
                     )
                 }
+                // р250: опрос показывается под текстом сообщения (поста) - тем
+                // же пузырём, что и сама карточка файла.
+                if (poll != null) {
+                    ApuPollCard(
+                        poll = poll,
+                        onToggle = onTogglePollChoice,
+                        onClose = onClosePoll,
+                        canClose = canModerate || poll.isMine,
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(time, style = MaterialTheme.typography.labelSmall, color = bubbleTextColor.copy(alpha = 0.65f))
                     if (message.isPinned) {
@@ -2008,6 +2103,8 @@ private fun MessageBubble(
             onDismiss = { showMenu = false },
             actions = buildList {
                 add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                // р250: ответ - первым пунктом, как в привычных мессенджерах.
+                add(ApuAction("Ответить", Icons.AutoMirrored.Filled.Reply) { onReply() })
                 add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
                 add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
                 // Раунд 212: копирование - как в личном чате («Копировать всё»).
@@ -2234,4 +2331,129 @@ private fun groupTypingLabel(names: List<String>): String = when (names.size) {
     1 -> "${names[0]} печатает…"
     2 -> "${names[0]} и ${names[1]} печатают…"
     else -> "${names[0]}, ${names[1]} и ещё ${names.size - 2} печатают…"
+}
+
+// =============================================================================
+// р250: ответы на сообщения, опросы и медленный режим
+// =============================================================================
+
+/**
+ * Цитата ответа внутри пузыря: цветная полоса слева, имя автора и текст.
+ *
+ * Текст цитаты хранится рядом с сообщением (колонки `replyAuthor`/`replyText`),
+ * поэтому цитата рисуется даже тогда, когда исходное сообщение удалено или не
+ * доехало до этого телефона. Тап прокручивает ленту к исходному сообщению.
+ */
+@Composable
+private fun QuoteBlock(
+    author: String,
+    text: String,
+    color: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .heightIn(min = 30.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+        )
+        Spacer(Modifier.width(6.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                author.ifBlank { "Сообщение" },
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text.ifBlank { "Вложение" },
+                style = MaterialTheme.typography.bodySmall,
+                color = color.copy(alpha = 0.85f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Цитата над полем ввода: видно, на что отвечаем, и можно отменить ответ. */
+@Composable
+private fun ReplyStrip(
+    author: String,
+    text: String,
+    onClear: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+            .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.dp)
+                .heightIn(min = 28.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "Ответ $author",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text.ifBlank { "Вложение" },
+                style = MaterialTheme.typography.bodySmall,
+                color = ApuBubbleTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Отменить ответ",
+                modifier = Modifier.size(16.dp),
+                tint = ApuBubbleMutedColor,
+            )
+        }
+    }
+}
+
+/**
+ * Подпись под полем ввода, когда в группе включён медленный режим: человек
+ * должен понимать, почему «Отправить» не нажимается.
+ */
+private fun slowModeHint(seconds: Int, role: String?): String {
+    val label = when (seconds) {
+        10 -> "10 секунд"
+        30 -> "30 секунд"
+        60 -> "1 минуту"
+        300 -> "5 минут"
+        900 -> "15 минут"
+        else -> "$seconds с"
+    }
+    return if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(role.orEmpty())) {
+        "Медленный режим: участники пишут не чаще одного сообщения в $label (администраторы - без паузы)"
+    } else {
+        "Медленный режим: не чаще одного сообщения в $label"
+    }
 }

@@ -174,6 +174,26 @@ rustc --version 2>&1 | tee -a "$LOG"
 cargo --version 2>&1 | tee -a "$LOG"
 say "processors: $(nproc 2>/dev/null || echo '?')"
 
+# ── имена Kotlin: что вызывается, но нигде не объявлено и не импортировано ──
+# Работает без JDK, поэтому стоит ПЕРЕД проверками, которым нужна Java: грабли
+# v11.74.171 (первые две сборки тега упали на `:app:compileReleaseKotlin` из-за
+# `ApuAvatar`/`ApuSettingsSectionHeader` и необъявленного `ApuSettingsDangerColor`)
+# этот шаг ловит до тега. См. tools/sandbox/check_unresolved_symbols.py.
+begin "kotlin unresolved symbols (main + tests)"
+if python3 tools/sandbox/check_unresolved_symbols.py \
+        android-app/app/src/main/java/com/vladimir/messenger \
+        android-app/app/src/test/java/com/vladimir/messenger \
+        android-app/app/src/androidTest/java/com/vladimir/messenger >>"$LOG" 2>&1; then
+    say "kotlin unresolved symbols: OK"
+else
+    FAILED=1
+    FAILED_STEP="kotlin unresolved symbols (main + tests)"
+    strip_ansi
+    report
+    comment_to_pr
+    exit 1
+fi
+
 # ── локальная история: source wiring + real Kotlin coroutine regressions ────
 begin "local-first chat history (Kotlin + source contracts)"
 if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \

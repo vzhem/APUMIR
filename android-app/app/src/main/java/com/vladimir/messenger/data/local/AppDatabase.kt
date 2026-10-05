@@ -41,15 +41,18 @@ import com.vladimir.messenger.data.local.entity.ProfileHeartEntity
 import com.vladimir.messenger.data.local.entity.SavedItemEntity
 import com.vladimir.messenger.data.local.entity.PostManifestEntity
 import com.vladimir.messenger.data.local.entity.PostSignerEntity
+import com.vladimir.messenger.data.local.entity.GroupPollEntity
+import com.vladimir.messenger.data.local.entity.GroupPollVoteEntity
 import com.vladimir.messenger.data.local.dao.PostManifestDao
 import com.vladimir.messenger.data.local.dao.PostSignerDao
+import com.vladimir.messenger.data.local.dao.GroupPollDao
 
 /**
  * Версия схемы. Вынесена в константу, потому что её сверяет резервная копия
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 24
+const val APP_DATABASE_VERSION = 25
 
 @Database(
     entities = [
@@ -75,6 +78,8 @@ const val APP_DATABASE_VERSION = 24
         PostViewEntity::class,
         PostManifestEntity::class,
         PostSignerEntity::class,
+        GroupPollEntity::class,
+        GroupPollVoteEntity::class,
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false,
@@ -97,6 +102,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun postViewDao(): PostViewDao
     abstract fun postManifestDao(): PostManifestDao
     abstract fun postSignerDao(): PostSignerDao
+    abstract fun groupPollDao(): GroupPollDao
 
     companion object {
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
@@ -488,6 +494,67 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "ALTER TABLE `groups` ADD COLUMN `mutedUntilMs` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        /**
+         * р250: ответы на сообщения, медленный режим групп и опросы.
+         *
+         * Аддитивная миграция: ни одна существующая строка не переписывается и
+         * не удаляется. Прежние сообщения остаются без цитат (`replyToId`
+         * пуст), группы - без медленного режима, опросов нет ни у кого.
+         */
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Ответ: кого цитируем и что цитируем. Цитата приезжает
+                // отдельным конвертом `mrep`, поэтому хранится рядом с текстом,
+                // а не вычисляется по replyToId при показе.
+                db.execSQL(
+                    "ALTER TABLE `messages` ADD COLUMN `replyAuthor` TEXT NOT NULL DEFAULT ''"
+                )
+                db.execSQL(
+                    "ALTER TABLE `messages` ADD COLUMN `replyText` TEXT NOT NULL DEFAULT ''"
+                )
+                // Медленный режим: 0 - выключен.
+                db.execSQL(
+                    "ALTER TABLE `groups` ADD COLUMN `slowModeSeconds` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `group_polls` (" +
+                        "`pollId` TEXT NOT NULL, " +
+                        "`groupId` TEXT NOT NULL, " +
+                        "`topicId` TEXT NOT NULL, " +
+                        "`messageId` TEXT NOT NULL, " +
+                        "`question` TEXT NOT NULL, " +
+                        "`optionsCsv` TEXT NOT NULL, " +
+                        "`anonymous` INTEGER NOT NULL DEFAULT 0, " +
+                        "`multiChoice` INTEGER NOT NULL DEFAULT 0, " +
+                        "`creatorId` TEXT NOT NULL, " +
+                        "`createdAtMs` INTEGER NOT NULL, " +
+                        "`closed` INTEGER NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY(`pollId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_group_polls_groupId` " +
+                        "ON `group_polls` (`groupId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_group_polls_messageId` " +
+                        "ON `group_polls` (`messageId`)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `group_poll_votes` (" +
+                        "`pollId` TEXT NOT NULL, " +
+                        "`voterId` TEXT NOT NULL, " +
+                        "`voterName` TEXT NOT NULL, " +
+                        "`choicesCsv` TEXT NOT NULL, " +
+                        "`atMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`pollId`, `voterId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_group_poll_votes_pollId` " +
+                        "ON `group_poll_votes` (`pollId`)"
                 )
             }
         }

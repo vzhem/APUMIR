@@ -12,6 +12,7 @@ import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuSearchField
@@ -71,6 +72,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuTabBar
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -222,10 +224,14 @@ fun GroupAdminScreen(
                     canChangeInfo = uiState.canChangeInfo,
                     canChangeVisibility = uiState.isAdmin,
                     topicsEnabled = uiState.group?.topicsEnabled == true,
+                    // р250: медленный режим - сколько секунд участник ждёт
+                    // между сообщениями (0 - выключен).
+                    slowModeSeconds = uiState.group?.slowModeSeconds ?: 0,
                     onSetAvatar = viewModel::setGroupAvatar,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
                     onEnableTopics = viewModel::enableTopics,
+                    onSetSlowMode = viewModel::setSlowMode,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
                     onDeleteGroup = { viewModel.deleteGroup(onLeftGroup) },
                 )
@@ -296,10 +302,14 @@ private fun OverviewTab(
     canChangeVisibility: Boolean,
     /** Раунд 153: у группы темы выключены - предлагаем включить. */
     topicsEnabled: Boolean,
+    /** р250: медленный режим, секунд (0 - выключен). */
+    slowModeSeconds: Int,
     onSetAvatar: (android.net.Uri) -> Unit,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
     onEnableTopics: () -> Unit,
+    /** р250: включить или выключить медленный режим. */
+    onSetSlowMode: (Int) -> Unit,
     onLeave: () -> Unit,
     onDeleteGroup: () -> Unit,
 ) {
@@ -469,6 +479,66 @@ private fun OverviewTab(
             }
         }
 
+        // р250: медленный режим. Блок видят все - режим заметен в чате, и
+        // скрывать его нет смысла; переключают только те, кто вправе менять
+        // информацию о группе (как название и описание).
+        ApuBubble {
+            Column {
+                Text("Медленный режим", fontWeight = FontWeight.Medium)
+                Text(
+                    if (slowModeSeconds > 0) {
+                        "Участники пишут не чаще одного сообщения в ${slowModeLabel(slowModeSeconds)}. " +
+                            "Администраторы и владелец - без паузы."
+                    } else {
+                        "Выключен: писать можно как угодно часто."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    com.vladimir.messenger.data.group.GroupWire.SLOW_MODE_CHOICES.forEach { seconds ->
+                        val selected = seconds == slowModeSeconds
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                    }
+                                )
+                                .then(
+                                    if (canChangeInfo) {
+                                        Modifier.clickable { onSetSlowMode(seconds) }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                slowModeShort(seconds),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (selected) Color.White else ApuBubbleAccentColor,
+                            )
+                        }
+                    }
+                }
+                if (!canChangeInfo) {
+                    Text(
+                        "Режим меняют администраторы.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
+            }
+        }
+
         ApuBubble {
             TextButton(onClick = { showLeaveConfirm = true }) {
                 Text(if (isChannel) "Отписаться от канала" else "Покинуть группу")
@@ -576,6 +646,27 @@ private fun OverviewTab(
             onDismiss = { groupAvatarToCrop = null },
         )
     }
+}
+
+/** р250: подпись выбранной паузы словами (для пояснения в настройках). */
+private fun slowModeLabel(seconds: Int): String = when (seconds) {
+    10 -> "10 секунд"
+    30 -> "30 секунд"
+    60 -> "1 минуту"
+    300 -> "5 минут"
+    900 -> "15 минут"
+    else -> "$seconds с"
+}
+
+/** р250: короткая подпись на кнопке выбора паузы. */
+private fun slowModeShort(seconds: Int): String = when (seconds) {
+    0 -> "Выкл"
+    10 -> "10 с"
+    30 -> "30 с"
+    60 -> "1 мин"
+    300 -> "5 мин"
+    900 -> "15 мин"
+    else -> "$seconds с"
 }
 
 /**

@@ -274,6 +274,34 @@ interface MessageDao {
     @Query("SELECT MAX(timestamp) FROM messages WHERE chatId = :chatId AND topicId = :topicId")
     suspend fun latestTopicTimestamp(chatId: String, topicId: String): Long?
 
+    /**
+     * р250: когда ЭТОТ участник последний раз писал в группу (0 - ещё ни разу).
+     *
+     * По нему считается ожидание медленного режима: отсчёт идёт от моего
+     * предыдущего сообщения, а не от чужих, - иначе участник наказывался бы за
+     * чужую болтовню. Тема не важна: режим один на всю группу.
+     */
+    @Query("SELECT MAX(timestamp) FROM messages WHERE chatId = :chatId AND senderId = :senderId")
+    suspend fun lastOutgoingAt(chatId: String, senderId: String): Long?
+
+    /**
+     * р250: приклеить к сообщению цитату ответа.
+     *
+     * Цитата приезжает отдельным конвертом `mrep` (старые телефоны его не
+     * знают и просто показывают сообщение без цитаты), поэтому колонки
+     * заполняются уже после вставки самой строки.
+     */
+    @Query(
+        "UPDATE messages SET replyToId = :replyToId, replyAuthor = :replyAuthor, replyText = :replyText " +
+            "WHERE id = :messageId"
+    )
+    suspend fun applyReply(
+        messageId: String,
+        replyToId: String?,
+        replyAuthor: String,
+        replyText: String,
+    ): Int
+
     // ── Комментарии большого канала (рой, этап 4) ────────────────────────────
     // Текстовые сообщения темы - без служебных кусков фото и длинного текста
     // ([partPattern] = `InlineImage.PART_MARKER + "%"`). В теме канала самое

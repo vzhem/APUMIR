@@ -987,4 +987,142 @@ class GroupWireTest {
         // Пустой наследник.
         assertNull(GroupWire.parse("APUGRP1|own|grp1||$oldOwner|123|give"))
     }
+
+    // ── р250: ответы на сообщения ───────────────────────────────────────────
+
+    /**
+     * Цитата ответа едет СВОИМ конвертом, а не десятым полем `msg`: прежние
+     * версии ждут в сообщении 5-9 частей и любой незнакомый вид молча
+     * пропускают. Значит, ответ доходит до всех, а цитату видят обновившиеся.
+     */
+    @Test
+    fun replyRoundTripKeepsQuote() {
+        val quote = "а это исходное | сообщение\nс переводом строки"
+        val envelope = GroupWire.buildReply("grp1", "msg-1", "msg-0", "Владимир", quote)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Reply)
+        val reply = parsed as GroupWire.Packet.Reply
+        assertEquals("grp1", reply.groupId)
+        assertEquals("msg-1", reply.messageId)
+        assertEquals("msg-0", reply.replyToId)
+        assertEquals("Владимир", reply.replyAuthor)
+        assertEquals(GroupWire.replyPreview(quote), reply.replyText)
+    }
+
+    /** Цитата не раздувает конверт: длинное сообщение обрезается с многоточием. */
+    @Test
+    fun replyPreviewCutsLongText() {
+        val long = "а".repeat(GroupWire.REPLY_PREVIEW_CHARS + 50)
+        val preview = GroupWire.replyPreview(long)
+        assertEquals(GroupWire.REPLY_PREVIEW_CHARS + 1, preview.length)
+        assertTrue(preview.endsWith("…"))
+    }
+
+    /** Ответ без цели (на что отвечаем неизвестно) - мусор. */
+    @Test
+    fun replyRejectsGarbage() {
+        assertNull(GroupWire.parse("APUGRP1|mrep|grp1|bWFzZy0x|||"))
+        // Лишняя часть - конверт другой версии.
+        val id = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("msg-1".toByteArray(Charsets.UTF_8))
+        val to = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("msg-0".toByteArray(Charsets.UTF_8))
+        assertNull(GroupWire.parse("APUGRP1|mrep|grp1|$id|$to||x|"))
+        // Не хватает полей.
+        assertNull(GroupWire.parse("APUGRP1|mrep|grp1|$id"))
+    }
+
+    // ── р250: опросы ────────────────────────────────────────────────────────
+
+    @Test
+    fun pollRoundTripKeepsOptions() {
+        val options = listOf("первый | вариант", "второй\nвариант", "третий")
+        val envelope = GroupWire.buildPoll("grp1", "topic1", "poll-1", "msg-1", "Как дела?", options, true, false)
+        val parsed = GroupWire.parse(envelope)
+        assertTrue(parsed is GroupWire.Packet.Poll)
+        val poll = parsed as GroupWire.Packet.Poll
+        assertEquals("grp1", poll.groupId)
+        assertEquals("topic1", poll.topicId)
+        assertEquals("poll-1", poll.pollId)
+        assertEquals("msg-1", poll.messageId)
+        assertEquals("Как дела?", poll.question)
+        assertEquals(options, poll.options)
+        assertTrue(poll.anonymous)
+        assertFalse(poll.multiChoice)
+    }
+
+    /** Опрос без вариантов и с одним вариантом отбрасывается: голосовать не за что. */
+    @Test
+    fun pollRejectsTooFewOptions() {
+        val one = GroupWire.buildPoll("grp1", "topic1", "poll-1", "msg-1", "Вопрос?", listOf("один"), false, false)
+        assertNull(GroupWire.parse(one))
+        val none = GroupWire.buildPoll("grp1", "topic1", "poll-1", "msg-1", "Вопрос?", emptyList(), false, false)
+        assertNull(GroupWire.parse(none))
+    }
+
+    /** Слишком длинный вариант - не наш конверт (или чужой, или повреждённый). */
+    @Test
+    fun pollRejectsOversizedOption() {
+        val long = "б".repeat(GroupWire.MAX_POLL_OPTION_CHARS + 1)
+        val envelope = GroupWire.buildPoll("grp1", "topic1", "poll-1", "msg-1", "Вопрос?", listOf(long, "нормальный"), false, false)
+        assertNull(GroupWire.parse(envelope))
+    }
+
+    @Test
+    fun pollVoteRoundTripKeepsChoices() {
+        val envelope = GroupWire.buildPollVote("grp1", "poll-1", "node-7", "Владимир", listOf(0, 2))
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.PollVote
+        assertEquals("poll-1", parsed.pollId)
+        assertEquals("node-7", parsed.voterId)
+        assertEquals("Владимир", parsed.voterName)
+        assertEquals(listOf(0, 2), parsed.choices)
+    }
+
+    /** Пустой выбор - голос отозван; это не ошибка, а нормальное состояние. */
+    @Test
+    fun pollVoteEmptyMeansRetracted() {
+        val envelope = GroupWire.buildPollVote("grp1", "poll-1", "node-7", "Владимир", emptyList())
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.PollVote
+        assertTrue(parsed.choices.isEmpty())
+    }
+
+    @Test
+    fun pollCloseRoundTrip() {
+        val parsed = GroupWire.parse(GroupWire.buildPollClose("grp1", "poll-1")) as GroupWire.Packet.PollClose
+        assertEquals("grp1", parsed.groupId)
+        assertEquals("poll-1", parsed.pollId)
+    }
+
+    // ── р250: медленный режим ───────────────────────────────────────────────
+
+    @Test
+    fun slowModeRoundTripAndLimits() {
+        val parsed = GroupWire.parse(GroupWire.buildSlowMode("grp1", 30)) as GroupWire.Packet.SlowMode
+        assertEquals("grp1", parsed.groupId)
+        assertEquals(30, parsed.seconds)
+        // Выключенный режим - обычное значение 0, а не «нет пакета».
+        assertEquals(0, (GroupWire.parse(GroupWire.buildSlowMode("grp1", 0)) as GroupWire.Packet.SlowMode).seconds)
+        // Отрицательное и чрезмерное значение - не наш конверт.
+        assertNull(GroupWire.parse("APUGRP1|slow|grp1|-5"))
+        assertNull(GroupWire.parse("APUGRP1|slow|grp1|" + (GroupWire.SLOW_MODE_MAX_SECONDS + 1)))
+        assertNull(GroupWire.parse("APUGRP1|slow|grp1|много"))
+    }
+
+    /**
+     * Новые виды не ломают старые конверты: сообщение из пяти частей и
+     * обновление группы из девяти по-прежнему разбираются.
+     */
+    @Test
+    fun legacyEnvelopesStillParseAfterNewKinds() {
+        val text = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("старое сообщение".toByteArray(Charsets.UTF_8))
+        val message = GroupWire.parse("APUGRP1|msg|grp1|topic1|$text")
+        assertTrue(message is GroupWire.Packet.Message)
+        val info = GroupWire.parse(
+            "APUGRP1|info|grp1|" +
+                java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("Группа".toByteArray(Charsets.UTF_8)) +
+                "||owner1|slug|0|1",
+        )
+        assertTrue(info is GroupWire.Packet.GroupInfo)
+    }
 }

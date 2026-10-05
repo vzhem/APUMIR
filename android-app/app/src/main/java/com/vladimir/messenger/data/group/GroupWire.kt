@@ -303,6 +303,40 @@ object GroupWire {
      */
     const val KIND_OWNER = "own"
 
+    /**
+     * р250: ответ на сообщение группы или темы - `mrep|groupId|msgId|to|author|text`.
+     *
+     * Отдельный вид, а не десятое поле в `msg`: конверт сообщения из 5-9 частей
+     * понимают все прежние телефоны, а любой новый вид они МОЛЧА ПРОПУСКАЮТ.
+     * Так ответ показывается цитатой там, где приложение новое, и просто
+     * текстом там, где старое - сообщение не теряется ни у кого.
+     */
+    const val KIND_REPLY = "mrep"
+
+    /**
+     * р250: опрос - `poll|groupId|topicId|pollId|msgId|question|anon|multi|opt,…`.
+     *
+     * Опрос едет своим конвертом и приклеивается к уже ушедшему сообщению
+     * (посту) по его идентификатору: текст сообщения остаётся текстом, и
+     * старые телефоны показывают вопрос как обычное сообщение.
+     */
+    const val KIND_POLL = "poll"
+
+    /** р250: голос в опросе - `pvot|groupId|pollId|voterId|voterName|0,2,…`. */
+    const val KIND_POLL_VOTE = "pvot"
+
+    /** р250: опрос закрыт - `pcls|groupId|pollId`. */
+    const val KIND_POLL_CLOSE = "pcls"
+
+    /**
+     * р250: медленный режим группы - `slow|groupId|seconds`.
+     *
+     * Отдельный вид по той же причине, что и ответ: конверт `info` из 9-10
+     * частей разбирают прежние версии, и добавлять в него поле нельзя - иначе
+     * обновление информации о группе перестало бы доходить до старых телефонов.
+     */
+    const val KIND_SLOW_MODE = "slow"
+
     /** Режим пакета [KIND_OWNER]: добровольная передача от нынешнего владельца. */
     const val OWNER_MODE_GIVE = "give"
 
@@ -329,6 +363,44 @@ object GroupWire {
 
     /** Значков реакций на пост в сводке: самые частые. */
     const val MAX_COUNTER_EMOJI = 8
+
+    /**
+     * р250: варианты ответа - одной строкой для базы (черновик опроса и итоги
+     * лежат в `group_polls.optionsCsv`). Кодировка та же, что в конверте:
+     * внутри варианта может быть что угодно, кроме разделителя после кодирования.
+     */
+    fun encodeOptions(options: List<String>): String =
+        options.take(MAX_POLL_OPTIONS).joinToString(",") { encode(it) }
+
+    /** р250: разбор колонки с вариантами (обратно к [encodeOptions]). */
+    fun decodeOptions(csv: String): List<String> =
+        if (csv.isBlank()) emptyList() else csv.split(',').mapNotNull { cell -> decode(cell)?.takeIf { it.isNotBlank() } }
+
+    // ── р250: опросы ────────────────────────────────────────────────────────
+
+    /** Вариантов в одном опросе: 10 × 100 знаков укладываются в конверт вместе с вопросом. */
+    const val MAX_POLL_OPTIONS = 10
+
+    /** Меньше двух вариантов опрос не имеет смысла. */
+    const val MIN_POLL_OPTIONS = 2
+
+    /** Знаков в одном варианте ответа. */
+    const val MAX_POLL_OPTION_CHARS = 100
+
+    /** Знаков в вопросе опроса. */
+    const val MAX_POLL_QUESTION_CHARS = 255
+
+    /** Знаков из исходного сообщения, которые показываются как цитата в ответе. */
+    const val REPLY_PREVIEW_CHARS = 120
+
+    /**
+     * р250: варианты медленного режима, секунды. Первое значение (0) -
+     * «выключен»; остальные совпадают с привычными настройками мессенджеров.
+     */
+    val SLOW_MODE_CHOICES: List<Int> = listOf(0, 10, 30, 60, 300, 900)
+
+    /** Больше этого ждать между сообщениями бессмысленно: режим станет наказанием. */
+    const val SLOW_MODE_MAX_SECONDS = 3600
 
     const val DECISION_APPROVED = "APPROVED"
     const val DECISION_REJECTED = "REJECTED"
@@ -397,6 +469,61 @@ object GroupWire {
             val nodeId: String,
             val permissionsMask: Long,
         ) : Packet()
+
+        /**
+         * р250: сообщение [messageId] - ответ на [replyToId].
+         *
+         * Автор и текст цитаты едут в конверте: исходное сообщение могло быть
+         * удалено или не дойти, а цитата должна показываться везде одинаково,
+         * без пересчёта по локальной базе.
+         */
+        data class Reply(
+            val groupId: String,
+            val messageId: String,
+            val replyToId: String,
+            val replyAuthor: String = "",
+            val replyText: String = "",
+        ) : Packet()
+
+        /**
+         * р250: опрос, приклеенный к сообщению [messageId] темы [topicId].
+         *
+         * Повторная доставка того же опроса (ретрансляция, досылка новичку) не
+         * сбрасывает итоги: получатель записывает опрос, только если его ещё нет.
+         */
+        data class Poll(
+            val groupId: String,
+            val topicId: String,
+            val pollId: String,
+            val messageId: String,
+            val question: String,
+            val options: List<String>,
+            val anonymous: Boolean = false,
+            val multiChoice: Boolean = false,
+        ) : Packet()
+
+        /**
+         * р250: голос участника [voterId] в опросе [pollId].
+         *
+         * Пустой [choices] - голос отозван. Повторное голосование заменяет
+         * прежний выбор: передумал - голос переезжает, а не удваивается.
+         */
+        data class PollVote(
+            val groupId: String,
+            val pollId: String,
+            val voterId: String,
+            val voterName: String = "",
+            val choices: List<Int> = emptyList(),
+        ) : Packet()
+
+        /** р250: опрос [pollId] закрыт - голосовать нельзя, итоги видны. */
+        data class PollClose(val groupId: String, val pollId: String) : Packet()
+
+        /**
+         * р250: медленный режим группы - участник ждёт [seconds] секунд между
+         * своими сообщениями; 0 - режим выключен.
+         */
+        data class SlowMode(val groupId: String, val seconds: Int) : Packet()
 
         /**
          * Просьба прислать последние [limit] постов канала целиком.
@@ -1228,6 +1355,89 @@ object GroupWire {
 
     fun buildKick(groupId: String, nodeId: String): String = "$PREFIX|$KIND_KICK|$groupId|$nodeId"
 
+    // ── р250: ответы на сообщения ───────────────────────────────────────────
+
+    /**
+     * Цитата ответа: своим конвертом, чтобы прежние версии приложения видели
+     * просто сообщение, а не «битый» пакет (их разбор ждёт 5-9 полей в `msg`).
+     */
+    fun buildReply(
+        groupId: String,
+        messageId: String,
+        replyToId: String,
+        replyAuthor: String,
+        replyText: String,
+    ): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        require(messageId.isNotBlank()) { "bad message id" }
+        require(replyToId.isNotBlank()) { "bad reply target" }
+        return "$PREFIX|$KIND_REPLY|$groupId|${encode(messageId)}|${encode(replyToId)}|" +
+            "${encode(replyAuthor)}|${encode(replyPreview(replyText))}"
+    }
+
+    /** Короткий текст цитаты: длинное сообщение не должно раздувать конверт. */
+    fun replyPreview(text: String): String {
+        val one = text.replace('\n', ' ').trim()
+        return if (one.length <= REPLY_PREVIEW_CHARS) one else one.take(REPLY_PREVIEW_CHARS) + "…"
+    }
+
+    // ── р250: опросы ────────────────────────────────────────────────────────
+
+    /**
+     * Опрос, приклеенный к сообщению (посту). Варианты кодируются по одному и
+     * разделяются запятой: внутри варианта может быть что угодно, вплоть до
+     * перевода строки.
+     */
+    fun buildPoll(
+        groupId: String,
+        topicId: String,
+        pollId: String,
+        messageId: String,
+        question: String,
+        options: List<String>,
+        anonymous: Boolean,
+        multiChoice: Boolean,
+    ): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        require(pollId.isNotBlank()) { "bad poll id" }
+        require(question.isNotBlank()) { "bad question" }
+        val variants = options.take(MAX_POLL_OPTIONS).joinToString(",") { encode(it) }
+        return "$PREFIX|$KIND_POLL|$groupId|${encode(topicId)}|${encode(pollId)}|${encode(messageId)}|" +
+            "${encode(question)}|${if (anonymous) 1 else 0}|${if (multiChoice) 1 else 0}|$variants"
+    }
+
+    /** Голос в опросе: номера выбранных вариантов через запятую; пусто - голос отозван. */
+    fun buildPollVote(
+        groupId: String,
+        pollId: String,
+        voterId: String,
+        voterName: String,
+        choices: List<Int>,
+    ): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        require(pollId.isNotBlank()) { "bad poll id" }
+        require(voterId.isNotBlank()) { "bad voter id" }
+        val cells = choices.joinToString(",")
+        return "$PREFIX|$KIND_POLL_VOTE|$groupId|${encode(pollId)}|${encode(voterId)}|" +
+            "${encode(voterName)}|$cells"
+    }
+
+    /** Опрос закрыт: итоги остаются, голосовать нельзя. */
+    fun buildPollClose(groupId: String, pollId: String): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        require(pollId.isNotBlank()) { "bad poll id" }
+        return "$PREFIX|$KIND_POLL_CLOSE|$groupId|${encode(pollId)}"
+    }
+
+    // ── р250: медленный режим ───────────────────────────────────────────────
+
+    /** Медленный режим группы: [seconds] секунд между сообщениями участника (0 - выключен). */
+    fun buildSlowMode(groupId: String, seconds: Int): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        val safe = seconds.coerceIn(0, SLOW_MODE_MAX_SECONDS)
+        return "$PREFIX|$KIND_SLOW_MODE|$groupId|$safe"
+    }
+
     fun buildMemberRestrict(groupId: String, nodeId: String, permissionsMask: Long): String =
         "$PREFIX|$KIND_MEMBER_RESTRICT|$groupId|${encode(nodeId)}|$permissionsMask"
 
@@ -1580,6 +1790,102 @@ object GroupWire {
                 val nodeId = decode(parts[3]).orEmpty()
                 val mask = parts[4].toLongOrNull()
                 if (nodeId.isBlank() || mask == null) null else Packet.MemberRestrict(groupId, nodeId, mask)
+            } else {
+                null
+            }
+
+            // ── р250: ответы, опросы и медленный режим ──
+            // Все новые виды собраны так, что прежние версии их не знают и
+            // молча отбрасывают: сообщение (без цитаты) и пост (без карточки
+            // опроса) доходят до всех, а новые возможности - до обновившихся.
+            KIND_REPLY -> if (parts.size == 7) {
+                val messageId = decode(parts[3]) ?: return null
+                val replyToId = decode(parts[4]) ?: return null
+                val author = decode(parts[5]).orEmpty()
+                val text = decode(parts[6]).orEmpty()
+                if (messageId.isBlank() || replyToId.isBlank()) {
+                    null
+                } else {
+                    Packet.Reply(groupId, messageId, replyToId, author, text)
+                }
+            } else {
+                null
+            }
+
+            KIND_POLL -> if (parts.size == 10) {
+                val topicId = decode(parts[3]) ?: return null
+                val pollId = decode(parts[4]) ?: return null
+                val messageId = decode(parts[5]).orEmpty()
+                val question = decode(parts[6]) ?: return null
+                val anon = parts[7]
+                val multi = parts[8]
+                if (pollId.isBlank() || question.isBlank() || question.length > MAX_POLL_QUESTION_CHARS ||
+                    (anon != "0" && anon != "1") || (multi != "0" && multi != "1")
+                ) {
+                    null
+                } else {
+                    val options = if (parts[9].isBlank()) {
+                        emptyList()
+                    } else {
+                        parts[9].split(',').mapNotNull { cell -> decode(cell) }
+                    }
+                    // Опрос без вариантов или с одним вариантом не имеет смысла.
+                    val clean = options.map { it.trim() }.filter { it.isNotBlank() }
+                    if (clean.size !in MIN_POLL_OPTIONS..MAX_POLL_OPTIONS ||
+                        clean.any { it.length > MAX_POLL_OPTION_CHARS }
+                    ) {
+                        null
+                    } else {
+                        Packet.Poll(
+                            groupId = groupId,
+                            topicId = topicId,
+                            pollId = pollId,
+                            messageId = messageId,
+                            question = question,
+                            options = clean,
+                            anonymous = anon == "1",
+                            multiChoice = multi == "1",
+                        )
+                    }
+                }
+            } else {
+                null
+            }
+
+            KIND_POLL_VOTE -> if (parts.size == 7) {
+                val pollId = decode(parts[3]) ?: return null
+                val voterId = decode(parts[4]) ?: return null
+                val voterName = decode(parts[5]).orEmpty()
+                if (pollId.isBlank() || voterId.isBlank()) {
+                    null
+                } else {
+                    val choices = if (parts[6].isBlank()) {
+                        emptyList()
+                    } else {
+                        parts[6].split(',').mapNotNull { it.trim().toIntOrNull() }
+                            .filter { it >= 0 }
+                            .take(MAX_POLL_OPTIONS)
+                    }
+                    Packet.PollVote(groupId, pollId, voterId, voterName, choices)
+                }
+            } else {
+                null
+            }
+
+            KIND_POLL_CLOSE -> if (parts.size == 4) {
+                val pollId = decode(parts[3]) ?: return null
+                if (pollId.isBlank()) null else Packet.PollClose(groupId, pollId)
+            } else {
+                null
+            }
+
+            KIND_SLOW_MODE -> if (parts.size == 4) {
+                val seconds = parts[3].toIntOrNull()
+                if (seconds == null || seconds < 0 || seconds > SLOW_MODE_MAX_SECONDS) {
+                    null
+                } else {
+                    Packet.SlowMode(groupId, seconds)
+                }
             } else {
                 null
             }

@@ -51,6 +51,7 @@ object AppModule {
                 AppDatabase.MIGRATION_21_22,
                 AppDatabase.MIGRATION_22_23,
                 AppDatabase.MIGRATION_23_24,
+                AppDatabase.MIGRATION_24_25,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -98,6 +99,11 @@ object AppModule {
     @Provides
     fun providePostSignerDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.PostSignerDao =
         db.postSignerDao()
+
+    /** р250: опросы групп, тем и каналов. */
+    @Provides
+    fun provideGroupPollDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.GroupPollDao =
+        db.groupPollDao()
 
     @Provides @Singleton
     fun provideGroupDao(db: AppDatabase): GroupDao = db.groupDao()

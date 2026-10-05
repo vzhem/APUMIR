@@ -45,4 +45,12 @@ data class GroupEntity(
     /** р249: звук выключен до этого времени (0 - звук включён). */
     @ColumnInfo(defaultValue = "0")
     val mutedUntilMs: Long = 0L,
+    /**
+     * р250: медленный режим - сколько секунд участник ждёт между своими
+     * сообщениями в группе (0 - режим выключен). Касается всех тем сразу:
+     * иначе режим обходили, переходя из темы в тему. Владельцу и
+     * администраторам режим не мешает - см. GroupRepository.sendMessage.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val slowModeSeconds: Int = 0,
 )

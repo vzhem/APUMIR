@@ -39,6 +39,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transform
@@ -175,6 +177,14 @@ class GroupRepository(
      * кто в сети).
      */
     private val deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox? = null,
+    /**
+     * р250: опросы групп, тем и каналов.
+     *
+     * null - хранилища нет (так живут JVM-тесты ядра): сообщения, ответы и
+     * медленный режим работают, а опросы молча недоступны, как без него
+     * работали манифесты роя.
+     */
+    private val pollDao: com.vladimir.messenger.data.local.dao.GroupPollDao? = null,
 ) {
 
     /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
@@ -666,6 +676,8 @@ class GroupRepository(
             } else {
                 0
             },
+            // р250: медленный режим - экран чата показывает остаток ожидания.
+            slowModeSeconds = g.slowModeSeconds,
         )
     }
 
@@ -820,6 +832,17 @@ class GroupRepository(
         topicId: String,
         text: String,
         photos: List<String> = emptyList(),
+        /**
+         * р250: это сообщение - ответ на другое. Цитата уедет отдельным
+         * конвертом `mrep`, поэтому старые телефоны увидят обычное сообщение.
+         */
+        reply: ReplyTarget? = null,
+        /**
+         * р250: опрос, приклеенный к этому сообщению (посту канала). Текст
+         * сообщения остаётся текстом - карточка опроса просто надстраивается
+         * над ним у тех, кто умеет её показывать.
+         */
+        poll: PollDraft? = null,
     ): Result<String> {
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
         // Визитка файла (этап 9) - служебная строка: из слов её вынимаем и
@@ -872,6 +895,24 @@ class GroupRepository(
 
         val now = clock()
         val messageId = idFactory()
+        // р250: опрос - право «Опросы» из вкладки «Разрешения». Владелец и
+        // администраторы создают опросы всегда: ограничения участников на них
+        // не распространяются (как и на закрепы).
+        if (poll != null && !isAdmin &&
+            !GroupPermissions.has(memberMask, GroupPermissions.Member.SEND_POLLS)
+        ) {
+            return Result.failure(SecurityException("Опросы в этой группе запрещены"))
+        }
+        // р250: медленный режим. Считаем от моего предыдущего сообщения: чужой
+        // разговор не должен наказывать участника. Владелец и администраторы
+        // пишут без паузы - им приходится гасить всплески сразу.
+        if (!isAdmin) {
+            val waitMs = slowModeWaitMs(group, me, now)
+            if (waitMs > 0L) {
+                val seconds = (waitMs + 999L) / 1000L
+                return Result.failure(SecurityException("Медленный режим: подождите $seconds с"))
+            }
+        }
         // Пост канала - первое сообщение своей темы; всё остальное в теме -
         // комментарии, они роем не ходят и манифеста не получают.
         val isChannelPost = group.isChannel && isAdmin &&
@@ -888,6 +929,11 @@ class GroupRepository(
                 channel = "GROUP",
                 recipientId = "",
                 topicId = topic.id,
+                // р250: цитата ответа пишется сразу - своя лента должна
+                // показывать ответ без ожидания второго конверта.
+                replyToId = reply?.messageId,
+                replyAuthor = reply?.author.orEmpty(),
+                replyText = if (reply == null) "" else GroupWire.replyPreview(reply.text),
             )
         )
         registerOutgoing(groupId, topic, body, me, now)
@@ -1010,7 +1056,382 @@ class GroupRepository(
                 "fanout=${report.delivered}/${report.attempted} swarmRest=${wave?.rest ?: 0} " +
                 "viaHubs=${commentRoute != null} manifest=${manifest != null} via=${delivery.name}",
         )
+        // ── р250: цитата ответа - своим конвертом, сразу за сообщением ──
+        if (reply != null) {
+            backgroundScope.launch {
+                runCatching {
+                    delivery.deliver(
+                        groupId,
+                        GroupWire.buildReply(
+                            groupId = groupId,
+                            messageId = messageId,
+                            replyToId = reply.messageId,
+                            replyAuthor = reply.author,
+                            replyText = reply.text,
+                        ),
+                        fullRecipients,
+                    )
+                }.onFailure { Log.w(TAG, "reply fanout failed: ${it.message}") }
+            }
+        }
+        // ── р250: опрос приклеиваем к тому же сообщению (посту) ──
+        if (poll != null) {
+            val pollId = pollIdOf(messageId)
+            storePoll(
+                com.vladimir.messenger.data.local.entity.GroupPollEntity(
+                    pollId = pollId,
+                    groupId = groupId,
+                    topicId = topic.id,
+                    messageId = messageId,
+                    question = poll.question.trim(),
+                    optionsCsv = GroupWire.encodeOptions(poll.options),
+                    anonymous = poll.anonymous,
+                    multiChoice = poll.multiChoice,
+                    creatorId = me,
+                    createdAtMs = now,
+                ),
+            )
+            backgroundScope.launch {
+                runCatching {
+                    delivery.deliver(
+                        groupId,
+                        GroupWire.buildPoll(
+                            groupId = groupId,
+                            topicId = topic.id,
+                            pollId = pollId,
+                            messageId = messageId,
+                            question = poll.question.trim(),
+                            options = poll.options,
+                            anonymous = poll.anonymous,
+                            multiChoice = poll.multiChoice,
+                        ),
+                        fullRecipients,
+                    )
+                }.onFailure { Log.w(TAG, "poll fanout failed: ${it.message}") }
+            }
+        }
         return Result.success(messageId)
+    }
+
+    // ── р250: ответы, опросы и медленный режим ──────────────────────────────
+    //
+    // Все три возможности добавлены НОВЫМИ видами конверта, а не полями в
+    // старых: `msg` из 5–9 частей и `info` из 9–10 частей разбирают прежние
+    // версии приложения, и любое новое поле сделало бы пакет для них битым -
+    // сообщение (или обновление группы) просто пропало бы. Ломать ничего не
+    // надо: неизвестный вид старые телефоны молча отбрасывают, поэтому у них
+    // ответ показывается текстом без цитаты, опрос - постом без карточки, а
+    // медленный режим действует только на тех, кто его получил.
+
+    /** р250: на какое сообщение отвечаем (цитата над пузырём). */
+    data class ReplyTarget(
+        val messageId: String,
+        /** Имя автора исходного сообщения - его видит вся группа. */
+        val author: String,
+        val text: String,
+    )
+
+    /** Опрос всегда привязан к сообщению: id опроса выводится из id сообщения. */
+    private fun pollIdOf(messageId: String): String = "p:$messageId"
+
+    /** Записать опрос; повторная доставка того же опроса итоги не сбрасывает. */
+    private suspend fun storePoll(poll: com.vladimir.messenger.data.local.entity.GroupPollEntity) {
+        val dao = pollDao ?: return
+        if (dao.getPoll(poll.pollId) != null) return
+        dao.insertPoll(poll)
+    }
+
+    /**
+     * Сколько миллисекунд ЭТОМУ участнику осталось ждать перед следующим
+     * сообщением (0 - можно писать). Отсчёт от моего предыдущего сообщения в
+     * группе: тема не важна, иначе режим обходили переходом в другую тему.
+     */
+    suspend fun slowModeWaitMs(groupId: String, me: String): Long {
+        val group = groupDao.getGroupById(groupId) ?: return 0L
+        val member = groupDao.getMember(groupId, me) ?: return 0L
+        if (GroupRole.isAdminOrOwner(member.role)) return 0L
+        return slowModeWaitMs(group, me, clock())
+    }
+
+    private suspend fun slowModeWaitMs(group: GroupEntity, me: String, now: Long): Long {
+        if (group.slowModeSeconds <= 0) return 0L
+        val last = messageDao.lastOutgoingAt(group.id, me) ?: return 0L
+        val wait = last + group.slowModeSeconds * 1000L - now
+        return if (wait > 0L) wait else 0L
+    }
+
+    /**
+     * Включить (или выключить) медленный режим: [seconds] секунд между
+     * сообщениями участника, 0 - выключен. Менять вправе владелец и
+     * администратор с правом «Изменять информацию» - как название и описание.
+     */
+    suspend fun setSlowMode(groupId: String, seconds: Int): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
+        }
+        val safe = seconds.coerceIn(0, GroupWire.SLOW_MODE_MAX_SECONDS)
+        if (safe == group.slowModeSeconds) return Result.success(Unit)
+        groupDao.setSlowMode(groupId, safe)
+        // Режим должен действовать на всех, поэтому уходит конвертом: у
+        // вступившего позже он появится с первым же изменением (или при
+        // одобрении заявки - см. decideJoinRequest).
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(groupId, GroupWire.buildSlowMode(groupId, safe), allRecipients(groupId, me))
+            }.onFailure { Log.w(TAG, "slow mode fanout failed: ${it.message}") }
+        }
+        Log.i(TAG, "slow mode group=$groupId seconds=$safe by=$me")
+        return Result.success(Unit)
+    }
+
+    /** Проголосовать (или отозвать голос): [choices] - номера вариантов, пусто - отозвать. */
+    suspend fun votePoll(groupId: String, pollId: String, choices: List<Int>): Result<Unit> {
+        val dao = pollDao ?: return Result.failure(IllegalStateException("Опросы недоступны"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        val poll = dao.getPoll(pollId)
+            ?: return Result.failure(IllegalStateException("Опрос не найден"))
+        if (poll.groupId != groupId) return Result.failure(IllegalStateException("Опрос из другой группы"))
+        if (poll.closed) return Result.failure(SecurityException("Опрос закрыт"))
+        val variants = GroupWire.decodeOptions(poll.optionsCsv)
+        val clean = choices.filter { it in variants.indices }.distinct()
+        if (!poll.multiChoice && clean.size > 1) {
+            return Result.failure(IllegalArgumentException("В этом опросе можно выбрать только один вариант"))
+        }
+        dao.putVote(
+            com.vladimir.messenger.data.local.entity.GroupPollVoteEntity(
+                pollId = pollId,
+                voterId = me,
+                voterName = member.displayName,
+                choicesCsv = clean.joinToString(","),
+                atMs = clock(),
+            ),
+        )
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(
+                    groupId,
+                    GroupWire.buildPollVote(groupId, pollId, me, member.displayName, clean),
+                    allRecipients(groupId, me),
+                )
+            }.onFailure { Log.w(TAG, "poll vote fanout failed: ${it.message}") }
+        }
+        return Result.success(Unit)
+    }
+
+    /** Закрыть опрос: автор, владелец или администратор. */
+    suspend fun closePoll(groupId: String, pollId: String): Result<Unit> {
+        val dao = pollDao ?: return Result.failure(IllegalStateException("Опросы недоступны"))
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        val poll = dao.getPoll(pollId)
+            ?: return Result.failure(IllegalStateException("Опрос не найден"))
+        if (poll.groupId != groupId) return Result.failure(IllegalStateException("Опрос из другой группы"))
+        val isAdmin = GroupRole.isAdminOrOwner(member.role)
+        if (!isAdmin && poll.creatorId != me) {
+            return Result.failure(SecurityException("Закрыть опрос вправе его автор или администратор"))
+        }
+        if (poll.closed) return Result.success(Unit)
+        dao.closePoll(pollId)
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(groupId, GroupWire.buildPollClose(groupId, pollId), allRecipients(groupId, me))
+            }.onFailure { Log.w(TAG, "poll close fanout failed: ${it.message}") }
+        }
+        return Result.success(Unit)
+    }
+
+    /** Опросы группы (канала) в виде доменных моделей: ключ - id сообщения. */
+    fun observePolls(groupId: String): Flow<Map<String, PollSummary>> {
+        val dao = pollDao
+            ?: return kotlinx.coroutines.flow.flowOf<Map<String, PollSummary>>(emptyMap())
+        val me = myId().orEmpty()
+        return kotlinx.coroutines.flow.combine(
+            dao.observeGroupPolls(groupId),
+            dao.observeGroupVotes(groupId),
+        ) { polls, votes ->
+            val byPoll = votes.groupBy { it.pollId }
+            polls.associate { row -> row.messageId to toPollSummary(row, byPoll[row.pollId].orEmpty(), me) }
+        }.flowOn(Dispatchers.IO)
+    }
+
+    private fun toPollSummary(
+        row: com.vladimir.messenger.data.local.entity.GroupPollEntity,
+        votes: List<com.vladimir.messenger.data.local.entity.GroupPollVoteEntity>,
+        me: String,
+    ): PollSummary {
+        val options = GroupWire.decodeOptions(row.optionsCsv)
+        val counts = IntArray(options.size)
+        for (vote in votes) {
+            for (index in vote.choices()) {
+                if (index in counts.indices) counts[index]++
+            }
+        }
+        val mine = votes.firstOrNull { it.voterId == me }?.choices().orEmpty()
+        return PollSummary(
+            pollId = row.pollId,
+            groupId = row.groupId,
+            topicId = row.topicId,
+            messageId = row.messageId,
+            question = row.question,
+            options = options.mapIndexed { index, text -> PollOption(index, text, counts.getOrNull(index) ?: 0) },
+            anonymous = row.anonymous,
+            multiChoice = row.multiChoice,
+            creatorId = row.creatorId,
+            createdAtMs = row.createdAtMs,
+            closed = row.closed,
+            isMine = row.creatorId == me,
+            myChoices = mine,
+            // Анонимный опрос показывает только числа: имена хранятся, чтобы
+            // отличать свой голос от чужих, но наружу не отдаются.
+            voters = if (row.anonymous) {
+                emptyList()
+            } else {
+                votes.map { PollVoter(it.voterId, it.voterName, it.choices()) }
+            },
+        )
+    }
+
+    // ── р250: приём новых конвертов ─────────────────────────────────────────
+
+    /** Цитата, приехавшая раньше своего сообщения: ключ - id сообщения. */
+    private class PendingReply(val groupId: String, val packet: GroupWire.Packet.Reply)
+
+    private val pendingReplies = SwarmBuffer<PendingReply>(PENDING_REPLIES, PENDING_TTL_MS, clock)
+
+    private suspend fun handleReply(senderId: String, packet: GroupWire.Packet.Reply) {
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        val message = messageDao.getMessageById(packet.messageId)
+        // Сообщение ещё в пути (цитата пришла быстрее): подождём его в буфере,
+        // как куски поста ждут манифест.
+        if (message == null || message.chatId != packet.groupId) {
+            pendingReplies.put(packet.messageId, PendingReply(packet.groupId, packet))
+            return
+        }
+        applyReply(packet)
+    }
+
+    private suspend fun applyReply(packet: GroupWire.Packet.Reply) {
+        messageDao.applyReply(
+            messageId = packet.messageId,
+            replyToId = packet.replyToId,
+            replyAuthor = packet.replyAuthor,
+            replyText = GroupWire.replyPreview(packet.replyText),
+        )
+    }
+
+    private suspend fun handlePoll(senderId: String, packet: GroupWire.Packet.Poll) {
+        val dao = pollDao ?: return
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        val author = groupDao.getMember(packet.groupId, senderId)
+        val authorIsAdmin = author?.let { GroupRole.isAdminOrOwner(it.role) } == true
+        // Право «Опросы» проверяем по автору: администраторы и владелец вне
+        // общих ограничений участников (как с закрепами).
+        if (!authorIsAdmin) {
+            val authorMask = GroupPermissions.effectiveMemberPermissions(
+                author?.permissions ?: 0L,
+                effectiveMemberMask(group),
+            )
+            if (!GroupPermissions.has(authorMask, GroupPermissions.Member.SEND_POLLS)) {
+                Log.w(TAG, "poll from member without right dropped poll=${packet.pollId}")
+                return
+            }
+        }
+        val known = dao.getPoll(packet.pollId)
+        // Повторная доставка (ретрансляция, досылка новичку) итоги не сбрасывает.
+        if (known != null) return
+        dao.insertPoll(
+            com.vladimir.messenger.data.local.entity.GroupPollEntity(
+                pollId = packet.pollId,
+                groupId = packet.groupId,
+                topicId = packet.topicId,
+                messageId = packet.messageId,
+                question = packet.question,
+                optionsCsv = GroupWire.encodeOptions(packet.options),
+                anonymous = packet.anonymous,
+                multiChoice = packet.multiChoice,
+                creatorId = senderId,
+                createdAtMs = clock(),
+            ),
+        )
+        Log.i(TAG, "poll in group=${packet.groupId} poll=${packet.pollId} options=${packet.options.size}")
+    }
+
+    private suspend fun handlePollVote(senderId: String, packet: GroupWire.Packet.PollVote) {
+        val dao = pollDao ?: return
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        val poll = dao.getPoll(packet.pollId) ?: return
+        if (poll.groupId != packet.groupId) return
+        if (poll.closed) return
+        // В анонимный опрос имена не показываем, но храним: иначе нельзя
+        // отличить переголосование от нового участника.
+        val name = if (poll.anonymous) "" else packet.voterName
+        val clean = if (poll.multiChoice) {
+            packet.choices.distinct().filter { it in 0 until GroupWire.decodeOptions(poll.optionsCsv).size }
+        } else {
+            packet.choices.take(1).filter { it in 0 until GroupWire.decodeOptions(poll.optionsCsv).size }
+        }
+        dao.putVote(
+            com.vladimir.messenger.data.local.entity.GroupPollVoteEntity(
+                pollId = packet.pollId,
+                voterId = packet.voterId,
+                voterName = name,
+                choicesCsv = clean.joinToString(","),
+                atMs = clock(),
+            ),
+        )
+    }
+
+    private suspend fun handlePollClose(senderId: String, packet: GroupWire.Packet.PollClose) {
+        val dao = pollDao ?: return
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        val poll = dao.getPoll(packet.pollId) ?: return
+        if (poll.groupId != packet.groupId) return
+        // Закрыть вправе автор опроса, владелец группы и администратор.
+        if (senderId != poll.creatorId && senderId != group.ownerId) {
+            val sender = groupDao.getMember(packet.groupId, senderId)
+            if (sender == null || !GroupRole.isAdminOrOwner(sender.role)) return
+        }
+        dao.closePoll(packet.pollId)
+    }
+
+    private suspend fun handleSlowMode(senderId: String, packet: GroupWire.Packet.SlowMode) {
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        // Верим владельцу и администраторам с правом менять информацию -
+        // ровно тем, кто вправе режим включать.
+        if (senderId != group.ownerId) {
+            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+            if (!GroupRole.isAdminOrOwner(sender.role)) return
+            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
+        }
+        if (packet.seconds == group.slowModeSeconds) return
+        groupDao.setSlowMode(packet.groupId, packet.seconds)
+        Log.i(TAG, "slow mode applied group=${packet.groupId} seconds=${packet.seconds} from=$senderId")
     }
 
     // ── Сообщения обычных групп роем (этап 5) ────────────────────────────────
@@ -1521,6 +1942,9 @@ class GroupRepository(
             .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
         for (row in stale) messageDao.deleteById(row.id)
         messageDao.deleteById(messageId)
+        // р250: вместе с сообщением уходит и приклеенный к нему опрос (с
+        // голосами) - иначе карточка осталась бы висеть без своего сообщения.
+        pollDao?.deleteByMessage(messageId)
         refreshGroupLastPreview(groupId)
     }
 
@@ -2927,6 +3351,9 @@ class GroupRepository(
                         topicId = packet.topicId,
                     )
                 )
+                // р250: цитата ответа могла приехать раньше самого сообщения -
+                // забираем её из буфера (как куски поста ждут манифест).
+                pendingReplies.take { it.packet.messageId == localId }.forEach { applyReply(it.packet) }
                 rememberSender(packet.groupId, authorId, packet.senderName, now)
                 // Файл, приложенный к сообщению (этап 9): сам файл не пришёл -
                 // только визитка; рой решает, просить ли его у автора сейчас.
@@ -3483,6 +3910,17 @@ class GroupRepository(
                 Log.i(TAG, "member restrict applied group=${packet.groupId} node=${packet.nodeId} by=$senderId")
             }
 
+            // ── р250: ответы, опросы и медленный режим ──
+            is GroupWire.Packet.Reply -> handleReply(senderId, packet)
+
+            is GroupWire.Packet.Poll -> handlePoll(senderId, packet)
+
+            is GroupWire.Packet.PollVote -> handlePollVote(senderId, packet)
+
+            is GroupWire.Packet.PollClose -> handlePollClose(senderId, packet)
+
+            is GroupWire.Packet.SlowMode -> handleSlowMode(senderId, packet)
+
             is GroupWire.Packet.OwnerClaim -> handleOwnerClaim(senderId, packet)
 
             is GroupWire.Packet.Directory -> handleDirectory(packet, senderId)
@@ -3806,6 +4244,20 @@ class GroupRepository(
             val group = groupDao.getGroupById(groupId)
                 ?: return Result.failure(IllegalStateException("Группа не найдена"))
             admitMember(group, nodeId, request.displayName, slug = "")
+            // р250: новичок не знает медленного режима - конверт об изменении
+            // он пропустил (его здесь не было). Говорим сразу, иначе режим
+            // для него начался бы только со следующей правки настройки.
+            if (group.slowModeSeconds > 0) {
+                backgroundScope.launch {
+                    runCatching {
+                        delivery.deliver(
+                            groupId,
+                            GroupWire.buildSlowMode(groupId, group.slowModeSeconds),
+                            listOf(nodeId),
+                        )
+                    }.onFailure { Log.w(TAG, "slow mode for newcomer failed: ${it.message}") }
+                }
+            }
         } else {
             delivery.deliver(
                 groupId,
@@ -4721,6 +5173,9 @@ class GroupRepository(
     private suspend fun deleteGroupLocally(groupId: String) {
         messageDao.deleteGroupMessages(groupId)
         manifestDao?.deleteForGroup(groupId)
+        // р250: опросы и голоса - вместе с группой; иначе карточки вернулись
+        // бы в ленту при повторном вступлении.
+        pollDao?.deleteGroupPolls(groupId)
         groupDao.deleteGroup(groupId)
         backgroundScope.launch {
             runCatching { onGroupGone(groupId) }.onFailure { Log.w(TAG, "group files cleanup failed: ${it.message}") }
