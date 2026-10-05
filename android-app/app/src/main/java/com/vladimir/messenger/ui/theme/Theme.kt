@@ -8,12 +8,16 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
 import androidx.core.view.WindowCompat
 
 // =============================================================================
@@ -163,9 +167,13 @@ fun P2PMessengerTheme(
         }
     }
 
+    val fontSize by AppFontSizeHolder.size.collectAsState()
+    val baseDensity = LocalDensity.current
+    val scaledDensity = Density(baseDensity.density, fontSize.scale)
     CompositionLocalProvider(
         LocalMessengerColors provides messengerColors,
         LocalAppDarkTheme    provides darkTheme,
+        LocalDensity         provides scaledDensity,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

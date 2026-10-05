@@ -85,6 +85,8 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.AppFontSize
+import com.vladimir.messenger.ui.theme.AppFontSizeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
 import com.vladimir.messenger.util.QrCodeGenerator
@@ -677,6 +679,26 @@ private fun SettingsTabContent(
                     val context = LocalContext.current
                     val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
                     ThemeModeChoices(selected = themeMode, onSelect = { ThemeModeHolder.set(context, it) })
+                    ApuSettingsDivider()
+                    val appFontSize by AppFontSizeHolder.size.collectAsStateWithLifecycle()
+                    Text("Размер текста", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Меняется во всех личных чатах, группах, каналах и темах",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        AppFontSize.entries.forEach { option ->
+                            FilterChip(
+                                selected = appFontSize == option,
+                                onClick = { AppFontSizeHolder.set(context, option) },
+                                label = { Text(option.title) },
+                            )
+                        }
+                    }
 
                     // Свои обои: из галереи или стандартные в тон теме.
                     ApuSettingsDivider()

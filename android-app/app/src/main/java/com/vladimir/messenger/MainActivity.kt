@@ -29,6 +29,7 @@ import com.vladimir.messenger.ui.components.AppSplash
 import com.vladimir.messenger.ui.components.UsernameConflictDialog
 import com.vladimir.messenger.ui.theme.P2PMessengerTheme
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
+import com.vladimir.messenger.ui.theme.AppFontSizeHolder
 import com.vladimir.messenger.ui.theme.AvatarHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
@@ -342,6 +343,7 @@ class MainActivity : ComponentActivity() {
         handleNotificationTap(intent)
 
         ThemeModeHolder.init(this)
+        AppFontSizeHolder.init(this)
         WallpaperHolder.init(this)
         com.vladimir.messenger.data.swarm.SwarmSettings.init(this)
         com.vladimir.messenger.data.swarm.StorageSettings.init(this)
