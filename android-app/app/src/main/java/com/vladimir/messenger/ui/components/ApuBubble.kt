@@ -35,6 +35,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
@@ -61,6 +63,23 @@ fun Modifier.apuBubbleSurface(
     shape: Shape = ApuBubbleShape,
 ): Modifier = clip(shape)
     .background(color)
+    // Тонкий диагональный блик делает поверхности объёмнее, но остаётся
+    // почти незаметным и не превращает интерфейс в «пластик».
+    .drawWithCache {
+        val gloss = Brush.linearGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.16f),
+                Color.Transparent,
+                Color.White.copy(alpha = 0.04f),
+            ),
+            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+            end = androidx.compose.ui.geometry.Offset(size.width, size.height),
+        )
+        onDrawWithContent {
+            drawContent()
+            drawRect(gloss)
+        }
+    }
     .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), shape)
 
 /** Компактный пузырь шапки. null onClick не добавляет ложного действия. */
