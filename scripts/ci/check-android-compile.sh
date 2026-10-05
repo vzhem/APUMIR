@@ -41,9 +41,16 @@ fi
 export PATH="$JAVA_HOME/bin:$PATH"
 java -version 2>&1
 
-# ---- Android SDK: cmdline-tools + платформа под compileSdk = 35 ------------
-SDK="$REPO_ROOT/target/android-sdk"
-if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+# ---- Android SDK: образ runner уже несёт SDK; AGP терпит только одну -------
+# ---- переменную: оставляем ANDROID_HOME, иначе «Several environment    ----
+# ---- variables contain different paths to the SDK» (прогон 37305248268).----
+if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+    export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+    unset ANDROID_SDK_ROOT
+fi
+SDK="${ANDROID_HOME:-}"
+if [ -z "$SDK" ] || [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+    SDK="$REPO_ROOT/target/android-sdk"
     mkdir -p "$SDK/cmdline-tools"
     curl -fsSL -o /tmp/cmdline-tools.zip \
         https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
@@ -53,8 +60,9 @@ if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
 fi
 export ANDROID_HOME="$SDK"
 yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+# compileSdk = 35 (gradle/libs.versions.toml); build-tools 34.0.0 - дефолт AGP 8.7.
 "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
-    "platforms;android-35" "build-tools;34.0.0" "platform-tools" >/dev/null
+    "platforms;android-35" "build-tools;34.0.0" >/dev/null
 
 # ---- сама компиляция --------------------------------------------------------
 chmod +x android-app/gradlew
