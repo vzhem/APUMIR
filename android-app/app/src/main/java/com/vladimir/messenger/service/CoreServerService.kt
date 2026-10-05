@@ -606,6 +606,10 @@ class CoreServerService : Service() {
                     // чате к этому моменту уже есть, оживёт по приходу байтов.
                     runCatching { pumpMirrorMedia() }
                         .onFailure { Log.w(TAG, "media pump failed: ${it.message}") }
+                    // р249: байты файлов, которые тень не смогла попросить в
+                    // момент приёма (была офлайн или без активного партнёра).
+                    runCatching { pumpMirrorFiles() }
+                        .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
                 }
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
@@ -1323,6 +1327,38 @@ class CoreServerService : Service() {
             asked++
         }
         if (asked > 0) Log.i(TAG, "media pump: запрошено $asked гифк(а) у активного")
+    }
+
+    /** р249: когда в последний раз просили у партнёра байты этой передачи. */
+    private val mirrorFileAskedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * р249: насос байтов файлов. Только для устройства-зеркала: своей сети у
+     * него нет, поэтому докачать принятый (или подготовленный) файл можно
+     * только у активного партнёра.
+     *
+     * Закрывает разрыв «карточка приехала, а байты попросить было некого»:
+     * раньше просьба уходила единственный раз - в ответ на кадр «файл принят».
+     * Если второе устройство было офлайн или канал поднялся позже, карточка
+     * оставалась пустой навсегда. Теперь насос добирает такие файлы сам, по
+     * одной передаче за заход: канал зеркала общий с сообщениями.
+     */
+    private suspend fun pumpMirrorFiles() {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) return
+        val rows = runCatching { fileTransferRouter.transfersMissingBytes(3) }.getOrDefault(emptyList())
+        val now = System.currentTimeMillis()
+        for (row in rows) {
+            val last = mirrorFileAskedAt[row.transferId] ?: 0L
+            if (now - last < MIRROR_FILE_RETRY_MS) continue
+            mirrorFileAskedAt[row.transferId] = now
+            com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
+                row.transferId,
+                row.displayName,
+                row.totalBytes,
+            )
+            Log.i(TAG, "file bytes pump: прошу ${row.displayName} (${row.totalBytes} Б)")
+            break
+        }
     }
 
     private suspend fun applyMirrorEnvelope(
@@ -2457,6 +2493,9 @@ class CoreServerService : Service() {
     }
 
     companion object {
+        /** р249: как часто тень повторяет просьбу о байтах одного файла. */
+        private const val MIRROR_FILE_RETRY_MS = 5L * 60 * 1000
+
         const val EXTRA_DISPLAY_NAME = "display_name"
         const val POLL_INTERVAL_MS = 5000L
         // K3: шаг опроса, пока события приходят пучком (идёт файл): кусок
