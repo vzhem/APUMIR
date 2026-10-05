@@ -681,12 +681,20 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    /** Выключить или включить звук личного чата. */
-    fun setChatMuted(chatId: String, muted: Boolean) {
+    /** Поставить или снять временную паузу уведомлений личного чата. */
+    fun setChatMutedUntil(chatId: String, untilMs: Long) {
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { chatRepository.setChatMuted(chatId, muted) }
-                .onFailure { Log.w(TAG, "звук чата не переключился: ${it.message}") }
+            runCatching { chatRepository.setChatMutedUntil(chatId, untilMs) }
+                .onFailure { Log.w(TAG, "пауза уведомлений чата не изменилась: ${it.message}") }
         }
+    }
+
+    /** Совместимость со старым переключателем: true означает «навсегда». */
+    fun setChatMuted(chatId: String, muted: Boolean) {
+        setChatMutedUntil(
+            chatId,
+            if (muted) com.vladimir.messenger.data.repository.ChatRepository.MUTED_FOREVER_MS else 0L,
+        )
     }
 
     /** Убрать группу или канал в архив или вернуть. */
@@ -697,12 +705,20 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    /** Выключить или включить звук группы или канала. */
-    fun setGroupMuted(groupId: String, muted: Boolean) {
+    /** Поставить или снять временную паузу уведомлений группы или канала. */
+    fun setGroupMutedUntil(groupId: String, untilMs: Long) {
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { groupRepository.setGroupMuted(groupId, muted) }
-                .onFailure { Log.w(TAG, "звук группы не переключился: ${it.message}") }
+            runCatching { groupRepository.setGroupMutedUntil(groupId, untilMs) }
+                .onFailure { Log.w(TAG, "пауза уведомлений группы не изменилась: ${it.message}") }
         }
+    }
+
+    /** Совместимость со старым переключателем: true означает «навсегда». */
+    fun setGroupMuted(groupId: String, muted: Boolean) {
+        setGroupMutedUntil(
+            groupId,
+            if (muted) com.vladimir.messenger.data.repository.ChatRepository.MUTED_FOREVER_MS else 0L,
+        )
     }
 
     /** Сбросить счётчик непрочитанных личного чата. */

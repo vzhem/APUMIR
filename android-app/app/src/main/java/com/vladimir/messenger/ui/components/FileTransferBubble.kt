@@ -63,6 +63,7 @@ fun FileTransferBubble(
      * картинок, поэтому реакцию на гифке поставить не мог никто.
      */
     onLongPress: (() -> Unit)? = null,
+    onSwipeReply: (() -> Unit)? = null,
 ) {
     val messenger = com.vladimir.messenger.ui.theme.LocalMessengerColors.current
     val background = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther
@@ -70,7 +71,8 @@ fun FileTransferBubble(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .swipeToReply(enabled = onSwipeReply != null) { onSwipeReply?.invoke() },
         horizontalArrangement = if (isFromMe) Arrangement.End else Arrangement.Start,
     ) {
         // Раунд 169/170: стикер (webp и видео-webm) парит в чате - без

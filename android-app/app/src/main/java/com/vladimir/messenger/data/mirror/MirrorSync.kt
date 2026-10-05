@@ -66,6 +66,10 @@ data class MirrorRow(
     val mine: Boolean,
     val recipientId: String,
     val status: String,
+    /** р250: цитата, прикреплённая к сообщению личного чата. */
+    val replyToId: String = "",
+    val replyAuthor: String = "",
+    val replyText: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -77,6 +81,9 @@ data class MirrorRow(
         .put("mine", if (mine) 1 else 0)
         .put("to", recipientId)
         .put("st", status)
+        .put("reply_to", replyToId)
+        .put("reply_author", replyAuthor)
+        .put("reply_text", replyText)
 
     companion object {
         fun fromJson(o: JSONObject): MirrorRow = MirrorRow(
@@ -89,6 +96,9 @@ data class MirrorRow(
             mine = o.optInt("mine") == 1,
             recipientId = o.optString("to"),
             status = o.optString("st", "SENT"),
+            replyToId = o.optString("reply_to"),
+            replyAuthor = o.optString("reply_author"),
+            replyText = o.optString("reply_text"),
         )
     }
 }
@@ -130,8 +140,22 @@ object MirrorHub {
     fun routeOutgoing(): MirrorChannel? =
         channel?.takeIf { it.canCarryOutgoing() }
 
-    fun publishSentEcho(id: String, chatId: String, content: String, ts: Long, recipientId: String, status: String) {
-        runCatching { channel?.publishSentEcho(id, chatId, content, ts, recipientId, status) }
+    fun publishSentEcho(
+        id: String,
+        chatId: String,
+        content: String,
+        ts: Long,
+        recipientId: String,
+        status: String,
+        replyToId: String = "",
+        replyAuthor: String = "",
+        replyText: String = "",
+    ) {
+        runCatching {
+            channel?.publishSentEcho(
+                id, chatId, content, ts, recipientId, status, replyToId, replyAuthor, replyText,
+            )
+        }
     }
 
     /** р240: сколько своих сообщений ещё не отправлено (обновляет сервис). */
@@ -454,6 +478,7 @@ object MirrorEnvelopes {
             PostViewWire.isViewPacket(text) ||
             HeartWire.isHeartPacket(text) ||
             ReadReceiptWire.isReadReceipt(text) ||
+            com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text) ||
             GifLibrary.isGifRef(text)
 }
 
@@ -873,10 +898,36 @@ class MirrorChannel(
     }
 
     /** Исходящее ушло с активного - отразить на зеркале. */
-    fun publishSentEcho(id: String, chatId: String, content: String, ts: Long, recipientId: String, status: String) {
+    fun publishSentEcho(
+        id: String,
+        chatId: String,
+        content: String,
+        ts: Long,
+        recipientId: String,
+        status: String,
+        replyToId: String = "",
+        replyAuthor: String = "",
+        replyText: String = "",
+    ) {
         if (!engineUp) return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            sendEvent("sent", MirrorRow(id, chatId, "", "", content, ts, true, recipientId, status).toJson())
+            sendEvent(
+                "sent",
+                MirrorRow(
+                    id = id,
+                    chatId = chatId,
+                    contactName = "",
+                    senderId = "",
+                    content = content,
+                    timestamp = ts,
+                    mine = true,
+                    recipientId = recipientId,
+                    status = status,
+                    replyToId = replyToId,
+                    replyAuthor = replyAuthor,
+                    replyText = replyText,
+                ).toJson(),
+            )
         }
     }
 

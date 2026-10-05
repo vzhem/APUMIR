@@ -291,10 +291,10 @@ private fun EmojiCell(emoji: String, selected: String, onPick: (String) -> Unit)
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            emoji,
-            fontSize = 22.sp,
-            textAlign = TextAlign.Center,
+        ShinyEmoji(
+            emoji = emoji,
+            fontSize = 24.sp,
+            modifier = Modifier.size(34.dp),
         )
     }
 }

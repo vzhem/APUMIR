@@ -3,6 +3,8 @@ package com.vladimir.messenger.ui.screens.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.notification.NotificationMuteScope
+import com.vladimir.messenger.data.notification.NotificationMuteStore
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.repository.NetworkStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,6 +54,7 @@ data class SettingsUiState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val notificationMuteStore: NotificationMuteStore,
     private val proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
@@ -66,6 +69,16 @@ class SettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SettingsUiState())
     private var lastGossipTrigger: Long = 0L
     val uiState = _uiState.asStateFlow()
+
+    /** Живое состояние сроков глобальной и разделных пауз уведомлений. */
+    val notificationMuteRevision = notificationMuteStore.revision
+
+    fun notificationMuteUntil(scope: NotificationMuteScope): Long =
+        notificationMuteStore.mutedUntilMs(scope)
+
+    fun setNotificationMuteUntil(scope: NotificationMuteScope, untilMs: Long) {
+        notificationMuteStore.setMutedUntil(scope, untilMs)
+    }
 
     /**
      * Раунд 249: «Выйти из APU» - стереть локальные данные и вернуться на

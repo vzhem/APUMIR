@@ -61,6 +61,7 @@ fun MessageBubble(
     linkColor: Color = ApuBubbleLinkColor,
     onTap: () -> Unit = {},
     onLongClick: (() -> Unit)? = null,
+    onReply: (() -> Unit)? = null,
     /** Раунд 176: тап по «Добавить контакт» в карточке-приглашении. */
     onContactInvite: ((inviteLink: String) -> Unit)? = null,
     /** Раунд 189: тап по «Вступить»/«Подписаться» в карточке группы/канала. */
@@ -100,6 +101,7 @@ fun MessageBubble(
                     color = if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther,
                     shape = if (isOwn) OwnBubbleShape else OtherBubbleShape,
                 )
+                .swipeToReply(enabled = onReply != null) { onReply?.invoke() }
                 .combinedClickable(
                     onClick = onTap,
                     onLongClick = { onLongClick?.invoke() }
@@ -112,6 +114,14 @@ fun MessageBubble(
                 val fwdRef = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
                 val showFwdHeader = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
                 val displayContent = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
+                if (!message.replyToId.isNullOrBlank()) {
+                    MessageQuoteBlock(
+                        author = message.replyAuthor,
+                        text = message.replyText,
+                        color = textColor,
+                        onClick = {},
+                    )
+                }
                 if (showFwdHeader) {
                     val fwdLabel = fwdRef?.label ?: com.vladimir.messenger.util.ForwardMarker.plainHeaderLabel(message.content)
                     Row(

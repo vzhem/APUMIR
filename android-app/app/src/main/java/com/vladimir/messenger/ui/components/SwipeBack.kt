@@ -39,6 +39,9 @@ fun Modifier.swipeBack(
                 if (travelled > SWIPE_BACK_THRESHOLD_PX) onBack()
             },
         ) { change, dragAmount ->
+            // Сообщение может уже забрать этот жест для ответа; тогда
+            // навигация назад не должна срабатывать одновременно.
+            if (change.isConsumed) return@detectHorizontalDragGestures
             travelled += dragAmount
             // Гасим только движение вправо, чтобы не отбирать жесты у
             // горизонтальных списков и листалок внутри экрана.

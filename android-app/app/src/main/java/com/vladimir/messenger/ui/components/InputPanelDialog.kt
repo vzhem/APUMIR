@@ -335,10 +335,10 @@ private fun EmojiSection(onEmoji: (String) -> Unit) {
                         .clickable { onEmoji(category.emojis[i]) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        category.emojis[i],
-                        fontSize = 24.sp,
-                        textAlign = TextAlign.Center,
+                    ShinyEmoji(
+                        emoji = category.emojis[i],
+                        fontSize = 26.sp,
+                        modifier = Modifier.size(34.dp),
                     )
                 }
             }

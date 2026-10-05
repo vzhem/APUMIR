@@ -13,6 +13,7 @@ import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.mirror.MirrorHub
 import com.vladimir.messenger.data.mirror.MirrorRow
 import com.vladimir.messenger.data.receipt.DeliveryAckWire
+import com.vladimir.messenger.data.reply.DirectReplyWire
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
@@ -144,6 +145,7 @@ class ChatRepository @Inject constructor(
         chatId: String,
         recipientId: String,
         content: String,
+        reply: DirectReplyWire.Target? = null,
         /** р226: чужая строка идёт с СОБСТВЕННЫМ id - одинаковые id на обоих устройствах. */
         fixedMessageId: String? = null,
         /** р226: true - строка пришла от зеркала-партнёра, эхо назад не слать. */
@@ -180,6 +182,9 @@ class ChatRepository @Inject constructor(
                                 id = messageId, chatId = chatId, contactName = mirrorChat?.contactName ?: "",
                                 senderId = "self", content = content, timestamp = timestamp,
                                 mine = true, recipientId = mirrorRecipient, status = MessageStatus.PENDING.name,
+                                replyToId = reply?.messageId.orEmpty(),
+                                replyAuthor = reply?.author.orEmpty(),
+                                replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
                             )
                         )
                         if (offered) {
@@ -222,6 +227,9 @@ class ChatRepository @Inject constructor(
                 status = MessageStatus.PENDING.name,
                 channel = MessageChannel.UNKNOWN.name,
                 recipientId = actualRecipientId,
+                replyToId = reply?.messageId,
+                replyAuthor = reply?.author.orEmpty(),
+                replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
             )
             messageDao.insertMessage(entity)
             chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
@@ -262,6 +270,9 @@ class ChatRepository @Inject constructor(
                     ts = timestamp,
                     recipientId = actualRecipientId,
                     status = if (sentDirectly) MessageStatus.SENT.name else MessageStatus.QUEUED_OFFLINE.name,
+                    replyToId = reply?.messageId.orEmpty(),
+                    replyAuthor = reply?.author.orEmpty(),
+                    replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
                 )
             }
 
@@ -279,6 +290,17 @@ class ChatRepository @Inject constructor(
                 Log.w(TAG, "referral attribution failed: ${e.message}")
             }
 
+            if (reply != null) {
+                val packet = DirectReplyWire.build(
+                    messageId = messageId,
+                    replyToId = reply.messageId,
+                    replyAuthor = reply.author,
+                    replyText = reply.text,
+                )
+                val replyTransportId = DirectReplyWire.transportMessageId(messageId)
+                runCatching { sendViaRust(replyTransportId, chatId, actualRecipientId, packet) }
+                    .onFailure { Log.w(TAG, "direct reply metadata send failed: ${it.message}") }
+            }
             Result.success(entity.toDomain())
         } catch (e: Exception) {
             Log.e(TAG, "sendMessage error", e)
@@ -977,14 +999,19 @@ class ChatRepository @Inject constructor(
     }
 
     /**
-     * Выключить (или включить обратно) звук чата. Срок, а не простая отметка:
-     * «без звука» само отключается, когда срок вышел, - держать состояние в
-     * базе и отдельно гасить его таймером было бы лишним.
+     * Отключить уведомления чата до заданного времени. Long.MAX_VALUE означает
+     * «навсегда», 0 или уже прошедший срок - включить обратно. Время, а не
+     * таймер, позволяет паузе корректно переживать перезапуск и зеркалироваться
+     * на остальные устройства этой личности.
      */
-    suspend fun setChatMuted(chatId: String, muted: Boolean) {
-        val until = if (muted) MUTED_FOREVER_MS else 0L
-        chatDao.setMutedUntil(chatId, until)
+    suspend fun setChatMutedUntil(chatId: String, requestedUntilMs: Long) {
         val chat = chatDao.getChatById(chatId) ?: return
+        val until = when {
+            requestedUntilMs == MUTED_FOREVER_MS -> MUTED_FOREVER_MS
+            requestedUntilMs > System.currentTimeMillis() -> requestedUntilMs
+            else -> 0L
+        }
+        chatDao.setMutedUntil(chatId, until)
         if (chat.contactId.isBlank()) return
         com.vladimir.messenger.data.mirror.MirrorHub.publishChatFlags(
             kind = CHAT_FLAG_PERSONAL,
@@ -994,7 +1021,11 @@ class ChatRepository @Inject constructor(
         )
     }
 
-    /** Звук чата выключен прямо сейчас (срок в базе ещё не истёк). */
+    /** Совместимый переключатель для старых мест вызова: выключить навсегда. */
+    suspend fun setChatMuted(chatId: String, muted: Boolean) =
+        setChatMutedUntil(chatId, if (muted) MUTED_FOREVER_MS else 0L)
+
+    /** Уведомления чата выключены прямо сейчас (срок в базе ещё не истёк). */
     suspend fun isChatMuted(chatId: String): Boolean =
         runCatching { chatDao.countMuted(chatId, System.currentTimeMillis()) > 0 }
             .getOrDefault(false)
@@ -1056,11 +1087,22 @@ class ChatRepository @Inject constructor(
         // Тема нужна уведомлениям: тап ведёт в место сообщения.
         topicId = topicId,
         isPinned = isPinned,
+        replyToId = replyToId,
+        replyAuthor = replyAuthor,
+        replyText = replyText,
     )
 
     suspend fun getMessageById(messageId: String): Message? {
         return messageDao.getMessageById(messageId)?.toDomain()
     }
+
+    suspend fun applyDirectReply(packet: DirectReplyWire.Packet): Boolean =
+        messageDao.applyReply(
+            messageId = packet.messageId,
+            replyToId = packet.replyToId,
+            replyAuthor = packet.replyAuthor,
+            replyText = packet.replyText,
+        ) > 0
 
 
     /** Rust send calls may wait for network work; never run them on a caller/UI dispatcher. */

@@ -65,6 +65,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.EmojiEmotions
@@ -112,6 +114,7 @@ import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.GroupFileCard
 import com.vladimir.messenger.ui.components.GroupQrInviteDialog
 import com.vladimir.messenger.util.GroupFileMarker
@@ -146,6 +149,7 @@ fun ChannelScreen(
     }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
     var showTopMenu by remember { mutableStateOf(false) }
+    var showNotificationMuteDialog by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
     var qrLink by remember { mutableStateOf<String?>(null) }
     var qrLoading by remember { mutableStateOf(false) }
@@ -233,8 +237,7 @@ fun ChannelScreen(
                             Icon(Icons.Default.Settings, contentDescription = "Админ-кабинет")
                         }
                     }
-                    // Раунд 213: «три точки» шапки канала - приглашение по QR
-                    // и будущие действия (пункты в золотых пузырях).
+                    // «Три точки» канала: пауза уведомлений и приглашение по QR.
                     Box {
                         IconButton(onClick = { showTopMenu = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "Ещё")
@@ -243,6 +246,19 @@ fun ChannelScreen(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
+                                ApuAction(
+                                    title = if ((uiState.channel?.mutedUntilMs ?: 0L) > System.currentTimeMillis()) {
+                                        "Включить уведомления"
+                                    } else {
+                                        "Отключить уведомления"
+                                    },
+                                    icon = if ((uiState.channel?.mutedUntilMs ?: 0L) > System.currentTimeMillis()) {
+                                        Icons.Default.NotificationsActive
+                                    } else {
+                                        Icons.Default.NotificationsOff
+                                    },
+                                    onClick = { showNotificationMuteDialog = true },
+                                ),
                                 ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
                                     showQrInvite = true
                                 },
@@ -783,6 +799,21 @@ fun ChannelScreen(
                 },
             )
         }
+    }
+    if (showNotificationMuteDialog) {
+        NotificationMuteDialog(
+            targetName = uiState.channel?.title ?: "Канал",
+            mutedUntilMs = uiState.channel?.mutedUntilMs ?: 0L,
+            onSelectUntil = { untilMs ->
+                viewModel.setNotificationsMutedUntil(untilMs)
+                showNotificationMuteDialog = false
+            },
+            onTurnOn = {
+                viewModel.setNotificationsMutedUntil(0L)
+                showNotificationMuteDialog = false
+            },
+            onDismiss = { showNotificationMuteDialog = false },
+        )
     }
 }
 

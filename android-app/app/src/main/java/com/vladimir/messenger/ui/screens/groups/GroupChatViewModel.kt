@@ -10,6 +10,7 @@ import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.data.local.MessagePinPolicy
+import com.vladimir.messenger.data.notification.NotificationMuteStore
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -125,6 +126,7 @@ class GroupChatViewModel @Inject constructor(
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val notificationMuteStore: NotificationMuteStore,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     private val groupTyping: com.vladimir.messenger.data.typing.GroupTypingRouter,
@@ -161,6 +163,7 @@ class GroupChatViewModel @Inject constructor(
         GroupChatUiState(groupId = groupId, startInTopic = requestedTopicId != null)
     )
     val uiState: StateFlow<GroupChatUiState> = _uiState.asStateFlow()
+    val notificationMuteRevision: StateFlow<Long> = notificationMuteStore.revision
 
     init {
         observeGroup()
@@ -1265,6 +1268,24 @@ class GroupChatViewModel @Inject constructor(
         observePinned(topicId)
         // р249: индикатор «печатает…» считается по открытой теме.
         refreshTypingMembers()
+    }
+
+    /** Срок паузы уведомлений отдельной темы или ветки комментариев канала. */
+    fun topicMutedUntilMs(topicId: String): Long =
+        notificationMuteStore.topicMutedUntilMs(groupId, topicId)
+
+    fun setTopicNotificationsMutedUntil(topicId: String, untilMs: Long) {
+        notificationMuteStore.setTopicMutedUntil(groupId, topicId, untilMs)
+    }
+
+    /** Пауза уведомлений всей группы или канала (личная настройка). */
+    fun setGroupNotificationsMutedUntil(untilMs: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.setGroupMutedUntil(groupId, untilMs) }
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить уведомления") }
+                }
+        }
     }
 
     /**

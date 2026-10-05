@@ -285,6 +285,13 @@ class CoreServerService : Service() {
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
         // префиксом съедаем, но статус меняем только для разобранного id.
+        if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
+            com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
+                runCatching { chatRepository.applyDirectReply(packet) }
+                    .onFailure { Log.w(TAG, "direct reply apply failed: ${it.message}") }
+            }
+            return true
+        }
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
@@ -1095,9 +1102,7 @@ class CoreServerService : Service() {
         ) {
             val (chatId, name) = chatRepository.applyMirrorIncoming(row)
             if (notify) {
-                // р249: у заглушённого чата уведомления не показываем - иначе
-                // «без звука» значило бы только «без звука», но не «без
-                // уведомления», и человек всё равно видел бы строку в шторке.
+                // р249: у чата на паузе не показываем сообщение в шторке.
                 if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
                     Log.i(TAG, "notification suppressed: чат без звука (зеркало)")
                     return
@@ -1272,6 +1277,13 @@ class CoreServerService : Service() {
                 content = row.content,
                 fixedMessageId = row.id,
                 fromMirror = true,
+                reply = row.replyToId.takeIf { it.isNotBlank() }?.let {
+                    com.vladimir.messenger.data.reply.DirectReplyWire.Target(
+                        messageId = it,
+                        author = row.replyAuthor,
+                        text = row.replyText,
+                    )
+                },
             )
         }
 
@@ -1428,6 +1440,12 @@ class CoreServerService : Service() {
                 com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
             } else {
                 com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
+            }
+            return true
+        }
+        if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
+            com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
+                chatRepository.applyDirectReply(packet)
             }
             return true
         }
@@ -1679,11 +1697,10 @@ class CoreServerService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     /**
-     * р249: звук этой переписки выключен - личный чат это или группа.
+     * р249: уведомления этой переписки выключены - личный чат это или группа.
      *
-     * Уведомление молчит целиком: «без звука» в телефоне означает «не тревожь»,
-     * а не «не звони, но строку в шторке покажи». Срок живёт в базе, поэтому
-     * «без звука» снимается само - гасить его таймером не нужно.
+     * Уведомление не создаётся вообще: пауза скрывает сообщение из шторки.
+     * Срок живёт в базе, поэтому пауза снимается сама, без таймера.
      */
     private suspend fun isMutedForNotifications(chatId: String): Boolean {
         if (chatId.isBlank()) return false
@@ -1955,6 +1972,15 @@ class CoreServerService : Service() {
                 // р243/р247: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
                 // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
                 // до v140 не распознавали его, поэтому свежая версия фильтрует
+                if (com.vladimir.messenger.data.reply.DirectReplyWire.isPacket(text)) {
+                    com.vladimir.messenger.data.reply.DirectReplyWire.parse(text)?.let { packet ->
+                        runCatching { chatRepository.applyDirectReply(packet) }
+                            .onFailure { Log.w(TAG, "direct reply apply failed: ${it.message}") }
+                    }
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    return
+                }
+
                 // префикс также на последнем общем страже сохранения.
                 //
                 // Подтверждения ходили только через брокера (MQTT): если он

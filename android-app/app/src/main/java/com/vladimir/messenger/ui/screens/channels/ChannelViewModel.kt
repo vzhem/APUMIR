@@ -150,6 +150,16 @@ class ChannelViewModel @Inject constructor(
         }
     }
 
+    /** Поставить или снять личную паузу уведомлений канала. */
+    fun setNotificationsMutedUntil(untilMs: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.setGroupMutedUntil(channelId, untilMs) }
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить уведомления") }
+                }
+        }
+    }
+
     /** Закрепить/открепить пост канала (личное закреп, до 10; зеркалится своим устройствам). */
     fun togglePostPin(post: ChannelPost) {
         viewModelScope.launch(Dispatchers.IO) {
