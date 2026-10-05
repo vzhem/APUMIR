@@ -19,6 +19,12 @@ data class GroupSummary(
     val lastMessageAtMs: Long?,
     val myRole: String,
     val pendingRequests: Int,
+    /**
+     * р250: медленный режим - сколько секунд участник ждёт между своими
+     * сообщениями; 0 - режим выключен. Владельцу и администраторам режим не
+     * мешает. В канале относится к комментариям под постами.
+     */
+    val slowModeSeconds: Int = 0,
 )
 
 data class TopicSummary(

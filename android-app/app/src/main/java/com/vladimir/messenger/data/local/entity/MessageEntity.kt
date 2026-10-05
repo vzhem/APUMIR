@@ -20,7 +20,24 @@ data class MessageEntity(
     val timestamp: Long,
     val status: String = "PENDING",
     val isFromMe: Boolean = false,
+    /**
+     * р250: на какое сообщение это ответ (в личке, в группе и в теме).
+     * Пусто - обычное сообщение без цитаты.
+     */
     val replyToId: String? = null,
+    /**
+     * р250: кого цитируем - имя автора исходного сообщения.
+     *
+     * Имя и текст цитаты хранятся рядом с сообщением, а не достаются по
+     * [replyToId] при отрисовке: исходное сообщение могло быть удалено, не
+     * дойти или лежать за пределами загруженной части ветки, а пузырь с
+     * цитатой должен рисоваться всегда.
+     */
+    @ColumnInfo(defaultValue = "")
+    val replyAuthor: String = "",
+    /** р250: короткий текст цитируемого сообщения (до 120 знаков). */
+    @ColumnInfo(defaultValue = "")
+    val replyText: String = "",
     val channel: String = "UNKNOWN",
     val recipientId: String = "",
     // ── Группы и темы (аддитивно, v7 → v8). В личных чатах все четыре поля пусты. ──

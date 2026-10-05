@@ -256,6 +256,39 @@ class GroupAdminViewModel @Inject constructor(
         }
     }
 
+    /**
+     * р250: медленный режим - [seconds] секунд между сообщениями участника
+     * (0 - выключен). Право то же, что у названия и описания группы: режим
+     * меняет владелец, администратор с правом «Изменять информацию» или
+     * участник, которому это право дано (см. GroupPermissions.canChangeInfo).
+     */
+    fun setSlowMode(seconds: Int) {
+        viewModelScope.launch {
+            groupRepository.setSlowMode(groupId, seconds)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            notice = if (seconds <= 0) {
+                                "Медленный режим выключен"
+                            } else {
+                                "Медленный режим: одно сообщение в ${secondsWords(seconds)}"
+                            },
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun secondsWords(seconds: Int): String = when (seconds) {
+        10 -> "10 секунд"
+        30 -> "30 секунд"
+        60 -> "минуту"
+        300 -> "5 минут"
+        900 -> "15 минут"
+        else -> "$seconds с"
+    }
+
     fun updateProfile(title: String, about: String) {
         viewModelScope.launch {
             groupRepository.updateProfile(groupId, title, about)

@@ -38,6 +38,9 @@ fetch org.jetbrains.kotlinx kotlinx-coroutines-core-jvm "$COROUTINES" runtime
 fetch org.jetbrains.kotlinx kotlinx-coroutines-test-jvm "$COROUTINES" runtime
 fetch junit junit "$JUNIT" runtime
 fetch org.hamcrest hamcrest-core 1.3 runtime
+# Ed25519 постов (net.i2p.crypto:eddsa) нужен мосту манифестов, на который
+# ссылается групповой конверт GroupWire. Версия - та же, что в libs.versions.toml.
+fetch net.i2p.crypto eddsa 0.3.0 runtime
 CP="$(printf '%s:' "$OUT"/runtime/*.jar)${OUT}/compiler/annotations-13.0.jar"
 BASE="$ROOT/android-app/app/src"
 MODEL="$BASE/main/java/com/vladimir/messenger/domain/model"
@@ -53,14 +56,24 @@ HEART_WIRE="$BASE/main/java/com/vladimir/messenger/data/heart/HeartWire.kt"
 HEART_TEST="$BASE/test/java/com/vladimir/messenger/data/heart/HeartWireTest.kt"
 GROUP_PERMS="$BASE/main/java/com/vladimir/messenger/data/group/GroupPermissions.kt"
 GROUP_PERMS_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupPermissionsTest.kt"
+# Групповой конверт (р250: ответы `mrep`, опросы `poll`/`pvot`/`pcls`,
+# медленный режим `slow`). Формат критичен к обратной совместимости: прежние
+# телефоны обязаны молча пропускать незнакомые виды и понимать старые `msg`/`info`.
+POST_MANIFEST="$BASE/main/java/com/vladimir/messenger/data/swarm/PostManifest.kt"
+GROUP_WIRE="$BASE/main/java/com/vladimir/messenger/data/group/GroupWire.kt"
+GROUP_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupWireTest.kt"
+GROUP_WIRE_UPDATE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupWireUpdateTest.kt"
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
-    "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST"
+    "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
+    "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
     com.vladimir.messenger.data.local.MessagePinPolicyTest \
     com.vladimir.messenger.ui.components.SplashOrbitGeometryTest \
     com.vladimir.messenger.ui.components.ApuSettingsLayoutTest \
     com.vladimir.messenger.data.heart.HeartWireTest \
-    com.vladimir.messenger.data.group.GroupPermissionsTest
+    com.vladimir.messenger.data.group.GroupPermissionsTest \
+    com.vladimir.messenger.data.group.GroupWireTest \
+    com.vladimir.messenger.data.group.GroupWireUpdateTest

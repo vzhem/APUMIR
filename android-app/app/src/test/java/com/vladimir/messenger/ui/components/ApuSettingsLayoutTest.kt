@@ -7,8 +7,12 @@ import org.junit.Test
 
 class ApuSettingsLayoutTest {
     @Test
-    fun normalPhoneHasFourCompactProfileActions() {
-        assertEquals(4, ApuSettingsLayout.profileActionColumns(296f, 1f))
+    fun normalPhoneGetsTwoByTwoSoCaptionsFitTabletGetsFour() {
+        // 296dp - карточка профиля обычного телефона: четыре колонки по
+        // ~68dp рвали «Никнейм» посреди слова (скрин владельца 2026-10-05),
+        // поэтому телефон идёт в 2x2, а четыре колонки - только планшет.
+        assertEquals(2, ApuSettingsLayout.profileActionColumns(296f, 1f))
+        assertEquals(4, ApuSettingsLayout.profileActionColumns(600f, 1f))
     }
 
     @Test
@@ -20,7 +24,7 @@ class ApuSettingsLayoutTest {
 
     @Test
     fun smallerFontDoesNotReduceTheMinimumTouchTargets() {
-        assertEquals(4, ApuSettingsLayout.profileActionColumns(296f, 0.7f))
+        assertEquals(2, ApuSettingsLayout.profileActionColumns(296f, 0.7f))
         assertEquals(2, ApuSettingsLayout.profileActionColumns(240f, 0.7f))
     }
 
@@ -33,8 +37,11 @@ class ApuSettingsLayoutTest {
 
     @Test
     fun exactThresholdsArePredictable() {
-        assertEquals(4, ApuSettingsLayout.profileActionColumns(280f, 1f))
-        assertEquals(2, ApuSettingsLayout.profileActionColumns(279f, 1f))
+        // 4 колонки требуют 4*88+24=376dp, 2 колонки - 2*88+8=184dp.
+        assertEquals(4, ApuSettingsLayout.profileActionColumns(376f, 1f))
+        assertEquals(2, ApuSettingsLayout.profileActionColumns(375f, 1f))
+        assertEquals(2, ApuSettingsLayout.profileActionColumns(184f, 1f))
+        assertEquals(1, ApuSettingsLayout.profileActionColumns(183f, 1f))
         assertTrue(ApuSettingsLayout.horizontalThemeChoices(256f, 1f))
         assertFalse(ApuSettingsLayout.horizontalThemeChoices(255f, 1f))
     }

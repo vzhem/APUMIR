@@ -622,6 +622,14 @@ fun ChannelScreen(
                                         onFavorite = { viewModel.saveFileToFavorites(it) },
                                     )
                                 },
+                                // р250: опрос под постом канала.
+                                poll = uiState.polls[post.messageId],
+                                onTogglePollChoice = { index ->
+                                    uiState.polls[post.messageId]?.let { viewModel.togglePollChoice(it, index) }
+                                },
+                                onClosePoll = {
+                                    uiState.polls[post.messageId]?.let { viewModel.closePoll(it.pollId) }
+                                },
                             )
                         }
                     }
@@ -659,8 +667,9 @@ fun ChannelScreen(
                 viewModel.clearStagedFile()
                 viewModel.dismissError()
             },
-            onConfirm = { text, photos ->
-                viewModel.createPost(text, photos)
+            onConfirm = { text, photos, poll ->
+                // р250: пост с опросом - опрос уходит следом за текстом.
+                viewModel.createPost(text, photos, poll)
                 showNewPost = false
             },
             onPickImages = { uris, onReady -> viewModel.prepareImages(context, uris, onReady) },
@@ -680,12 +689,14 @@ fun ChannelScreen(
             initialText = post.text,
             initialImages = post.images,
             imagesEditable = false,
+            // р250: к уже опубликованному посту опрос не приклеивается.
+            pollEditable = false,
             creating = uiState.creating,
             onDismiss = {
                 editingPost = null
                 viewModel.dismissError()
             },
-            onConfirm = { text, _ ->
+            onConfirm = { text, _, _ ->
                 viewModel.editPost(post, text)
                 editingPost = null
             },
@@ -803,6 +814,10 @@ private fun PostCard(
     fileCard: FileCardState? = null,
     /** Раунд 173: закрепить/открепить пост. */
     onTogglePin: () -> Unit = {},
+    /** р250: опрос, приклеенный к посту; null - публикация без опроса. */
+    poll: com.vladimir.messenger.data.group.PollSummary? = null,
+    onTogglePollChoice: (Int) -> Unit = {},
+    onClosePoll: () -> Unit = {},
 ) {
     var showReactions by remember { mutableStateOf(false) }
     // Раунд 210: «три точки» поста - меню действий, как у сообщений в чатах.
@@ -991,6 +1006,17 @@ private fun PostCard(
                             add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
                         }
                     },
+                )
+            }
+            // р250: опрос под постом - там же, где карточка файла. Голосуют
+            // все подписчики; автора и администраторы могут закрыть опрос.
+            if (poll != null) {
+                com.vladimir.messenger.ui.components.ApuPollCard(
+                    poll = poll,
+                    onToggle = onTogglePollChoice,
+                    onClose = onClosePoll,
+                    canClose = canModerate,
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
             // Поставленные реакции - прямо под текстом поста, как в привычных
@@ -1208,12 +1234,15 @@ private fun PostEditorDialog(
     confirmLabel: String,
     creating: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: (String, List<String>) -> Unit,
+    /** р250: третий аргумент - опрос к посту (null - публикация без опроса). */
+    onConfirm: (String, List<String>, com.vladimir.messenger.data.group.PollDraft?) -> Unit,
     /** Сжатие выбранных картинок: делается во ViewModel, вне главного потока. */
     onPickImages: (List<android.net.Uri>, (List<String>) -> Unit) -> Unit,
     initialText: String = "",
     initialImages: List<String> = emptyList(),
     imagesEditable: Boolean = true,
+    /** р250: показывать ли блок опроса (не нужен при правке поста). */
+    pollEditable: Boolean = true,
     /** Файл к посту (рой, этап 10): готовая визитка, идёт подготовка, выбрать, убрать. null - без файла (правка). */
     stagedFile: GroupFileMarker.Info? = null,
     preparingFile: Boolean = false,
@@ -1225,6 +1254,10 @@ private fun PostEditorDialog(
     var images by remember { mutableStateOf(initialImages) }
     var preparing by remember { mutableStateOf(false) }
     var overflowHint by remember { mutableStateOf<String?>(null) }
+    // р250: опрос к посту - по кнопке «Прикрепить опрос».
+    var withPoll by remember { mutableStateOf(false) }
+    val pollState = remember { com.vladimir.messenger.ui.components.PollDraftState() }
+    var pollProblem by remember { mutableStateOf<String?>(null) }
 
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
@@ -1373,12 +1406,47 @@ private fun PostEditorDialog(
                         }
                     }
                 }
+                // р250: опрос к посту. Блок раскрывается по кнопке, чтобы не
+                // загромождать окно, когда опрос не нужен.
+                if (pollEditable) {
+                    if (withPoll) {
+                        HorizontalDivider()
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Опрос к посту",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { withPoll = false }) { Text("Убрать") }
+                        }
+                        com.vladimir.messenger.ui.components.PollDraftFields(
+                            state = pollState,
+                            problem = pollProblem,
+                        )
+                    } else {
+                        TextButton(
+                            onClick = { withPoll = true },
+                            enabled = !creating,
+                        ) { Text("Прикрепить опрос") }
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(text, images) },
-                enabled = (text.isNotBlank() || images.isNotEmpty() || stagedFile != null) &&
+                onClick = {
+                    val draft = if (withPoll) pollState.draft() else null
+                    // Опрос выбран, но заполнен не до конца - не публикуем молча:
+                    // написать, чего не хватает, полезнее, чем потерять пост.
+                    if (withPoll && draft == null) {
+                        pollProblem = pollState.problem()
+                        return@TextButton
+                    }
+                    onConfirm(text, images, draft)
+                },
+                enabled = (text.isNotBlank() || images.isNotEmpty() || stagedFile != null || withPoll) &&
                     !creating && !preparing && !preparingFile,
             ) { Text(confirmLabel) }
         },

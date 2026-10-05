@@ -102,6 +102,8 @@ data class ChannelUiState(
     val stagedFile: com.vladimir.messenger.util.GroupFileMarker.Info? = null,
     /** Идёт подготовка выбранного файла. */
     val isPreparingFile: Boolean = false,
+    /** р250: опросы канала: ключ - id сообщения-поста, под которым висит карточка. */
+    val polls: Map<String, com.vladimir.messenger.data.group.PollSummary> = emptyMap(),
 )
 
 @HiltViewModel
@@ -134,6 +136,8 @@ class ChannelViewModel @Inject constructor(
         observeReactions()
         observeTransfers()
         observeAntiRatings()
+        // р250: опросы под постами канала.
+        observePolls()
         // Вступивший позже не застал посты - просим у владельца последние
         // (раз за запуск на канал; владельцу и уже полным лентам это не нужно).
         viewModelScope.launch {
@@ -180,6 +184,39 @@ class ChannelViewModel @Inject constructor(
             reactionRepository.observeChat(channelId).collect { map ->
                 _uiState.update { it.copy(reactions = map) }
             }
+        }
+    }
+
+    // ── р250: опросы под постами канала ────────────────────────────────────
+
+    /** Карточки опросов: ключ - id сообщения-поста. */
+    private fun observePolls() {
+        viewModelScope.launch {
+            groupRepository.observePolls(channelId).collect { polls ->
+                _uiState.update { it.copy(polls = polls) }
+            }
+        }
+    }
+
+    /** Отметить вариант (повторный тап в опросе с одним выбором голос отзывает). */
+    fun togglePollChoice(poll: com.vladimir.messenger.data.group.PollSummary, index: Int) {
+        val current = poll.myChoices
+        val next = if (poll.multiChoice) {
+            if (index in current) current - index else (current + index).sorted()
+        } else {
+            if (current == listOf(index)) emptyList() else listOf(index)
+        }
+        viewModelScope.launch {
+            groupRepository.votePoll(channelId, poll.pollId, next)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Закрыть опрос: автор поста, владелец или администратор канала. */
+    fun closePoll(pollId: String) {
+        viewModelScope.launch {
+            groupRepository.closePoll(channelId, pollId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
@@ -457,23 +494,33 @@ class ChannelViewModel @Inject constructor(
      * Тема нужна, чтобы у поста было своё место для комментариев - ровно как
      * обсуждение под постом в Телеграме.
      */
-    fun createPost(text: String, photos: List<String> = emptyList()) {
+    fun createPost(
+        text: String,
+        photos: List<String> = emptyList(),
+        /** р250: опрос к посту; null - публикация без опроса. */
+        poll: com.vladimir.messenger.data.group.PollDraft? = null,
+    ) {
         val stripped = InlineImage.stripImage(text)
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
         val staged = _uiState.value.stagedFile
-        if (stripped.isEmpty() && attached.isEmpty() && staged == null) return
+        if (stripped.isEmpty() && attached.isEmpty() && staged == null && poll == null) return
         _uiState.update { it.copy(creating = true, error = null) }
         viewModelScope.launch {
+            // р250: опрос без подписи - пост всё равно нужен: текстом поста
+            // становится вопрос опроса, иначе старые телефоны (и лента без
+            // карточки) увидели бы пустую публикацию.
+            val question = poll?.question.orEmpty().trim()
+            val words = stripped.ifBlank { question }
             // Заголовок берём из ТЕКСТА, а не из служебных строк картинок.
-            val title = stripped.lineSequence().firstOrNull().orEmpty().trim()
+            val title = words.lineSequence().firstOrNull().orEmpty().trim()
                 .take(GroupRepository.POST_TITLE_CHARS)
                 .ifBlank { staged?.displayName?.take(GroupRepository.POST_TITLE_CHARS) ?: "Пост" }
             // Файл поста (рой, этап 10): визитка последней строкой, как в группе;
             // сам файл подписчики попросят у автора и друг у друга.
-            val body = if (staged == null) stripped else com.vladimir.messenger.util.GroupFileMarker.compose(stripped, staged)
+            val body = if (staged == null) words else com.vladimir.messenger.util.GroupFileMarker.compose(words, staged)
             groupRepository.createTopic(channelId, title)
                 .onSuccess { topic ->
-                    groupRepository.sendMessage(channelId, topic.id, body, attached)
+                    groupRepository.sendMessage(channelId, topic.id, body, attached, poll = poll)
                         .onFailure { e ->
                             _uiState.update {
                                 it.copy(creating = false, error = e.message ?: "Не удалось опубликовать пост")

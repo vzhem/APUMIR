@@ -92,6 +92,7 @@ object GroupsModule {
         chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
         manifestDao: com.vladimir.messenger.data.local.dao.PostManifestDao,
         signerDao: com.vladimir.messenger.data.local.dao.PostSignerDao,
+        pollDao: com.vladimir.messenger.data.local.dao.GroupPollDao,
         directory: SwarmPeerDirectory,
         counters: com.vladimir.messenger.data.channel.PostCounterRepository,
         shortener: com.vladimir.messenger.data.link.LinkShortener,
@@ -113,6 +114,8 @@ object GroupsModule {
         // ярусам из того же справочника, что и очередь веера.
         manifestDao = manifestDao,
         signerDao = signerDao,
+        // р250: опросы, ответы на сообщения и медленный режим групп/каналов.
+        pollDao = pollDao,
         signManifest = { manifest ->
             com.vladimir.messenger.data.swarm.PostSigner.sign(context.applicationContext, manifest)
         },

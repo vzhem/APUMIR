@@ -101,6 +101,17 @@ data class GroupChatUiState(
     val swarmStatus: String? = null,
     /** Принятый файл, который человек просит сохранить в папку (системное окно). */
     val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
+    // ── р250: ответы на сообщения ──
+    /** Сообщение, на которое отвечаем: цитата показывается над полем ввода. */
+    val replyTo: MessageEntity? = null,
+    // ── р250: опросы ──
+    /** Опросы этой группы или канала: ключ - id сообщения (поста), под которым висит карточка. */
+    val polls: Map<String, com.vladimir.messenger.data.group.PollSummary> = emptyMap(),
+    // ── р250: медленный режим ──
+    /** Сколько секунд участник ждёт между своими сообщениями; 0 - режим выключен. */
+    val slowModeSeconds: Int = 0,
+    /** Сколько миллисекунд осталось ждать; 0 - писать можно. */
+    val slowModeWaitMs: Long = 0L,
 )
 
 @HiltViewModel
@@ -192,6 +203,9 @@ class GroupChatViewModel @Inject constructor(
         observeGifArrivals()
         observeStickerArrivals()
         observeJoinRequests()
+        // р250: опросы группы/канала и отсчёт медленного режима.
+        observePolls()
+        observeSlowMode()
         observeAntiRatings()
         observeGroupTyping()
     }
@@ -893,11 +907,152 @@ class GroupChatViewModel @Inject constructor(
     private fun observeGroup() {
         viewModelScope.launch {
             groupRepository.observeGroup(groupId).collect { summary ->
-                _uiState.update { it.copy(group = summary) }
+                _uiState.update {
+                    it.copy(
+                        group = summary,
+                        // р250: медленный режим - из настроек группы.
+                        slowModeSeconds = summary?.slowModeSeconds ?: 0,
+                    )
+                }
                 refreshAttachRights(_uiState.value.me, summary)
             }
         }
     }
+
+    // ── р250: опросы ────────────────────────────────────────────────────────
+
+    /** Карточки опросов этой группы (канала): ключ - id сообщения. */
+    private fun observePolls() {
+        viewModelScope.launch {
+            groupRepository.observePolls(groupId).collect { polls ->
+                _uiState.update { it.copy(polls = polls) }
+            }
+        }
+    }
+
+    /**
+     * Новый опрос в текущей теме. Вопрос становится текстом сообщения (поста),
+     * а сама карточка уходит следом своим конвертом: прежние версии приложения
+     * увидят вопрос обычным сообщением.
+     */
+    fun createPoll(draft: com.vladimir.messenger.data.group.PollDraft) {
+        val topicId = _uiState.value.selectedTopicId
+        if (topicId == null) {
+            _uiState.update { it.copy(error = "Выберите тему") }
+            return
+        }
+        val question = draft.question.trim()
+        val options = draft.options
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .take(com.vladimir.messenger.data.group.GroupWire.MAX_POLL_OPTIONS)
+            .map { it.take(com.vladimir.messenger.data.group.GroupWire.MAX_POLL_OPTION_CHARS) }
+        if (question.isBlank() || options.size < com.vladimir.messenger.data.group.GroupWire.MIN_POLL_OPTIONS) {
+            _uiState.update { it.copy(error = "Нужны вопрос и хотя бы два варианта ответа") }
+            return
+        }
+        _uiState.update { it.copy(sending = true, error = null) }
+        viewModelScope.launch {
+            groupRepository.sendMessage(
+                groupId = groupId,
+                topicId = topicId,
+                text = question,
+                poll = com.vladimir.messenger.data.group.PollDraft(
+                    question = question,
+                    options = options,
+                    anonymous = draft.anonymous,
+                    multiChoice = draft.multiChoice,
+                ),
+            )
+                .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
+                .onSuccess { _uiState.update { it.copy(sending = false) } }
+        }
+    }
+
+    /** Отметить вариант: в опросе с одним выбором повторный тап голос отзывает. */
+    fun togglePollChoice(poll: com.vladimir.messenger.data.group.PollSummary, index: Int) {
+        val current = poll.myChoices
+        val next = if (poll.multiChoice) {
+            if (index in current) current - index else (current + index).sorted()
+        } else {
+            if (current == listOf(index)) emptyList() else listOf(index)
+        }
+        votePoll(poll.pollId, next)
+    }
+
+    fun votePoll(pollId: String, choices: List<Int>) {
+        viewModelScope.launch {
+            groupRepository.votePoll(groupId, pollId, choices)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Закрыть опрос: автор, владелец или администратор. */
+    fun closePoll(pollId: String) {
+        viewModelScope.launch {
+            groupRepository.closePoll(groupId, pollId)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    // ── р250: медленный режим ───────────────────────────────────────────────
+
+    /**
+     * Остаток ожидания на экране: пока длится пауза, счётчик тикает twice в
+     * секунду (человек должен видеть, сколько осталось), а когда режим
+     * выключен - проверяем раз в пять секунд, чтобы не гонять базу зря.
+     */
+    private fun observeSlowMode() {
+        viewModelScope.launch {
+            while (true) {
+                val me = _uiState.value.me?.nodeId.orEmpty()
+                val wait = if (me.isBlank()) {
+                    0L
+                } else {
+                    runCatching { groupRepository.slowModeWaitMs(groupId, me) }.getOrDefault(0L)
+                }
+                _uiState.update { it.copy(slowModeWaitMs = wait) }
+                kotlinx.coroutines.delay(if (wait > 0L) 500L else 5_000L)
+            }
+        }
+    }
+
+    /** Включить (или выключить) медленный режим прямо из чата. */
+    fun setSlowMode(seconds: Int) {
+        viewModelScope.launch {
+            groupRepository.setSlowMode(groupId, seconds)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    // ── р250: ответы на сообщения ───────────────────────────────────────────
+
+    /** Долгое нажатие → «Ответить»: цитата встаёт над полем ввода. */
+    fun startReply(message: MessageEntity) {
+        _uiState.update { it.copy(replyTo = message) }
+    }
+
+    fun clearReply() {
+        _uiState.update { it.copy(replyTo = null) }
+    }
+
+    /** Имя автора сообщения из состава группы (участника могло не быть в списке). */
+    private fun nameOf(senderId: String): String =
+        _uiState.value.members.firstOrNull { it.nodeId == senderId }
+            ?.displayName
+            ?.takeIf { it.isNotBlank() }
+            ?: ("Участник " + senderId.takeLast(4))
+
+    /**
+     * Чем цитируем: словами из сообщения, без служебных строк - иначе в цитате
+     * вместо текста торчали бы куски base64 фотографий и визитки файлов.
+     */
+    fun quoteText(message: MessageEntity): String =
+        com.vladimir.messenger.util.ChatPreviews.human(
+            com.vladimir.messenger.util.ForwardMarker.stripHeader(
+                com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+            ),
+        ).orEmpty().ifBlank { "Вложение" }
 
     /**
      * Левая колонка значков: все свои группы и каналы с непрочитанными.
@@ -1172,18 +1327,31 @@ class GroupChatViewModel @Inject constructor(
         val topicId = _uiState.value.selectedTopicId ?: return
         val staged = _uiState.value.stagedFile
         if (text.isBlank() && staged == null) return
+        // р250: ответ уходит вместе с сообщением - цитата уже здесь, на этом
+        // телефоне, а остальным доедет своим конвертом.
+        val source = _uiState.value.replyTo
+        val reply = if (source == null) {
+            null
+        } else {
+            com.vladimir.messenger.data.group.GroupRepository.ReplyTarget(
+                messageId = source.id,
+                author = nameOf(source.senderId),
+                text = quoteText(source),
+            )
+        }
         _uiState.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
             // Файл (этап 9): в сообщении едет визитка и подпись «📎 имя
             // (размер)» - старые версии видят подпись, новые рисуют карточку;
             // сам файл участники просят у меня и друг у друга.
             val body = if (staged == null) text else com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
-            groupRepository.sendMessage(groupId, topicId, body)
+            groupRepository.sendMessage(groupId, topicId, body, reply = reply)
                 .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
                 .onSuccess {
                     // р237: сообщение ушло - черновик пропадает на обоих устройствах.
                     onDraftChanged("")
-                    _uiState.update { it.copy(sending = false, stagedFile = null) }
+                    // Ответ отправлен - цитата над полем ввода больше не нужна.
+                    _uiState.update { it.copy(sending = false, stagedFile = null, replyTo = null) }
                 }
         }
     }

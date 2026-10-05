@@ -104,6 +104,14 @@ interface GroupDao {
     @Query("UPDATE groups SET mutedUntilMs = :untilMs WHERE id = :groupId")
     suspend fun setMutedUntil(groupId: String, untilMs: Long)
 
+    /**
+     * р250: медленный режим - сколько секунд участник ждёт между сообщениями
+     * (0 - режим выключен). Ставит только тот, кто вправе менять информацию о
+     * группе: проверка прав живёт в GroupRepository.
+     */
+    @Query("UPDATE groups SET slowModeSeconds = :seconds WHERE id = :groupId")
+    suspend fun setSlowMode(groupId: String, seconds: Int)
+
     /** р249: звук выключен прямо сейчас (см. ChatDao.countMuted про COUNT(*)). */
     @Query("SELECT COUNT(*) FROM groups WHERE id = :groupId AND mutedUntilMs > :nowMs")
     suspend fun countMuted(groupId: String, nowMs: Long): Int

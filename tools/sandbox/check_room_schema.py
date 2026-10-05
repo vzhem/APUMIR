@@ -246,6 +246,13 @@ def main():
                 errs.append('%s: тип %s, сущность ждёт %s' % (col, g['type'], e['type']))
             if g['notNull'] != e['notNull']:
                 errs.append('%s: NOT NULL=%s, сущность ждёт %s' % (col, g['notNull'], e['notNull']))
+            # DEFAULT сверяется только когда его объявила сущность: именно так
+            # это делает Room (TableInfo.Column.equals - сравнение идёт, если
+            # defaultValue задан у стороны, созданной из @Entity). Расхождение
+            # даёт «Migration didn't properly handle» при открытии базы.
+            if e['default'] is not None and g['default'] != e['default']:
+                errs.append('%s: DEFAULT %s, сущность объявила %s' %
+                            (col, g['default'], e['default']))
         for col in got['columns']:
             if col not in exp['columns']:
                 errs.append('лишний столбец %s' % col)
