@@ -5707,6 +5707,8 @@ companion object {
         /** Рой: буфер кусков без манифеста - записей и срок жизни. */
         private const val PENDING_PIECES = 100
         private const val PENDING_MANIFESTS = 40
+        /** р250: буфер цитат, приехавших раньше своего сообщения. */
+        private const val PENDING_REPLIES = 40
         private const val PENDING_TTL_MS = 60_000L
         /** Метка в списке «уже слали»: манифест поста, а не сообщение. */
         private const val MANIFEST_SENT_PREFIX = "pman:"

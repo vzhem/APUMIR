@@ -94,6 +94,33 @@ DECL_RE = re.compile(
 )
 # Обращение к имени с заглавной буквы: вызов или доступ к члену.
 USE_RE = re.compile(r'(?<![.\w$])([A-Z][A-Za-z0-9_]*)\s*(?=[.(<])')
+# р251: два класса ошибок, которые USE_RE пропускает, а тег v11.74.175 на них
+# упал в :app:compileReleaseKotlin (прогон 37305997197):
+# 1) голая ALL_CAPS-константа как значение (`PENDING_REPLIES` без объявления) -
+#    после имени нет `(`, и USE_RE молчит;
+# 2) член-иконка без импорта (`Icons.AutoMirrored.Filled.Reply`) - имя стоит
+#    после точки, и USE_RE молчит тоже.
+# Константа: ЗАГЛАВНЫЕ с хотя бы одним подчёркиванием (типа PENDING_REPLIES);
+# одиночные заглавные (дженерики `T`) и CamelCase-типы сюда не попадают.
+CONST_USE_RE = re.compile(r'(?<![.\w$])([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b')
+ICONS_USE_RE = re.compile(
+    r'\bIcons\.(AutoMirrored\.)?(?:Filled|Default|Outlined)\.([A-Z][A-Za-z0-9_]*)')
+ICONS_WILDCARD_PREFIX = 'androidx.compose.material.icons'
+# Константы, которые Kotlin разрешает через наследование от базовых классов
+# Android (Service наследует ContextWrapper, Activity - ContextThemeWrapper):
+# в subclass они пишутся голыми без импорта, и инструмент о наследовании не
+# знает. Только реально существующие константы Service/Context - калибровка
+# по живому коду (прогон р251: 7 подозрений, все из этого семейства).
+INHERITED_ANDROID_CONSTS = {
+    'START_STICKY', 'START_NOT_STICKY', 'START_REDELIVER_INTENT',
+    'STOP_FOREGROUND_REMOVE', 'STOP_FOREGROUND_KEEP',
+    'MODE_PRIVATE', 'MODE_APPEND',
+    'POWER_SERVICE', 'WIFI_SERVICE', 'CONNECTIVITY_SERVICE', 'NOTIFICATION_SERVICE',
+    'DOWNLOAD_SERVICE', 'CLIPBOARD_SERVICE', 'ALARM_SERVICE', 'AUDIO_SERVICE',
+    'CAMERA_SERVICE', 'LOCATION_SERVICE', 'SENSOR_SERVICE', 'VIBRATOR_SERVICE',
+    'WINDOW_SERVICE', 'ACTIVITY_SERVICE', 'TELEPHONY_SERVICE', 'INPUT_METHOD_SERVICE',
+    'LAYOUT_INFLATER_SERVICE', 'STORAGE_SERVICE', 'USB_SERVICE', 'NFC_SERVICE',
+}
 
 
 def strip_noise(text):
@@ -365,6 +392,26 @@ def check_file(path, packages, project_names):
         seen.add(name)
         line_no = clean.count('\n', 0, m.start()) + 1
         suspects.append((name, line_no))
+    # р251, класс 1: голая константа без объявления/импорта.
+    for m in CONST_USE_RE.finditer(clean):
+        name = m.group(1)
+        if name in INHERITED_ANDROID_CONSTS:
+            continue
+        if name in allowed or name in seen:
+            continue
+        if name not in project_names and external_wildcards:
+            continue
+        seen.add(name)
+        suspects.append((name, clean.count('\n', 0, m.start()) + 1))
+    # р251, класс 2: иконка Material без импорта своего пакета.
+    icons_wild = any(w == ICONS_WILDCARD_PREFIX or w.startswith(ICONS_WILDCARD_PREFIX + '.')
+                     for w in wildcards)
+    for m in ICONS_USE_RE.finditer(clean):
+        name = m.group(2)
+        if name in imported or name in seen or icons_wild:
+            continue
+        seen.add(name)
+        suspects.append((name, clean.count('\n', 0, m.start()) + 1))
     return suspects
 
 
@@ -377,6 +424,8 @@ val Z = 1
 fun f() {
     Text("ok"); T("ok"); Y.go(); Z.go(); Unknown.go()
     val s = "Text Unknown Inside"
+    val c = MISSING_CONST + 1
+    val ic = Icons.AutoMirrored.Filled.MissingIcon
     val t = "${Text} and Unknown"
     /* Text Unknown block */
     // Text Unknown line
@@ -397,8 +446,11 @@ fun f() {
     assert 'Unknown' in got, got
     assert got['Unknown'] == 7, got
     assert 'Y' not in got and 'Text' not in got and 'T' not in got and 'Z' not in got, got
+    # р251: голая константа и иконка без импорта ловятся; строка c - 9, ic - 10.
+    assert got.get('MISSING_CONST') == 9, got
+    assert got.get('MissingIcon') == 10, got
     print('самопроверка: OK (литералы/комментарии не считаются, импорты и '
-          'объявления разрешаются)')
+          'объявления разрешаются, константы и иконки без импорта ловятся)')
     return 0
 
 

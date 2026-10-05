@@ -23,6 +23,7 @@ import com.vladimir.messenger.ui.components.CreatePollDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.foundation.rememberScrollState
