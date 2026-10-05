@@ -1166,6 +1166,11 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror LAN pull reset failed: ${it.message}") }
         }
 
+        override suspend fun onLanPullFailed(transferId: String) {
+            runCatching { fileTransferRouter.noteLanPullFailed(transferId) }
+                .onFailure { Log.w(TAG, "Mirror LAN fallback failed: ${it.message}") }
+        }
+
         override suspend fun onCallFromPartner(signal: org.json.JSONObject) {
             runCatching { callManager.onMirrorCall(signal) }
                 .onFailure { Log.w(TAG, "Mirror call signal failed: ${it.message}") }
@@ -1367,18 +1372,30 @@ class CoreServerService : Service() {
      */
     private suspend fun pumpMirrorFiles() {
         if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) return
-        val rows = runCatching { fileTransferRouter.transfersMissingBytes(3) }.getOrDefault(emptyList())
         val now = System.currentTimeMillis()
-        for (row in rows) {
+        val auto = runCatching { fileTransferRouter.transfersMissingBytes(3) }.getOrDefault(emptyList())
+        // р249: большой файл - только тот, который человек уже открывал здесь
+        // или который не удалось забрать по локальной сети. Автоматом сотни
+        // мегабайт в фоне не качаем.
+        val wanted = if (auto.isEmpty()) {
+            runCatching { fileTransferRouter.transfersMissingBigBytes(1) }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        for (row in auto + wanted) {
             val last = mirrorFileAskedAt[row.transferId] ?: 0L
             if (now - last < MIRROR_FILE_RETRY_MS) continue
             mirrorFileAskedAt[row.transferId] = now
+            val offset = fileTransferRouter.mirrorReceivedBytesOf(row.transferId)
+            val big = row.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
             com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
                 row.transferId,
                 row.displayName,
                 row.totalBytes,
+                offset = offset,
+                big = big,
             )
-            Log.i(TAG, "file bytes pump: прошу ${row.displayName} (${row.totalBytes} Б)")
+            Log.i(TAG, "file bytes pump: прошу ${row.displayName} (${row.totalBytes} Б, с $offset)")
             break
         }
     }

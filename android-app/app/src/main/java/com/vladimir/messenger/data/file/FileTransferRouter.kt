@@ -1113,6 +1113,87 @@ class FileTransferRouter @Inject constructor(
         java.util.concurrent.ConcurrentHashMap<String, Pair<ReceivedFileStore.Writer, Triple<String, Long, Int>>>()
 
     /**
+     * р249: сколько байтов этой передачи уже принято по зеркалу в ЭТОМ сеансе.
+     *
+     * После обрыва канала просьба повторяется не с начала, а с этого места:
+     * заново качать полгигабайта из-за моргнувшей сети никто не будет. Счёт
+     * живёт в памяти - после перезапуска приложения файл качается с начала,
+     * и это честно: приёмник в памяти тоже новый.
+     */
+    private val mirrorReceivedBytes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** р249: сколько байтов передачи уже принято по зеркалу. */
+    fun mirrorReceivedBytesOf(transferId: String): Long = mirrorReceivedBytes[transferId] ?: 0L
+
+    /** р249: файлы, которые человек уже просил открыть на этом устройстве. */
+    private val bigWanted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * р249: передачи, которые ЖДУТ большой файл: просили явно, а байтов нет.
+     *
+     * Автоматом большой файл не качаем - только по требованию (человек открыл
+     * его здесь) или когда прямой локальный канал не вышел. Иначе второе
+     * устройство молча выкачивало бы сотни мегабайт в фоне.
+     */
+    suspend fun transfersMissingBigBytes(limit: Int): List<com.vladimir.messenger.data.local.entity.FileTransferEntity> =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val auto = com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
+            val cap = com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_BIG_MAX_BYTES
+            runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())
+                .asSequence()
+                .filter { it.totalBytes > auto && it.totalBytes <= cap }
+                .filter { it.transferId in bigWanted }
+                .filter { receivedStore.receivedFile(it.transferId, it.displayName) == null }
+                .take(limit.coerceAtLeast(1))
+                .toList()
+        }
+
+    /** р249: когда в последний раз просили байты этой передачи (не частим). */
+    private val mirrorAskedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * р249: попросить у активного устройства байты файла, которого здесь нет.
+     *
+     * Зовётся в тот момент, когда человек открывает карточку файла на втором
+     * устройстве: `receivedFileFor` возвращает null, и вместо пустого места
+     * начинается докачка. Повторы режет пауза - карточка перерисовывается
+     * часто, а просьба стоит запечатывания кадра (вызов в ядро).
+     */
+    private fun askMirrorForBytes(
+        transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity,
+    ) {
+        if (com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()) return
+        if (transfer.direction != "INCOMING" && transfer.direction != "OUTGOING") return
+        val cap = com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_BIG_MAX_BYTES
+        if (transfer.totalBytes <= 0L || transfer.totalBytes > cap) return
+        val now = System.currentTimeMillis()
+        val last = mirrorAskedAt[transfer.transferId] ?: 0L
+        if (now - last < MIRROR_ASK_GAP_MS) return
+        mirrorAskedAt[transfer.transferId] = now
+        if (transfer.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES) {
+            bigWanted.add(transfer.transferId)
+        }
+        com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
+            transfer.transferId,
+            transfer.displayName,
+            transfer.totalBytes,
+            offset = mirrorReceivedBytesOf(transfer.transferId),
+            big = transfer.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES,
+        )
+    }
+
+    /** р249: прямой локальный канал не вышел - докачиваем файл зеркалом. */
+    suspend fun noteLanPullFailed(transferId: String) {
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val row = runCatching { transferDao.getTransfer(transferId) }.getOrNull()
+                ?: return@withContext
+            mirrorAskedAt.remove(transferId)
+            bigWanted.add(transferId)
+            askMirrorForBytes(row)
+        }
+    }
+
+    /**
      * р230: порция файла от партнёрского устройства. Пишем через тот же
      * [ReceivedFileStore], что и обычный приём: имя каталога - идентификатор
      * передачи, поэтому и открытие файла в чате сработает как обычно.
@@ -1129,15 +1210,20 @@ class FileTransferRouter @Inject constructor(
         }
         try {
             writerState.first.write(bytes, bytes.size)
+            // р249: счётчик принятого - по нему возобновляем после обрыва.
+            mirrorReceivedBytes[transferId] = mirrorReceivedBytesOf(transferId) + bytes.size
             if (last) {
                 writerState.first.commit()
                 mirrorWriters.remove(transferId)
+                mirrorReceivedBytes.remove(transferId)
+                bigWanted.remove(transferId)
                 Log.i(TAG, "mirror file complete id=$transferId (${row.displayName})")
             }
         } catch (error: Exception) {
             runCatching { writerState.first.abort() }
             runCatching { receivedStore.deleteTransfer(transferId) }
             mirrorWriters.remove(transferId)
+            mirrorReceivedBytes.remove(transferId)
             Log.w(TAG, "mirror file chunk failed id=$transferId: ${error.message}")
         }
     }
@@ -1145,8 +1231,12 @@ class FileTransferRouter @Inject constructor(
     /**
      * р232: перед прямым (LAN) приёмом забыть недокачанное зеркальным каналом:
      * файл придёт целиком, склеивать обрывки нельзя.
+     *
+     * р249: счётчик принятого тоже обнуляем - иначе возобновление после обрыва
+     * началось бы с середины уже принятого файла.
      */
     suspend fun resetMirrorWriter(transferId: String) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        mirrorReceivedBytes.remove(transferId)
         mirrorWriters.remove(transferId)?.let { runCatching { it.first.abort() } }
         runCatching { receivedStore.deleteTransfer(transferId) }
     }
@@ -1198,9 +1288,20 @@ class FileTransferRouter @Inject constructor(
     /** Verified plaintext of a completed incoming transfer (app-private storage), if present. */
     fun receivedFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
         if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return null
-        return runCatching { receivedStore.receivedFile(transfer.transferId, transfer.displayName) }
+        val file = runCatching { receivedStore.receivedFile(transfer.transferId, transfer.displayName) }
             .getOrNull()
+        if (file == null) {
+            // р249: на втором устройстве файла может не быть - его приняло
+            // активное. Раньше карточка оставалась пустой навсегда; теперь
+            // открытие карточки само запускает докачку (пауза между просьбами
+            // не даст дергать канал на каждой перерисовке).
+            askMirrorForBytes(transfer)
+        }
+        return file
     }
+
+    /** р249: как часто повторять просьбу о байтах одного и того же файла. */
+    private val MIRROR_ASK_GAP_MS = 60_000L
 
     /**
      * Раунд 43: файл превью для пузыря в чате. Входящая картинка - принятый
