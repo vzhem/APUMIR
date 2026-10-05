@@ -3570,6 +3570,22 @@ class GroupRepository(
                 val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
                 for ((from, manifest) in ready) handleManifest(from, manifest)
             }
+
+            is GroupWire.Packet.Typing -> {
+                // р249: «печатает…» в группе. Состояние мимолётное: в базу не
+                // идёт, живёт в памяти и гаснет само. Чужой пакет от узла,
+                // которого нет в составе, не показываем - иначе любой, кто
+                // знает идентификатор группы, засветил бы индикатором.
+                if (senderId == me) return
+                if (groupDao.getMember(packet.groupId, me) == null) return
+                if (groupDao.getMember(packet.groupId, senderId) == null) return
+                com.vladimir.messenger.data.typing.TypingPeer.groupTyping(
+                    packet.groupId,
+                    packet.topicId,
+                    senderId,
+                    packet.typing,
+                )
+            }
         }
     }
 

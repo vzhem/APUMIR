@@ -1110,6 +1110,18 @@ fun GroupChatScreen(
                         )
                         .padding(6.dp),
                 ) {
+                    // р249: «печатает…» в группе - та же строка, что и в личке,
+                    // только с именами: в группе печатать могут несколько
+                    // человек сразу, и в теме канала индикатор свой у каждой
+                    // темы. Состояние мимолётное: гаснет само (TypingPeer).
+                    if (uiState.typingMembers.isNotEmpty()) {
+                        Text(
+                            text = groupTypingLabel(uiState.typingMembers),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
+                        )
+                    }
                     if (inputFocused) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(
@@ -2216,3 +2228,10 @@ private fun NewTopicDialog(
     )
 }
 
+/** р249: подпись индикатора «печатает…» в группе (1, 2 или больше человек). */
+private fun groupTypingLabel(names: List<String>): String = when (names.size) {
+    0 -> ""
+    1 -> "${names[0]} печатает…"
+    2 -> "${names[0]} и ${names[1]} печатают…"
+    else -> "${names[0]}, ${names[1]} и ещё ${names.size - 2} печатают…"
+}
