@@ -126,7 +126,7 @@ comment_to_pr() {
         echo "Строки с ошибками компилятора:"
         echo
         echo '```'
-        grep -n -m 3 -A 14 -E '^error(\[|:| )' "$LOG" || echo '(строк с ошибками компилятора в выводе нет)'
+        grep -n -m 3 -A 14 -E '^error(\[|:| )|^e: ' "$LOG" || echo '(строк с ошибками компилятора в выводе нет)'
         echo '```'
         if [ -s "$TESTS_DIGEST" ]; then
             echo "Упавшие тесты и причины:"
@@ -209,6 +209,27 @@ else
     report
     comment_to_pr
     exit 1
+fi
+
+# ── 1b. полная компиляция Kotlin приложения (грабли тегов v171/v175) ────────
+# :app:compileReleaseKotlin раньше выполнялся только в сборке тега, и теги
+# v11.74.171 (дважды) и v11.74.175 умирали именно там, а логи из песочницы не
+# скачиваются. Теперь та же задача компилируется на runner каждого PR, и
+# ошибка уходит комментарием. Пока шаг не доказал стабильность - его падение
+# не блокирует прогон (паттерн K6): warning + комментарий к PR.
+begin "android compileReleaseKotlin"
+ANDROID_OK=0
+if bash scripts/ci/check-android-compile.sh >>"$LOG" 2>&1; then
+    ANDROID_OK=1
+    say "android compileReleaseKotlin: OK"
+else
+    say "android compileReleaseKotlin: FAILED (пока не блокирует - см. комментарий)"
+fi
+strip_ansi
+if [ "$ANDROID_OK" = 0 ]; then
+    report
+    comment_to_pr
+    say "::warning::compileReleaseKotlin упал на runner - разбор в комментарии к PR"
 fi
 
 # ── 2. компиляция ядра ─────────────────────────────────────────────────────
