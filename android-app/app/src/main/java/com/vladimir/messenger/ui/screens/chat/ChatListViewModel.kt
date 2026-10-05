@@ -98,7 +98,6 @@ data class ChatListUiState(
     /** Разделы, которые этому телефону показывать: админские - по факту наличия групп. */
     val sections: List<InboxSection> = listOf(
         InboxSection.All,
-        InboxSection.Unread,
         InboxSection.Chats,
         InboxSection.Groups,
         InboxSection.Channels,
@@ -376,7 +375,8 @@ class ChatListViewModel @Inject constructor(
      */
     private fun buildState(snap: Snapshot): Built {
         val query = snap.query.trim()
-        val sections = sectionsFor(snap.groups)
+        val unreadCount = snap.unreadChats.size + snap.unreadGroups.size
+        val sections = sectionsFor(snap.groups, unreadCount)
         // Во время поиска показываем «Все»: человек ищет собеседника, а не
         // раздел, и находка в группах не должна прятаться только потому, что
         // открыта вкладка «Чаты».
@@ -421,7 +421,6 @@ class ChatListViewModel @Inject constructor(
             .map { InboxItem.Group(it, it.timeMs ?: 0L) }
             .sortedWith { left, right -> compareInboxItems(left, right) }
         val unreadMerged = merge(unreadPersonal, unreadGroupsRaw)
-        val unreadCount = snap.unreadChats.size + snap.unreadGroups.size
 
         val bySection = mutableMapOf<InboxSection, List<InboxItem>>()
         for (target in sections) {
@@ -495,10 +494,10 @@ class ChatListViewModel @Inject constructor(
     }
 
     /** Админские разделы - только тому, у кого есть своя группа или канал. */
-    private fun sectionsFor(groups: List<InboxGroup>): List<InboxSection> {
-        val sections = mutableListOf(
-            InboxSection.All,
-            InboxSection.Unread,
+    private fun sectionsFor(groups: List<InboxGroup>, unreadCount: Int): List<InboxSection> {
+        val sections = mutableListOf(InboxSection.All)
+        if (unreadCount > 0) sections += InboxSection.Unread
+        sections += listOf(
             InboxSection.Chats,
             InboxSection.Groups,
             InboxSection.Channels,
