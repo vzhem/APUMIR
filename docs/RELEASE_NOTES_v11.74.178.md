@@ -4,4 +4,8 @@
 - Для крупных эмодзи добавлены мягкие анимированные световые эффекты.
 - Улучшено отображение крупных эмодзи на поддерживаемых версиях Android.
 
-[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.178/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.178/app-release.apk.sha256)
+[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.178/app-release.apk)
+
+SHA-256 APK: `97c0fd5ccc2071c124b2a649dbf2616e6b765054e30bd92a85560de1b1836c45`
+
+Устанавливайте поверх предыдущей версии — переписка сохранится.
