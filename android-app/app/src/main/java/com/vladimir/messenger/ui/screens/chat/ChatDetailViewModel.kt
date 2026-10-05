@@ -54,6 +54,8 @@ data class ChatDetailUiState(
     val isPreparingFile: Boolean = false,
     val error: String?          = null,
     val isContactOnline: Boolean = false,
+    /** Срок паузы уведомлений этого личного чата. */
+    val mutedUntilMs: Long = 0L,
     /** @никнейм собеседника: показывает карточка профиля. */
     val contactUsername: String = "",
     /** Сердечки и анти-рейтинг профиля собеседника. */
@@ -83,6 +85,7 @@ data class ChatDetailUiState(
     val swarmStatus: String? = null,
     /** Реакции по сообщениям: ключ - id сообщения. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
+    val replyTo: Message? = null,
 )
 
 @HiltViewModel
@@ -311,6 +314,7 @@ class ChatDetailViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isContactOnline = chat.isContactOnline,
+                            mutedUntilMs = chat.mutedUntilMs,
                             isSelfChat = isSelfChat(it.messages, chat.contactId),
                             contactUsername = nick,
                             isPeerTyping = com.vladimir.messenger.data.typing.TypingPeer
@@ -325,6 +329,16 @@ class ChatDetailViewModel @Inject constructor(
                     }
                 }
             }
+        }
+    }
+
+    /** Изменить срок отключения уведомлений только для этой личной переписки. */
+    fun setNotificationsMutedUntil(untilMs: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { chatRepository.setChatMutedUntil(chatId, untilMs) }
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить уведомления") }
+                }
         }
     }
 
@@ -544,6 +558,17 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    fun startReply(message: Message) {
+        _uiState.update { it.copy(replyTo = message) }
+    }
+
+    fun clearReply() {
+        _uiState.update { it.copy(replyTo = null) }
+    }
+
+    private fun contactNameForReply(message: Message): String =
+        if (message.senderId == peerId) "Собеседник" else message.senderId.takeLast(6)
+
     fun onInputTextChanged(text: String) {
         _uiState.update { it.copy(inputText = text) }
         // р235: «печатает…» у собеседника, пока в поле есть текст.
@@ -559,7 +584,14 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, inputText = "") }
 
-            sendMessageUseCase(chatId, text)
+            val reply = _uiState.value.replyTo?.let { target ->
+                com.vladimir.messenger.data.reply.DirectReplyWire.Target(
+                    messageId = target.id,
+                    author = if (target.isFromMe) "Вы" else contactNameForReply(target),
+                    text = target.content,
+                )
+            }
+            sendMessageUseCase(chatId, text, reply)
                 .onSuccess {
                     // р235: сообщение ушло - «печатает…» у собеседника гаснет.
                     publishTyping(false)
@@ -567,7 +599,8 @@ class ChatDetailViewModel @Inject constructor(
                     saveDraft("")
                     _uiState.update { it.copy(
                         isSending      = false,
-                        scrollToBottom = true
+                        scrollToBottom = true,
+                        replyTo = null,
                     )}
                 }
                 .onFailure { e ->

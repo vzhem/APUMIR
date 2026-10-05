@@ -25,6 +25,9 @@ import com.vladimir.messenger.ui.components.ApuSettingsItem
 import com.vladimir.messenger.ui.components.ApuSettingsLayout
 import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
 import com.vladimir.messenger.ui.components.ApuProfileQuickAction
+import com.vladimir.messenger.ui.components.NotificationMuteDialog
+import com.vladimir.messenger.ui.components.notificationMuteStatus
+import com.vladimir.messenger.data.notification.NotificationMuteScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
@@ -637,6 +640,9 @@ private fun SettingsTabContent(
     var showSyncDialog by remember { mutableStateOf(false) }
     // Раунд 249: подтверждение выхода из APU.
     var showLogoutDialog by remember { mutableStateOf(false) }
+    var muteScope by remember { mutableStateOf<NotificationMuteScope?>(null) }
+    val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
+    val notificationMuteNowMs = remember(muteRevision) { System.currentTimeMillis() }
     val mqttClipboard = LocalClipboardManager.current
     // Бегунок справа: видно, где мы в длинном списке.
     val settingsScrollState = rememberLazyListState()
@@ -713,8 +719,35 @@ private fun SettingsTabContent(
             }
 
             // ----------------------------------------------------------------
-            // СТАТУС СЕТИ
+            // Пауза новых сообщений: приложение целиком или нужный раздел.
             // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Уведомления") }
+            item {
+                SettingsCard {
+                    val muteScopes = listOf(
+                        NotificationMuteScope.APP to Icons.Default.NotificationsActive,
+                        NotificationMuteScope.PERSONAL_CHATS to Icons.Default.Person,
+                        NotificationMuteScope.GROUPS to Icons.Default.Groups,
+                        NotificationMuteScope.CHANNELS to Icons.Default.Campaign,
+                        NotificationMuteScope.TOPICS to Icons.Default.Forum,
+                    )
+                    muteScopes.forEachIndexed { index, (scope, icon) ->
+                        val untilMs = viewModel.notificationMuteUntil(scope)
+                        SettingsItem(
+                            icon = icon,
+                            title = scope.title,
+                            subtitle = if (untilMs > notificationMuteNowMs) {
+                                notificationMuteStatus(untilMs, notificationMuteNowMs)
+                            } else {
+                                scope.description
+                            },
+                            onClick = { muteScope = scope },
+                        )
+                        if (index < muteScopes.lastIndex) ApuSettingsDivider()
+                    }
+                }
+            }
+
             item { SettingsSectionTitle("Безопасность") }
             item {
                 SettingsCard {
@@ -1214,6 +1247,23 @@ private fun SettingsTabContent(
             dismissButton = {
                 TextButton(onClick = { showMqttDialog = false }) { Text("Закрыть") }
             },
+        )
+    }
+
+    muteScope?.let { scope ->
+        val untilMs = viewModel.notificationMuteUntil(scope)
+        NotificationMuteDialog(
+            targetName = scope.title,
+            mutedUntilMs = untilMs,
+            onSelectUntil = { chosenUntil ->
+                viewModel.setNotificationMuteUntil(scope, chosenUntil)
+                muteScope = null
+            },
+            onTurnOn = {
+                viewModel.setNotificationMuteUntil(scope, 0L)
+                muteScope = null
+            },
+            onDismiss = { muteScope = null },
         )
     }
 

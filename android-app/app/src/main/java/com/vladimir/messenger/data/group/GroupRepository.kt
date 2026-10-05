@@ -678,6 +678,7 @@ class GroupRepository(
             },
             // р250: медленный режим - экран чата показывает остаток ожидания.
             slowModeSeconds = g.slowModeSeconds,
+            mutedUntilMs = g.mutedUntilMs,
         )
     }
 
@@ -4048,25 +4049,32 @@ class GroupRepository(
         )
     }
 
-    /** Выключить (или включить обратно) звук группы или канала. */
-    suspend fun setGroupMuted(groupId: String, muted: Boolean) {
-        if (groupDao.getGroupById(groupId) == null) return
-        val until = if (muted) {
-            com.vladimir.messenger.data.repository.ChatRepository.MUTED_FOREVER_MS
-        } else {
-            0L
+    /** Отключить уведомления группы или канала до указанного срока. */
+    suspend fun setGroupMutedUntil(groupId: String, requestedUntilMs: Long) {
+        val group = groupDao.getGroupById(groupId) ?: return
+        val until = when {
+            requestedUntilMs == com.vladimir.messenger.data.repository.ChatRepository.MUTED_FOREVER_MS ->
+                com.vladimir.messenger.data.repository.ChatRepository.MUTED_FOREVER_MS
+            requestedUntilMs > System.currentTimeMillis() -> requestedUntilMs
+            else -> 0L
         }
         groupDao.setMutedUntil(groupId, until)
-        val archived = groupDao.getGroupById(groupId)?.archived == true
         com.vladimir.messenger.data.mirror.MirrorHub.publishChatFlags(
             kind = com.vladimir.messenger.data.repository.ChatRepository.CHAT_FLAG_GROUP,
             itemId = groupId,
-            archived = archived,
+            archived = group.archived,
             mutedUntilMs = until,
         )
     }
 
-    /** Звук группы выключен прямо сейчас (срок в базе ещё не истёк). */
+    /** Совместимый переключатель для старых мест вызова: выключить навсегда. */
+    suspend fun setGroupMuted(groupId: String, muted: Boolean) =
+        setGroupMutedUntil(
+            groupId,
+            if (muted) com.vladimir.messenger.data.repository.ChatRepository.MUTED_FOREVER_MS else 0L,
+        )
+
+    /** Уведомления группы выключены прямо сейчас (срок в базе ещё не истёк). */
     suspend fun isGroupMuted(groupId: String): Boolean =
         runCatching { groupDao.countMuted(groupId, System.currentTimeMillis()) > 0 }
             .getOrDefault(false)

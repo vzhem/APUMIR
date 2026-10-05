@@ -9,7 +9,10 @@ import androidx.core.app.NotificationCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.notification.NotificationMuteScope
+import com.vladimir.messenger.data.notification.NotificationMuteStore
 import com.vladimir.messenger.data.repository.ContactRepository
 import javax.inject.Inject
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,7 +25,9 @@ import javax.inject.Singleton
 class NotificationHelper @Inject constructor(
     @ApplicationContext private val context: Context,
     private val contactRepository: ContactRepository,
+    private val chatDao: ChatDao,
     private val groupDao: GroupDao,
+    private val notificationMuteStore: NotificationMuteStore,
 ) {
     companion object {
         private const val MESSAGE_NOTIFICATION_BASE_ID = 2000
@@ -57,15 +62,21 @@ class NotificationHelper @Inject constructor(
             return
         }
 
+        val nowMs = System.currentTimeMillis()
+        val group = groupDao.getGroupById(chatId)
+        if (isMuted(chatId, topicId, group, nowMs)) {
+            android.util.Log.i("NotificationHelper", "Message notification suppressed by mute settings: ${chatId.take(12)}")
+            return
+        }
+
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        
+
         // Получить имя и аватар отправителя
         val contact = contactRepository.getContactById(senderId)
 
         // Групповое сообщение: в заголовке нужна группа, а не «pk_40d2401a».
         // Отправитель в группе обычно не в контактах, поэтому имя берём из
         // списка участников, и только потом - из идентификатора узла.
-        val group = groupDao.getGroupById(chatId)
         val senderName = contact?.displayName
             ?: groupDao.getMember(chatId, senderId)?.displayName?.takeIf { it.isNotBlank() }
             ?: senderId.take(8)
@@ -100,6 +111,38 @@ class NotificationHelper @Inject constructor(
         // Показать notification (ID на основе chatId чтобы группировать)
         val notificationId = MESSAGE_NOTIFICATION_BASE_ID + chatId.hashCode().mod(1000)
         notificationManager.notify(notificationId, notification)
+    }
+
+    /**
+     * Проверка в последней точке перед публикацией: сюда попадают и события
+     * ядра, и зеркальные сообщения. Поэтому глобальная пауза, раздел, чат,
+     * группа/канал и отдельная тема одинаково работают для всех путей доставки.
+     */
+    private suspend fun isMuted(
+        chatId: String,
+        topicId: String?,
+        group: com.vladimir.messenger.data.local.entity.GroupEntity?,
+        nowMs: Long,
+    ): Boolean {
+        if (notificationMuteStore.isMuted(NotificationMuteScope.APP, nowMs)) return true
+
+        if (group != null) {
+            val section = if (group.isChannel) {
+                NotificationMuteScope.CHANNELS
+            } else {
+                NotificationMuteScope.GROUPS
+            }
+            if (notificationMuteStore.isMuted(section, nowMs)) return true
+            if (group.mutedUntilMs > nowMs) return true
+            if (!topicId.isNullOrBlank()) {
+                if (notificationMuteStore.isMuted(NotificationMuteScope.TOPICS, nowMs)) return true
+                if (notificationMuteStore.isTopicMuted(chatId, topicId, nowMs)) return true
+            }
+            return false
+        }
+
+        if (notificationMuteStore.isMuted(NotificationMuteScope.PERSONAL_CHATS, nowMs)) return true
+        return chatDao.getChatById(chatId)?.mutedUntilMs?.let { it > nowMs } == true
     }
 
     /**

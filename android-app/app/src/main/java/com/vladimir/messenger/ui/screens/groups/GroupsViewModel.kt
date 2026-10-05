@@ -173,6 +173,13 @@ class GroupsViewModel @Inject constructor(
         }
     }
 
+    /** Поставить или снять личную паузу уведомлений группы/канала. */
+    fun setNotificationsMutedUntil(groupId: String, untilMs: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.setGroupMutedUntil(groupId, untilMs) }
+        }
+    }
+
     /**
      * Выйти из группы, а владельцу - удалить её. Решение принимается по роли,
      * поэтому экран не может случайно удалить чужую группу.

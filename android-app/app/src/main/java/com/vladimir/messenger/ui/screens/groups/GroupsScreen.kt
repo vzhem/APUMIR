@@ -6,6 +6,7 @@ package com.vladimir.messenger.ui.screens.groups
 
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
@@ -40,6 +41,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.vladimir.messenger.ui.components.ApuScrollbar
@@ -139,6 +142,7 @@ fun GroupsScreen(
     var createAsChannel by remember { mutableStateOf(create == "channel") }
     // Выход из группы и удаление - через подтверждение: это необратимо.
     var confirmLeave by remember { mutableStateOf<GroupSummary?>(null) }
+    var muteTarget by remember { mutableStateOf<GroupSummary?>(null) }
     // Как приглашать: показать QR при встрече или отправить ссылку.
     var inviteChoice by remember { mutableStateOf<GroupSummary?>(null) }
     // Готовый QR: название группы и ссылка со входом без одобрения.
@@ -332,6 +336,7 @@ fun GroupsScreen(
                                         onOpen = { onGroupClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
                                         onInvite = { inviteChoice = group },
+                                        onMute = { muteTarget = group },
                                         onMarkRead = { viewModel.markGroupRead(group.id) },
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
@@ -350,6 +355,7 @@ fun GroupsScreen(
                                         onOpen = { onChannelClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
                                         onInvite = { inviteChoice = group },
+                                        onMute = { muteTarget = group },
                                         onMarkRead = { viewModel.markGroupRead(group.id) },
                                         onLeaveOrDelete = { confirmLeave = group },
                                     ),
@@ -607,6 +613,22 @@ fun GroupsScreen(
                 )
             },
             confirmButton = { TextButton(onClick = { showRankHint = false }) { Text("Понятно") } },
+        )
+    }
+
+    muteTarget?.let { group ->
+        NotificationMuteDialog(
+            targetName = group.title,
+            mutedUntilMs = group.mutedUntilMs,
+            onSelectUntil = { untilMs ->
+                viewModel.setNotificationsMutedUntil(group.id, untilMs)
+                muteTarget = null
+            },
+            onTurnOn = {
+                viewModel.setNotificationsMutedUntil(group.id, 0L)
+                muteTarget = null
+            },
+            onDismiss = { muteTarget = null },
         )
     }
 }
@@ -1175,6 +1197,7 @@ private fun groupMenuActions(
     onOpen: () -> Unit,
     onAdmin: () -> Unit,
     onInvite: () -> Unit,
+    onMute: () -> Unit,
     onMarkRead: () -> Unit,
     onLeaveOrDelete: () -> Unit,
 ): List<BubbleMenuAction> = buildList {
@@ -1190,6 +1213,14 @@ private fun groupMenuActions(
             title = if (group.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
             icon = Icons.Filled.PersonAdd,
             onClick = onInvite,
+        )
+    )
+    val muted = group.mutedUntilMs > System.currentTimeMillis()
+    add(
+        BubbleMenuAction(
+            title = if (muted) "Включить уведомления" else "Отключить уведомления",
+            icon = if (muted) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
+            onClick = onMute,
         )
     )
     if (GroupRole.isAdminOrOwner(group.myRole)) {

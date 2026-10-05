@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.vladimir.messenger.ui.components.PeerProfileSheet
+import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -225,6 +226,7 @@ fun ChatDetailScreen(
 
     // Карточка собеседника: открывается тапом по имени в шапке.
     var showPeerProfile by remember { mutableStateOf(false) }
+    var showNotificationMuteDialog by remember { mutableStateOf(false) }
 
     // Карточка собеседника поверх переписки.
     if (showPeerProfile) {
@@ -354,6 +356,14 @@ fun ChatDetailScreen(
                             },
                         )
                     }
+                    val notificationsMuted = uiState.mutedUntilMs > System.currentTimeMillis()
+                    IconButton(onClick = { showNotificationMuteDialog = true }) {
+                        Icon(
+                            if (notificationsMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                            contentDescription = if (notificationsMuted) "Изменить паузу уведомлений" else "Отключить уведомления",
+                            tint = if (notificationsMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 },
             )
         },
@@ -362,6 +372,9 @@ fun ChatDetailScreen(
                 text         = uiState.inputText,
                 onTextChange = viewModel::onInputTextChanged,
                 onSend       = viewModel::onSendMessage,
+                replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) "Вы" else contactName },
+                replyText    = uiState.replyTo?.content.orEmpty(),
+                onClearReply = viewModel::clearReply,
                 isSending    = uiState.isSending,
                 isSelfChat   = uiState.isSelfChat,
                 canAttach    = uiState.canSendAttachments,
@@ -588,6 +601,9 @@ fun ChatDetailScreen(
                                             showCopyDialog = message
                                         }
                                     },
+                                    onSwipeReply = row.message?.let { message ->
+                                        { viewModel.startReply(message) }
+                                    },
                                 )
                                 // Реакции файла/гифки - той же строкой под пузырём,
                                 // что и у текстовых сообщений.
@@ -722,6 +738,7 @@ fun ChatDetailScreen(
                                     // владелец просил ставить их в один тап.
                                     // Остальные действия - долгое нажатие.
                                     onTap = { reactionFor = message.id },
+                                    onReply = { viewModel.startReply(message) },
                                     // Долгое нажатие открывает действия сразу -
                                     // как в группе. Раньше требовалось нажать
                                     // дважды, и «В избранное» никто не находил.
@@ -1000,6 +1017,21 @@ fun ChatDetailScreen(
             },
         )
     }
+    if (showNotificationMuteDialog) {
+        NotificationMuteDialog(
+            targetName = contactName,
+            mutedUntilMs = uiState.mutedUntilMs,
+            onSelectUntil = { untilMs ->
+                viewModel.setNotificationsMutedUntil(untilMs)
+                showNotificationMuteDialog = false
+            },
+            onTurnOn = {
+                viewModel.setNotificationsMutedUntil(0L)
+                showNotificationMuteDialog = false
+            },
+            onDismiss = { showNotificationMuteDialog = false },
+        )
+    }
     }
 }
 
@@ -1009,6 +1041,9 @@ private fun MessageInputBar(
     text: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
+    replyAuthor: String? = null,
+    replyText: String = "",
+    onClearReply: () -> Unit = {},
     isSending: Boolean,
     /** р241: переписка с собственным узлом - отправлять здесь нечего. */
     isSelfChat: Boolean = false,
@@ -1053,6 +1088,13 @@ private fun MessageInputBar(
             )
             .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
+        if (!replyAuthor.isNullOrBlank()) {
+            com.vladimir.messenger.ui.components.MessageReplyStrip(
+                author = replyAuthor,
+                text = replyText,
+                onClear = onClearReply,
+            )
+        }
         // Раунд 148: как в темах - при наборе скрепка и GIF уходят НАД
         // полем, «Отправить» - своим пузырём во всю ширину ПОД полем.
         var inputFocused by remember { mutableStateOf(false) }

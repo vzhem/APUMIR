@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import com.vladimir.messenger.ui.components.swipeBack
+import com.vladimir.messenger.ui.components.swipeToReply
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -63,6 +64,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
@@ -129,6 +132,7 @@ import com.vladimir.messenger.ui.theme.LocalMessengerColors
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.ApuMenuDots
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.FileCardState
@@ -165,6 +169,7 @@ fun GroupChatScreen(
     viewModel: GroupChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
     // второе устройство личности и возвращается, если чат открыть заново.
     var showNewTopic by remember { mutableStateOf(false) }
@@ -174,6 +179,7 @@ fun GroupChatScreen(
     var showEditTopic by remember { mutableStateOf(false) }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
     var showTopMenu by remember { mutableStateOf(false) }
+    var showNotificationMuteDialog by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
     var qrLink by remember { mutableStateOf<String?>(null) }
     var qrLoading by remember { mutableStateOf(false) }
@@ -492,6 +498,22 @@ fun GroupChatScreen(
     // название группы уходит в подзаголовок: раньше имя темы шло мелким
     // серым «дом · 3 участн.», и было не видно, куда зашёл.
     val topicHeader = !isChannel && hasTopics && showFeed && selectedTopic != null
+    // В открытой теме группы или ветке комментариев канала настраиваем паузу
+    // именно для неё; в списке тем/ленте канала - для всей группы или канала.
+    val muteTopicId = if (
+        showFeed && !uiState.selectedTopicId.isNullOrBlank() && (topicHeader || isChannel)
+    ) uiState.selectedTopicId else null
+    val muteUntilMs = remember(muteRevision, muteTopicId, uiState.group?.mutedUntilMs) {
+        if (muteTopicId != null) viewModel.topicMutedUntilMs(muteTopicId)
+        else uiState.group?.mutedUntilMs ?: 0L
+    }
+    val muteTargetName = when {
+        muteTopicId != null && isChannel -> "Комментарии к «${selectedTopicName ?: "публикации"}»"
+        muteTopicId != null -> "Тема «${selectedTopicName ?: "группы"}»"
+        isChannel -> uiState.group?.title ?: "Канал"
+        else -> uiState.group?.title ?: "Группа"
+    }
+    val notificationsMuted = muteUntilMs > System.currentTimeMillis()
     // Системный жест «Назад» (смахивание от края экрана, в т.ч. справа
     // налево) и кнопка «Назад» телефона. Без этого перехватчика Android
     // закрывал весь экран группы, и из темы человек попадал сразу в список
@@ -655,8 +677,7 @@ fun GroupChatScreen(
                     IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Управление группой")
                     }
-                    // Раунд 213: «три точки» шапки группы/канала - сейчас тут
-                    // приглашение по QR, дальше дополним по просьбам владельца.
+                    // Действия группы/канала и уведомлений собраны в «три точки».
                     Box {
                         IconButton(onClick = { showTopMenu = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
@@ -665,6 +686,15 @@ fun GroupChatScreen(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
+                                ApuAction(
+                                    title = if (notificationsMuted) "Включить уведомления" else "Отключить уведомления",
+                                    icon = if (notificationsMuted) {
+                                        Icons.Default.NotificationsActive
+                                    } else {
+                                        Icons.Default.NotificationsOff
+                                    },
+                                    onClick = { showNotificationMuteDialog = true },
+                                ),
                                 ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
                                     showQrInvite = true
                                 },
@@ -1341,6 +1371,30 @@ fun GroupChatScreen(
             onDismiss = { showQrInvite = false },
         )
     }
+
+    if (showNotificationMuteDialog) {
+        NotificationMuteDialog(
+            targetName = muteTargetName,
+            mutedUntilMs = muteUntilMs,
+            onSelectUntil = { untilMs ->
+                if (muteTopicId != null) {
+                    viewModel.setTopicNotificationsMutedUntil(muteTopicId, untilMs)
+                } else {
+                    viewModel.setGroupNotificationsMutedUntil(untilMs)
+                }
+                showNotificationMuteDialog = false
+            },
+            onTurnOn = {
+                if (muteTopicId != null) {
+                    viewModel.setTopicNotificationsMutedUntil(muteTopicId, 0L)
+                } else {
+                    viewModel.setGroupNotificationsMutedUntil(0L)
+                }
+                showNotificationMuteDialog = false
+            },
+            onDismiss = { showNotificationMuteDialog = false },
+        )
+    }
 }
 
 // =============================================================================
@@ -1883,6 +1937,7 @@ private fun MessageBubble(
         ApuBubbleCard(
             modifier = Modifier
                 .widthIn(max = 300.dp)
+                .swipeToReply { onReply() }
                 .combinedClickable(
                     // В режиме выбора клик отмечает сообщение; иначе - реакции / меню действий.
                     onClick = { if (selectionMode) onToggleSelect() else showReactions = true },

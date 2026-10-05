@@ -85,6 +85,14 @@ import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.ui.components.InviteAttachDialog
+import com.vladimir.messenger.ui.components.NotificationMuteDialog
+
+private data class NotificationMuteTarget(
+    val id: String,
+    val title: String,
+    val mutedUntilMs: Long,
+    val isGroupOrChannel: Boolean,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,6 +139,7 @@ fun ChatListScreen(
     // Раунд 175: «Поделиться контактом» из списка чатов - выбор адресата в APU.
     var shareCardFor by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var muteTarget by remember { mutableStateOf<NotificationMuteTarget?>(null) }
 
     // Листалка разделов. Страницы едут за пальцем, поэтому выбранный раздел и
     // страница обязаны ходить парой: тап по чипсу листает страницу, а
@@ -412,13 +421,23 @@ fun ChatListScreen(
                             viewModel.setChatArchived(chat.id, !chat.isArchived)
                         },
                         onTogglePersonalMute = { chat ->
-                            viewModel.setChatMuted(chat.id, !chat.isMuted())
+                            muteTarget = NotificationMuteTarget(
+                                id = chat.id,
+                                title = chat.contactName,
+                                mutedUntilMs = chat.mutedUntilMs,
+                                isGroupOrChannel = false,
+                            )
                         },
                         onToggleGroupArchive = { group ->
                             viewModel.setGroupArchived(group.id, !group.isArchived)
                         },
                         onToggleGroupMute = { group ->
-                            viewModel.setGroupMuted(group.id, !group.isMuted())
+                            muteTarget = NotificationMuteTarget(
+                                id = group.id,
+                                title = group.title,
+                                mutedUntilMs = group.mutedUntilMs,
+                                isGroupOrChannel = true,
+                            )
                         },
                         onLoadMore = viewModel::loadMore,
                     )
@@ -796,6 +815,30 @@ fun ChatListScreen(
         )
     }
 
+    muteTarget?.let { target ->
+        NotificationMuteDialog(
+            targetName = target.title,
+            mutedUntilMs = target.mutedUntilMs,
+            onSelectUntil = { untilMs ->
+                if (target.isGroupOrChannel) {
+                    viewModel.setGroupMutedUntil(target.id, untilMs)
+                } else {
+                    viewModel.setChatMutedUntil(target.id, untilMs)
+                }
+                muteTarget = null
+            },
+            onTurnOn = {
+                if (target.isGroupOrChannel) {
+                    viewModel.setGroupMutedUntil(target.id, 0L)
+                } else {
+                    viewModel.setChatMutedUntil(target.id, 0L)
+                }
+                muteTarget = null
+            },
+            onDismiss = { muteTarget = null },
+        )
+    }
+
     // Connect dialog
     if (showConnectDialog) {
         AlertDialog(
@@ -1092,7 +1135,7 @@ private fun SectionPage(
                                         onClick = { onTogglePersonalArchive(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = if (item.chat.isMuted()) "Включить звук" else "Без звука",
+                                        title = if (item.chat.isMuted()) "Включить уведомления" else "Отключить уведомления",
                                         icon = if (item.chat.isMuted()) {
                                             Icons.Default.NotificationsActive
                                         } else {
@@ -1141,7 +1184,7 @@ private fun SectionPage(
                                     )
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isMuted()) "Включить звук" else "Без звука",
+                                            title = if (item.group.isMuted()) "Включить уведомления" else "Отключить уведомления",
                                             icon = if (item.group.isMuted()) {
                                                 Icons.Default.NotificationsActive
                                             } else {
