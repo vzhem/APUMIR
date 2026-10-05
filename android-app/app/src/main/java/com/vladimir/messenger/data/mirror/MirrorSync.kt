@@ -355,6 +355,20 @@ object MirrorHub {
     }
 
     /**
+     * р249: архив и «без звука» - партнёрскому устройству.
+     *
+     * Флаги живут в базе каждого устройства, поэтому без кадра телефоны
+     * расходились: убрал чат в архив здесь - на втором он остался в списке.
+     * Ключ переписки устойчивый (узел собеседника или идентификатор группы),
+     * поэтому кадр одинаково понимают оба устройства.
+     */
+    fun publishChatFlags(kind: String, itemId: String, archived: Boolean, mutedUntilMs: Long) {
+        if (kind.isBlank() || itemId.isBlank()) return
+        if (isApplyingFrame()) return
+        runCatching { channel?.publishChatFlags(kind, itemId, archived, mutedUntilMs) }
+    }
+
+    /**
      * р249: удаление сообщения «у меня» - партнёрскому устройству.
      *
      * Раньше «удалить у себя» жило только на том телефоне, где его сделали:
@@ -514,6 +528,18 @@ class MirrorChannel(
          * ту же строку и здесь (собеседнику удаление не уходит).
          */
         suspend fun onDeleteForMeFromPartner(peerId: String, groupId: String, messageId: String)
+        /**
+         * р249: на партнёрском устройстве изменили архив или звук переписки.
+         *
+         * @param kind «p» - личный чат (ключ - узел собеседника), «g» - группа
+         *             или канал (ключ - идентификатор группы).
+         */
+        suspend fun onChatFlagsFromPartner(
+            kind: String,
+            itemId: String,
+            archived: Boolean,
+            mutedUntilMs: Long,
+        )
         /** Home-inbox conversation pin changed on the partner device. */
         suspend fun onInboxPinFromPartner(
             kind: String,
@@ -673,6 +699,24 @@ class MirrorChannel(
                 JSONObject().put("id", messageId).put("on", if (pinned) 1 else 0),
             ) ?: return@launch
             sendJson(JSONObject().put("t", "ev").put("k", "pin").put("d", sealed))
+        }
+    }
+
+    /**
+     * р249: архив и «без звука» - партнёрскому устройству. Кадр крошечный и
+     * идемпотентный: повторная отправка того же состояния ничего не ломает.
+     */
+    fun publishChatFlags(kind: String, itemId: String, archived: Boolean, mutedUntilMs: Long) {
+        if (wsRef.get() == null) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(
+                JSONObject()
+                    .put("k", kind)
+                    .put("id", itemId)
+                    .put("a", if (archived) 1 else 0)
+                    .put("m", mutedUntilMs),
+            ) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "chatflag").put("d", sealed))
         }
     }
 
@@ -1471,6 +1515,24 @@ class MirrorChannel(
                             itemId = id,
                             pinned = body.optInt("on", 0) == 1,
                             pinnedAtMs = body.optLong("at", 0L),
+                        )
+                    }
+                }
+            }
+            "chatflag" -> {
+                // р249: архив/звук изменились на партнёре - привести свою базу
+                // к тому же виду. Кадр про личное состояние владельца, в сеть
+                // не уходит; повторной рассылки нет.
+                val body = openPayload(wire) ?: return
+                val id = body.optString("id")
+                if (id.isBlank()) return
+                scope.launch {
+                    MirrorHub.duringApply {
+                        bridge.onChatFlagsFromPartner(
+                            kind = body.optString("k"),
+                            itemId = id,
+                            archived = body.optInt("a", 0) == 1,
+                            mutedUntilMs = body.optLong("m", 0L),
                         )
                     }
                 }

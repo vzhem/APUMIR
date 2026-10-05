@@ -1095,6 +1095,13 @@ class CoreServerService : Service() {
         ) {
             val (chatId, name) = chatRepository.applyMirrorIncoming(row)
             if (notify) {
+                // р249: у заглушённого чата уведомления не показываем - иначе
+                // «без звука» значило бы только «без звука», но не «без
+                // уведомления», и человек всё равно видел бы строку в шторке.
+                if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
+                    Log.i(TAG, "notification suppressed: чат без звука (зеркало)")
+                    return
+                }
                 runCatching {
                     notificationHelper.showMessageNotification(
                         chatId,
@@ -1198,6 +1205,21 @@ class CoreServerService : Service() {
                         else -> Unit
                     }
                 }
+        }
+
+        override suspend fun onChatFlagsFromPartner(
+            kind: String,
+            itemId: String,
+            archived: Boolean,
+            mutedUntilMs: Long,
+        ) {
+            runCatching {
+                if (kind == com.vladimir.messenger.data.repository.ChatRepository.CHAT_FLAG_GROUP) {
+                    groupRepository.applyMirrorChatFlags(itemId, archived, mutedUntilMs)
+                } else {
+                    chatRepository.applyMirrorChatFlags(itemId, archived, mutedUntilMs)
+                }
+            }.onFailure { Log.w(TAG, "Mirror chat flags failed: ${it.message}") }
         }
 
         override suspend fun onDeleteForMeFromPartner(
@@ -1639,6 +1661,19 @@ class CoreServerService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * р249: звук этой переписки выключен - личный чат это или группа.
+     *
+     * Уведомление молчит целиком: «без звука» в телефоне означает «не тревожь»,
+     * а не «не звони, но строку в шторке покажи». Срок живёт в базе, поэтому
+     * «без звука» снимается само - гасить его таймером не нужно.
+     */
+    private suspend fun isMutedForNotifications(chatId: String): Boolean {
+        if (chatId.isBlank()) return false
+        if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) return true
+        return runCatching { groupRepository.isGroupMuted(chatId) }.getOrDefault(false)
+    }
+
     private fun startEventPolling() {
         
         // Observer for incoming messages → show notifications
@@ -1664,6 +1699,14 @@ class CoreServerService : Service() {
                     }
                     for (msg in recentIncoming) {
                         try {
+                            // р249: «без звука» - ни уведомления, ни звука.
+                            // Проверяем и личный чат, и группу: у сообщения
+                            // один chatId, а чем он окажется - решаем по базе
+                            // (два дешёвых запроса по первичному ключу).
+                            if (isMutedForNotifications(msg.chatId)) {
+                                Log.i(TAG, "notification suppressed: без звука ${msg.chatId.take(12)}")
+                                continue
+                            }
                             // Тема/пост, где написано сообщение: тап открывает
                             // именно его. Вызов позиционный: именованные
                             // аргументы + значение по умолчанию ловили

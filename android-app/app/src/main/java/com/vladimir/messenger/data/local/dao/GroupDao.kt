@@ -96,6 +96,18 @@ interface GroupDao {
     @Query("SELECT * FROM groups WHERE id = :groupId")
     suspend fun getGroupById(groupId: String): GroupEntity?
 
+    /** р249: убрать группу или канал в архив (строка и история целы). */
+    @Query("UPDATE groups SET archived = :archived WHERE id = :groupId")
+    suspend fun setArchived(groupId: String, archived: Boolean)
+
+    /** р249: выключить звук до :untilMs (0 - включить обратно). */
+    @Query("UPDATE groups SET mutedUntilMs = :untilMs WHERE id = :groupId")
+    suspend fun setMutedUntil(groupId: String, untilMs: Long)
+
+    /** р249: звук выключен прямо сейчас (см. ChatDao.countMuted про COUNT(*)). */
+    @Query("SELECT COUNT(*) FROM groups WHERE id = :groupId AND mutedUntilMs > :nowMs")
+    suspend fun countMuted(groupId: String, nowMs: Long): Int
+
     @Query("SELECT * FROM groups WHERE id = :groupId")
     fun observeGroup(groupId: String): Flow<GroupEntity?>
 

@@ -38,7 +38,17 @@ class ChatRepository @Inject constructor(
     // Полная досылка неподтверждённого - вещь дорогая (до 50 сообщений разом),
     // поэтому одному собеседнику не чаще раза в 5 минут.
     private val FULL_SYNC_COOLDOWN_MS = 300_000L
+
     companion object {
+        /** р249: ключ кадра флагов - личный чат (узел собеседника). */
+        const val CHAT_FLAG_PERSONAL = "p"
+
+        /** р249: ключ кадра флагов - группа или канал (идентификатор группы). */
+        const val CHAT_FLAG_GROUP = "g"
+
+        /** р249: «без звука» без срока - навсегда, пока человек не включит обратно. */
+        const val MUTED_FOREVER_MS = Long.MAX_VALUE
+
         private const val TAG = "ChatRepository"
     }
 
@@ -947,6 +957,65 @@ class ChatRepository @Inject constructor(
         chatDao.markAsRead(chatId)
     }
 
+    // ── р249: архив и «без звука» ──────────────────────────────────────────
+
+    /**
+     * Убрать чат в архив (или вернуть из него). Переписка остаётся целиком:
+     * архив - это только про место чата в списке.
+     */
+    suspend fun setChatArchived(chatId: String, archived: Boolean) {
+        chatDao.setArchived(chatId, archived)
+        val chat = chatDao.getChatById(chatId) ?: return
+        if (chat.contactId.isBlank()) return
+        // р249: второе устройство той же личности должно показать то же.
+        com.vladimir.messenger.data.mirror.MirrorHub.publishChatFlags(
+            kind = CHAT_FLAG_PERSONAL,
+            itemId = chat.contactId,
+            archived = archived,
+            mutedUntilMs = chat.mutedUntilMs,
+        )
+    }
+
+    /**
+     * Выключить (или включить обратно) звук чата. Срок, а не простая отметка:
+     * «без звука» само отключается, когда срок вышел, - держать состояние в
+     * базе и отдельно гасить его таймером было бы лишним.
+     */
+    suspend fun setChatMuted(chatId: String, muted: Boolean) {
+        val until = if (muted) MUTED_FOREVER_MS else 0L
+        chatDao.setMutedUntil(chatId, until)
+        val chat = chatDao.getChatById(chatId) ?: return
+        if (chat.contactId.isBlank()) return
+        com.vladimir.messenger.data.mirror.MirrorHub.publishChatFlags(
+            kind = CHAT_FLAG_PERSONAL,
+            itemId = chat.contactId,
+            archived = chat.archived,
+            mutedUntilMs = until,
+        )
+    }
+
+    /** Звук чата выключен прямо сейчас (срок в базе ещё не истёк). */
+    suspend fun isChatMuted(chatId: String): Boolean =
+        runCatching { chatDao.countMuted(chatId, System.currentTimeMillis()) > 0 }
+            .getOrDefault(false)
+
+    /**
+     * р249: архив/звук изменились на партнёрском устройстве - привести свою
+     * базу к тому же виду. Ключ - узел собеседника: номер чата у каждого
+     * устройства свой. Своего кадра здесь не будет (кадр применяется под
+     * `duringApply`), поэтому петли нет.
+     */
+    suspend fun applyMirrorChatFlags(contactId: String, archived: Boolean, mutedUntilMs: Long) {
+        if (contactId.isBlank()) return
+        val chats = chatDao.getChatsByContactId(contactId)
+        if (chats.isEmpty()) return
+        for (chat in chats) {
+            chatDao.setArchived(chat.id, archived)
+            chatDao.setMutedUntil(chat.id, mutedUntilMs)
+        }
+        Log.i(TAG, "mirror chat flags: $contactId архив=$archived звук до $mutedUntilMs")
+    }
+
     /** р230: есть ли уже строка с таким идентификатором (для зеркала файлов). */
     suspend fun messageExists(messageId: String): Boolean = messageDao.messageExists(messageId)
 
@@ -970,6 +1039,8 @@ class ChatRepository @Inject constructor(
         isContactOnline = isContactOnline,
         isPinned = pinnedAtMs != null,
         pinnedAtMs = pinnedAtMs,
+        isArchived = archived,
+        mutedUntilMs = mutedUntilMs,
     )
 
     private fun MessageEntity.toDomain() = Message(

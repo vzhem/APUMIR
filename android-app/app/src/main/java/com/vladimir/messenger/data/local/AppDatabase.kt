@@ -49,7 +49,7 @@ import com.vladimir.messenger.data.local.dao.PostSignerDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 23
+const val APP_DATABASE_VERSION = 24
 
 @Database(
     entities = [
@@ -464,6 +464,31 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `chats` ADD COLUMN `pinnedAtMs` INTEGER")
                 db.execSQL("ALTER TABLE `groups` ADD COLUMN `pinnedAtMs` INTEGER")
+            }
+        }
+
+        /**
+         * р249: архив и «без звука» у чатов, групп и каналов.
+         *
+         * Аддитивная миграция: существующие строки не переписываются, оба
+         * флага по умолчанию выключены (архив пуст, звук включён). Флаги
+         * живут рядом с закрепом главного списка и так же уезжают на второе
+         * устройство личности кадром зеркала.
+         */
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `chats` ADD COLUMN `archived` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE `chats` ADD COLUMN `mutedUntilMs` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE `groups` ADD COLUMN `archived` INTEGER NOT NULL DEFAULT 0"
+                )
+                db.execSQL(
+                    "ALTER TABLE `groups` ADD COLUMN `mutedUntilMs` INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
 

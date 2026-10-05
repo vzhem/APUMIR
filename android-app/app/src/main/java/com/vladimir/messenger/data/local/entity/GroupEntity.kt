@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -38,4 +39,10 @@ data class GroupEntity(
     val unreadCount: Int = 0,
     /** Pin timestamp in the mixed home inbox; null means unpinned. */
     val pinnedAtMs: Long? = null,
+    /** р249: группа или канал убраны в архив (строка цела, в общем списке не видна). */
+    @ColumnInfo(defaultValue = "0")
+    val archived: Boolean = false,
+    /** р249: звук выключен до этого времени (0 - звук включён). */
+    @ColumnInfo(defaultValue = "0")
+    val mutedUntilMs: Long = 0L,
 )
