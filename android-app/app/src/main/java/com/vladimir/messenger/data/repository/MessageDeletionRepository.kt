@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.repository
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ChatDao
+import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MessageReactionDao
 import com.vladimir.messenger.util.InlineImage
@@ -35,6 +36,7 @@ class MessageDeletionRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val reactionDao: MessageReactionDao,
     private val outbox: DeletionOutbox,
+    private val groupDao: GroupDao,
 ) {
 
     /** Удалить сообщение только у себя (в любом чате). */
@@ -46,8 +48,65 @@ class MessageDeletionRepository @Inject constructor(
                 return@withContext Result.failure(IllegalArgumentException("Сообщение из другого чата"))
             }
             deleteLocal(chatId, messageId)
+            // р249: строка стёрта здесь - пусть исчезнет и на втором устройстве
+            // личности. Собеседнику такое удаление не уходит: это личное дело
+            // владельца переписки.
+            publishDeleteForMe(chatId, messageId)
             Result.success(Unit)
         }
+
+    /**
+     * р249: рассказать партнёрскому устройству об удалении «у меня».
+     *
+     * Идентификаторы чатов на устройствах СВОИ, поэтому в кадр уходят не они,
+     * а устойчивые ключи переписки: узел собеседника (личный чат) или
+     * идентификатор группы/канала (он один на всех устройствах).
+     */
+    private suspend fun publishDeleteForMe(chatId: String, messageId: String) {
+        if (chatId.isBlank() || messageId.isBlank()) return
+        if (MirrorHub.isApplyingFrame()) return
+        val (peerId, groupId) = conversationKeys(chatId)
+        if (peerId.isBlank() && groupId.isBlank()) return
+        MirrorHub.publishDeleteForMe(peerId, groupId, messageId)
+    }
+
+    /** Устойчивые ключи переписки: узел собеседника и (или) идентификатор группы. */
+    private suspend fun conversationKeys(chatId: String): Pair<String, String> {
+        if (runCatching { groupDao.getGroupById(chatId) != null }.getOrDefault(false)) {
+            return "" to chatId
+        }
+        val contact = runCatching { chatDao.getChatById(chatId)?.contactId }.getOrNull().orEmpty()
+        return contact to ""
+    }
+
+    /**
+     * р249: партнёрское устройство удалило сообщение «у меня» - стереть ту же
+     * строку и здесь. Идентификатор сообщения на обоих устройствах один и тот
+     * же (его задаёт отправитель), а чат находим по устойчивому ключу: узел
+     * собеседника или идентификатор группы.
+     *
+     * @return true - кадр распознан (строка стёрта или её здесь нет).
+     */
+    suspend fun applyMirrorDeleteForMe(
+        peerId: String,
+        groupId: String,
+        messageId: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (messageId.isBlank()) return@withContext true
+        val chatId = if (groupId.isNotBlank()) {
+            groupId
+        } else {
+            if (peerId.isBlank()) return@withContext false
+            chatDao.getChatByContactId(peerId)?.id ?: return@withContext false
+        }
+        val message = messageDao.getMessageById(messageId) ?: return@withContext false
+        // Граница чата обязательна: чужой кадр не должен стирать строки вне
+        // переписки, о которой в нём сказано.
+        if (message.chatId != chatId) return@withContext false
+        deleteLocal(chatId, messageId)
+        Log.i(TAG, "mirror delete-for-me applied id=$messageId")
+        true
+    }
 
     /**
      * Удалить своё сообщение У ВСЕХ (личный чат): конверт собеседнику и
@@ -111,7 +170,12 @@ class MessageDeletionRepository @Inject constructor(
         if (peerId.isBlank() || targetId.isBlank()) return true
         withContext(Dispatchers.IO) {
             val chat = chatDao.getChatByContactId(peerId) ?: return@withContext
-            val removed = messageDao.deleteByIdChatAndSender(targetId, chat.id, peerId)
+            // р249: удаление сделано САМИМ владельцем на втором устройстве,
+            // поэтому стирается его собственное сообщение, а не строка
+            // собеседника: фильтр по отправителю (peerId) здесь ошибочен и
+            // не находил ничего - после такого удаления строка оставалась на
+            // активном устройстве, хотя собеседнику уже ушло «удали у всех».
+            val removed = messageDao.deleteByIdAndChat(targetId, chat.id)
             if (removed > 0) {
                 reactionDao.deleteForMessage(targetId)
                 refreshPreview(chat.id)

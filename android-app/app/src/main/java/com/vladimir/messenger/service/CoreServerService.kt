@@ -1196,6 +1196,15 @@ class CoreServerService : Service() {
                 }
         }
 
+        override suspend fun onDeleteForMeFromPartner(
+            peerId: String,
+            groupId: String,
+            messageId: String,
+        ) {
+            runCatching { messageDeletion.applyMirrorDeleteForMe(peerId, groupId, messageId) }
+                .onFailure { Log.w(TAG, "Mirror delete-for-me failed: ${it.message}") }
+        }
+
         override suspend fun onInboxPinFromPartner(
             kind: String,
             itemId: String,

@@ -381,6 +381,18 @@ interface MessageDao {
     suspend fun deleteByIdChatAndSender(messageId: String, chatId: String, senderId: String): Int
 
     /**
+     * р249: стереть сообщение по его идентификатору внутри известного чата.
+     *
+     * Отличается от [deleteByIdChatAndSender] тем, что не проверяет
+     * отправителя: «удалить у себя» и зеркальное удаление приходят от самого
+     * владельца, а отправитель строки может быть любым (своё сообщение или
+     * чужое). Границы чата проверяем обязательно - иначе кадром из другой
+     * переписки можно было бы стереть чужую строку.
+     */
+    @Query("DELETE FROM messages WHERE id = :messageId AND chatId = :chatId")
+    suspend fun deleteByIdAndChat(messageId: String, chatId: String): Int
+
+    /**
      * Стереть все сообщения группы. У messages нет внешнего ключа на groups,
      * поэтому каскад их не убирает — чистим явно при удалении группы.
      */

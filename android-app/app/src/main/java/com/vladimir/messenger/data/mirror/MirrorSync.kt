@@ -355,6 +355,22 @@ object MirrorHub {
     }
 
     /**
+     * р249: удаление сообщения «у меня» - партнёрскому устройству.
+     *
+     * Раньше «удалить у себя» жило только на том телефоне, где его сделали:
+     * строка исчезала здесь и оставалась на втором - устройства расходились
+     * именно в этом месте. Собеседнику такое удаление не уходит (это личное
+     * дело владельца переписки), поэтому кадра с устойчивым ключом чата и
+     * идентификатором сообщения достаточно.
+     */
+    fun publishDeleteForMe(peerId: String, groupId: String, messageId: String) {
+        if (messageId.isBlank()) return
+        if (peerId.isBlank() && groupId.isBlank()) return
+        if (isApplyingFrame()) return
+        runCatching { channel?.publishDeleteForMe(peerId, groupId, messageId) }
+    }
+
+    /**
      * р246: снимок профиля (имя, ник, тема, аватар, обои) - партнёрскому
      * устройству. Живая синхронизация профиля: изменил на одном телефоне -
      * второй подтянет сам, без полной копии и перезапуска.
@@ -493,6 +509,11 @@ class MirrorChannel(
         suspend fun onDraftFromPartner(key: String, text: String)
         /** р238: сообщение закреплено/откреплено на партнёрском устройстве. */
         suspend fun onPinFromPartner(messageId: String, pinned: Boolean)
+        /**
+         * р249: на партнёрском устройстве удалили сообщение «у меня» - стереть
+         * ту же строку и здесь (собеседнику удаление не уходит).
+         */
+        suspend fun onDeleteForMeFromPartner(peerId: String, groupId: String, messageId: String)
         /** Home-inbox conversation pin changed on the partner device. */
         suspend fun onInboxPinFromPartner(
             kind: String,
@@ -536,6 +557,9 @@ class MirrorChannel(
     private var catchupInFlight = false
     /** р231: когда в последний раз просили движок (передача роли). */
     @Volatile private var lastClaimAt = 0L
+
+    /** р249: когда в последний раз досылали накопленные исходящие тени. */
+    @Volatile private var lastPendingFlushAt = 0L
 
     /** Ведёт ли ЭТО устройство сеть (активное) или живёт зеркалом. */
     fun isEngineUp(): Boolean = engineUp
@@ -649,6 +673,26 @@ class MirrorChannel(
                 JSONObject().put("id", messageId).put("on", if (pinned) 1 else 0),
             ) ?: return@launch
             sendJson(JSONObject().put("t", "ev").put("k", "pin").put("d", sealed))
+        }
+    }
+
+    /**
+     * р249: удаление сообщения «у меня» - партнёрскому устройству.
+     *
+     * Ключ переписки устойчивый (узел собеседника или идентификатор группы),
+     * поэтому партнёр найдёт у себя ту же строку по идентификатору сообщения,
+     * даже если номер его чата другой.
+     */
+    fun publishDeleteForMe(peerId: String, groupId: String, messageId: String) {
+        if (wsRef.get() == null) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sealed = sealPayload(
+                JSONObject()
+                    .put("p", peerId)
+                    .put("g", groupId)
+                    .put("id", messageId),
+            ) ?: return@launch
+            sendJson(JSONObject().put("t", "ev").put("k", "delf").put("d", sealed))
         }
     }
 
@@ -1182,6 +1226,9 @@ class MirrorChannel(
     private fun onPartnerFrame(obj: JSONObject) {
         val dev = obj.optString("dev")
         if (dev.isBlank() || dev == deviceTag) return
+        // р249: партнёра только что не было видно - запоминаем, чтобы тень
+        // дослала накопленные исходящие (см. flushPendingOutgoing).
+        val partnerAppeared = !partnerFresh()
         partnerDev = dev
         partnerEng = obj.optInt("eng") == 1
         partnerSince = obj.optLong("since", 0L).takeIf { it > 0 } ?: Long.MAX_VALUE
@@ -1190,6 +1237,9 @@ class MirrorChannel(
         partnerMaxTs = max
         partnerLastSeen = System.currentTimeMillis()
         maybeCatchup(force = becameFreshMax)
+        // р249: партнёр объявился - у тени могли копиться исходящие, которым
+        // некому было уйти (писали при отсутствующем активном).
+        if (partnerAppeared) flushPendingOutgoing()
         // р246: отпечаток профиля партнёра отличается от нашего - запросить
         // полный снимок и слиться (онлайн-поиск расхождений профиля).
         ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
@@ -1425,6 +1475,23 @@ class MirrorChannel(
                     }
                 }
             }
+            "delf" -> {
+                // р249: на партнёре удалили сообщение «у меня» - стереть ту же
+                // строку и здесь. Собственное удаление партнёра, поэтому
+                // повторной рассылки нет (кадр не проходит через сеть).
+                val body = openPayload(wire) ?: return
+                val messageId = body.optString("id")
+                if (messageId.isBlank()) return
+                scope.launch {
+                    MirrorHub.duringApply {
+                        bridge.onDeleteForMeFromPartner(
+                            peerId = body.optString("p"),
+                            groupId = body.optString("g"),
+                            messageId = messageId,
+                        )
+                    }
+                }
+            }
             "draft" -> {
                 // р236: черновик с партнёрского устройства - положить под тот
                 // же ключ (открытый чат подхватит текст сам).
@@ -1611,12 +1678,32 @@ class MirrorChannel(
             ProfileMirror.publishNow(context)
         }
         // Тень: невостребованные исходящие (ушли, пока партнёра не было).
-        if (!engineUp) {
-            scope.launch {
-                bridge.pendingOutgoing(50).forEach { row ->
+        flushPendingOutgoing()
+    }
+
+    /**
+     * р249: дослать исходящие, которые тень накопила без партнёра.
+     *
+     * Раньше это делалось только в момент открытия соединения: если WS уже
+     * был жив, а активный появился позже (или перезапустился), строки так и
+     * висели `PENDING` до следующего переподключения - владелец видел
+     * «висит одна галочка» без всякой причины. Теперь догон зовётся и отсюда,
+     * и из появления партнёра; повторы режет пауза (иначе одна и та же строка
+     * ушла бы собеседнику дважды: она остаётся PENDING до подтверждения).
+     */
+    private fun flushPendingOutgoing() {
+        if (engineUp) return
+        if (!partnerEng) return
+        if (wsRef.get() == null) return
+        val now = System.currentTimeMillis()
+        if (now - lastPendingFlushAt < PENDING_FLUSH_COOLDOWN_MS) return
+        lastPendingFlushAt = now
+        scope.launch {
+            runCatching {
+                bridge.pendingOutgoing(PENDING_FLUSH_ROWS).forEach { row ->
                     publishOutgoing(row)
                 }
-            }
+            }.onFailure { Log.w(TAG, "pending flush failed: ${it.message}") }
         }
     }
 
@@ -1675,5 +1762,11 @@ class MirrorChannel(
 
         /** р236: черновик длиннее этого в кадр зеркала не кладём (кадр - 512 КиБ). */
         private const val DRAFT_MAX_CHARS = 8_000
+
+        /** р249: сколько накопленных строк тень досылает за один заход. */
+        private const val PENDING_FLUSH_ROWS = 50
+
+        /** р249: как часто повторять досылку накопленных исходящих. */
+        private const val PENDING_FLUSH_COOLDOWN_MS = 20_000L
     }
 }
