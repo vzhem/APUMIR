@@ -3,6 +3,7 @@ package com.vladimir.messenger.ui.screens.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.diagnostics.MqttLinkText
 import com.vladimir.messenger.data.notification.NotificationMuteScope
 import com.vladimir.messenger.data.notification.NotificationMuteStore
 import com.vladimir.messenger.util.OwnInvite
@@ -643,7 +644,7 @@ class SettingsViewModel @Inject constructor(
             // Раунд 190: человекочитаемая версия той же строки. Ядро не
             // трогаем - разбор на стороне приложения; если формат когда-
             // нибудь изменится, вернётся пусто и экран покажет сырую.
-            val mqttHuman = humanizeMqttLine(mqttLine)
+            val mqttHuman = MqttLinkText.humanize(mqttLine)
 
             _uiState.update {
                 it.copy(
@@ -721,76 +722,6 @@ class SettingsViewModel @Inject constructor(
             }
             // ерезагрузить UI чтобы показать обновлённое количество пиров
             loadSettings()
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Раунд 190: «Сообщения сети» по-человечески. Сырая строка ядра
-    // («MQTT: <режим>, ConnAck N с назад[, ошибка N с назад: текст]»)
-    // переводится в понятные фразы. Логика статуса: что произошло ПОЗЖЕ -
-    // то и состояние. ConnAck приходит раз на (пере)подключение, поэтому
-    // «связь подтверждена N назад» = сколько живёт текущая сессия.
-    // ------------------------------------------------------------------
-
-    /** Человекочитаемая строка состояния; пусто = экран покажет сырую. */
-    private fun humanizeMqttLine(raw: String): String {
-        if (!raw.startsWith("MQTT: ")) return ""
-        val body = raw.removePrefix("MQTT: ")
-
-        // Путь. Адрес сервера не показываем (просьба владельца, 2026-09-19).
-        val mode = body.substringBefore(", ConnAck").trim()
-        val path = when {
-            mode.isEmpty() -> return ""
-            mode.startsWith("wss") -> "через обходной канал"
-            mode.contains("наш брокер") &&
-                (mode.contains("переход") || mode.contains("не ответили")) ->
-                "через наш сервер (прямой путь не прошёл)"
-            mode.contains("наш брокер") -> "через наш сервер"
-            mode.contains("SOCKS5") -> "через мост"
-            mode.startsWith("tcp") -> "напрямую"
-            else -> mode
-        }
-
-        val connAckSec = Regex("ConnAck (\\d+) с назад").find(body)
-            ?.groupValues?.get(1)?.toIntOrNull()
-        val errMatch = Regex(", ошибка (\\d+) с назад: (.+)$").find(body)
-        val errSec = errMatch?.groupValues?.get(1)?.toIntOrNull()
-        val errText = errMatch?.groupValues?.get(2)?.trim().orEmpty()
-
-        val head = when {
-            connAckSec != null && (errSec == null || connAckSec <= errSec) ->
-                "🟢 На связи (подтверждена ${mqttHumanAgo(connAckSec)})"
-            connAckSec != null ->
-                "🟡 Был перебой ${mqttHumanAgo(errSec ?: 0)} — подключаемся снова сами"
-            errSec != null ->
-                "🟡 Нет ответа, соединение восстанавливается автоматически " +
-                    "(${mqttHumanError(errText)})"
-            else ->
-                "🟡 Подключаемся…"
-        }
-        return "$head · $path"
-    }
-
-    /** «45 с назад» / «6 мин назад» / «3 ч назад» / «2 дн назад». */
-    private fun mqttHumanAgo(sec: Int): String = when {
-        sec < 60 -> "$sec с назад"
-        sec < 3600 -> "${sec / 60} мин назад"
-        sec < 86400 -> "${sec / 3600} ч назад"
-        else -> "${sec / 86400} дн назад"
-    }
-
-    /** Частые сетевые ошибки - по-человечески; незнакомое остаётся как есть. */
-    private fun mqttHumanError(rawError: String): String {
-        val e = rawError.lowercase()
-        return when {
-            e.contains("refused") -> "узел не принял связь"
-            e.contains("timed out") || e.contains("timeout") -> "не дождались ответа"
-            e.contains("unreachable") -> "сеть до узла не доходит"
-            e.contains("reset by peer") || e.contains("connection closed") -> "связь оборвалась"
-            e.contains("dns") || e.contains("name or service not known") ||
-                e.contains("lookup") -> "не удалось найти адрес узла"
-            rawError.isBlank() -> "сеть не ответила"
-            else -> rawError
         }
     }
 

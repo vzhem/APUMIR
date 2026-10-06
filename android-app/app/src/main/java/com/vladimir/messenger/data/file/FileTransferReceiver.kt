@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.file
 
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
@@ -327,7 +329,7 @@ class FileTransferReceiver(
         if (features and FileTransferWire.FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION != 0) {
             TransferDiagnostics.record(
                 "F4",
-                "Received FCAP v2 authenticated-direct capability (maxFrame=$maxFramePayload)",
+                "получатель подтвердил прямой канал (кадр до $maxFramePayload Б)",
             )
             runCatching { onAuthenticatedDirectFcap(transferIdHex, senderId, maxFramePayload) }
                 .onFailure { Log.w(TAG, "F4 FCAP hook failed for $transferIdHex: ${it.message}") }
@@ -776,6 +778,19 @@ class FileTransferReceiver(
             Log.w(TAG, "Binary range for $transferIdHex exceeds chunk bounds; dropped")
             return
         }
+        // Диагностика «Логи»: счётчики растут на каждом диапазоне, а в журнал
+        // попадает каждый 16-й (плюс первый) - иначе приём файла вытеснил бы
+        // из журнала сеть, ядро и F4-переговоры.
+        TransferDiagnostics.count(Counters.F4_BYTES_RECEIVED, ciphertextRange.size.toLong())
+        TransferDiagnostics.recordProgress(
+            key = Counters.F4_RANGES_RECEIVED,
+            everyN = 16,
+            area = "F4",
+            detail = {
+                "прямой канал: принят кусок=$chunkIndex смещение=$chunkOffset " +
+                    "байт=${ciphertextRange.size}"
+            },
+        )
         mutex.withLock {
             if (declined.containsKey(transferIdHex)) return
             val key = "$transferIdHex|$chunkIndex"
@@ -1348,6 +1363,12 @@ class FileTransferReceiver(
                 "Cannot persist verified file completion"
             }
             Log.i(TAG, "File transfer COMPLETE: $transferIdHex (${manifest.displayName})")
+            TransferDiagnostics.count(Counters.FILE_COMPLETED)
+            TransferDiagnostics.recordSuccess(
+                "file",
+                "файл принят целиком: ${DiagnosticsReport.formatBytes(manifest.fileSize.toLong())}, " +
+                    "от предложения ${DiagnosticsReport.formatDuration((nowMs() - fresh.createdAtMs).coerceAtLeast(0L))}",
+            )
             directFromOrigin.remove(transferIdHex)
             wantSeq.remove(transferIdHex)
             inventorySentAt.remove(transferIdHex)
@@ -1383,6 +1404,11 @@ class FileTransferReceiver(
             runCatching { receivedStore.deleteTransfer(transferIdHex) }
             advance(fresh, newState = "FAILED", errorCode = "VERIFY_FAILED")
             Log.w(TAG, "File verification failed for $transferIdHex: ${error.message}")
+            TransferDiagnostics.count(Counters.FILE_FAILED)
+            TransferDiagnostics.recordFailure(
+                "file",
+                "файл не сошёлся по контрольной сумме или не собрался: ${error.message}",
+            )
         }
     }
 
@@ -2132,7 +2158,14 @@ class FileTransferReceiver(
             expiresAtMs = manifest.expiresAtMs,
             updatedAtMs = now,
         )
-        return if (transferDao.insertNewTransfer(entity)) entity else null
+        val inserted = if (transferDao.insertNewTransfer(entity)) entity else return null
+        TransferDiagnostics.count(Counters.FILE_STARTED_IN)
+        TransferDiagnostics.record(
+            "file",
+            "входящий файл: ${DiagnosticsReport.formatBytes(entity.totalBytes)} " +
+                "(${entity.mediaType}), кусков ${entity.chunkCount}",
+        )
+        return inserted
     }
 
     private suspend fun advance(

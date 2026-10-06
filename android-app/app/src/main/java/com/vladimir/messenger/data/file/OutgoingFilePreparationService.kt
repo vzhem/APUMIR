@@ -2,6 +2,9 @@ package com.vladimir.messenger.data.file
 
 import android.content.Context
 import android.net.Uri
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
@@ -204,6 +207,11 @@ class OutgoingFilePreparationService private constructor(
         }
         val entity = manifest.toEntity(messageId, groupId, "", nowMs).copy(state = "PREPARING")
         check(transferDao.insertNewTransfer(entity)) { "Transfer ID collision" }
+        TransferDiagnostics.count(Counters.FILE_STARTED_OUT)
+        TransferDiagnostics.record(
+            "file",
+            "отправка файла сообщества: ${DiagnosticsReport.formatBytes(inspected.sizeBytes)}",
+        )
         try {
             check(store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)) {
                 "New transfer unexpectedly reused a manifest"
@@ -312,6 +320,12 @@ class OutgoingFilePreparationService private constructor(
         )
         val entity = manifest.toEntity(messageId, chatId, recipientNodeId, nowMs)
         check(transferDao.insertNewTransfer(entity)) { "Transfer ID collision" }
+        TransferDiagnostics.count(Counters.FILE_STARTED_OUT)
+        TransferDiagnostics.record(
+            "file",
+            "отправка файла: ${DiagnosticsReport.formatBytes(inspected.sizeBytes)} " +
+                "(${inspected.mediaType})",
+        )
         try {
             check(store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)) {
                 "New transfer unexpectedly reused a manifest"

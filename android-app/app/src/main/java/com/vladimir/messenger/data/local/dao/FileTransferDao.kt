@@ -9,10 +9,24 @@ import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Сколько передач в одном состоянии: строка отчёта «Логи» без чтения всех строк. */
+data class TransferStateCount(
+    val state: String,
+    val total: Long,
+)
+
 @Dao
 interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE chatId = :chatId ORDER BY createdAtMs ASC")
     fun observeForChat(chatId: String): Flow<List<FileTransferEntity>>
+
+    /**
+     * Состояния очереди передач одним запросом (COMPLETE/FAILED/WAITING_RECIPIENT/…).
+     * Нужен отчёту «Логи» и сводке в настройках: у владельца не должно быть
+     * «голословного» скриншота без цифр о том, что сейчас с файлами.
+     */
+    @Query("SELECT state, COUNT(*) AS total FROM file_transfers GROUP BY state")
+    suspend fun transferStateCounts(): List<TransferStateCount>
 
     @Query("SELECT * FROM file_transfers WHERE transferId = :transferId")
     suspend fun getTransfer(transferId: String): FileTransferEntity?

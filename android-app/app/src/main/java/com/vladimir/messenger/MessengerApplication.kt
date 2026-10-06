@@ -40,6 +40,12 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        // Отметка в журнале «Логов»: владелец видит, с какого момента
+        // собраны события, и не путает свежий запуск со старым.
+        com.vladimir.messenger.data.diagnostics.TransferDiagnostics.record(
+            "app",
+            "процесс приложения запущен",
+        )
         // Резервная копия, подготовленная к восстановлению, ложится на место
         // здесь - до Room, сервисов и воркеров, пока базу никто не открыл.
         if (com.vladimir.messenger.data.backup.ProfileBackup.applyStagedIfAny(applicationContext)) {

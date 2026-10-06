@@ -17,6 +17,8 @@ import androidx.core.app.NotificationCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
@@ -491,6 +493,7 @@ class CoreServerService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "CoreServerService created")
+        TransferDiagnostics.record("core", "служба ядра запускается")
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK, "P2PMessenger::CoreWakeLock"
@@ -788,6 +791,8 @@ class CoreServerService : Service() {
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                TransferDiagnostics.count(Counters.CORE_STARTS)
+                TransferDiagnostics.recordSuccess("core", "ядро поднято")
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
                 CoreStatus.markReady()
 
@@ -1041,6 +1046,8 @@ class CoreServerService : Service() {
                 startEventPolling()
             } else {
                 updateNotification("Не удалось подключиться")
+                TransferDiagnostics.count(Counters.CORE_FAILURES)
+                TransferDiagnostics.recordFailure("core", "ядро не поднялось — ограниченный режим")
                 // Раунд 263: движок не поднялся - не держим человека на
                 // заставке: честный ограниченный режим, сплэш отпускаем.
                 CoreStatus.report("Ядро в ограниченном режиме")
@@ -1682,6 +1689,7 @@ class CoreServerService : Service() {
         com.vladimir.messenger.data.mirror.MirrorHub.close()
         mirror = null
         Log.i(TAG, "CoreServerService destroyed")
+        TransferDiagnostics.record("core", "служба ядра остановлена")
         eventPollingJob?.cancel()
         filePumpJob?.cancel()
         networkMonitor?.stop()

@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.file
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.diagnostics.Counters
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -531,10 +532,20 @@ class FileTransferRouter @Inject constructor(
             },
             onAuthenticatedDirectFcap = { transferIdHex, from, maxFramePayload ->
                 if (isPeerViaUdp(from)) {
-                    TransferDiagnostics.record("F4", "FCAP v2 received over UDP; keeping F3 compatibility route")
+                    TransferDiagnostics.count(Counters.F4_UDP_FALLBACK)
+                    TransferDiagnostics.recordWarning(
+                        "F4",
+                        "FCAP v2 пришёл по UDP — бинарный прямой канал не включаем, " +
+                            "остаётся совместимый путь",
+                    )
                     Log.i(TAG, "F4 FCAP $transferIdHex from ${from.takeLast(8)}: peer via UDP, keeping F3")
                 } else {
-                    TransferDiagnostics.record("F4", "FCAP v2 negotiated; next binary ranges prefer authenticated direct session")
+                    TransferDiagnostics.count(Counters.F4_NEGOTIATED)
+                    TransferDiagnostics.recordSuccess(
+                        "F4",
+                        "прямой канал согласован (диапазон до $maxFramePayload Б) — " +
+                            "следующие куски пойдут бинарными диапазонами",
+                    )
                     senderLocal.markBinaryCapable(
                         transferIdHex,
                         maxFramePayload,

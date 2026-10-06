@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.file
 
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
@@ -120,6 +122,13 @@ class FileTransferSender(
             if (contiguousChunks == transfer.chunkCount) {
                 advance(transfer, newState = "COMPLETE")
                 Log.i(TAG, "File transfer COMPLETE by receiver ACK: $transferIdHex")
+                TransferDiagnostics.count(Counters.FILE_COMPLETED)
+                TransferDiagnostics.recordSuccess(
+                    "file",
+                    "отправка подтверждена получателем: " +
+                        "${DiagnosticsReport.formatBytes(transfer.totalBytes)}, от начала " +
+                        "${DiagnosticsReport.formatDuration((nowMs() - transfer.createdAtMs).coerceAtLeast(0L))}",
+                )
             }
         }
     }
@@ -147,6 +156,11 @@ class FileTransferSender(
                 } else {
                     failures++
                     Log.w(TAG, "File transfer pump failed for ${transfer.transferId}: ${error?.message}")
+                    TransferDiagnostics.count(Counters.FILE_FAILED)
+                    TransferDiagnostics.recordWarning(
+                        "file",
+                        "отправка не удалась: ${error?.message ?: "причина неизвестна"}",
+                    )
                 }
             }
         }
@@ -324,13 +338,31 @@ class FileTransferSender(
                     )
                 }.getOrDefault(false)
                 if (capability.authenticatedDirectSession) {
-                    // This is intentionally metadata-only: the diagnostic report must never retain
-                    // ciphertext, names, keys, transfer IDs or contact IDs.
-                    TransferDiagnostics.record(
-                        "F4",
-                        "Direct-session range requested: chunk=$chunkIndex offset=$offset bytes=${range.size}; " +
-                            "native bridge=${if (delivered) "accepted" else "unavailable"}",
-                    )
+                    // Только служебные факты: в отчёте не должно быть ни
+                    // шифротекста, ни имён, ни ключей, ни адресов. Счётчики
+                    // растут на каждом диапазоне, а в журнал попадает лишь
+                    // каждый 16-й - иначе передача вытеснила бы из журнала
+                    // всё остальное (см. TransferDiagnostics.recordProgress).
+                    val bytes = range.size.toLong()
+                    if (delivered) {
+                        TransferDiagnostics.count(Counters.F4_BYTES_SENT, bytes)
+                        TransferDiagnostics.recordProgress(
+                            key = Counters.F4_RANGES_SENT,
+                            everyN = 16,
+                            area = "F4",
+                            detail = {
+                                "прямой канал: отдан кусок=$chunkIndex смещение=$offset " +
+                                    "байт=${range.size}"
+                            },
+                        )
+                    } else {
+                        TransferDiagnostics.count(Counters.F4_RANGE_FAILURES)
+                        TransferDiagnostics.recordWarning(
+                            "F4",
+                            "прямой канал не принял диапазон (кусок=$chunkIndex смещение=$offset) — " +
+                                "передача встала на паузу",
+                        )
+                    }
                 }
                 if (!delivered) {
                     Log.i(TAG, "Recipient not directly reachable (binary) — pausing transfer")

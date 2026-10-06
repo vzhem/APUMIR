@@ -22,12 +22,15 @@ import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
+import com.vladimir.messenger.ui.components.ApuDiagnosticsReportCard
+import com.vladimir.messenger.ui.components.ApuDiagnosticsStatusCard
 import com.vladimir.messenger.ui.components.ApuSettingsItem
 import com.vladimir.messenger.ui.components.ApuSettingsLayout
 import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
 import com.vladimir.messenger.ui.components.ApuProfileQuickAction
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.notificationMuteStatus
+import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.notification.NotificationMuteScope
 import androidx.compose.foundation.background
@@ -40,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.vladimir.messenger.ui.components.swipeBack
+import com.vladimir.messenger.util.AppShare
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -637,17 +641,21 @@ private fun SettingsTabContent(
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
     var showMqttDialog by remember { mutableStateOf(false) }
-    // Бounded, privacy-filtered transfer/network diagnostic report for phone acceptance tests.
+    // Безопасный отчёт о сети, ядре и передачах: сводка для человека плюс
+    // текст, который копируют целиком (TransferDiagnostics.collect).
     var showTransferLogsDialog by remember { mutableStateOf(false) }
     var transferLogsRefresh by remember { mutableIntStateOf(0) }
-    var transferLogsText by remember { mutableStateOf("") }
+    var transferLogsSnapshot by remember { mutableStateOf<TransferDiagnostics.Snapshot?>(null) }
+    var transferLogsLoading by remember { mutableStateOf(false) }
     val settingsContext = LocalContext.current
     LaunchedEffect(showTransferLogsDialog, transferLogsRefresh) {
         if (showTransferLogsDialog) {
-            transferLogsText = "Собираю безопасный отчёт…"
-            transferLogsText = withContext(Dispatchers.IO) {
-                TransferDiagnostics.buildReport(settingsContext)
+            transferLogsLoading = true
+            // Сбор идёт в фоне: внутри вызовы ядра, база и `logcat -d`.
+            transferLogsSnapshot = withContext(Dispatchers.IO) {
+                TransferDiagnostics.collect(settingsContext)
             }
+            transferLogsLoading = false
         }
     }
     // р240: диагностика синхронизации устройств одной личности.
@@ -1342,42 +1350,82 @@ private fun SettingsTabContent(
     }
 
     if (showTransferLogsDialog) {
-        val reportScroll = rememberScrollState()
+        val logsSnapshot = transferLogsSnapshot
+        val reportText = logsSnapshot?.report.orEmpty()
         ApuSettingsDialog(
             onDismissRequest = { showTransferLogsDialog = false },
             icon = { Icon(Icons.Default.Description, contentDescription = null) },
             title = { Text("Логи") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Вся область прокручивается: на узком экране или крупном
+                // шрифте сводка и отчёт вместе выше диалога, а отдельная
+                // прокрутка у отчёта остаётся удобной для длинного текста.
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     Text(
-                        "Отчёт содержит только состояние сети и F4/F3-переходы. " +
-                            "Чаты, имена файлов, ключи, ciphertext, адреса и contact ID не копируются.",
-                        style = MaterialTheme.typography.bodySmall,
+                        "Что происходит сейчас",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ApuBubbleTextColor,
                     )
-                    SelectionContainer {
+                    if (logsSnapshot == null || transferLogsLoading) {
                         Text(
-                            transferLogsText.ifBlank { "Собираю безопасный отчёт…" },
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 300.dp)
-                                .verticalScroll(reportScroll),
+                            "Собираю безопасный отчёт…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    } else {
+                        ApuDiagnosticsStatusCard(lines = logsSnapshot.statusLines)
+                    }
+                    Text(
+                        "Отчёт содержит состояние сети, ядра, брокера и передач. Чаты, имена " +
+                            "файлов, ключи, ciphertext, адреса и contact ID в него не попадают — " +
+                            "его можно копировать и присылать целиком.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                    ApuDiagnosticsReportCard(
+                        text = reportText.ifBlank { "Собираю безопасный отчёт…" },
+                        maxHeight = 240.dp,
+                    )
+                    if (logsSnapshot != null) {
+                        Text(
+                            "Собрано в ${DiagnosticsReport.clock(logsSnapshot.createdAtMs)} · " +
+                                "записей журнала ${logsSnapshot.journalSize} · " +
+                                "предупреждений ${logsSnapshot.warnCount} · " +
+                                "ошибок ${logsSnapshot.badCount}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
                         )
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    mqttClipboard.setText(
-                        AnnotatedString(transferLogsText.ifBlank { "Отчёт ещё собирается" }),
-                    )
-                    android.widget.Toast.makeText(
-                        settingsContext,
-                        "Логи скопированы",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }) { Text("Скопировать") }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // «Отправить» — системное меню Android: отчёт уезжает в
+                    // Telegram/почту одной кнопкой, без ручного копирования.
+                    TextButton(
+                        enabled = reportText.isNotBlank(),
+                        onClick = { AppShare.shareText(settingsContext, reportText, "Логи APU") },
+                    ) { Text("Отправить") }
+                    TextButton(
+                        enabled = reportText.isNotBlank(),
+                        onClick = {
+                            mqttClipboard.setText(
+                                AnnotatedString(reportText.ifBlank { "Отчёт ещё собирается" }),
+                            )
+                            android.widget.Toast.makeText(
+                                settingsContext,
+                                "Логи скопированы",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        },
+                    ) { Text("Скопировать") }
+                }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
