@@ -988,7 +988,7 @@ impl FileReceiveSession {
         S: FileControlSigner + ?Sized,
     {
         let resolver = FixedFileSessionPeerResolver { peer };
-        Self::accept_with_resolver(
+        match Self::accept_with_resolver(
             connection,
             local_node_id,
             local_identity,
@@ -997,7 +997,17 @@ impl FileReceiveSession {
             now_ms,
             limits,
             admission,
-        ).await
+        )
+        .await
+        {
+            // Keep the established compatibility surface for callers which supplied one explicit
+            // expected peer. Production's dynamic resolver retains the more precise
+            // `PeerResolution` error below.
+            Err(FileSessionError::PeerResolution(_)) => {
+                Err(FileSessionError::Control(FileControlError::UnexpectedSigner))
+            }
+            result => result,
+        }
     }
 
     /// Accept one C1 ordered stream after resolving the self-asserted signer to a pre-existing,
