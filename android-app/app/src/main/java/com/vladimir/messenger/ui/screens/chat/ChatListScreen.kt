@@ -272,18 +272,9 @@ fun ChatListScreen(
                                     // только запутывали.
                                     // Контакты, Группы, Профиль и Настройки
                                     // живут в нижней панели - под большим
-                                    // пальцем. Дублировать их здесь незачем.
-                                    // «Избранное» больше не в нижней панели -
-                                    // её место занял «Профиль», поэтому пункт
-                                    // вернулся сюда.
-                                    DropdownMenuItem(
-                                        text = { Text("Избранное") },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.Bookmark) },
-                                        onClick = {
-                                            menuOpen = false
-                                            onSavedClick()
-                                        },
-                                    )
+                                    // пальцем. «Избранное» теперь - первым
+                                    // отдельным контактом в списке чатов,
+                                    // поэтому дублировать его в меню не нужно.
                                     DropdownMenuItem(
                                         text = { Text("Подключиться по ссылке") },
                                         leadingIcon = { ShimmerIcon(Icons.Default.Link) },
@@ -403,6 +394,7 @@ fun ChatListScreen(
                         items = uiState.itemsBySection[section].orEmpty(),
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
                         onChatClick = onChatClick,
+                        onSavedClick = onSavedClick,
                         onAddContactClick = onAddContactClick,
                         onCallClick = onCallClick,
                         onGroupClick = onGroupClick,
@@ -922,6 +914,8 @@ private fun SectionPage(
     items: List<InboxItem>,
     isSearchActive: Boolean,
     onChatClick: (chatId: String, contactName: String, contactId: String) -> Unit,
+    /** «Избранное» - постоянный личный контакт в разделах с личными чатами. */
+    onSavedClick: () -> Unit,
     onAddContactClick: () -> Unit,
     onCallClick: (contactId: String, contactName: String) -> Unit,
     onGroupClick: (groupId: String) -> Unit,
@@ -950,6 +944,10 @@ private fun SectionPage(
 ) {
     val openAdmin = section == InboxSection.AdminGroups ||
         section == InboxSection.AdminChannels
+    // «Избранное» ведёт на отдельное личное хранилище, поэтому логично живёт
+    // рядом с личными чатами, но не засоряет списки групп, каналов и архив.
+    val showSavedContact = !isSearchActive &&
+        (section == InboxSection.All || section == InboxSection.Chats)
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -1043,6 +1041,20 @@ private fun SectionPage(
                 }
             }
 
+            // Даже на новом аккаунте «Избранное» доступно как первый личный
+            // контакт: туда можно сразу складывать заметки и файлы.
+            items.isEmpty() && showSavedContact -> {
+                SavedContactCard(
+                    onClick = onSavedClick,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+                EmptyChatList(
+                    isSearchActive = false,
+                    onAddContact = onAddContactClick,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+
             items.isEmpty() -> {
                 EmptyChatList(
                     isSearchActive = isSearchActive,
@@ -1072,6 +1084,11 @@ private fun SectionPage(
                     // последний чат (как было в ленте канала и в избранном).
                     contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp),
                 ) {
+                    if (showSavedContact) {
+                        item(key = "saved-contact") {
+                            SavedContactCard(onClick = onSavedClick)
+                        }
+                    }
                     items(
                         items = items,
                         key   = { item ->
@@ -1371,6 +1388,72 @@ private fun EmptyChatList(
         }
     }
 
+}
+
+/**
+ * «Избранное» - не сетевой собеседник, а личное хранилище. В главном списке
+ * выглядит как отдельный контакт, чтобы открыть заметки/файлы можно было тем
+ * же привычным тапом, что и обычную переписку.
+ */
+@Composable
+private fun SavedContactCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.52f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Bookmark,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Избранное",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF1E2430),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Личное хранилище",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Заметки, файлы и пересланное",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF5A6472),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 // =============================================================================
