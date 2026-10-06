@@ -237,11 +237,22 @@ jobs:
           rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release-ks.pass" "$RUNNER_TEMP/apu-release-key.pass"
           echo "signed with the rotated key"
 
+      # Контрольная сумма выпускается из того же файла, который затем
+      # загружается в GitHub Release, поэтому пользователь может безопасно
+      # проверить APK до ручной установки.
+      - name: Create APK SHA-256 checksum
+        run: |
+          APK_DIR=android-app/app/build/outputs/apk/release
+          (cd "$APK_DIR" && sha256sum app-release.apk > SHA256SUMS.txt)
+          cat "$APK_DIR/SHA256SUMS.txt"
+
       - name: Create Release
         if: github.event_name != 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          files: android-app/app/build/outputs/apk/release/app-release.apk
+          files: |
+            android-app/app/build/outputs/apk/release/app-release.apk
+            android-app/app/build/outputs/apk/release/SHA256SUMS.txt
           name: Release ${{ steps.get_version.outputs.VERSION }}
           # Заготовка. Перед публикацией promote-release.ps1 -NotesFile заменяет её
           # текстом по docs/RELEASE_PUBLICATION_POLICY.md.
