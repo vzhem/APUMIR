@@ -3,14 +3,12 @@ package com.vladimir.messenger.ui.screens.contacts
 // =============================================================================
 // ADDCONTACTSCREEN.KT
 // =============================================================================
-// Добавление контакта - в едином стиле APU (подложка на весь экран, русский
-// текст, скруглённые карточки). Три способа:
-//   1. Вставить ссылку-приглашение или отпечаток.
-//   2. Найти по @никнейму в роевом реестре и добавить в один тап.
-//   3. Отсканировать QR-код.
+// Добавление контакта в едином стиле APU: обои, светлые карточки-пузыри,
+// золотые акценты и понятные действия. Три пути: ссылка, @никнейм или QR.
 // =============================================================================
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,25 +16,30 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -54,7 +57,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,7 +68,6 @@ import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleShape
-import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -89,9 +94,7 @@ fun AddContactScreen(
     }
 
     LaunchedEffect(uiState.contactAdded) {
-        if (uiState.contactAdded) {
-            onContactAdded()
-        }
+        if (uiState.contactAdded) onContactAdded()
     }
 
     LaunchedEffect(uiState.error) {
@@ -101,7 +104,6 @@ fun AddContactScreen(
         }
     }
 
-    // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
         Scaffold(
@@ -111,13 +113,16 @@ fun AddContactScreen(
                 TopAppBar(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
-                    // Прокрутка НЕ должна красить панель: под ней обои APU.
-                    scrolledContainerColor = Color.Transparent,
+                        // Прокрутка не должна красить панель: под ней обои APU.
+                        scrolledContainerColor = Color.Transparent,
                     ),
                     title = { Text("Добавить контакт", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Назад",
+                            )
                         }
                     },
                 )
@@ -127,23 +132,20 @@ fun AddContactScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 // ---------------- Ссылка-приглашение ----------------
-                // Все поверхности на экране - фирменные пузыри поверх обоев:
-                // не серые Material-карточки, а та же светлая поверхность с
-                // золотой рамкой, что у списка контактов и чатов.
                 ApuBubble(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Text("Ссылка-приглашение", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Вставьте ссылку, которую вам прислал собеседник.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ApuBubbleMutedColor,
+                    ApuAddContactSectionHeader(
+                        icon = Icons.Default.Link,
+                        title = "Ссылка-приглашение",
+                        subtitle = "Вставьте ссылку, которую вам прислал собеседник.",
                     )
                     ApuFormTextField(
                         value = uiState.inviteLink,
@@ -152,12 +154,26 @@ fun AddContactScreen(
                         placeholder = "Вставьте ссылку или ключ",
                         isError = uiState.error != null,
                         supportingText = uiState.error,
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Link,
+                                contentDescription = null,
+                                tint = ApuBubbleAccentColor,
+                            )
+                        },
                     )
                     ApuFormTextField(
                         value = uiState.displayName,
                         onValueChange = viewModel::onDisplayNameChanged,
                         label = "Имя контакта (необязательно)",
                         placeholder = "Например, Анна",
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = ApuBubbleAccentColor,
+                            )
+                        },
                     )
                     Button(
                         onClick = viewModel::onAddContactClicked,
@@ -166,21 +182,23 @@ fun AddContactScreen(
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
-                            disabledContainerColor = ApuBubbleMutedColor.copy(alpha = 0.22f),
-                            disabledContentColor = ApuBubbleMutedColor.copy(alpha = 0.68f),
+                            // Не превращаем отключённое действие в бесформенную
+                            // серую плашку: золотой контур остаётся частью стиля.
+                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            disabledContentColor = ApuBubbleAccentColor.copy(alpha = 0.58f),
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (uiState.isLoading) {
                             CircularProgressIndicator(
-                                modifier = Modifier.height(18.dp),
+                                modifier = Modifier.size(19.dp),
                                 color = MaterialTheme.colorScheme.onPrimary,
                                 strokeWidth = 2.dp,
                             )
                         } else {
                             Icon(Icons.Default.PersonAdd, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Добавить контакт")
+                            Spacer(Modifier.width(8.dp))
+                            Text("Добавить контакт", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -188,13 +206,12 @@ fun AddContactScreen(
                 // ---------------- Поиск по @никнейму ----------------
                 ApuBubble(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Text("Найти по @никнейму", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Поиск по сетевому реестру имён: кого уже видели ваши контакты.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ApuBubbleMutedColor,
+                    ApuAddContactSectionHeader(
+                        icon = Icons.Default.Search,
+                        title = "Найти по @никнейму",
+                        subtitle = "Ищем только имена, которые уже встречались в сети APU.",
                     )
                     ApuSearchField(
                         value = uiState.nickQuery,
@@ -206,28 +223,54 @@ fun AddContactScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
+                                color = ApuBubbleAccentColor,
                                 strokeWidth = 2.dp,
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Ищем...", style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Ищем в сети APU…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
                         }
                     }
                     uiState.nickResults.forEach { entry ->
-                        HorizontalDivider(color = ApuBubbleMutedColor.copy(alpha = 0.22f))
+                        // Результат — самостоятельный маленький пузырь, а не
+                        // голая строка с системной кнопкой посреди карточки.
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
+                                .background(
+                                    ApuBubbleAccentColor.copy(alpha = 0.08f),
+                                    RoundedCornerShape(14.dp),
+                                )
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(ApuBubbleAccentColor.copy(alpha = 0.14f), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AlternateEmail,
+                                    contentDescription = null,
+                                    tint = ApuBubbleAccentColor,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "@${entry.name}",
+                                    text = "@${entry.name}",
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    entry.ownerId.takeLast(8),
+                                    text = entry.ownerId.takeLast(8),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = ApuBubbleMutedColor,
                                 )
@@ -235,8 +278,11 @@ fun AddContactScreen(
                             TextButton(
                                 onClick = { viewModel.onAddByNicknameClicked(entry) },
                                 enabled = !uiState.isLoading,
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = ApuBubbleAccentColor,
+                                ),
                             ) {
-                                Text("Добавить")
+                                Text("Добавить", fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -245,7 +291,7 @@ fun AddContactScreen(
                         uiState.nickResults.isEmpty()
                     ) {
                         Text(
-                            "Никого не нашли. Ищем только тех, чьё имя уже встречалось в сети.",
+                            text = "Никого не нашли. Проверьте написание никнейма или попросите ссылку-приглашение.",
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -253,26 +299,86 @@ fun AddContactScreen(
                 }
 
                 // ---------------- QR-код ----------------
-                // Это тоже отдельное действие-пузырь, а не прозрачная
-                // стандартная OutlineButton, которая терялась на обоях.
-                OutlinedButton(
-                    onClick = onScanQrClick,
-                    shape = ApuBubbleShape,
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.58f),
-                    ),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = ApuBubbleSurfaceColor,
-                        contentColor = ApuBubbleAccentColor,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
+                ApuBubble(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button, onClick = onScanQrClick),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
-                    Icon(Icons.Default.QrCodeScanner, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Сканировать QR-код")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(ApuBubbleAccentColor.copy(alpha = 0.14f), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.QrCodeScanner,
+                                contentDescription = null,
+                                tint = ApuBubbleAccentColor,
+                                modifier = Modifier.size(25.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Сканировать QR-код",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Быстро добавьте человека рядом с вами",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowRight,
+                            contentDescription = "Открыть сканер",
+                            tint = ApuBubbleAccentColor,
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+/** Единая шапка карточек на формах: иконка, заголовок и короткое пояснение. */
+@Composable
+private fun ApuAddContactSectionHeader(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .background(ApuBubbleAccentColor.copy(alpha = 0.14f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = ApuBubbleAccentColor,
+                modifier = Modifier.size(23.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = ApuBubbleMutedColor,
+            )
         }
     }
 }
