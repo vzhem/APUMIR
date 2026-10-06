@@ -240,25 +240,8 @@ fun ContactCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Счётчик непрочитанных
-            if (chat.unreadCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
-                        .background(
-                            color  = MaterialTheme.colorScheme.primary,
-                            shape  = CircleShape,
-                        )
-                        .padding(horizontal = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text  = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF3A2A05),
-                    )
-                }
-            }
+            // Счётчик непрочитанных общий для всех списков и тем.
+            ApuNotificationBadge(chat.unreadCount)
         }
 
         // Меню «три вертикальные точки» — крайним справа в пузыре.

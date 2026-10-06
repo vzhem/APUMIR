@@ -6,6 +6,7 @@ package com.vladimir.messenger.ui.screens.groups
 
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
@@ -75,7 +76,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -701,12 +701,10 @@ private fun GroupRow(
                 )
             }
             if (group.pendingRequests > 0) {
-                Badge { Text(group.pendingRequests.toString()) }
+                ApuNotificationBadge(group.pendingRequests)
                 Spacer(Modifier.width(8.dp))
             }
-            if (group.unreadCount > 0) {
-                Badge { Text(group.unreadCount.toString()) }
-            }
+            ApuNotificationBadge(group.unreadCount)
             // Меню «⋮» - как в пузырях главного экрана: списки должны
             // выглядеть и вести себя одинаково.
             BubbleOverflowMenu(actions = menuActions)

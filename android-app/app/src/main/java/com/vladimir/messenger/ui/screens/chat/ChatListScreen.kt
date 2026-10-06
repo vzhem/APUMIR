@@ -33,6 +33,7 @@ import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ApuMainTabBar
+import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import com.vladimir.messenger.ui.components.SearchOrb
@@ -1587,20 +1588,7 @@ private fun GroupCard(
                     )
                 }
             }
-            if (group.unreadCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
-                        .padding(horizontal = 6.dp, vertical = 1.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = if (group.unreadCount > 99) "99+" else group.unreadCount.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-            }
+            ApuNotificationBadge(group.unreadCount)
         }
 
         BubbleOverflowMenu(actions = menuActions)
