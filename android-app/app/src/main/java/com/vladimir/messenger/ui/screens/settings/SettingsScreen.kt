@@ -35,6 +35,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import com.vladimir.messenger.ui.components.swipeBack
 import android.content.Context
 import android.content.Intent
@@ -681,22 +682,59 @@ private fun SettingsTabContent(
                     ThemeModeChoices(selected = themeMode, onSelect = { ThemeModeHolder.set(context, it) })
                     ApuSettingsDivider()
                     val appFontSize by AppFontSizeHolder.size.collectAsStateWithLifecycle()
-                    Text("Размер текста", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Меняется во всех личных чатах, группах, каналах и темах",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        AppFontSize.entries.forEach { option ->
-                            FilterChip(
-                                selected = appFontSize == option,
-                                onClick = { AppFontSizeHolder.set(context, option) },
-                                label = { Text(option.title) },
+                    // Раунд 268: у этого блока не было боковых отступов, и
+                    // подпись «…группах, каналах и темах» упиралась в край
+                    // карточки (скрин владельца 2026-10-05). Теперь как у
+                    // выбора темы: BoxWithConstraints + отступы 16dp, а если
+                    // три чипа не влезают в строку (в т.ч. при «Крупном»
+                    // размере текста) — столбиком, а не обрезанным рядом.
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                        val chipsHorizontal = ApuSettingsLayout.horizontalFontSizeChoices(
+                            maxWidth.value,
+                            LocalDensity.current.fontScale,
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "Размер текста",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
                             )
+                            Text(
+                                "Меняется во всех личных чатах, группах, каналах и темах",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            val chipRows =
+                                if (chipsHorizontal) listOf(AppFontSize.entries.toList())
+                                else AppFontSize.entries.map { listOf(it) }
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                chipRows.forEach { rowOptions ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        rowOptions.forEach { option ->
+                                            FilterChip(
+                                                selected = appFontSize == option,
+                                                onClick = { AppFontSizeHolder.set(context, option) },
+                                                label = {
+                                                    Text(
+                                                        option.title,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                },
+                                                modifier =
+                                                    if (chipsHorizontal) Modifier
+                                                    else Modifier.fillMaxWidth(),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

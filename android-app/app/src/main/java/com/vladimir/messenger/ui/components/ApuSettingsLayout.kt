@@ -24,4 +24,15 @@ internal object ApuSettingsLayout {
 
     fun horizontalCommunityTypeChoices(widthDp: Float, fontScale: Float): Boolean =
         widthDp >= 2 * 108f * fontScale.coerceAtLeast(1f) + 8f
+
+    /**
+     * Три размера текста («Мелкий», «Стандартный», «Крупный») в одну строку.
+     * Замер по скрину владельца 2026-10-05 (обычный телефон ~393dp): чипы
+     * 80dp + 121dp + 74dp, между ними 2 зазора по 8dp — итого ~291dp при
+     * scale 1.0. Самый длинный чип — «Стандартный». Ряд без переноса и без
+     * прокрутки при крупном тексте обрезается справа, поэтому при нехватке
+     * ширины чипы идут столбиком, как у выбора темы.
+     */
+    fun horizontalFontSizeChoices(widthDp: Float, fontScale: Float): Boolean =
+        widthDp >= 291f * fontScale.coerceAtLeast(1f) + 16f
 }
