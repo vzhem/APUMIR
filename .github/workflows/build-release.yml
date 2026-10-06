@@ -168,10 +168,19 @@ jobs:
         if: failure()
         run: |
           test -f "$RUNNER_TEMP/gradle-build.log" || exit 0
-          tail -n 10 "$RUNNER_TEMP/gradle-build.log" | while IFS= read -r line; do
-            clean=$(printf '%s' "$line" | tr '%' '_' | tr '\r\n' ' ')
-            [ -n "$clean" ] && echo "::error title=Gradle build tail::$clean"
-          done
+          python3 - "$RUNNER_TEMP/gradle-build.log" <<'PY'
+          from pathlib import Path
+          import sys
+
+          # One sizeable annotation preserves the actual compiler diagnostics;
+          # Actions limits a step to ten annotations, so emitting one per line
+          # drops the useful part of a long Gradle tail.
+          text = "\n".join(
+              Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
+          )
+          escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Gradle build tail::{escaped}")
+          PY
 
       # ---- подпись релиза -------------------------------------------------
       # Gradle подписывает APK прежним ключом android-app/app/p2p-release.jks.
