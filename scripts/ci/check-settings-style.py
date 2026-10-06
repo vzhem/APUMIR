@@ -126,6 +126,15 @@ class SettingsStyleTest(unittest.TestCase):
             self.assertIn(house_part, text)
         # Возможности больше не рисуются текстовыми маркерами «•».
         self.assertNotIn('"• ', text)
+        # Пойманное на телефоне 2026-10-06 (v11.74.187): поле было видно, а кнопка
+        # «Применить» оставалась под клавиатурой. Подводим не поле, а весь блок
+        # «поле + кнопка», и делаем две попытки: клавиатура поднимается анимацией
+        # около трети секунды, поэтому одного вызова мало.
+        self.assertIn("bringIntoViewRequester(promoBlock)", text)
+        promo_block = text.index("bringIntoViewRequester(promoBlock)")
+        self.assertIn("ApuFormTextField(", text[promo_block:])
+        self.assertIn('Text("Применить")', text[promo_block:])
+        self.assertGreaterEqual(text.count("promoBlock.bringIntoView()"), 2)
         shared = source("components/ApuSettingsUi.kt")
         for house_part in (
             "fun ApuSettingsFeatureRow(",

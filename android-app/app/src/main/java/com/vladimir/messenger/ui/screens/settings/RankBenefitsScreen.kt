@@ -386,15 +386,21 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
 
-    // Клавиатура не должна накрывать поле: когда оно получает фокус, список
-    // подъезжает так, чтобы поле осталось видимым над клавиатурой. Небольшая
-    // пауза нужна, чтобы клавиатура успела подняться и список уже сжался.
-    val bringIntoView = remember { BringIntoViewRequester() }
+    // Клавиатура не должна накрывать ни поле, ни кнопку «Применить»: когда поле
+    // получает фокус, список подъезжает так, чтобы над клавиатурой оказался весь
+    // блок «поле + кнопка». Просим подвести именно блок: если просить одно поле,
+    // кнопка под ним остаётся за клавиатурой (поймано на телефоне 2026-10-06,
+    // v11.74.187). Две попытки с разной паузой: первая - как только клавиатура
+    // начала подниматься, вторая - когда она уже заняла своё место и список
+    // успел сжаться (анимация клавиатуры занимает около трети секунды).
+    val promoBlock = remember { BringIntoViewRequester() }
     var focused by remember { mutableStateOf(false) }
     LaunchedEffect(focused) {
         if (focused) {
             delay(250)
-            bringIntoView.bringIntoView()
+            promoBlock.bringIntoView()
+            delay(400)
+            promoBlock.bringIntoView()
         }
     }
 
@@ -410,51 +416,60 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = HintBubbleMutedColor,
             )
-            ApuFormTextField(
-                value = code,
-                onValueChange = {
-                    code = it
-                    message = null
-                },
-                // Подсказка НЕ показывает настоящий код: пример выдал бы
-                // рабочий промокод любому, кто просто открыл раздел.
-                label = "Ваш промокод",
-                placeholder = "Введите промокод",
-                isError = isError,
+            // Поле и кнопка - один блок: список подводит его целиком, поэтому
+            // кнопка «Применить» видна вместе с полем, а не остаётся под
+            // клавиатурой.
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .bringIntoViewRequester(bringIntoView)
-                    .onFocusChanged { state -> focused = state.isFocused },
-            )
-            Button(
-                onClick = {
-                    when (PromoCodes.redeem(context, code)) {
-                        PromoCodes.Result.APPLIED -> {
-                            isError = false
-                            message = "Промокод принят: +${PromoCodes.BONUS_PER_CODE} к рангу"
-                            code = ""
-                            onRedeemed()
-                        }
-                        PromoCodes.Result.UNKNOWN -> {
-                            isError = true
-                            message = "Такого промокода нет - проверьте написание"
-                        }
-                        PromoCodes.Result.ALREADY_USED -> {
-                            isError = true
-                            message = "Этот промокод здесь уже использован"
-                        }
-                        PromoCodes.Result.LIMIT_REACHED -> {
-                            isError = true
-                            message = "Промокодами набран предел: " +
-                                "${PromoCodes.MAX_PROMO_BONUS}"
-                        }
-                    }
-                },
-                enabled = code.isNotBlank(),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth(),
+                    .bringIntoViewRequester(promoBlock),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("Применить")
+                ApuFormTextField(
+                    value = code,
+                    onValueChange = {
+                        code = it
+                        message = null
+                    },
+                    // Подсказка НЕ показывает настоящий код: пример выдал бы
+                    // рабочий промокод любому, кто просто открыл раздел.
+                    label = "Ваш промокод",
+                    placeholder = "Введите промокод",
+                    isError = isError,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { state -> focused = state.isFocused },
+                )
+                Button(
+                    onClick = {
+                        when (PromoCodes.redeem(context, code)) {
+                            PromoCodes.Result.APPLIED -> {
+                                isError = false
+                                message = "Промокод принят: +${PromoCodes.BONUS_PER_CODE} к рангу"
+                                code = ""
+                                onRedeemed()
+                            }
+                            PromoCodes.Result.UNKNOWN -> {
+                                isError = true
+                                message = "Такого промокода нет - проверьте написание"
+                            }
+                            PromoCodes.Result.ALREADY_USED -> {
+                                isError = true
+                                message = "Этот промокод здесь уже использован"
+                            }
+                            PromoCodes.Result.LIMIT_REACHED -> {
+                                isError = true
+                                message = "Промокодами набран предел: " +
+                                    "${PromoCodes.MAX_PROMO_BONUS}"
+                            }
+                        }
+                    },
+                    enabled = code.isNotBlank(),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Применить")
+                }
             }
             message?.let { text ->
                 Text(
