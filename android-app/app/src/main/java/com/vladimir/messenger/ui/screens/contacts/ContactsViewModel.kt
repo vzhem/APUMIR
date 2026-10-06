@@ -10,6 +10,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -68,6 +69,30 @@ class ContactsViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
+        )
+
+    /**
+     * Контакты с данными настоящих чатов для списка «Контакты».
+     *
+     * Раньше экран создавал здесь новый пустой чат из одного только контакта.
+     * У него всегда были `lastMessage = null` и `lastMessageTime = null`, поэтому
+     * под каждым человеком показывалось «Нет сообщений» даже при живой
+     * переписке. Источник последнего сообщения - таблица `chats`, а не
+     * `contacts`, поэтому подписываемся на обе таблицы и соединяем их по
+     * contactId. Имя и online-статус по-прежнему берём из контакта: это
+     * адресная книга пользователя.
+     */
+    val contactChatRows: StateFlow<List<ContactChatRow>> = combine(
+        contacts,
+        chatRepository.observeChats(),
+    ) { contacts, chats ->
+        buildContactChatRows(contacts, chats)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
         )
 
     /**

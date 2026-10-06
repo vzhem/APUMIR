@@ -35,7 +35,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.domain.model.Contact
-import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.ui.components.BubbleKind
 import com.vladimir.messenger.ui.components.BubbleMenuAction
 import com.vladimir.messenger.ui.components.ContactCard
@@ -64,6 +63,9 @@ fun ContactsScreen(
     viewModel: ContactsViewModel = hiltViewModel()
 ) {
     val contacts by viewModel.contacts.collectAsState()
+    // In contrast to the address book, a list row also needs the real chat:
+    // message preview, time and unread badge live in the chats table.
+    val contactChatRows by viewModel.contactChatRows.collectAsState()
     val context = LocalContext.current
     // Подтверждение удаления контакта из меню «⋮» в пузыре.
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
@@ -121,16 +123,16 @@ fun ContactsScreen(
                 placeholder = "Поиск: имя или @никнейм",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
-            val shown = remember(contacts, query) {
+            val shown = remember(contactChatRows, query) {
                 val q = query.trim().lowercase()
                 val qNick = q.removePrefix("@")
-                if (q.isEmpty()) contacts
-                else contacts.filter {
-                    it.displayName.lowercase().contains(q) ||
-                        it.username.lowercase().contains(qNick)
+                if (q.isEmpty()) contactChatRows
+                else contactChatRows.filter { row ->
+                    row.contact.displayName.lowercase().contains(q) ||
+                        row.contact.username.lowercase().contains(qNick)
                 }
             }
-            if (shown.isEmpty() && contacts.isNotEmpty()) {
+            if (shown.isEmpty() && contactChatRows.isNotEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     // Раунд 48: подсказка в пузыре HintBubble - на обоях и в
                     // ночной теме голый текст не читался.
@@ -144,7 +146,7 @@ fun ContactsScreen(
                     }
                 }
             }
-        if (contacts.isEmpty()) {
+        if (contactChatRows.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -191,18 +193,14 @@ fun ContactsScreen(
                 ) {
                     items(
                         items = shown,
-                        key = { it.id }
-                    ) { contact ->
-                        // ContactCard expects Chat, create a minimal Chat from Contact
+                        key = { it.contact.id }
+                    ) { row ->
+                        val contact = row.contact
                         // Пузырь контакта — тот же ContactCard, что на главной:
-                        // владелец просил, чтобы списки выглядели одинаково.
+                        // он получает настоящий чат, поэтому превью, время и
+                        // счётчик непрочитанных совпадают с разделом «Чаты».
                         ContactCard(
-                            chat = Chat(
-                                id = contact.id,
-                                contactId = contact.id,
-                                contactName = contact.displayName,
-                                isContactOnline = contact.isOnline,
-                            ),
+                            chat = row.chat,
                             // Идём через viewModel: он находит настоящий чат.
                             // Прямая передача contact.id открывала «другой»
                             // чат - пустой и с вечными часиками при отправке.
